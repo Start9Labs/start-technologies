@@ -2074,7 +2074,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
 dependencies = [
  "const-oid 0.9.6",
- "der_derive 0.7.3",
  "pem-rfc7468 0.7.0",
  "zeroize",
 ]
@@ -2086,7 +2085,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a878c850e9e421b20262e9b41f9c860e4785fa07541c266b62ff9d1ef998a80a"
 dependencies = [
  "const-oid 0.10.2",
- "der_derive 0.8.0",
+ "der_derive",
  "pem-rfc7468 1.0.0",
  "zeroize",
 ]
@@ -2103,17 +2102,6 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "rusticata-macros",
-]
-
-[[package]]
-name = "der_derive"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8034092389675178f570469e6c3b0465d3d30b4505c294a6550db47f3c17ad18"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -8569,13 +8557,10 @@ dependencies = [
  "chrono",
  "clap",
  "color-eyre",
- "der 0.7.10",
- "digest 0.10.7",
  "dirs",
  "ed25519-dalek 2.2.0",
  "fd-lock-rs",
  "flate2",
- "form_urlencoded",
  "futures",
  "futures-util",
  "hickory-server",
@@ -8595,7 +8580,6 @@ dependencies = [
  "pkcs8 0.10.2",
  "pwhash",
  "rand 0.9.5",
- "rand_core 0.6.4",
  "reqwest",
  "rpassword",
  "rpc-toolkit",

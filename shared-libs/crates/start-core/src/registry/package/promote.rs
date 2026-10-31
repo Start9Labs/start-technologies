@@ -7,6 +7,7 @@ use url::Url;
 use crate::PackageId;
 use crate::context::CliContext;
 use crate::prelude::*;
+use crate::registry::client::RegistryClient;
 use crate::registry::package::get::{GetPackageResponseFull, PackageDetailLevel};
 use crate::s9pk::v2::SIG_CONTEXT;
 use crate::util::VersionString;
@@ -57,10 +58,12 @@ pub async fn call_registry(
 ) -> Result<Value, Error> {
     crate::registry::compat::pem_wire(&mut params);
     let sig_context = url.host().as_ref().map(InternedString::from_display);
+    let mut headers = HeaderMap::new();
+    RegistryClient::current(None).insert_into(&mut headers);
     crate::middleware::auth::signature::call_remote(
         ctx,
         url,
-        HeaderMap::new(),
+        headers,
         sig_context.as_deref(),
         method,
         params,

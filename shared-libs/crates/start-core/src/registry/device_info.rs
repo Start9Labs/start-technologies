@@ -15,6 +15,7 @@ use url::Url;
 
 use crate::context::RpcContext;
 use crate::prelude::*;
+use crate::registry::client::{Product, REGISTRY_CLIENT_HEADER, RegistryClient};
 use crate::registry::context::RegistryContext;
 use crate::registry::os::index::OsVersionInfoMap;
 use crate::registry::os::version::GetOsVersionParams;
@@ -222,6 +223,7 @@ pub struct Metadata {
 #[derive(Clone)]
 pub struct DeviceInfoMiddleware {
     device_info_header: Option<HeaderValue>,
+    client_header: Option<HeaderValue>,
     device_info: Option<DeviceInfo>,
     req: Option<RpcRequest>,
     legacy_signatures: bool,
@@ -234,6 +236,7 @@ impl DeviceInfoMiddleware {
     pub fn new() -> Self {
         Self {
             device_info_header: None,
+            client_header: None,
             device_info: None,
             req: None,
             legacy_signatures: false,
@@ -246,13 +249,30 @@ impl DeviceInfoMiddleware {
 
     fn prepare_request(
         &mut self,
-        startwrt: bool,
+        product: Product,
         metadata: Metadata,
         request: &mut RpcRequest,
     ) -> Result<(), Error> {
-        self.legacy_signatures = startwrt;
-        self.legacy_pem = true;
-        self.legacy_os_notes = false;
+        let client = self
+            .client_header
+            .as_ref()
+            .map(RegistryClient::from_header_value)
+            .transpose()?
+            .unwrap_or_default();
+        if let Some(client_product) = client.product.filter(|p| *p != product) {
+            return Err(Error::new(
+                eyre!(
+                    "{}",
+                    t!(
+                        "registry.client.wrong-product",
+                        registry = product,
+                        client = client_product
+                    )
+                ),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        let mut client_version = None;
         if let Some(header) = &self.device_info_header {
             let device_info = if metadata.get_device_info {
                 Some(DeviceInfo::from_header_value(header)?)
@@ -260,10 +280,9 @@ impl DeviceInfoMiddleware {
                 DeviceInfo::from_header_value(header).ok()
             };
             if let Some(device_info) = device_info {
-                self.legacy_signatures |= reads_legacy_signatures(&device_info.os.version)?;
-                self.legacy_pem = startwrt || predates_0_4_0_5(&device_info.os.version)?;
-                self.legacy_os_notes = self.legacy_pem;
-                self.inline_icons = reads_inline_icons(&device_info.os.version)?;
+                client_version = Some(device_info.os.version.clone());
+                self.inline_icons =
+                    product == Product::StartOs && reads_inline_icons(&device_info.os.version)?;
                 if metadata.get_device_info {
                     request.params["__DeviceInfo_device_info"] = to_value(&device_info)?;
                     self.device_info = Some(device_info);
@@ -271,18 +290,35 @@ impl DeviceInfoMiddleware {
             }
         } else if request.method.as_str() == "os.version.get" {
             let params: GetOsVersionParams = from_value(request.params.clone())?;
-            if let Some(version) = params.source_version {
-                self.legacy_signatures |= reads_legacy_signatures(&version)?;
-                self.legacy_pem = startwrt || predates_0_4_0_5(&version)?;
-                self.legacy_os_notes = self.legacy_pem;
-            }
+            client_version = params.source_version;
         }
+        self.legacy_signatures = !client.reads_ed25519ph
+            && match product {
+                Product::StartOs => client_version
+                    .as_ref()
+                    .map(reads_legacy_signatures)
+                    .transpose()?
+                    .unwrap_or(false),
+                Product::StartWrt => true,
+            };
+        self.legacy_pem = match product {
+            Product::StartOs => client_version
+                .as_ref()
+                .map(predates_0_4_0_5)
+                .transpose()?
+                .unwrap_or(true),
+            Product::StartWrt => true,
+        };
+        self.legacy_os_notes = match client_version.as_ref() {
+            Some(version) => product == Product::StartWrt || predates_0_4_0_5(version)?,
+            None => false,
+        };
         if request.method.as_str().starts_with("db.") {
             self.legacy_pem = false;
             self.legacy_signatures = false;
         }
         self.legacy_os_versions =
-            !startwrt && self.legacy_signatures && request.method.as_str() == "os.version.get";
+            self.legacy_signatures && request.method.as_str() == "os.version.get";
         self.req = Some(request.clone());
         Ok(())
     }
@@ -310,6 +346,7 @@ fn project_legacy_os_notes(method: &str, res: &mut Value) -> Result<(), Error> {
     Ok(())
 }
 
+/// Whether a StartOS version reads `id-Ed25519` as Ed25519ph.
 fn reads_legacy_signatures(version: &Version) -> Result<bool, Error> {
     Ok(version < &"0.4.0.3".parse::<Version>()?)
 }
@@ -406,6 +443,7 @@ impl Middleware<RegistryContext> for DeviceInfoMiddleware {
         request: &mut Request,
     ) -> Result<(), Response> {
         self.device_info_header = request.headers_mut().remove(DEVICE_INFO_HEADER);
+        self.client_header = request.headers_mut().remove(REGISTRY_CLIENT_HEADER);
         Ok(())
     }
     async fn process_rpc_request(
@@ -414,7 +452,7 @@ impl Middleware<RegistryContext> for DeviceInfoMiddleware {
         metadata: Self::Metadata,
         request: &mut RpcRequest,
     ) -> Result<(), RpcResponse> {
-        self.prepare_request(ctx.startwrt, metadata, request)
+        self.prepare_request(ctx.product, metadata, request)
             .map_err(|e| RpcResponse::from_result(Err(e)))
     }
     async fn process_rpc_response(
@@ -550,22 +588,22 @@ mod tests {
     }
 
     #[test]
-    fn pem_responses_follow_client_capability() {
-        for (header, startwrt, legacy) in [
-            (None, false, true),
+    fn pem_responses_follow_product_and_version() {
+        for (header, product, legacy) in [
+            (None, Product::StartOs, true),
             (
                 Some("os.version=0.4.0.4&os.compat=*&os.platform=x86_64"),
-                false,
+                Product::StartOs,
                 true,
             ),
             (
                 Some("os.version=0.4.0.5&os.compat=*&os.platform=x86_64"),
-                false,
+                Product::StartOs,
                 false,
             ),
             (
-                Some("os.version=0.4.0.5&os.compat=*&os.platform=x86_64"),
-                true,
+                Some("os.version=1.3.1&os.compat=*&os.platform=spacemit,k1-x"),
+                Product::StartWrt,
                 true,
             ),
         ] {
@@ -573,7 +611,7 @@ mod tests {
             middleware.device_info_header = header.map(HeaderValue::from_static);
             middleware
                 .prepare_request(
-                    startwrt,
+                    product,
                     Metadata {
                         get_device_info: false,
                     },
@@ -586,7 +624,7 @@ mod tests {
             let mut middleware = DeviceInfoMiddleware::new();
             middleware
                 .prepare_request(
-                    false,
+                    Product::StartOs,
                     Metadata {
                         get_device_info: false,
                     },
@@ -599,19 +637,24 @@ mod tests {
 
     #[test]
     fn raw_database_responses_keep_the_stored_encoding() {
-        for method in ["db.dump", "db.subscribe"] {
-            let mut middleware = DeviceInfoMiddleware::new();
-            middleware
-                .prepare_request(
-                    true,
-                    Metadata {
-                        get_device_info: false,
-                    },
-                    &mut request(method, json!({})),
-                )
-                .unwrap();
-            assert!(!middleware.legacy_pem);
-            assert!(!middleware.legacy_signatures);
+        for product in [Product::StartOs, Product::StartWrt] {
+            for method in ["db.dump", "db.subscribe"] {
+                let mut middleware = DeviceInfoMiddleware::new();
+                middleware.device_info_header = Some(HeaderValue::from_static(
+                    "os.version=0.4.0.2&os.compat=*&os.platform=x86_64",
+                ));
+                middleware
+                    .prepare_request(
+                        product,
+                        Metadata {
+                            get_device_info: false,
+                        },
+                        &mut request(method, json!({})),
+                    )
+                    .unwrap();
+                assert!(!middleware.legacy_pem);
+                assert!(!middleware.legacy_signatures);
+            }
         }
     }
 
@@ -646,7 +689,11 @@ mod tests {
             middleware.device_info_header = header.map(HeaderValue::from_static);
             middleware
                 .prepare_request(
-                    startwrt,
+                    if startwrt {
+                        Product::StartWrt
+                    } else {
+                        Product::StartOs
+                    },
                     Metadata {
                         get_device_info: true,
                     },
@@ -668,7 +715,11 @@ mod tests {
                 let mut middleware = DeviceInfoMiddleware::new();
                 middleware
                     .prepare_request(
-                        startwrt,
+                        if startwrt {
+                            Product::StartWrt
+                        } else {
+                            Product::StartOs
+                        },
                         Metadata {
                             get_device_info: false,
                         },
@@ -726,7 +777,7 @@ mod tests {
             let mut middleware = DeviceInfoMiddleware::new();
             middleware
                 .prepare_request(
-                    false,
+                    Product::StartOs,
                     Metadata {
                         get_device_info: true,
                     },
@@ -740,7 +791,7 @@ mod tests {
 
     #[test]
     fn headerless_registry_queries_keep_modern_labels_unless_startwrt() {
-        for startwrt in [false, true] {
+        for product in [Product::StartOs, Product::StartWrt] {
             for (method, params) in [
                 ("os.version.get", json!({})),
                 ("package.get", json!({ "sourceVersion": "0.4.0.2" })),
@@ -748,14 +799,14 @@ mod tests {
                 let mut middleware = DeviceInfoMiddleware::new();
                 middleware
                     .prepare_request(
-                        startwrt,
+                        product,
                         Metadata {
                             get_device_info: true,
                         },
                         &mut request(method, params),
                     )
                     .unwrap();
-                assert_eq!(middleware.legacy_signatures, startwrt);
+                assert_eq!(middleware.legacy_signatures, product == Product::StartWrt);
             }
         }
     }
@@ -783,7 +834,7 @@ mod tests {
             middleware.device_info_header = Some(HeaderValue::from_static(header));
             middleware
                 .prepare_request(
-                    false,
+                    Product::StartOs,
                     Metadata {
                         get_device_info: false,
                     },
@@ -794,28 +845,113 @@ mod tests {
         }
     }
 
+    fn prepare(
+        product: Product,
+        client: Option<RegistryClient>,
+        device_info: Option<&'static str>,
+        params: Value,
+    ) -> Result<DeviceInfoMiddleware, Error> {
+        let mut middleware = DeviceInfoMiddleware::new();
+        middleware.client_header = client.map(|c| c.to_header_value());
+        middleware.device_info_header = device_info.map(HeaderValue::from_static);
+        middleware.prepare_request(
+            product,
+            Metadata {
+                get_device_info: true,
+            },
+            &mut request("os.version.get", params),
+        )?;
+        Ok(middleware)
+    }
+
+    const STARTWRT_1_2_1: &str = "os.version=1.2.1&os.compat=^1.2.0&os.platform=spacemit,k1-x";
+
     #[test]
-    fn startwrt_keeps_os_versions_without_signatures() {
-        for header in [
-            None,
-            Some("os.version=0.1.0&os.compat=^0.1.0&os.platform=spacemit,k1-x_muse-pi-pro"),
-        ] {
-            for params in [json!({}), json!({ "sourceVersion": "0.1.0" })] {
-                let mut middleware = DeviceInfoMiddleware::new();
-                middleware.device_info_header = header.map(HeaderValue::from_static);
-                middleware
-                    .prepare_request(
-                        true,
-                        Metadata {
-                            get_device_info: false,
-                        },
-                        &mut request("os.version.get", params),
-                    )
-                    .unwrap();
+    fn startwrt_clients_without_the_capability_get_only_versions_they_can_verify() {
+        for device_info in [None, Some(STARTWRT_1_2_1)] {
+            for params in [json!({}), json!({ "sourceVersion": "1.2.1" })] {
+                let middleware = prepare(Product::StartWrt, None, device_info, params).unwrap();
                 assert!(middleware.legacy_signatures);
-                assert!(!middleware.legacy_os_versions);
+                assert!(middleware.legacy_os_versions);
             }
         }
+    }
+
+    #[test]
+    fn the_capability_selects_current_labels_on_either_product() {
+        for (product, device_info, source) in [
+            (Product::StartWrt, STARTWRT_1_2_1, "1.2.1"),
+            (
+                Product::StartOs,
+                "os.version=0.4.0.2&os.compat=*&os.platform=x86_64",
+                "0.4.0.2",
+            ),
+        ] {
+            let client = RegistryClient::current(Some(product));
+            for device_info in [None, Some(device_info)] {
+                let middleware = prepare(
+                    product,
+                    Some(client),
+                    device_info,
+                    json!({ "sourceVersion": source }),
+                )
+                .unwrap();
+                assert!(!middleware.legacy_signatures, "{product}");
+                assert!(!middleware.legacy_os_versions, "{product}");
+            }
+        }
+    }
+
+    #[test]
+    fn signature_capability_does_not_select_key_encoding() {
+        for (product, version, pem, legacy_signatures) in [
+            (Product::StartOs, "0.4.0.2", true, true),
+            (Product::StartOs, "0.4.0.4", true, false),
+            (Product::StartOs, "0.4.0.5", false, false),
+            (Product::StartWrt, "1.3.1", true, true),
+        ] {
+            for client in [None, Some(RegistryClient::current(Some(product)))] {
+                let middleware =
+                    prepare(product, client, None, json!({ "sourceVersion": version })).unwrap();
+                assert_eq!(middleware.legacy_pem, pem, "{product} {version} {client:?}");
+                assert_eq!(
+                    middleware.legacy_signatures,
+                    client.is_none() && legacy_signatures,
+                    "{product} {version} {client:?}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_a_client_of_another_product() {
+        for (registry, other) in [
+            (Product::StartOs, Product::StartWrt),
+            (Product::StartWrt, Product::StartOs),
+        ] {
+            for (client, accepted) in [(Some(other), false), (Some(registry), true), (None, true)] {
+                let res = prepare(
+                    registry,
+                    Some(RegistryClient::current(client)),
+                    None,
+                    json!({}),
+                );
+                assert_eq!(res.is_ok(), accepted, "{registry} {client:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn startos_version_rules_stay_off_a_startwrt_registry() {
+        let middleware = prepare(
+            Product::StartWrt,
+            Some(RegistryClient::current(None)),
+            Some("os.version=0.1.0&os.compat=^0.1.0&os.platform=spacemit,k1-x"),
+            json!({}),
+        )
+        .unwrap();
+        assert!(!middleware.inline_icons);
+        assert!(!middleware.legacy_signatures);
     }
 
     #[test]
@@ -845,7 +981,7 @@ mod tests {
         ));
         middleware
             .prepare_request(
-                false,
+                Product::StartOs,
                 Metadata {
                     get_device_info: true,
                 },
@@ -927,7 +1063,7 @@ mod tests {
             middleware.device_info_header = header.map(HeaderValue::from_static);
             middleware
                 .prepare_request(
-                    false,
+                    Product::StartOs,
                     Metadata {
                         get_device_info: false,
                     },

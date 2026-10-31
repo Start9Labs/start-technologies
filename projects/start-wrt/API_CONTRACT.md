@@ -223,7 +223,9 @@ struct SystemInfoResponse {
 
 No auth required. Queries the Start9 registry for OS versions newer than the running firmware.
 Registry URL defaults to `https://startwrt-registry.start9.com` (no trailing slash) and can be
-overridden via UCI: `startwrt.system.registry`.
+overridden via UCI: `startwrt.system.registry`. Fails when the registry is unreachable,
+refuses the request, or returns a response the router cannot parse; an empty list means the
+router is up to date.
 
 ```rust
 // Request: {}

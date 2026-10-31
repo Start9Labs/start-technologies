@@ -28,7 +28,8 @@ use crate::middleware::auth::local::{LocalAuthContext, dial_addr, is_loopback, l
 use crate::middleware::auth::signature::{NonceCache, SignatureAuthContext, SignatureAuthMetadata};
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
-use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
+use crate::registry::client::{Product, RegistryClient};
+use crate::registry::device_info::DeviceInfo;
 use crate::registry::migrations::run_migrations;
 use crate::registry::os::security;
 use crate::registry::package::icon::{icons_dir, referenced_icons, sweep_icons};
@@ -60,7 +61,9 @@ pub struct RegistryConfig {
     pub tor_proxy: Option<Url>,
     #[arg(short = 'd', long = "datadir", help = "help.arg.data-directory")]
     pub datadir: Option<PathBuf>,
-    #[arg(long, help = "help.arg.registry-startwrt")]
+    #[arg(long, value_enum, help = "help.arg.registry-product")]
+    pub product: Option<Product>,
+    #[arg(skip)]
     #[serde(default)]
     pub startwrt: bool,
     #[arg(long, help = "help.arg.registry-security-notifications")]
@@ -76,6 +79,7 @@ impl ContextConfig for RegistryConfig {
         self.registry_hostname.append(&mut other.registry_hostname);
         self.tor_proxy = self.tor_proxy.take().or(other.tor_proxy);
         self.datadir = self.datadir.take().or(other.datadir);
+        self.product = self.product.take().or(other.product);
         self.startwrt |= other.startwrt;
         self.security_notifications |= other.security_notifications;
     }
@@ -88,6 +92,19 @@ impl RegistryConfig {
         self.load_path_rec(Some(CONFIG_PATH))?;
         Ok(self)
     }
+
+    /// `startwrt: true` stands for `product: startwrt`.
+    pub fn product(&self) -> Result<Product, Error> {
+        match (self.product, self.startwrt) {
+            (Some(Product::StartOs), true) => Err(Error::new(
+                eyre!("{}", t!("registry.context.conflicting-product")),
+                ErrorKind::InvalidRequest,
+            )),
+            (Some(product), _) => Ok(product),
+            (None, true) => Ok(Product::StartWrt),
+            (None, false) => Ok(Product::StartOs),
+        }
+    }
 }
 
 pub struct RegistryContextSeed {
@@ -95,7 +112,7 @@ pub struct RegistryContextSeed {
     pub listen: SocketAddr,
     pub db: TypedPatchDb<RegistryDatabase>,
     pub datadir: PathBuf,
-    pub startwrt: bool,
+    pub product: Product,
     pub rpc_continuations: RpcContinuations,
     pub open_authed_continuations: OpenAuthedContinuations<Option<InternedString>>,
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
@@ -110,6 +127,7 @@ pub struct RegistryContext(Arc<RegistryContextSeed>);
 impl RegistryContext {
     #[instrument(skip_all)]
     pub async fn init(config: &RegistryConfig) -> Result<Self, Error> {
+        let product = config.product()?;
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
         let datadir = config
             .datadir
@@ -177,7 +195,7 @@ impl RegistryContext {
             listen: config.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN),
             db,
             datadir,
-            startwrt: config.startwrt,
+            product,
             rpc_continuations: RpcContinuations::new(),
             open_authed_continuations: OpenAuthedContinuations::new(),
             auth_sig_nonce_cache: SyncMutex::new(Default::default()),
@@ -259,6 +277,7 @@ impl CallRemote<RegistryContext> for CliContext {
         };
 
         let mut headers = HeaderMap::new();
+        RegistryClient::current(None).insert_into(&mut headers);
         if is_local {
             if let Some(auth) = local_auth {
                 headers.insert(AUTHORIZATION, auth);
@@ -289,36 +308,27 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
         &self,
         mut method: &str,
         metadata: OrdMap<&'static str, Value>,
-        mut params: Value,
-        RegistryUrlParams { mut registry }: RegistryUrlParams,
+        params: Value,
+        RegistryUrlParams { registry }: RegistryUrlParams,
     ) -> Result<Value, RpcError> {
-        super::compat::pem_wire(&mut params);
-        let mut headers = HeaderMap::new();
-        let mut device_info = None;
-        if metadata
+        let device_info = if metadata
             .get("get_device_info")
             .and_then(|m| m.as_bool())
             .unwrap_or(false)
         {
-            let di = DeviceInfo::load(self).await?;
-            headers.insert(DEVICE_INFO_HEADER, di.to_header_value());
-            device_info = Some(di);
-        }
-
-        registry
-            .path_segments_mut()
-            .map_err(|_| Error::new(eyre!("cannot extend URL path"), ErrorKind::ParseUrl))?
-            .push("rpc")
-            .push("v0");
+            Some(DeviceInfo::load(self).await?)
+        } else {
+            None
+        };
 
         method = method.strip_prefix("registry.").unwrap_or(method);
         let is_onion = registry.host_str().map_or(false, |h| h.ends_with(".onion"));
 
-        let mut res = match crate::middleware::auth::signature::call_remote_with_client(
-            None,
+        let mut res = match crate::registry::client::call(
             self.client.get(),
             registry,
-            headers,
+            Product::StartOs,
+            device_info.as_ref(),
             method,
             params.clone(),
         )
@@ -467,6 +477,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn startwrt_flag_stands_for_the_startwrt_product() {
+        for (product, startwrt, expected) in [
+            (None, false, Some(Product::StartOs)),
+            (None, true, Some(Product::StartWrt)),
+            (Some(Product::StartWrt), true, Some(Product::StartWrt)),
+            (Some(Product::StartWrt), false, Some(Product::StartWrt)),
+            (Some(Product::StartOs), true, None),
+        ] {
+            let config = RegistryConfig {
+                product,
+                startwrt,
+                ..Default::default()
+            };
+            assert_eq!(config.product().ok(), expected, "{product:?} {startwrt}");
+        }
+    }
+
+    #[test]
+    fn product_reads_from_yaml() {
+        let config: RegistryConfig =
+            serde_yaml::from_str("registry-hostname: [r]\nproduct: startwrt").unwrap();
+        assert_eq!(config.product().unwrap(), Product::StartWrt);
+        let config: RegistryConfig =
+            serde_yaml::from_str("registry-hostname: [r]\nstartwrt: true").unwrap();
+        assert_eq!(config.product().unwrap(), Product::StartWrt);
+    }
+
+    #[test]
+    fn product_reads_from_flags() {
+        for (args, expected) in [
+            (&["--product", "startwrt"][..], Product::StartWrt),
+            (&["--product", "startos"][..], Product::StartOs),
+        ] {
+            let config = RegistryConfig::try_parse_from(
+                std::iter::once("start-registryd").chain(args.iter().copied()),
+            )
+            .unwrap();
+            assert_eq!(config.product().unwrap(), expected, "{args:?}");
+        }
+    }
+
+    #[test]
     fn security_notifications_are_opt_in_from_cli_or_config() {
         let default = RegistryConfig::try_parse_from(["registry"]).unwrap();
         assert!(!default.security_notifications);
@@ -491,5 +543,34 @@ mod tests {
             serde_json::to_value(&merged).unwrap()["security-notifications"],
             true
         );
+    }
+
+    #[test]
+    fn product_and_security_notifications_merge_independently() {
+        for (args, yaml) in [
+            (
+                vec!["registry", "--product", "startwrt"],
+                "product: startos\nsecurity-notifications: true",
+            ),
+            (
+                vec!["registry", "--security-notifications"],
+                "startwrt: true",
+            ),
+            (
+                vec![
+                    "registry",
+                    "--product",
+                    "startwrt",
+                    "--security-notifications",
+                ],
+                "",
+            ),
+        ] {
+            let mut config = RegistryConfig::try_parse_from(args).unwrap();
+            let file = format!("registry-hostname: [registry.test]\n{yaml}");
+            config.merge_with(serde_yaml::from_str(&file).unwrap());
+            assert_eq!(config.product().unwrap(), Product::StartWrt);
+            assert!(config.security_notifications);
+        }
     }
 }

@@ -391,7 +391,7 @@ DNS (Domain Name System) translates domain names to IP addresses.
 
 Enable DNS over HTTPS (DoH) for encrypted DNS queries. This improves privacy by preventing eavesdropping on your DNS traffic.
 
-**Note:** Not all DNS servers support DoH. Common servers that do include Cloudflare (1.1.1.1), Google (8.8.8.8), and Quad9 (9.9.9.9).`,
+**Note:** Not all DNS servers support DoH. Common servers that do include Cloudflare (1.1.1.1) and Google (8.8.8.8).`,
   '/wan/dynamic-dns': `## WAN – Dynamic DNS
 
 ### Dynamic DNS

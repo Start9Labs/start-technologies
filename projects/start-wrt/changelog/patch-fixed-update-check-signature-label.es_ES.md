@@ -1,0 +1,2 @@
+- El router encuentra actualizaciones en registros con start-registry 1.2.0 o posterior.
+- Si no puede buscar actualizaciones, **Sistema > Ajustes > General** indica que la búsqueda ha fallado, en lugar de mostrar que no hay actualizaciones.

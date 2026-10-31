@@ -1,0 +1,1 @@
+- Routery StartWRT starsze niż 1.4.0 nie otrzymują już propozycji wydań, których nie mogą zweryfikować.

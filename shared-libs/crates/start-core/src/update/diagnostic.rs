@@ -6,7 +6,6 @@ use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
 use exver::{Version, VersionRange};
 use futures::{StreamExt, TryStreamExt};
-use http::HeaderMap;
 use imbl_value::json;
 use itertools::Itertools;
 use reqwest::{Client, Url};
@@ -17,10 +16,10 @@ use tracing::instrument;
 
 use crate::PLATFORM;
 use crate::context::{CliContext, DiagnosticContext};
-use crate::middleware::auth::signature;
 use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, PhasedProgressBar, ProgressUnits};
 use crate::registry::asset::RegistryAsset;
+use crate::registry::client::Product;
 use crate::registry::os::index::OsVersionInfo;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::sign::commitment::blake3::Blake3Commitment;
@@ -233,20 +232,15 @@ async fn stream_progress(
 
 async fn get_versions(
     client: &Client,
-    mut registry: Url,
+    registry: Url,
     source: &Version,
     target: &VersionRange,
 ) -> Result<BTreeMap<Version, OsVersionInfo>, Error> {
-    registry
-        .path_segments_mut()
-        .map_err(|_| Error::new(eyre!("cannot extend URL path"), ErrorKind::ParseUrl))?
-        .push("rpc")
-        .push("v0");
-    let res = signature::call_remote_with_client(
-        None,
+    let res = crate::registry::client::call(
         client.clone(),
         registry,
-        HeaderMap::new(),
+        Product::StartOs,
+        None,
         "os.version.get",
         json!({
             "sourceVersion": source,

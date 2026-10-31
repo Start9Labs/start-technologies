@@ -1,0 +1,3 @@
+- Le paramètre `product` du registre (`startos` ou `startwrt`) désigne le système d’exploitation dont il distribue les versions. `startwrt: true` sélectionne toujours StartWRT.
+- Un serveur StartOS ou routeur StartWRT actuel interrogeant un registre de l’autre produit reçoit une erreur indiquant le produit distribué.
+- Les clients déclarant prendre en charge les libellés de signature actuels les reçoivent, quels que soient leur produit et leur version.

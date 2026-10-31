@@ -391,7 +391,7 @@ DNS (Domain Name System) übersetzt Domänennamen in IP-Adressen.
 
 Aktivieren Sie DNS over HTTPS (DoH) für verschlüsselte DNS-Abfragen. Dies verbessert die Privatsphäre, indem es das Abhören Ihres DNS-Datenverkehrs verhindert.
 
-**Hinweis:** Nicht alle DNS-Server unterstützen DoH. Gängige Server, die dies tun, sind Cloudflare (1.1.1.1), Google (8.8.8.8) und Quad9 (9.9.9.9).`,
+**Hinweis:** Nicht alle DNS-Server unterstützen DoH. Gängige Server, die dies tun, sind Cloudflare (1.1.1.1) und Google (8.8.8.8).`,
   '/wan/dynamic-dns': `## WAN – Dynamisches DNS
 
 ### Dynamisches DNS

@@ -1,0 +1,1 @@
+- La ayuda de DNS sobre HTTPS deja de recomendar Quad9 (`9.9.9.9`) como servidor.

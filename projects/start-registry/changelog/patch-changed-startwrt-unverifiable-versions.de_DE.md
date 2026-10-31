@@ -1,0 +1,1 @@
+- StartWRT-Router vor Version 1.4.0 erhalten keine Versionen mehr angeboten, die sie nicht verifizieren können.
