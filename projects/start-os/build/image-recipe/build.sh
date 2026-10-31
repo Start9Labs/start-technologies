@@ -85,6 +85,10 @@ if [ "${IB_TARGET_PLATFORM}" = "raspberrypi" ]; then
 	PLATFORM_CONFIG_EXTRAS+=( --firmware-binary false )
 	PLATFORM_CONFIG_EXTRAS+=( --firmware-chroot false )
 	RPI_KERNEL_VERSION=6.18.33+rpt
+	if ! [[ "$RPI_KERNEL_VERSION" =~ ^6\.18\.[0-9]+\+rpt$ ]] || ! dpkg --compare-versions "${RPI_KERNEL_VERSION%+rpt}" ge 6.18.56; then
+		printf 'CVE-2026-98432: Raspberry Pi images require a fixed 6.18 kernel (>= 6.18.56+rpt); refusing %s\n' "$RPI_KERNEL_VERSION" >&2
+		exit 1
+	fi
 	PLATFORM_CONFIG_EXTRAS+=( --linux-packages linux-image-$RPI_KERNEL_VERSION )
 	PLATFORM_CONFIG_EXTRAS+=( --linux-flavours "rpi-v8 rpi-2712" )
 elif [ "${IB_TARGET_PLATFORM}" = "rockchip64" ]; then
