@@ -1,1 +1,0 @@
-- Sicherungen und Wiederherstellung über Netzwerkordner akzeptieren DNS-Hostnamen mit Punkten. Kurze Computernamen verwenden weiterhin ausschließlich NetBIOS; Fehlermeldungen bei der Namensauflösung nennen den verwendeten Resolver.

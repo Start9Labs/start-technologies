@@ -1,1 +1,0 @@
-- Kopie zapasowe i odzyskiwanie z folderów sieciowych obsługują nazwy hostów DNS zawierające kropki. Same nazwy komputerów nadal korzystają wyłącznie z NetBIOS, a błędy wyszukiwania wskazują użyty mechanizm rozwiązywania nazw.

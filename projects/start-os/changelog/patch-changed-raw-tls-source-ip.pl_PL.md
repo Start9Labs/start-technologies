@@ -1,1 +1,0 @@
-- Surowe połączenia TLS usług niewymagających proxy HTTP zachowują źródłowe adresy IP klientów.

@@ -1,1 +1,0 @@
-- Usa codificaciones compactas de claves y firmas en el índice, con respuestas compatibles con PEM para los clientes antiguos.

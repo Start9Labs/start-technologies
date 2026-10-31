@@ -1,1 +1,0 @@
-- Die Karte „Abhängigkeiten“ eines Dienstes zeigt die installierte Version jeder Abhängigkeit. Eine Abhängigkeit mit inkompatibler Version öffnet den Marktplatz bei einer kompatiblen Version.
