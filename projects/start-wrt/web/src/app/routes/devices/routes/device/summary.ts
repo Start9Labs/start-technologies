@@ -53,7 +53,10 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
         <div appSummary>
           {{ 'IPv4 Address' | i18n }}
           <span tuiSubtitle>
-            @if (parent.data()?.ipv4Static) {
+            @if (
+              parent.data()?.ipv4Static &&
+              !parent.data()?.inactiveIpv4Reservation
+            ) {
               <tui-icon icon="@tui.lock" />
             }
             {{ parent.data()?.ipv4 }}

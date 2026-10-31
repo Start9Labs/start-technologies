@@ -568,4 +568,7 @@ export default {
   596: 'Erlaubt diesem Gerät, Ihren anderen Geräten IPv6-Routen anzukündigen (erforderlich für Thread-Border-Router wie Apple TV, HomePod oder Home Assistant). Standardmäßig aus.',
   597: 'IPv6-Router-Advertisements erlauben?',
   598: 'Dieses Gerät kann dann Ihren anderen Geräten IPv6-Adressen, Routen, DNS-Server und ein Standard-Gateway zuweisen und ihren IPv6-Verkehr am Router vorbeileiten. Gewähren Sie dies nur einem Gerät, dem Sie vertrauen, etwa einem Thread-Border-Router.',
+  599: 'Außerhalb des Subnetzes des Profils dieses Geräts',
+  600: 'Keine nutzbare Host-Adresse',
+  601: 'Diese Reservierung liegt außerhalb des Subnetzes des Profils, in dem sich dieses Gerät befindet, daher erhält das Gerät stattdessen eine Adresse aus dem Pool des Profils. Reservieren Sie eine Adresse im Subnetz seines Profils.',
 } satisfies i18n

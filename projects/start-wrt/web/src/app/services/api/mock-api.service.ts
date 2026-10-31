@@ -1202,6 +1202,11 @@ export class MockApiService extends ApiService {
         ipv4: device.ipv4,
         ipv6: device.ipv6,
         ipv4_static: !!host?.options.ip,
+        inactive_ipv4_reservation:
+          host?.options.ip && host.options.ip !== device.ipv4
+            ? host.options.ip
+            : null,
+        profile_network: profile ? `${profile.gateway_ip}/24` : null,
         allow_auto_port_forward: this.autoForwardAllowed.has(mac),
         allow_dns_injection: this.dnsInjectionAllowed.has(mac),
         allow_router_advertisements: this.raAllowed.has(mac),
@@ -1699,16 +1704,16 @@ export class MockApiService extends ApiService {
     )
     const def = this.mockDeviceDefs.find(d => d.mac.toUpperCase() === macUpper)
 
-    // Compute IPv4 from profile gateway + host octet
-    let ipv4: string | null = null
-    if (host?.options.ip) {
-      ipv4 = host.options.ip
-    } else if (def) {
+    // A reservation in the profile's subnet, else profile gateway + host octet
+    let ipv4: string | null = host?.options.ip ?? null
+    if (def) {
       const gateway = this.mockProfiles.find(
         p => p.interface === def.profileInterface,
       )?.gateway_ip
       const subnet = gateway?.split('.').slice(0, 3).join('.') ?? '192.168.1'
-      ipv4 = `${subnet}.${def.hostOctet}`
+      if (!ipv4?.startsWith(`${subnet}.`)) {
+        ipv4 = `${subnet}.${def.hostOctet}`
+      }
     }
 
     // Compute IPv6

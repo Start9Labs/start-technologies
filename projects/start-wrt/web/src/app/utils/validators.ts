@@ -33,6 +33,24 @@ export class CustomValidators {
     }
   }
 
+  /** Takes the router's address with its prefix length, as in `192.168.2.1/24`. */
+  static ipv4HostIn(network: string): ValidatorFn {
+    const [router = '', bits = ''] = network.split('/')
+    const size = 2 ** (32 - Number(bits))
+    const toInt = (ip: string) =>
+      ip.split('.').reduce((acc, octet) => acc * 256 + Number(octet), 0)
+    const subnet = Math.floor(toInt(router) / size)
+    return (control: AbstractControl): ValidationErrors | null => {
+      if (!control.value || CustomValidators.ipv4()(control)) return null
+      const ip = toInt(control.value)
+      if (Math.floor(ip / size) !== subnet) return { outsideProfile: true }
+      const host = ip % size
+      return host === 0 || host === size - 1 || control.value === router
+        ? { notHost: true }
+        : null
+    }
+  }
+
   static ipv4OrIpv6(): ValidatorFn {
     return (control: AbstractControl): ValidationErrors | null => {
       if (!control.value) return null

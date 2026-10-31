@@ -568,4 +568,7 @@ export default {
   596: 'Permite que este dispositivo anuncie rutas IPv6 a tus otros dispositivos (necesario para routers de borde Thread como un Apple TV, HomePod o Home Assistant). Desactivado de forma predeterminada.',
   597: '¿Permitir anuncios de router IPv6?',
   598: 'Este dispositivo podrá asignar a tus otros dispositivos direcciones IPv6, rutas, servidores DNS y una puerta de enlace predeterminada, y podría desviar su tráfico IPv6 fuera del router. Concede esto solo a un dispositivo de confianza, como un router de borde Thread.',
+  599: 'Fuera de la subred del perfil de este dispositivo',
+  600: 'No es una dirección de host utilizable',
+  601: 'Esta reserva está fuera de la subred del perfil en el que se encuentra este dispositivo, por lo que el dispositivo recibe en su lugar una dirección del rango del perfil. Reserve una dirección en la subred de su perfil.',
 } satisfies i18n
