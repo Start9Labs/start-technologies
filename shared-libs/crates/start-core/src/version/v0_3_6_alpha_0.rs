@@ -970,4 +970,120 @@ mod test {
     fn an_address_without_a_manifest_hands_over_nothing() {
         assert_eq!(onion_ports(&package_data(), "start-os", "admin"), None);
     }
+
+    #[tokio::test]
+    async fn a_0_3_5_1_database_migrates_to_current() {
+        use openssl::hash::MessageDigest;
+        use patch_db::json_ptr::ROOT;
+
+        use crate::util::crypto::ed25519_expand_key;
+        use crate::version::Current;
+
+        let account = AccountInfo::new("password", std::time::SystemTime::now(), None).unwrap();
+        let server_key = ed25519_expand_key(&[1; 32]);
+        let tor_address = format!("https://{}.onion/", onion_address_from_key(&server_key));
+        let ca_fingerprint = account
+            .root_ca_cert
+            .digest(MessageDigest::sha256())
+            .unwrap()
+            .iter()
+            .map(|x| format!("{x:X}"))
+            .join(":");
+        let pubkey = account.ssh_key.public_key().to_openssh().unwrap();
+        let mut db: Value = serde_json::from_str(
+            r#"{
+                "server-info": {
+                    "arch": "x86_64",
+                    "platform": "x86_64-nonfree",
+                    "id": null,
+                    "hostname": "adjective-noun",
+                    "version": "0.3.5.1",
+                    "last-backup": null,
+                    "last-wifi-region": null,
+                    "eos-version-compat": ">=0.3.0 <=0.3.5.1",
+                    "lan-address": "https://adjective-noun.local/",
+                    "tor-address": null,
+                    "ip-info": { "eth0": {
+                        "ipv4-range": "192.168.1.0/24",
+                        "ipv4": "192.168.1.10",
+                        "ipv6-range": null,
+                        "ipv6": null
+                    } },
+                    "status-info": {
+                        "backup-progress": null,
+                        "updated": false,
+                        "update-progress": null,
+                        "shutting-down": false,
+                        "restarting": false
+                    },
+                    "wifi": { "ssids": [], "selected": null, "connected": null },
+                    "unread-notification-count": 0,
+                    "connection-addresses": { "tor": [], "clearnet": [] },
+                    "password-hash": null,
+                    "pubkey": null,
+                    "ca-fingerprint": null,
+                    "ntp-synced": true,
+                    "zram": true,
+                    "governor": null
+                },
+                "package-data": null,
+                "ui": {
+                    "name": null,
+                    "ack-welcome": "0.3.5.1",
+                    "marketplace": {
+                        "selected-url": "https://registry.start9.com/",
+                        "known-hosts": {
+                            "https://registry.start9.com/": {},
+                            "https://community-registry.start9.com/": {}
+                        }
+                    },
+                    "dev": {},
+                    "gaming": { "snake": { "high-score": 0 } },
+                    "ack-instructions": {},
+                    "theme": "Dark",
+                    "widgets": []
+                }
+            }"#,
+        )
+        .unwrap();
+        let server_info = &mut db["server-info"];
+        server_info["id"] = json!(account.server_id);
+        server_info["tor-address"] = json!(tor_address);
+        server_info["password-hash"] = json!(account.password);
+        server_info["pubkey"] = json!(pubkey);
+        server_info["ca-fingerprint"] = json!(ca_fingerprint);
+        db["package-data"] = package_data();
+        let tor_keys = BTreeMap::from([
+            (("start-os".to_owned(), "admin".to_owned()), server_key),
+            (
+                ("gitea".to_owned(), "main".to_owned()),
+                ed25519_expand_key(&[2; 32]),
+            ),
+        ]);
+
+        let res = v0_3_5_2::Version.up(&mut db, ()).unwrap();
+        v0_3_5_2::Version.commit(&mut db, res).unwrap();
+        let res = Version
+            .up(
+                &mut db,
+                (account, SshKeys::new(), CifsTargets::default(), tor_keys),
+            )
+            .unwrap();
+        Version.commit(&mut db, res).unwrap();
+        let store = PatchDb::in_memory();
+        store.put(&ROOT, &db).await.unwrap();
+        Current::default().pre_init(&store).await.unwrap();
+
+        let migrated = store.dump(&ROOT).await.value;
+        assert_eq!(
+            migrated["public"]["serverInfo"]["version"],
+            to_value(&Current::default().semver()).unwrap()
+        );
+        assert_eq!(
+            migrated["private"]["sessions"],
+            json!({ "pubkeys": {}, "tokens": {} })
+        );
+        Current::default().pre_init(&store).await.unwrap();
+        assert_eq!(store.dump(&ROOT).await.value, migrated);
+    }
 }
