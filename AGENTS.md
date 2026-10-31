@@ -136,6 +136,7 @@ make start-os-scripts-test   # StartOS shell scripts (projects/start-os/build/te
 make bash-completion-test    # completion staging and lazy loading (requires bash-completion)
 make start-wrt-test          # StartWRT Rust crates
 make release-notes-test      # changelog fragments, versions, release notes, signed commits
+make complexity-test         # census, delta, history freshness and PR routing
 make package-ci-test         # shared GitHub/Forgejo service-package CI (root npm dependencies)
 
 # Run a specific Rust test
@@ -266,6 +267,9 @@ What `### Environment` carries, by project:
 - **Label product changes with an impact tier: `major`, `minor`, or `patch`.** Choose one tier for the largest change to the product the PR primarily concerns. Documentation-only and repo-only PRs do not require an impact label. When several products change, use the most relevant product rather than supporting changes: a StartOS change with a supporting start-cli change is labeled by its impact on StartOS.
 - **No "Test plan" section in the body.** Summarize what the change does and why, plus executed verification and its results. CI supplies an additional test record; a list of checks someone should run does not.
 - **The diff decides, so a PR takes as many labels as it needs.** An issue carries the one product a defect surfaces in; a PR carries every project whose files it changes, because that is what tells a reviewer and a release what a merge can break. Build, CI, and release tooling — `.github/`, `build/`, `scripts/`, `Makefile`, `debian/`, `apt/`, and the repo-root docs — is `repo`. A `shared-libs/` change has no label of its own: label the products whose behavior it changes.
+- **Run `make complexity-record` before opening a PR and commit what it writes.** It compares the branch against its merge-base and prints the totals, every function it pushed higher, every one it simplified, and which utilities a second subsystem now depends on — then appends this tree's totals to [`build/complexity/history.tsv`](build/complexity/history.tsv). Three seconds, no build. On non-draft code PRs, CI checks that the log's last row has the same numeric totals as a fresh census of the PR head; no complexity threshold fails a build. Re-run it after changes that alter the census totals. The log is `merge=union`, so git preserves both branches' appended rows. Master CI neither checks nor appends a row; the merged tree is not measured by this job.
+- **An unexpected rise is a symptom, not a verdict.** Read the named functions, not the total. It is usually a condition that did not need adding, one clear function chopped into worse ones, or a special case passed down through layers that should have handled it at the top. Fix what the report caught, or say in the body why the number is wrong: a requirement that has nine cases takes nine branches wherever it is handled, and no restructuring removes them.
+- **Adding a utility costs nothing here.** A general-purpose helper has one call site the day it is written, and the report only names a function once a second subsystem calls it. Writing a second helper where one already exists therefore gains nothing either, so search before you add.
 
 ## Commits
 

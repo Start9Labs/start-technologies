@@ -233,3 +233,25 @@ jobs:
             projects/start-registry/man
             projects/start-tunnel/man
             projects/start-os/man
+
+  complexity:
+    name: Complexity
+    needs: [prettier, changes]
+    if: >-
+      !cancelled() && needs.prettier.result == 'success'
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.draft != true
+      && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      # The recorded row describes the branch head, not the merge ref.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Test complexity tooling
+        run: make complexity-test
+      - name: Check the complexity log describes this tree
+        run: make complexity-verify
