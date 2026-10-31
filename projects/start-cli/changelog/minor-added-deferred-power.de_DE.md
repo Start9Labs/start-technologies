@@ -1,1 +1,1 @@
-- **`server restart` und `server shutdown` warten standardmäßig auf das Ende einer laufenden Sicherung.** `--force` unterbricht die Sicherung. `server cancel-deferred-power` hebt die vorgemerkte Aktion auf. Diese Befehle benötigen StartOS ab 0.4.1.
+- **`server restart` und `server shutdown` warten standardmäßig auf das Ende einer laufenden Sicherung.** `--force` unterbricht die Sicherung. `server cancel-deferred-power` hebt die vorgemerkte Aktion auf. Diese Befehle benötigen StartOS ab 0.4.2.

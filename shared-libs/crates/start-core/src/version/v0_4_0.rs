@@ -91,7 +91,7 @@ mod test {
     use super::*;
 
     #[tokio::test]
-    async fn welcome_notification_survives_migration_to_0_4_1() {
+    async fn welcome_notification_survives_migration_to_current() {
         use super::super::{Current, PreUps, migrate_from_unchecked};
 
         for (from, todos, eligible) in [
@@ -123,7 +123,7 @@ mod test {
             } });
             let pre_ups = PreUps::load(&previous, &current).await.unwrap();
             migrate_from_unchecked(&previous, &current, pre_ups, &mut db).unwrap();
-            assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.1"));
+            assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.2"));
             assert_eq!(
                 db["public"]["serverInfo"]["postInitMigrationTodos"]["0.4.0"],
                 json!(eligible),

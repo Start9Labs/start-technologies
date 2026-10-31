@@ -173,13 +173,17 @@ mod tests {
         let account =
             crate::account::AccountInfo::new("password", std::time::SystemTime::now(), None)
                 .unwrap();
-        let catch_up_todos = json!({ "0.4.0.5": null, "0.4.1": null });
+        let catch_up_todos = json!({ "0.4.0.5": null, "0.4.1": null, "0.4.2": null });
         for (revision, key_id, expected_todos) in [
             (0, key.to_string(), catch_up_todos.clone()),
             (1, key.to_string(), catch_up_todos.clone()),
             (1, canonical.to_string(), catch_up_todos.clone()),
             (2, canonical.to_string(), catch_up_todos),
-            (3, canonical.to_string(), json!({ "0.4.1": null })),
+            (
+                3,
+                canonical.to_string(),
+                json!({ "0.4.1": null, "0.4.2": null }),
+            ),
         ] {
             let mut fixture =
                 to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
@@ -218,7 +222,7 @@ mod tests {
                 migrated["public"]["serverInfo"]["postInitMigrationTodos"],
                 expected_todos
             );
-            assert_eq!(migrated["public"]["serverInfo"]["version"], json!("0.4.1"));
+            assert_eq!(migrated["public"]["serverInfo"]["version"], json!("0.4.2"));
             assert_eq!(migrated["private"]["sessions"]["tokens"], json!({}));
             assert!(
                 !migrated["private"]

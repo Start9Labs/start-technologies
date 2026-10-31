@@ -469,6 +469,7 @@ mod tests {
         let mut fixture =
             to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
                 .unwrap();
+        fixture["public"]["serverInfo"]["version"] = json!("0.4.1");
         fixture["public"]["serverInfo"]["trustedKeys"]["start9"]["os"] = json!(false);
         fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(1);
         fixture["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
@@ -489,7 +490,11 @@ mod tests {
         assert_eq!(migrated["public"]["serverInfo"]["trustedKeys"], saved_trust);
         assert_eq!(
             migrated["public"]["serverInfo"]["latestMigrationRevision"],
-            json!(2)
+            json!(Current::default().migration_revision())
+        );
+        assert_eq!(
+            migrated["public"]["serverInfo"]["postInitMigrationTodos"],
+            json!({ "0.4.1": null, "0.4.2": null })
         );
         Current::default().pre_init(&db).await.unwrap();
         assert_eq!(db.dump(&ROOT).await.value, migrated);
@@ -511,6 +516,7 @@ mod tests {
                 to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
                     .unwrap();
             let server = fixture["public"]["serverInfo"].as_object_mut().unwrap();
+            server.insert("version".into(), json!("0.4.1"));
             server.remove("trustedKeys");
             server.insert("trustedOsUpdateSigners".into(), to_value(&legacy).unwrap());
             server.insert("latestMigrationRevision".into(), json!(0));
@@ -528,11 +534,11 @@ mod tests {
             assert_eq!(migrated["private"]["sessions"], sessions);
             assert_eq!(
                 migrated["public"]["serverInfo"]["latestMigrationRevision"],
-                json!(Version.migration_revision())
+                json!(Current::default().migration_revision())
             );
             assert_eq!(
                 migrated["public"]["serverInfo"]["postInitMigrationTodos"],
-                json!({ "0.4.1": null })
+                json!({ "0.4.1": null, "0.4.2": null })
             );
             Current::default().pre_init(&db).await.unwrap();
             assert_eq!(db.dump(&ROOT).await.value, migrated);
