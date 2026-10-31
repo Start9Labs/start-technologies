@@ -44,6 +44,14 @@ Przypisz niestandardową nazwę, aby łatwo zidentyfikować to urządzenie. Jeś
 
 Zarezerwuj adres IP, aby przypisać stały adres IPv4, który nie zmieni się między ponownymi uruchomieniami. Przydatne dla serwerów, drukarek, urządzeń NAS lub wszystkiego, do czego potrzebujesz dostępu pod spójnym adresem IP. Adresów IPv6 nie można rezerwować: każde urządzenie samo wybiera swój adres IPv6, więc router nie ma na to wpływu.
 
+### Uprawnienia
+
+**Zezwól na automatyczne przekierowanie portów**: Pozwala temu urządzeniu otwierać i odnawiać własne przekierowania portów przez UPnP/PCP (używane przez serwery StartOS, konsole do gier itp.). Domyślnie wyłączone; aktywne przekierowania pojawiają się na stronie Opublikowane porty.
+
+**Zezwól na publikowanie rekordów DNS**: Pozwala temu urządzeniu publikować w routerze nazwy DNS wskazujące na nie samo, dzięki czemu każde urządzenie w Twojej sieci może je rozwiązywać (używane przez serwery StartOS dla domen prywatnych). Domyślnie wyłączone; opublikowane nazwy pojawiają się pod ustawieniami.
+
+**Zezwalaj na ogłoszenia routera IPv6**: Pozwala temu urządzeniu ogłaszać trasy IPv6 innym Twoim urządzeniom (wymagane przez routery brzegowe Thread, takie jak Apple TV, HomePod lub Home Assistant). Domyślnie wyłączone.
+
 ### Zapomnij
 
 Usuwa urządzenie offline z listy urządzeń. Wszelkie niestandardowe nazwy lub ustawienia zarezerwowanego IP zostaną utracone. Jeśli urządzenie połączy się ponownie, pojawi się jako nowe urządzenie.`,
