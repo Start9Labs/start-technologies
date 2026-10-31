@@ -180,7 +180,7 @@ export default class SystemBackupComponent {
 
       this.dialog
         .openComponent(BACKUP, {
-          label: 'Select services',
+          label: 'Select backup items',
           data: target,
           size: 'm',
         })

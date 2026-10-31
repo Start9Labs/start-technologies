@@ -147,6 +147,22 @@ export type SetDataVersionParamsInput = z.input<
 export type SetMainStatusStatusInput = z.input<
   typeof schemas.SetMainStatusStatus
 >
+export type SharedVolumeAvailability = z.output<
+  typeof schemas.SharedVolumeAvailability
+>
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export type SharedVolumeId = z.output<typeof schemas.SharedVolumeId>
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export type SharedVolumeIdInput = z.input<typeof schemas.SharedVolumeId>
+export type SharedVolumeUnavailableReason = z.output<
+  typeof schemas.SharedVolumeUnavailableReason
+>
 export type SmtpSecurity = z.output<typeof schemas.SmtpSecurity>
 export type StartStop = z.output<typeof schemas.StartStop>
 export type TaskCondition = z.output<typeof schemas.TaskCondition>
@@ -255,6 +271,9 @@ export type GetServiceManifestParamsInput = z.input<
 export type GetServicePortForwardParamsInput = z.input<
   typeof schemas.GetServicePortForwardParams
 >
+export type GetSharedVolumesParamsInput = z.input<
+  typeof schemas.GetSharedVolumesParams
+>
 export type GetSslCertificateParamsInput = z.input<
   typeof schemas.GetSslCertificateParams
 >
@@ -263,6 +282,7 @@ export type GetStatusParamsInput = z.input<typeof schemas.GetStatusParams>
 export type GetSystemSmtpParamsInput = z.input<
   typeof schemas.GetSystemSmtpParams
 >
+export type GrantedSharedVolume = z.output<typeof schemas.GrantedSharedVolume>
 export type HardwareRequirements = z.output<typeof schemas.HardwareRequirements>
 export type HostnameMetadata = z.output<typeof schemas.HostnameMetadata>
 export type ImageSource = z.output<typeof schemas.ImageSource>
@@ -272,6 +292,9 @@ export type ListServiceInterfacesParamsInput = z.input<
   typeof schemas.ListServiceInterfacesParams
 >
 export type Metadata = z.output<typeof schemas.Metadata>
+export type MountSharedVolumeParamsInput = z.input<
+  typeof schemas.MountSharedVolumeParams
+>
 export type MountTargetInput = z.input<typeof schemas.MountTarget>
 export type PluginHostnameInfoInput = z.input<typeof schemas.PluginHostnameInfo>
 export type PortForward = z.output<typeof schemas.PortForward>
@@ -328,6 +351,9 @@ export type RetireBindingParamsInput = z.input<
 >
 export type RetireHostParamsInput = z.input<typeof schemas.RetireHostParams>
 export type SetMainStatusInput = z.input<typeof schemas.SetMainStatus>
+export type SharedVolumeMountResult = z.output<
+  typeof schemas.SharedVolumeMountResult
+>
 export type SmtpValue = z.output<typeof schemas.SmtpValue>
 export type TaskInput = z.output<typeof schemas.TaskInput>
 export type TaskInputInput = z.input<typeof schemas.TaskInput>

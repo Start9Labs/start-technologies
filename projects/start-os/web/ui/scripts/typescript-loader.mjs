@@ -43,13 +43,21 @@ export function loadTypeScript(boundaries) {
           source: boundaries.get(url.slice('test-boundary:'.length)),
           shortCircuit: true,
         }
+      if (url.endsWith('.md'))
+        return {
+          format: 'module',
+          source: `export default ${JSON.stringify(readFileSync(new URL(url), 'utf8'))}`,
+          shortCircuit: true,
+        }
       if (url.endsWith('.ts'))
         return {
           format: 'module',
-          source: ts.transpileModule(readFileSync(new URL(url), 'utf8'), {
-            compilerOptions,
-            fileName: fileURLToPath(url),
-          }).outputText,
+          source: `import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);\n${
+            ts.transpileModule(readFileSync(new URL(url), 'utf8'), {
+              compilerOptions,
+              fileName: fileURLToPath(url),
+            }).outputText
+          }`,
           shortCircuit: true,
         }
       return next(url, context)

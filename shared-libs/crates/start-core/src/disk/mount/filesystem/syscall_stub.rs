@@ -17,7 +17,34 @@ fn unsupported<T>() -> Result<T, Error> {
     ))
 }
 
+pub(crate) struct MountNamespace;
+
+impl MountNamespace {
+    pub(crate) fn for_process(_pid: u32) -> Result<Self, Error> {
+        unsupported()
+    }
+
+    pub(crate) fn run<T: Send>(
+        &self,
+        _operation: impl FnOnce() -> Result<T, Error> + Send,
+    ) -> Result<T, Error> {
+        unsupported()
+    }
+}
+
 pub fn open_tree_clone(_path: &Path, _recursive: bool) -> Result<OwnedFd, Error> {
+    unsupported()
+}
+
+pub fn unmount_fd(_mount: BorrowedFd) -> Result<(), Error> {
+    unsupported()
+}
+
+pub fn open_beneath(_base: &Path, _relative: &Path) -> Result<OwnedFd, Error> {
+    unsupported()
+}
+
+pub fn open_tree_clone_fd(_source: BorrowedFd) -> Result<OwnedFd, Error> {
     unsupported()
 }
 
@@ -38,6 +65,9 @@ impl DetachedMount {
         unsupported()
     }
     pub fn attach(self, _mountpoint: &Path) -> Result<(), Error> {
+        unsupported()
+    }
+    pub fn attach_to_fd(self, _target: BorrowedFd) -> Result<OwnedFd, Error> {
         unsupported()
     }
     pub fn attach_beneath(self, _mountpoint: &Path) -> Result<(), Error> {

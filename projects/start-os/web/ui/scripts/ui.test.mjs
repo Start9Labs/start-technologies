@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { generateKeyPairSync } from 'node:crypto'
+import { generateKeyPairSync, webcrypto } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { loadTypeScript } from './typescript-loader.mjs'
@@ -10,7 +10,7 @@ import {
   signal,
 } from '@angular/core'
 import { FormBuilder, NonNullableFormBuilder } from '@angular/forms'
-import { BehaviorSubject, EMPTY, firstValueFrom, of, Subject } from 'rxjs'
+import { BehaviorSubject, EMPTY, firstValueFrom, map, of, Subject } from 'rxjs'
 
 const boundaries = new Map()
 function boundary(specifier, names, extra = '') {
@@ -25,16 +25,18 @@ boundary(
     'TaskService',
     'DialogService',
     'DocsLinkDirective',
+    'ErrorService',
     'i18nPipe',
     'i18nService',
     'LocalizePipe',
+    'ConvertBytesPipe',
     'MarkdownPipe',
     'SafeLinksDirective',
-    'ErrorService',
+    'RPCErrorDetails',
     'Exver',
     'ExverComparesPipe',
   ],
-  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const sameUrl = (a, b) => a === b; export const registryUrl = value => value;',
+  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const pauseFor = async () => {}; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const sameUrl = (a, b) => a === b; export const registryUrl = value => value;',
 )
 boundary(
   '@taiga-ui/core',
@@ -51,6 +53,9 @@ boundary(
     'TuiIcon',
     'TuiInput',
     'TuiTitle',
+    'TuiGroup',
+    'TuiCheckbox',
+    'TuiHint',
   ],
   'export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => [];',
 )
@@ -60,13 +65,18 @@ boundary('@taiga-ui/kit', [
   'TuiButtonLoading',
   'TuiButtonSelect',
   'TuiDataListWrapper',
+  'TuiBlock',
+  'TuiAvatar',
+  'TuiRadioList',
+  'TuiPassword',
+  'TuiSegmented',
   'TuiSwitch',
   'TuiTextarea',
 ])
 boundary(
   '@taiga-ui/cdk',
-  ['TuiAnimated'],
-  'export const tuiMarkControlAsTouchedAndValidate = () => {}; export const tuiProvide = () => [];',
+  ['TuiAnimated', 'TuiMapperPipe', 'TuiAutoFocus'],
+  'export const tuiProvide = () => []; export const tuiMarkControlAsTouchedAndValidate = () => {};',
 )
 boundary('@taiga-ui/layout', ['TuiHeader', 'TuiForm'])
 boundary('@taiga-ui/addon-table', ['TuiTable', 'TuiTableDirective'])
@@ -78,9 +88,14 @@ boundary(
 )
 boundary('@taiga-ui/dompurify', ['NgDompurifyPipe'])
 boundary(
+  '@ng-web-apis/platform',
+  [],
+  'export const WA_IS_MOBILE = Symbol("mobile"); export const WA_IS_ANDROID = Symbol("android"); export const WA_IS_IOS = Symbol("ios"); export const WA_REDUCED_MOTION = Symbol("reduced-motion"); export const isApple = () => false; export const isEdge = () => false; export const isFirefox = () => false; export const isSafari = () => false;',
+)
+boundary(
   '@ng-web-apis/common',
   [],
-  'export const WA_WINDOW = Symbol("window");',
+  'export const WA_WINDOW = Symbol("window"); export const WA_CRYPTO = Symbol("crypto"); export const WA_SESSION_STORAGE = Symbol("sessionStorage");',
 )
 boundary(
   '@taiga-ui/polymorpheus',
@@ -93,6 +108,14 @@ export class PolymorpheusComponent { constructor(component) { this.component = c
 `,
 )
 boundary('src/app/services/api/embassy-api.service', ['ApiService'])
+boundary('./embassy-api.service', ['ApiService'])
+boundary('src/app/routes/portal/components/pkg-icon', ['PkgIconDirective'])
+boundary('src/app/routes/portal/components/table.component', ['TableComponent'])
+boundary(
+  'src/app/services/patch-db/patch-db-source',
+  [],
+  'export const PATCH_CACHE = Symbol("patch cache");',
+)
 boundary('src/app/services/config.service', ['ConfigService'])
 boundary('src/app/services/trusted-keys.service', ['TrustedKeysService'])
 boundary('src/app/services/package-icon.service', ['PackageIconService'])
@@ -114,7 +137,12 @@ for (const [file, name] of [
 }
 boundaries.set(
   '@start9labs/marketplace',
-  ['trust.ts', 'types.ts', 'services/abstract-marketplace.service.ts']
+  [
+    'trust.ts',
+    'types.ts',
+    'services/abstract-marketplace.service.ts',
+    'util/icon.ts',
+  ]
     .map(
       file =>
         `export * from ${JSON.stringify(new URL(`../../../../../shared-libs/ts-modules/marketplace/src/${file}`, import.meta.url).href)};`,
@@ -134,7 +162,7 @@ const { LocalizePipe: ProductionLocalizePipe } =
 const { I18N } =
   await import('../../../../../shared-libs/ts-modules/shared/src/i18n/i18n.providers.ts')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
-const { TaskService, DialogService, i18nPipe, i18nService } =
+const { TaskService, DialogService, ErrorService, i18nPipe, i18nService } =
   await import('@start9labs/shared')
 const { CONTEXT } = await import('@taiga-ui/polymorpheus')
 const { WA_WINDOW } = await import('@ng-web-apis/common')
@@ -1228,6 +1256,519 @@ test('device lookup and downloader failures stay in TaskService and leave the mo
   assert.deepEqual(await Promise.all(f.tasks), [false, false])
   assert.equal(f.submissions.length, 1)
   assert.equal(f.completed, 0)
+})
+
+const { BackupsBackupComponent } =
+  await import('src/app/routes/portal/routes/system/routes/backups/backup.component')
+const { BackupsRecoverComponent } =
+  await import('src/app/routes/portal/routes/system/routes/backups/recover.component')
+const { VolumeGrant } =
+  await import('src/app/routes/portal/routes/system/routes/volumes/grant')
+const { default: SystemVolumes } =
+  await import('src/app/routes/portal/routes/system/routes/volumes/index')
+const { getManifest, getCurrentManifest } =
+  await import('src/app/utils/get-package-data')
+const { Router } = await import('@angular/router')
+const volumeA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+const volumeB = 'BCDEFGHIJKLMNOPQRSTUVWXYZ234567A'
+
+function volumeFixture(t, packageData = {}) {
+  const source = new Subject()
+  const cache = new BehaviorSubject({
+    id: 1,
+    value: {
+      packageData,
+      sharedVolumes: {
+        [volumeA]: {
+          name: 'Photos',
+          source: { kind: 'local' },
+          grants: {},
+          availability: 'available',
+        },
+        [volumeB]: {
+          name: 'Music',
+          source: { kind: 'cifs', hostname: 'nas.invalid', path: '/music' },
+          grants: {},
+          availability: 'unavailable',
+        },
+      },
+    },
+  })
+  const patch = new PatchDB(source, cache)
+  patch.start()
+  const requests = [],
+    results = [],
+    errors = [],
+    routes = [],
+    grants = [],
+    taskCalls = []
+  let completed = 0
+  const api = {
+    rpc: {
+      backup: {
+        create: async params => {
+          requests.push({ kind: 'backup', params })
+        },
+        volume: {
+          restore: async (params, options) => {
+            requests.push({ kind: 'volume', params, options })
+            assert.ok(results.length)
+            const result = results.shift()
+            if (result instanceof Error) throw result
+            return result
+          },
+        },
+      },
+      package: {
+        backup: {
+          restore: async params => {
+            requests.push({ kind: 'package', params })
+          },
+        },
+      },
+      volumes: {
+        listRetained: async () => ({ [volumeA]: 'Retained Photos' }),
+        setGrant: async params => {
+          grants.push(params)
+        },
+      },
+    },
+  }
+  const injector = createEnvironmentInjector([
+    { provide: PatchDB, useValue: patch },
+    { provide: ApiService, useValue: api },
+    { provide: DialogService, useValue: {} },
+    {
+      provide: TaskService,
+      useValue: {
+        async run(fn, message) {
+          taskCalls.push(message)
+          try {
+            await fn()
+            return true
+          } catch (error) {
+            errors.push(error)
+            return false
+          }
+        },
+      },
+    },
+    {
+      provide: ErrorService,
+      useValue: { handleError: error => errors.push(error) },
+    },
+    { provide: ConfigService, useValue: { version: '0.4.1' } },
+    {
+      provide: Router,
+      useValue: {
+        async navigate(route) {
+          routes.push(route)
+        },
+      },
+    },
+    {
+      provide: CONTEXT,
+      useValue: {
+        $implicit: {
+          complete() {
+            completed++
+          },
+        },
+        data: {
+          id: 'target',
+          targetId: 'target',
+          serverId: 'server',
+          password: 'password',
+          backupInfo: {
+            packageBackups: {
+              service: {
+                title: 'Service',
+                version: '1.0.0',
+                osVersion: '0.4.0',
+                timestamp: '2026-01-01T00:00:00Z',
+              },
+            },
+            sharedVolumeBackups: {
+              [volumeA]: {
+                name: 'Photos',
+                timestamp: '2026-01-01T00:00:00Z',
+                generation: 'old-a',
+              },
+              [volumeB]: {
+                name: 'Music',
+                timestamp: '2026-01-01T00:00:00Z',
+                generation: 'old-b',
+              },
+            },
+          },
+        },
+      },
+    },
+  ])
+  t.after(() => {
+    injector.destroy()
+    patch.stop()
+  })
+  return {
+    api,
+    requests,
+    results,
+    errors,
+    routes,
+    grants,
+    taskCalls,
+    get completed() {
+      return completed
+    },
+    make: Class => runInInjectionContext(injector, () => new Class()),
+  }
+}
+
+test('retained-volume page loading never starts a global task', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(SystemVolumes)
+  await Promise.resolve()
+  assert.deepEqual(model.retained(), { [volumeA]: 'Retained Photos' })
+  assert.deepEqual(f.taskCalls, [])
+  assert.deepEqual(f.errors, [])
+})
+
+test('retained-volume page failures reach ErrorService without a global task', async t => {
+  const f = volumeFixture(t)
+  const error = { code: 0, message: 'unavailable' }
+  f.api.rpc.volumes.listRetained = async () => {
+    throw error
+  }
+  const model = f.make(SystemVolumes)
+  await Promise.resolve()
+  assert.deepEqual(model.retained(), {})
+  assert.deepEqual(f.errors, [error])
+  assert.deepEqual(f.taskCalls, [])
+})
+
+test('volume-only backup selection includes unavailable sources and sends an explicit empty service selection', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(BackupsBackupComponent)
+  assert.equal(model.hasSelection(), false)
+  model.toggleSelectAll()
+  assert.equal(model.hasSelection(), true)
+  assert.equal(model.items().find(item => item.id === volumeB).disabled, false)
+  await model.createBackup('password')
+  assert.deepEqual(f.requests[0].params.packageIds, [])
+  assert.deepEqual(
+    new Set(f.requests[0].params.sharedVolumeIds),
+    new Set([volumeA, volumeB]),
+  )
+  assert.equal(f.completed, 1)
+  model.toggleSelectAll()
+  assert.equal(model.hasSelection(), false)
+})
+
+test('backup toggle-all omits installing services without omitting volumes', t => {
+  const f = volumeFixture(t, {
+    installed: {
+      stateInfo: {
+        state: 'installed',
+        manifest: { id: 'installed', title: 'Installed' },
+      },
+    },
+    installing: {
+      stateInfo: {
+        state: 'installing',
+        installingInfo: {
+          newManifest: { id: 'installing', title: 'Installing' },
+        },
+      },
+    },
+  })
+  const model = f.make(BackupsBackupComponent)
+  model.toggleSelectAll()
+  assert.deepEqual(
+    new Set(
+      model
+        .items()
+        .filter(item => item.checked)
+        .map(item => item.id),
+    ),
+    new Set(['installed', volumeA, volumeB]),
+  )
+})
+
+test('partial restore retry excludes submitted services and successful new volumes', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(BackupsRecoverComponent)
+  model.selected.set(new Set(model.options()))
+  f.results.push({
+    restored: { [volumeA]: 'new-a' },
+    errors: { [volumeB]: 'offline backup target' },
+  })
+  await model.restore()
+  assert.deepEqual(
+    [...model.selected()].map(item => item.id),
+    [volumeB],
+  )
+  assert.match(String(f.errors[0]), /Music: offline backup target/)
+  assert.equal(
+    model.options().find(option => option.kind === 'package').installed,
+    true,
+  )
+  assert.equal(
+    model.toMessage(model.options().find(option => option.kind === 'package'))
+      .text,
+    'Unavailable. Service is already installed.',
+  )
+  assert.ok(
+    model.selected().has(model.options().find(option => option.id === volumeB)),
+  )
+  assert.equal(f.completed, 0)
+  f.results.push({ restored: { [volumeB]: 'new-b' }, errors: {} })
+  await model.restore()
+  assert.deepEqual(
+    f.requests.map(request => [request.kind, request.params.ids]),
+    [
+      ['package', ['service']],
+      ['volume', [volumeB, volumeA]],
+      ['volume', [volumeB]],
+    ],
+  )
+  assert.deepEqual(f.requests[1].options, {
+    timeout: 0,
+    headers: { 'ngsw-bypass': 'true' },
+  })
+  assert.equal(model.selected().size, 0)
+  assert.equal(f.completed, 1)
+  assert.deepEqual(f.routes, [['/system/volumes']])
+})
+
+test('multiple volume restore errors have HTML line breaks', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(BackupsRecoverComponent)
+  model.selected.set(
+    new Set(model.options().filter(option => option.kind === 'volume')),
+  )
+  f.results.push({
+    restored: {},
+    errors: { [volumeA]: 'first failure', [volumeB]: 'second failure' },
+  })
+  await model.restore()
+  assert.equal(f.errors[0], 'Music: second failure<br />Photos: first failure')
+  assert.equal(model.selected().size, 2)
+})
+
+test('restore transport failure retains volume selection and keeps the dialog open', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(BackupsRecoverComponent)
+  const selected = model.options().filter(option => option.kind === 'volume')
+  model.selected.set(new Set(selected))
+  f.results.push(new Error('connection lost'))
+  await model.restore()
+  assert.deepEqual([...model.selected()], selected)
+  assert.equal(f.completed, 0)
+  assert.deepEqual(f.routes, [])
+})
+
+test('failed service restore does not submit volumes or discard either selection', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(BackupsRecoverComponent)
+  model.selected.set(new Set(model.options()))
+  f.api.rpc.package.backup.restore = async () => {
+    throw new Error('authorization expired')
+  }
+  await model.restore()
+  assert.equal(model.selected().size, 3)
+  assert.deepEqual(f.requests, [])
+  assert.equal(f.completed, 0)
+})
+
+test('grant choices map to the backend contract and pending resets after saving', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(VolumeGrant)
+  model.volumeId = () => volumeA
+  model.packageId = () => 'service'
+  for (const [choice, expected, index] of [
+    ['Off', null, 0],
+    ['Read', { readonly: true }, 1],
+    ['Read/write', { readonly: false }, 2],
+  ]) {
+    await model.save(choice)
+    assert.deepEqual(f.grants.at(-1), {
+      id: volumeA,
+      packageId: 'service',
+      grant: expected,
+    })
+    assert.equal(model.pending(), false)
+    assert.equal(model.activeIndex(), index)
+  }
+})
+
+test('failed optimistic grant uses the latest observed grant rather than a stale rollback value', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(VolumeGrant)
+  model.volumeId = () => volumeA
+  model.packageId = () => 'service'
+  model.grant = signal({ readonly: true })
+  const pending = deferred()
+  f.api.rpc.volumes.setGrant = async () => {
+    await pending.promise
+    throw new Error('denied')
+  }
+  assert.equal(model.value(), 'Read')
+  const saved = model.save('Off')
+  assert.equal(model.pending(), true)
+  model.grant.set({ readonly: false })
+  pending.resolve()
+  await saved
+  assert.equal(model.value(), 'Read/write')
+  assert.equal(model.activeIndex(), 2)
+  assert.equal(model.pending(), false)
+})
+
+test('grant optimistic state resets when a reused row changes consumer or volume before the server patch arrives', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(VolumeGrant)
+  model.volumeId = signal(volumeA)
+  model.packageId = signal('service')
+  model.grant = signal(undefined)
+  await model.save('Read/write')
+  assert.equal(model.value(), 'Read/write')
+  model.packageId.set('another-service')
+  assert.equal(model.value(), 'Off')
+  await model.save('Read')
+  model.volumeId.set(volumeB)
+  assert.equal(model.value(), 'Off')
+})
+
+test('grant capability reads the installed manifest throughout updates without changing candidate projections', () => {
+  const installed = { sharedVolumes: true }
+  const candidate = { sharedVolumes: false }
+  const pkg = {
+    stateInfo: {
+      state: 'updating',
+      manifest: installed,
+      installingInfo: { newManifest: candidate },
+    },
+  }
+  assert.equal(getCurrentManifest(pkg), installed)
+  assert.equal(getManifest(pkg), candidate)
+  pkg.stateInfo = { state: 'installed', manifest: candidate }
+  assert.equal(getCurrentManifest(pkg), candidate)
+  pkg.stateInfo = {
+    state: 'installing',
+    installingInfo: { newManifest: installed },
+  }
+  assert.equal(getCurrentManifest(pkg), installed)
+})
+
+test('production mocks support inspection, independent failed backups and new-local restore without public credentials', async t => {
+  const { MockApiService } =
+    await import('src/app/services/api/embassy-mock-api.service')
+  const { Mock } = await import('src/app/services/api/api.fixures')
+  const { mockPatchData } = await import('src/app/services/api/mock-patch')
+  const { WA_CRYPTO, WA_SESSION_STORAGE } = await import('@ng-web-apis/common')
+  const { PATCH_CACHE } =
+    await import('src/app/services/patch-db/patch-db-source')
+  const originalInfo = structuredClone(Mock.BackupInfo)
+  const originalNotifications = [...Mock.Notifications]
+  t.after(() => {
+    Object.assign(Mock.BackupInfo, originalInfo)
+    Mock.Notifications.splice(0, Infinity, ...originalNotifications)
+  })
+  const cache = new BehaviorSubject({
+    id: 1,
+    value: structuredClone(mockPatchData),
+  })
+  const injector = createEnvironmentInjector([
+    { provide: WA_CRYPTO, useValue: webcrypto },
+    { provide: WA_SESSION_STORAGE, useValue: {} },
+    { provide: PATCH_CACHE, useValue: cache },
+  ])
+  const api = runInInjectionContext(injector, () => new MockApiService())
+  const patch = new PatchDB(
+    api.mockWsSource$.pipe(map(revision => [revision])),
+    cache,
+  )
+  patch.start()
+  t.after(() => {
+    patch.stop()
+    injector.destroy()
+  })
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const local = await api.rpc.volumes.create({
+    name: 'Photos',
+    source: { kind: 'local' },
+  })
+  const remote = await api.rpc.volumes.create({
+    name: 'Remote',
+    source: {
+      kind: 'cifs',
+      hostname: 'nas.invalid',
+      path: '/share',
+      username: 'private-user',
+      password: 'private-password',
+    },
+  })
+  assert.match(local, /^[A-Z2-7]{32}$/)
+  assert.match(remote, /^[A-Z2-7]{32}$/)
+  assert.equal(cache.value.value.sharedVolumes[remote].availability, 'unknown')
+  assert.doesNotMatch(
+    JSON.stringify(cache.value.value.sharedVolumes),
+    /private-user|private-password/,
+  )
+  assert.equal(
+    (await api.rpc.volumes.inspect({ id: remote })).availability,
+    'unavailable',
+  )
+  await api.rpc.volumes.rename({ id: local, name: 'Renamed photos' })
+  Mock.BackupInfo.sharedVolumeBackups[remote] = {
+    name: 'Previous remote copy',
+    timestamp: '2026-01-01T00:00:00Z',
+    generation: 'previous',
+  }
+  await api.rpc.backup.create({
+    targetId: 'csgashbdjkasnd',
+    packageIds: [],
+    sharedVolumeIds: [local, remote],
+    password: 'password',
+    oldPassword: null,
+  })
+  t.mock.timers.tick(500)
+  await tick()
+  assert.equal(
+    Mock.BackupInfo.sharedVolumeBackups[local].name,
+    'Renamed photos',
+  )
+  assert.match(
+    Mock.BackupInfo.sharedVolumeBackups[local].generation,
+    /^[A-Z2-7]{32}$/,
+  )
+  assert.equal(
+    Mock.BackupInfo.sharedVolumeBackups[remote].generation,
+    'previous',
+  )
+  const report = Mock.Notifications[0].data
+  assert.equal(report.sharedVolumes[local].error, null)
+  assert.ok(report.sharedVolumes[remote].error)
+  assert.deepEqual(report.packages, {})
+  const restored = await api.rpc.backup.volume.restore({
+    targetId: 'csgashbdjkasnd',
+    serverId: '1234-5678-9876-5432',
+    password: 'password',
+    ids: [local],
+  })
+  assert.notEqual(restored.restored[local], local)
+  assert.match(restored.restored[local], /^[A-Z2-7]{32}$/)
+  assert.deepEqual(cache.value.value.sharedVolumes[restored.restored[local]], {
+    name: 'Renamed photos',
+    source: { kind: 'local' },
+    grants: {},
+    availability: 'available',
+  })
+  await api.rpc.volumes.remove({ id: local })
+  assert.deepEqual(await api.rpc.volumes.listRetained({}), {
+    [local]: 'Renamed photos',
+  })
+  await api.rpc.volumes.deleteData({ id: local })
+  assert.deepEqual(await api.rpc.volumes.listRetained({}), {})
 })
 
 test('a candidate disappearing during the asynchronous UI registry lookup prevents submission', async t => {

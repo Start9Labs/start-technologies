@@ -32,6 +32,12 @@ export default [
         loadComponent: () => import('./routes/smtp/smtp.component'),
       },
       {
+        path: 'volumes',
+        title: titleResolver,
+        data: { title: 'Volumes' },
+        loadComponent: () => import('./routes/volumes'),
+      },
+      {
         path: 'backup',
         title: titleResolver,
         loadComponent: () => import('./routes/backups/backups.component'),

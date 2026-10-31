@@ -101,6 +101,15 @@ export type Effects = {
     callback?: () => void
   }): Promise<Manifest | null>
 
+  /** User-granted shared volumes. Changes invalidate the subscription without a payload. */
+  getSharedVolumes(options: {
+    callback?: () => void
+  }): Promise<RPC.RpcReturnType<RPC.Effects, 'get-shared-volumes'>>
+  /** Mount a granted shared volume. Authorization and invalid-path failures reject. */
+  mountSharedVolume(
+    options: RPC.RpcParamType<RPC.Effects, 'mount-shared-volume'>,
+  ): Promise<RPC.RpcReturnType<RPC.Effects, 'mount-shared-volume'>>
+
   // backup
   /**
    * Low-level backup-progress report. **Prefer `FullProgressTracker`** — the

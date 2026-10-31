@@ -369,7 +369,7 @@ images: {
 
 ## Volumes
 
-Storage volumes for persistent data. When possible, prefer matching the upstream project's volume naming convention for clarity:
+Package-owned storage for persistent data. When possible, prefer matching the upstream project's volume naming convention for clarity:
 
 ```typescript
 // If upstream docker-compose uses a volume named "mcaptcha-data"
@@ -386,6 +386,8 @@ volumes: ['main', 'db', 'config'],
 ```
 
 Reference these in `main.ts` mounts by the volume ID you chose.
+
+To support user-managed local folders and network shares, declare `sharedVolumes: true` separately. This enables user-selected grants rather than adding sources to package-owned `volumes`. See [Volumes](shared-volumes.md) for optional mounting, reactive grants and backup ownership.
 
 ## Dependencies
 

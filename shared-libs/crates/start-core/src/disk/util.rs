@@ -96,6 +96,14 @@ pub struct BackupUnencryptedMetadata {
     pub password_hash: Option<String>,
     pub wrapped_key: Option<String>,
 }
+impl BackupUnencryptedMetadata {
+    pub fn path(root: &Path, server_id: &str) -> PathBuf {
+        root.join(super::BACKUP_DIR_NAME)
+            .join(server_id)
+            .join("unencrypted-metadata.json")
+    }
+}
+
 impl From<BackupUnencryptedMetadata> for StartOsRecoveryInfo {
     fn from(meta: BackupUnencryptedMetadata) -> Self {
         Self {
@@ -358,9 +366,8 @@ pub async fn recovery_info(
         let mut dir = tokio::fs::read_dir(&backup_root).await?;
         while let Some(entry) = dir.next_entry().await? {
             let server_id = entry.file_name().to_string_lossy().into_owned();
-            let backup_unencrypted_metadata_path = backup_root
-                .join(&server_id)
-                .join("unencrypted-metadata.json");
+            let backup_unencrypted_metadata_path =
+                BackupUnencryptedMetadata::path(mountpoint.as_ref(), &server_id);
             if tokio::fs::metadata(&backup_unencrypted_metadata_path)
                 .await
                 .is_ok()

@@ -11,12 +11,18 @@ export type BackupContext = TuiDialogContext<
   MappedBackupTarget<CifsBackupTarget | DiskBackupTarget>
 >
 
-export interface RecoverOption extends T.PackageBackupInfo {
-  id: string
-  checked: boolean
-  installed: boolean
-  newerOs: boolean
-}
+export type RecoverOption =
+  | (T.PackageBackupInfo & {
+      kind: 'package'
+      id: string
+      installed: boolean
+      newerOs: boolean
+    })
+  | (Pick<T.SharedVolumeBackupInfo, 'timestamp'> & {
+      kind: 'volume'
+      id: string
+      title: string
+    })
 
 export interface RecoverData {
   targetId: string

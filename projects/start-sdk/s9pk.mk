@@ -19,7 +19,7 @@ else
 BASE_NAME := $(PACKAGE_ID)
 endif
 
-.PHONY: all arches aarch64 x86_64 riscv64 arm arm64 x86 riscv arch/* clean install check-deps check-init package ingredients format
+.PHONY: all arches aarch64 x86_64 riscv64 arm arm64 x86 riscv arch/* clean install check-deps check-cli check-init package ingredients format
 .DELETE_ON_ERROR:
 .SECONDARY:
 
@@ -68,12 +68,12 @@ x86 x86_64: arch/x86_64
 arm arm64 aarch64: arch/aarch64
 riscv riscv64: arch/riscv64
 
-$(BASE_NAME).s9pk: $(INGREDIENTS) $(GIT_DEPS) | check-deps
+$(BASE_NAME).s9pk: $(INGREDIENTS) $(GIT_DEPS) | check-deps check-cli
 	@$(MAKE) --no-print-directory ingredients
 	@echo "   Packing '$@'..."
 	start-cli s9pk pack -o $@
 
-$(BASE_NAME)_%.s9pk: $(INGREDIENTS) $(GIT_DEPS) | check-deps
+$(BASE_NAME)_%.s9pk: $(INGREDIENTS) $(GIT_DEPS) | check-deps check-cli
 	@$(MAKE) --no-print-directory ingredients
 	@echo "   Packing '$@'..."
 	start-cli s9pk pack --arch=$* -o $@
@@ -112,6 +112,9 @@ check-deps:
 		(echo "Error: git not found. Install git. See https://docs.start9.com/packaging/environment-setup.html" && exit 1)
 	@command -v jq >/dev/null || \
 		(echo "Error: jq not found. Install jq. See https://docs.start9.com/packaging/environment-setup.html" && exit 1)
+
+check-cli: javascript/index.js | check-deps
+	node $(SDK_DIR)/check-cli.mjs
 
 check-init:
 	@start-cli init-key

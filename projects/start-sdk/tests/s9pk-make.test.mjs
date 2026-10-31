@@ -7,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs'
@@ -33,12 +34,17 @@ function fixture(t) {
   writeFileSync(join(root, 'tsconfig.json'), '{}')
   writeFileSync(join(root, 'package.json'), '{}')
   writeFileSync(join(root, 'package-lock.json'), '{}')
-  mkdirSync(join(root, 'node_modules'))
+  const sdk = join(root, 'node_modules/@start9labs/start-sdk')
+  mkdirSync(sdk, { recursive: true })
+  symlinkSync(
+    join(dirname(source), 'check-cli.mjs'),
+    join(sdk, 'check-cli.mjs'),
+  )
   writeFileSync(
     join(root, 'Makefile'),
     `TS_CHECK := echo typecheck >> steps
 FORMAT := echo format >> steps
-JS_BUNDLE := mkdir -p javascript && cp startos/index.ts javascript/index.js && echo bundle >> steps
+JS_BUNDLE := mkdir -p javascript && node -e 'const fs = require("node:fs"); fs.writeFileSync("javascript/index.js", "module.exports=" + JSON.stringify({manifest: {sharedVolumes: false}, source: fs.readFileSync("startos/index.ts", "utf8")}))' && echo bundle >> steps
 include ${source}
 `,
   )
@@ -62,7 +68,7 @@ if (args.join(' ') === 's9pk list-ingredients') {
     fs.writeFileSync(output, JSON.stringify({
       arch: args.find(arg => arg.startsWith('--arch='))?.slice(7),
       variant: process.env.VARIANT || '',
-      bundle: fs.readFileSync('javascript/index.js', 'utf8'),
+      bundle: require(require('node:path').resolve('javascript/index.js')).source,
     }))
   }
 } else if (args[0] === 'package' && args[1] === 'install' && args[2] === '-s') {
@@ -98,6 +104,28 @@ if (args.join(' ') === 's9pk list-ingredients') {
     },
   }
 }
+
+test('parallel capability checks wait for dependency checks and do not run after dependency failure', t => {
+  const f = fixture(t)
+  writeFileSync(
+    join(f.root, 'Makefile'),
+    readFileSync(join(f.root, 'Makefile'), 'utf8') +
+      '\ncheck-deps:\n\t@sleep 0.1; echo "dependency check failed"; exit 1\n',
+  )
+  mkdirSync(join(f.root, 'javascript'))
+  writeFileSync(
+    join(f.root, 'javascript/index.js'),
+    'module.exports={manifest:{sharedVolumes:true}}',
+  )
+  const result = f.make({}, ['-j8', 'check-cli'])
+  assert.notEqual(result.status, 0)
+  assert.match(
+    result.stdout,
+    /dependency check failed/,
+    result.stdout + result.stderr,
+  )
+  assert.ok(!f.calls().some(args => args[0] === '--version'))
+})
 
 function succeeds(result) {
   assert.equal(result.status, 0, result.stdout + result.stderr)
