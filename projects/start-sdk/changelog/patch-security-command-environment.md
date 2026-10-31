@@ -1,5 +1,5 @@
 ---
-user-facing: true
+release-notes: true
 ---
 
 - Keep daemon and subcontainer command environment values out of process command lines, splitting large environments into bounded chunks.
