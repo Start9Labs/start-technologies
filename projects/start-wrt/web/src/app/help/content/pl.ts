@@ -453,22 +453,22 @@ Czas rozpoczęcia i zakończenia okresu wyłączenia. WiFi będzie wyłączone m
 Wybierz, w które dni tygodnia okno wyłączenia ma być aktywne.`,
   '/wifi/passwords': `## Wi-Fi – Hasła
 
-Zarządzaj hasłami sieci bezprzewodowych. Każdy wpis reprezentuje sieć Wi-Fi z własnym hasłem i profilem bezpieczeństwa kontrolującym uprawnienia dostępu.
+Zarządzaj hasłami sieci bezprzewodowej. Każde hasło łączy z tą samą siecią Wi-Fi, której nazwę ustawia się w Wi-Fi › Ustawienia. Hasło, którym łączy się urządzenie, decyduje o jego profilu bezpieczeństwa.
 
 ### Profil bezpieczeństwa
 
 Kontroluje, do czego podłączone urządzenie może mieć dostęp w sieci. Przypisz profil bezpieczeństwa, aby ograniczyć lub przyznać dostęp do określonych zasobów.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Hasła
 
-Każdy wpis reprezentuje sieć Wi-Fi z własnym hasłem i profilem bezpieczeństwa kontrolującym uprawnienia dostępu.
+Każde hasło łączy z tą samą siecią Wi-Fi, której nazwę ustawia się w Wi-Fi › Ustawienia. Hasło, którym łączy się urządzenie, decyduje o jego profilu bezpieczeństwa.
 
 ### Etykieta
 
-Opisowa nazwa tej sieci Wi-Fi, taka jak „Dom” lub „Sieć dla gości”. Jest to nazwa sieci (SSID), którą zobaczą urządzenia.
+Opisowa nazwa tego hasła, taka jak „Dom” lub „Sieć dla gości”. Pojawia się tylko w tym interfejsie; urządzenia nigdy jej nie widzą.
 
 ### Hasło
 
-Hasło, którego urządzenia będą używać do łączenia się. Musi mieć co najmniej 8 znaków. Użyj przycisku generowania, aby utworzyć silne losowe hasło.
+Hasło, którego urządzenia będą używać do łączenia się. Musi mieć co najmniej 8 znaków. Użyj przycisku generowania, aby utworzyć silne losowe hasło. Zmiana hasła może na krótko rozłączyć wszystkie urządzenia Wi-Fi. Urządzenia używające starego hasła muszą połączyć się ponownie przy użyciu nowego.
 
 ### Profil bezpieczeństwa
 

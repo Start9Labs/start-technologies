@@ -453,22 +453,22 @@ Las horas de inicio y fin del periodo de apagado. El WiFi se deshabilitará entr
 Selecciona qué días de la semana debe estar activo el apagado.`,
   '/wifi/passwords': `## Wi-Fi – Contraseñas
 
-Gestiona las contraseñas de las redes inalámbricas. Cada entrada representa una red Wi-Fi con su propia contraseña y perfil de seguridad que controla los permisos de acceso.
+Gestiona las contraseñas de la red inalámbrica. Todas las contraseñas conectan a la misma red Wi-Fi, cuyo nombre se define en Wi-Fi › Ajustes. La contraseña con la que se conecta un dispositivo decide su perfil de seguridad.
 
 ### Perfil de seguridad
 
 Controla a qué puede acceder el dispositivo conectado en la red. Asigna un perfil de seguridad para limitar o conceder acceso a recursos específicos.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Contraseñas
 
-Cada entrada representa una red Wi-Fi con su propia contraseña y perfil de seguridad que controla los permisos de acceso.
+Todas las contraseñas conectan a la misma red Wi-Fi, cuyo nombre se define en Wi-Fi › Ajustes. La contraseña con la que se conecta un dispositivo decide su perfil de seguridad.
 
 ### Etiqueta
 
-Un nombre descriptivo para esta red Wi-Fi, como «Casa» o «Red de invitados». Es el nombre de red (SSID) que verán los dispositivos.
+Un nombre descriptivo para esta contraseña, como «Casa» o «Red de invitados». Solo aparece en esta interfaz; los dispositivos nunca lo ven.
 
 ### Contraseña
 
-La contraseña que usarán los dispositivos para conectarse. Debe tener al menos 8 caracteres. Usa el botón de generar para crear una contraseña aleatoria fuerte.
+La contraseña que usarán los dispositivos para conectarse. Debe tener al menos 8 caracteres. Usa el botón de generar para crear una contraseña aleatoria fuerte. Cambiar una contraseña puede desconectar brevemente todos los dispositivos Wi-Fi. Los dispositivos que usan la contraseña anterior deben volver a conectarse con la nueva.
 
 ### Perfil de seguridad
 

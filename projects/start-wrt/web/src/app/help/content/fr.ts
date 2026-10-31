@@ -453,22 +453,22 @@ Les heures de début et de fin de la période d’extinction. Le Wi-Fi sera dés
 Sélectionnez les jours de la semaine où la plage d’extinction doit être active.`,
   '/wifi/passwords': `## Wi-Fi – Mots de passe
 
-Gérez les mots de passe des réseaux sans fil. Chaque entrée représente un réseau Wi-Fi avec son propre mot de passe et son profil de sécurité contrôlant les autorisations d’accès.
+Gérez les mots de passe du réseau sans fil. Tous les mots de passe rejoignent le même réseau Wi-Fi, dont le nom se définit dans Wi-Fi › Paramètres. Le mot de passe avec lequel un appareil se connecte détermine son profil de sécurité.
 
 ### Profil de sécurité
 
 Contrôle ce à quoi l’appareil connecté peut accéder sur le réseau. Attribuez un profil de sécurité pour limiter ou accorder l’accès à des ressources spécifiques.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Mots de passe
 
-Chaque entrée représente un réseau Wi-Fi avec son propre mot de passe et son profil de sécurité contrôlant les autorisations d’accès.
+Tous les mots de passe rejoignent le même réseau Wi-Fi, dont le nom se définit dans Wi-Fi › Paramètres. Le mot de passe avec lequel un appareil se connecte détermine son profil de sécurité.
 
 ### Étiquette
 
-Un nom descriptif pour ce réseau Wi-Fi, tel que « Maison » ou « Réseau invité ». C’est le nom du réseau (SSID) que les appareils verront.
+Un nom descriptif pour ce mot de passe, tel que « Maison » ou « Réseau invité ». Il n’apparaît que dans cette interface ; les appareils ne le voient jamais.
 
 ### Mot de passe
 
-Le mot de passe que les appareils utiliseront pour se connecter. Doit comporter au moins 8 caractères. Utilisez le bouton de génération pour créer un mot de passe aléatoire fort.
+Le mot de passe que les appareils utiliseront pour se connecter. Doit comporter au moins 8 caractères. Utilisez le bouton de génération pour créer un mot de passe aléatoire fort. Modifier un mot de passe peut déconnecter brièvement tous les appareils Wi-Fi. Les appareils qui utilisent l’ancien mot de passe doivent se reconnecter avec le nouveau.
 
 ### Profil de sécurité
 
