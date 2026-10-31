@@ -41,7 +41,7 @@ A good `instructions.md` covers, roughly in this order:
 
 The `## Documentation` bullets have a second reader: Start9's support indexer parses them and crawls each URL into the package's upstream-documentation index, and it looks nowhere else. What you list decides what a support agent can answer about the service — and a URL that classifies badly costs a wasted crawl on every indexing run, silently.
 
-**The bullet must parse.** Exactly `- [Title](URL)`, optionally followed by ` — a few words` (em-dash, en-dash, or hyphen), and nothing else on the line. A bullet that opens with prose and puts the link mid-sentence is skipped. The heading is matched as `Documentation` at any depth, and the section ends at the next heading of equal or shallower depth. A package with no parseable bullet gets **no** upstream docs and no instructions indexed at all.
+**The bullet must parse.** Exactly `- [Title](URL)`, optionally followed by `([label](source URL))`, then optionally ` — a few words` (em-dash, en-dash, or hyphen), and nothing else on the line. The source link is what is indexed in place of `URL`: give one when the page people should open can't be indexed well — a site with no `llms-full.txt` — and its Markdown source can, so the bullet serves both readers. A bullet that opens with prose and puts the link mid-sentence is skipped. The heading is matched as `Documentation` at any depth, and the section ends at the next heading of equal or shallower depth. A package with no parseable bullet gets **no** upstream docs and no instructions indexed at all.
 
 **How a URL is treated:**
 
