@@ -32,7 +32,7 @@ Build and run from the monorepo root:
 cargo build -p start-registry --bin registrybox
 
 # run the server (defaults: listen 127.0.0.1:5959, datadir /var/lib/startos)
-./target/debug/registrybox start-registryd --listen 0.0.0.0:5959 --datadir ./registry-data
+./target/debug/registrybox start-registryd --listen 0.0.0.0:5959 --hostname localhost --datadir ./registry-data
 
 # talk to it with the CLI
 ./target/debug/registrybox start-registry --help
@@ -40,14 +40,14 @@ cargo build -p start-registry --bin registrybox
 
 Configuration is read from CLI flags and a config file (`-c <path>`; default search includes the standard StartOS config path). Key flags:
 
-| Flag                       | Purpose                                         |
-| -------------------------- | ----------------------------------------------- |
-| `-l, --listen <addr>`      | listen address (default `127.0.0.1:5959`)       |
-| `-H, --hostname <host>`    | public hostname(s) used in generated asset URLs |
-| `-p, --tor-proxy <url>`    | SOCKS proxy for outbound (e.g. Tor) requests    |
-| `-d, --datadir <path>`     | data directory (default `/var/lib/startos`)     |
-| `-c, --config <path>`      | config file                                     |
-| `--security-notifications` | enable the OS security feed (default: false)    |
+| Flag                       | Purpose                                                  |
+| -------------------------- | -------------------------------------------------------- |
+| `-l, --listen <addr>`      | listen address (default `127.0.0.1:5959`)                |
+| `-H, --hostname <host>`    | required public hostname(s) used in generated asset URLs |
+| `-p, --tor-proxy <url>`    | SOCKS proxy for outbound (e.g. Tor) requests             |
+| `-d, --datadir <path>`     | data directory (default `/var/lib/startos`)              |
+| `-c, --config <path>`      | config file                                              |
+| `--security-notifications` | enable the OS security feed (default: false)             |
 
 Security notifications are disabled by default. To opt in, set this in that registry's config file and restart the daemon:
 

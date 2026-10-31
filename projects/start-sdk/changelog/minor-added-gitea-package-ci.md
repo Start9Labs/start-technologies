@@ -1,0 +1,5 @@
+---
+user-facing: true
+---
+
+- Gitea users can opt into self-contained package workflows supplied with the packaging guide, including builds, releases, registry publishing, and automatic `next` branch synchronization.

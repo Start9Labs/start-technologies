@@ -1,0 +1,1 @@
+- Les workflows de publication des paquets avertissent et continuent après l’échec d’une requête au registre au lieu de quitter avant la tentative de publication ; les échecs de requête au registre de référence affichent leur erreur avant l’arrêt.
