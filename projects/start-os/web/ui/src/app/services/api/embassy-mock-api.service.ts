@@ -13,6 +13,7 @@ import {
   SetLanguageParams,
 } from '@start9labs/shared'
 import {
+  auth,
   createRpcClient,
   RpcHandlers,
   T,
@@ -51,6 +52,7 @@ import {
 } from 'src/app/services/patch-db/data-model'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { toAuthorityUrl } from 'src/app/utils/acme'
+import { parsePemPublicKey, parsePublicKeys } from 'src/app/utils/public-keys'
 import { Mock } from './api.fixures'
 import { BTC_ICON, LND_ICON, PROXY_ICON } from './api-icons'
 import {
@@ -129,8 +131,14 @@ export class MockApiService extends ApiService {
   private readonly storage = inject(WA_SESSION_STORAGE)
   private readonly cache = inject(PATCH_CACHE)
   private readonly revertTime = 1800
+  private readonly conversionJobs: T.ServerStatus['backupConversions'] = {}
+  private readonly pushSubscriptions = new Map<
+    string,
+    Params<'notification.push.subscribe'>
+  >()
   sequence = 1
   private readonly handlers: RpcHandlers<Api> = {
+    'git-info': async () => 'mock-os-build',
     state: async () => {
       await pauseFor(1000)
 
@@ -282,6 +290,54 @@ export class MockApiService extends ApiService {
       },
       hardware: null,
     }),
+    'server.trusted-keys.add': async ({ name, publicKeys, context }) => {
+      const id = crypto.randomUUID()
+      const value: T.TrustedKeyring = {
+        name,
+        gpgExports: [],
+        publicKeys: parsePublicKeys(publicKeys.join('\n')).map(key =>
+          auth.normalizeDer64(parsePemPublicKey(key)),
+        ),
+        removable: true,
+        marketplace: true,
+        os: context === 'os',
+      }
+      mockPatchData.serverInfo.trustedKeys[id] = value
+      await this.mockRevision([
+        {
+          op: PatchOp.ADD,
+          path: pathFromArray(['serverInfo', 'trustedKeys', id]),
+          value,
+        },
+      ])
+      return null
+    },
+    'server.trusted-keys.update': async ({ id, name, marketplace, os }) => {
+      const keyring = mockPatchData.serverInfo.trustedKeys[id]
+      if (!keyring) throw new Error('Keyring not found')
+      const value = { ...keyring, name, marketplace, os }
+      mockPatchData.serverInfo.trustedKeys[id] = value
+      await this.mockRevision([
+        {
+          op: PatchOp.REPLACE,
+          path: pathFromArray(['serverInfo', 'trustedKeys', id]),
+          value,
+        },
+      ])
+      return null
+    },
+    'server.trusted-keys.remove': async ({ id }) => {
+      if (!mockPatchData.serverInfo.trustedKeys[id]?.removable)
+        throw new Error('Protected key')
+      delete mockPatchData.serverInfo.trustedKeys[id]
+      await this.mockRevision([
+        {
+          op: PatchOp.REMOVE,
+          path: pathFromArray(['serverInfo', 'trustedKeys', id]),
+        },
+      ])
+      return null
+    },
     'server.update': async params => {
       await pauseFor(2000)
       const initialProgress = {
@@ -360,6 +416,14 @@ export class MockApiService extends ApiService {
     'disk.repair': async params => {
       await pauseFor(2000)
       return null
+    },
+    'disk.list': async () => {
+      await pauseFor(1000)
+      return Mock.Disks
+    },
+    'disk.format': async ({ disk }) => {
+      await pauseFor(3000)
+      return `${disk}1`
     },
     'server.set-hostname': async params => {
       await pauseFor(1000)
@@ -483,6 +547,18 @@ export class MockApiService extends ApiService {
       await pauseFor(2000)
       return Mock.RegistryInfo
     },
+    'notification.push.key': async () =>
+      'BMPJ4K-bgv51B65CU1VyQTEkdx1KpAEwNW1yBT1s1L897jXuwArMYD6evcHvlejf27P-ouK7X_LwifLqyBkL6Hs',
+    'notification.push.list': async () => [...this.pushSubscriptions.values()],
+    'notification.push.subscribe': async params => {
+      this.pushSubscriptions.set(params.endpoint, params)
+      return null
+    },
+    'notification.push.unsubscribe': async ({ endpoint }) => {
+      this.pushSubscriptions.delete(endpoint)
+      return null
+    },
+    'notification.push.test': async () => null,
     'notification.list': async params => {
       await pauseFor(2000)
 
@@ -722,7 +798,23 @@ export class MockApiService extends ApiService {
     },
     'backup.target.list': async params => {
       await pauseFor(2000)
-      return Mock.BackupTargets
+      return structuredClone(Mock.BackupTargets)
+    },
+    'backup.target.convert': async params => {
+      const backup =
+        Mock.BackupTargets[params.targetId]?.startOs[params.serverId]
+      if (!backup) throw new Error('Backup not found')
+      const jobs = (this.conversionJobs[params.targetId] ??= {})
+      if (jobs[params.serverId]?.state === 'running')
+        throw new Error('Conversion already running')
+      jobs[params.serverId] = {
+        state: 'running',
+        progress: { overall: false, phases: [] },
+        error: null,
+      }
+      backup.formatStatus = 'interrupted'
+      void this.simulateConversion(params, backup)
+      return null
     },
     'backup.target.cifs.add': async params => {
       await pauseFor(2000)
@@ -1113,6 +1205,7 @@ export class MockApiService extends ApiService {
                 'chain-state': {
                   name: 'Chain State',
                   result: 'loading',
+                  waiting: false,
                   message:
                     'Bitcoin is syncing from genesis. Downloading block headers and verifying chain integrity, please wait',
                 },
@@ -1167,6 +1260,7 @@ export class MockApiService extends ApiService {
                 'ephemeral-health-check': {
                   name: 'Ephemeral Health Check',
                   result: 'starting',
+                  waiting: false,
                   message: null,
                 },
                 'unnecessary-health-check': {
@@ -1177,6 +1271,7 @@ export class MockApiService extends ApiService {
                 'chain-state': {
                   name: 'Chain State',
                   result: 'loading',
+                  waiting: false,
                   message: 'Bitcoin is syncing from genesis',
                 },
                 'p2p-interface': {
@@ -2298,6 +2393,62 @@ export class MockApiService extends ApiService {
           ? 'gateway'
           : 'public-fallback',
     }
+  }
+
+  private async publishConversions(): Promise<void> {
+    await this.mockRevision<T.ServerStatus['backupConversions']>([
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/statusInfo/backupConversions',
+        value: structuredClone(this.conversionJobs),
+      },
+    ])
+  }
+
+  private async simulateConversion(
+    params: Params<'backup.target.convert'>,
+    backup: T.StartOsRecoveryInfo,
+  ): Promise<void> {
+    const job = this.conversionJobs[params.targetId]![params.serverId]!
+    const progress = new utils.FullProgressTracker()
+    const phases = [
+      ['Inspecting backup', 'steps', 5],
+      ['Converting metadata', 'bytes', 20],
+      ['Scanning backup objects', 'steps', 10],
+      ['Converting data objects', 'steps', 60],
+      ['Finalizing conversion', 'steps', 5],
+    ] as const
+    const handles = phases.map(([name, , weight]) =>
+      progress.addPhase(name, weight),
+    )
+    for (const [index, [name, units]] of phases.entries()) {
+      const phase = handles[index]!
+      phase.setUnits(units)
+      phase.setTotal(100)
+      for (const done of [0, 25, 50, 75, 100]) {
+        phase.setDone(done)
+        job.progress = progress.snapshot()
+        if (
+          name === 'Converting data objects' &&
+          done === 25 &&
+          params.password === 'interrupt'
+        ) {
+          job.state = 'failed'
+          job.error =
+            'Conversion interrupted. Resume it when the target is available.'
+          await this.publishConversions()
+          return
+        }
+        await this.publishConversions()
+        await pauseFor(700)
+      }
+      phase.complete()
+    }
+    backup.formatStatus = 'current'
+    job.state = 'complete'
+    progress.complete()
+    job.progress = progress.snapshot()
+    await this.publishConversions()
   }
 
   private mockData(path: string): any {

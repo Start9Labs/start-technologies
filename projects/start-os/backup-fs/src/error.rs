@@ -77,6 +77,18 @@ impl BkfsError {
         }
     }
 
+    /// Reports missing or mistyped indexed data as EIO.
+    #[track_caller]
+    pub fn referenced_io(error: io::Error) -> Self {
+        let error = match error.kind() {
+            io::ErrorKind::NotFound
+            | io::ErrorKind::NotADirectory
+            | io::ErrorKind::IsADirectory => io::Error::other(error),
+            _ => error,
+        };
+        Self::wrap(error)
+    }
+
     pub fn to_errno_log(&self) -> c_int {
         let no = self.to_errno();
         log!(self.kind.severity(), "{self:?}");
@@ -221,7 +233,19 @@ mod non_fuse_tests {
 
     use log::Level;
 
-    use super::BkfsErrorKind;
+    use super::{BkfsError, BkfsErrorKind};
+
+    #[test]
+    fn referenced_data_failures_are_eio_but_operational_errors_keep_their_errno() {
+        for errno in [libc::ENOENT, libc::ENOTDIR, libc::EISDIR] {
+            let error = BkfsError::referenced_io(io::Error::from_raw_os_error(errno));
+            assert_eq!(error.to_errno(), libc::EIO);
+        }
+        assert_eq!(
+            BkfsError::referenced_io(io::Error::from_raw_os_error(libc::EACCES)).to_errno(),
+            libc::EACCES
+        );
+    }
 
     #[test]
     fn multiple_uses_its_highest_error_severity_recursively() {

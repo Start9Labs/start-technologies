@@ -1,10 +1,34 @@
 use std::io::{self, Read, Write};
 use std::ops::RangeInclusive;
+use std::os::fd::AsRawFd;
+use std::sync::OnceLock;
 
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 use sha2::digest::Output;
 use sha2::Digest;
+
+pub(crate) fn sync_batch() -> usize {
+    static BATCH: OnceLock<usize> = OnceLock::new();
+    *BATCH.get_or_init(|| {
+        std::env::var("BACKUPFS_SYNC_BATCH")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(4096)
+    })
+}
+
+pub(crate) fn sync_filesystem(file: &impl AsRawFd) -> io::Result<()> {
+    if unsafe { libc::syncfs(file.as_raw_fd()) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+pub(crate) fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
 
 pub struct RandReader<R: Rng>(R);
 impl<R: Rng> RandReader<R> {

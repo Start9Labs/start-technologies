@@ -6,7 +6,7 @@ import {
 } from 'src/app/services/patch-db/data-model'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
 import { BTC_ICON, LND_ICON, PROXY_ICON, REGISTRY_ICON } from './api-icons'
-import { ActionRes } from './api.types'
+import { ActionRes, Result } from './api.types'
 
 import markdown from './md-sample.md'
 
@@ -22,7 +22,10 @@ const mockDescription = {
 }
 
 export namespace Mock {
+  export const ServerId = '1234-5678-9876-5432'
+
   export const ServerUpdated: T.ServerStatus = {
+    backupConversions: {},
     backupProgress: null,
     updateProgress: null,
     restarting: false,
@@ -32,6 +35,8 @@ export namespace Mock {
 
   export const RegistryOSUpdate: T.OsVersionInfoMap = {
     '0.4.1': {
+      gitHash: null,
+      security: false,
       headline: 'v0.4.1',
       releaseNotes: 'Testing some release notes',
       sourceVersion: '>=0.3.5:0 <=0.4.0-alpha.17:0',
@@ -117,6 +122,8 @@ export namespace Mock {
       img: {},
     },
     '0.4.1-alpha.5': {
+      gitHash: null,
+      security: false,
       headline: 'v0.4.1-alpha.5',
       releaseNotes: 'Some more release notes',
       sourceVersion: '>=0.3.5:0 <=0.4.0-alpha.5:0',
@@ -1264,24 +1271,34 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
   export const Sessions: T.SessionList = {
     current: 'b7b1a9cef4284f00af9e9dda6e676177',
     sessions: {
-      '9513226517c54ddd8107d6d7b9d8aed7': {
-        name: null,
-        loggedIn: '2021-07-14T20:49:17.774Z',
-        lastActive: '2021-07-14T20:49:17.774Z',
-        userAgent: 'AppleWebKit/{WebKit Rev} (KHTML, like Gecko)',
+      pubkeys: {
+        '9513226517c54ddd8107d6d7b9d8aed7': {
+          name: null,
+          loggedIn: '2021-07-14T20:49:17.774Z',
+          lastActive: '2021-07-14T20:49:17.774Z',
+          userAgent: 'AppleWebKit/{WebKit Rev} (KHTML, like Gecko)',
+        },
+        klndsfjhbwsajkdnaksj: {
+          name: null,
+          loggedIn: '2021-07-14T20:49:17.774Z',
+          lastActive: '2019-07-14T20:49:17.774Z',
+          userAgent: 'AppleWebKit/{WebKit Rev} (KHTML, like Gecko)',
+        },
+        b7b1a9cef4284f00af9e9dda6e676177: {
+          name: null,
+          loggedIn: '2021-07-14T20:49:17.774Z',
+          lastActive: '2021-06-14T20:49:17.774Z',
+          userAgent:
+            'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:47.0) Gecko/20100101 Firefox/47.0',
+        },
       },
-      klndsfjhbwsajkdnaksj: {
-        name: null,
-        loggedIn: '2021-07-14T20:49:17.774Z',
-        lastActive: '2019-07-14T20:49:17.774Z',
-        userAgent: 'AppleWebKit/{WebKit Rev} (KHTML, like Gecko)',
-      },
-      b7b1a9cef4284f00af9e9dda6e676177: {
-        name: null,
-        loggedIn: '2021-07-14T20:49:17.774Z',
-        lastActive: '2021-06-14T20:49:17.774Z',
-        userAgent:
-          'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:47.0) Gecko/20100101 Firefox/47.0',
+      tokens: {
+        Qm3xV1yZ8kH2pL0sT4wN6rB9cD5fG7jAeU2iO8qW4tY: {
+          name: 'Claude Desktop MCP',
+          loggedIn: '2021-07-14T20:49:17.774Z',
+          lastActive: '2021-07-13T20:49:17.774Z',
+          userAgent: null,
+        },
       },
     },
   }
@@ -1335,6 +1352,52 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     ],
   }
 
+  export const Disks: Result<'disk.list'> = [
+    {
+      logicalname: '/dev/sdb',
+      stablePath: '/dev/disk/by-path/pci-0000:00:14.0-usb-0:2:1.0-scsi-0:0:0:0',
+      partitionTable: null,
+      vendor: 'SanDisk',
+      model: 'Extreme Pro',
+      partitions: [],
+      capacity: 2000000000000,
+      guid: null,
+      filesystem: null,
+    },
+    {
+      logicalname: '/dev/sdc',
+      stablePath: '/dev/disk/by-path/pci-0000:00:14.0-usb-0:3:1.0-scsi-0:0:0:0',
+      partitionTable: 'gpt',
+      vendor: 'Samsung',
+      model: 'T7',
+      partitions: [
+        {
+          logicalname: '/dev/sdc1',
+          stablePath:
+            '/dev/disk/by-path/pci-0000:00:14.0-usb-0:3:1.0-scsi-0:0:0:0-part1',
+          label: 'Old Backups',
+          capacity: 1000000000000,
+          used: 100000000000,
+          available: 900000000000,
+          startOs: {
+            [ServerId]: {
+              hostname: 'server-name',
+              timestamp: new Date().toISOString(),
+              version: '0.4.0',
+              formatStatus: 'legacy',
+            },
+          },
+          legacyBackup: false,
+          guid: null,
+          filesystem: null,
+        },
+      ],
+      capacity: 1000000000000,
+      guid: null,
+      filesystem: null,
+    },
+  ]
+
   export const BackupTargets: { [id: string]: T.BackupTarget } = {
     hsbdjhasbasda: {
       type: 'cifs',
@@ -1344,10 +1407,11 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       mountable: false,
       available: null,
       startOs: {
-        '1234-5678-9876-5432': {
+        [ServerId]: {
           hostname: 'server-name',
           timestamp: new Date().toISOString(),
           version: '0.4.0',
+          formatStatus: 'unknown',
         },
       },
       legacyBackup: false,
@@ -1370,10 +1434,17 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       mountable: true,
       available: 50000000000,
       startOs: {
-        '1234-5678-9876-5432': {
+        [ServerId]: {
           hostname: 'server-name',
           timestamp: new Date().toISOString(),
           version: '0.4.0',
+          formatStatus: 'legacy',
+        },
+        'archive-server': {
+          hostname: 'archive-server',
+          timestamp: new Date().toISOString(),
+          version: '0.4.0',
+          formatStatus: 'legacy',
         },
       },
       legacyBackup: false,
@@ -1391,10 +1462,11 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       filesystem: null,
       available: 1000000000,
       startOs: {
-        '1234-5678-9876-5432': {
+        [ServerId]: {
           hostname: 'server-name',
           timestamp: new Date().toISOString(),
           version: '0.4.0',
+          formatStatus: 'interrupted',
         },
       },
       legacyBackup: true,
@@ -2552,6 +2624,7 @@ PersistentKeepalive = 25`
               addSsl: null,
               preferredExternalPort: 443,
               secure: { ssl: true },
+              proxy: null,
             },
             interfaces: {
               ui: {
@@ -2598,6 +2671,7 @@ PersistentKeepalive = 25`
               addSsl: null,
               preferredExternalPort: 8332,
               secure: { ssl: false },
+              proxy: null,
             },
             interfaces: {
               rpc: {
@@ -2644,6 +2718,7 @@ PersistentKeepalive = 25`
               addSsl: null,
               preferredExternalPort: 8333,
               secure: { ssl: false },
+              proxy: null,
             },
             interfaces: {
               p2p: {

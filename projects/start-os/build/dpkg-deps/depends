@@ -6,6 +6,7 @@ beep
 binfmt-support
 bmon
 btrfs-progs
+btrfsmaintenance
 ca-certificates
 cifs-utils
 conntrack
@@ -46,6 +47,7 @@ nftables
 nvme-cli
 nyx
 openssh-server
+pciutils
 podman
 psmisc
 qemu-guest-agent
@@ -66,6 +68,7 @@ systemd-resolved
 systemd-sysv
 systemd-timesyncd
 tor
+usbutils
 util-linux
 vim
 wireguard-tools

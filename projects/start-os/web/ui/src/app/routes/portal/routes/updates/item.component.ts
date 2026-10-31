@@ -1,9 +1,11 @@
 import { DatePipe } from '@angular/common'
-import { Component, inject, input, signal } from '@angular/core'
+import { Component, computed, inject, input, signal } from '@angular/core'
 import { RouterLink } from '@angular/router'
 import {
   MarketplaceIconDirective,
   MarketplacePkg,
+  matchingTrustedKeys,
+  packageSigners,
 } from '@start9labs/marketplace'
 import {
   DialogService,
@@ -17,6 +19,7 @@ import {
   TuiExpand,
   TuiIcon,
   TuiLink,
+  TuiNotification,
   TuiTitle,
 } from '@taiga-ui/core'
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
@@ -32,6 +35,7 @@ import { filter } from 'rxjs'
 import { InstallingProgressPipe } from 'src/app/routes/portal/routes/services/pipes/install-progress.pipe'
 import { HiddenUpdatesService } from 'src/app/services/hidden-updates.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
+import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
 import {
   InstalledState,
   PackageDataEntry,
@@ -121,6 +125,7 @@ import UpdatesComponent from './updates.component'
             size="s"
             iconStart="@tui.download"
             [loading]="!ready()"
+            [disabled]="!trusted().length"
             [appearance]="error() ? 'destructive' : 'primary'"
             (click.stop)="update()"
           >
@@ -131,6 +136,11 @@ import UpdatesComponent from './updates.component'
     </tr>
     <tr>
       <td colspan="5">
+        @if (!trusted().length) {
+          <div tuiNotification appearance="warning">
+            {{ "This service package isn't signed by anyone you trust" | i18n }}
+          </div>
+        }
         @if (error()) {
           <p class="g-negative">{{ error() }}</p>
         }
@@ -283,11 +293,13 @@ import UpdatesComponent from './updates.component'
     SafeLinksDirective,
     DatePipe,
     InstallingProgressPipe,
+    TuiNotification,
     i18nPipe,
   ],
 })
 export class UpdatesItemComponent {
   private readonly service = inject(MarketplaceService)
+  private readonly trust = inject(TrustedKeysService)
   private readonly dialog = inject(DialogService)
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
   private readonly alerts = inject(MarketplaceAlertsService)
@@ -302,8 +314,18 @@ export class UpdatesItemComponent {
     input.required<PackageDataEntry<InstalledState | UpdatingState>>()
   readonly pending = input.required<boolean>()
 
+  protected readonly trusted = computed(() =>
+    matchingTrustedKeys(
+      packageSigners(this.item()),
+      this.trust.keys() ?? {},
+      'marketplace',
+    ),
+  )
+
   async update() {
-    const { id, version, preDownloadAlert } = this.item()
+    if (!this.trusted().length) return
+    const pkg = this.item()
+    const { preDownloadAlert } = pkg
     const url = this.parent.current()?.url || ''
 
     if (
@@ -318,9 +340,9 @@ export class UpdatesItemComponent {
     this.ready.set(false)
 
     try {
-      await this.service.installPackage(id, version, url)
-    } catch (e: any) {
-      this.error.set(e.message)
+      await this.service.installPackage(pkg, url)
+    } catch (e) {
+      this.error.set(e instanceof Error ? e.message : String(e))
     } finally {
       this.ready.set(true)
     }

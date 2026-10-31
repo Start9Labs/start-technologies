@@ -18,6 +18,7 @@ path = "src/main.rs"
 required-features = ["cli"]
 
 [dependencies]
+backup-fs-protocol = { path = "../../../shared-libs/crates/backup-fs-protocol" }
 bincode = { version = "2", features = ["serde"] }
 chacha20 = { version = "0.10.1", features = ["zeroize"] }
 clap = { version = "4.5.7", optional = true, features = ["derive", "cargo"] }
@@ -31,7 +32,6 @@ fuser = { git = "https://github.com/Start9Labs/fuser.git", rev = "4ef196b", feat
 ] }
 generic-array = { version = "1", features = ["serde"] }
 imbl = { version = "7", features = ["serde"] }
-io-uring = "0.7.11"
 itertools = "0.13"
 libc = "0.2"
 log = "0.4"
@@ -41,6 +41,7 @@ ppv-lite86 = "0.2.17"
 rand = "0.10"
 reed-solomon-erasure = "6"
 serde = { version = "*", features = ["derive"] }
+serde_json = "1"
 sha2 = "0.11.0"
 smallvec = "1"
 typenum = "1"

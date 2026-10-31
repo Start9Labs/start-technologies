@@ -36,6 +36,10 @@ monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product 
 - Type-check the runtime: `cd projects/start-os/container-runtime && npm run check`.
 - Build the UI: `make start-os-ui` (or `make start-os-uis` for ui + setup-wizard).
 - Tests: `make test` (Rust + SDK + container-runtime + shell), `make start-core-test`, `make backup-fs-test` for all backup-fs library tests except the mount-based `/dev/fuse` suite, or `make start-os-scripts-test` for the shell suite under `build/tests/`.
+- Backup helper integration: `cargo build -p startos-backup-fs --bin startos-backup-fs`, then `bash projects/start-os/backup-fs/test-cli.sh target/debug/startos-backup-fs`. Requires Linux FUSE mount privileges, `fusermount3`, Node.js, and `attr`.
+- Legacy helper interoperability: `bash projects/start-os/backup-fs/test-legacy-interop.sh <current-helper> <format-1-helper>` exercises old/new FUSE writes and reads before explicit conversion. Build the old helper from the pre-PR revision pinned in `backup-fs/testdata/generate.sh`; the test requires the same FUSE privileges and tools as helper integration. The old helper also needs `io_uring` syscalls, which Docker's default seccomp profile denies.
+- Migration capacity regression: after building the helper, `bash projects/start-os/backup-fs/test-migration-space.sh target/debug/startos-backup-fs`. Requires Docker; its isolated 3 MiB tmpfs has no room for a second copy of the legacy objects.
+- Migration replacement-order regression: `bash projects/start-os/backup-fs/test-migration-durability.sh target/debug/startos-backup-fs`. Requires Docker and installs `strace` in a disposable container to assert file-sync/rename/directory-sync ordering for actual legacy in-place replacements.
 - Format: `make start-os-format` / `make start-os-format-check` (Rust only);
   TS/web/container-runtime formatting runs through `make web-format` (root
   prettier config).
@@ -79,7 +83,7 @@ This guide covers building and contributing to the **StartOS OS product** in `pr
 
 Start from the root [AGENTS.md](../../AGENTS.md) for the shared toolchain (Rust, Node 24, Docker, Make, git), branch policy, and the repo-wide commit/PR conventions; this section adds the StartOS-specific setup on top.
 
-If you want to **package a service** for StartOS instead, see the [packaging guide](https://docs.start9.com/packaging). For other ways to help, see [start9.com/contribute](https://start9.com/contribute).
+If you want to **package a service** for StartOS instead, see the [packaging guide](https://docs.start9.com/packaging).
 
 ### Documentation
 

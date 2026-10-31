@@ -57,6 +57,12 @@ fn with_backupfs(
     func: impl FnOnce(&Path),
     file_size_padding: Option<f64>,
 ) {
+    let mut options = opts(data, &password);
+    options.file_size_padding = file_size_padding;
+    with_mounted(BackupFS::new(options).unwrap(), func);
+}
+
+fn with_mounted(fs: BackupFS, func: impl FnOnce(&Path)) {
     let mnt = TempDir::with_prefix("backupfs_mnt").unwrap();
     let mut config = Config::default();
     // No AutoUnmount: with 0.17's spawn(), the auto-unmount helper deadlocks
@@ -69,15 +75,6 @@ fn with_backupfs(
     // (main.rs) sets default_permissions — its enforcement is covered by the
     // VM backup/restore test, where the mount is kernel-idmapped.
     config.mount_options = vec![MountOption::FSName("backup-fs".to_string())];
-    let fs = BackupFS::new(BackupFSOptions {
-        data_dir: data.to_owned(),
-        setuid_support: false,
-        password,
-        file_size_padding,
-        readonly: false,
-        idmapped: false,
-    })
-    .unwrap();
     // 0.17's spawn() moves the mount into the BackgroundSession, so an
     // unmounter taken from the Session beforehand is dead. Drive the whole
     // lifecycle through the BackgroundSession: run in the background, then
@@ -137,12 +134,55 @@ fn tree(path: impl AsRef<Path>, dirs: bool) -> Result<Vec<String>, io::Error> {
     Ok(children)
 }
 
-/// Count content block files, tolerating an absent `contents/` dir — a
-/// backup whose files are all inline-sized writes no content blocks at all.
+fn indexed(data: &Path, kind: &str) -> usize {
+    let mut options = opts(data, "ohea");
+    options.readonly = true;
+    Controller::new(options)
+        .unwrap()
+        .indexed_storage()
+        .keys()
+        .filter(|key| key.starts_with(kind))
+        .count()
+}
+
+/// Count committed content blocks; inline and packed files store none.
 fn content_files(data: &Path) -> usize {
-    tree(data.join("contents"), false)
-        .map(|v| v.len())
-        .unwrap_or(0)
+    indexed(data, "Block")
+}
+
+/// Locates a committed block frame in its segment file.
+fn block_frame(data: &Path, ino: u64, idx: u64) -> (std::path::PathBuf, crate::seglog::Location) {
+    let mut options = opts(data, "ohea");
+    options.readonly = true;
+    let (_, loc) = Controller::new(options)
+        .unwrap()
+        .block_frame(ContentId(ino), idx);
+    (
+        crate::seglog::segment_path(&data.join("segments"), loc.segment),
+        loc,
+    )
+}
+
+fn frame_bytes(data: &Path, ino: u64, idx: u64) -> Vec<u8> {
+    use std::os::unix::fs::FileExt;
+    let (path, loc) = block_frame(data, ino, idx);
+    let mut bytes = vec![0; loc.len as usize];
+    fs::File::open(path)
+        .unwrap()
+        .read_exact_at(&mut bytes, loc.offset)
+        .unwrap();
+    bytes
+}
+
+fn zero_block_frame(data: &Path, ino: u64, idx: u64) {
+    use std::os::unix::fs::FileExt;
+    let (path, loc) = block_frame(data, ino, idx);
+    fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .write_all_at(&vec![0; loc.len as usize], loc.offset)
+        .unwrap();
 }
 
 #[test_log::test]
@@ -239,14 +279,7 @@ fn preserves_directory() {
 fn checksum() {
     let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(data.path(), "ohea".to_owned(), |_mnt| {}, None);
-    let res = BackupFS::new(BackupFSOptions {
-        data_dir: data.path().to_owned(),
-        setuid_support: false,
-        password: "rtns".to_owned(),
-        file_size_padding: None,
-        readonly: false,
-        idmapped: false,
-    });
+    let res = BackupFS::new(opts(data.path(), "rtns"));
     match res {
         Ok(_) => panic!(),
         Err(err) => assert!(matches!(&err.kind, BkfsErrorKind::BadChecksum)),
@@ -266,15 +299,7 @@ fn change_password() {
     );
 
     {
-        let mut fs = BackupFS::new(BackupFSOptions {
-            data_dir: data.path().to_owned(),
-            setuid_support: false,
-            password: "ohea".to_owned(),
-            file_size_padding: None,
-            readonly: false,
-            idmapped: false,
-        })
-        .unwrap();
+        let mut fs = BackupFS::new(opts(data.path(), "ohea")).unwrap();
         fs.change_password("rtns").unwrap();
     }
 
@@ -554,7 +579,7 @@ fn rmdir_heals_stale_parent_reference() {
     // but the child inode is gone: tombstone the child in the log directly,
     // leaving the parent still referencing it.
     let ctrl = crate::ctrl::Controller::new(opts(data.path(), "ohea")).unwrap();
-    ctrl.log_tombstone(crate::inode::Inode(stale_inode), true)
+    ctrl.log_tombstone(crate::inode::Inode(stale_inode))
         .unwrap();
     drop(ctrl);
 
@@ -1197,7 +1222,7 @@ fn rename_over_stale_parent_reference_recovers() {
     // the log (as if gc_inode ran but the parent's new state was lost to a
     // lazy unmount). Tombstone it directly.
     let ctrl = crate::ctrl::Controller::new(opts(data.path(), "ohea")).unwrap();
-    ctrl.log_tombstone(crate::inode::Inode(stale_inode), true)
+    ctrl.log_tombstone(crate::inode::Inode(stale_inode))
         .unwrap();
     drop(ctrl);
 
@@ -1420,11 +1445,6 @@ fn capture<T: Send + 'static>(
     rx.recv().unwrap()
 }
 
-fn sha256_file(path: &Path) -> Vec<u8> {
-    use sha2::{Digest, Sha256};
-    Sha256::digest(fs::read(path).unwrap()).to_vec()
-}
-
 /// A FIFO created through the mount must round-trip its file type across a
 /// remount — exercises mknod(S_IFIFO) end to end (no privilege needed,
 /// unlike char/block devices).
@@ -1494,16 +1514,14 @@ fn ecc_recovers_corrupted_block() {
     // Locate the block file and flip a small contiguous run of bytes at
     // the very start of the shard region — damages a single shard, well
     // within the parity budget.
-    let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
-    let block = ctrl.resolve_block_path(ContentId(ino), 0);
-    drop(ctrl);
-    assert!(block.exists(), "expected block file at {block:?}");
-    let mut bytes = fs::read(&block).unwrap();
-    let start = 28 + 4; // skip header + first shard's CRC → corrupt shard data
+    let (segment, loc) = block_frame(data.path(), ino, 0);
+    let mut bytes = fs::read(&segment).unwrap();
+    // Skips the frame header, vault header and first shard's CRC.
+    let start = loc.offset as usize + 24 + 28 + 4;
     for b in &mut bytes[start..start + 16] {
         *b ^= 0xFF;
     }
-    fs::write(&block, &bytes).unwrap();
+    fs::write(&segment, &bytes).unwrap();
 
     with_backupfs(
         data.path(),
@@ -1517,9 +1535,8 @@ fn ecc_recovers_corrupted_block() {
     );
 }
 
-/// Overwriting a small region of a multi-block file must rewrite only the
-/// affected block file and leave the others byte-for-byte identical on
-/// disk — the property that makes rsync/rclone incremental copies cheap.
+/// Overwriting a small region of a multi-block file must append only the
+/// affected block and leave the others byte-for-byte where they were.
 #[test_log::test]
 fn incremental_overwrite_touches_one_block() {
     let data = TempDir::with_prefix("backupfs_data").unwrap();
@@ -1533,15 +1550,8 @@ fn incremental_overwrite_touches_one_block() {
         fs::metadata(mnt.join("big")).unwrap().ino()
     });
 
-    let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
-    let paths: Vec<_> = (0..3)
-        .map(|i| ctrl.resolve_block_path(ContentId(ino), i))
-        .collect();
-    drop(ctrl);
-    for p in &paths {
-        assert!(p.exists(), "missing block file {p:?}");
-    }
-    let before: Vec<_> = paths.iter().map(|p| sha256_file(p)).collect();
+    let locations: Vec<_> = (0..3).map(|i| block_frame(data.path(), ino, i).1).collect();
+    let before: Vec<_> = (0..3).map(|i| frame_bytes(data.path(), ino, i)).collect();
 
     // Overwrite 100 bytes inside block 1 only.
     with_backupfs(
@@ -1558,7 +1568,11 @@ fn incremental_overwrite_touches_one_block() {
         None,
     );
 
-    let after: Vec<_> = paths.iter().map(|p| sha256_file(p)).collect();
+    let updated: Vec<_> = (0..3).map(|i| block_frame(data.path(), ino, i).1).collect();
+    assert_eq!(locations[0], updated[0]);
+    assert_ne!(locations[1], updated[1]);
+    assert_eq!(locations[2], updated[2]);
+    let after: Vec<_> = (0..3).map(|i| frame_bytes(data.path(), ino, i)).collect();
     assert_eq!(before[0], after[0], "block 0 was rewritten unnecessarily");
     assert_ne!(before[1], after[1], "block 1 should have changed");
     assert_eq!(before[2], after[2], "block 2 was rewritten unnecessarily");
@@ -1583,7 +1597,7 @@ fn incremental_overwrite_touches_one_block() {
 const CHUNK_OFFSET: u64 = crate::blockstore::CHUNK_SIZE;
 
 /// A sparse file (size set, middle written) stores only the touched
-/// blocks: holes occupy no block files on disk and read back as zeros.
+/// blocks: holes are not stored and read back as zeros.
 #[test_log::test]
 fn sparse_file_omits_hole_blocks() {
     let data = TempDir::with_prefix("backupfs_data").unwrap();
@@ -1606,16 +1620,16 @@ fn sparse_file_omits_hole_blocks() {
 
     let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
     assert!(
-        !ctrl.resolve_block_path(ContentId(ino), 0).exists(),
-        "hole block 0 should not exist on disk"
+        !ctrl.block_exists(ContentId(ino), 0),
+        "hole block 0 should not be stored"
     );
     assert!(
-        !ctrl.resolve_block_path(ContentId(ino), 1).exists(),
-        "hole block 1 should not exist on disk"
+        !ctrl.block_exists(ContentId(ino), 1),
+        "hole block 1 should not be stored"
     );
     assert!(
-        ctrl.resolve_block_path(ContentId(ino), 2).exists(),
-        "written block 2 should exist on disk"
+        ctrl.block_exists(ContentId(ino), 2),
+        "written block 2 should be stored"
     );
     drop(ctrl);
 
@@ -1635,10 +1649,7 @@ fn sparse_file_omits_hole_blocks() {
     );
 }
 
-/// A run of reads inside one block decodes that block once. Deleting both
-/// block files partway through is what makes the cache visible: the reads
-/// that follow keep working only if they are served from the decoded copy,
-/// while the block that was never read comes back as the hole it now is.
+/// Cached authenticated bytes survive removal; an unread indexed block reports EIO.
 #[test_log::test]
 fn repeated_reads_in_one_block_decode_it_once() {
     let data = TempDir::with_prefix("backupfs_data").unwrap();
@@ -1651,10 +1662,13 @@ fn repeated_reads_in_one_block_decode_it_once() {
         fs::metadata(mnt.join("two_blocks")).unwrap().ino()
     });
 
-    let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
-    let block0 = ctrl.resolve_block_path(ContentId(ino), 0);
-    let block1 = ctrl.resolve_block_path(ContentId(ino), 1);
-    drop(ctrl);
+    let damage = {
+        let data = data.path().to_owned();
+        move || {
+            zero_block_frame(&data, ino, 0);
+            zero_block_frame(&data, ino, 1);
+        }
+    };
 
     with_backupfs(
         data.path(),
@@ -1665,18 +1679,16 @@ fn repeated_reads_in_one_block_decode_it_once() {
             f.read_exact(&mut head).unwrap();
             pattern_check(0, &head);
 
-            fs::remove_file(&block0).unwrap();
-            fs::remove_file(&block1).unwrap();
+            damage();
 
             let mut rest = vec![0u8; chunk - 4096];
             f.read_exact(&mut rest).unwrap();
             pattern_check(4096, &rest);
 
             let mut second = vec![0u8; chunk];
-            f.read_exact(&mut second).unwrap();
-            assert!(
-                second.iter().all(|&b| b == 0),
-                "block 1 was never read, so its deleted file must read back as a hole"
+            assert_eq!(
+                f.read_exact(&mut second).unwrap_err().raw_os_error(),
+                Some(libc::EIO)
             );
         },
         None,
@@ -1904,12 +1916,8 @@ fn large_file_spills_and_stays_intact() {
         None,
     );
 
-    // 40 MiB / 1 MiB chunk = 40 block files.
-    assert_eq!(
-        tree(data.path().join("contents"), false).unwrap().len(),
-        40,
-        "unexpected block file count"
-    );
+    // 40 MiB / 1 MiB chunk = 40 blocks.
+    assert_eq!(content_files(data.path()), 40, "unexpected block count");
 
     with_backupfs(
         data.path(),
@@ -1953,11 +1961,10 @@ fn large_directory_spills_and_stays_consistent() {
         None,
     );
 
-    // The listing must actually have spilled to bucket files on disk.
+    // The listing must actually have spilled out of the inode.
     assert!(
-        data.path().join("dirents").exists()
-            && tree(data.path().join("dirents"), false).unwrap().len() > 1,
-        "expected multiple directory bucket files for a spilled directory"
+        indexed(data.path(), "Bucket") >= 1,
+        "expected directory chunks for a spilled directory"
     );
 
     // Remount: everything is still there; unlink half; remainder intact.
@@ -1994,11 +2001,178 @@ fn large_directory_spills_and_stays_consistent() {
         |mnt| assert!(!mnt.join("big").exists(), "spilled dir survived rm -rf"),
         None,
     );
-    let leftover = tree(data.path().join("dirents"), false).unwrap_or_default();
-    assert!(
-        leftover.is_empty(),
-        "leftover dir bucket files after rm -rf: {leftover:?}"
+    let leftover = indexed(data.path(), "Bucket");
+    assert_eq!(leftover, 0, "leftover dir buckets after rm -rf");
+}
+
+fn files_under(root: &Path) -> usize {
+    match fs::read_dir(root) {
+        Ok(entries) => entries
+            .flatten()
+            .map(|entry| {
+                if entry.file_type().unwrap().is_dir() {
+                    files_under(&entry.path())
+                } else {
+                    1
+                }
+            })
+            .sum(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => 0,
+        Err(error) => panic!("{error}"),
+    }
+}
+
+#[test_log::test]
+fn legacy_stores_keep_new_blocks_and_spilled_directories_through_conversion() {
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
+    crate::legacy::fixture(data.path());
+    let n = 1500usize;
+    let mut blocks = vec![0u8; 3 * 1024 * 1024 + 100];
+    pattern_fill(0, &mut blocks);
+    let block_files = files_under(&data.path().join("contents"));
+    with_backupfs(
+        data.path(),
+        "password".to_owned(),
+        |mnt| {
+            let d = mnt.join("big");
+            fs::create_dir(&d).unwrap();
+            for i in 0..n {
+                fs::write(d.join(format!("f{i:05}")), format!("data {i}")).unwrap();
+            }
+            fs::write(mnt.join("blocks"), &blocks).unwrap();
+        },
+        None,
     );
+    assert!(!data.path().join("segments/state").exists());
+    assert!(files_under(&data.path().join("dirents")) > 1);
+    assert_eq!(files_under(&data.path().join("contents")), block_files + 4);
+    for converted in [false, true] {
+        if converted {
+            BackupFS::convert(opts(data.path(), "password")).unwrap();
+            assert!(!data.path().join("dirents").exists());
+            assert!(!data.path().join("contents").exists());
+        }
+        with_backupfs(
+            data.path(),
+            "password".to_owned(),
+            |mnt| {
+                let d = mnt.join("big");
+                assert_eq!(fs::read_dir(&d).unwrap().count(), n);
+                for i in (0..n).step_by(97) {
+                    assert_eq!(
+                        fs::read(d.join(format!("f{i:05}"))).unwrap(),
+                        format!("data {i}").as_bytes()
+                    );
+                }
+                let readback = fs::read(mnt.join("blocks")).unwrap();
+                assert_eq!(readback.len(), blocks.len());
+                pattern_check(0, &readback);
+            },
+            None,
+        );
+    }
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+/// Every directory entry resolves to a readable inode that lists the entry.
+fn assert_namespace_consistent(data: &Path, step: &str) {
+    let fs = BackupFS::new(opts(data, "ohea")).unwrap();
+    let ctrl = fs.handler.lock().unwrap().ctrl().clone();
+    let mut directories = vec![Inode(crate::FUSE_ROOT_ID)];
+    while let Some(directory) = directories.pop() {
+        let attrs: crate::inode::InodeAttributes = ctrl.load(directory).unwrap();
+        let crate::inode::FileData::Directory(entries) = &attrs.attrs.contents else {
+            panic!("{step}: {directory:?} is not a directory");
+        };
+        for (name, entry) in entries.snapshot(&ctrl, directory).unwrap().iter() {
+            let child: crate::inode::InodeAttributes = ctrl
+                .load(entry.inode)
+                .unwrap_or_else(|e| panic!("{step}: {name:?} names a missing inode: {e}"));
+            assert!(
+                child.attrs.parents.contains(&(directory, name.clone())),
+                "{step}: {name:?} is not among its inode's parents"
+            );
+            match &child.attrs.contents {
+                crate::inode::FileData::Directory(_) => directories.push(entry.inode),
+                crate::inode::FileData::File(_) | crate::inode::FileData::Packed(_) => {
+                    let mut contents =
+                        crate::contents::Contents::open(ctrl.clone(), entry.inode).unwrap();
+                    let mut bytes = vec![0; contents.inode.attrs.size as usize];
+                    contents
+                        .read_exact_at(&mut bytes, 0)
+                        .unwrap_or_else(|e| panic!("{step}: {name:?} is unreadable: {e}"));
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+#[test_log::test]
+fn every_commit_records_the_namespace_between_requests() {
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
+    let images = TempDir::with_prefix("backupfs_images").unwrap();
+    let fs = BackupFS::new(opts(data.path(), "ohea")).unwrap();
+    let handler = fs.handler.clone();
+    handler.lock().unwrap().ctrl().set_sync_batch(1);
+    let mut image = 0;
+    let mut crash = |step: &str| {
+        let idle = handler.lock().unwrap();
+        let copy = images.path().join(image.to_string());
+        copy_tree(data.path(), &copy);
+        drop(idle);
+        image += 1;
+        assert_namespace_consistent(&copy, step);
+    };
+    let mut payload = vec![0u8; 3 * 1024 * 1024 + 11];
+    pattern_fill(0, &mut payload);
+    with_mounted(fs, |mnt| {
+        fs::create_dir(mnt.join("a")).unwrap();
+        crash("mkdir");
+        fs::write(mnt.join("a/f"), &payload).unwrap();
+        crash("write");
+        fs::write(mnt.join("a/small"), b"small").unwrap();
+        crash("small write");
+        fs::create_dir(mnt.join("b")).unwrap();
+        crash("second mkdir");
+        fs::rename(mnt.join("a/f"), mnt.join("b/g")).unwrap();
+        crash("rename across directories");
+        fs::hard_link(mnt.join("b/g"), mnt.join("a/h")).unwrap();
+        crash("link");
+        fs::rename(mnt.join("a/small"), mnt.join("a/h")).unwrap();
+        crash("rename over a link");
+        fs::remove_file(mnt.join("b/g")).unwrap();
+        crash("unlink");
+        fs::remove_dir(mnt.join("b")).unwrap();
+        crash("rmdir");
+        handler.lock().unwrap().ctrl().set_sync_batch(64);
+        fs::create_dir(mnt.join("big")).unwrap();
+        for i in 0..1_100 {
+            fs::write(mnt.join(format!("big/{i:05}")), i.to_string()).unwrap();
+        }
+        handler.lock().unwrap().ctrl().set_sync_batch(1);
+        crash("spill into chunks");
+        fs::rename(mnt.join("big/00007"), mnt.join("big/renamed")).unwrap();
+        crash("rename within chunks");
+        fs::rename(mnt.join("big/00008"), mnt.join("a/moved")).unwrap();
+        crash("rename out of chunks");
+        for i in 100..200 {
+            fs::remove_file(mnt.join(format!("big/{i:05}"))).unwrap();
+        }
+        crash("unlink from chunks");
+    });
 }
 
 /// rename within a spilled directory, across into another directory, and
@@ -2329,17 +2503,8 @@ fn compaction_reclaims_dead_space() {
     );
 }
 
-/// Sorted list of segment file names.
-fn segment_names(data: &Path) -> Vec<String> {
-    let mut v: Vec<String> = fs::read_dir(data.join("segments"))
-        .map(|rd| {
-            rd.flatten()
-                .map(|e| e.file_name().to_string_lossy().into_owned())
-                .collect()
-        })
-        .unwrap_or_default();
-    v.sort();
-    v
+fn data_segment_inventory(data: &Path) -> Vec<(u64, u64)> {
+    crate::seglog::list_segments(&data.join("segments")).unwrap()
 }
 
 /// Regression for the recompute_live bug: a fully-live set of packed files
@@ -2363,13 +2528,13 @@ fn idle_remount_does_not_recompact_live_packed() {
         },
         None,
     );
-    let segs_before = segment_names(data.path());
+    let segs_before = data_segment_inventory(data.path());
     assert!(segs_before.len() > 1, "expected multiple segments");
 
     // Idle cycle: mount, touch nothing, unmount → compaction runs.
     with_backupfs(data.path(), "ohea".to_owned(), |_mnt| {}, None);
 
-    let segs_after = segment_names(data.path());
+    let segs_after = data_segment_inventory(data.path());
     assert_eq!(
         segs_before, segs_after,
         "idle remount recompacted live packed segments (recompute_live regression)"
@@ -2390,23 +2555,16 @@ fn idle_remount_does_not_recompact_live_packed() {
     );
 }
 
-/// Total bytes across content block files.
+/// Stored bytes of indexed block and directory-bucket records.
 fn content_bytes(data: &Path) -> u64 {
-    let dir = data.join("contents");
-    let mut total = 0u64;
-    let mut stack = vec![dir];
-    while let Some(d) = stack.pop() {
-        let Ok(rd) = fs::read_dir(&d) else { continue };
-        for e in rd.flatten() {
-            let m = e.metadata().unwrap();
-            if m.is_dir() {
-                stack.push(e.path());
-            } else {
-                total += m.len();
-            }
-        }
-    }
-    total
+    let mut options = opts(data, "ohea");
+    options.readonly = true;
+    Controller::new(options)
+        .unwrap()
+        .indexed_storage()
+        .values()
+        .map(|&(_, _, len)| len as u64)
+        .sum()
 }
 
 /// A compressible file (by extension policy) is stored much smaller than its
@@ -2762,12 +2920,7 @@ fn copy_file_range_that_fails_partway_reports_the_bytes_it_moved() {
             fs::metadata(mnt.join("src")).unwrap().ino()
         })
     };
-    {
-        let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
-        let block = ctrl.resolve_block_path(ContentId(ino), 1);
-        fs::remove_file(&block).unwrap();
-        fs::create_dir(&block).unwrap();
-    }
+    zero_block_frame(data.path(), ino, 1);
 
     with_backupfs(
         data.path(),
@@ -2827,12 +2980,7 @@ fn copy_file_range_counts_only_complete_writes_before_an_unaligned_error() {
             fs::metadata(mnt.join("dest")).unwrap().ino()
         })
     };
-    {
-        let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
-        let block = ctrl.resolve_block_path(ContentId(dest_ino), 1);
-        fs::remove_file(&block).unwrap();
-        fs::create_dir(&block).unwrap();
-    }
+    zero_block_frame(data.path(), dest_ino, 1);
 
     with_backupfs(
         data.path(),
@@ -3006,9 +3154,8 @@ fn a_write_that_fails_after_a_tier_migration_leaves_the_file_readable() {
     let big: Vec<u8> = (0..17 * CHUNK_OFFSET).map(pattern_byte).collect();
     {
         let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
-        let blocked = ctrl.resolve_block_path(ContentId(ino), 0);
-        fs::create_dir_all(&blocked).unwrap();
-        let mut handler = crate::handle::Handler::new(ctrl);
+        ctrl.fail_block_puts(Some(ContentId(ino)));
+        let mut handler = crate::handle::Handler::new(ctrl.clone());
         let fh = handler
             .fopen(Inode(ino), true, true, |_, _| Ok(()))
             .unwrap();
@@ -3023,7 +3170,7 @@ fn a_write_that_fails_after_a_tier_migration_leaves_the_file_readable() {
                 .expect("the successful prefix must be reported");
             assert_eq!(written, 16 * CHUNK_OFFSET as usize);
         }
-        fs::remove_dir(blocked).unwrap();
+        ctrl.fail_block_puts(None);
         handler.fclose(fh).unwrap();
         handler.flush_all_dirty().unwrap();
     }
@@ -3033,4 +3180,53 @@ fn a_write_that_fails_after_a_tier_migration_leaves_the_file_readable() {
     });
     assert_eq!(got.len(), 16 * CHUNK_OFFSET as usize);
     pattern_check(0, &got);
+}
+
+/// Growth by truncate, by descriptor or by path, must not expose a committed
+/// block beyond the size the file had before the request.
+#[test_log::test]
+fn truncate_growth_hides_committed_blocks_beyond_the_old_size() {
+    for by_path in [false, true] {
+        let data = TempDir::with_prefix("backupfs_data").unwrap();
+        let ino = capture(data.path(), "ohea", |mnt| {
+            fs::write(mnt.join("grow"), vec![0x5au8; CHUNK_OFFSET as usize]).unwrap();
+            fs::metadata(mnt.join("grow")).unwrap().ino()
+        });
+        {
+            let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
+            crate::blockstore::write_block(
+                &ctrl,
+                ContentId(ino),
+                1,
+                b"stale spill",
+                crate::compress::Codec::None,
+            )
+            .unwrap();
+            ctrl.syncfs().unwrap();
+        }
+        let got = capture(data.path(), "ohea", move |mnt| {
+            let path = mnt.join("grow");
+            if by_path {
+                let path = CString::new(path.as_os_str().as_bytes()).unwrap();
+                assert_eq!(
+                    unsafe { libc::truncate(path.as_ptr(), 3 * CHUNK_OFFSET as libc::off_t) },
+                    0
+                );
+            } else {
+                fs::OpenOptions::new()
+                    .write(true)
+                    .open(&path)
+                    .unwrap()
+                    .set_len(3 * CHUNK_OFFSET)
+                    .unwrap();
+            }
+            fs::read(path).unwrap()
+        });
+        assert_eq!(got.len(), 3 * CHUNK_OFFSET as usize);
+        assert!(got[..CHUNK_OFFSET as usize].iter().all(|&b| b == 0x5a));
+        assert!(
+            got[CHUNK_OFFSET as usize..].iter().all(|&b| b == 0),
+            "stale block exposed by growth (by_path={by_path})"
+        );
+    }
 }

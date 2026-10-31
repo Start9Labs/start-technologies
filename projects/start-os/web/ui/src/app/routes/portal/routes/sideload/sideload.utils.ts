@@ -1,6 +1,7 @@
 import { MarketplacePkgBase } from '@start9labs/marketplace'
 import { i18nKey } from '@start9labs/shared'
 import { S9pk, ExtendedVersion } from '@start9labs/start-core'
+import { publicKeyPem } from 'src/app/utils/public-keys'
 
 const MAGIC = new Uint8Array([59, 59])
 const VERSION_1 = new Uint8Array([1])
@@ -42,6 +43,7 @@ async function parseS9pk(file: File): Promise<MarketplacePkgSideload> {
     flavor: ExtendedVersion.parse(s9pk.manifest.version).flavor,
     fullLicense: await s9pk.license(),
     s9pks: [],
+    signers: [publicKeyPem(s9pk.archive.signer.pubkey)],
   }
 }
 
