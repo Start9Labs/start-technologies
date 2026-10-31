@@ -12,10 +12,12 @@ use crate::PackageId;
 use crate::context::CliContext;
 use crate::prelude::*;
 use crate::progress::FullProgressTracker;
+use crate::registry::RegistryDatabase;
 use crate::registry::asset::BufferedHttpSource;
 use crate::registry::context::RegistryContext;
 use crate::registry::package::icon::icons_dir;
 use crate::registry::package::index::PackageVersionInfo;
+use crate::rpc_continuations::Guid;
 use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::v2::SIG_CONTEXT;
@@ -85,18 +87,7 @@ pub async fn add_package(
 
     ctx.db
         .mutate(|db| {
-            if db.as_admins().de()?.contains(&uploader_guid)
-                || db
-                    .as_index()
-                    .as_package()
-                    .as_packages()
-                    .as_idx(&manifest.id)
-                    .or_not_found(&manifest.id)?
-                    .as_authorized()
-                    .de()?
-                    .get(&uploader_guid)
-                    .map_or(false, |v| manifest.version.satisfies(v))
-            {
+            if can_publish(db, &uploader_guid, &manifest.id, &manifest.version)? {
                 let package = db
                     .as_index_mut()
                     .as_package_mut()
@@ -119,6 +110,25 @@ pub async fn add_package(
         })
         .await
         .result
+}
+
+pub fn can_publish(
+    db: &Model<RegistryDatabase>,
+    signer: &Guid,
+    id: &PackageId,
+    version: &VersionString,
+) -> Result<bool, Error> {
+    Ok(db.as_admins().de()?.contains(signer)
+        || db
+            .as_index()
+            .as_package()
+            .as_packages()
+            .as_idx(id)
+            .or_not_found(id)?
+            .as_authorized()
+            .de()?
+            .get(signer)
+            .map_or(false, |v| version.satisfies(v)))
 }
 
 #[derive(Debug, Deserialize, Serialize, Parser)]
@@ -386,18 +396,7 @@ pub async fn add_mirror(
 
     ctx.db
         .mutate(|db| {
-            if db.as_admins().de()?.contains(&uploader_guid)
-                || db
-                    .as_index()
-                    .as_package()
-                    .as_packages()
-                    .as_idx(&manifest.id)
-                    .or_not_found(&manifest.id)?
-                    .as_authorized()
-                    .de()?
-                    .get(&uploader_guid)
-                    .map_or(false, |v| manifest.version.satisfies(v))
-            {
+            if can_publish(db, &uploader_guid, &manifest.id, &manifest.version)? {
                 let package = db
                     .as_index_mut()
                     .as_package_mut()

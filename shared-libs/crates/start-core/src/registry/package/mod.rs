@@ -10,6 +10,7 @@ pub mod get;
 pub mod icon;
 pub mod index;
 pub mod promote;
+pub mod sign;
 pub mod signer;
 
 pub fn package_api<C: Context>() -> ParentHandler<C> {
@@ -83,6 +84,19 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
                 .no_display()
                 .with_about("about.remove-mirror-package")
                 .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "sign",
+            from_fn_async(sign::sign_package)
+                .with_metadata("get_signer", Value::Bool(true))
+                .no_cli(),
+        )
+        .subcommand(
+            "sign",
+            from_fn_async(sign::cli_sign_package)
+                .no_ts()
+                .no_display()
+                .with_about("about.sign-package-registry"),
         )
         .subcommand(
             "signer",
