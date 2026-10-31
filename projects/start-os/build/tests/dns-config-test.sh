@@ -46,7 +46,7 @@ try {
     assert.equal(result.status, 0, result.stderr)
     assert.equal(read(root + '/etc/upstream'), buildResolver, 'must replace resolver symlinks without modifying their targets')
     if (marker === 'live') {
-      assert.equal(read(root + '/etc/resolv.conf'), buildResolver, 'package installs and NVIDIA/Tor hooks retain build DNS')
+      assert.equal(read(root + '/etc/resolv.conf'), buildResolver, 'package installs and the NVIDIA hook retain build DNS')
       assert.equal(read(root + '/etc/resolv.conf.orig'), 'nameserver 127.0.0.1\n')
       fs.renameSync(root + '/etc/resolv.conf.orig', root + '/etc/resolv.conf')
     }
@@ -58,6 +58,6 @@ try {
 }
 const recipe = read(base + 'build/image-recipe/build.sh')
 assert.doesNotMatch(recipe, /resolv\.conf\.bak/, 'must not restore build-host DNS into the shipped rootfs')
-assert.match(recipe, /lb chroot\nlb installer\nlb binary_chroot\nlb chroot_prep install all mode-apt-install-binary mode-archives-chroot\nlb binary_rootfs\n[\s\S]*?if \[ "\$\{IMAGE_TYPE\}" = iso \]; then/, 'ISO and img share live-build resolver cleanup and rootfs assembly')
+assert.match(recipe, /lb chroot\n[\s\S]*?\nlb installer\nlb binary_chroot\nlb chroot_prep install all mode-apt-install-binary mode-archives-chroot\nlb binary_rootfs\n[\s\S]*?if \[ "\$\{IMAGE_TYPE\}" = iso \]; then/, 'ISO and img share live-build resolver cleanup and rootfs assembly')
 console.log('DNS configuration preserves build DNS until live-build restores the runtime OS stub')
 NODE
