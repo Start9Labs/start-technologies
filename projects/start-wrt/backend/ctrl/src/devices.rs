@@ -235,7 +235,7 @@ fn parse_proc_ipv6_addr(hex: &str) -> Option<String> {
     Some(std::net::Ipv6Addr::from(bytes).to_string())
 }
 
-/// Parse `ip neigh show` output (`IP dev IFACE lladdr MAC STATE`) into entries,
+/// Parse `ip neigh show` output (`IP dev IFACE lladdr MAC [FLAGS] STATE`) into entries,
 /// MAC uppercased, on every interface. Entries without an lladdr
 /// (FAILED/INCOMPLETE) are skipped. The single parser for the whole crate —
 /// callers apply their own interface filter.
@@ -246,7 +246,7 @@ pub(crate) fn parse_neigh_output(output: &str) -> Vec<ArpEntry> {
             if let Some((iface, rest)) = rest.split_once(" lladdr ") {
                 let mut rest_parts = rest.split_whitespace();
                 if let Some(mac) = rest_parts.next() {
-                    let state = rest_parts.next().unwrap_or("UNKNOWN");
+                    let state = rest_parts.last().unwrap_or("UNKNOWN");
                     entries.push(ArpEntry {
                         ip: ip.trim().to_string(),
                         mac: mac.to_uppercase(),
@@ -930,8 +930,8 @@ async fn flush_device_from_network(mac: &str) {
 /// - `probe_targets`: IPv4 (ip, mac, interface) triples to ping-probe.
 ///   The interface is included so pings are bound to the correct LAN segment
 ///   and can't leak to WAN when subnets overlap.
-/// - `ipv6_only_macs`: MACs with only IPv6 neighbor entries (no IPv4 to probe)
-///    — these are treated as unreachable since we can't verify them
+/// - `ipv6_only_macs`: MACs with only IPv6 neighbor entries (no IPv4 to
+///   probe); the IPv6 verification pass decides whether they are present.
 ///
 /// Active WiFi clients are skipped entirely — hostapd is authoritative.
 fn non_wifi_probe_candidates(
@@ -995,8 +995,6 @@ fn non_wifi_probe_candidates(
         }
     }
 
-    // MACs with only IPv6 neighbor entries can't be probed — treat as
-    // unreachable so lingering NDP entries don't resurrect offline devices.
     let ipv6_only = alive_non_wifi_macs.difference(&has_ipv4).cloned().collect();
 
     (targets, ipv6_only)
@@ -1048,6 +1046,13 @@ async fn ping_unreachable_macs(
     (unreachable, live_ipv4s)
 }
 
+/// Longest wait for solicited IPv6 neighbors to answer.
+const IPV6_PROBE_WAIT: Duration = Duration::from_secs(1);
+
+/// Most unknown addresses contacted per multicast ping. Bounds the processes a
+/// client can cause by spoofing echo replies.
+const MAX_ECHO_REPLIERS: usize = 64;
+
 /// GUA (`2000::/3`) or ULA (`fc00::/7`) — the two address classes [`pick_ipv6`]
 /// can return. Link-local and every other scope is filtered out downstream, so
 /// probing one would only cost a second for an address that is never displayed.
@@ -1064,89 +1069,75 @@ fn is_displayable_ipv6(ip: &str) -> bool {
 ///
 /// The kernel keeps a `STALE` entry indefinitely while it sits below the GC
 /// threshold, so "present in the neighbor table" is not evidence the device
-/// still holds the address — it may have been dropped hours ago when a prefix
-/// went away. Anything already `REACHABLE` needs no probe (the kernel verified
-/// it within the last ~30 s), and neither does any MAC that has a `REACHABLE`
-/// entry for the same address family, since it is demonstrably answering NDP.
+/// still holds the address. Each address is judged on its own entry: a device
+/// answering for one address says nothing about another it may have dropped.
 ///
 /// Unlike [`non_wifi_probe_candidates`] this does *not* skip WiFi clients:
 /// hostapd is authoritative for a station's presence, but says nothing about
 /// which IPv6 addresses it still owns.
 fn ipv6_probe_candidates(arp_entries: &[ArpEntry]) -> Vec<(String, String)> {
-    let reachable_macs: std::collections::HashSet<&str> = arp_entries
+    arp_entries
         .iter()
-        .filter(|e| e.state == "REACHABLE" && e.ip.contains(':'))
-        .map(|e| e.mac.as_str())
-        .collect();
-
-    let mut seen = std::collections::HashSet::new();
-    let mut targets = Vec::new();
-    for entry in arp_entries {
-        if !entry.ip.contains(':') || !is_displayable_ipv6(&entry.ip) {
-            continue;
-        }
-        if entry.state == "REACHABLE" || reachable_macs.contains(entry.mac.as_str()) {
-            continue;
-        }
-        if !matches!(entry.state.as_str(), "STALE" | "DELAY" | "PROBE") {
-            continue;
-        }
-        if seen.insert(entry.ip.clone()) {
-            targets.push((entry.ip.clone(), entry.interface.clone()));
-        }
-    }
-    targets
+        .filter(|e| is_displayable_ipv6(&e.ip))
+        .filter(|e| matches!(e.state.as_str(), "STALE" | "DELAY" | "PROBE"))
+        .map(|e| (e.ip.clone(), e.interface.clone()))
+        .collect()
 }
 
-/// Unicast-probe `targets`, then re-read the neighbor table and return every
-/// IPv6 address the kernel now reports as `REACHABLE`.
+/// Solicit `targets`, then return every IPv6 address the kernel reports as
+/// `REACHABLE` once they have all answered or the wait runs out.
 ///
-/// The verdict deliberately comes from the NUD state rather than the ping's
-/// exit code (the way [`ping_unreachable_macs`] judges IPv4). Sending to the
-/// address forces the kernel through neighbor discovery, and a device that
-/// still owns it answers the solicitation even when its firewall drops the
-/// echo request — which is the default on Windows for anything but a private
-/// network profile. Judging on echo replies would hide addresses devices
-/// genuinely hold. This is the same standard [`crate::ipv6_tracker`] applies.
+/// Forces each entry into `PROBE`, which solicits at once: traffic alone holds
+/// a `STALE` entry in `DELAY` for `delay_first_probe_time`, longer than this
+/// waits. The verdict comes from the NUD state, not an echo reply, because a
+/// device answers solicitations even when its firewall drops echo requests. This
+/// is the same standard [`crate::ipv6_tracker`] applies.
 ///
-/// Returns `None` when the neighbor table could not be re-read, which the
-/// caller treats as "no verification available" and fails open.
+/// Returns `None` when the neighbor table could not be read, which the caller
+/// treats as "no verification available" and fails open.
 async fn verify_ipv6_neighbors(
     targets: Vec<(String, String)>,
 ) -> Option<std::collections::HashSet<String>> {
-    use std::process::Stdio;
-
-    let mut children = Vec::new();
-    for (ip, iface) in &targets {
-        if let Ok(child) = tokio::process::Command::new("ping6")
-            .args(["-c", "1", "-W", "1", "-I", iface.as_str(), ip.as_str()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+    futures::future::join_all(targets.iter().map(|(ip, iface)| {
+        tokio::process::Command::new("ip")
+            .args([
+                "-6",
+                "neigh",
+                "change",
+                ip.as_str(),
+                "dev",
+                iface.as_str(),
+                "nud",
+                "probe",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .kill_on_drop(true)
-            .spawn()
-        {
-            children.push(child);
-        }
-    }
-    for mut child in children {
-        let _ = child.wait().await;
-    }
+            .status()
+    }))
+    .await;
 
-    let output = tokio::process::Command::new("ip")
-        .args(["-6", "neigh", "show"])
-        .output()
-        .await
-        .ok()?;
-    if !output.status.success() {
-        return None;
+    let deadline = Instant::now() + IPV6_PROBE_WAIT;
+    loop {
+        let output = tokio::process::Command::new("ip")
+            .args(["-6", "neigh", "show"])
+            .output()
+            .await
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let reachable: std::collections::HashSet<String> =
+            parse_arp_output(&String::from_utf8_lossy(&output.stdout))
+                .into_iter()
+                .filter(|e| e.state == "REACHABLE")
+                .map(|e| e.ip)
+                .collect();
+        if Instant::now() >= deadline || targets.iter().all(|(ip, _)| reachable.contains(ip)) {
+            return Some(reachable);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    Some(
-        parse_arp_output(&String::from_utf8_lossy(&output.stdout))
-            .into_iter()
-            .filter(|e| e.state == "REACHABLE")
-            .map(|e| e.ip)
-            .collect(),
-    )
 }
 
 /// The IPv6 addresses of a MAC that survive verification, in neighbor-table
@@ -1168,6 +1159,22 @@ fn live_ipv6_candidates<'a>(
             Some(live) => e.state == "REACHABLE" || live.contains(&e.ip),
         })
         .map(|e| e.ip.as_str())
+        .collect()
+}
+
+/// MACs in `ipv6_only` with an IPv6 entry the kernel confirmed this poll, in
+/// the snapshot or after the probe. Without a verdict nothing is confirmed: a
+/// lingering entry must not bring an absent device back online.
+fn ipv6_confirmed_macs(
+    arp_entries: &[ArpEntry],
+    ipv6_only: &std::collections::HashSet<String>,
+    verified: Option<&std::collections::HashSet<String>>,
+) -> std::collections::HashSet<String> {
+    arp_entries
+        .iter()
+        .filter(|e| e.ip.contains(':') && ipv6_only.contains(&e.mac))
+        .filter(|e| e.state == "REACHABLE" || verified.is_some_and(|live| live.contains(&e.ip)))
+        .map(|e| e.mac.clone())
         .collect()
 }
 
@@ -1304,81 +1311,149 @@ async fn resolve_mdns_names(targets: Vec<(String, String)>) -> HashMap<String, S
         .await
 }
 
+/// Displayable source addresses in `ping6` output, each once, in reply order.
+fn echo_reply_sources(output: &str) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    output
+        .lines()
+        .filter_map(|line| line.split_once(" bytes from ")?.1.split_once(": "))
+        .filter_map(|(addr, _)| addr.parse::<std::net::Ipv6Addr>().ok())
+        .map(|addr| addr.to_string())
+        .filter(|addr| is_displayable_ipv6(addr) && seen.insert(addr.clone()))
+        .collect()
+}
+
+/// `(address, interface)` pairs that answered a multicast ping and have no
+/// neighbor entry on that interface. `replies` pairs each ping's interface with
+/// its output.
+fn unknown_echo_repliers(
+    replies: &[(String, String)],
+    own_addrs: &std::collections::HashSet<String>,
+    known: &[ArpEntry],
+) -> Vec<(String, String)> {
+    let known: std::collections::HashSet<(&str, &str)> = known
+        .iter()
+        .map(|e| (e.ip.as_str(), e.interface.as_str()))
+        .collect();
+    replies
+        .iter()
+        .flat_map(|(iface, output)| {
+            echo_reply_sources(output)
+                .into_iter()
+                .filter(|addr| {
+                    !own_addrs.contains(addr) && !known.contains(&(addr.as_str(), iface.as_str()))
+                })
+                .take(MAX_ECHO_REPLIERS)
+                .map(|addr| (addr, iface.clone()))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn spawn_ping6(args: &[&str], stdout: std::process::Stdio) -> Option<tokio::process::Child> {
+    tokio::process::Command::new("ping6")
+        .args(args)
+        .stdout(stdout)
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .ok()
+}
+
 /// Ping ff02::1 on every LAN interface to (re)populate the NDP neighbor table.
 /// SLAAC is stateless — the router never learns which addresses clients
-/// configured — so this multicast prod is how they become visible. All pings
-/// fire concurrently so wall-clock time is ~1s regardless of interface count.
+/// configured — so this multicast prod is how they become visible.
+///
+/// A client that already resolved the router's address answers without
+/// soliciting from its own, leaving the router no entry for it. Contacting each
+/// unknown address that replied creates one.
+///
 /// Shared by `list` (phase 1) and the `ipv6_tracker` periodic rescan.
 pub(crate) async fn prod_ipv6_neighbors() {
-    {
-        use std::process::Stdio;
+    use std::process::Stdio;
 
-        // When bridge VLAN filtering is active, br-lan.X interfaces exist for
-        // each profile VLAN — use those exclusively. Multicast on the bridge
-        // master (br-lan) leaks out ALL member ports including WAN, which
-        // causes upstream devices to appear as LAN clients.
-        // When no VLANs exist (single admin profile), fall back to br-lan.
-        let mut ifaces = Vec::new();
-        if let Ok(mut entries) = tokio::fs::read_dir("/sys/class/net").await {
-            while let Ok(Some(entry)) = entries.next_entry().await {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with("br-lan.") {
-                    ifaces.push(name);
-                }
+    // When bridge VLAN filtering is active, br-lan.X interfaces exist for
+    // each profile VLAN — use those exclusively. Multicast on the bridge
+    // master (br-lan) leaks out ALL member ports including WAN, which
+    // causes upstream devices to appear as LAN clients.
+    // When no VLANs exist (single admin profile), fall back to br-lan.
+    let mut ifaces = Vec::new();
+    if let Ok(mut entries) = tokio::fs::read_dir("/sys/class/net").await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("br-lan.") {
+                ifaces.push(name);
             }
         }
-        if ifaces.is_empty() {
-            ifaces.push("br-lan".to_string());
-        }
+    }
+    if ifaces.is_empty() {
+        ifaces.push("br-lan".to_string());
+    }
 
-        let mut children: Vec<tokio::process::Child> = Vec::new();
+    let link_local: Vec<_> = ifaces
+        .iter()
+        .filter_map(|iface| {
+            spawn_ping6(
+                &["-c", "1", "-W", "1", "-I", iface.as_str(), "ff02::1"],
+                Stdio::null(),
+            )
+        })
+        .collect();
 
-        // Link-local discovery on each LAN VLAN interface.
-        for iface in &ifaces {
-            if let Ok(child) = tokio::process::Command::new("ping6")
-                .args(["-c", "1", "-W", "1", "-I", iface.as_str(), "ff02::1"])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .kill_on_drop(true)
-                .spawn()
-            {
-                children.push(child);
-            }
-        }
-
-        // ULA/global discovery — ping from each interface's global IPv6
-        // address so clients respond from their ULA addresses (RFC 6724).
-        if let Ok(content) = tokio::fs::read_to_string("/proc/net/if_inet6").await {
-            for line in content.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                // Format: addr_hex ifindex prefix_len scope flags ifname
-                // scope "00" = global
-                if parts.len() >= 6 && parts[3] == "00" && ifaces.iter().any(|i| i == parts[5]) {
-                    if let Some(addr) = parse_proc_ipv6_addr(parts[0]) {
-                        let dest = format!("ff02::1%{}", parts[5]);
-                        if let Ok(child) = tokio::process::Command::new("ping6")
-                            .args(["-c", "1", "-W", "1", "-I", &addr, &dest])
-                            .stdout(Stdio::null())
-                            .stderr(Stdio::null())
-                            .kill_on_drop(true)
-                            .spawn()
-                        {
-                            children.push(child);
-                        }
+    // Clients answer from the address matching each source (RFC 6724).
+    let mut own_addrs = std::collections::HashSet::new();
+    let mut global = Vec::new();
+    if let Ok(content) = tokio::fs::read_to_string("/proc/net/if_inet6").await {
+        for line in content.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            // Format: addr_hex ifindex prefix_len scope flags ifname
+            // scope "00" = global
+            if parts.len() >= 6 && parts[3] == "00" && ifaces.iter().any(|i| i == parts[5]) {
+                if let Some(addr) = parse_proc_ipv6_addr(parts[0]) {
+                    let dest = format!("ff02::1%{}", parts[5]);
+                    // A count would stop at the router's own looped-back reply.
+                    if let Some(child) =
+                        spawn_ping6(&["-w", "1", "-I", &addr, &dest], Stdio::piped())
+                    {
+                        global.push((parts[5].to_string(), child));
                     }
+                    own_addrs.insert(addr);
                 }
             }
         }
+    }
 
-        for mut child in children {
-            let _ = child.wait().await;
-        }
+    let replies: Vec<(String, String)> =
+        futures::future::join_all(global.into_iter().map(|(iface, child)| async move {
+            let output = child.wait_with_output().await.ok()?;
+            Some((iface, String::from_utf8_lossy(&output.stdout).into_owned()))
+        }))
+        .await
+        .into_iter()
+        .flatten()
+        .collect();
+    for mut child in link_local {
+        let _ = child.wait().await;
+    }
+
+    let known = parse_arp_output(&run_cmd("ip", &["-6", "neigh", "show"]).await);
+    let contacts: Vec<_> = unknown_echo_repliers(&replies, &own_addrs, &known)
+        .iter()
+        .filter_map(|(addr, iface)| {
+            spawn_ping6(
+                &["-c", "1", "-W", "1", "-I", iface.as_str(), addr.as_str()],
+                Stdio::null(),
+            )
+        })
+        .collect();
+    for mut child in contacts {
+        let _ = child.wait().await;
     }
 }
 
 #[instrument(skip_all)]
 pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
-    // --- Phase 1: IPv6 multicast discovery (all pings concurrent, ~1s) ---
+    // --- Phase 1: IPv6 multicast discovery (~1s) ---
     prod_ipv6_neighbors().await;
 
     // --- Phase 2a: Initial data gather (parallel) ---
@@ -1453,9 +1528,9 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     // For any non-WiFi device (STALE or REACHABLE), ping it to check if it's
     // actually present. This catches both aged-out entries AND recently
     // disconnected WiFi devices whose ARP is still REACHABLE but hostapd has
-    // already dropped them. MACs with only IPv6 neighbor entries (no IPv4 to
-    // probe) are treated as unreachable. Runs concurrently with nlbw,
-    // conntrack, and lease reads so it adds zero net latency.
+    // already dropped them. MACs with only IPv6 neighbor entries are offline
+    // unless the IPv6 pass confirms one of their addresses. Runs concurrently
+    // with nlbw, conntrack, and lease reads so it adds zero net latency.
     let (probe_targets, ipv6_only_macs) = non_wifi_probe_candidates(&initial_arp, &wifi_clients);
     // IPv6 addresses get their own verification pass: a STALE NDP entry can
     // outlive the address itself by hours, so the neighbor table alone is not
@@ -1495,7 +1570,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     );
 
     let mut unreachable_macs = unreachable_macs;
-    unreachable_macs.extend(ipv6_only_macs);
+    let ipv6_confirmed = ipv6_confirmed_macs(&initial_arp, &ipv6_only_macs, live_ipv6s.as_ref());
+    unreachable_macs.extend(ipv6_only_macs.difference(&ipv6_confirmed).cloned());
     let leases_output = leases_output;
 
     // Use the initial ARP snapshot — no need to re-read since we use ping
@@ -2873,42 +2949,150 @@ config host 'host_cccccccccccc'
     #[test]
     fn ipv6_probe_candidates_targets_only_unconfirmed_displayable_addresses() {
         let entries = vec![
-            // Probed: a stale GUA and a stale ULA are exactly the addresses that
-            // can outlive the device's ownership of them.
             arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE"),
             arp_mac("fd00::5", "AA:AA:AA:00:00:02", "STALE"),
-            // Not probed: the kernel confirmed this one within the last ~30 s.
+            arp_mac("2001:db8::9", "AA:AA:AA:00:00:08", "DELAY"),
+            arp_mac("2001:db8::a", "AA:AA:AA:00:00:09", "PROBE"),
+            // Confirmed within the last ~30 s.
             arp_mac("2001:db8::6", "AA:AA:AA:00:00:03", "REACHABLE"),
-            // Not probed: same MAC as the REACHABLE entry above, so the device is
-            // demonstrably answering NDP — a second probe would tell us nothing.
-            arp_mac("2001:db8::7", "AA:AA:AA:00:00:03", "STALE"),
-            // Not probed: never displayed, so verifying it would be wasted time.
+            // Never displayed.
             arp_mac("fe80::1", "AA:AA:AA:00:00:04", "STALE"),
             arp_mac("fec0::1", "AA:AA:AA:00:00:05", "STALE"),
-            // Not probed: IPv4 has its own probe path.
+            // IPv4 has its own probe path.
             arp_mac("192.168.10.5", "AA:AA:AA:00:00:06", "STALE"),
-            // Not probed: FAILED is not an "alive" state.
             arp_mac("2001:db8::8", "AA:AA:AA:00:00:07", "FAILED"),
         ];
 
-        let targets = ipv6_probe_candidates(&entries);
+        let targets: Vec<_> = ipv6_probe_candidates(&entries)
+            .into_iter()
+            .map(|(ip, _)| ip)
+            .collect();
         assert_eq!(
             targets,
-            vec![
+            ["2001:db8::5", "fd00::5", "2001:db8::9", "2001:db8::a"],
+        );
+    }
+
+    #[test]
+    fn ipv6_probe_candidates_probes_stale_address_beside_reachable_ones() {
+        let entries = vec![
+            arp_mac("fe80::5", "AA:AA:AA:00:00:01", "REACHABLE"),
+            arp_mac("2001:db8::6", "AA:AA:AA:00:00:01", "REACHABLE"),
+            arp_mac("fd00::5", "AA:AA:AA:00:00:01", "STALE"),
+        ];
+        assert_eq!(
+            ipv6_probe_candidates(&entries),
+            [("fd00::5".to_string(), "br-lan.101".to_string())],
+        );
+    }
+
+    #[test]
+    fn ipv6_probe_candidates_probes_each_bridge_holding_an_address() {
+        let a = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE");
+        let mut b = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE");
+        b.interface = "br-lan.102".to_string();
+        assert_eq!(
+            ipv6_probe_candidates(&[a, b]),
+            [
                 ("2001:db8::5".to_string(), "br-lan.101".to_string()),
-                ("fd00::5".to_string(), "br-lan.101".to_string()),
+                ("2001:db8::5".to_string(), "br-lan.102".to_string()),
             ],
         );
     }
 
     #[test]
-    fn ipv6_probe_candidates_deduplicates_repeated_addresses() {
-        // The same address can appear on two bridges after a device roams; one
-        // probe settles it.
-        let a = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE");
-        let mut b = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE");
-        b.interface = "br-lan.102".to_string();
-        assert_eq!(ipv6_probe_candidates(&[a, b]).len(), 1);
+    fn parse_neigh_output_reads_state_past_flags() {
+        let entries = parse_neigh_output(
+            "fd00::5 dev br-lan.1 lladdr aa:aa:aa:00:00:01 router STALE\n\
+             fd00::6 dev br-lan.1 lladdr aa:aa:aa:00:00:02 router proxy REACHABLE\n\
+             fd00::7 dev br-lan.1 lladdr aa:aa:aa:00:00:03 DELAY\n\
+             fd00::8 dev br-lan.1 lladdr aa:aa:aa:00:00:04\n",
+        );
+        let states: Vec<_> = entries.iter().map(|e| e.state.as_str()).collect();
+        assert_eq!(states, ["STALE", "REACHABLE", "DELAY", "UNKNOWN"]);
+    }
+
+    #[test]
+    fn echo_reply_sources_reads_every_displayable_replier_once() {
+        let output = "\
+PING ff02::1%br-lan.1 (ff02::1%6) from fd00::1: 56 data bytes
+64 bytes from fd00::1: seq=0 ttl=64 time=0.494 ms
+64 bytes from fd00::5: seq=0 ttl=64 time=1.075 ms (DUP!)
+64 bytes from 2001:db8::5: seq=0 ttl=64 time=1.100 ms (DUP!)
+64 bytes from fe80::5: seq=0 ttl=64 time=1.200 ms (DUP!)
+64 bytes from fd00::5: seq=1 ttl=64 time=0.611 ms (DUP!)
+64 bytes from nonsense: seq=1 ttl=64 time=0.700 ms (DUP!)
+
+--- ff02::1%br-lan.1 ping statistics ---
+1 packets transmitted, 1 packets received, 4 duplicates, 0% packet loss
+";
+        assert_eq!(
+            echo_reply_sources(output),
+            ["fd00::1", "fd00::5", "2001:db8::5"],
+        );
+    }
+
+    #[test]
+    fn unknown_echo_repliers_skips_own_and_known_addresses() {
+        let output = "64 bytes from fd00::1: seq=0\n\
+                      64 bytes from fd00::5: seq=0\n\
+                      64 bytes from fd00::6: seq=0\n";
+        let replies = vec![
+            ("br-lan.101".to_string(), output.to_string()),
+            ("br-lan.102".to_string(), output.to_string()),
+        ];
+        let own = ["fd00::1".to_string()].into_iter().collect();
+        let known = vec![arp_mac("fd00::5", "AA:AA:AA:00:00:01", "STALE")];
+        assert_eq!(
+            unknown_echo_repliers(&replies, &own, &known),
+            [
+                ("fd00::6".to_string(), "br-lan.101".to_string()),
+                ("fd00::5".to_string(), "br-lan.102".to_string()),
+                ("fd00::6".to_string(), "br-lan.102".to_string()),
+            ],
+        );
+    }
+
+    #[test]
+    fn unknown_echo_repliers_caps_each_ping_but_not_known_addresses() {
+        let output: String = (0..MAX_ECHO_REPLIERS + 10)
+            .map(|i| format!("64 bytes from fd00::{:x}: seq=0\n", i + 1))
+            .collect();
+        let replies = vec![("br-lan.101".to_string(), output)];
+        let known = vec![arp_mac("fd00::1", "AA:AA:AA:00:00:01", "STALE")];
+        let found = unknown_echo_repliers(&replies, &Default::default(), &known);
+        assert_eq!(found.len(), MAX_ECHO_REPLIERS);
+        assert_eq!(found[0].0, "fd00::2");
+    }
+
+    #[test]
+    fn ipv6_confirmed_macs_needs_a_reachable_or_verified_entry() {
+        let entries = [
+            arp_mac("fd00::5", "AA:AA:AA:00:00:01", "STALE"),
+            arp_mac("fe80::6", "AA:AA:AA:00:00:02", "REACHABLE"),
+            arp_mac("fd00::7", "AA:AA:AA:00:00:03", "STALE"),
+            arp_mac("192.168.10.9", "AA:AA:AA:00:00:03", "REACHABLE"),
+        ];
+        let ipv6_only: std::collections::HashSet<String> = [
+            "AA:AA:AA:00:00:01",
+            "AA:AA:AA:00:00:02",
+            "AA:AA:AA:00:00:03",
+        ]
+        .map(String::from)
+        .into();
+        let verified = ["fd00::5".to_string()].into();
+
+        let confirmed = ipv6_confirmed_macs(&entries, &ipv6_only, Some(&verified));
+        assert_eq!(
+            confirmed,
+            ["AA:AA:AA:00:00:01", "AA:AA:AA:00:00:02"]
+                .map(String::from)
+                .into(),
+        );
+
+        // No verdict: only an entry the snapshot already confirmed counts.
+        let confirmed = ipv6_confirmed_macs(&entries, &ipv6_only, None);
+        assert_eq!(confirmed, ["AA:AA:AA:00:00:02".to_string()].into());
     }
 
     #[test]
