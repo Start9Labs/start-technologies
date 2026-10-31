@@ -956,9 +956,8 @@ struct SetDnsInjectionReq {
 }
 // Response: null
 // Backend: stores `_allow_dns_inject` on the device's DHCP host section,
-// creating one if needed, rewrites the per-profile dnsmasq instances, and
-// applies the change immediately. `allow: false` also drops the records the
-// device has published.
+// creating one if needed, and applies the change immediately. `allow: false`
+// also drops the records the device has published.
 ```
 
 ### `devices.set-router-advertisements`
@@ -1621,9 +1620,9 @@ struct PeerSetDnsInjectionArgs {
 }
 // Response: null
 // Backend: stores `_allow_dns_inject` on the peer's `wireguard_wg_<profile>`
-// section, rewrites the per-profile dnsmasq instances, and applies the change
-// immediately. A peer's signed updates are refused without it. `allow: false`
-// also drops the records the peer has published.
+// section and applies the change immediately. A peer's signed updates are
+// refused without it. `allow: false` also drops the records the peer has
+// published.
 ```
 
 ---

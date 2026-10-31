@@ -1,0 +1,1 @@
+- Todas las redes responden al dominio de detección de DNS sobre HTTPS de Firefox, por lo que DoH activado por defecto deja paso a la resolución local de nombres de dispositivos. DoH habilitado explícitamente por el usuario no cambia.
