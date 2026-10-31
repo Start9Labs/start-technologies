@@ -1,1 +1,0 @@
-- Stocke les clés typées structurellement sans enveloppe PEM, tout en préservant les connexions existantes et les signataires de mises à jour approuvés lors des mises à niveau.

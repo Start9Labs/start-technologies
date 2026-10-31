@@ -1,1 +1,0 @@
-- Aktualizacja ze StartOS 0.3.5 przenosi każdy adres `.onion` z portami, które tam obsługiwał, także dla usług, których migracja kończy się po Torze. Interfejs, który w 0.3.5 nie miał adresu Tor, nie otrzymuje go.

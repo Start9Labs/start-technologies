@@ -1,1 +1,0 @@
-- **Formatowanie dysku na kopie zapasowe w StartOS.** W menu `Ustawienia > Utwórz kopię zapasową` opcja „Sformatuj dysk” wymazuje podłączony dysk i tworzy na nim jedną partycję Btrfs gotową na kopie zapasowe. Dysk zawierający StartOS lub jego dane jest odrzucany. Dostępne również jako `start-cli disk format`.

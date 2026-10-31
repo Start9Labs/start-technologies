@@ -1,1 +1,0 @@
-- Beim Update von StartOS 0.3.5 behält jede `.onion`-Adresse die Ports, die sie dort bediente, auch bei Diensten, deren Migration erst nach Tor abgeschlossen ist. Eine Schnittstelle ohne Tor-Adresse unter 0.3.5 erhält keine.
