@@ -568,4 +568,7 @@ export default {
   596: 'Pozwala temu urządzeniu ogłaszać trasy IPv6 innym Twoim urządzeniom (wymagane przez routery brzegowe Thread, takie jak Apple TV, HomePod lub Home Assistant). Domyślnie wyłączone.',
   597: 'Zezwolić na ogłoszenia routera IPv6?',
   598: 'To urządzenie będzie mogło przydzielać innym Twoim urządzeniom adresy IPv6, trasy, serwery DNS i bramę domyślną, a także kierować ich ruch IPv6 z pominięciem routera. Przyznaj to tylko zaufanemu urządzeniu, takiemu jak router brzegowy Thread.',
+  599: 'Urządzenia na {port} przejdą do profilu {profile}. Większość połączy się ponownie w ciągu kilku sekund. Jeśli urządzenie nie ma potem dostępu do internetu lub nie może połączyć się z innymi urządzeniami, co często zdarza się za przełącznikiem, odłącz i ponownie podłącz jego kabel albo uruchom ponownie urządzenie lub przełącznik. W przeciwnym razie połączy się samo w ciągu 12 godzin.',
+  600: 'Zmienić profil bezpieczeństwa?',
+  601: 'Zmień profil',
 } satisfies i18n
