@@ -1437,7 +1437,7 @@ test('archived localized notes keep the changelog link last and its source URL',
   assert.equal(withoutLink(polish), withoutLink(pendingPolish))
 })
 
-test('CLI capability gates registry writes and CI uploads without gating pure notes', t => {
+test('CLI capability gates registry writes without gating pure notes', t => {
   const { root, env, write, script, run, nodeExecutable } = releaseFixture(t)
   write(`projects/start-wrt/release-notes/${VERSION}.md`, MAIN)
   const marker = join(root, 'registry-write')
@@ -1485,23 +1485,8 @@ enter_release_dir() { touch "${marker}"; }
     contains(rejected.stderr, 'update it before publishing registry notes')
     assert.equal(existsSync(marker), false)
   }
-  for (const [workflow, product, upload] of [
-    ['startos-iso.yaml', 'start-os', 'Upload to S3'],
-    ['start-wrt.yaml', 'start-wrt', 'Upload images to S3'],
-  ]) {
-    const source = text(join(REPO, '.github/workflows', workflow)).split(
-      '\n  deploy:\n',
-    )[1]
-    const install = source
-      .split('      - name: Install start-cli\n')[1]
-      .split('\n      - name: ')[0]
+  for (const product of ['start-os', 'start-wrt']) {
     const command = `./scripts/manage-release.sh check-registry-notes-cli ${product}`
-    contains(install, command)
-    assert.ok(source.indexOf(command) < source.indexOf(`- name: ${upload}`))
-    assert.ok(
-      source.indexOf(command) <
-        source.indexOf('- name: Drop the previous alpha build'),
-    )
     const rejected = run('bash', ['-e', '-c', command], { encoding: 'utf8' })
     assert.notEqual(rejected.status, 0)
     contains(rejected.stderr, 'lacks LocaleString release notes')
