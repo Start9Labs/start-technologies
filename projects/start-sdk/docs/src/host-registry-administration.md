@@ -73,6 +73,17 @@ start-cli registry package remove-mirror <PACKAGE_ID> <VERSION> --url <MIRROR_UR
 
 You can't remove the last remaining URL for a package — every indexed version needs at least one reachable URL.
 
+### Cosigning
+
+Any signer authorized for a package can add their signature to a version already in the index:
+
+```sh
+start-cli registry package sign <S9PK_FILE>
+start-cli registry package sign --no-verify --id <PACKAGE_ID> --version <VERSION>
+```
+
+The first form signs a local copy of the `.s9pk`. With `--no-verify`, it signs the commitments the registry lists for that version without checking them against a local file.
+
 ## Categories
 
 Categories are flat tags that group packages in the marketplace UI. Create and assign:
