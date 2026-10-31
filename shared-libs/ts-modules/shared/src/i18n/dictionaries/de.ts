@@ -901,4 +901,7 @@ export default {
   1018: 'Gesamtfortschritt',
   1019: 'Sicherungsformat aktualisieren?',
   1020: 'Die Sicherung dieses Servers verwendet ein altes Format. Aktualisieren Sie es für eine stärkere Manipulationserkennung und schreibgeschützte Snapshots, oder überspringen Sie diesen Schritt, um eine Sicherung im bestehenden Format zu erstellen. Die Konvertierung kann lange dauern, und diese Sicherung ist bis zum Abschluss nicht verfügbar.',
+  1023: 'Stopp erzwingen',
+  1024: 'Stopp wird erzwungen',
+  1025: 'Ein erzwungener Stopp kann zu Datenverlust führen oder den Dienst in einem fehlerhaften Zustand hinterlassen. Möchten Sie den Stopp wirklich erzwingen?',
 } satisfies i18n

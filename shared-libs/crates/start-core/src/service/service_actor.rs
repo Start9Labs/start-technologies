@@ -99,6 +99,28 @@ async fn service_actor_loop<'a>(
     transition: &mut Option<Transition<'a>>,
 ) -> Result<(), Error> {
     let entry = watch.peek_and_mark_seen()?;
+    let mut status = entry.as_status_info().de()?;
+    let id = &seed.id;
+    let previous_deadline = status.force_stop_at;
+    let delay = seed.ctx.force_stop_delay;
+    status.sync_force_stop_deadline(chrono::Utc::now(), delay);
+    if status.force_stop_at != previous_deadline {
+        seed.ctx
+            .db
+            .mutate(|db| {
+                db.as_public_mut()
+                    .as_package_data_mut()
+                    .as_idx_mut(id)
+                    .or_not_found(id)?
+                    .as_status_info_mut()
+                    .mutate(|status| {
+                        status.sync_force_stop_deadline(chrono::Utc::now(), delay);
+                        Ok(())
+                    })
+            })
+            .await
+            .result?;
+    }
     let kind = required_transition(&entry, &seed.id, transition.as_ref().map(|task| task.kind))?;
     let task = transition.take().filter(|task| Some(task.kind) == kind);
     *transition = task.or_else(|| match kind {
@@ -194,6 +216,48 @@ mod tests {
             .as_tasks_mut()
             .insert(&name.parse().unwrap(), &task)
             .unwrap();
+    }
+
+    #[test]
+    fn force_stop_requires_explicit_stop_during_critical_task_shutdown() {
+        let id = "service".parse().unwrap();
+        let now = chrono::Utc::now();
+        let delay = Duration::from_secs(30);
+        let mut entry = entry(DesiredStatus::Running, true);
+        add_task(
+            &mut entry,
+            "blocker",
+            "service",
+            true,
+            TaskSeverity::Critical,
+        );
+        assert_eq!(
+            required_transition(&entry, &id, None).unwrap(),
+            Some(TransitionKind::Stopping)
+        );
+        entry
+            .as_status_info_mut()
+            .mutate(|status| {
+                status.sync_force_stop_deadline(now, delay);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(entry.as_status_info().de().unwrap().force_stop_at, None);
+        entry.as_status_info_mut().stop().unwrap();
+        entry
+            .as_status_info_mut()
+            .mutate(|status| {
+                status.sync_force_stop_deadline(now, delay);
+                Ok(())
+            })
+            .unwrap();
+        let status = entry.as_status_info().de().unwrap();
+        let deadline = status.force_stop_at.unwrap();
+        assert!(status.can_force_stop(deadline, now + delay));
+        assert_eq!(
+            required_transition(&entry, &id, Some(TransitionKind::Stopping)).unwrap(),
+            Some(TransitionKind::Stopping)
+        );
     }
 
     #[test]

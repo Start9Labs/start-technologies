@@ -901,4 +901,7 @@ export default {
   1018: 'Progreso general',
   1019: '¿Actualizar el formato de la copia?',
   1020: 'La copia de este servidor utiliza un formato antiguo. Actualícelo para una detección de alteraciones más sólida e instantáneas de solo lectura, u omita este paso para crear una copia con el formato existente. La conversión puede tardar mucho tiempo y esta copia no estará disponible hasta que termine.',
+  1023: 'Forzar detención',
+  1024: 'Forzando detención',
+  1025: 'Forzar la detención puede provocar pérdida de datos o dejar el servicio en mal estado. ¿Seguro que deseas forzar la detención?',
 } satisfies i18n

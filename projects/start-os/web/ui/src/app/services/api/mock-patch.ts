@@ -12,7 +12,8 @@ function mockService(
   id: string,
   title: string,
   pkgVersion: string,
-  statusInfo: T.StatusInfo,
+  statusInfo: Omit<T.StatusInfo, 'forceStopAt'> &
+    Partial<Pick<T.StatusInfo, 'forceStopAt'>>,
 ): PackageDataEntry<InstalledState> {
   return {
     stateInfo: {
@@ -26,7 +27,7 @@ function mockService(
     },
     s9pk: `/media/startos/data/package-data/archive/installed/${id}.s9pk`,
     lastBackup: null,
-    statusInfo,
+    statusInfo: { forceStopAt: null, ...statusInfo },
     actions: {},
     currentDependencies: {},
     hosts: {},
@@ -410,6 +411,7 @@ export const mockPatchData: DataModel = {
       s9pk: '/media/startos/data/package-data/archive/installed/asdfasdf.s9pk',
       lastBackup: null,
       statusInfo: {
+        forceStopAt: null,
         desired: { main: 'stopped' },
         error: null,
         health: {},
@@ -542,6 +544,7 @@ export const mockPatchData: DataModel = {
       s9pk: '/media/startos/data/package-data/archive/installed/asdfasdf.s9pk',
       lastBackup: new Date(new Date().valueOf() - 604800001).toISOString(),
       statusInfo: {
+        forceStopAt: null,
         desired: { main: 'stopped' },
         error: null,
         health: {},
@@ -1098,6 +1101,7 @@ export const mockPatchData: DataModel = {
       s9pk: '/media/startos/data/package-data/archive/installed/tor.s9pk',
       lastBackup: null,
       statusInfo: {
+        forceStopAt: null,
         desired: { main: 'running' },
         error: null,
         health: {},
@@ -1174,15 +1178,10 @@ export const mockPatchData: DataModel = {
       started: null,
     }),
     electrs: mockService('electrs', 'Electrs', '0.10.5:0', {
-      desired: { main: 'running' },
+      desired: { main: 'stopped' },
+      forceStopAt: new Date(Date.now() - 60000).toISOString(),
       error: null,
-      health: {
-        rpc: {
-          name: 'RPC',
-          result: 'failure',
-          message: 'Cannot reach bitcoind',
-        },
-      },
+      health: {},
       started: new Date(Date.now() - 3600000).toISOString(),
     }),
     'home-assistant': mockService(

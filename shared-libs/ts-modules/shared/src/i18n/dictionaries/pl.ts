@@ -901,4 +901,7 @@ export default {
   1018: 'Łączny postęp',
   1019: 'Zaktualizować format kopii zapasowej?',
   1020: 'Kopia tego serwera używa starego formatu. Zaktualizuj go, aby uzyskać skuteczniejsze wykrywanie modyfikacji i migawki tylko do odczytu, lub pomiń ten krok, aby utworzyć kopię w istniejącym formacie. Konwersja może potrwać długo, a kopia jest niedostępna do jej zakończenia.',
+  1023: 'Wymuś zatrzymanie',
+  1024: 'Wymuszanie zatrzymania',
+  1025: 'Wymuszenie zatrzymania może spowodować utratę danych lub pozostawić serwis w nieprawidłowym stanie. Czy na pewno chcesz wymusić zatrzymanie?',
 } satisfies i18n

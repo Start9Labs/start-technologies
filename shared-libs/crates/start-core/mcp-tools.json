@@ -3351,6 +3351,31 @@
     }
   },
   {
+    "name": "package.force-stop",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "ForceStopParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/PackageId" },
+            "forceStopAt": { "type": "string" }
+          },
+          "required": ["id", "forceStopAt"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/PackageId" },
+        "forceStopAt": { "type": "string" }
+      },
+      "required": ["id", "forceStopAt"],
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "package.host.address.domain.private.add",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

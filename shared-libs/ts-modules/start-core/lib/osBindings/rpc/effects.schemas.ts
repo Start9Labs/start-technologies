@@ -2539,11 +2539,16 @@ export const StatusInfo: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   desired: typeof DesiredStatus
+  forceStopAt: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
 }> = /* @__PURE__ */ object({
   health: z.record(z.string(), NamedHealthCheckResult),
   error: wire(ErrorData.nullable().optional(), ErrorData.nullable()),
   started: wire(z.string().nullable().optional(), z.string().nullable()),
   desired: DesiredStatus,
+  forceStopAt: wire(z.string().nullable().optional(), z.string().nullable()),
 }).meta({
   id: 'StatusInfo',
 })

@@ -901,4 +901,7 @@ export default {
   1018: 'Progression globale',
   1019: 'Mettre à jour le format de sauvegarde ?',
   1020: 'La sauvegarde de ce serveur utilise un ancien format. Mettez-le à jour pour une meilleure détection des altérations et des instantanés en lecture seule, ou ignorez cette étape pour créer une sauvegarde au format existant. La conversion peut prendre beaucoup de temps et cette sauvegarde reste indisponible jusqu’à la fin.',
+  1023: 'Forcer l’arrêt',
+  1024: 'Arrêt forcé en cours',
+  1025: 'Forcer l’arrêt peut entraîner une perte de données ou laisser le service dans un état défectueux. Voulez-vous vraiment forcer l’arrêt ?',
 } satisfies i18n

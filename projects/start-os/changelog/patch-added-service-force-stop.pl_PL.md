@@ -1,0 +1,1 @@
+- **Wymuś zatrzymanie usług, które utknęły podczas zatrzymywania.** Potwierdzenie ostrzega o utracie danych i niespójnym stanie usługi. Przycisk pojawia się domyślnie po 30 sekundach; czas można zmienić przez `force-stop-delay-seconds` w `config.yaml`.

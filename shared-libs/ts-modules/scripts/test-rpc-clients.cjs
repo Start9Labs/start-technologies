@@ -273,6 +273,10 @@ test('StartOS derives the method path and forwards results untouched', async () 
   assert.equal(requests[2].method, 'package.action.get-input')
   await rpc.server.logs({ limit: 1 }, { timeout: 10000 })
   assert.equal(requests[3].timeout, 10000)
+  const forceStop = { id: 'demo', forceStopAt: '2026-10-10T12:00:30Z' }
+  assert.equal(await rpc.package.forceStop(forceStop), null)
+  assert.equal(requests[4].method, 'package.force-stop')
+  assert.equal(requests[4].params, forceStop)
 })
 
 test('Setup converts the actual JWK response and forwards the installation timeout', async () => {
@@ -409,6 +413,81 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
     }),
     version,
   )
+})
+
+test('StartOS force-stop mock checks the live episode rather than its seed fixture', async () => {
+  const storage = Symbol('session storage')
+  const oldDeadline = new Date(Date.now() - 120000).toISOString()
+  const deadline = new Date(Date.now() - 60000).toISOString()
+  const status = {
+    desired: { main: 'stopped' },
+    started: new Date(Date.now() - 3600000).toISOString(),
+    forceStopAt: deadline,
+    error: null,
+    health: {},
+  }
+  const { dependencies, tokens, load } = harness(
+    new Map([
+      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
+      ['src/app/utils/acme', {}],
+      ['./api.fixures', { Mock: {} }],
+      [
+        './mock-patch',
+        {
+          mockPatchData: {
+            packageData: {
+              service: { statusInfo: { ...status, forceStopAt: oldDeadline } },
+            },
+          },
+        },
+      ],
+      ['./md-sample.md', ''],
+    ]),
+  )
+  const cache = new BehaviorSubject({
+    value: { packageData: { service: { statusInfo: status } } },
+  })
+  dependencies.set(storage, null)
+  dependencies.set(tokens.PATCH_CACHE, cache)
+  const client = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+  ).MockApiService)()
+  await assert.rejects(
+    client.rpc.package.forceStop({ id: 'service', forceStopAt: oldDeadline }),
+    /not eligible/,
+  )
+  const revisions = []
+  const subscription = client.mockWsSource$.subscribe(revision =>
+    revisions.push(revision),
+  )
+  await client.rpc.package.forceStop({ id: 'service', forceStopAt: deadline })
+  assert.deepEqual(JSON.parse(JSON.stringify(revisions[0].patch)), [
+    {
+      op: 'replace',
+      path: '/packageData/service/statusInfo',
+      value: {
+        desired: { main: 'stopped' },
+        forceStopAt: null,
+        started: null,
+        error: null,
+        health: {},
+      },
+    },
+  ])
+  cache.next({
+    value: {
+      packageData: { service: { statusInfo: revisions[0].patch[0].value } },
+    },
+  })
+  await assert.rejects(
+    client.rpc.package.forceStop({ id: 'service', forceStopAt: deadline }),
+    /not eligible/,
+  )
+  await assert.rejects(
+    client.rpc.package.forceStop({ id: 'missing', forceStopAt: deadline }),
+    /not eligible/,
+  )
+  subscription.unsubscribe()
 })
 
 test('StartOS DNS mock updates the selected gateway using live gateway state', async () => {
