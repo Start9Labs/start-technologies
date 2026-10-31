@@ -1,0 +1,5 @@
+---
+release-notes: false
+---
+
+- Pressing the physical power button during a backup also waits when StartOS can intercept the key. Over the CLI, `start-cli server restart` and `server shutdown` wait by default; `--force` interrupts the backup. The command `start-cli server cancel-deferred-power` cancels the pending action. StartOS refuses new backups once a restart or shutdown is committed. See [Creating Backups](https://docs.start9.com/start-os/backup-create.html).

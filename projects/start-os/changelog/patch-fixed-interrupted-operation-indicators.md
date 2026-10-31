@@ -1,5 +1,5 @@
 ---
-user-facing: true
+release-notes: false
 ---
 
 - **Restarting the StartOS daemon clears interrupted backup, update, restart, and shutdown indicators**, including any pending power action. An interrupted operation no longer appears to be running after the daemon starts again.

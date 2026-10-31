@@ -1,5 +1,5 @@
 ---
-user-facing: true
+release-notes: true
 ---
 
 - **`server restart` and `server shutdown` wait for a running backup to finish by default.** Pass `--force` to interrupt the backup. `server cancel-deferred-power` cancels the pending action. These commands require StartOS 0.4.2 or later.
