@@ -44,6 +44,14 @@ Asigna un nombre personalizado para identificar fácilmente este dispositivo. Si
 
 Reserva una dirección IP para asignar una dirección IPv4 fija que no cambiará entre reinicios. Útil para servidores, impresoras, dispositivos NAS o cualquier cosa a la que necesites acceder mediante una dirección IP constante. Las direcciones IPv6 no se pueden reservar: cada dispositivo elige su propia dirección IPv6, por lo que el router no interviene.
 
+### Permisos
+
+**Permitir el reenvío automático de puertos**: Permite a este dispositivo abrir y renovar sus propios reenvíos de puertos mediante UPnP/PCP (usado por servidores StartOS, consolas de juegos y similares). Desactivado por defecto; los reenvíos activos aparecen en la página de Puertos publicados.
+
+**Permitir publicación de registros DNS**: Permite a este dispositivo publicar nombres DNS para sí mismo en el router, de modo que todos los dispositivos de su red puedan resolverlos (lo usan los servidores StartOS para dominios privados). Desactivado por defecto; los nombres publicados aparecen debajo de la configuración.
+
+**Permitir anuncios de router IPv6**: Permite que este dispositivo anuncie rutas IPv6 a tus otros dispositivos (necesario para routers de borde Thread como un Apple TV, HomePod o Home Assistant). Desactivado de forma predeterminada.
+
 ### Olvidar
 
 Elimina un dispositivo sin conexión de tu lista de dispositivos. Se perderá cualquier nombre personalizado o ajuste de IP reservada. Si el dispositivo vuelve a conectarse, aparecerá como un dispositivo nuevo.`,
