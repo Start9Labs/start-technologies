@@ -1,0 +1,1 @@
+- **Opublikowane porty można zapisywać bez globalnego adresu IPv6 routera.** Wcześniej utrata tego adresu WAN blokowała wszystkie zmiany, nawet dotyczące tylko IPv4, jeśli istniało przekierowanie IPv6. Istniejące przekierowania IPv6 zachowują reguły i pokazują brak adresu; globalny adres IPv6 jest nadal wymagany tylko przy dodawaniu nowego przekierowania IPv6.
