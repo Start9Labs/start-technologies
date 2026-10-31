@@ -72,6 +72,7 @@ function harness(moduleOverrides = new Map()) {
     }).outputText
     const shared = () => ({
       ...tokens,
+      ...load('shared-libs/ts-modules/shared/src/util/misc.util.ts'),
       pauseFor: async () => {},
       ...load('shared-libs/ts-modules/shared/src/types/rpc.types.ts'),
       ...load('shared-libs/ts-modules/shared/src/classes/rpc-error.ts'),

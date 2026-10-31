@@ -4,11 +4,13 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms'
-import { i18nPipe, TaskService } from '@start9labs/shared'
+import { CopyService, i18nPipe, TaskService } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
 import {
   TuiButton,
+  TuiCell,
+  TuiIcon,
   TuiDialogContext,
   TuiError,
   TuiInput,
@@ -24,10 +26,21 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
   template: `
     <form tuiForm="m" [formGroup]="form" (submit.prevent)="save()">
       <header tuiHeader>
-        <h2 tuiTitle [id]="context.id">{{ 'Edit trusted keyring' | i18n }}</h2>
+        <h2 tuiTitle [id]="context.id">{{ 'Edit key' | i18n }}</h2>
       </header>
+      <button
+        tuiCell
+        type="button"
+        (click)="copy.copy(context.data.keyring.publicKeys[0]!)"
+      >
+        <span tuiTitle>
+          <span tuiSubtitle>{{ 'Public keys' | i18n }}</span>
+          <code>{{ context.data.keyring.publicKeys[0] }}</code>
+        </span>
+        <tui-icon icon="@tui.copy" />
+      </button>
       <tui-textfield>
-        <label tuiLabel>{{ 'Name' | i18n }}</label>
+        <label tuiLabel>{{ 'Label' | i18n }}</label>
         <input tuiInput formControlName="name" />
       </tui-textfield>
       <tui-error formControlName="name" />
@@ -35,7 +48,7 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
         <legend>{{ 'Trust signatures for:' | i18n }}</legend>
         <label tuiLabel>
           <input tuiSwitch type="checkbox" formControlName="marketplace" />
-          {{ 'Service Packages' | i18n }}
+          {{ 'Packages' | i18n }}
         </label>
         <label tuiLabel>
           <input tuiSwitch type="checkbox" formControlName="os" />
@@ -56,6 +69,10 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
     </form>
   `,
   styles: `
+    code {
+      overflow-wrap: anywhere;
+      white-space: normal;
+    }
     fieldset > label {
       grid-column: 1 / -1;
     }
@@ -63,6 +80,8 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
   imports: [
     ReactiveFormsModule,
     TuiButton,
+    TuiCell,
+    TuiIcon,
     TuiButtonLoading,
     TuiError,
     TuiForm,
@@ -90,6 +109,7 @@ export class EditTrustedKeyDialog {
     injectContext<
       TuiDialogContext<void, { id: string; keyring: T.TrustedKeyring }>
     >()
+  protected readonly copy = inject(CopyService)
   protected readonly saving = signal(false)
   protected readonly form = inject(NonNullableFormBuilder).group({
     name: [

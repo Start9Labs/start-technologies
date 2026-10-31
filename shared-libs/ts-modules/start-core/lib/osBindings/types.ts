@@ -922,6 +922,8 @@ export type RangeServiceInterfaceInput = z.input<
 >
 export type RebuildParams = z.output<typeof schemas.RebuildParams>
 export type RebuildParamsInput = z.input<typeof schemas.RebuildParams>
+export type RegistryIdentity = z.output<typeof schemas.RegistryIdentity>
+export type RegistryIdentityInput = z.input<typeof schemas.RegistryIdentity>
 export type RemoveAcmeParams = z.output<typeof schemas.RemoveAcmeParams>
 export type RemoveAcmeParamsInput = z.input<typeof schemas.RemoveAcmeParams>
 export type RemoveAdminParams = z.output<typeof schemas.RemoveAdminParams>
@@ -1038,16 +1040,6 @@ export type TaskTrigger = z.output<typeof schemas.TaskTrigger>
 export type TaskTriggerInput = z.input<typeof schemas.TaskTrigger>
 export type TestSmtpParams = z.output<typeof schemas.TestSmtpParams>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
-
-/**
- * A named keyring with independent service-package and OS-update trust.
- */
-export type TrustedKeyring = z.output<typeof schemas.TrustedKeyring>
-
-/**
- * A named keyring with independent service-package and OS-update trust.
- */
-export type TrustedKeyringInput = z.input<typeof schemas.TrustedKeyring>
 export type UmountParams = z.output<typeof schemas.UmountParams>
 export type UmountParamsInput = z.input<typeof schemas.UmountParams>
 export type UninstallParams = z.output<typeof schemas.UninstallParams>
@@ -1190,6 +1182,16 @@ export type SetupProgress = z.output<typeof schemas.SetupProgress>
 export type SetupProgressInput = z.input<typeof schemas.SetupProgress>
 export type Task = z.output<typeof schemas.Task>
 export type TaskParams = z.input<typeof schemas.Task>
+
+/**
+ * Signing-key material and independent package and OS-update trust.
+ */
+export type TrustedKeyring = z.output<typeof schemas.TrustedKeyring>
+
+/**
+ * Signing-key material and independent package and OS-update trust.
+ */
+export type TrustedKeyringInput = z.input<typeof schemas.TrustedKeyring>
 export type UpdateSystemParams = z.output<typeof schemas.UpdateSystemParams>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type UrlPluginClearUrlsParams = z.output<

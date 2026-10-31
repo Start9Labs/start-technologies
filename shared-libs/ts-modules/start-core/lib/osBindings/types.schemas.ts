@@ -803,6 +803,20 @@ export const GpgPublicKeyExport: z.ZodObject<{
    * Self-certified user IDs containing names, comments, and email addresses.
    */
   userIds: z.ZodArray<z.ZodString>
+  /**
+   * Self-certified claims indexed by the signing key's canonical DER encoding.
+   */
+  identities: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
+  >
+  /**
+   * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
+   */
+  keyFingerprints: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
+  >
 }> = /* @__PURE__ */ object({
   /**
    * Original armor, preserving all certificate packets and headers.
@@ -823,6 +837,26 @@ export const GpgPublicKeyExport: z.ZodObject<{
   userIds: z.array(z.string()).meta({
     description:
       'Self-certified user IDs containing names, comments, and email addresses.',
+  }),
+  /**
+   * Self-certified claims indexed by the signing key's canonical DER encoding.
+   */
+  identities: wire(
+    z.record(z.string(), z.array(z.string())).optional(),
+    z.record(z.string(), z.array(z.string())),
+  ).meta({
+    description:
+      "Self-certified claims indexed by the signing key's canonical DER encoding.",
+  }),
+  /**
+   * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
+   */
+  keyFingerprints: wire(
+    z.record(z.string(), z.array(z.string())).optional(),
+    z.record(z.string(), z.array(z.string())),
+  ).meta({
+    description:
+      "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
   }),
 }).meta({
   id: 'GpgPublicKeyExport',
@@ -3779,6 +3813,21 @@ export const RebuildParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'RebuildParams',
   })
+export const RegistryIdentity: z.ZodObject<{
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  icon: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof DataUrl>>,
+    z.ZodNullable<typeof DataUrl>
+  >
+}> = /* @__PURE__ */ object({
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
+}).meta({
+  id: 'RegistryIdentity',
+})
 export const RemoveAcmeParams: z.ZodObject<{ provider: typeof AcmeProvider }> =
   /* @__PURE__ */ object({ provider: AcmeProvider }).meta({
     id: 'RemoveAcmeParams',
@@ -4179,61 +4228,6 @@ export const TestSmtpParams: z.ZodObject<{
   security: wire(SmtpSecurity.optional(), SmtpSecurity),
 }).meta({
   id: 'TestSmtpParams',
-})
-
-/**
- * A named keyring with independent service-package and OS-update trust.
- */
-export const TrustedKeyring: z.ZodObject<{
-  name: z.ZodString
-  /**
-   * Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
-   */
-  publicKeys: z.ZodArray<typeof AnyVerifyingKey>
-  /**
-   * Original GPG exports; signing trust is determined by `public_keys`.
-   */
-  gpgExports: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
-    z.ZodArray<typeof GpgPublicKeyExport>
-  >
-  /**
-   * False for built-in keyrings.
-   */
-  removable: z.ZodBoolean
-  marketplace: z.ZodBoolean
-  os: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  name: z.string(),
-  /**
-   * Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
-   */
-  publicKeys: z.array(AnyVerifyingKey).meta({
-    description:
-      'Ed25519 public keys encoded as padded standard Base64 DER in canonical order.',
-  }),
-  /**
-   * Original GPG exports; signing trust is determined by `public_keys`.
-   */
-  gpgExports: wire(
-    z.array(GpgPublicKeyExport).optional(),
-    z.array(GpgPublicKeyExport),
-  ).meta({
-    description:
-      'Original GPG exports; signing trust is determined by `public_keys`.',
-  }),
-  /**
-   * False for built-in keyrings.
-   */
-  removable: z.boolean().meta({
-    description: 'False for built-in keyrings.',
-  }),
-  marketplace: z.boolean(),
-  os: z.boolean(),
-}).meta({
-  id: 'TrustedKeyring',
-  description:
-    'A named keyring with independent service-package and OS-update trust.',
 })
 export const UmountParams: z.ZodObject<{
   targetId: z.ZodCodec<
@@ -5031,6 +5025,13 @@ export const RegistryInfo: z.ZodObject<{
     z.ZodNullable<typeof LocaleString>
   >
   categories: z.ZodRecord<z.ZodString, typeof Category>
+  /**
+   * Proposed Marketplace signing keys and fallback labels, not an assertion of trust.
+   */
+  trustKeys: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>,
+    z.ZodRecord<z.ZodString, z.ZodString>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -5044,6 +5045,16 @@ export const RegistryInfo: z.ZodObject<{
     description: "Markdown, shown above the registry's services.",
   }),
   categories: z.record(z.string(), Category),
+  /**
+   * Proposed Marketplace signing keys and fallback labels, not an assertion of trust.
+   */
+  trustKeys: wire(
+    z.record(z.string(), z.string()).optional(),
+    z.record(z.string(), z.string()),
+  ).meta({
+    description:
+      'Proposed Marketplace signing keys and fallback labels, not an assertion of trust.',
+  }),
 }).meta({
   id: 'RegistryInfo',
 })
@@ -5145,6 +5156,89 @@ export const Task: z.ZodObject<{
   input: wire(TaskInput.nullable().optional(), TaskInput.nullable()),
 }).meta({
   id: 'Task',
+})
+
+/**
+ * Signing-key material and independent package and OS-update trust.
+ */
+export const TrustedKeyring: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * The first import source: system, manual, or a registry base URL.
+   */
+  origin: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+  /**
+   * Registry identity recorded when this key was first imported.
+   */
+  originRegistry: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof RegistryIdentity>>,
+    z.ZodNullable<typeof RegistryIdentity>
+  >
+  /**
+   * Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
+   */
+  publicKeys: z.ZodArray<typeof AnyVerifyingKey>
+  /**
+   * Original GPG exports; signing trust is determined by `public_keys`.
+   */
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
+  /**
+   * False for System keys and keys listed by a connected registry.
+   */
+  removable: z.ZodBoolean
+  marketplace: z.ZodBoolean
+  os: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * The first import source: system, manual, or a registry base URL.
+   */
+  origin: wire(z.string().optional(), z.string()).meta({
+    description:
+      'The first import source: system, manual, or a registry base URL.',
+  }),
+  /**
+   * Registry identity recorded when this key was first imported.
+   */
+  originRegistry: wire(
+    RegistryIdentity.nullable().optional(),
+    RegistryIdentity.nullable(),
+  ).meta({
+    description: 'Registry identity recorded when this key was first imported.',
+  }),
+  /**
+   * Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
+   */
+  publicKeys: z.array(AnyVerifyingKey).meta({
+    description:
+      'Ed25519 public keys encoded as padded standard Base64 DER in canonical order.',
+  }),
+  /**
+   * Original GPG exports; signing trust is determined by `public_keys`.
+   */
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ).meta({
+    description:
+      'Original GPG exports; signing trust is determined by `public_keys`.',
+  }),
+  /**
+   * False for System keys and keys listed by a connected registry.
+   */
+  removable: z.boolean().meta({
+    description:
+      'False for System keys and keys listed by a connected registry.',
+  }),
+  marketplace: z.boolean(),
+  os: z.boolean(),
+}).meta({
+  id: 'TrustedKeyring',
+  description:
+    'Signing-key material and independent package and OS-update trust.',
 })
 export const UpdateSystemParams: z.ZodObject<{
   registry: z.ZodString
@@ -5988,6 +6082,10 @@ export const FullIndex: z.ZodObject<{
   package: typeof PackageIndex
   os: typeof OsIndex
   signers: z.ZodRecord<z.ZodString, typeof SignerInfo>
+  trustSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof Guid>>,
+    z.ZodArray<typeof Guid>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -5998,6 +6096,7 @@ export const FullIndex: z.ZodObject<{
   package: PackageIndex,
   os: OsIndex,
   signers: z.record(z.string(), SignerInfo),
+  trustSigners: wire(z.array(Guid).optional(), z.array(Guid)),
 }).meta({
   id: 'FullIndex',
 })
@@ -6266,6 +6365,13 @@ export const ServerInfo: z.ZodObject<{
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof TrustedKeyring>>,
     z.ZodRecord<z.ZodString, typeof TrustedKeyring>
   >
+  /**
+   * Last observed trust proposals from connected registries.
+   */
+  registryKeys: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<typeof AnyVerifyingKey>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<typeof AnyVerifyingKey>>
+  >
   pubkey: z.ZodString
   caFingerprint: z.ZodString
   ntpSynced: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
@@ -6315,6 +6421,15 @@ export const ServerInfo: z.ZodObject<{
     z.record(z.string(), TrustedKeyring).optional(),
     z.record(z.string(), TrustedKeyring),
   ),
+  /**
+   * Last observed trust proposals from connected registries.
+   */
+  registryKeys: wire(
+    z.record(z.string(), z.array(AnyVerifyingKey)).optional(),
+    z.record(z.string(), z.array(AnyVerifyingKey)),
+  ).meta({
+    description: 'Last observed trust proposals from connected registries.',
+  }),
   pubkey: z.string(),
   caFingerprint: z.string(),
   ntpSynced: wire(z.boolean().optional(), z.boolean()),

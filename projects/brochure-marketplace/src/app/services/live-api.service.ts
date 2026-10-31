@@ -7,6 +7,7 @@ import {
   isRpcError,
   RpcError,
   RPCOptions,
+  registryUrl,
 } from '@start9labs/shared'
 import { createRpcClient } from '@start9labs/start-core'
 import { ApiService, RegistryClient } from './api.service'
@@ -24,7 +25,7 @@ export class LiveApiService extends ApiService {
   }
 
   registry(url: string): RegistryClient {
-    const root = `${new URL('rpc/v0', url)}`
+    const root = `${new URL('rpc/v0', registryUrl(new URL(url).href))}`
     let client = this.registries.get(root)
     if (!client) {
       client = createRpcClient<RegistryClient>({

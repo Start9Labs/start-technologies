@@ -9,7 +9,7 @@ import {
   MarketplaceRegistrySelectComponent,
   MarketplaceTileComponent,
 } from '@start9labs/marketplace'
-import { i18nPipe } from '@start9labs/shared'
+import { i18nPipe, registryUrl } from '@start9labs/shared'
 import { tap } from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
@@ -26,7 +26,7 @@ import { MarketplaceControlsComponent } from './components/controls.component'
       [(category)]="category"
       [(query)]="query"
     >
-      <marketplace-registry-select />
+      <marketplace-registry-select manageRegistriesLink="/system/registries" />
       <a marketplacePackageLink actions></a>
       <ng-template let-pkg>
         <button [marketplaceTile]="pkg">
@@ -89,7 +89,9 @@ export default class Marketplace {
             queryParamsHandling: 'merge',
           })
         } else {
-          this.marketplaceService.currentRegistryUrl$.next(registry)
+          this.marketplaceService.currentRegistryUrl$.next(
+            registryUrl(registry),
+          )
         }
       }),
     )

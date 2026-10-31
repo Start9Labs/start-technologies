@@ -40,6 +40,35 @@ function mockService(
   }
 }
 
+function mockSystemKey(
+  name: string,
+  publicKey: string,
+  userIds: string[],
+  enabled: boolean,
+  fingerprint?: string,
+): T.TrustedKeyring {
+  return {
+    name,
+    origin: 'system',
+    originRegistry: null,
+    publicKeys: [publicKey],
+    gpgExports: userIds.length
+      ? [
+          {
+            armored: '',
+            fingerprints: [],
+            userIds,
+            identities: { [publicKey]: userIds },
+            keyFingerprints: fingerprint ? { [publicKey]: [fingerprint] } : {},
+          },
+        ]
+      : [],
+    removable: false,
+    marketplace: enabled,
+    os: enabled,
+  }
+}
+
 export const mockPatchData: DataModel = {
   ui: {
     registries: {
@@ -53,30 +82,46 @@ export const mockPatchData: DataModel = {
   },
   serverInfo: {
     id: Mock.ServerId,
+    registryKeys: {},
     trustedKeys: {
-      start9: {
-        name: 'Start9',
-        gpgExports: [],
-        publicKeys: [
+      'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=':
+        mockSystemKey(
+          'drbonez',
           'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
+          ['Aiden McClelland <aiden@start9.com>'],
+          true,
+          'b416c0e67b9df3f1718480ae7cffda41ca66056a',
+        ),
+      'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=':
+        mockSystemKey(
+          'matthill',
           'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
+          ['Matt Hill <matthill@start9.com>'],
+          true,
+          'a969c8eba8b13613d2568a85ee395832e45a6664',
+        ),
+      'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=':
+        mockSystemKey(
+          'Start9',
           'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=',
-        ],
-        removable: false,
-        marketplace: true,
-        os: true,
-      },
-      'start9-alpha': {
-        name: 'Start9 Alpha',
-        gpgExports: [],
-        publicKeys: [
+          ['Start9 <security@start9.com>'],
+          true,
+          '5456dbff1b9df905041fa7765259adfc2d63c217',
+        ),
+      'MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=':
+        mockSystemKey(
+          'Start9 Alpha',
           'MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=',
+          [],
+          false,
+        ),
+      'MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=':
+        mockSystemKey(
+          'Community builds',
           'MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=',
-        ],
-        removable: false,
-        marketplace: false,
-        os: false,
-      },
+          [],
+          false,
+        ),
     },
     version,
     lastBackup: new Date(new Date().valueOf() - 604800001).toISOString(),

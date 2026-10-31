@@ -1,6 +1,6 @@
 # Alternative Registries
 
-Beyond the [default registries](default-registries.md), you can add alternative registries to your Marketplace. Custom registries are useful for organizations packaging services for their own users, developers distributing services outside the default registries, or communities curating specialized collections. To switch between registries or add new ones, click "Switch" beneath the current registry title in the sidebar.
+Beyond the [default registries](default-registries.md), you can add alternative registries to your Marketplace. Custom registries are useful for organizations packaging services for their own users, developers distributing services outside the default registries, or communities curating specialized collections. To switch between registries, open the registry selector above the Marketplace search field. To add a registry, follow its **Manage Registries** link or open **System → Manage Registries**, click **Add registry**, and enter its URL. Review the proposed signing keys before confirming. Approved keys receive package trust and appear in [Manage Trust](trusted-keys.md), with the registry recorded as their origin.
 
 > [!NOTE]
 > Start9 does not vet, endorse, or support services from custom registries. Exercise caution and only add registries you trust.

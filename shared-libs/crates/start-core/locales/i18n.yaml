@@ -4662,6 +4662,13 @@ help.arg.registry-startwrt:
   fr_FR: "Servir les clients StartWRT"
   pl_PL: "Obsługuj klientów StartWRT"
 
+help.arg.registry-trust-signers:
+  en_US: "Existing signer IDs to propose for package trust"
+  de_DE: "IDs vorhandener Signierer, die für Paketvertrauen vorgeschlagen werden"
+  es_ES: "Identificadores de firmantes existentes propuestos para confiar en paquetes"
+  fr_FR: "Identifiants des signataires existants à proposer pour la confiance des paquets"
+  pl_PL: "Identyfikatory istniejących podpisujących proponowanych do zaufania pakietom"
+
 help.arg.registry-url:
   en_US: "URL of the registry"
   de_DE: "URL des Registrys"
@@ -7390,6 +7397,13 @@ about.set-registry-name:
   fr_FR: "Définir le nom du registre"
   pl_PL: "Ustaw nazwę rejestru"
 
+about.set-registry-trust-signers:
+  en_US: "Select the signers proposed for package trust; no signers clears the selection"
+  de_DE: "Signierer für Paketvertrauen auswählen; ohne Signierer wird die Auswahl gelöscht"
+  es_ES: "Seleccionar los firmantes propuestos para confiar en paquetes; sin firmantes se borra la selección"
+  fr_FR: "Sélectionner les signataires proposés pour la confiance des paquets ; sans signataires, effacer la sélection"
+  pl_PL: "Wybierz podpisujących proponowanych do zaufania pakietom; brak podpisujących czyści wybór"
+
 about.set-smtp:
   en_US: "Set SMTP configuration"
   de_DE: "SMTP-Konfiguration festlegen"
@@ -7782,6 +7796,13 @@ trusted-keys.invalid:
   fr_FR: "Saisissez un nom et au moins une clé publique Ed25519"
   pl_PL: "Podaj nazwę i co najmniej jeden klucz publiczny Ed25519"
 
+trusted-keys.invalid-registry-url:
+  en_US: "Enter an HTTP or HTTPS registry URL without credentials, query, or fragment"
+  de_DE: "Geben Sie eine HTTP- oder HTTPS-Registry-URL ohne Zugangsdaten, Abfrage oder Fragment ein"
+  es_ES: "Introduzca una URL de registro HTTP o HTTPS sin credenciales, consulta ni fragmento"
+  fr_FR: "Saisissez une URL de registre HTTP ou HTTPS sans identifiants, requête ni fragment"
+  pl_PL: "Podaj adres HTTP lub HTTPS rejestru bez danych logowania, zapytania i fragmentu"
+
 trusted-keys.not-found:
   en_US: "Trusted keyring not found"
   de_DE: "Vertrauenswürdiger Schlüsselbund nicht gefunden"
@@ -7789,12 +7810,19 @@ trusted-keys.not-found:
   fr_FR: "Trousseau de confiance introuvable"
   pl_PL: "Nie znaleziono zaufanego pęku kluczy"
 
+trusted-keys.proposal-changed:
+  en_US: "The registry no longer proposes an approved key. Review its keys again."
+  de_DE: "Die Registry schlägt einen genehmigten Schlüssel nicht mehr vor. Prüfen Sie die Schlüssel erneut."
+  es_ES: "El registro ya no propone una clave aprobada. Revise sus claves de nuevo."
+  fr_FR: "Le registre ne propose plus une clé approuvée. Vérifiez à nouveau ses clés."
+  pl_PL: "Rejestr nie proponuje już zatwierdzonego klucza. Sprawdź ponownie jego klucze."
+
 trusted-keys.protected:
-  en_US: "Built-in keyrings cannot be deleted; disable their trust instead"
-  de_DE: "Integrierte Schlüsselbunde können nicht gelöscht werden; deaktivieren Sie stattdessen deren Vertrauen"
-  es_ES: "Los llaveros integrados no se pueden eliminar; desactive su confianza"
-  fr_FR: "Les trousseaux intégrés ne peuvent pas être supprimés ; désactivez plutôt leur confiance"
-  pl_PL: "Nie można usunąć wbudowanych pęków kluczy; zamiast tego wyłącz zaufanie do nich"
+  en_US: "System keys and keys listed by connected registries cannot be deleted; disable their trust instead"
+  de_DE: "Systemschlüssel und von verbundenen Registries aufgeführte Schlüssel können nicht gelöscht werden; deaktivieren Sie stattdessen deren Vertrauen"
+  es_ES: "Las claves del sistema y las publicadas por registros conectados no se pueden eliminar; desactive su confianza"
+  fr_FR: "Les clés système et les clés répertoriées par les registres connectés ne peuvent pas être supprimées ; désactivez plutôt leur confiance"
+  pl_PL: "Kluczy systemowych i kluczy wymienionych przez połączone rejestry nie można usunąć; zamiast tego wyłącz zaufanie do nich"
 
 version.http-auth-downgrade-requires-tls:
   en_US: "Cannot downgrade: an HTTP authentication policy has no TLS wrapper. Add TLS to this binding before downgrading."

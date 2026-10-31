@@ -9,9 +9,9 @@ This guide is for flashing StartOS to a USB drive, then installing it onto a des
 ## Download
 
 > [!NOTE]
-> These links point to StartOS 0.4.0.4 rather than the latest release, 0.4.1, because 0.4.1 cannot complete an update from StartOS 0.3.5.x. Once your server is running 0.4.0.4, [update it](updating-startos.md) to 0.4.1 as usual. When StartOS 0.4.1.1 is released with the fix, these links will point to it.
+> Use the linked StartOS 0.4.0.4 images as a migration step for servers running 0.3.5.x. Once your server is running 0.4.0.4, [update it](updating-startos.md) to the latest StartOS release.
 
-1.  Visit the [Github release page](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.0.4) to find the latest version of StartOS.
+1.  Visit the [Github release page](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.0.4) for the image downloads.
 
 1.  Under "Image Downloads", select the image for your hardware. StartOS is available in x86_64 (AMD64), aarch64 (ARM64), and RISC-V (RVA23). For x86_64 and aarch64, two variants are available:
     - **Standard**: Includes proprietary firmware and drivers for broader hardware compatibility, including display and wireless. Recommended for most users.
@@ -196,7 +196,7 @@ Anything else is a failure. **`BAD signature`** means the file is not what Start
 > StartOS 0.4.0 supports the **Raspberry Pi 4 ONLY**. Other Raspberry Pi models are not supported.
 
 > [!NOTE]
-> The link below points to StartOS 0.4.0.4 rather than the latest release, 0.4.1, because 0.4.1 cannot complete an update from StartOS 0.3.5.x. Once your Pi is running 0.4.0.4, [update it](updating-startos.md) to 0.4.1 as usual. When StartOS 0.4.1.1 is released with the fix, this link will point to it.
+> Use the linked StartOS 0.4.0.4 image as a migration step for a Pi running 0.3.5.x. Once your Pi is running 0.4.0.4, [update it](updating-startos.md) to the latest StartOS release.
 
 A Raspberry Pi does not use the USB installer above. Instead, you flash the StartOS image directly to the Pi's microSD card. This is also how a Raspberry Pi is updated to a new major version of StartOS — it cannot update over the air. If you are updating an existing 0.3.5.1 server, complete the [preparation steps in the update guide](update-040.md#prepare-your-server) before flashing.
 

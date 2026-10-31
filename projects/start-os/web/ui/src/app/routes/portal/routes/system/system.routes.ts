@@ -64,9 +64,15 @@ export default [
         loadComponent: () => import('./routes/ssh/ssh.component'),
       },
       {
+        path: 'registries',
+        title: titleResolver,
+        data: { title: 'Manage Registries' },
+        loadComponent: () => import('./routes/registries'),
+      },
+      {
         path: 'trusted-keys',
         title: titleResolver,
-        data: { title: 'Trusted keyrings' },
+        data: { title: 'Manage Trust' },
         loadComponent: () => import('./routes/trusted-keys'),
       },
       {

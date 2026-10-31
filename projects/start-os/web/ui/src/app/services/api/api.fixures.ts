@@ -211,6 +211,12 @@ export namespace Mock {
   }
 
   export const RegistryInfo: T.RegistryInfo = {
+    trustKeys: {
+      'MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=':
+        'Start9 Alpha',
+      'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=':
+        'Package publisher',
+    },
     name: 'Start9 Registry',
     icon: REGISTRY_ICON,
     description:
@@ -884,7 +890,10 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
                   'https://github.com/Start9Labs/bitcoind-startos/releases/download/v27.0.0/bitcoind.s9pk',
                 ],
                 commitment: mockMerkleArchiveCommitment,
-                signatures: {},
+                signatures: {
+                  'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=':
+                    'mock-signature',
+                },
                 publishedAt: Date.now().toString(),
               },
             ],

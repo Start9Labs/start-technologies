@@ -1,0 +1,16 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-registry-info-set-trust-signers 1  "set-trust-signers " 
+.SH NAME
+start\-registry\-info\-set\-trust\-signers \- Select the signers proposed for package trust; no signers clears the selection
+.SH SYNOPSIS
+\fBstart\-registry info set\-trust\-signers\fR [\fB\-h\fR|\fB\-\-help\fR] [\fISIGNER\fR] 
+.SH DESCRIPTION
+Select the signers proposed for package trust; no signers clears the selection
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+[\fISIGNER\fR]
+Existing signer IDs to propose for package trust

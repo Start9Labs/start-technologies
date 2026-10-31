@@ -132,7 +132,8 @@ impl Public {
                     restarting: false,
                     restart: None,
                 },
-                trusted_keys: initial_trusted_keys(),
+                trusted_keys: crate::trusted_keys::individual_keys(&initial_trusted_keys())?,
+                registry_keys: BTreeMap::new(),
                 unread_notification_count: 0,
                 pubkey: ssh_key::PublicKey::from(&account.ssh_key)
                     .to_openssh()
@@ -183,6 +184,9 @@ pub struct ServerInfo {
     pub unread_notification_count: u64,
     #[serde(default = "initial_trusted_keys")]
     pub trusted_keys: TrustedKeys,
+    /// Last observed trust proposals from connected registries.
+    #[serde(default)]
+    pub registry_keys: BTreeMap<InternedString, BTreeSet<crate::sign::AnyVerifyingKey>>,
     pub pubkey: String,
     pub ca_fingerprint: String,
     #[serde(default)]

@@ -9,6 +9,8 @@ import {
 import {
   FullKeyboard,
   pauseFor,
+  registryUrl,
+  sameUrl,
   RPCErrorDetails,
   SetLanguageParams,
 } from '@start9labs/shared'
@@ -290,26 +292,68 @@ export class MockApiService extends ApiService {
       },
       hardware: null,
     }),
-    'server.trusted-keys.add': async ({ name, publicKeys, context }) => {
-      const id = crypto.randomUUID()
-      const value: T.TrustedKeyring = {
-        name,
-        gpgExports: [],
-        publicKeys: parsePublicKeys(publicKeys.join('\n')).map(key =>
-          auth.normalizeDer64(parsePemPublicKey(key)),
-        ),
-        removable: true,
-        marketplace: true,
-        os: context === 'os',
+    'server.trusted-keys.registry-preview': async ({ url }) =>
+      this.mockRegistryInfo(url),
+    'server.trusted-keys.connect-registry': async ({
+      url,
+      name,
+      approvedKeys,
+    }) => {
+      const normalized = registryUrl(url)
+      const info = this.mockRegistryInfo(normalized)
+      for (const key of approvedKeys) {
+        const label = info.trustKeys[key]
+        if (label === undefined)
+          throw new Error('Registry trust proposal changed')
+        const trusted = (mockPatchData.serverInfo.trustedKeys[key] ??= {
+          name: label || key,
+          origin: normalized,
+          originRegistry: { name: info.name, icon: info.icon },
+          publicKeys: [key],
+          gpgExports: [],
+          removable: false,
+          marketplace: false,
+          os: false,
+        })
+        trusted.marketplace = true
       }
-      mockPatchData.serverInfo.trustedKeys[id] = value
-      await this.mockRevision([
-        {
-          op: PatchOp.ADD,
-          path: pathFromArray(['serverInfo', 'trustedKeys', id]),
-          value,
-        },
-      ])
+      for (const saved of Object.keys(mockPatchData.ui.registries)) {
+        if (sameUrl(saved, normalized))
+          delete mockPatchData.ui.registries[saved]
+      }
+      mockPatchData.ui.registries[normalized] = name ?? info.name
+      mockPatchData.serverInfo.registryKeys[normalized] = Object.keys(
+        info.trustKeys,
+      )
+      await this.publishTrust()
+      return null
+    },
+    'server.trusted-keys.remove-registry': async ({ url }) => {
+      for (const saved of Object.keys(mockPatchData.ui.registries)) {
+        if (sameUrl(saved, url)) delete mockPatchData.ui.registries[saved]
+      }
+      for (const saved of Object.keys(mockPatchData.serverInfo.registryKeys)) {
+        if (sameUrl(saved, url))
+          delete mockPatchData.serverInfo.registryKeys[saved]
+      }
+      await this.publishTrust()
+      return null
+    },
+    'server.trusted-keys.add': async ({ name, publicKeys, context }) => {
+      for (const key of parsePublicKeys(publicKeys.join('\n'))) {
+        const id = auth.normalizeDer64(parsePemPublicKey(key))
+        mockPatchData.serverInfo.trustedKeys[id] ??= {
+          name,
+          origin: 'manual',
+          originRegistry: null,
+          gpgExports: [],
+          publicKeys: [id],
+          removable: true,
+          marketplace: true,
+          os: context === 'os',
+        }
+      }
+      await this.publishTrust()
       return null
     },
     'server.trusted-keys.update': async ({ id, name, marketplace, os }) => {
@@ -2393,6 +2437,44 @@ export class MockApiService extends ApiService {
           ? 'gateway'
           : 'public-fallback',
     }
+  }
+
+  private mockRegistryInfo(url: string): T.RegistryInfo {
+    return {
+      ...Mock.RegistryInfo,
+      name:
+        Object.entries(mockPatchData.ui.registries).find(([saved]) =>
+          sameUrl(saved, url),
+        )?.[1] || 'Example Registry',
+    }
+  }
+
+  private async publishTrust(): Promise<void> {
+    const listed = new Set(
+      Object.values(mockPatchData.serverInfo.registryKeys).flat(),
+    )
+    for (const key of Object.values(mockPatchData.serverInfo.trustedKeys)) {
+      key.removable =
+        key.origin !== 'system' &&
+        !key.publicKeys.some(publicKey => listed.has(publicKey))
+    }
+    await this.mockRevision<unknown>([
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/trustedKeys',
+        value: structuredClone(mockPatchData.serverInfo.trustedKeys),
+      },
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/registryKeys',
+        value: structuredClone(mockPatchData.serverInfo.registryKeys),
+      },
+      {
+        op: PatchOp.REPLACE,
+        path: '/ui/registries',
+        value: structuredClone(mockPatchData.ui.registries),
+      },
+    ])
   }
 
   private async publishConversions(): Promise<void> {

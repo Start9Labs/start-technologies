@@ -30,15 +30,17 @@ export class StoreIconDirective {
   private readonly failed = signal<ReadonlySet<string>>(new Set())
 
   readonly storeIcon = input<string>()
+  readonly storeIconData = input<string | null>(null)
 
   protected readonly icon = computed(() => {
     const url = this.storeIcon() || ''
     const live = this.registryIcons().find(entry => sameUrl(entry.url, url))
     const generic = 'assets/img/storefront-outline.png'
+    const provided = this.storeIconData() || live?.icon
 
     return (
       [
-        live?.icon?.startsWith('data:image/') ? live.icon : null,
+        provided?.startsWith('data:image/') ? provided : null,
         Object.entries(FALLBACKS).find(([u]) => sameUrl(u, url))?.[1],
         generic,
       ].find(icon => icon && !this.failed().has(icon)) || generic
