@@ -1,0 +1,1 @@
+- Los servidores con StartOS 0.3.5 pueden actualizarse a esta versión.

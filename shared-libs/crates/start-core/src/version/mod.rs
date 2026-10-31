@@ -82,6 +82,7 @@ mod v0_4_0_beta_7;
 mod v0_4_0_beta_8;
 mod v0_4_0_beta_9;
 mod v0_4_1;
+mod v0_4_1_1;
 mod v0_4_2;
 
 pub type Current = v0_4_2::Version; // VERSION_BUMP
@@ -231,6 +232,7 @@ enum Version {
     V0_4_0_4(Wrapper<v0_4_0_4::Version>),
     V0_4_0_5(Wrapper<v0_4_0_5::Version>),
     V0_4_1(Wrapper<v0_4_1::Version>),
+    V0_4_1_1(Wrapper<v0_4_1_1::Version>),
     V0_4_2(Wrapper<v0_4_2::Version>), // VERSION_BUMP
     Other(exver::Version),
 }
@@ -316,6 +318,7 @@ impl Version {
             Self::V0_4_0_4(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_0_5(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_1(v) => DynVersion(Box::new(v.0)),
+            Self::V0_4_1_1(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_2(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
             Self::Other(v) => {
                 return Err(Error::new(
@@ -393,6 +396,7 @@ impl Version {
             Version::V0_4_0_4(Wrapper(x)) => x.semver(),
             Version::V0_4_0_5(Wrapper(x)) => x.semver(),
             Version::V0_4_1(Wrapper(x)) => x.semver(),
+            Version::V0_4_1_1(Wrapper(x)) => x.semver(),
             Version::V0_4_2(Wrapper(x)) => x.semver(), // VERSION_BUMP
             Version::Other(x) => x.clone(),
         }
@@ -881,7 +885,7 @@ mod tests {
         let resolved = Version::from_exver_version(current.semver());
         assert!(matches!(resolved, Version::V0_4_2(_)));
         let target = resolved.as_version_t().unwrap();
-        assert_eq!(target.previous().semver(), v0_4_1::Version.semver());
+        assert_eq!(target.previous().semver(), v0_4_1_1::Version.semver());
         let mut db = json!({ "private": { "sessionPubkeys": {} }, "public": { "serverInfo": {
             "version": "0.4.0.5",
             "packageVersionCompat": ">=0.3.0 <0.5.0",
@@ -898,7 +902,7 @@ mod tests {
         );
         assert_eq!(
             db["public"]["serverInfo"]["postInitMigrationTodos"],
-            json!({ "0.4.1": null, "0.4.2": null })
+            json!({ "0.4.1": null, "0.4.1.1": null, "0.4.2": null })
         );
         assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
         assert_eq!(db["public"]["packageData"], packages);
@@ -909,42 +913,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn current_commits_after_the_published_release_without_changing_payload() {
-        let previous = v0_4_1::Version;
+    async fn current_commits_after_both_predecessors_without_changing_payload() {
         let current = Current::default();
-        assert_eq!(current.previous().semver(), previous.semver());
+        assert_eq!(current.previous().semver(), v0_4_1_1::Version.semver());
         assert!(matches!(
             Version::from_exver_version(current.semver()),
             Version::V0_4_2(_)
         ));
-        let mut db = json!({ "private": { "sessions": { "pubkeys": {}, "tokens": {} } },
-            "public": { "serverInfo": {
-                "version": "0.4.1",
-                "packageVersionCompat": ">=0.3.0 <0.5.0",
-                "postInitMigrationTodos": {},
-                "latestMigrationRevision": 2,
-            }, "packageData": { "service": { "setting": "preserved" } } } });
-        let private = db["private"].clone();
-        let packages = db["public"]["packageData"].clone();
-        let upgrade = Upgrade::load(&previous, &current, 2).await.unwrap();
-        upgrade.apply(&previous, &current, &mut db).unwrap();
-        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.2"));
-        assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
-        assert_eq!(
-            db["public"]["serverInfo"]["packageVersionCompat"],
-            to_value(current.compat()).unwrap()
-        );
-        assert_eq!(
-            db["public"]["serverInfo"]["postInitMigrationTodos"],
-            json!({ "0.4.2": null })
-        );
-        assert_eq!(db["private"], private);
-        assert_eq!(db["public"]["packageData"], packages);
-        rollback_to_unchecked(&current, &previous, &mut db).unwrap();
-        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.1"));
-        assert_eq!(applied_migration_revision(&mut db).unwrap(), 2);
-        assert_eq!(db["private"], private);
-        assert_eq!(db["public"]["packageData"], packages);
+        for (from, revision, todos) in [
+            ("0.4.1", 2, json!({ "0.4.1.1": null, "0.4.2": null })),
+            ("0.4.1.1", 0, json!({ "0.4.2": null })),
+        ] {
+            let previous = from_value::<Version>(json!(from))
+                .unwrap()
+                .as_version_t()
+                .unwrap();
+            let mut db = json!({ "private": { "sessions": { "pubkeys": {}, "tokens": {} } },
+                "public": { "serverInfo": {
+                    "version": from,
+                    "packageVersionCompat": ">=0.3.0 <0.5.0",
+                    "postInitMigrationTodos": {},
+                    "latestMigrationRevision": revision,
+                }, "packageData": { "service": { "setting": "preserved" } } } });
+            let private = db["private"].clone();
+            let packages = db["public"]["packageData"].clone();
+            let upgrade = Upgrade::load(&previous, &current, revision).await.unwrap();
+            upgrade.apply(&previous, &current, &mut db).unwrap();
+            assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.2"));
+            assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
+            assert_eq!(
+                db["public"]["serverInfo"]["packageVersionCompat"],
+                to_value(current.compat()).unwrap()
+            );
+            assert_eq!(db["public"]["serverInfo"]["postInitMigrationTodos"], todos);
+            assert_eq!(db["private"], private);
+            assert_eq!(db["public"]["packageData"], packages);
+            rollback_to_unchecked(&current, &previous, &mut db).unwrap();
+            assert_eq!(db["public"]["serverInfo"]["version"], json!(from));
+            assert_eq!(applied_migration_revision(&mut db).unwrap(), revision);
+            assert_eq!(db["private"], private);
+            assert_eq!(db["public"]["packageData"], packages);
+        }
     }
 
     #[tokio::test]

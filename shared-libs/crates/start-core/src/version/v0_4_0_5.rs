@@ -173,7 +173,8 @@ mod tests {
         let account =
             crate::account::AccountInfo::new("password", std::time::SystemTime::now(), None)
                 .unwrap();
-        let catch_up_todos = json!({ "0.4.0.5": null, "0.4.1": null, "0.4.2": null });
+        let catch_up_todos =
+            json!({ "0.4.0.5": null, "0.4.1": null, "0.4.1.1": null, "0.4.2": null });
         for (revision, key_id, expected_todos) in [
             (0, key.to_string(), catch_up_todos.clone()),
             (1, key.to_string(), catch_up_todos.clone()),
@@ -182,7 +183,7 @@ mod tests {
             (
                 3,
                 canonical.to_string(),
-                json!({ "0.4.1": null, "0.4.2": null }),
+                json!({ "0.4.1": null, "0.4.1.1": null, "0.4.2": null }),
             ),
         ] {
             let mut fixture =
