@@ -1,0 +1,28 @@
+#include "spacemit/k1-x_deb1.dts"
+#include <dt-bindings/input/input.h>
+
+/ {
+	gpio-keys {
+		compatible = "gpio-keys";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_fdl>;
+
+		fdl {
+			label = "FDL";
+			gpios = <&gpio 98 0>;
+			linux,code = <KEY_RESTART>;
+		};
+	};
+};
+
+&pinctrl {
+	pinctrl_fdl: fdl_grp {
+		pinctrl-single,pins = <
+			K1X_PADCONF(QSPI_DAT3, MUX_MODE1, (EDGE_NONE | PULL_DOWN | PAD_3V_DS4))
+		>;
+	};
+};
+
+&qspi {
+	status = "disabled";
+};

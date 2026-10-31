@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod daemon;
+pub mod fdl_reset;
 
 use std::collections::{HashMap, VecDeque};
 use std::ffi::OsString;
@@ -29,6 +30,11 @@ impl MultiExecutable {
 
     pub fn enable_cli(&mut self) -> &mut Self {
         self.handlers.insert("startwrt-cli", cli::main);
+        self
+    }
+
+    pub fn enable_fdl_reset(&mut self) -> &mut Self {
+        self.handlers.insert("startwrt-fdl-reset", fdl_reset::main);
         self
     }
 
