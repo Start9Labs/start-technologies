@@ -2872,13 +2872,6 @@ registry.package.remove-mirror.unauthorized:
   fr_FR: "Non autorisé"
   pl_PL: "Brak autoryzacji"
 
-registry.package.sign.unauthorized:
-  en_US: "Unauthorized"
-  de_DE: "Nicht autorisiert"
-  es_ES: "No autorizado"
-  fr_FR: "Non autorisé"
-  pl_PL: "Brak autoryzacji"
-
 registry.package.sign.commitment-not-found:
   en_US: "%{id}@%{version} lists no s9pk with sighash %{sighash}"
   de_DE: "%{id}@%{version} listet kein s9pk mit Sighash %{sighash}"

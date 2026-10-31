@@ -75,7 +75,7 @@ You can't remove the last remaining URL for a package — every indexed version 
 
 ### Cosigning
 
-Any signer authorized for a package can add their signature to a version already in the index:
+Any signer known to the registry can add their signature to a version already in the index:
 
 ```sh
 start-cli registry package sign <S9PK_FILE>

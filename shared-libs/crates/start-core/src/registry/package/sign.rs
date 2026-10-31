@@ -9,7 +9,6 @@ use crate::PackageId;
 use crate::context::CliContext;
 use crate::prelude::*;
 use crate::registry::context::RegistryContext;
-use crate::registry::package::add::can_publish;
 use crate::registry::package::index::PackageIndex;
 use crate::s9pk::S9pk;
 use crate::s9pk::v2::SIG_CONTEXT;
@@ -46,13 +45,7 @@ pub async fn sign_package(
         crate::sign::compat::verify_commitment(&signer, &commitment, SIG_CONTEXT, &signature)?;
     ctx.db
         .mutate(|db| {
-            let guid = db.as_index().as_signers().get_signer(&signer)?;
-            if !can_publish(db, &guid, &id, &version)? {
-                return Err(Error::new(
-                    eyre!("{}", t!("registry.package.sign.unauthorized")),
-                    ErrorKind::Authorization,
-                ));
-            }
+            db.as_index().as_signers().get_signer(&signer)?;
             let mut found = false;
             db.as_index_mut()
                 .as_package_mut()
