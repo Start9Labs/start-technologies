@@ -568,4 +568,7 @@ export default {
   596: 'Pozwala temu urządzeniu ogłaszać trasy IPv6 innym Twoim urządzeniom (wymagane przez routery brzegowe Thread, takie jak Apple TV, HomePod lub Home Assistant). Domyślnie wyłączone.',
   597: 'Zezwolić na ogłoszenia routera IPv6?',
   598: 'To urządzenie będzie mogło przydzielać innym Twoim urządzeniom adresy IPv6, trasy, serwery DNS i bramę domyślną, a także kierować ich ruch IPv6 z pominięciem routera. Przyznaj to tylko zaufanemu urządzeniu, takiemu jak router brzegowy Thread.',
+  599: 'Poza podsiecią profilu tego urządzenia',
+  600: 'To nie jest użyteczny adres hosta',
+  601: 'Ta rezerwacja jest poza podsiecią profilu, w którym znajduje się to urządzenie, więc urządzenie otrzymuje zamiast tego adres z puli profilu. Zarezerwuj adres w podsieci jego profilu.',
 } satisfies i18n

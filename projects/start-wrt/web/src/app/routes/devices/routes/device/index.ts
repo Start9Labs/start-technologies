@@ -13,6 +13,7 @@ import {
   TuiHintDirective,
   TuiInput,
   TuiLink,
+  TuiNotification,
   TuiTitle,
 } from '@taiga-ui/core'
 import { provideTranslatedValidationErrors } from 'src/app/i18n/validation-errors'
@@ -26,6 +27,7 @@ import {
   DEVICE_VALIDATION_ERRORS,
   DevicePermissionChanges,
   getDeviceForm,
+  reservedIpv4,
   updateDeviceValidators,
 } from 'src/app/routes/devices/utils'
 import {
@@ -107,6 +109,14 @@ import { i18nKey } from 'src/app/i18n/i18n.providers'
           {{ 'Reserve' | i18n }}
           <i [tuiHint]="'Required by a published port rule' | i18n"></i>
         </label>
+        @if (data()?.inactiveIpv4Reservation) {
+          <div tuiNotification appearance="warning">
+            {{
+              "This reservation is outside the subnet of the profile this device is on, so the device gets an address from the profile's pool instead. Reserve an address in its profile's subnet."
+                | i18n
+            }}
+          </div>
+        }
         <div>
           <tui-textfield>
             <label tuiLabel>{{ 'IPv6 address' | i18n }}</label>
@@ -220,6 +230,7 @@ import { i18nKey } from 'src/app/i18n/i18n.providers'
     TuiInput,
     TuiError,
     TuiHintDirective,
+    TuiNotification,
     TuiSwitch,
     InjectedRecordsTable,
     i18nPipe,
@@ -280,16 +291,16 @@ export default class DeviceDetail {
           allowRouterAdvertisements: data.allowRouterAdvertisements,
           ip: {
             ipv4Static: data.ipv4Static,
-            ipv4: data.ipv4 ?? '',
+            ipv4: reservedIpv4(data),
           },
         })
-        updateDeviceValidators(this.form, data.ipv4Static)
+        updateDeviceValidators(this.form, data.ipv4Static, data)
       }
     })
 
     // Update validators when the static toggle changes
     effect(() => {
-      updateDeviceValidators(this.form, this.ipv4Static())
+      updateDeviceValidators(this.form, this.ipv4Static(), this.data())
     })
   }
 
@@ -356,8 +367,10 @@ export default class DeviceDetail {
     // can't push it to a connected client. Warn only when we're actually pinning
     // it to a *different* address; reserving the device's existing address (just
     // making the current lease static) changes nothing for the device.
+    const data = this.data()
     const ipv4Changed =
-      formValue.ip.ipv4Static && formValue.ip.ipv4 !== (this.data()?.ipv4 ?? '')
+      formValue.ip.ipv4Static &&
+      formValue.ip.ipv4 !== (data ? reservedIpv4(data) : '')
 
     // A permission is sent only when it changed; revoking one tears down what
     // the device created with it.
@@ -408,7 +421,7 @@ export default class DeviceDetail {
         allowRouterAdvertisements: data.allowRouterAdvertisements,
         ip: {
           ipv4Static: data.ipv4Static,
-          ipv4: data.ipv4 ?? '',
+          ipv4: reservedIpv4(data),
         },
       })
     }

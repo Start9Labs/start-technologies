@@ -1,0 +1,2 @@
+- Una reserva IPv4 debe pertenecer a la subred del perfil de seguridad del dispositivo. Antes el router aceptaba direcciones de otros perfiles que DHCP ignoraba sin avisar.
+- Si una reserva deja de coincidir con el perfil, por ejemplo tras cambiar de perfil, la página del dispositivo muestra su dirección real con una advertencia y sus puertos publicados indican la discrepancia.

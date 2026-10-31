@@ -276,7 +276,10 @@ class Profiles {
         hasStaticIpsInSubnet = devices.some(
           d =>
             d.ipv4_static &&
-            d.ipv4?.split('.').slice(0, 3).join('.') === profileSubnet,
+            (d.inactive_ipv4_reservation ?? d.ipv4)
+              ?.split('.')
+              .slice(0, 3)
+              .join('.') === profileSubnet,
         )
         const defaultName =
           this.service.data()?.find(p => p.owns_lan)?.fullname ?? ''

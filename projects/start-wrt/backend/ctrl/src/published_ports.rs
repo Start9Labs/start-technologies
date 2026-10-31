@@ -82,7 +82,7 @@ pub(crate) fn may_affect_v6_rules(mac: &str) -> bool {
 
 // ── Types ──────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitVariants)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitVariants)]
 #[serde(rename_all = "lowercase")]
 pub enum Protocol {
     Tcp,
@@ -558,7 +558,10 @@ struct RawPort {
 /// Extract raw published ports from firewall config sections.
 async fn extract_ports(arena: &Arena, uci_root: &std::path::Path) -> Result<Vec<RawPort>, Error> {
     let cfgs = parse_all(uci_root, arena, &["firewall"]).await?;
+    Ok(raw_ports(&cfgs))
+}
 
+fn raw_ports(cfgs: &Configs) -> Vec<RawPort> {
     // Collect redirects and rules with _pp_id metadata
     let mut redirects_by_id: HashMap<String, FirewallRedirect> = HashMap::new();
     let mut rules_by_id: HashMap<String, FirewallRule> = HashMap::new();
@@ -634,7 +637,7 @@ async fn extract_ports(arena: &Arena, uci_root: &std::path::Path) -> Result<Vec<
         }
     }
 
-    Ok(ports)
+    ports
 }
 
 fn sections_to_raw_port(
@@ -706,9 +709,18 @@ fn compute_status(
     }
     let has_ipv4 = device.ipv4.is_some();
     let has_ipv6 = device.ipv6.is_some();
+    let stale_ipv6 = port.ipv6
+        && port
+            .dest_ipv6
+            .as_deref()
+            .zip(device.ipv6.as_deref())
+            .is_some_and(|(dest, cur)| {
+                is_gua(dest) && is_gua(cur) && same_v6_prefix64(dest, cur) == Some(false)
+            });
+    let working_ipv6 = port.ipv6 && has_ipv6 && !stale_ipv6;
 
     if port.ipv4 && !has_ipv4 {
-        if port.ipv6 && has_ipv6 {
+        if working_ipv6 {
             return (
                 PublishedPortStatus::Partial,
                 Some("IPv4 unavailable".into()),
@@ -718,6 +730,14 @@ fn compute_status(
             PublishedPortStatus::Error,
             Some("No addresses available".into()),
         );
+    }
+
+    if port.ipv4 && device.inactive_ipv4_reservation.is_some() {
+        let reason = Some("IPv4 reservation outside the device's profile".into());
+        if working_ipv6 {
+            return (PublishedPortStatus::Partial, reason);
+        }
+        return (PublishedPortStatus::Error, reason);
     }
 
     if port.ipv6 && !has_ipv6 {
@@ -733,28 +753,15 @@ fn compute_status(
         );
     }
 
-    // Stale-prefix backstop. An IPv6 forward's stored dest_ip is a full GUA. If
-    // the device now has a GUA in a *different* /64, the ISP-delegated prefix
-    // rotated and this rule is stranded on the old one. `reconcile` normally
-    // repairs this on the wan6 hotplug, but a device that was offline during the
-    // rotation (or a privacy-address client whose suffix moved) can slip past it
-    // — so surface it here instead of showing false-green. Only compares two
-    // GUAs; a ULA-only device is handled by the availability checks above.
-    if port.ipv6 {
-        if let (Some(dest), Some(cur)) = (port.dest_ipv6.as_deref(), device.ipv6.as_deref()) {
-            if is_gua(dest) && is_gua(cur) && same_v6_prefix64(dest, cur) == Some(false) {
-                if port.ipv4 && has_ipv4 {
-                    return (
-                        PublishedPortStatus::Partial,
-                        Some("IPv6 address out of date".into()),
-                    );
-                }
-                return (
-                    PublishedPortStatus::Error,
-                    Some("IPv6 address out of date".into()),
-                );
-            }
-        }
+    if stale_ipv6 {
+        return (
+            if port.ipv4 && has_ipv4 {
+                PublishedPortStatus::Partial
+            } else {
+                PublishedPortStatus::Error
+            },
+            Some("IPv6 address out of date".into()),
+        );
     }
 
     (PublishedPortStatus::Active, None)
@@ -1010,6 +1017,7 @@ pub async fn set<C: CtrlContext>(
         } else {
             HashMap::new()
         };
+        validate_reservation_zones(&cfgs, &req.ports, &device_info, &mac_zones)?;
 
         // Remove all existing published-port sections (name starts with "pp_")
         cfgs["firewall"].sections.retain(|section| {
@@ -1333,6 +1341,59 @@ fn validate_device_addresses(
         }
     }
     Ok(())
+}
+
+/// Refuses an enabled IPv4 port on a device whose reservation lies in another
+/// zone than the neighbor table places it in.
+fn validate_reservation_zones(
+    cfgs: &Configs,
+    ports: &[PublishedPortInput],
+    device_info: &HashMap<String, DeviceNetInfo>,
+    mac_zones: &HashMap<String, String>,
+) -> Result<(), Error> {
+    let stored = raw_ports(cfgs);
+    for port in ports.iter().filter(|p| p.enabled && p.ipv4) {
+        if stored.iter().any(|s| same_ipv4_forward(s, port)) {
+            continue;
+        }
+        let mac = port.device_mac.to_uppercase();
+        let Some(info) = device_info.get(&mac).filter(|i| i.has_static_ipv4) else {
+            continue;
+        };
+        let Some(reserved) = info.ipv4.as_deref() else {
+            continue;
+        };
+        let by_address = reserved
+            .parse::<Ipv4Addr>()
+            .ok()
+            .and_then(|ip| zone_for_ipv4(cfgs, ip));
+        if let (Some(by_address), Some(by_neighbor)) = (by_address, mac_zones.get(&mac)) {
+            if by_address != *by_neighbor {
+                return Err(Error::new(
+                    eyre!(
+                        "port forward '{}': device {} is reserved {reserved}, outside the subnet of the profile it is on; change its reservation or disable the port",
+                        port.label,
+                        port.device_mac
+                    ),
+                    ErrorKind::InvalidValue,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn same_ipv4_forward(stored: &RawPort, port: &PublishedPortInput) -> bool {
+    let public_port = |p: &Option<String>, ports: &str| p.clone().unwrap_or_else(|| ports.into());
+    stored.id == port.id
+        && stored.enabled
+        && stored.ipv4
+        && stored.device_mac.eq_ignore_ascii_case(&port.device_mac)
+        && stored.ports == port.ports
+        && stored.protocol == port.protocol
+        && stored.source == port.source
+        && public_port(&stored.ipv4_public_port, &stored.ports)
+            == public_port(&port.ipv4_public_port, &port.ports)
 }
 
 fn active_ipv4_ranges(ports: &[PublishedPortInput]) -> Vec<(u16, u16)> {
@@ -1681,31 +1742,29 @@ async fn resolve_device_info_for_macs(macs: HashSet<String>) -> HashMap<String, 
     let mut arp_ipv6_candidates: HashMap<String, Vec<String>> = HashMap::new();
     let mut arp_iface: HashMap<String, String> = HashMap::new();
 
-    for line in neigh_output.lines() {
-        if let Some((ip, rest)) = line.split_once(" dev ") {
-            if let Some((iface, rest)) = rest.split_once(" lladdr ") {
-                if let Some(mac) = rest.split_whitespace().next() {
-                    let mac_upper = mac.to_uppercase();
-                    if macs.contains(&mac_upper) {
-                        let ip = ip.trim();
-                        // Capture interface (prefer br-lan* interfaces)
-                        if iface.starts_with("br-lan") {
-                            arp_iface
-                                .entry(mac_upper.clone())
-                                .or_insert_with(|| iface.to_string());
-                        }
-                        if ip.contains(':') {
-                            arp_ipv6_candidates
-                                .entry(mac_upper)
-                                .or_default()
-                                .push(ip.to_string());
-                        } else {
-                            arp_ipv4.entry(mac_upper).or_insert_with(|| ip.to_string());
-                        }
-                    }
-                }
-            }
+    let neighbors: Vec<devices::ArpEntry> = devices::parse_neigh_output(&neigh_output)
+        .into_iter()
+        .filter(|entry| macs.contains(&entry.mac))
+        .collect();
+    let live_ipv4s = devices::verified_ipv4_neighbors(&neighbors).await;
+    for mac in &macs {
+        let entries: Vec<&devices::ArpEntry> =
+            neighbors.iter().filter(|entry| &entry.mac == mac).collect();
+        let (ipv4, interface) = neighbor_ipv4_and_interface(&entries, &live_ipv4s);
+        if let Some(ipv4) = ipv4 {
+            arp_ipv4.insert(mac.clone(), ipv4);
         }
+        if let Some(interface) = interface {
+            arp_iface.insert(mac.clone(), interface);
+        }
+        arp_ipv6_candidates.insert(
+            mac.clone(),
+            entries
+                .iter()
+                .filter(|entry| entry.ip.contains(':'))
+                .map(|entry| entry.ip.clone())
+                .collect(),
+        );
     }
 
     // Pick best IPv6 per MAC: GUA preferred over ULA, link-local excluded
@@ -1767,6 +1826,22 @@ async fn resolve_device_info_for_macs(macs: HashSet<String>) -> HashMap<String, 
     }
 
     result
+}
+
+fn neighbor_ipv4_and_interface(
+    entries: &[&devices::ArpEntry],
+    live_ipv4s: &HashSet<String>,
+) -> (Option<String>, Option<String>) {
+    let ipv4 = devices::choose_ipv4_entry(entries, live_ipv4s).map(|entry| entry.ip.clone());
+    let lan_entries: Vec<&devices::ArpEntry> = entries
+        .iter()
+        .copied()
+        .filter(|entry| entry.interface.starts_with("br-lan"))
+        .collect();
+    let interface = devices::choose_ipv4_entry(&lan_entries, live_ipv4s)
+        .or_else(|| lan_entries.first().copied())
+        .map(|entry| entry.interface.clone());
+    (ipv4, interface)
 }
 
 /// Firewall zone for a device's neighbor-table interface: VLAN tag (e.g.
@@ -2701,6 +2776,8 @@ config rule 'pp_a_v6'
             ipv4: ipv4.map(str::to_string),
             ipv6: ipv6.map(str::to_string),
             ipv4_static: false,
+            inactive_ipv4_reservation: None,
+            profile_network: None,
             allow_auto_port_forward: false,
             allow_dns_injection: false,
             allow_router_advertisements: false,
@@ -2708,6 +2785,46 @@ config rule 'pp_a_v6'
             speed: None,
             data_usage: None,
         }
+    }
+
+    #[test]
+    fn status_flags_an_inactive_reservation() {
+        let mut dev = online_device(Some("192.168.101.20"), Some("2001:db8:abcd::99"));
+        dev.ipv4_static = true;
+        dev.inactive_ipv4_reservation = Some("192.168.1.50".into());
+
+        let ipv4_only = RawPort {
+            ipv6: false,
+            ..raw_v6_port(true, None)
+        };
+        let (status, reason) = compute_status(&ipv4_only, Some(&dev));
+        assert!(matches!(status, PublishedPortStatus::Error), "{status:?}");
+        assert!(reason.unwrap().contains("reservation"));
+
+        let both = raw_v6_port(true, Some("2001:db8:abcd::99"));
+        let (status, _) = compute_status(&both, Some(&dev));
+        assert!(matches!(status, PublishedPortStatus::Partial), "{status:?}");
+    }
+
+    #[test]
+    fn status_error_when_both_reservation_and_v6_prefix_are_stale() {
+        let mut dev = online_device(Some("192.168.101.20"), Some("2001:db8:9999::99"));
+        dev.ipv4_static = true;
+        dev.inactive_ipv4_reservation = Some("192.168.1.50".into());
+        let port = raw_v6_port(true, Some("2001:db8:abcd::99"));
+
+        let (status, reason) = compute_status(&port, Some(&dev));
+        assert!(matches!(status, PublishedPortStatus::Error), "{status:?}");
+        assert!(reason.unwrap().contains("reservation"));
+    }
+
+    #[test]
+    fn status_error_when_ipv4_is_missing_and_v6_prefix_is_stale() {
+        let dev = online_device(None, Some("2001:db8:9999::99"));
+        let port = raw_v6_port(true, Some("2001:db8:abcd::99"));
+
+        let (status, _) = compute_status(&port, Some(&dev));
+        assert!(matches!(status, PublishedPortStatus::Error), "{status:?}");
     }
 
     #[test]
@@ -3417,6 +3534,125 @@ config rule 'pp_v6only_v6'
         let arena = Arena::new();
         let cfg = uciedit::Config::parse_str(&arena, fw).unwrap();
         v6_rule_dests(&cfg)
+    }
+
+    #[test]
+    fn neighbor_placement_prefers_the_verified_current_profile() {
+        let neighbors = devices::parse_neigh_output(
+            "192.168.1.50 dev br-lan.1 lladdr aa:bb:cc:dd:ee:ff DELAY\n\
+             192.168.101.20 dev br-lan.101 lladdr aa:bb:cc:dd:ee:ff STALE\n",
+        );
+        let entries: Vec<&devices::ArpEntry> = neighbors.iter().collect();
+        let live = HashSet::from(["192.168.101.20".to_string()]);
+        let (ipv4, interface) = neighbor_ipv4_and_interface(&entries, &live);
+        assert_eq!(ipv4.as_deref(), Some("192.168.101.20"));
+        assert_eq!(interface.as_deref(), Some("br-lan.101"));
+    }
+
+    #[test]
+    fn neighbor_placement_prefers_reachable_over_the_first_entry() {
+        let neighbors = devices::parse_neigh_output(
+            "192.168.1.50 dev br-lan.1 lladdr aa:bb:cc:dd:ee:ff STALE\n\
+             192.168.101.20 dev br-lan.101 lladdr aa:bb:cc:dd:ee:ff REACHABLE\n",
+        );
+        let entries: Vec<&devices::ArpEntry> = neighbors.iter().collect();
+        let (ipv4, interface) = neighbor_ipv4_and_interface(&entries, &HashSet::new());
+        assert_eq!(ipv4.as_deref(), Some("192.168.101.20"));
+        assert_eq!(interface.as_deref(), Some("br-lan.101"));
+    }
+
+    #[tokio::test]
+    async fn reservation_in_another_zone_refuses_the_port() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(dir.path(), FORWARDINGS);
+        std::fs::write(dir.path().join("network"), NETWORK).unwrap();
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["firewall", "network"])
+            .await
+            .unwrap();
+        let info = offline_device();
+        let ports = [make_port("p", true, false)];
+        let zones = |zone: &str| HashMap::from([("AA:BB:CC:DD:EE:FF".to_string(), zone.into())]);
+
+        let err = validate_reservation_zones(&cfgs, &ports, &info, &zones("lan_guest"))
+            .expect_err("reservation in lan, device in lan_guest");
+        assert!(err.to_string().contains("192.168.1.50"), "{err}");
+        validate_reservation_zones(&cfgs, &ports, &info, &zones("lan")).unwrap();
+        validate_reservation_zones(&cfgs, &ports, &info, &HashMap::new()).unwrap();
+
+        let disabled = [PublishedPortInput {
+            enabled: false,
+            ..make_port("p", true, false)
+        }];
+        validate_reservation_zones(&cfgs, &disabled, &info, &zones("lan_guest")).unwrap();
+    }
+
+    #[tokio::test]
+    async fn reservation_in_another_zone_keeps_an_unchanged_port() {
+        let stored = |enabled: &str| {
+            format!(
+                "{FORWARDINGS}
+config redirect 'pp_p'
+\toption name 'Port p'
+\toption src 'wan'
+\toption dest 'lan'
+\toption target 'DNAT'
+\tlist proto 'tcp'
+\toption src_dport '80'
+\toption dest_port '80'
+\toption dest_ip '192.168.1.50'
+\toption enabled '{enabled}'
+\toption _pp_id 'p'
+\toption _pp_mac 'AA:BB:CC:DD:EE:FF'
+"
+            )
+        };
+        async fn check(firewall: String, port: PublishedPortInput) -> Result<(), Error> {
+            let dir = tempfile::tempdir().unwrap();
+            setup_firewall(dir.path(), &firewall);
+            std::fs::write(dir.path().join("network"), NETWORK).unwrap();
+            let arena = Arena::new();
+            let cfgs = parse_all(dir.path(), &arena, &["firewall", "network"])
+                .await
+                .unwrap();
+            let zones = HashMap::from([("AA:BB:CC:DD:EE:FF".to_string(), "lan_guest".to_string())]);
+            validate_reservation_zones(&cfgs, &[port], &offline_device(), &zones)
+        }
+
+        let renamed = PublishedPortInput {
+            label: "Renamed".into(),
+            ..make_port("p", true, false)
+        };
+        check(stored("1"), renamed).await.unwrap();
+
+        let changed = [
+            PublishedPortInput {
+                ports: "81".into(),
+                ..make_port("p", true, false)
+            },
+            PublishedPortInput {
+                ipv4_public_port: Some("8080".into()),
+                ..make_port("p", true, false)
+            },
+            PublishedPortInput {
+                protocol: Protocol::Udp,
+                ..make_port("p", true, false)
+            },
+            PublishedPortInput {
+                source: "10.0.0.0/8".into(),
+                ..make_port("p", true, false)
+            },
+            make_port("q", true, false),
+        ];
+        for port in changed {
+            let desc = format!("{port:?}");
+            check(stored("1"), port)
+                .await
+                .expect_err(&format!("changed port {desc} accepted"));
+        }
+        check(stored("0"), make_port("p", true, false))
+            .await
+            .expect_err("enabling a stored disabled port");
     }
 
     fn offline_device() -> HashMap<String, DeviceNetInfo> {

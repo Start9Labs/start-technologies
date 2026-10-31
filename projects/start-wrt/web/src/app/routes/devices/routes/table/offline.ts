@@ -44,7 +44,11 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
               <div
                 tuiChip
                 size="xs"
-                [iconStart]="item.ipv4Static ? '@tui.lock' : ''"
+                [iconStart]="
+                  item.ipv4Static && !item.inactiveIpv4Reservation
+                    ? '@tui.lock'
+                    : ''
+                "
               >
                 {{ item.ipv4 }}
               </div>

@@ -1,0 +1,2 @@
+- Eine IPv4-Reservierung muss im Subnetz des Sicherheitsprofils des Geräts liegen. Zuvor akzeptierte der Router Adressen anderer Profile, die DHCP stillschweigend ignorierte.
+- Passt eine Reservierung etwa nach einem Profilwechsel nicht mehr zum Profil, zeigt die Geräteseite die tatsächliche Adresse mit einer Warnung an; veröffentlichte Ports melden die Abweichung ebenfalls.
