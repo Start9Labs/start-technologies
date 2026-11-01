@@ -1,0 +1,1 @@
+- **Los puertos publicados se guardan aunque el router no tenga una dirección IPv6 global.** Antes, perder esa dirección WAN bloqueaba cualquier cambio, incluso solo de IPv4, si existía algún reenvío IPv6. Los reenvíos IPv6 existentes conservan su regla e indican que falta la dirección; solo añadir uno nuevo sigue requiriendo una dirección IPv6 global.

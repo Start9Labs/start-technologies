@@ -51,9 +51,9 @@ Each rule can be toggled on and off without deleting it. Use the "Enable" or "Di
 Each published port rule shows a status indicator in the table:
 
 - **Active** (green) — The rule is enabled and the target device is online with the addresses the rule needs.
-- **Partial** (yellow) — Only one of the rule's IP versions is currently usable. For example, the device is missing its IPv4 or IPv6 address, or its IPv6 address is out of date after your ISP rotated the delegated prefix.
+- **Partial** (yellow) — Only one of the rule's IP versions is currently usable. For example, the device is missing its IPv4 or IPv6 address, its IPv6 address is out of date after your ISP rotated the delegated prefix, or the router has no global IPv6 address from your ISP.
 - **Paused** (orange) — The target device is offline or not found.
-- **Error** (red) — No usable address is available for the rule — the device lacks an address for the selected IP version(s), or its IPv6 address is out of date.
+- **Error** (red) — No usable address is available for the rule — the device lacks an address for the selected IP version(s), its IPv6 address is out of date, or the router has no global IPv6 address for an IPv6-only rule.
 - **Disabled** (grey) — The rule has been toggled off.
 
 The status reflects the rule and the device's addresses on your LAN — it does not test whether traffic actually arrives from the Internet.
