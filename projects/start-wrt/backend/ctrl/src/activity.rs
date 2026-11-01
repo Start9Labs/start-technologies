@@ -1,4 +1,5 @@
-use std::sync::{LazyLock, Mutex};
+use std::ops::Deref;
+use std::sync::{Mutex, MutexGuard};
 
 use clap::Parser;
 use rpc_toolkit::{from_fn_async, HandlerExt as _, ParentHandler};
@@ -10,7 +11,6 @@ use crate::prelude::*;
 use crate::utils::HandlerExtSerde;
 use crate::{CliContext, ServerContext};
 
-const ACTIVITY_DIR: &str = "/var/lib/startwrt";
 pub const ACTIVITY_DB: &str = "/var/lib/startwrt/activity.db";
 pub(crate) const MAX_ENTRIES: usize = 500;
 
@@ -24,16 +24,50 @@ const ACTIVITY_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS activity (
     error TEXT
 );";
 
-static DB: LazyLock<Mutex<Connection>> = LazyLock::new(|| {
-    let _ = std::fs::create_dir_all(ACTIVITY_DIR);
+static DB: Mutex<Option<Connection>> = Mutex::new(None);
+
+struct Db(MutexGuard<'static, Option<Connection>>);
+
+impl Deref for Db {
+    type Target = Connection;
+
+    fn deref(&self) -> &Connection {
+        self.0.as_ref().expect("opened by db()")
+    }
+}
+
+fn db() -> Result<Db, Error> {
     #[cfg(test)]
-    let conn = Connection::open_in_memory().expect("failed to open in-memory activity database");
+    let path = ":memory:";
     #[cfg(not(test))]
-    let conn = Connection::open(ACTIVITY_DB).expect("failed to open activity database");
-    conn.execute_batch(ACTIVITY_SCHEMA)
-        .expect("failed to initialize activity table");
-    Mutex::new(conn)
-});
+    let path = ACTIVITY_DB;
+    let mut slot = DB
+        .lock()
+        .map_err(|e| Error::new(eyre!("lock poisoned: {e}"), ErrorKind::Incoherent))?;
+    ensure_open(&mut slot, path)?;
+    Ok(Db(slot))
+}
+
+fn ensure_open(slot: &mut Option<Connection>, path: &str) -> Result<(), Error> {
+    if slot.is_none() {
+        *slot = Some(open_db(path).map_err(|e| {
+            Error::new(
+                eyre!("failed to open activity database: {e}"),
+                ErrorKind::Filesystem,
+            )
+        })?);
+    }
+    Ok(())
+}
+
+fn open_db(path: &str) -> Result<Connection, Box<dyn std::error::Error>> {
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let conn = Connection::open(path)?;
+    conn.execute_batch(ACTIVITY_SCHEMA)?;
+    Ok(conn)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct ActivityEntry {
@@ -97,7 +131,7 @@ fn log_inner(
     tracing::info!(target: "activity", "startwrt-activity [{category}.{action}] {status} {summary}{err_suffix}");
 
     // Insert into SQLite
-    let conn = DB.lock().map_err(|e| format!("lock poisoned: {e}"))?;
+    let conn = db().map_err(|e| e.to_string())?;
     insert_entry(&conn, category, action, success, summary, error)?;
     Ok(())
 }
@@ -155,11 +189,7 @@ fn log_to_inner(
     let err_suffix = error.map(|e| format!(": {e}")).unwrap_or_default();
     tracing::info!(target: "activity", "startwrt-activity(eMMC) [{category}.{action}] {status} {summary}{err_suffix}");
 
-    if let Some(parent) = std::path::Path::new(db_path).parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let conn = Connection::open(db_path)?;
-    conn.execute_batch(ACTIVITY_SCHEMA)?;
+    let conn = open_db(db_path)?;
     insert_entry(&conn, category, action, success, summary, error)?;
     Ok(())
 }
@@ -222,9 +252,7 @@ pub(crate) async fn list(
     let offset = params.offset.unwrap_or(0);
     let limit = params.limit.unwrap_or(50);
 
-    let conn = DB
-        .lock()
-        .map_err(|e| Error::new(eyre!("lock poisoned: {e}"), ErrorKind::Incoherent))?;
+    let conn = db()?;
 
     let total: usize = conn
         .query_row("SELECT COUNT(*) FROM activity", [], |row| row.get(0))
@@ -276,9 +304,7 @@ async fn delete(
     _ctx: ServerContext,
     ActivityDeleteParams { id }: ActivityDeleteParams,
 ) -> Result<(), Error> {
-    let conn = DB
-        .lock()
-        .map_err(|e| Error::new(eyre!("lock poisoned: {e}"), ErrorKind::Incoherent))?;
+    let conn = db()?;
     conn.execute("DELETE FROM activity WHERE id = ?1", [id])
         .map_err(|e| {
             Error::new(
@@ -297,9 +323,7 @@ async fn delete(
 
 #[instrument(skip_all)]
 async fn clear(_ctx: ServerContext) -> Result<(), Error> {
-    let conn = DB
-        .lock()
-        .map_err(|e| Error::new(eyre!("lock poisoned: {e}"), ErrorKind::Incoherent))?;
+    let conn = db()?;
     conn.execute("DELETE FROM activity", []).map_err(|e| {
         Error::new(
             eyre!("failed to clear activity: {e}"),
@@ -329,4 +353,34 @@ pub fn activity<C: rpc_toolkit::Context>() -> ParentHandler<C> {
                 .no_display()
                 .with_call_remote::<CliContext>(),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_open_is_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("file");
+        std::fs::write(&file, "").unwrap();
+        let blocked = file.join("activity.db");
+        let mut slot = None;
+        assert!(ensure_open(&mut slot, blocked.to_str().unwrap()).is_err());
+        assert!(slot.is_none());
+        let path = dir.path().join("activity.db");
+        ensure_open(&mut slot, path.to_str().unwrap()).unwrap();
+        assert!(slot.is_some());
+    }
+
+    #[test]
+    fn open_db_creates_the_directory_and_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sub/activity.db");
+        let conn = open_db(path.to_str().unwrap()).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM activity", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 }
