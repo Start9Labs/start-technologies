@@ -47,7 +47,12 @@ impl VersionT for Version {
         }
         server.remove("trustedOsUpdateSigners");
         let private = db["private"].as_object_mut().or_not_found("private")?;
-        if !private.contains_key("sessions") {
+        // A database migrated straight from 0.3.x holds 0.3.6's cookie sessions here.
+        if private
+            .get("sessions")
+            .and_then(|sessions| sessions.get("pubkeys"))
+            .is_none()
+        {
             let pubkeys = private
                 .remove("sessionPubkeys")
                 .unwrap_or_else(|| json!({}));
@@ -470,6 +475,7 @@ mod tests {
             to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
                 .unwrap();
         fixture["public"]["serverInfo"]["trustedKeys"]["start9"]["os"] = json!(false);
+        fixture["public"]["serverInfo"]["version"] = to_value(&Version.semver()).unwrap();
         fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(1);
         fixture["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
         fixture["private"]["sessions"]["tokens"] =
@@ -488,8 +494,8 @@ mod tests {
         assert_eq!(migrated["private"]["sessions"], saved_sessions);
         assert_eq!(migrated["public"]["serverInfo"]["trustedKeys"], saved_trust);
         assert_eq!(
-            migrated["public"]["serverInfo"]["latestMigrationRevision"],
-            json!(2)
+            migrated["public"]["serverInfo"]["postInitMigrationTodos"],
+            json!({ "0.4.1": null, "0.4.1.1": null })
         );
         Current::default().pre_init(&db).await.unwrap();
         assert_eq!(db.dump(&ROOT).await.value, migrated);
@@ -513,6 +519,7 @@ mod tests {
             let server = fixture["public"]["serverInfo"].as_object_mut().unwrap();
             server.remove("trustedKeys");
             server.insert("trustedOsUpdateSigners".into(), to_value(&legacy).unwrap());
+            server.insert("version".into(), to_value(&Version.semver()).unwrap());
             server.insert("latestMigrationRevision".into(), json!(0));
             server.insert("postInitMigrationTodos".into(), json!({}));
             fixture["private"]["sessions"]["tokens"] =
@@ -527,12 +534,8 @@ mod tests {
             assert_eq!(os_signers(&keyrings), legacy);
             assert_eq!(migrated["private"]["sessions"], sessions);
             assert_eq!(
-                migrated["public"]["serverInfo"]["latestMigrationRevision"],
-                json!(Version.migration_revision())
-            );
-            assert_eq!(
                 migrated["public"]["serverInfo"]["postInitMigrationTodos"],
-                json!({ "0.4.1": null })
+                json!({ "0.4.1": null, "0.4.1.1": null })
             );
             Current::default().pre_init(&db).await.unwrap();
             assert_eq!(db.dump(&ROOT).await.value, migrated);

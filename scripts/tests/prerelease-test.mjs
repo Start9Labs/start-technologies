@@ -30,7 +30,7 @@ function prereleaseFixture(t) {
   write(labels, readFileSync(join(REPO, labels)))
   write(
     'projects/start-os/changelog/patch-fixed-localized.md',
-    '---\nuser-facing: true\n---\n\n- Visible correction.\n',
+    '---\nrelease-notes: true\n---\n\n- Visible correction.\n',
   )
   write(
     'projects/start-os/changelog/patch-fixed-localized.pl_PL.md',
@@ -52,7 +52,7 @@ function prereleaseFixture(t) {
   )
   write(
     'projects/start-os/changelog/patch-security-example.md',
-    '---\nuser-facing: false\n---\n\n- Security correction.\n',
+    '---\nrelease-notes: false\n---\n\n- Security correction.\n',
   )
   function commit() {
     git(
