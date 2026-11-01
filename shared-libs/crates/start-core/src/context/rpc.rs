@@ -228,6 +228,20 @@ impl RpcContext {
         } else {
             TypedPatchDb::<Database>::load(config.db().await?).await?
         };
+        db.mutate(|db| {
+            for (_, volume) in db
+                .as_public_mut()
+                .as_shared_volumes_mut()
+                .as_entries_mut()?
+            {
+                volume
+                    .as_availability_mut()
+                    .ser(&crate::shared_volumes::SharedVolumeAvailability::default())?;
+            }
+            Ok(())
+        })
+        .await
+        .result?;
         let peek = db.peek().await;
         let account = AccountInfo::load(&peek)?;
         load_db.complete();
@@ -349,7 +363,6 @@ impl RpcContext {
                             .invoke(ErrorKind::Unknown)
                             .await?;
 
-                        // Create squashfs with UID/GID mapping (avoids chown on readonly mounts)
                         if let Some(p) = sqfs.parent() {
                             tokio::fs::create_dir_all(p)
                                 .await
@@ -359,12 +372,11 @@ impl RpcContext {
                             .arg(&*tmp)
                             .arg(&sqfs)
                             .arg("-force-uid")
-                            .arg("100000")
+                            .arg(crate::lxc::BASE_IDMAP.to_id.to_string())
                             .arg("-force-gid")
-                            .arg("100000")
+                            .arg(crate::lxc::BASE_IDMAP.to_id.to_string())
                             .invoke(ErrorKind::Filesystem)
                             .await?;
-                        // tmp.unmount_and_delete().await?;
                     }
                     BlockDev::new(&sqfs)
                         .mount(NVIDIA_OVERLAY_PATH, ReadOnly)

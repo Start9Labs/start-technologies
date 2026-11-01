@@ -1,3 +1,4 @@
+import { Version as StartOsVersion } from '@start9labs/start-core/exver'
 import * as T from '@start9labs/start-core/types'
 import { ImageConfig, ImageId, VolumeId } from '@start9labs/start-core/types'
 import {
@@ -34,12 +35,27 @@ type NoExtraKeys<Manifest> = {
 export function setupManifest<
   Id extends string,
   VolumesTypes extends VolumeId,
-  Manifest extends {
+  const Manifest extends {
     id: Id
     volumes: VolumesTypes[]
   } & SDKManifest,
 >(manifest: Manifest & SDKManifest & NoExtraKeys<Manifest>): Manifest {
   return manifest
+}
+
+const sharedVolumeOsVersion = '0.4.1'
+
+function manifestOsVersion(manifest: SDKManifest): string {
+  const required = manifest.sharedVolumes ? sharedVolumeOsVersion : OSVersion
+  const requested = manifest.osVersion ?? required
+  if (
+    manifest.sharedVolumes &&
+    StartOsVersion.parse(requested).compare(StartOsVersion.parse(required)) ===
+      'less'
+  ) {
+    throw new Error(`Shared volumes require StartOS ${required} or later`)
+  }
+  return requested
 }
 
 /**
@@ -81,7 +97,7 @@ export function buildManifest<
     ...manifest,
     dependencies: dependencies.manifestDependencies(),
     gitHash: null,
-    osVersion: manifest.osVersion ?? OSVersion,
+    osVersion: manifestOsVersion(manifest),
     sdkVersion: sdkPackage.version,
     version: versions.current.options.version,
     releaseNotes: versions.current.options.releaseNotes,
@@ -115,6 +131,7 @@ export function buildManifest<
     userspaceFilesystems: manifest.userspaceFilesystems ?? false,
     virtualNetworking: manifest.virtualNetworking ?? false,
     hardwareVirtualization: manifest.hardwareVirtualization ?? false,
+    sharedVolumes: manifest.sharedVolumes ?? false,
     plugins: manifest.plugins ?? [],
   }
 }

@@ -78,6 +78,7 @@ pub mod rpc_continuations;
 pub mod s9pk;
 pub mod service;
 pub mod setup;
+pub mod shared_volumes;
 pub mod shutdown;
 pub mod sign;
 pub mod sound;
@@ -216,6 +217,12 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
                     auth::token::<C, RpcContext>().with_about("about.commands-auth-tokens"),
                 )
                 .with_about("about.commands-authentication"),
+        )
+        .subcommand(
+            "volumes",
+            shared_volumes::handler::<C>()
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_cli(),
         )
         .subcommand("db", db::db::<C>().with_about("about.commands-db"))
         .subcommand("ssh", ssh::ssh::<C>().with_about("about.commands-ssh-keys"))

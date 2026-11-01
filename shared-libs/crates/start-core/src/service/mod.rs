@@ -293,6 +293,12 @@ pub struct Service {
     seed: Arc<ServiceActorSeed>,
 }
 impl Service {
+    pub(crate) fn shared_volume_mounts(
+        &self,
+    ) -> &tokio::sync::Mutex<crate::shared_volumes::mounts::SharedVolumeMounts> {
+        &self.seed.persistent_container.shared_volumes
+    }
+
     pub fn is_initialized(&self) -> bool {
         self.seed.persistent_container.state.borrow().rt_initialized
     }
@@ -397,20 +403,14 @@ impl Service {
             })
             .await
             .result?;
-        let seed = Arc::new(ServiceActorSeed {
-            id,
-            persistent_container,
+        let service = Self::from_container(
             ctx,
-            backup: SyncMutex::new(None),
-            backup_phase: SyncMutex::new(None),
-            init_phase: SyncMutex::new(init_progress),
-        });
-        let service: ServiceRef = Self {
-            actor: ConcurrentActor::new(ServiceActor(seed.clone())),
-            seed,
-        }
-        .into();
+            persistent_container,
+            Arc::new(SyncMutex::new(None)),
+            init_progress,
+        );
         let recovery_guard = if let Some(recovery_source) = &recovery_source {
+            service.shared_volume_mounts().lock().await.block();
             Some(
                 service
                     .seed
@@ -432,8 +432,73 @@ impl Service {
         }
         if let Some(recovery_source) = recovery_source {
             recovery_source.unmount().await?;
+            service.shared_volume_mounts().lock().await.allow();
         }
+        service
+            .seed
+            .persistent_container
+            .state
+            .send_modify(|state| state.rt_initialized = true);
         Ok(service)
+    }
+
+    fn from_container(
+        ctx: RpcContext,
+        persistent_container: PersistentContainer,
+        backup_phase: Arc<SyncMutex<Option<crate::progress::PhaseProgressTrackerHandle>>>,
+        init_progress: Option<crate::progress::PhaseProgressTrackerHandle>,
+    ) -> ServiceRef {
+        let seed = Arc::new(ServiceActorSeed {
+            id: persistent_container.s9pk.as_manifest().id.clone(),
+            persistent_container,
+            ctx,
+            backup: SyncMutex::new(None),
+            backup_phase,
+            init_phase: SyncMutex::new(init_progress),
+        });
+        Self {
+            actor: ConcurrentActor::new(ServiceActor(seed.clone())),
+            seed,
+        }
+        .into()
+    }
+
+    pub(in crate::service) async fn isolated_backup(
+        seed: &ServiceActorSeed,
+        event_id: Guid,
+        path: PathBuf,
+    ) -> Result<(), Error> {
+        let container =
+            PersistentContainer::new_backup(&seed.ctx, seed.persistent_container.s9pk.clone())
+                .await?;
+        let backup =
+            Self::from_container(seed.ctx.clone(), container, seed.backup_phase.clone(), None);
+        let result = async {
+            let container = &backup.seed.persistent_container;
+            container
+                .init_backup(backup.weak(), event_id.clone())
+                .await?;
+            let guard = container
+                .mount_backup(path, crate::disk::mount::filesystem::ReadWrite)
+                .await?;
+            let result = container
+                .execute::<crate::util::serde::NoOutput>(
+                    event_id,
+                    ProcedureName::CreateBackup,
+                    Value::Null,
+                    None,
+                )
+                .await;
+            let unmount = guard.unmount(true).await;
+            result?;
+            unmount
+        }
+        .await;
+        let shutdown = backup.shutdown(None).await;
+        let mut errors = ErrorCollection::new();
+        errors.handle(result);
+        errors.handle(shutdown);
+        errors.into_result()
     }
 
     #[instrument(skip_all)]
@@ -888,7 +953,7 @@ struct ServiceActorSeed {
     backup: SyncMutex<Option<BoxFuture<'static, ()>>>,
     /// Set while a backup procedure is running so the service container can
     /// stream progress updates back via the `setBackupProgress` effect.
-    backup_phase: SyncMutex<Option<crate::progress::PhaseProgressTrackerHandle>>,
+    backup_phase: Arc<SyncMutex<Option<crate::progress::PhaseProgressTrackerHandle>>>,
     /// Set while the init procedure is running so the service container can
     /// stream progress updates back via the `setInitProgress` effect. Routed
     /// to the install/update finalization phase of the install progress.

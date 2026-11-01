@@ -250,6 +250,7 @@ impl TryFrom<ManifestV1> for Manifest {
                 .map(|(id, _)| id.clone())
                 .chain([VolumeId::from_str("embassy").unwrap()])
                 .collect(),
+            shared_volumes: false,
             dependencies: Dependencies(
                 value
                     .dependencies

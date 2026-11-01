@@ -2,7 +2,8 @@ import { CommonModule } from '@angular/common'
 import { Component, computed, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { i18nKey, i18nPipe } from '@start9labs/shared'
-import { TuiDialogContext, TuiIcon } from '@taiga-ui/core'
+import { TuiMapperPipe } from '@taiga-ui/cdk'
+import { TuiDialogContext, TuiIcon, TuiTitle } from '@taiga-ui/core'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { PatchDB } from 'patch-db-client'
 import { map } from 'rxjs'
@@ -26,23 +27,36 @@ import { DataModel } from '../services/patch-db/data-model'
           <td>{{ 'System data' | i18n }}</td>
           <td [style.color]="system().color">
             <tui-icon [icon]="system().icon" />
-            {{ system().result | i18n }}
+            {{ system().result | i18n
+            }}{{
+              data.content.server.error ? ': ' + data.content.server.error : ''
+            }}
           </td>
           <td></td>
         </tr>
         @if (pkgTitles(); as titles) {
-          @for (pkg of data.content.packages | keyvalue; track $index) {
+          @for (
+            item of data.content | tuiMapper: reportRows : titles;
+            track item.key
+          ) {
             <tr>
-              <td>{{ titles[pkg.key] || pkg.key }}</td>
-              <td [style.color]="getColor(pkg.value.error)">
-                <tui-icon [icon]="getIcon(pkg.value.error)" />
+              <td>
+                <span tuiTitle>
+                  <b>{{ item.title }}</b>
+                  @if (item.kind === 'volume') {
+                    <span tuiSubtitle>{{ 'Volumes' | i18n }}</span>
+                  }
+                </span>
+              </td>
+              <td [style.color]="getColor(item.result.error)">
+                <tui-icon [icon]="getIcon(item.result.error)" />
                 {{
-                  pkg.value.error
-                    ? ('Failed' | i18n) + ': ' + pkg.value.error
+                  item.result.error
+                    ? ('Failed' | i18n) + ': ' + item.result.error
                     : ('Succeeded' | i18n)
                 }}
               </td>
-              <td>{{ formatDuration(pkg.value.duration_ms) }}</td>
+              <td>{{ formatDuration(item.result.duration_ms) }}</td>
             </tr>
           }
         }
@@ -65,10 +79,9 @@ import { DataModel } from '../services/patch-db/data-model'
       margin-inline-end: 0.25rem;
     }
   `,
-  imports: [CommonModule, TuiIcon, i18nPipe],
+  imports: [CommonModule, TuiIcon, TuiTitle, TuiMapperPipe, i18nPipe],
 })
 export class BackupsReportModal {
-  private readonly i18n = inject(i18nPipe)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
 
   readonly data =
@@ -90,6 +103,24 @@ export class BackupsReportModal {
     ),
   )
 
+  protected readonly reportRows = (
+    content: T.BackupReport,
+    titles: Record<string, string>,
+  ) => [
+    ...Object.entries(content.packages).map(([id, result]) => ({
+      key: `package:${id}`,
+      kind: 'package' as const,
+      title: titles[id] || id,
+      result,
+    })),
+    ...Object.entries(content.sharedVolumes ?? {}).map(([id, result]) => ({
+      key: `volume:${id}`,
+      kind: 'volume' as const,
+      title: result.name,
+      result,
+    })),
+  ]
+
   readonly system = computed(
     (): { result: i18nKey; icon: string; color: string } => {
       if (!this.data.content.server.attempted) {
@@ -102,8 +133,7 @@ export class BackupsReportModal {
 
       if (this.data.content.server.error) {
         return {
-          result:
-            `${this.i18n.transform('Failed')}: ${this.data.content.server.error}` as i18nKey,
+          result: 'Failed',
           icon: '@tui.circle-minus',
           color: 'var(--tui-text-negative)',
         }

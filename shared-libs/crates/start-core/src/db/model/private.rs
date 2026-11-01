@@ -34,6 +34,13 @@ pub struct Private {
     pub push: crate::notifications::push::PushState,
     pub cifs: CifsTargets,
     #[serde(default)]
+    pub shared_volume_credentials: BTreeMap<
+        crate::shared_volumes::SharedVolumeId,
+        crate::shared_volumes::SharedVolumeCredentials,
+    >,
+    #[serde(default)]
+    pub retained_shared_volumes: BTreeMap<crate::shared_volumes::SharedVolumeId, String>,
+    #[serde(default)]
     pub package_stores: BTreeMap<PackageId, Value>,
 }
 

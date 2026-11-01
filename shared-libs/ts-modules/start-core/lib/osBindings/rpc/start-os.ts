@@ -103,6 +103,7 @@ export type CheckPortRes = z.output<typeof schemas.CheckPortRes>
  * [`CheckPortRes`] so the IPv4 and IPv6 checks can run independently.
  */
 export type CheckPortV6Res = z.output<typeof schemas.CheckPortV6Res>
+export type CifsInput = z.input<typeof schemas.Cifs>
 export type CifsAddParamsInput = z.input<typeof schemas.CifsAddParams>
 export type ContactInfo = z.output<typeof schemas.ContactInfo>
 export type ContactInfoInput = z.input<typeof schemas.ContactInfo>
@@ -271,6 +272,23 @@ export type SetServerHostnameParamsInput = z.input<
 export type SetWifiEnabledParamsInput = z.input<
   typeof schemas.SetWifiEnabledParams
 >
+export type SharedVolumeAvailability = z.output<
+  typeof schemas.SharedVolumeAvailability
+>
+export type SharedVolumeBackupInfo = z.output<
+  typeof schemas.SharedVolumeBackupInfo
+>
+export type SharedVolumeGrantInput = z.input<typeof schemas.SharedVolumeGrant>
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export type SharedVolumeId = z.output<typeof schemas.SharedVolumeId>
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export type SharedVolumeIdInput = z.input<typeof schemas.SharedVolumeId>
 export type ShutdownParamsInput = z.input<typeof schemas.ShutdownParams>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 
@@ -384,6 +402,9 @@ export type CifsUpdateParamsInput = z.input<typeof schemas.CifsUpdateParams>
 export type ClearTaskParamsInput = z.input<typeof schemas.ClearTaskParams>
 export type ControlParamsInput = z.input<typeof schemas.ControlParams>
 export type CreateParamsInput = z.input<typeof schemas.CreateParams>
+export type CreateSharedVolumeSourceInput = z.input<
+  typeof schemas.CreateSharedVolumeSource
+>
 export type CurrentDependencyKind = z.output<
   typeof schemas.CurrentDependencyKind
 >
@@ -502,11 +523,18 @@ export type RemoveTunnelParamsInput = z.input<typeof schemas.RemoveTunnelParams>
 export type RenameGatewayParamsInput = z.input<
   typeof schemas.RenameGatewayParams
 >
+export type RenameSharedVolumeParamsInput = z.input<
+  typeof schemas.RenameSharedVolumeParams
+>
 export type RequiresHostIdInput = z.input<typeof schemas.RequiresHostId>
 export type RequiresPackageIdInput = z.input<typeof schemas.RequiresPackageId>
 export type RestorePackageParamsInput = z.input<
   typeof schemas.RestorePackageParams
 >
+export type RestoreVolumeParamsInput = z.input<
+  typeof schemas.RestoreVolumeParams
+>
+export type RestoreVolumeResult = z.output<typeof schemas.RestoreVolumeResult>
 export type RunActionParamsInput = z.input<typeof schemas.RunActionParams>
 export type ServiceStats = z.output<typeof schemas.ServiceStats>
 export type SetDefaultOutboundParamsInput = z.input<
@@ -525,7 +553,14 @@ export type SetOsUpdateSignerParamsInput = z.input<
 export type SetOutboundGatewayParamsInput = z.input<
   typeof schemas.SetOutboundGatewayParams
 >
+export type SetSharedVolumeGrantParamsInput = z.input<
+  typeof schemas.SetSharedVolumeGrantParams
+>
 export type SetStaticDnsParamsInput = z.input<typeof schemas.SetStaticDnsParams>
+export type SharedVolumeInspection = z.output<
+  typeof schemas.SharedVolumeInspection
+>
+export type SharedVolumeParamsInput = z.input<typeof schemas.SharedVolumeParams>
 export type SideloadResponse = z.output<typeof schemas.SideloadResponse>
 export type SignAssetParamsInput = z.input<typeof schemas.SignAssetParams>
 export type SignPackageParamsInput = z.input<typeof schemas.SignPackageParams>
@@ -563,6 +598,9 @@ export type CompatibleAlpnInfo = z.output<typeof schemas.CompatibleAlpnInfo>
  * Selects an existing server backup and its unlocking credential.
  */
 export type ConvertParamsInput = z.input<typeof schemas.ConvertParams>
+export type CreateSharedVolumeParamsInput = z.input<
+  typeof schemas.CreateSharedVolumeParams
+>
 export type DependencyMetadata = z.output<typeof schemas.DependencyMetadata>
 export type HardwareInfo = z.output<typeof schemas.HardwareInfo>
 export type HostAddress = z.output<typeof schemas.HostAddress>
