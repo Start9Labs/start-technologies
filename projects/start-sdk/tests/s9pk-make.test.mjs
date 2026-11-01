@@ -49,13 +49,30 @@ const fs = require('node:fs')
 const args = process.argv.slice(2)
 fs.appendFileSync('calls', JSON.stringify(args) + '\\n')
 if (args.join(' ') === 's9pk list-ingredients') {
-  console.log('javascript/index.js startos/manifest/index.ts Dockerfile')
+  console.log('javascript/index.js startos/manifest/index.ts')
+  if (process.env.DYNAMIC_INGREDIENTS) {
+    if (fs.existsSync('javascript/index.js')) {
+      console.log(JSON.parse(fs.readFileSync('javascript/index.js', 'utf8')).ingredients.join('\\n'))
+    }
+  } else {
+    console.log('Dockerfile')
+  }
+  process.exitCode = Number(process.env.LIST_STATUS || 0)
 } else if (args.join(' ') === 'init-key') {
   process.exit(Number(process.env.INIT_STATUS || 0))
 } else if (args.join(' ') === 'server device-info --format json') {
   console.log(JSON.stringify({ hardware: { arch: process.env.ARCH || 'aarch64' } }))
   process.exit(Number(process.env.DEVICE_STATUS || 0))
+} else if (args[0] === 's9pk' && args[1] === 'inspect') {
+  console.log(JSON.stringify({ title: 'Example', version: '1.0.0', images: {}, sdkVersion: 'test', gitHash: 'test' }))
 } else if (args[0] === 's9pk' && args[1] === 'pack') {
+  if (process.env.DYNAMIC_INGREDIENTS) {
+    const ingredients = JSON.parse(fs.readFileSync('javascript/index.js', 'utf8')).ingredients
+    if (ingredients.some(path => !fs.existsSync(path))) {
+      console.error('Missing current ingredient')
+      process.exit(1)
+    }
+  }
   process.exitCode = Number(process.env.PACK_STATUS || 0)
   if (!process.exitCode) {
     const output = args[args.indexOf('-o') + 1]
@@ -242,3 +259,71 @@ test('build gate failures prevent packing and installation', t => {
     false,
   )
 })
+
+for (const target of ['x86', 'universal']) {
+  for (const removed of [
+    'image/Dockerfile',
+    'image',
+    'dependency.svg',
+    'dependency.s9pk',
+  ]) {
+    test(`${target} builds on the first attempt after removing ${removed} from the manifest`, t => {
+      const f = fixture(t)
+      const env = { DYNAMIC_INGREDIENTS: '1' }
+      const output = target === 'x86' ? 'example_x86_64.s9pk' : 'example.s9pk'
+      mkdirSync(join(f.root, 'image'))
+      writeFileSync(join(f.root, 'image', 'Dockerfile'), 'FROM scratch\n')
+      writeFileSync(join(f.root, 'dependency.svg'), 'synthetic icon')
+      writeFileSync(join(f.root, 'dependency.s9pk'), 'synthetic dependency')
+      writeFileSync(
+        join(f.root, 'startos', 'index.ts'),
+        JSON.stringify({ ingredients: [removed] }),
+      )
+      succeeds(f.make(env, [target]))
+      f.stale('javascript/index.js')
+      f.stale(output)
+      rmSync(join(f.root, removed), { recursive: true })
+      const updated = JSON.stringify({ ingredients: [] })
+      writeFileSync(join(f.root, 'startos', 'index.ts'), updated)
+      succeeds(f.make(env, [target]))
+      assert.equal(
+        JSON.parse(readFileSync(join(f.root, output), 'utf8')).bundle,
+        updated,
+      )
+      assert.equal(f.calls().filter(args => args[1] === 'pack').length, 2)
+      succeeds(f.make(env, [target]))
+      assert.equal(f.calls().filter(args => args[1] === 'pack').length, 2)
+      assert.equal(
+        readFileSync(join(f.root, 'steps'), 'utf8'),
+        'typecheck\nformat\nbundle\ntypecheck\nformat\nbundle\n',
+      )
+    })
+  }
+}
+
+for (const target of ['x86', 'universal']) {
+  test(`${target} fails when the current manifest still requires a missing ingredient`, t => {
+    const f = fixture(t)
+    const env = { DYNAMIC_INGREDIENTS: '1' }
+    writeFileSync(
+      join(f.root, 'startos', 'index.ts'),
+      JSON.stringify({ ingredients: ['Dockerfile'] }),
+    )
+    succeeds(f.make(env, [target]))
+    f.stale(target === 'x86' ? 'example_x86_64.s9pk' : 'example.s9pk')
+    rmSync(join(f.root, 'Dockerfile'))
+    assert.notEqual(f.make(env, [target]).status, 0)
+  })
+}
+
+for (const target of ['x86', 'universal']) {
+  test(`${target} fails closed on a partial ingredient-list failure`, t => {
+    const f = fixture(t)
+    succeeds(f.make({}, [target]))
+    const packs = f.calls().filter(args => args[1] === 'pack').length
+    const result = f.make({ LIST_STATUS: '9' }, [target])
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /list-ingredients.*failed/)
+    assert.equal(f.calls().filter(args => args[1] === 'pack').length, packs)
+  })
+}
