@@ -212,7 +212,7 @@ mod tests {
             assert_eq!(migrated["private"]["osSecurityNotifications"], json!({}));
             assert_eq!(
                 migrated["public"]["serverInfo"]["postInitMigrationTodos"],
-                json!({ "0.4.0.5": null, "0.4.1": null, "0.4.1.1": null })
+                json!({ "0.4.0.5": null, "0.4.1": null, "0.4.1.1": null, "0.4.2": null })
             );
             assert!(
                 migrated["private"]["sessions"]["pubkeys"]
