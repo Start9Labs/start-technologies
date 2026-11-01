@@ -9,22 +9,15 @@ import {
   packageResponse,
   packagesResponse,
 } from '@start9labs/marketplace'
-import {
-  defaultRegistries,
-  Exver,
-  i18nPipe,
-  registryUrl,
-  sameUrl,
-} from '@start9labs/shared'
+import { Exver, registryUrl, sameUrl } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import { PatchDB, pathFromArray } from 'patch-db-client'
+import { PatchDB } from 'patch-db-client'
 import {
   BehaviorSubject,
   catchError,
   combineLatest,
   distinctUntilChanged,
   filter,
-  firstValueFrom,
   from,
   map,
   mergeMap,
@@ -36,14 +29,11 @@ import {
   shareReplay,
   startWith,
   switchMap,
-  tap,
 } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { PackageIconService } from 'src/app/services/package-icon.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { StorageService } from 'src/app/services/storage.service'
-
-const { start9, community } = defaultRegistries
 
 @Injectable({
   providedIn: 'root',
@@ -54,29 +44,24 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly exver = inject(Exver)
   private readonly storage = inject(StorageService)
-  private readonly i18n = inject(i18nPipe)
 
   readonly registries$: Observable<StoreIdentity[]> = this.patch
     .watch$('ui', 'registries')
     .pipe(
-      map(registries => [
-        toStoreIdentity(start9, registries[start9]),
-        toStoreIdentity(community, registries[community]),
-        ...Object.entries(registries)
-          .filter(([u, _]) => !sameUrl(start9, u) && !sameUrl(community, u))
-          .map(([url, name]) => toStoreIdentity(url, name)),
-      ]),
+      map(registries =>
+        Object.entries(registries).map(([url, name]) =>
+          toStoreIdentity(url, name),
+        ),
+      ),
     )
 
-  readonly newRegistry$ = this.patch.watch$('ui', 'registries').pipe(
-    map(registries =>
-      [start9, community, ...Object.keys(registries)]
-        .filter((url, i, all) => all.findIndex(u => sameUrl(u, url)) === i)
-        .map(url => ({ url, name: registries[url] ?? null })),
-    ),
-    startWith<{ url: string; name: string | null }[]>([]),
+  readonly newRegistry$ = this.registries$.pipe(
+    map(registries => registries.map(registry => registry.url)),
+    startWith<string[]>([]),
     pairwise(),
-    mergeMap(([p, c]) => c.filter(a => !p.find(b => sameUrl(a.url, b.url)))),
+    mergeMap(([previous, current]) =>
+      current.filter(url => !previous.some(saved => sameUrl(url, saved))),
+    ),
   )
 
   readonly currentRegistryUrl$ = new ReplaySubject<string>(1)
@@ -85,12 +70,8 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
   readonly marketplace$: Observable<Marketplace> = combineLatest([
     this.newRegistry$.pipe(
-      mergeMap(({ url, name }) =>
+      mergeMap(url =>
         this.fetchRegistry$(url).pipe(
-          tap(data => {
-            if (data?.info.name)
-              this.updateRegistryName(url, name, data.info.name)
-          }),
           map(data => [url, data] satisfies [string, StoreDataWithUrl | null]),
           startWith<[string, StoreDataWithUrl | null]>([url, null]),
         ),
@@ -129,11 +110,11 @@ export class MarketplaceService extends AbstractMarketplaceService {
   )
 
   readonly registryIcons$ = combineLatest([
-    this.currentRegistry$,
+    this.currentRegistry$.pipe(startWith(null)),
     this.marketplace$,
   ]).pipe(
     map(([current, marketplace]) => [
-      { url: current.url, icon: current.info.icon },
+      ...(current ? [{ url: current.url, icon: current.info.icon }] : []),
       ...Object.values(marketplace).flatMap(registry =>
         registry ? [{ url: registry.url, icon: registry.info.icon }] : [],
       ),
@@ -298,61 +279,41 @@ export class MarketplaceService extends AbstractMarketplaceService {
     })
   }
 
-  async connect(url: string): Promise<void> {
+  async connect(rawUrl: string): Promise<void> {
+    const url = registryUrl(rawUrl)
     this.currentRegistryUrl$.next(url)
     this.storage.set('selectedRegistry', url)
   }
 
-  async add(rawUrl: string): Promise<string> {
+  async previewRegistry(rawUrl: string) {
     const url = registryUrl(rawUrl)
-    const existing = await firstValueFrom(this.registries$)
+    const info = await this.api.rpc.server.trustedKeys.registryPreview({ url })
+    return { url, info }
+  }
 
-    if (existing.some(r => sameUrl(r.url, url))) {
-      throw new Error(this.i18n.transform('Registry already added'))
-    }
-
-    const info = await firstValueFrom(this.fetchInfo$(url))
-    await this.api.rpc.db.put.ui({
-      pointer: pathFromArray(['registries', url]),
-      value: info.name,
+  async add(rawUrl: string, approvedKeys: string[] = []): Promise<string> {
+    const url = registryUrl(rawUrl)
+    await this.api.rpc.server.trustedKeys.connectRegistry({
+      url,
+      name: null,
+      approvedKeys,
     })
-
     return url
   }
 
   async delete(url: string): Promise<void> {
-    const raw = await firstValueFrom(this.patch.watch$('ui', 'registries'))
-    const filtered: Record<string, string | null> = Object.fromEntries(
-      Object.entries(raw).filter(([key]) => !sameUrl(key, url)),
-    )
-    await this.api.rpc.db.put.ui({
-      pointer: pathFromArray(['registries']),
-      value: filtered,
-    })
+    await this.api.rpc.server.trustedKeys.removeRegistry({ url })
 
     const selected = this.storage.get<string>('selectedRegistry')
     if (selected && sameUrl(selected, url)) {
       this.storage.set('selectedRegistry', null)
     }
   }
-
-  private async updateRegistryName(
-    url: string,
-    oldName: string | null,
-    newName: string,
-  ): Promise<void> {
-    if (oldName !== newName) {
-      this.api.rpc.db.put.ui({
-        pointer: pathFromArray(['registries', url]),
-        value: newName,
-      })
-    }
-  }
 }
 
 function toStoreIdentity(url: string, name?: string | null): StoreIdentity {
   return {
-    url,
+    url: registryUrl(url),
     name: name || url,
   }
 }

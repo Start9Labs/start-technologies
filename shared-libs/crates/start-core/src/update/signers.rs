@@ -121,10 +121,11 @@ fn get_signer(
 pub async fn add(ctx: RpcContext, params: SetOsUpdateSignerParams) -> Result<(), Error> {
     ctx.db
         .mutate(|db| {
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_trusted_keys_mut()
-                .mutate(|keys| legacy_add(keys, params.key, params.label))
+            db.as_public_mut().mutate(|public| {
+                crate::trusted_keys::mutate_public_keys(public, |keys| {
+                    legacy_add(keys, params.key, params.label)
+                })
+            })
         })
         .await
         .result
@@ -152,10 +153,11 @@ pub async fn list(ctx: RpcContext) -> Result<TrustedOsUpdateSigners, Error> {
 pub async fn update(ctx: RpcContext, params: SetOsUpdateSignerParams) -> Result<(), Error> {
     ctx.db
         .mutate(|db| {
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_trusted_keys_mut()
-                .mutate(|keys| legacy_update(keys, &params.key, params.label))
+            db.as_public_mut().mutate(|public| {
+                crate::trusted_keys::mutate_public_keys(public, |keys| {
+                    legacy_update(keys, &params.key, params.label)
+                })
+            })
         })
         .await
         .result
@@ -164,10 +166,11 @@ pub async fn update(ctx: RpcContext, params: SetOsUpdateSignerParams) -> Result<
 pub async fn remove(ctx: RpcContext, params: OsUpdateSignerKeyParams) -> Result<(), Error> {
     ctx.db
         .mutate(|db| {
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_trusted_keys_mut()
-                .mutate(|keys| legacy_remove(keys, &params.key))
+            db.as_public_mut().mutate(|public| {
+                crate::trusted_keys::mutate_public_keys(public, |keys| {
+                    legacy_remove(keys, &params.key)
+                })
+            })
         })
         .await
         .result

@@ -23,6 +23,7 @@ boundary(
   '@start9labs/shared',
   [
     'TaskService',
+    'CopyService',
     'DialogService',
     'DocsLinkDirective',
     'i18nPipe',
@@ -55,6 +56,7 @@ boundary(
   'export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => [];',
 )
 boundary('@taiga-ui/kit', [
+  'TuiAvatar',
   'TuiBadge',
   'TuiBadgeNotification',
   'TuiButtonLoading',
@@ -114,12 +116,17 @@ for (const [file, name] of [
 }
 boundaries.set(
   '@start9labs/marketplace',
-  ['trust.ts', 'types.ts', 'services/abstract-marketplace.service.ts']
+  [
+    'trust.ts',
+    'key-identity.ts',
+    'types.ts',
+    'services/abstract-marketplace.service.ts',
+  ]
     .map(
       file =>
         `export * from ${JSON.stringify(new URL(`../../../../../shared-libs/ts-modules/marketplace/src/${file}`, import.meta.url).href)};`,
     )
-    .join('\n'),
+    .join('\n') + '\nexport class StoreIconDirective {}',
 )
 loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
@@ -134,7 +141,7 @@ const { LocalizePipe: ProductionLocalizePipe } =
 const { I18N } =
   await import('../../../../../shared-libs/ts-modules/shared/src/i18n/i18n.providers.ts')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
-const { TaskService, DialogService, i18nPipe, i18nService } =
+const { TaskService, CopyService, DialogService, i18nPipe, i18nService } =
   await import('@start9labs/shared')
 const { CONTEXT } = await import('@taiga-ui/polymorpheus')
 const { WA_WINDOW } = await import('@ng-web-apis/common')
@@ -1242,8 +1249,12 @@ test('a candidate disappearing during the asynchronous UI registry lookup preven
   assert.equal(f.completed, 0)
 })
 
-const { matchingTrustedKeys, packageSigners } =
-  await import('@start9labs/marketplace')
+const {
+  matchingTrustedKeys,
+  packageSigners,
+  PackageSignerIdentitiesPipe,
+  signingKeyIdentity,
+} = await import('@start9labs/marketplace')
 const { parsePublicKeys, publicKeyPem } =
   await import('src/app/utils/public-keys')
 const { MarketplaceControlsComponent: Controls } =
@@ -1257,6 +1268,65 @@ const pkg = {
   flavor: null,
   s9pks: [['x86_64', { signatures: { [OS_UPDATE_SIGNERS[0]]: 'signature' } }]],
 }
+
+test('PEM and DER public keys share the complete SHA-256 SPKI fingerprint', () => {
+  const der = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
+  const expected = {
+    name: null,
+    emails: [],
+    fingerprints: ['SHA256:N8LBiYUGYmV8l4H5YRPwqgC4n6y9uMYO9IIGemPc1Bs'],
+  }
+  assert.deepEqual(signingKeyIdentity(der), expected)
+  assert.deepEqual(
+    signingKeyIdentity(
+      `-----BEGIN PUBLIC KEY-----\n${der}\n-----END PUBLIC KEY-----`,
+    ),
+    expected,
+  )
+})
+
+test('marketplace signer identities stay visible when disabled and never borrow another key’s identity', () => {
+  const first = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
+  const second = 'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40='
+  const known = {
+    name: 'Fallback publisher',
+    publicKeys: [first],
+    marketplace: false,
+    os: false,
+    gpgExports: [
+      {
+        identities: {
+          [first]: ['Alice <alice@example.test>', 'Alice <alice@other.test>'],
+          [second]: ['Bob <bob@example.test>'],
+        },
+        keyFingerprints: {
+          [first]: ['5456dbff1b9df905041fa7765259adfc2d63c217'],
+          [second]: ['a969c8eba8b13613d2568a85ee395832e45a6664'],
+        },
+      },
+    ],
+  }
+  const signers = new PackageSignerIdentitiesPipe().transform(
+    {
+      signers: [
+        first,
+        `-----BEGIN PUBLIC KEY-----\n${first}\n-----END PUBLIC KEY-----`,
+        second,
+      ],
+    },
+    { known },
+  )
+  assert.equal(signers.length, 2)
+  assert.deepEqual(signers[0], {
+    id: first,
+    name: 'Alice',
+    emails: ['alice@example.test', 'alice@other.test'],
+    fingerprints: ['5456 DBFF 1B9D F905 041F A776 5259 ADFC 2D63 C217'],
+  })
+  assert.equal(signers[1].name, null)
+  assert.deepEqual(signers[1].emails, [])
+  assert.match(signers[1].fingerprints[0], /^SHA256:/)
+})
 
 test('PEM form parsing canonicalizes multiple keys and rejects empty, private, non-Ed25519, and mixed input', () => {
   const first = OS_UPDATE_SIGNERS[0]
@@ -1543,6 +1613,7 @@ function keyringDialogFixture(t, component, keyring, reject = false) {
         useValue: new FormBuilder().nonNullable,
       },
       { provide: CONTEXT, useValue: context },
+      { provide: CopyService, useValue: { copy: () => {} } },
       {
         provide: ApiService,
         useValue: {
@@ -1628,7 +1699,7 @@ test('failed keyring edits keep their form values and dialog open', async t => {
   assert.equal(f.instance.saving(), false)
 })
 
-test('new System keyrings default to package trust only', async t => {
+test('new manually added keys default to package trust only', async t => {
   const f = keyringDialogFixture(t, AddTrustedKeyDialog)
   f.instance.form.setValue({
     name: 'Publisher',
@@ -1643,4 +1714,175 @@ test('new System keyrings default to package trust only', async t => {
     },
   ])
   assert.deepEqual(f.closed, [true])
+})
+
+test('individual trust switches preserve the other context and restore the control on failure', async () => {
+  for (const context of ['marketplace', 'os']) {
+    for (const succeeds of [true, false]) {
+      const submissions = []
+      const resets = []
+      const key = { name: 'Publisher', marketplace: true, os: false }
+      const enabled = !key[context]
+      const instance = {
+        saving: signal(false),
+        api: {
+          rpc: {
+            server: {
+              trustedKeys: {
+                update: async params => {
+                  submissions.push(params)
+                  if (!succeeds) throw new Error('offline')
+                },
+              },
+            },
+          },
+        },
+        tasks: {
+          run: async work => {
+            try {
+              await work()
+              return true
+            } catch {
+              return false
+            }
+          },
+        },
+      }
+      await TrustedKeyrings.prototype.update.call(
+        instance,
+        'individual-key',
+        key,
+        context,
+        enabled,
+        { reset: value => resets.push(value) },
+      )
+      assert.deepEqual(submissions, [
+        { id: 'individual-key', ...key, [context]: enabled },
+      ])
+      assert.deepEqual(resets, succeeds ? [] : [key[context]])
+      assert.equal(instance.saving(), false)
+    }
+  }
+})
+
+test('registry preview grants no trust, and connection sends only the approved keys', async () => {
+  const calls = []
+  const info = {
+    name: 'Registry',
+    trustKeys: { approved: 'Publisher', unapproved: 'Other publisher' },
+  }
+  const instance = {
+    api: {
+      rpc: {
+        server: {
+          trustedKeys: {
+            registryPreview: async params => {
+              calls.push(['preview', params])
+              return info
+            },
+            connectRegistry: async params => {
+              calls.push(['connect', params])
+            },
+          },
+        },
+      },
+    },
+  }
+  assert.deepEqual(
+    await MarketplaceService.prototype.previewRegistry.call(
+      instance,
+      'https://registry.test',
+    ),
+    { url: 'https://registry.test', info },
+  )
+  assert.deepEqual(calls, [['preview', { url: 'https://registry.test' }]])
+  await MarketplaceService.prototype.add.call(
+    instance,
+    'https://registry.test',
+    ['approved'],
+  )
+  assert.deepEqual(calls[1], [
+    'connect',
+    { url: 'https://registry.test', name: null, approvedKeys: ['approved'] },
+  ])
+})
+
+test('a late registry metadata response cannot restore a removed registry', async t => {
+  const { Exver } = await import('@start9labs/shared')
+  const { StorageService } = await import('src/app/services/storage.service')
+  const { PackageIconService } =
+    await import('src/app/services/package-icon.service')
+  const metadata = deferred()
+  const registries = new BehaviorSubject({
+    'https://registry.test': 'Old name',
+  })
+  const writes = []
+  const injector = createEnvironmentInjector(
+    [
+      { provide: PatchDB, useValue: { watch$: () => registries } },
+      { provide: Exver, useValue: {} },
+      { provide: StorageService, useValue: { get: () => null } },
+      { provide: PackageIconService, useValue: {} },
+      {
+        provide: ApiService,
+        useValue: {
+          rpc: {
+            registry: {
+              info: () => metadata.promise,
+              package: { get: async () => ({}) },
+            },
+            server: {
+              trustedKeys: { removeRegistry: async () => registries.next({}) },
+            },
+            db: {
+              put: {
+                ui: async params => {
+                  writes.push(params)
+                  registries.next({ 'https://registry.test': params.value })
+                },
+              },
+            },
+          },
+        },
+      },
+    ],
+    null,
+  )
+  t.after(() => injector.destroy())
+  const service = runInInjectionContext(
+    injector,
+    () => new MarketplaceService(),
+  )
+  const subscription = service.marketplace$.subscribe()
+  t.after(() => subscription.unsubscribe())
+  await service.delete('https://registry.test')
+  metadata.resolve({ name: 'New name', categories: {} })
+  await new Promise(setImmediate)
+  assert.deepEqual(await firstValueFrom(service.registries$), [])
+  assert.deepEqual(writes, [])
+})
+
+test('registry removal uses the authoritative endpoint and clears a matching selected registry', async () => {
+  const calls = []
+  const instance = {
+    api: {
+      rpc: {
+        server: {
+          trustedKeys: { removeRegistry: async params => calls.push(params) },
+        },
+      },
+    },
+    storage: {
+      get: () => 'https://registry.test',
+      set: (...args) => calls.push(args),
+    },
+  }
+  await MarketplaceService.prototype.delete.call(
+    instance,
+    'https://registry.test',
+  )
+  assert.deepEqual(calls, [
+    { url: 'https://registry.test' },
+    ['selectedRegistry', null],
+  ])
 })

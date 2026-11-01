@@ -31,6 +31,8 @@ fn package_commitment_requires_an_enabled_marketplace_signer() {
         "custom".into(),
         TrustedKeyring {
             name: "custom".into(),
+            origin: "manual".into(),
+            origin_registry: None,
             removable: true,
             public_keys: std::collections::BTreeSet::from([public]),
             gpg_exports: Default::default(),

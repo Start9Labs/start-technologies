@@ -3,12 +3,7 @@ import { Observable, of } from 'rxjs'
 import { MarketplacePkg, StoreDataWithUrl, StoreIdentity } from '../types'
 import { registryIconUrl } from '../util/icon'
 
-/**
- * Contract the shared marketplace components (tile, preview, registry-select)
- * depend on. Each app provides a concrete implementation: the embedded OS UI
- * persists registries to patch-db; the public brochure persists them to
- * localStorage and hits registries' RPC directly.
- */
+/** Registry storage and transport supplied by the host application. */
 export abstract class AbstractMarketplaceService {
   /** Icons fetched from registry info. */
   abstract readonly registryIcons$: Observable<
@@ -21,7 +16,7 @@ export abstract class AbstractMarketplaceService {
   /** The url of the registry currently being browsed. */
   abstract readonly currentRegistryUrl$: Observable<string>
 
-  /** All registries known to this app (start9, community, then customs). */
+  /** Registries saved by this app. */
   abstract readonly registries$: Observable<StoreIdentity[]>
 
   /** Resolve one package. version/flavor/registryUrl are optional. */
@@ -46,9 +41,9 @@ export abstract class AbstractMarketplaceService {
   /** Switch the browsed registry to `url` and persist the selection. */
   abstract connect(url: string): Promise<void>
 
-  /** Validate & persist a custom registry; resolves to its normalized url. */
+  /** Saves a registry and returns its normalized URL. */
   abstract add(rawUrl: string): Promise<string>
 
-  /** Remove a custom registry. */
+  /** Removes a saved registry. */
   abstract delete(url: string): Promise<void>
 }

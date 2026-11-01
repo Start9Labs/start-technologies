@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use clap::Parser;
 use imbl_value::InternedString;
@@ -8,9 +8,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::context::CliContext;
 use crate::prelude::*;
+use crate::registry::FullIndex;
 use crate::registry::context::RegistryContext;
 use crate::registry::package::index::Category;
+use crate::rpc_continuations::Guid;
 use crate::s9pk::manifest::LocaleString;
+use crate::sign::AnyVerifyingKey;
 use crate::util::DataUrl;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat};
 
@@ -21,6 +24,14 @@ pub fn info_api<C: Context>() -> ParentHandler<C, WithIoFormat<Empty>> {
                 .with_metadata("authenticated", Value::Bool(false))
                 .with_display_serializable()
                 .with_about("about.display-registry-info")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "set-trust-signers",
+            from_fn_async(set_trust_signers)
+                .with_metadata("admin", Value::Bool(true))
+                .no_display()
+                .with_about("about.set-registry-trust-signers")
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
@@ -65,19 +76,73 @@ pub struct RegistryInfo {
     /// Markdown, shown above the registry's services.
     pub description: Option<LocaleString>,
     pub categories: BTreeMap<InternedString, Category>,
+    /// Proposed Marketplace signing keys and fallback labels, not an assertion of trust.
+    #[serde(default)]
+    pub trust_keys: BTreeMap<AnyVerifyingKey, String>,
 }
 
 rpc_toolkit::reflect_ts!(RegistryInfo);
 rpc_toolkit::ts_export!(RegistryInfo, namespaces = [""]);
 
 pub async fn get_info(ctx: RegistryContext) -> Result<RegistryInfo, Error> {
-    let peek = ctx.db.peek().await.into_index();
+    let index: FullIndex = ctx.db.peek().await.into_index().de()?;
+    let trust_keys = proposed_keys(&index);
     Ok(RegistryInfo {
-        name: peek.as_name().de()?,
-        icon: peek.as_icon().de()?,
-        description: peek.as_description().de()?,
-        categories: peek.as_package().as_categories().de()?,
+        name: index.name,
+        icon: index.icon,
+        description: index.description,
+        categories: index.package.categories,
+        trust_keys,
     })
+}
+
+fn proposed_keys(index: &FullIndex) -> BTreeMap<AnyVerifyingKey, String> {
+    index
+        .trust_signers
+        .iter()
+        .filter_map(|id| index.signers.get(id))
+        .flat_map(|signer| {
+            signer
+                .keys
+                .iter()
+                .map(|key| (key.clone(), signer.name.clone()))
+        })
+        .collect()
+}
+
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
+#[command(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
+pub struct SetTrustSignersParams {
+    #[arg(value_name = "SIGNER", help = "help.arg.registry-trust-signers", num_args = 0..)]
+    pub signers: Vec<Guid>,
+}
+
+rpc_toolkit::reflect_ts!(SetTrustSignersParams);
+
+async fn set_trust_signers(
+    ctx: RegistryContext,
+    params: SetTrustSignersParams,
+) -> Result<(), Error> {
+    ctx.db
+        .mutate(|db| {
+            db.as_index_mut()
+                .mutate(|index| select_trust_signers(index, params.signers.into_iter().collect()))
+        })
+        .await
+        .result
+}
+
+fn select_trust_signers(index: &mut FullIndex, signers: BTreeSet<Guid>) -> Result<(), Error> {
+    if signers.iter().any(|id| !index.signers.contains_key(id)) {
+        return Err(Error::new(
+            eyre!("{}", t!("registry.admin.unknown-signer")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    index.trust_signers = signers;
+    Ok(())
 }
 
 #[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
@@ -244,6 +309,68 @@ pub async fn cli_set_icon(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registry_proposals_reject_malformed_keys_before_confirmation() {
+        let mut value = serde_json::to_value(RegistryInfo::default()).unwrap();
+        value["trustKeys"] = serde_json::json!({ "invalid key": "Publisher" });
+        assert!(serde_json::from_value::<RegistryInfo>(value).is_err());
+    }
+
+    #[test]
+    fn cli_trust_signers_accepts_a_selection_or_no_signers_to_clear() {
+        let signer = Guid::new();
+        let params =
+            SetTrustSignersParams::try_parse_from(["set-trust-signers", signer.as_ref()]).unwrap();
+        assert_eq!(params.signers, vec![signer]);
+        assert!(
+            SetTrustSignersParams::try_parse_from(["set-trust-signers"])
+                .unwrap()
+                .signers
+                .is_empty()
+        );
+        assert!(SetTrustSignersParams::try_parse_from(["set-trust-signers", "invalid"]).is_err());
+    }
+
+    #[test]
+    fn registry_proposes_only_the_selected_existing_signers() {
+        use crate::registry::signer::SignerInfo;
+        let first = Guid::new();
+        let second = Guid::new();
+        let mut index = FullIndex::default();
+        let keys = crate::trusted_keys::initial_trusted_keys()[crate::trusted_keys::START9]
+            .public_keys
+            .clone();
+        let first_key = keys.first().unwrap().clone();
+        let second_key = keys.last().unwrap().clone();
+        for (id, name, key) in [
+            (first.clone(), "First", first_key.clone()),
+            (second.clone(), "Second", second_key),
+        ] {
+            index.signers.insert(
+                id,
+                SignerInfo {
+                    name: name.into(),
+                    contact: vec![],
+                    keys: BTreeSet::from([key]),
+                },
+            );
+        }
+        assert!(proposed_keys(&index).is_empty());
+        select_trust_signers(&mut index, BTreeSet::from([first.clone()])).unwrap();
+        assert_eq!(
+            proposed_keys(&index),
+            BTreeMap::from([(first_key, "First".into())])
+        );
+        assert!(select_trust_signers(&mut index, BTreeSet::from([Guid::new()])).is_err());
+        assert_eq!(index.trust_signers, BTreeSet::from([first]));
+        select_trust_signers(&mut index, BTreeSet::new()).unwrap();
+        assert!(proposed_keys(&index).is_empty());
+        let mut old_index = serde_json::to_value(&index).unwrap();
+        old_index.as_object_mut().unwrap().remove("trustSigners");
+        let restored: FullIndex = serde_json::from_value(old_index).unwrap();
+        assert!(proposed_keys(&restored).is_empty());
+    }
 
     #[test]
     fn cli_setters_require_value_or_clear() {

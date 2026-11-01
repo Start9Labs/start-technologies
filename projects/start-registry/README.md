@@ -9,8 +9,19 @@ This directory is a thin product wrapper inside the `start-technologies` monorep
 - Serves a **package index** (services, versions, dependency ranges, assets) and an **OS index** (StartOS versions and downloadable images).
 - Hosts `.s9pk` and OS image **assets** with content-addressed (Blake3) commitments.
 - Exposes a JSON-RPC API over HTTP, WebSocket, and a REST continuation channel.
-- Tracks **admins** and package **signers**, and verifies signatures on uploaded content.
+- Tracks **admins** and package **signers**, verifies signatures on uploaded content, and proposes administrator-selected signers for Marketplace trust when users connect.
 - Records anonymous **metrics** (downloads / users) for admin reporting.
+
+## Package trust proposals
+
+Choose which existing signers to propose when a user connects this registry:
+
+```bash
+start-registry admin signer list
+start-registry info set-trust-signers <SIGNER_ID> [SIGNER_ID...]
+```
+
+Run `start-registry info set-trust-signers` without IDs to clear the selection. Registries start with no proposed signers. `registry.info` exposes the selected signers' public keys and labels as `trustKeys`; StartOS asks users to approve package trust before accepting them. Existing saved registries can review the proposal from **System → Manage Registries → Review keys**. These proposals do not grant OS-update trust.
 
 ## Binary layout
 

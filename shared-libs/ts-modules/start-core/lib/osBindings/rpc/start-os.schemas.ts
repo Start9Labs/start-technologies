@@ -1065,6 +1065,10 @@ export const RegistryAsset = <Commitment extends z.ZodType>(
   })
   return self
 }
+export const RegistryPreviewParams: z.ZodObject<{ url: z.ZodString }> =
+  /* @__PURE__ */ object({ url: z.string() }).meta({
+    id: 'RegistryPreviewParams',
+  })
 export const RegistryUrlParams: z.ZodObject<{ registry: z.ZodString }> =
   /* @__PURE__ */ object({ registry: z.string() }).meta({
     id: 'RegistryUrlParams',
@@ -1902,6 +1906,29 @@ export const ClearTaskParams: z.ZodObject<{
   force: wire(z.boolean().optional(), z.boolean()),
 }).meta({
   id: 'ClearTaskParams',
+})
+export const ConnectRegistryParams: z.ZodObject<{
+  url: z.ZodString
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * Explicit consent to enable Marketplace trust for these proposed keys.
+   */
+  approvedKeys: z.ZodArray<typeof AnyVerifyingKey>
+}> = /* @__PURE__ */ object({
+  url: z.string(),
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * Explicit consent to enable Marketplace trust for these proposed keys.
+   */
+  approvedKeys: z.array(AnyVerifyingKey).meta({
+    description:
+      'Explicit consent to enable Marketplace trust for these proposed keys.',
+  }),
+}).meta({
+  id: 'ConnectRegistryParams',
 })
 export const ControlParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
@@ -3124,6 +3151,11 @@ export const SetStaticDnsParams: z.ZodObject<{
 }).meta({
   id: 'SetStaticDnsParams',
 })
+export const SetTrustSignersParams: z.ZodObject<{
+  signers: z.ZodArray<typeof Guid>
+}> = /* @__PURE__ */ object({ signers: z.array(Guid) }).meta({
+  id: 'SetTrustSignersParams',
+})
 export const SideloadResponse: z.ZodObject<{
   upload: typeof Guid
   progress: typeof Guid
@@ -3875,6 +3907,13 @@ export const RegistryInfo: z.ZodObject<{
     z.ZodNullable<typeof LocaleString>
   >
   categories: z.ZodRecord<z.ZodString, typeof Category>
+  /**
+   * Proposed Marketplace signing keys and fallback labels, not an assertion of trust.
+   */
+  trustKeys: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>,
+    z.ZodRecord<z.ZodString, z.ZodString>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -3888,6 +3927,16 @@ export const RegistryInfo: z.ZodObject<{
     description: "Markdown, shown above the registry's services.",
   }),
   categories: z.record(z.string(), Category),
+  /**
+   * Proposed Marketplace signing keys and fallback labels, not an assertion of trust.
+   */
+  trustKeys: wire(
+    z.record(z.string(), z.string()).optional(),
+    z.record(z.string(), z.string()),
+  ).meta({
+    description:
+      'Proposed Marketplace signing keys and fallback labels, not an assertion of trust.',
+  }),
 }).meta({
   id: 'RegistryInfo',
 })
@@ -4531,6 +4580,10 @@ export const FullIndex: z.ZodObject<{
   package: typeof PackageIndex
   os: typeof OsIndex
   signers: z.ZodRecord<z.ZodString, typeof SignerInfo>
+  trustSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof Guid>>,
+    z.ZodArray<typeof Guid>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -4541,6 +4594,7 @@ export const FullIndex: z.ZodObject<{
   package: PackageIndex,
   os: OsIndex,
   signers: z.record(z.string(), SignerInfo),
+  trustSigners: wire(z.array(Guid).optional(), z.array(Guid)),
 }).meta({
   id: 'FullIndex',
 })
@@ -5703,6 +5757,24 @@ export const Api = {
               ),
               _RETURN: /* @__PURE__ */ z.null(),
             },
+            'set-trust-signers': {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  z.intersection(empty, RegistryUrlParams),
+                  z.intersection(
+                    object({
+                      format: wire(
+                        IoFormat.nullable().optional(),
+                        IoFormat.nullable(),
+                      ),
+                    }),
+                    empty,
+                  ),
+                ),
+                SetTrustSignersParams,
+              ),
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
           },
         },
         metrics: {
@@ -6479,8 +6551,20 @@ export const Api = {
               _PARAMS: /* @__PURE__ */ AddTrustedKeyParams,
               _RETURN: /* @__PURE__ */ z.null(),
             },
+            'connect-registry': {
+              _PARAMS: /* @__PURE__ */ ConnectRegistryParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            'registry-preview': {
+              _PARAMS: /* @__PURE__ */ RegistryPreviewParams,
+              _RETURN: /* @__PURE__ */ RegistryInfo,
+            },
             remove: {
               _PARAMS: /* @__PURE__ */ RemoveTrustedKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            'remove-registry': {
+              _PARAMS: /* @__PURE__ */ RegistryPreviewParams,
               _RETURN: /* @__PURE__ */ z.null(),
             },
             update: {

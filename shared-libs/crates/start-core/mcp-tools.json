@@ -5577,6 +5577,10 @@
               "type": "object",
               "propertyNames": { "type": "string" },
               "additionalProperties": { "$ref": "#/$defs/SignerInfo" }
+            },
+            "trustSigners": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Guid" }
             }
           },
           "required": [
@@ -5585,7 +5589,8 @@
             "description",
             "package",
             "os",
-            "signers"
+            "signers",
+            "trustSigners"
           ],
           "additionalProperties": true
         },
@@ -6111,9 +6116,18 @@
           "type": "object",
           "propertyNames": { "type": "string" },
           "additionalProperties": { "$ref": "#/$defs/SignerInfo" }
-        }
+        },
+        "trustSigners": { "type": "array", "items": { "$ref": "#/$defs/Guid" } }
       },
-      "required": ["name", "icon", "description", "package", "os", "signers"],
+      "required": [
+        "name",
+        "icon",
+        "description",
+        "package",
+        "os",
+        "signers",
+        "trustSigners"
+      ],
       "additionalProperties": true
     }
   },
@@ -6167,9 +6181,21 @@
               "type": "object",
               "propertyNames": { "type": "string" },
               "additionalProperties": { "$ref": "#/$defs/Category" }
+            },
+            "trustKeys": {
+              "description": "Proposed Marketplace signing keys and fallback labels, not an assertion of trust.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "type": "string" }
             }
           },
-          "required": ["name", "icon", "description", "categories"],
+          "required": [
+            "name",
+            "icon",
+            "description",
+            "categories",
+            "trustKeys"
+          ],
           "additionalProperties": true
         },
         "DataUrl": { "type": "string" },
@@ -6204,9 +6230,15 @@
           "type": "object",
           "propertyNames": { "type": "string" },
           "additionalProperties": { "$ref": "#/$defs/Category" }
+        },
+        "trustKeys": {
+          "description": "Proposed Marketplace signing keys and fallback labels, not an assertion of trust.",
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "type": "string" }
         }
       },
-      "required": ["name", "icon", "description", "categories"],
+      "required": ["name", "icon", "description", "categories", "trustKeys"],
       "additionalProperties": true
     }
   },
@@ -6345,6 +6377,49 @@
           "required": ["name"],
           "additionalProperties": true
         }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "registry.info.set-trust-signers",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/RegistryUrlParams" },
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/SetTrustSignersParams" }
+      ],
+      "$defs": {
+        "RegistryUrlParams": {
+          "type": "object",
+          "properties": { "registry": { "type": "string" } },
+          "required": ["registry"],
+          "additionalProperties": true
+        },
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "SetTrustSignersParams": {
+          "type": "object",
+          "properties": {
+            "signers": { "type": "array", "items": { "$ref": "#/$defs/Guid" } }
+          },
+          "required": ["signers"],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" }
       },
       "type": "object"
     }
@@ -11049,6 +11124,137 @@
     }
   },
   {
+    "name": "server.trusted-keys.connect-registry",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "ConnectRegistryParams": {
+          "type": "object",
+          "properties": {
+            "url": { "type": "string" },
+            "name": { "type": ["string", "null"] },
+            "approvedKeys": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/AnyVerifyingKey" },
+              "description": "Explicit consent to enable Marketplace trust for these proposed keys."
+            }
+          },
+          "required": ["url", "approvedKeys"],
+          "additionalProperties": true
+        },
+        "AnyVerifyingKey": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "url": { "type": "string" },
+        "name": { "type": ["string", "null"] },
+        "approvedKeys": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AnyVerifyingKey" },
+          "description": "Explicit consent to enable Marketplace trust for these proposed keys."
+        }
+      },
+      "required": ["url", "approvedKeys"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "server.trusted-keys.registry-preview",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RegistryPreviewParams": {
+          "type": "object",
+          "properties": { "url": { "type": "string" } },
+          "required": ["url"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": { "url": { "type": "string" } },
+      "required": ["url"],
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RegistryInfo": {
+          "type": "object",
+          "properties": {
+            "name": { "type": ["string", "null"] },
+            "icon": {
+              "anyOf": [{ "$ref": "#/$defs/DataUrl" }, { "type": "null" }]
+            },
+            "description": {
+              "description": "Markdown, shown above the registry's services.",
+              "anyOf": [{ "$ref": "#/$defs/LocaleString" }, { "type": "null" }]
+            },
+            "categories": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/Category" }
+            },
+            "trustKeys": {
+              "description": "Proposed Marketplace signing keys and fallback labels, not an assertion of trust.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "type": "string" }
+            }
+          },
+          "required": [
+            "name",
+            "icon",
+            "description",
+            "categories",
+            "trustKeys"
+          ],
+          "additionalProperties": true
+        },
+        "DataUrl": { "type": "string" },
+        "LocaleString": {
+          "anyOf": [
+            { "type": "string" },
+            {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "type": "string" }
+            }
+          ]
+        },
+        "Category": {
+          "type": "object",
+          "properties": { "name": { "$ref": "#/$defs/LocaleString" } },
+          "required": ["name"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "name": { "type": ["string", "null"] },
+        "icon": {
+          "anyOf": [{ "$ref": "#/$defs/DataUrl" }, { "type": "null" }]
+        },
+        "description": {
+          "description": "Markdown, shown above the registry's services.",
+          "anyOf": [{ "$ref": "#/$defs/LocaleString" }, { "type": "null" }]
+        },
+        "categories": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/Category" }
+        },
+        "trustKeys": {
+          "description": "Proposed Marketplace signing keys and fallback labels, not an assertion of trust.",
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["name", "icon", "description", "categories", "trustKeys"],
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "server.trusted-keys.remove",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -11063,6 +11269,24 @@
       "type": "object",
       "properties": { "id": { "type": "string" } },
       "required": ["id"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "server.trusted-keys.remove-registry",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RegistryPreviewParams": {
+          "type": "object",
+          "properties": { "url": { "type": "string" } },
+          "required": ["url"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": { "url": { "type": "string" } },
+      "required": ["url"],
       "additionalProperties": true
     }
   },

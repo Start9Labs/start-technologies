@@ -25,10 +25,10 @@ import { parsePublicKeys } from 'src/app/utils/public-keys'
   template: `
     <form tuiForm="m" [formGroup]="form" (submit.prevent)="save()">
       <header tuiHeader>
-        <h2 tuiTitle [id]="context.id">{{ 'Add trusted keyring' | i18n }}</h2>
+        <h2 tuiTitle [id]="context.id">{{ 'Add key' | i18n }}</h2>
       </header>
       <tui-textfield>
-        <label tuiLabel>{{ 'Name' | i18n }}</label>
+        <label tuiLabel>{{ 'Label' | i18n }}</label>
         <input tuiInput formControlName="name" />
       </tui-textfield>
       <tui-error formControlName="name" />

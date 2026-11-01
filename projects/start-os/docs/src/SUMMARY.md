@@ -77,7 +77,7 @@
 - [Internationalization](internationalization.md)
 - [Kiosk Mode](kiosk-mode.md)
 - [Updating StartOS](updating-startos.md)
-- [Trusted Keyrings](trusted-keys.md)
+- [Manage Trust](trusted-keys.md)
 - [Change Password](change-password.md)
 - [Forgot Password](forgot-password.md)
 

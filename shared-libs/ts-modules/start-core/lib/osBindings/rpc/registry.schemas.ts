@@ -751,6 +751,11 @@ export const SetIconParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ icon: DataUrl.nullable() }).meta({
   id: 'SetIconParams',
 })
+export const SetTrustSignersParams: z.ZodObject<{
+  signers: z.ZodArray<typeof Guid>
+}> = /* @__PURE__ */ object({ signers: z.array(Guid) }).meta({
+  id: 'SetTrustSignersParams',
+})
 export const SignAssetParams: z.ZodObject<{
   version: z.ZodString
   platform: z.ZodString
@@ -943,6 +948,13 @@ export const RegistryInfo: z.ZodObject<{
     z.ZodNullable<typeof LocaleString>
   >
   categories: z.ZodRecord<z.ZodString, typeof Category>
+  /**
+   * Proposed Marketplace signing keys and fallback labels, not an assertion of trust.
+   */
+  trustKeys: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>,
+    z.ZodRecord<z.ZodString, z.ZodString>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -956,6 +968,16 @@ export const RegistryInfo: z.ZodObject<{
     description: "Markdown, shown above the registry's services.",
   }),
   categories: z.record(z.string(), Category),
+  /**
+   * Proposed Marketplace signing keys and fallback labels, not an assertion of trust.
+   */
+  trustKeys: wire(
+    z.record(z.string(), z.string()).optional(),
+    z.record(z.string(), z.string()),
+  ).meta({
+    description:
+      'Proposed Marketplace signing keys and fallback labels, not an assertion of trust.',
+  }),
 }).meta({
   id: 'RegistryInfo',
 })
@@ -1077,6 +1099,10 @@ export const FullIndex: z.ZodObject<{
   package: typeof PackageIndex
   os: typeof OsIndex
   signers: z.ZodRecord<z.ZodString, typeof SignerInfo>
+  trustSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof Guid>>,
+    z.ZodArray<typeof Guid>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -1087,6 +1113,7 @@ export const FullIndex: z.ZodObject<{
   package: PackageIndex,
   os: OsIndex,
   signers: z.record(z.string(), SignerInfo),
+  trustSigners: wire(z.array(Guid).optional(), z.array(Guid)),
 }).meta({
   id: 'FullIndex',
 })
@@ -1233,6 +1260,21 @@ export const Api = {
               empty,
             ),
             SetNameParams,
+          ),
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        'set-trust-signers': {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            SetTrustSignersParams,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
         },

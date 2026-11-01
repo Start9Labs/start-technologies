@@ -1,6 +1,6 @@
 export const TRUSTED_KEYRINGS_MENU_ITEM = {
   icon: '/assets/icons/key-chain.svg',
-  item: 'Trusted keyrings',
+  item: 'Manage Trust',
   link: 'trusted-keys',
 } as const
 
@@ -63,6 +63,11 @@ export const SYSTEM_MENU = [
       icon: '@tui.terminal',
       item: 'SSH Access',
       link: 'ssh',
+    },
+    {
+      icon: '@tui.store',
+      item: 'Manage Registries',
+      link: 'registries',
     },
     TRUSTED_KEYRINGS_MENU_ITEM,
     {
