@@ -902,4 +902,7 @@ export const ENGLISH: Record<string, number> = {
   'Overall progress': 1018,
   'Update backup format?': 1019,
   'This server’s backup uses an old format. Update it for stronger tamper detection and read-only snapshots, or skip to create a backup using the existing format. Conversion may take a long time, and this backup is unavailable until it finishes.': 1020,
+  'Force stop': 1023,
+  'Force stopping': 1024,
+  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 1025,
 }

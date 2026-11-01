@@ -402,6 +402,7 @@ export type EditSignerParamsInput = z.input<typeof schemas.EditSignerParams>
 export type EppInfo = z.output<typeof schemas.EppInfo>
 export type EppParamsInput = z.input<typeof schemas.EppParams>
 export type ExecParamsInput = z.input<typeof schemas.ExecParams>
+export type ForceStopParamsInput = z.input<typeof schemas.ForceStopParams>
 export type ForgetGatewayParamsInput = z.input<
   typeof schemas.ForgetGatewayParams
 >

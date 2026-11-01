@@ -1,5 +1,6 @@
 import { AsyncPipe } from '@angular/common'
 import { Component, computed, DOCUMENT, inject, input } from '@angular/core'
+import { toObservable, toSignal } from '@angular/core/rxjs-interop'
 import { i18nPipe } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { TuiButton, TuiDataList, TuiDropdown } from '@taiga-ui/core'
@@ -77,6 +78,18 @@ import { InterfaceService } from '../../../components/interfaces/interface.servi
       }
     }
 
+    @if (forceStopAt(); as forceStopAt) {
+      <button
+        tuiButton
+        appearance="primary-destructive"
+        iconStart="@tui.square"
+        [attr.aria-label]="'Force stop' | i18n"
+        (click)="controls.forceStop({ id: manifest().id, forceStopAt })"
+      >
+        {{ 'Force stop' | i18n }}
+      </button>
+    }
+
     @if (status() === 'stopped') {
       @let unmet = hasUnmet() | async;
       <button
@@ -137,6 +150,11 @@ export class ServiceControlsComponent {
   readonly status = input<PrimaryStatus>()
   readonly manifest = computed(() => getManifest(this.pkg()))
   readonly controls = inject(ControlsService)
+  protected readonly forceStopAt = toSignal(
+    this.controls.forceStopAt$(
+      toObservable(this.pkg).pipe(map(pkg => pkg.statusInfo)),
+    ),
+  )
 
   readonly hasUnmet = computed(() =>
     this.errors.getPkgDepErrors$(this.manifest().id).pipe(

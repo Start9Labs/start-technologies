@@ -25,15 +25,19 @@ import { ServiceUptimeComponent } from '../components/uptime.component'
 @Component({
   template: `
     @if (pkg(); as pkg) {
+      <ng-template #controls>
+        @if (connected() && installed()) {
+          <service-controls [pkg]="pkg" [status]="status()" />
+        }
+      </ng-template>
       @if (pkg.statusInfo.error) {
         <service-error [pkg]="pkg" />
+        <ng-container [ngTemplateOutlet]="controls" />
       } @else if (installing()) {
         <service-install-progress [pkg]="pkg" />
       } @else if (installed()) {
         <service-status [connected]="!!connected()" [pkg]="pkg">
-          @if (connected()) {
-            <service-controls [pkg]="pkg" [status]="status()" />
-          }
+          <ng-container [ngTemplateOutlet]="controls" />
         </service-status>
 
         @if (status() !== 'backing-up') {
