@@ -111,17 +111,20 @@ impl<'a> Config<'a> {
         for (n, line) in text.lines().enumerate() {
             let line = Line::parse(line, n)?;
             if matches!(line, Line::Section { .. }) {
-                // start a new section's line Vec
-                // pop anything like a header comment from the end of the previous section
+                let has_section = sections.len() > 1;
                 let last_section = sections.last_mut().unwrap();
                 let mut new_section = Section {
                     arena,
                     lines: Vec::new(),
                 };
-                while matches!(last_section.lines.last(), Some(Line::Comment { .. })) {
+                while matches!(
+                    last_section.lines.last(),
+                    Some(Line::Comment { indent: false, .. })
+                ) || (has_section && matches!(last_section.lines.last(), Some(Line::Empty)))
+                {
                     new_section.lines.push(last_section.lines.pop().unwrap());
                 }
-                new_section.lines.reverse(); // we pushed comment lines in reverse order
+                new_section.lines.reverse();
                 sections.push(new_section);
             }
             sections.last_mut().unwrap().lines.push(line);
