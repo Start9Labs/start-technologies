@@ -178,6 +178,7 @@ test('tag compiler workflow with local commit API', t => {
     'changelog.mjs',
     'changelog-version.mjs',
     'commit-staged.mjs',
+    'docs-versions.mjs',
   ]) {
     copyFileSync(join(REPO, 'scripts', name), join(f.root, 'scripts', name))
   }
