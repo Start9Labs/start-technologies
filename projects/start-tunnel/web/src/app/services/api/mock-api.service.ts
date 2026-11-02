@@ -67,7 +67,7 @@ export class MockApiService extends ApiService {
         {
           op: PatchOp.REPLACE,
           path: `/wg/subnets/${replaceSlashes(params.subnet)}/dnsPreserveSource`,
-          value: params.preserveSource,
+          value: params.preserveSource ?? false,
         },
       ]
       this.mockRevision(patch)
@@ -553,6 +553,7 @@ export class MockApiService extends ApiService {
           name: params.name,
           clients: {},
           dns: { type: 'default' },
+          dnsPreserveSource: false,
           wanIp: null,
           ipv6: null,
         },
