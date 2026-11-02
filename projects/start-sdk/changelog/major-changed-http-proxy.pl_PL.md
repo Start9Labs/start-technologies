@@ -1,0 +1,4 @@
+- Uwierzytelnianie proxy HTTP i nagłówki przekazywania konfiguruje się w opcji `proxy` funkcji `bindPort`, niezależnie od `addSsl`. Uwierzytelnianie obejmuje połączenie pierwotne i połączenie opakowane TLS.
+- Wartości domyślne zależą od protokołu: proxy jest włączone dla protokołów HTTP i wyłączone dla pozostałych. Każdy protokół przyjmuje jawny obiekt `proxy` lub `proxy: null`.
+- Przy ponownym budowaniu pakietów przenieś `addSsl.auth` do `proxy.auth` i `addSsl.addXForwardedHeaders` do `proxy.addXForwardedHeaders`. Ustawienia TLS pozostaw w `addSsl`.
+- Pakiety zbudowane z tym SDK wymagają StartOS 0.4.1 lub nowszego.

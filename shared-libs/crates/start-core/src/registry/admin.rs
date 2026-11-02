@@ -284,7 +284,7 @@ pub async fn edit_signer(
                     s.keys.extend(add_key);
                     for rm in remove_key {
                         if s.keys.remove(&rm) {
-                            removed.push(rm.interned_pem());
+                            removed.push(rm.interned_der64());
                         }
                     }
                     Ok(())
@@ -326,7 +326,7 @@ pub async fn remove_signer(
                 continuations,
                 ephemeral,
                 db,
-                signer.de()?.keys.iter().map(|k| k.interned_pem()),
+                signer.de()?.keys.iter().map(|k| k.interned_der64()),
             )?;
 
             for (_, pkg) in db

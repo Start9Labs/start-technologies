@@ -20,7 +20,7 @@ use tokio_rustls::rustls::sign::CertifiedKey;
 use super::{AcmeCert, AcmeCertCache, AcmeCertStore, certified_key};
 use crate::db::DbAccessMut;
 use crate::prelude::*;
-use crate::util::serde::Pem;
+use crate::util::serde::{Der64, Pem};
 
 pub(super) struct AcmeHttpClient(reqwest::Client);
 
@@ -97,7 +97,7 @@ where
     order.finalize_csr(csr.der()).await?;
     let chain = order.poll_certificate(&retry_policy()).await?;
     let cert = AcmeCert {
-        key: Pem(PKey::private_key_from_pem(key.serialize_pem().as_bytes()).map_err(other_error)?),
+        key: Der64(PKey::private_key_from_pkcs8(&key.serialize_der()).map_err(other_error)?),
         fullchain: X509::stack_from_pem(chain.as_bytes())
             .map_err(other_error)?
             .into_iter()

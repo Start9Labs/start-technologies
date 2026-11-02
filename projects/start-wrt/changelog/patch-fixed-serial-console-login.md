@@ -1,1 +1,0 @@
-- The serial console offers a login again after one times out. An unused login prompt expires after 60 seconds, and the console then stayed silent until the next reboot.

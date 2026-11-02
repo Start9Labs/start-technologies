@@ -1,1 +1,0 @@
-- Menus and dropdowns open when the browser or OS has reduced motion turned on.

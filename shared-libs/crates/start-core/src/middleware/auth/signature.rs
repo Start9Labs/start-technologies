@@ -5,6 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::Request;
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::TimeDelta;
 use http::header::USER_AGENT;
 use http::{Extensions, HeaderMap, HeaderValue};
@@ -27,7 +29,7 @@ use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::commitment::Commitment;
 use crate::sign::commitment::request::RequestCommitment;
 use crate::sign::{AnySignature, AnyVerifyingKey, Signer};
-use crate::util::serde::Base64;
+use crate::util::serde::{Base64, DerEncoding};
 use crate::util::sync::SyncMutex;
 
 pub const AUTH_SIG_HEADER: &str = "X-Start-Auth-Sig";
@@ -74,7 +76,7 @@ pub fn check_enrolled(
     if login {
         return Ok(None);
     }
-    let key = pubkey.interned_pem();
+    let key = pubkey.interned_der64();
     if is_enrolled(&key)? {
         Ok(Some(key))
     } else {
@@ -216,7 +218,7 @@ impl SignatureAuthContext for RpcContext {
         db: &mut Model<Self::Database>,
         keys: &BTreeSet<InternedString>,
     ) -> Result<(), Error> {
-        let auth_keys = db.as_private_mut().as_session_pubkeys_mut();
+        let auth_keys = db.as_private_mut().as_sessions_mut().as_pubkeys_mut();
         for key in keys {
             auth_keys.remove(key)?;
         }
@@ -256,10 +258,10 @@ impl SignatureAuthContext for RpcContext {
                 .peek(|keys| keys.0.contains_key(&**key))
                 || db
                     .as_private()
-                    .as_session_pubkeys()
-                    .de()?
-                    .0
-                    .contains_key(&**key))
+                    .as_sessions()
+                    .as_pubkeys()
+                    .as_idx(key)
+                    .is_some())
         })
     }
     async fn post_auth_hook(&self, key: Self::CheckPubkeyRes, _: &RpcRequest) -> Result<(), Error> {
@@ -327,6 +329,25 @@ fn loopback_identity(request: &Request) -> Option<InternedString> {
         .parse()
         .ok()?;
     ip.is_loopback().then(|| url_host_str(ip))
+}
+
+/// Names the server answers to on the request's ingress.
+pub(crate) fn request_identities<'a, C: SignatureAuthContext>(
+    context: &'a C,
+    request: &'a Request,
+) -> impl Future<Output = Result<Vec<InternedString>, Error>> + Send + 'a {
+    let loopback = loopback_identity(request);
+    let extensions = request.extensions();
+    async move {
+        let mut identities = context
+            .sig_context(extensions)
+            .await
+            .into_iter()
+            .map(|identity| identity.map(|identity| InternedString::intern(identity.as_ref())))
+            .collect::<Result<Vec<_>, _>>()?;
+        identities.extend(loopback);
+        Ok(identities)
+    }
 }
 
 pub trait SigningContext {
@@ -434,23 +455,12 @@ async fn verify_request_signature_with_address<C: SignatureAuthContext>(
     )?;
 
     let address = {
-        let sig_contexts = context
-            .sig_context(request.extensions())
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?;
-        let loopback = loopback_identity(request);
-        let address = verified_address(
-            &header,
-            sig_contexts
-                .iter()
-                .map(|c| c.as_ref())
-                .chain(loopback.as_deref()),
-        );
+        let identities = request_identities(context, request).await?;
+        let address = verified_address(&header, identities.iter().map(|c| &**c));
         let Some(address) = address else {
             tracing::debug!(
                 signer = ?header.signer,
-                contexts = ?sig_contexts.iter().map(|c| c.as_ref()).collect::<Vec<_>>(),
+                contexts = ?identities,
                 "request signature failed verification for every known server identity"
             );
             return Err(Error::new(
@@ -515,11 +525,11 @@ impl SignatureHeader {
         self.commitment.append_query(&mut url);
         url.query_pairs_mut().append_pair(
             "signer",
-            &self.signer.to_base64_der().expect("encode verifying key"),
+            &encode_header_der(&self.signer).expect("encode verifying key"),
         );
         url.query_pairs_mut().append_pair(
             "signature",
-            &self.signature.to_base64_der().expect("encode signature"),
+            &encode_header_der(&self.signature).expect("encode signature"),
         );
         HeaderValue::from_str(url.query().unwrap_or_default()).unwrap()
     }
@@ -527,10 +537,8 @@ impl SignatureHeader {
         let query: BTreeMap<_, _> = form_urlencoded::parse(header.as_bytes()).collect();
         Ok(Self {
             commitment: RequestCommitment::from_query(&header)?,
-            signer: AnyVerifyingKey::from_base64_der(query.get("signer").or_not_found("signer")?)?,
-            signature: AnySignature::from_base64_der(
-                query.get("signature").or_not_found("signature")?,
-            )?,
+            signer: decode_header_der(query.get("signer").or_not_found("signer")?)?,
+            signature: decode_header_der(query.get("signature").or_not_found("signature")?)?,
         })
     }
     pub async fn sign(signer: &Signer, body: &[u8], context: &str) -> Result<Self, Error> {
@@ -554,6 +562,21 @@ impl SignatureHeader {
             signature,
         })
     }
+}
+
+fn encode_header_der(value: &impl DerEncoding) -> Result<String, Error> {
+    Ok(URL_SAFE_NO_PAD.encode(
+        value
+            .to_der::<serde_json::Error>()
+            .with_kind(ErrorKind::Serialization)?,
+    ))
+}
+
+fn decode_header_der<T: DerEncoding>(value: &str) -> Result<T, Error> {
+    let der = URL_SAFE_NO_PAD
+        .decode(value)
+        .with_kind(ErrorKind::Deserialization)?;
+    T::from_der::<serde_json::Error>(&der).with_kind(ErrorKind::Deserialization)
 }
 
 const REQUEST_AUTH_TAG: &[u8] = b"Start-Auth-Sig v2\0";
@@ -896,11 +919,10 @@ mod tests {
             options: BindOptions {
                 preferred_external_port: 80,
                 secure: None,
+                proxy: None,
                 add_ssl: Some(AddSslOptions {
                     preferred_external_port: 443,
-                    add_x_forwarded_headers: false,
                     alpn: None,
-                    auth: None,
                     upstream_cert_validation: Default::default(),
                 }),
             },
@@ -1109,7 +1131,7 @@ mod tests {
     #[tokio::test]
     async fn compact_header_round_trip() {
         let key = Signer::Key(AnySigningKey::Ed25519(
-            ed25519_dalek::SigningKey::from_bytes(&[7; 32]),
+            ed25519_dalek::SigningKey::from_bytes(&[2; 32]),
         ));
         let header = SignatureHeader::sign(&key, BODY, "start-9.local")
             .await
@@ -1119,6 +1141,14 @@ mod tests {
             !value.to_str().unwrap().contains("BEGIN"),
             "compact form must not be PEM-armored"
         );
+        let query: BTreeMap<_, _> = form_urlencoded::parse(value.as_bytes()).collect();
+        assert_eq!(
+            query["signer"],
+            "MCowBQYDK2VwAyEAgTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q"
+        );
+        for field in ["signer", "signature"] {
+            assert!(!query[field].contains(['+', '/', '=']));
+        }
         let parsed = SignatureHeader::from_header(&value).expect("compact header parses");
         verify_request(
             &parsed.signer,

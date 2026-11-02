@@ -41,7 +41,7 @@ A good `instructions.md` covers, roughly in this order:
 
 The `## Documentation` bullets have a second reader: Start9's support indexer parses them and crawls each URL into the package's upstream-documentation index, and it looks nowhere else. What you list decides what a support agent can answer about the service — and a URL that classifies badly costs a wasted crawl on every indexing run, silently.
 
-**The bullet must parse.** Exactly `- [Title](URL)`, optionally followed by ` — a few words` (em-dash, en-dash, or hyphen), and nothing else on the line. A bullet that opens with prose and puts the link mid-sentence is skipped. The heading is matched as `Documentation` at any depth, and the section ends at the next heading of equal or shallower depth. A package with no parseable bullet gets **no** upstream docs and no instructions indexed at all.
+**The bullet must parse.** Exactly `- [Title](URL)`, optionally followed by `([label](source URL))`, then optionally ` — a few words` (em-dash, en-dash, or hyphen), and nothing else on the line. The source link is what is indexed in place of `URL`: give one when the page people should open can't be indexed well — a site with no `llms-full.txt` — and its Markdown source can, so the bullet serves both readers. A bullet that opens with prose and puts the link mid-sentence is skipped. The heading is matched as `Documentation` at any depth, and the section ends at the next heading of equal or shallower depth. A package with no parseable bullet gets **no** upstream docs and no instructions indexed at all.
 
 **How a URL is treated:**
 
@@ -64,6 +64,19 @@ Append `/*` to a site URL — `https://example.org/docs/*` — to confine the cr
 - **Avoid commit-pinned URLs.** A `blob/<sha>/` link freezes the index at that commit forever.
 
 One good link beats three that muddy the index.
+
+### Connections the service starts itself
+
+A user can publish a service through a tunnel such as StartTunnel to keep their home IP private. Replies to connections that arrive on the tunnel leave through it, but connections the service starts itself — to peers, to federated servers, to pages or files it fetches — follow the service's outbound gateway, which is usually the home router. So when the parties a service connects to would learn the server's address that way, add a short paragraph near where the instructions cover that interface or feature:
+
+- **What to do:** if they publish the service through a tunnel to keep their home IP private, send its outbound traffic through that tunnel too.
+- **Who would see the home IP otherwise:** its channel peers, the other homeservers it federates with, the sites whose icons it fetches.
+- **Any setting of the package's own that already avoids it,** such as all peer traffic over Tor.
+- **That someone using the tunnel for another reason** — a port their router can't forward, for instance — has nothing to change.
+
+Say what to do, not where to do it. The outbound gateway is a StartOS setting, and its place in the UI moves between releases.
+
+Leave it out when the service starts no connections of its own (a web client whose browser does the talking), and when it has no interface a user would publish through a tunnel.
 
 ## What does not belong in instructions
 
@@ -152,5 +165,6 @@ Use the sections that apply — a trivial service might be two paragraphs and a 
 - [ ] Every sentence is something the user could act on — no "this is typically triggered automatically by …" plumbing notes.
 - [ ] No hard-coded version numbers, image tags, or secrets.
 - [ ] Limitations section is omitted unless there is a specific, consequential surprise to flag.
+- [ ] If the service starts its own connections to parties who would learn the server's address, the instructions suggest sending its outbound traffic through the tunnel it is published on — see [Connections the service starts itself](#connections-the-service-starts-itself).
 - [ ] A `## Documentation` section lists the upstream documentation URLs, each with a few words of context, one `- [Title](URL) — context` bullet per line, each URL checked against [Choosing documentation URLs](#choosing-documentation-urls). No added marketing / donation / project-home / support links.
 - [ ] Renders cleanly in the StartOS Instructions tab on a real install.

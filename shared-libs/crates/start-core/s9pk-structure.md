@@ -26,7 +26,7 @@ The archive is cryptographically signed using Ed25519 with prehashed content (SH
     └── <arch>/             # e.g., x86_64, aarch64, riscv64
         ├── <image-id>.squashfs  # Container filesystem
         ├── <image-id>.json      # Image metadata
-        └── <image-id>.env       # Environment variables
+        └── <image-id>.env       # Legacy environment projection
 ```
 
 ## Components
@@ -74,8 +74,10 @@ The squashfs is mounted at `/usr/lib/startos/package/` and the runtime loads `in
 Container images organized by architecture:
 
 - **`<image-id>.squashfs`** - Container root filesystem
-- **`<image-id>.json`** - Image metadata (entrypoint, user, workdir, etc.)
-- **`<image-id>.env`** - Environment variables for the container
+- **`<image-id>.json`** - Image metadata (entrypoint, user, workdir, and `env`). The `env` object maps variable names to strings or `null` for removal and preserves multiline values.
+- **`<image-id>.env`** - Legacy newline-delimited environment projection for older SDKs. The SDK uses it when metadata has no `env` object.
+
+The SDK merges image defaults with per-command overrides and serializes one JSON object into contiguous environment variables `JSON_ENV_0`, `JSON_ENV_1`, and so on. Each UTF-8 chunk is at most 64 KiB. `start-container` concatenates them in numeric order before parsing; missing indexes and malformed JSON fail without echoing values. Subcontainer commands apply sources in order: default `PATH`, available server locales, `--env-file`, the JSON overrides, and explicit `--env` arguments. Transport variables are not inherited by the image command unless explicitly included in those sources. Linux's total exec size and individual service-variable limits still apply.
 
 Packing selects the requested Linux platform from exported image data; configuration and runtime metadata do not require daemon inspection. Registry tags first export from the local Docker/Podman store, then pull and retry when export fails or lacks the requested platform. Docker builds export OCI directly; Podman builds export OCI from its native image store. Local OCI layout directories and tar archives need no daemon. Legacy conversion reads saved images directly without loading them into a container engine.
 
@@ -83,7 +85,7 @@ OCI inputs traverse nested image indexes and select one configuration by platfor
 
 The native tar decoder spools payloads without extracting paths onto the workstation. Reconstruction applies ordered layers, lower-layer whiteouts and opaque directories, and preserves hardlink inode identity across replacements and deletions. Runtime metadata and environment come from the selected archive configuration; each complete uncompressed layer is verified against its configured SHA-256 DiffID. Uncompressed, gzip, and Zstd layers are supported.
 
-The image filesystem retains image-provided inode attributes within the native SquashFS import limits: whole-second timestamps in the unsigned 32-bit range, and `user.`, `trusted.`, and `security.` xattrs. Docker-created container initialization files are not added or removed by filename, except that a symlinked `etc/resolv.conf` becomes an empty regular file: StartOS writes the resolver onto that path from outside the image root. Implicit directories use root ownership, mode 0755, and zero timestamps. Symlink ancestors are rejected rather than followed. Image configuration identity, writer options, and the locked Zstd codec determine SquashFS bytes; JavaScript and assets additionally require identical contents and non-timestamp attributes.
+The image filesystem retains image-provided inode attributes within the native SquashFS import limits: whole-second timestamps in the unsigned 32-bit range, and `user.`, `trusted.`, and `security.` xattrs. Docker-created container initialization files are not added or removed by filename. Implicit directories use root ownership, mode 0755, and zero timestamps. Symlink ancestors are rejected rather than followed. Image configuration identity, writer options, and the locked Zstd codec determine SquashFS bytes; JavaScript and assets additionally require identical contents and non-timestamp attributes.
 
 The `ImageConfig` in manifest specifies:
 

@@ -49,6 +49,7 @@ fn auth(
     };
     Auth {
         local: local.map(credential),
+        bearer: None,
         signature: signature.map(credential),
     }
 }

@@ -108,7 +108,7 @@ async fn inner_main(
 
         let metrics_ctx = rpc_ctx.clone();
         let metrics_task = tokio::spawn(async move {
-            launch_metrics_task(&metrics_ctx.metrics_cache, || {
+            launch_metrics_task(&metrics_ctx.metrics_cache, &metrics_ctx.db, || {
                 metrics_ctx.shutdown.subscribe()
             })
             .await

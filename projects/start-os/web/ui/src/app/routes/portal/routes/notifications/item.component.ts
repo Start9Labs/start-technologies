@@ -50,6 +50,11 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
           [content]="item.message"
           (overflownChange)="overflow = $event"
         />
+        @if (link(); as path) {
+          <a tuiLink [routerLink]="path" (click.stop)="(null)">
+            {{ 'Software Update' | i18n }}
+          </a>
+        }
         @if ([1, 2].includes(item.code)) {
           <button tuiLink (click.stop)="onClick(item)">
             {{
@@ -180,6 +185,10 @@ export class NotificationItemComponent {
 
   readonly icon = computed((item = this.notificationItem()) =>
     item ? this.service.getIcon(item) : '',
+  )
+
+  readonly link = computed((item = this.notificationItem()) =>
+    item ? this.service.getLink(item) : null,
   )
 
   readonly pkg = toSignal(

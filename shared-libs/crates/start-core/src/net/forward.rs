@@ -25,7 +25,8 @@ use crate::util::serde::{HandlerExtSerde, display_serializable};
 use crate::util::sync::Watch;
 
 pub const START9_BRIDGE_IFACE: &str = "lxcbr0";
-const EPHEMERAL_PORT_START: u16 = 49152;
+/// The host's `ip_local_port_range` ends below this; see `projects/start-os/debian/postinst`.
+const DYNAMIC_PORT_START: u16 = 49152;
 // Reserved by/for host daemons (mDNS 5353, LLMNR 5355, postgres 5432, X11
 // forwarding 6010). 9050/9051 are claimable on purpose: they were the 0.3.x
 // host tor daemon's reservation (gone in 0.4.x), and the tor service now binds
@@ -44,6 +45,16 @@ pub struct ForwardRequirements {
     pub public_gateways: BTreeSet<GatewayId>,
     pub private_ips: BTreeSet<IpAddr>,
     pub secure: bool,
+}
+
+impl ForwardRequirements {
+    pub fn allows_gateway(&self, gateway: &NetworkInterfaceInfo) -> bool {
+        self.secure || gateway.secure()
+    }
+
+    pub fn public_on(&self, gateway: &GatewayId) -> bool {
+        self.secure && self.public_gateways.contains(gateway)
+    }
 }
 
 impl std::fmt::Display for ForwardRequirements {
@@ -68,7 +79,7 @@ impl AvailablePorts {
     pub fn alloc(&mut self, ssl: bool) -> Result<u16, Error> {
         let mut rng = crate::util::crypto::os_rng();
         for _ in 0..1000 {
-            let port = rng.random_range(EPHEMERAL_PORT_START..u16::MAX);
+            let port = rng.random_range(DYNAMIC_PORT_START..u16::MAX);
             if !self.0.contains_key(&port) {
                 self.0.insert(port, ssl);
                 return Ok(port);
@@ -755,8 +766,8 @@ impl InterfaceForwardEntry {
 
                             // The WAN is never secure: an insecure exposure is never public,
                             // so it still serves the LAN but never the public internet.
-                            let public = reqs.public_gateways.contains(gw_id) && reqs.secure;
-                            if !reqs.secure && !info.secure() {
+                            let public = reqs.public_on(gw_id);
+                            if !reqs.allows_gateway(info) {
                                 continue;
                             }
                             let src_filter = if public {

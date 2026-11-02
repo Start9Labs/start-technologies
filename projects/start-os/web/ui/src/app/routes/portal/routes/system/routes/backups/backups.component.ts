@@ -1,5 +1,5 @@
 import { AsyncPipe, DatePipe } from '@angular/common'
-import { Component, inject, OnInit } from '@angular/core'
+import { Component, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { ActivatedRoute, RouterLink } from '@angular/router'
 import { DialogService, DocsLinkDirective, i18nPipe } from '@start9labs/shared'
@@ -17,6 +17,7 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
 import { BACKUP } from './backup.component'
 import { BackupService, MappedBackupTarget } from './backup.service'
+import { CONVERSIONS } from './conversion'
 import { LEGACY_BACKUP } from './legacy.component'
 import { BackupNetworkComponent } from './network.component'
 import { BackupPhysicalComponent } from './physical.component'
@@ -127,7 +128,7 @@ import { BACKUP_RESTORE } from './restore.component'
     DocsLinkDirective,
   ],
 })
-export default class SystemBackupComponent implements OnInit {
+export default class SystemBackupComponent {
   readonly dialog = inject(DialogService)
   readonly type = inject(ActivatedRoute).snapshot.data['type']
   readonly service = inject(BackupService)
@@ -153,7 +154,7 @@ export default class SystemBackupComponent implements OnInit {
     }
   }
 
-  ngOnInit() {
+  constructor() {
     this.service.getBackupTargets()
   }
 
@@ -162,6 +163,20 @@ export default class SystemBackupComponent implements OnInit {
   ) {
     if (this.type === 'create') {
       if (!(await this.confirmLegacy(target.entry))) return
+      const readiness = await this.service.prepareBackup(
+        target.id,
+        target.entry.startOs,
+      )
+      if (readiness === 'cancelled') return
+      if (readiness === 'conversion') {
+        this.dialog
+          .openComponent(CONVERSIONS, {
+            size: 'l',
+            data: { targetId: target.id },
+          })
+          .subscribe()
+        return
+      }
 
       this.dialog
         .openComponent(BACKUP, {

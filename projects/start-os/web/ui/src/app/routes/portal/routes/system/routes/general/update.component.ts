@@ -3,6 +3,7 @@ import { Component, inject } from '@angular/core'
 import {
   DialogService,
   i18nPipe,
+  LocalizePipe,
   MarkdownPipe,
   SafeLinksDirective,
   TaskService,
@@ -23,7 +24,10 @@ import { trustedOsUpdateSigners } from 'src/app/utils/os-update-signers'
     <tui-scrollbar style="margin-bottom: 24px; max-height: 50vh;">
       @for (v of os.updateCandidates(); track v.version) {
         <h4 class="version-header">{{ v.version }}</h4>
-        <div safeLinks [innerHTML]="v.notes | markdown | dompurify"></div>
+        <div
+          safeLinks
+          [innerHTML]="v.notes | localize | markdown | dompurify"
+        ></div>
       }
     </tui-scrollbar>
     <button
@@ -45,6 +49,7 @@ import { trustedOsUpdateSigners } from 'src/app/utils/os-update-signers'
   `,
   imports: [
     CommonModule,
+    LocalizePipe,
     MarkdownPipe,
     NgDompurifyPipe,
     SafeLinksDirective,
@@ -76,7 +81,7 @@ export class SystemUpdateModal {
         latest.squashfs[os.platform]?.signatures ?? {},
       )
       const trustedSigners = await firstValueFrom(
-        this.patch.watch$('serverInfo', 'trustedOsUpdateSigners'),
+        this.patch.watch$('serverInfo', 'trustedKeys'),
       )
       const trusted = trustedOsUpdateSigners(signers, trustedSigners)
       if (this.os.updateCandidates()[0]?.version !== latest.version) return

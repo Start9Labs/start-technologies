@@ -1,1 +1,0 @@
-- Inbound VPN clients added with their own WireGuard public key can now connect. Adding one now shows its configuration, including the preshared key, with a placeholder for the device's private key. Clients added this way before this release never connected and must be deleted and added again.

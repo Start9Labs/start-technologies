@@ -36,6 +36,7 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 - `src/s9pk/` — S9PK package format (merkle archive)
 - `src/lxc/` — LXC container management for packages
 - `src/install/`, `src/update/` — Package install and OS/package update flows
+- `src/trusted_keys.rs` — Shared signing keyrings, trust contexts, committed initial certificates in `src/trusted_keys/initial/`, and legacy OS-signer adapters; `src/sign/gpg.rs` imports signing keys and retains original public exports with self-certified identity claims
 - `src/registry/` — Package registry server and management
 - `src/tunnel/` — StartTunnel server logic
 - `src/backup/`, `src/sign/` — Backup and signing
@@ -77,6 +78,20 @@ Patch-DB provides diff-based state synchronization. Changes to `db/model/public.
 - For maps: `.keys()`, `.as_idx(&key)`, `.as_idx_mut(&key)`, `.insert()`, `.remove()`, `.contains_key()`
 
 See [patchdb.md](patchdb.md) for `TypedDbWatch<T>` construction, API, and usage patterns.
+
+## Backup conversion
+
+`backup.target.convert` authenticates the selected target/server backup's existing credential and starts a background conversion. `PreparedConversion` owns the mount, data path and zeroizing credential; the worker retains only the database and shutdown receiver, not the full RPC context. The filesystem helper takes its existing exclusive store lock. Server shutdown cancels the helper before releasing the mount. Backup acceptance shares the per-target/server running-conversion check before publishing progress; the helper lock still arbitrates races, reversed starts and externally launched operations. Conversion reuses the authenticated pending marker and durable migration pointers on the backup, rather than trusting progress counters.
+
+`ServerStatus.backupConversions` holds observed jobs keyed by the target's canonical string and server ID. `FullProgressTracker` streams phase/count updates through Patch-DB; the existing initialization reset clears these transient observations on restart. The helper's `conversion.pending` discovery hint lets another session or server offer explicit resumption. That hint and `StartOsRecoveryInfo.formatStatus` are unauthenticated observations, not permission to mutate a store.
+
+`backup-fs-protocol` owns the portable helper messages shared by core and the Linux filesystem implementation. Core uses `Invoke::output_to` to consume bounded JSON progress lines and preserves stdin credential transport. The helper throttles progress output and aggregates corruption diagnostics; neither channel contains credentials.
+
+## Notification delivery
+
+`notifications::notify` persists notifications and enqueues push deliveries in the same transaction. `notifications::push` owns authenticated browser subscriptions, the server's VAPID identity, encrypted request construction, and the bounded private outbox. Its sender runs under `RpcContext`'s existing cron ownership, outside database mutations, and uses the reloadable SOCKS-aware HTTP client. Push transport failures do not prevent local notification creation.
+
+The StartOS frontend uses Angular `SwPush` and the stock Angular service worker. Browser subscriptions persist consent; authenticated portal startup and subscription-change events synchronize the server's delivery targets. Browser-provided HTTP(S) endpoints are trusted administrator input, including LAN addresses.
 
 ## i18n
 

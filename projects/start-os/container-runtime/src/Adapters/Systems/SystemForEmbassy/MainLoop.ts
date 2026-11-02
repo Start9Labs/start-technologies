@@ -119,8 +119,6 @@ export class MainLoop {
             ? {
                 preferredExternalPort: lanConf.external,
                 alpn: ['http/1.1'],
-                addXForwardedHeaders: false,
-                auth: null,
               }
             : null,
         })

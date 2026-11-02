@@ -37,7 +37,7 @@ use crate::net::vhost::ACME_CHALLENGE_PORT;
 use crate::net::web_server::Accept;
 use crate::prelude::*;
 use crate::util::FromStrParser;
-use crate::util::serde::{HandlerExtSerde, Pem, Pkcs8Doc};
+use crate::util::serde::{Der64, HandlerExtSerde, Pem};
 use crate::util::sync::{SyncMutex, Watch};
 
 mod order;
@@ -384,7 +384,7 @@ where
 #[derive(Debug, Default, Deserialize, Serialize, HasModel)]
 #[model = "Model<Self>"]
 pub struct AcmeCertStore {
-    pub accounts: BTreeMap<JsonKey<Vec<String>>, Pem<Pkcs8Doc>>,
+    pub accounts: BTreeMap<JsonKey<Vec<String>>, Der64<pkcs8::Document>>,
     pub certs: BTreeMap<Url, BTreeMap<JsonKey<BTreeSet<InternedString>>, AcmeCert>>,
 }
 impl AcmeCertStore {
@@ -406,7 +406,7 @@ impl DbAccessMut<AcmeCertStore> for Database {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AcmeCert {
-    pub key: Pem<PKey<Private>>,
+    pub key: Der64<PKey<Private>>,
     pub fullchain: Vec<Pem<X509>>,
 }
 
@@ -421,20 +421,17 @@ where
         let Some(account) = M::access(&peek).as_accounts().as_idx(&contacts) else {
             return Ok(None);
         };
-        Ok(Some(account.de()?.0.document.into_vec()))
+        Ok(Some(account.de()?.0.into_vec()))
     }
 
     async fn write_account(&self, contacts: &[&str], contents: &[u8]) -> Result<(), ErrorData> {
         let contacts = JsonKey::new(contacts.into_iter().map(|s| (*s).to_owned()).collect_vec());
-        let key = Pkcs8Doc {
-            tag: "EC PRIVATE KEY".into(),
-            document: pkcs8::Document::try_from(contents).with_kind(ErrorKind::Pem)?,
-        };
+        let key = pkcs8::Document::try_from(contents).with_kind(ErrorKind::Deserialization)?;
         self.0
             .mutate(|db| {
                 M::access_mut(db)
                     .as_accounts_mut()
-                    .insert(&contacts, &Pem::new(key))
+                    .insert(&contacts, &Der64::new(key))
             })
             .await
             .result?;

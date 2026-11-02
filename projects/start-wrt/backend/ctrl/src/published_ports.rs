@@ -995,7 +995,6 @@ pub async fn set<C: CtrlContext>(
                     let host = DhcpHost {
                         mac: mac.clone(),
                         ip: Some(want_ip),
-                        dns: Some("1".to_string()),
                         ..Default::default()
                     };
                     let section_name = format!("host_{}", mac.replace(':', "").to_lowercase());

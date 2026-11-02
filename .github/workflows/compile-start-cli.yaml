@@ -1,0 +1,49 @@
+name: Compile start-cli artifact
+
+on:
+  workflow_call:
+    inputs:
+      triple:
+        description: Rust target triple
+        type: string
+        required: true
+      environment:
+        description: Build environment feature flags
+        type: string
+        default: ''
+      fast:
+        description: Use the fast runner with a tmpfs workspace
+        type: boolean
+        default: false
+      nodejs-version:
+        description: Node.js version for build setup
+        type: string
+        default: '24.17.0'
+
+env:
+  ENVIRONMENT: ${{ inputs.environment }}
+
+jobs:
+  compile:
+    name: Build Binary
+    runs-on: ${{ fromJson('["ubuntu-latest", "ubuntu-24.04-32-cores"]')[inputs.fast] }}
+    steps:
+      - name: Mount tmpfs
+        if: inputs.fast
+        run: sudo mount -t tmpfs tmpfs .
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-build
+        with:
+          nodejs-version: ${{ inputs.nodejs-version }}
+
+      - name: Make
+        run: TARGET=${{ inputs.triple }} make start-cli
+        env:
+          SCCACHE_GHA_ENABLED: on
+          SCCACHE_GHA_VERSION: 0
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: start-cli_${{ inputs.triple }}
+          path: target/${{ inputs.triple }}/release/start-cli
+          retention-days: 14

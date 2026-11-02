@@ -1,1 +1,0 @@
-- Action menus near the right edge of the screen size to fit their items.

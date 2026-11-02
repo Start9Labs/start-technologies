@@ -17,7 +17,9 @@ Ethernet is strongly recommended. Servers are always-on, critical devices and sh
 
 ## StartOS boots into "Diagnostic Mode"
 
-If you encounter Diagnostic Mode, your best bet is stop clicking and [contact support](https://start9.com/contact).
+If you encounter Diagnostic Mode, your best bet is to stop clicking and [get help](https://start9.com/help).
+
+In Diagnostic Mode your server always answers over `http://`, at its usual name or IP address: type `http://server-name.local/` in full, `http://` included. Its `https://` address may not connect, and a page you already had open does not switch to Diagnostic Mode by itself.
 
 ## My server boots into StartOS instead of the USB installer
 
@@ -29,7 +31,7 @@ A Start9 server boots from a USB installer on its own, with nothing to press and
 
 If a freshly flashed drive still does not boot, connect a monitor and keyboard and pick the drive from the boot menu:
 
-- **Server Pure** — Needs no boot menu: the firmware boots a USB drive whenever one is plugged in. If a freshly flashed drive still does not boot, [contact support](https://start9.com/contact).
+- **Server Pure** — Needs no boot menu: the firmware boots a USB drive whenever one is plugged in. If a freshly flashed drive still does not boot, [get help](https://start9.com/help).
 
 - **Server One (2023)** — Press `F10` repeatedly from the moment you power on, and select the USB drive from the boot menu that appears. If StartOS starts before the menu appears, use the power button instead: with the server off, hold the power button for three seconds and release it. A menu of keys appears; press `F10` there.
 
@@ -78,7 +80,7 @@ For other hardware, see the [install guide](installing-startos.md#install) and t
 
 1. Try connecting using a different device. If this works, it means you need to clear cache on your current browser and/or restart your current device.
 
-1. Try visiting start.local. Your server may be in diagnostic mode.
+1. Try visiting `http://server-name.local/`, typed in full with `http://` in front. A server in [Diagnostic Mode](#startos-boots-into-diagnostic-mode) always answers there, even when its `https://` address does not.
 
 1. Try restarting your router.
 
@@ -139,7 +141,7 @@ sudo systemctl restart systemd-timesyncd
 
 Within a minute or so, `timedatectl timesync-status` should report a successful sync. If the warning in the UI does not clear shortly after that, restart your server once. The override file survives reboots; after a StartOS update, check that it is still present and re-create it if needed.
 
-If time sync still fails, please [contact support](https://start9.com/contact).
+If time sync still fails, [get help](https://start9.com/help).
 
 ## "Gateway Timeout" in the StartOS UI
 
@@ -170,6 +172,10 @@ If a service is running low on space, you have two options today:
 
 Support for multiple drives is planned for StartOS 0.4.1. There is no release date yet.
 
+## What does “Data drive metadata space is low” mean?
+
+Btrfs needs unallocated space for metadata even when the disk metrics show free space inside existing data chunks. The upgrade migration to StartOS 0.4.0.5 starts a filtered balance on both data filesystems in the background after they are mounted; weekly maintenance reclaims unused chunks thereafter. StartOS raises this notification when unallocated space falls below 5% of a filesystem's size, capped at 10 GiB. The notification names the affected filesystem. If the warning persists, free space or [move to a larger data drive](#can-i-add-a-second-drive-to-give-a-service-more-storage).
+
 ## Can I run two copies of the same service?
 
 Yes, but it is not officially supported. StartOS identifies a service by its package ID and installs each ID once, so a second copy means maintaining your own fork of the package under a unique ID, including its updates. It also won't work with dependent services: a service that depends on the original looks for it by ID and cannot be pointed at the fork.
@@ -194,8 +200,8 @@ An unexpected restart can also follow a power interruption or a kernel crash. To
 sudo journalctl -b -1 -n 200 --no-pager
 ```
 
-Where the kernel and firmware provide persistent crash records, StartOS preserves the systemd-pstore archive under `/media/startos/data/main/pstore/`. A watchdog reset may leave no crash record. `sudo gather-debug-info` collects available records, kernel logs, the previous boot's journal, watchdog status and NVMe power-state information for [support](https://start9.com/contact).
+Where the kernel and firmware provide persistent crash records, StartOS preserves the systemd-pstore archive under `/media/startos/data/main/pstore/`. A watchdog reset may leave no crash record. `sudo gather-debug-info` collects available records, kernel logs, the previous boot's journal, watchdog status and NVMe power-state information for [support](https://start9.com/help).
 
 ## Issue with a particular service
 
-If a service is misbehaving or crashing, check the [logs](logs.md) for that service — open the service and select its **Logs** tab. Look for any errors that might explain the problem. Often, the solution is to restart the service by clicking "Restart". If the issue persist, [contact support](https://start9.com/contact).
+If a service is misbehaving or crashing, check the [logs](logs.md) for that service — open the service and select its **Logs** tab. Look for any errors that might explain the problem. Often, the solution is to restart the service by clicking "Restart". If the issue persists, [get help](https://start9.com/help).

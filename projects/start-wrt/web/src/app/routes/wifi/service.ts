@@ -83,11 +83,11 @@ export class WifiService extends FormService<WifiConfig> {
       )
   }
 
-  async deletePassword(index: number) {
+  async deletePassword(password: string) {
     await this.actions.run(async () => {
       const current = this.data()
       if (!current) return
-      const passwords = current.passwords.filter((_, i) => i !== index)
+      const passwords = current.passwords.filter(p => p.password !== password)
       await this.api.wifiSet({
         ...current,
         passwords,

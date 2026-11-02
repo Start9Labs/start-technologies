@@ -1,0 +1,3 @@
+- Les valeurs d’environnement des commandes de daemons et sous-conteneurs n’apparaissent pas dans les lignes de commande des processus ; les environnements volumineux sont divisés en fragments de taille limitée.
+- Préserve les valeurs multilignes de l’environnement des images dans les paquets construits avec start-cli 2.6.0 ou ultérieur.
+- Les paquets construits avec ce SDK nécessitent StartOS 0.4.1 ou ultérieur.

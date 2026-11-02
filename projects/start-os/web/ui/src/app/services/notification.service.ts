@@ -5,6 +5,7 @@ import {
   i18nKey,
   MARKDOWN,
 } from '@start9labs/shared'
+import { schemas } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import { merge, of, shareReplay, Subject } from 'rxjs'
 import { REPORT } from 'src/app/components/backup-report.component'
@@ -62,11 +63,16 @@ export class NotificationService {
     }
   }
 
+  getLink(notification: ServerNotification<number>): string | null {
+    return schemas.OsUpdateAvailable.safeParse(notification.data).success
+      ? '/system/general'
+      : null
+  }
+
   viewModal(notification: ServerNotification<number>) {
     const { data, createdAt, code, title, message } = notification
 
     switch (code) {
-      // Backup report - structured report with per-service results
       case 1:
         this.dialogs
           .openComponent(REPORT, {
@@ -77,7 +83,6 @@ export class NotificationService {
           .subscribe()
         break
 
-      // OS update - data contains the full release notes markdown
       case 2:
         this.dialogs
           .openComponent(MARKDOWN, {
@@ -88,7 +93,6 @@ export class NotificationService {
           .subscribe()
         break
 
-      // General notification - show the message text
       default:
         this.dialogs
           .openComponent(MARKDOWN, {

@@ -1,3 +1,0 @@
-- A profile routed through an outbound VPN now sends its DNS queries through the tunnel in every case where it has DNS servers to use there. Previously, a profile with custom DNS servers resolved them over the WAN, so the ISP saw every name it looked up, and a VPN whose config had no `DNS =` line left its profiles on the ISP's DNS servers.
-- With custom system DNS, a profile routed through a VPN whose config has no DNS servers resolves again, through the tunnel; previously its DNS stopped working.
-- A profile routed through a VPN with no DNS servers to use through the tunnel shows **System (outside VPN)** in the DNS column, because its DNS still goes to the ISP outside the tunnel.

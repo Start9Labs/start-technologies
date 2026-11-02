@@ -102,6 +102,7 @@ impl From<BackupUnencryptedMetadata> for StartOsRecoveryInfo {
             hostname: meta.hostname,
             version: meta.version,
             timestamp: meta.timestamp,
+            format_status: Default::default(),
         }
     }
 }
@@ -114,6 +115,8 @@ pub struct StartOsRecoveryInfo {
     pub hostname: ServerHostname,
     pub version: exver::Version,
     pub timestamp: DateTime<Utc>,
+    #[serde(default)]
+    pub format_status: backup_fs_protocol::FormatStatus,
 }
 
 rpc_toolkit::reflect_ts!(StartOsRecoveryInfo);
@@ -232,6 +235,34 @@ pub async fn get_label<P: AsRef<Path>>(path: P) -> Result<Option<String>, Error>
 }
 
 #[instrument(skip_all)]
+pub async fn get_logical_block_size(path: &Path) -> Result<u64, Error> {
+    Ok(String::from_utf8(
+        Command::new("lsblk")
+            .arg("-bndo")
+            .arg("LOG-SEC")
+            .arg(path)
+            .invoke(ErrorKind::BlockDevice)
+            .await?,
+    )?
+    .trim()
+    .parse()?)
+}
+
+#[instrument(skip_all)]
+pub async fn get_type<P: AsRef<Path>>(path: P) -> Result<String, Error> {
+    Ok(String::from_utf8(
+        Command::new("lsblk")
+            .arg("-ndo")
+            .arg("type")
+            .arg(path.as_ref())
+            .invoke(crate::ErrorKind::BlockDevice)
+            .await?,
+    )?
+    .trim()
+    .to_owned())
+}
+
+#[instrument(skip_all)]
 pub async fn get_part_type<P: AsRef<Path>>(path: P) -> Result<Option<String>, Error> {
     let part_type = String::from_utf8(
         Command::new("lsblk")
@@ -305,6 +336,10 @@ pub async fn get_percentage<P: AsRef<Path>>(path: P) -> Result<u64, Error> {
     .parse::<u64>()?)
 }
 
+pub fn is_startos_pool_guid(guid: &str) -> bool {
+    guid.starts_with("EMBASSY_") || guid.starts_with("STARTOS_")
+}
+
 #[instrument(skip_all)]
 pub async fn pvscan() -> Result<BTreeMap<PathBuf, Option<InternedString>>, Error> {
     let pvscan_out = Command::new("pvscan")
@@ -330,21 +365,29 @@ pub async fn recovery_info(
                 .await
                 .is_ok()
             {
-                res.insert(
-                    server_id,
-                    IoFormat::Json
-                        .from_slice::<BackupUnencryptedMetadata>(
-                            &tokio::fs::read(&backup_unencrypted_metadata_path)
-                                .await
-                                .with_ctx(|_| {
-                                    (
-                                        crate::ErrorKind::Filesystem,
-                                        backup_unencrypted_metadata_path.display().to_string(),
-                                    )
-                                })?,
-                        )?
-                        .into(),
-                );
+                let mut info: StartOsRecoveryInfo = IoFormat::Json
+                    .from_slice::<BackupUnencryptedMetadata>(
+                        &tokio::fs::read(&backup_unencrypted_metadata_path)
+                            .await
+                            .with_ctx(|_| {
+                                (
+                                    crate::ErrorKind::Filesystem,
+                                    backup_unencrypted_metadata_path.display().to_string(),
+                                )
+                            })?,
+                    )?
+                    .into();
+                info.format_status =
+                    match super::mount::filesystem::backupfs::inspect(&entry.path().join("crypt"))
+                        .await
+                    {
+                        Ok(status) => status,
+                        Err(error) => {
+                            tracing::debug!(?error, "backup format inspection failed");
+                            backup_fs_protocol::FormatStatus::Unknown
+                        }
+                    };
+                res.insert(server_id, info);
             }
         }
     }
@@ -463,6 +506,9 @@ pub async fn list(os: &OsPartitionInfo, server_id: Option<&str>) -> Result<Vec<D
 
     let mut res = Vec::with_capacity(disks.len());
     for (disk, index) in disks {
+        if matches!(get_type(&disk).await.as_deref(), Ok("rom")) {
+            continue;
+        }
         if index.internal {
             for (part, stable_part_path) in index.parts {
                 let mut disk_info = disk_info(disk.clone(), index.stable_path.clone()).await;

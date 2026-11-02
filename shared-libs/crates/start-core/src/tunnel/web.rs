@@ -24,7 +24,7 @@ use crate::prelude::*;
 use crate::tunnel::auth::SetPasswordParams;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::{PortForward, PortForwards, TunnelDatabase};
-use crate::util::serde::{HandlerExtSerde, Pem, display_serializable};
+use crate::util::serde::{Der64, HandlerExtSerde, Pem, display_serializable};
 use crate::util::tui::{choose, parse_as, prompt, prompt_multiline};
 
 pub(crate) mod listener;
@@ -261,7 +261,7 @@ rpc_toolkit::reflect_ts!(WebserverInfo);
 #[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct TunnelCertData {
-    pub key: Pem<PKey<Private>>,
+    pub key: Der64<PKey<Private>>,
     pub cert: Pem<Vec<X509>>,
 }
 
@@ -497,7 +497,7 @@ pub async fn import_certificate_cli(
         .call_remote::<TunnelContext>(
             &parent_method.iter().chain(method.iter()).join("."),
             to_value(&TunnelCertData {
-                key,
+                key: Der64(key.0),
                 cert: Pem(chain),
             })?,
         )
@@ -537,7 +537,7 @@ pub async fn generate_certificate(
             db.as_webserver_mut()
                 .as_certificate_mut()
                 .ser(&Some(TunnelCertData {
-                    key: Pem(key),
+                    key: Der64(key),
                     cert: chain.clone(),
                 }))
         })

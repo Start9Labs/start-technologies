@@ -1,1 +1,0 @@
-- Disabling WAN IPv6 keeps its settings, which return when it is enabled again, and the `wan6` interface stays visible in LuCI and `ubus` as stopped rather than missing.

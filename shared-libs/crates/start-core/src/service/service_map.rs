@@ -32,7 +32,7 @@ use crate::service::{LoadDisposition, Service, ServiceRef, get_data_version};
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::status::StatusInfo;
 use crate::util::future::NonDetachingJoinHandle;
-use crate::util::serde::{Base32, Pem};
+use crate::util::serde::{Base32, Der64};
 use crate::util::sync::SyncMutex;
 
 const SERVICE_INIT_CONCURRENCY: usize = 4;
@@ -314,7 +314,7 @@ impl ServiceMap {
                                         s9pk: installed_path,
                                         status_info: StatusInfo::default(),
                                         registry,
-                                        developer_key: Pem::new(developer_key),
+                                        developer_key: Der64::new(developer_key),
                                         last_backup: None,
                                         current_dependencies: Default::default(),
                                         actions: Default::default(),

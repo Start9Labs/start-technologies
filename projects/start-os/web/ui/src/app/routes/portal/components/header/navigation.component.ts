@@ -16,7 +16,6 @@ import { getMenu } from 'src/app/utils/system-utilities'
         tuiHintDirection="bottom"
         [tuiHintShowDelay]="128"
         [routerLink]="['/', item.routerLink]"
-        [class.link_system]="item.routerLink === 'system'"
         [tuiHint]="rla.isActive ? '' : (item.name | i18n)"
       >
         <tui-badged-content [style.--tui-radius.%]="50">
@@ -106,10 +105,6 @@ import { getMenu } from 'src/app/utils/system-utilities'
         grid-template-columns: 1.5rem 1fr;
         padding: 0 1rem;
         margin: 0 calc(var(--bumper) + 0.5rem);
-
-        &.link_system {
-          pointer-events: none;
-        }
 
         + .link::before {
           left: -0.5rem;

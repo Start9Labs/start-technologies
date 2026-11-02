@@ -19,9 +19,11 @@ use crate::prelude::*;
 use crate::util::FromStrParser;
 use crate::util::serde::{HandlerExtSerde, const_true};
 
-// #[command(subcommands(list, delete, delete_before, create))]
+pub mod push;
+
 pub fn notification<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
+        .subcommand("push", push::push::<C>().no_cli())
         .subcommand(
             "list",
             from_fn_async(list)
@@ -86,7 +88,6 @@ pub struct ListNotificationParams {
 
 rpc_toolkit::reflect_ts!(ListNotificationParams);
 rpc_toolkit::ts_export!(ListNotificationParams, namespaces = [""]);
-// #[command(display(display_serializable))]
 #[instrument(skip_all)]
 pub async fn list(
     ctx: RpcContext,
@@ -162,17 +163,7 @@ pub async fn remove(
             for id in ids {
                 n.remove(&id)?;
             }
-            let mut unread = 0;
-            for (_, n) in n.as_entries()? {
-                if !n.as_seen().de()? {
-                    unread += 1;
-                }
-            }
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_unread_notification_count_mut()
-                .ser(&unread)?;
-            Ok(())
+            update_unread_count(db)
         })
         .await
         .result
@@ -200,17 +191,7 @@ pub async fn remove_before(
             for id in n.keys()?.range(..before) {
                 n.remove(&id)?;
             }
-            let mut unread = 0;
-            for (_, n) in n.as_entries()? {
-                if !n.as_seen().de()? {
-                    unread += 1;
-                }
-            }
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_unread_notification_count_mut()
-                .ser(&unread)?;
-            Ok(())
+            update_unread_count(db)
         })
         .await
         .result
@@ -229,17 +210,7 @@ pub async fn mark_seen(
                     .as_seen_mut()
                     .ser(&true)?;
             }
-            let mut unread = 0;
-            for (_, n) in n.as_entries()? {
-                if !n.as_seen().de()? {
-                    unread += 1;
-                }
-            }
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_unread_notification_count_mut()
-                .ser(&unread)?;
-            Ok(())
+            update_unread_count(db)
         })
         .await
         .result
@@ -258,17 +229,7 @@ pub async fn mark_seen_before(
                     .as_seen_mut()
                     .ser(&true)?;
             }
-            let mut unread = 0;
-            for (_, n) in n.as_entries()? {
-                if !n.as_seen().de()? {
-                    unread += 1;
-                }
-            }
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_unread_notification_count_mut()
-                .ser(&unread)?;
-            Ok(())
+            update_unread_count(db)
         })
         .await
         .result
@@ -287,20 +248,23 @@ pub async fn mark_unseen(
                     .as_seen_mut()
                     .ser(&false)?;
             }
-            let mut unread = 0;
-            for (_, n) in n.as_entries()? {
-                if !n.as_seen().de()? {
-                    unread += 1;
-                }
-            }
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_unread_notification_count_mut()
-                .ser(&unread)?;
-            Ok(())
+            update_unread_count(db)
         })
         .await
         .result
+}
+
+fn update_unread_count(db: &mut DatabaseModel) -> Result<(), Error> {
+    let mut unread = 0;
+    for (_, notification) in db.as_private().as_notifications().as_entries()? {
+        if !notification.as_seen().de()? {
+            unread += 1;
+        }
+    }
+    db.as_public_mut()
+        .as_server_info_mut()
+        .as_unread_notification_count_mut()
+        .ser(&unread)
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
@@ -440,6 +404,15 @@ pub struct NotificationWithId {
 rpc_toolkit::reflect_ts!(NotificationWithId);
 rpc_toolkit::ts_export!(NotificationWithId, namespaces = [""]);
 
+/// An OS update available for review.
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
+#[serde(tag = "kind", rename = "os-update-available")]
+#[visit(ts(rename = "OsUpdateAvailable"))]
+pub struct OsUpdateAvailable {}
+
+rpc_toolkit::reflect_ts!(OsUpdateAvailable);
+rpc_toolkit::ts_export!(OsUpdateAvailable, namespaces = [""]);
+
 pub trait NotificationType:
     serde::Serialize + for<'de> serde::Deserialize<'de> + std::fmt::Debug
 {
@@ -455,6 +428,9 @@ impl NotificationType for BackupReport {
 impl NotificationType for String {
     const CODE: u32 = 2;
 }
+impl NotificationType for OsUpdateAvailable {
+    const CODE: u32 = 3;
+}
 
 #[instrument(skip(subtype, db))]
 pub fn notify<T: NotificationType>(
@@ -466,6 +442,7 @@ pub fn notify<T: NotificationType>(
     subtype: T,
 ) -> Result<(), Error> {
     let data = to_value(&subtype)?;
+    push::enqueue(db, &title, &message)?;
     db.as_public_mut()
         .as_server_info_mut()
         .as_unread_notification_count_mut()

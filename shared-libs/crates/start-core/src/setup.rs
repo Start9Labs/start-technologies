@@ -25,13 +25,13 @@ use crate::context::rpc::InitRpcContextPhases;
 use crate::context::setup::SetupResult;
 use crate::context::{CliContext, RpcContext, SetupContext};
 use crate::db::model::Database;
-use crate::disk::REPAIR_DISK_PATH;
 use crate::disk::fsck::RepairStrategy;
 use crate::disk::main::{DEFAULT_PASSWORD, ImportMode};
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::disk::util::{DiskInfo, StartOsRecoveryInfo, pvscan, recovery_info};
+use crate::disk::{LIVE_MEDIUM_PATH, REPAIR_DISK_PATH};
 use crate::hostname::{ServerHostname, repair_hostname};
 use crate::init::{InitPhases, InitResult, init};
 use crate::net::ssl::root_ca_start_time;
@@ -158,8 +158,6 @@ pub fn disk<C: Context>() -> ParentHandler<C> {
             .with_call_remote::<CliContext>(),
     )
 }
-
-const LIVE_MEDIUM_PATH: &str = "/run/live/medium";
 
 pub async fn list_disks(_ctx: SetupContext) -> Result<Vec<DiskInfo>, Error> {
     let mut disks = crate::disk::util::list(
@@ -614,16 +612,6 @@ async fn cli_install_os(
     print_remote_result(res)
 }
 
-/// Read a password for an existing data drive: `PASSWORD` env first,
-/// otherwise prompt once on the TTY.
-fn read_password_env_or_prompt(prompt: &str) -> Result<String, RpcError> {
-    if let Ok(p) = std::env::var("PASSWORD") {
-        Ok(p)
-    } else {
-        Ok(rpassword::prompt_password(prompt)?)
-    }
-}
-
 /// Read a *new* password (for fresh setup): `PASSWORD` env if set,
 /// otherwise prompt twice on the TTY and confirm. Mirrors
 /// `cli_reset_password` in `auth.rs`.
@@ -690,7 +678,7 @@ async fn cli_attach(
     let password = if no_password && std::env::var_os("PASSWORD").is_none() {
         None
     } else {
-        let plaintext = read_password_env_or_prompt("Data drive password: ")?;
+        let plaintext = crate::util::tui::read_password("PASSWORD", "Data drive password: ")?;
         Some(encrypt_for_setup(&ctx, &plaintext).await?)
     };
 

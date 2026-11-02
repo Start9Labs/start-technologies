@@ -6,10 +6,7 @@ if [ -n "$DPKG_MAINTSCRIPT_PACKAGE" ]; then
 	SYSTEMCTL=deb-systemd-helper
 fi
 
-# Set `KEY=VALUE` in a config file: replace the entry in place if it already
-# exists (bare or commented, any indentation) — preserving its position, which
-# matters for section-scoped configs — or append it if not. VALUE is written
-# verbatim, so the caller supplies any quoting. Usage: set_config FILE KEY VALUE
+# Preserves section placement; the caller supplies quoting.
 set_config() {
 	if grep -qE "^[[:space:]]*#?[[:space:]]*$2[[:space:]]*=" "$1"; then
 		sed -i "/^[[:space:]]*#\\?[[:space:]]*$2[[:space:]]*=/c\\$2=$3" "$1"
@@ -177,6 +174,9 @@ $SYSTEMCTL mask suspend.target
 $SYSTEMCTL mask hibernate.target
 $SYSTEMCTL mask hybrid-sleep.target
 
+$SYSTEMCTL mask rpcbind.service
+$SYSTEMCTL mask rpcbind.socket
+
 if which gsettings > /dev/null; then
 	gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout '0'
 	gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-timeout '0'
@@ -203,6 +203,11 @@ echo 'port=0' > /etc/dnsmasq.conf
 sed -i 's/\[Service\]/[Service]\nEnvironment=SYSTEMD_LOG_LEVEL=debug/' /lib/systemd/system/systemd-timesyncd.service
 sed -i "s/\.debian\./\./g;s/#FallbackNTP=/FallbackNTP=/"  /etc/systemd/timesyncd.conf
 set_config /etc/systemd/timesyncd.conf RootDistanceMaxSec 10
+
+set_config /etc/default/btrfsmaintenance BTRFS_BALANCE_MOUNTPOINTS '"/media/startos/data/main:/media/startos/data/package-data"'
+set_config /etc/default/btrfsmaintenance BTRFS_BALANCE_PERIOD '"weekly"'
+set_config /etc/default/btrfsmaintenance BTRFS_SCRUB_PERIOD '"none"'
+SYSTEMD_OFFLINE=1 /usr/share/btrfsmaintenance/btrfsmaintenance-refresh-cron.sh systemd-timer
 
 # Reserve memory for the host management plane so a burst of resource-hungry
 # service containers can never starve startd / sshd / journald and wedge the
@@ -249,6 +254,13 @@ cat > /etc/systemd/system.conf.d/10-startos-watchdog.conf << 'EOF'
 RuntimeWatchdogSec=60s
 EOF
 
+# Start the serial console login prompt only on ports that have a UART.
+mkdir -p /etc/systemd/system/serial-getty@.service.d
+cat > /etc/systemd/system/serial-getty@.service.d/10-startos.conf << 'EOF'
+[Service]
+ExecCondition=/bin/sh -c '[ "$$(cat /sys/class/tty/%I/type 2>/dev/null)" != 0 ]'
+EOF
+
 mkdir -p /etc/nginx/ssl
 
 rm -rf /var/lib/tor/*
@@ -263,6 +275,8 @@ fs.inotify.max_user_watches=1048576
 # Headroom for nested user namespaces (rootless OCI engines inside service LXCs).
 user.max_user_namespaces=28633
 kernel.unprivileged_userns_clone=1
+# Outbound source ports stay below the service ports StartOS allocates.
+net.ipv4.ip_local_port_range=32768 49151
 EOF
 
 # Ensure /dev/fuse and /dev/net/tun are available on the host so service LXCs

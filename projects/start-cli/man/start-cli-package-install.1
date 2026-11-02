@@ -4,10 +4,13 @@
 .SH NAME
 start\-cli\-package\-install \- Install a package
 .SH SYNOPSIS
-\fBstart\-cli package install\fR [\fB\-s\fR|\fB\-\-sideload\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIID\fR] [\fIVERSION\fR]
+\fBstart\-cli package install\fR [\fB\-\-trust\fR] [\fB\-s\fR|\fB\-\-sideload\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIID\fR] [\fIVERSION\fR]
 .SH DESCRIPTION
 Install a package
 .SH OPTIONS
+.TP
+\fB\-\-trust\fR
+Install without requiring a trusted signer; signature and integrity checks remain mandatory
 .TP
 \fB\-s\fR, \fB\-\-sideload\fR
 

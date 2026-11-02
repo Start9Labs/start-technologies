@@ -3,6 +3,7 @@
 set -e
 
 apt-get update
+apt-get upgrade -y
 apt-get install -y curl rsync qemu-user-static nodejs
 
 cp /usr/lib/startos/resolved.conf /etc/systemd/resolved.conf

@@ -4,12 +4,30 @@ import { CopyService, i18nPipe, LocalizePipe } from '@start9labs/shared'
 import { TuiCell, TuiIcon, TuiTitle } from '@taiga-ui/core'
 import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { MarketplacePkgBase } from '../types'
+import { MarketplaceTrust, TrustedPackageSignersPipe } from '../trust'
 import { MarketplaceVersionsComponent } from './versions.component'
 
 @Component({
   selector: 'marketplace-about',
   template: `
     <section tuiCardLarge>
+      @if (trust; as trust) {
+        <div tuiCell>
+          <span tuiTitle>
+            <span tuiSubtitle>{{ 'Signed by' | i18n }}</span>
+            <span>
+              @for (
+                signer of pkg() | trustedPackageSigners: trust.keys() ?? {};
+                track signer.id
+              ) {
+                {{ $first ? '' : ', ' }}{{ signer.name }}
+              } @empty {
+                {{ 'None' | i18n }}
+              }
+            </span>
+          </span>
+        </div>
+      }
       @if ((versions()?.length || 0) > 1) {
         <button
           marketplaceVersions
@@ -71,6 +89,7 @@ import { MarketplaceVersionsComponent } from './versions.component'
   styles: ':host { display: contents; }',
   imports: [
     MarketplaceVersionsComponent,
+    TrustedPackageSignersPipe,
     DatePipe,
     i18nPipe,
     TuiCell,
@@ -82,6 +101,7 @@ import { MarketplaceVersionsComponent } from './versions.component'
   ],
 })
 export class MarketplaceAboutComponent {
+  protected readonly trust = inject(MarketplaceTrust, { optional: true })
   readonly copyService = inject(CopyService)
 
   readonly pkg = input.required<MarketplacePkgBase>()

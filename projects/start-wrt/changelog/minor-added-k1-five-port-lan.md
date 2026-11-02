@@ -1,1 +1,0 @@
-- K1 boards with four LAN ports bring up all of them, each assignable to its own Security Profile on the Ethernet page.

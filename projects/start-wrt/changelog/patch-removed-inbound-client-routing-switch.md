@@ -1,1 +1,0 @@
-- Removed "Switch to all traffic" and "Switch to LAN only" from the inbound VPN client list. To change a client's routing, delete it and add it again with the routing you want.

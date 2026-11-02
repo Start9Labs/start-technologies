@@ -8,7 +8,7 @@ use async_compression::tokio::bufread::GzipEncoder;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{self as x, Request};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
 use base64::Engine;
 use base64::display::Base64Display;
@@ -36,6 +36,8 @@ use crate::middleware::auth::Auth;
 use crate::middleware::auth::signature::verify_request_signature;
 use crate::middleware::cors::Cors;
 use crate::middleware::db::SyncDb;
+use crate::middleware::json::RequireJson;
+use crate::net::http::request_authority;
 use crate::prelude::*;
 use crate::rpc_continuations::{Guid, RpcContinuations};
 use crate::s9pk::S9pk;
@@ -66,6 +68,11 @@ pub trait UiContext: Context + AsRef<RpcContinuations> + Clone + Sized {
     fn extend_router(self, router: Router) -> Router {
         router
     }
+    /// Routes served by the context's RPC server.
+    #[allow(unused_variables)]
+    fn rpc_server_routes(self, server: HttpServer<Self>) -> Router {
+        Router::new()
+    }
     /// Applies layers after the UI fallback is installed.
     fn apply_outer_layers(self, router: Router) -> Router {
         router
@@ -84,8 +91,20 @@ impl UiContext for RpcContext {
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
         server
             .middleware(Cors::new())
-            .middleware(Auth::new().with_local_auth().with_signature_auth())
+            .middleware(
+                Auth::new()
+                    .with_local_auth()
+                    .with_bearer_auth()
+                    .with_signature_auth(),
+            )
             .middleware(SyncDb::new())
+    }
+    fn rpc_server_routes(self, server: HttpServer<Self>) -> Router {
+        crate::mcp::router(self, server).unwrap_or_else(|e| {
+            tracing::error!("MCP endpoint unavailable: {e}");
+            tracing::debug!("{e:?}");
+            Router::new()
+        })
     }
     fn extend_router(self, router: Router) -> Router {
         router
@@ -145,7 +164,10 @@ impl UiContext for InitContext {
         main_api()
     }
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
-        server.middleware(Cors::new())
+        server.middleware(RequireJson)
+    }
+    fn apply_outer_layers(self, router: Router) -> Router {
+        local_hosts_only(router)
     }
 }
 
@@ -157,7 +179,10 @@ impl UiContext for DiagnosticContext {
         main_api()
     }
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
-        server.middleware(Cors::new())
+        server.middleware(RequireJson)
+    }
+    fn apply_outer_layers(self, router: Router) -> Router {
+        local_hosts_only(router)
     }
 }
 
@@ -171,8 +196,43 @@ impl UiContext for SetupContext {
         main_api()
     }
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
-        server.middleware(Cors::new())
+        server.middleware(RequireJson)
     }
+    fn apply_outer_layers(self, router: Router) -> Router {
+        local_hosts_only(router)
+    }
+}
+
+/// Serves requests addressed to an IP address, `localhost`, or a `.local` name.
+fn local_hosts_only(router: Router) -> Router {
+    router.layer(axum::middleware::from_fn(
+        |request: Request, next: axum::middleware::Next| async move {
+            if request_authority(&request).is_some_and(|authority| is_local_host(authority.host()))
+            {
+                next.run(request).await
+            } else {
+                (
+                    StatusCode::FORBIDDEN,
+                    [(CONTENT_TYPE, "text/plain; charset=utf-8")],
+                    t!("net.static-server.unrecognized-host").into_owned(),
+                )
+                    .into_response()
+            }
+        },
+    ))
+}
+
+fn is_local_host(host: &str) -> bool {
+    host.trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+        .is_ok()
+        || host.eq_ignore_ascii_case("localhost")
+        || host
+            .strip_suffix('.')
+            .unwrap_or(host)
+            .rsplit_once('.')
+            .is_some_and(|(_, tld)| tld.eq_ignore_ascii_case("local"))
 }
 
 pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
@@ -284,7 +344,8 @@ pub fn ui_router<C: UiContext>(ctx: C) -> Router {
     ));
     let router = ctx
         .clone()
-        .extend_router(rpc_router(ctx.clone(), server))
+        .extend_router(rpc_router(ctx.clone(), server.clone()))
+        .merge(ctx.clone().rpc_server_routes(server))
         .fallback(any(|request: Request| async move {
             serve_ui(request, C::ui_dir()).unwrap_or_else(server_error)
         }));
@@ -485,7 +546,7 @@ async fn if_authorized<
     let path = request.uri().path().to_owned();
     match async {
         let signer = verify_request_signature(ctx, &mut request).await?;
-        let key = signer.interned_pem();
+        let key = signer.interned_der64();
         let enrolled = ctx
             .ephemeral_auth_keys
             .peek(|keys| keys.0.contains_key(&*key))
@@ -494,10 +555,10 @@ async fn if_authorized<
                 .peek()
                 .await
                 .as_private()
-                .as_session_pubkeys()
-                .de()?
-                .0
-                .contains_key(&*key);
+                .as_sessions()
+                .as_pubkeys()
+                .as_idx(&key)
+                .is_some();
         if !enrolled {
             return Err(Error::new(
                 eyre!("{}", t!("middleware.auth.unauthorized")),
@@ -1488,5 +1549,45 @@ mod tests {
 
         assert!(get("dependencies/lnd/icon").await.unwrap().is_none());
         assert!(get("LICENSE.md").await.unwrap().is_some());
+    }
+
+    async fn status_for_host(host: &str) -> StatusCode {
+        use tower_service::Service;
+
+        let mut router = local_hosts_only(Router::new().fallback(|| async { "ok" }));
+        router
+            .call(
+                http::Request::builder()
+                    .header(http::header::HOST, host)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    #[tokio::test]
+    async fn local_hosts_only_rejects_rebound_names() {
+        for host in [
+            "start.local",
+            "Start.LOCAL.",
+            "adjective-noun.local:80",
+            "192.168.1.5",
+            "192.168.1.5:80",
+            "[fe80::1]",
+            "[::1]:80",
+            "localhost",
+        ] {
+            assert_eq!(status_for_host(host).await, StatusCode::OK, "{host}");
+        }
+        for host in [
+            "attacker.example",
+            "start.local.attacker.example",
+            "local",
+            "192.168.1.5.nip.io",
+        ] {
+            assert_eq!(status_for_host(host).await, StatusCode::FORBIDDEN, "{host}");
+        }
     }
 }

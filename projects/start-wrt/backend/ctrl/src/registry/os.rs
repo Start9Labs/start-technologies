@@ -10,7 +10,7 @@ use crate::sign::commitment::Blake3Commitment;
 pub const SIG_CONTEXT: &str = "startos";
 
 /// Information about a single OS version from the registry.
-/// Wire-compatible with start-os's `OsVersionInfo`.
+/// Wire-compatible with the registry's English-only projection of start-os's `OsVersionInfo`.
 #[derive(Debug, Default, Deserialize, Serialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct OsVersionInfo {

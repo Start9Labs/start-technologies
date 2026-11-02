@@ -25,10 +25,10 @@ import { MarketplacePkgSideload } from './sideload.utils'
       </span>
       <span tuiTitle tuiFade>{{ pkg().title }}</span>
       <span tuiAccessories>
-        <marketplace-controls [pkg]="pkg()" [file]="file()" />
         <ng-content />
       </span>
     </header>
+    <marketplace-controls [pkg]="pkg()" [file]="file()" />
     <marketplace-about [pkg]="pkg()" (static)="onStatic()" />
     <marketplace-release-notes [pkg]="pkg()" />
     @if (!(pkg().dependencyMetadata | empty)) {

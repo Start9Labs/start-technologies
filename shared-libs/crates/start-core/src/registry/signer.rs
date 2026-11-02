@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::str::FromStr;
 
 use clap::builder::ValueParserFactory;
@@ -17,7 +17,7 @@ use crate::util::FromStrParser;
 pub struct SignerInfo {
     pub name: String,
     pub contact: Vec<ContactInfo>,
-    pub keys: HashSet<AnyVerifyingKey>,
+    pub keys: BTreeSet<AnyVerifyingKey>,
 }
 
 rpc_toolkit::reflect_ts!(SignerInfo);

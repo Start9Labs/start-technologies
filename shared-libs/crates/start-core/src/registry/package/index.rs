@@ -235,6 +235,7 @@ impl PackageVersionInfo {
                 .iter_mut()
                 .find(|(h, s)| s.commitment == asset.commitment && *h == hw_req)
             {
+                matching.signatures.extend(asset.signatures);
                 if replace_urls {
                     matching.urls = asset.urls;
                 } else {
@@ -348,6 +349,56 @@ pub async fn get_package_index(ctx: RegistryContext) -> Result<PackageIndex, Err
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn version_info_signed_by(seed: u8) -> (AnyVerifyingKey, PackageVersionInfo) {
+        use ed25519_dalek::Signer;
+
+        let key = ed25519_dalek::SigningKey::from_bytes(&[seed; 32]);
+        let mut info: PackageVersionInfo = serde_json::from_value(serde_json::json!({
+            "title": "Test Package",
+            "description": { "short": "Short", "long": "Long" },
+            "releaseNotes": "Notes",
+            "gitHash": null,
+            "license": "MIT",
+            "upstreamRepo": "https://example.com/upstream",
+            "marketingUrl": null,
+            "donationUrl": null,
+            "sdkVersion": null,
+            "dependencyMetadata": {},
+            "sourceVersion": null,
+            "s9pks": [[
+                { "device": [], "ram": null, "arch": ["x86_64"] },
+                {
+                    "publishedAt": "2026-01-01T00:00:00Z",
+                    "urls": ["https://example.com/test.s9pk"],
+                    "commitment": {
+                        "rootSighash": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+                        "rootMaxsize": 380,
+                    },
+                    "signatures": {},
+                },
+            ]],
+        }))
+        .unwrap();
+        let verifying_key = AnyVerifyingKey::Ed25519(key.verifying_key());
+        info.s9pks[0].1.signatures.insert(
+            verifying_key.clone(),
+            AnySignature::Ed25519ph(key.sign(b"test")),
+        );
+        (verifying_key, info)
+    }
+
+    #[test]
+    fn merging_the_same_s9pk_adds_its_signatures() {
+        let (developer, mut info) = version_info_signed_by(1);
+        let (cosigner, cosigned) = version_info_signed_by(2);
+        info.merge_with(cosigned, true).unwrap();
+
+        assert_eq!(
+            info.s9pks[0].1.signatures.keys().collect::<BTreeSet<_>>(),
+            [&developer, &cosigner].into()
+        );
+    }
 
     #[test]
     fn registry_dependency_metadata_preserves_base_requirement() {

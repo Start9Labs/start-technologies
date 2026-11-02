@@ -75,6 +75,6 @@ StartOS reports unsatisfied runtime dependencies, but their declaration does not
 
 ## Reaching a Dependency
 
-Resolve its live address with `sdk.host.getBridgeAddress`, as described in [Service-to-Service Networking](service-to-service.md). For a volume mount, use `.mountDependency({ dependencyId, volumeId, subpath, mountpoint, readonly: true })` in the `Mounts` chain. A missing dependency volume makes the mount fail.
+Resolve its live address with `sdk.host.getBridgeAddress`, as described in [Service-to-Service Networking](service-to-service.md). For a volume mount, use `.mountDependency({ dependencyId, volumeId, subpath, mountpoint, readonly: true })` in the `Mounts` chain. A missing dependency volume makes the mount fail, and so does a missing `subpath` on a read-only mount; a read-write mount creates the missing `subpath` as a folder on the dependency's volume.
 
 The normal init order is `restoreInit -> versionGraph -> setInterfaces -> actions -> dependencies -> setup`. Put `actions` before `dependencies` when `withInit` creates tasks for registered actions.

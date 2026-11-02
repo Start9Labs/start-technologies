@@ -1,1 +1,0 @@
-- The port-mapping server now answers NAT-PMP requests with "unsupported version" instead of ignoring them, so NAT-PMP clients fall back right away rather than retrying for about two minutes.

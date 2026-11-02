@@ -7,7 +7,7 @@ import { TuiButton } from '@taiga-ui/core'
 import { from, map, merge, Observable, Subject } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { TitleDirective } from 'src/app/services/title.service'
-import { SessionsTableComponent } from './table.component'
+import { SessionsTableComponent, SessionWithId } from './table.component'
 
 @Component({
   template: `
@@ -70,25 +70,17 @@ export default class SystemSessionsComponent {
   private readonly sessions$ = from(this.api.rpc.auth.session.list({}))
   private readonly local$ = new Subject<readonly SessionWithId[]>()
 
-  protected sessions = viewChild<SessionsTableComponent<SessionWithId>>('table')
+  protected sessions = viewChild<SessionsTableComponent>('table')
 
   readonly current$ = this.sessions$.pipe(
-    map(s => {
-      const current = s.current ? s.sessions[s.current] : undefined
-
-      return current ? [current] : []
-    }),
+    map(s => withIds(s).filter(({ id }) => id === s.current)),
   )
   readonly other$: Observable<readonly SessionWithId[]> = merge(
     this.local$,
     this.sessions$.pipe(
       map(s =>
-        Object.entries(s.sessions)
-          .filter(([id, _]) => id !== s.current)
-          .map(([id, session]) => ({
-            id,
-            ...session,
-          }))
+        withIds(s)
+          .filter(({ id }) => id !== s.current)
           .sort(
             (a, b) =>
               new Date(b.lastActive).valueOf() -
@@ -99,19 +91,28 @@ export default class SystemSessionsComponent {
   )
 
   async terminate(all: readonly SessionWithId[]) {
-    const ids =
-      this.sessions()
-        ?.selected()
-        .map(s => s.id) || []
+    const selected = this.sessions()?.selected() || []
+    const ids = selected.map(s => s.id)
+    const idsOf = (kind: SessionWithId['kind']) =>
+      selected.filter(s => s.kind === kind).map(s => s.id)
 
     this.tasks.run(async () => {
-      await this.api.rpc.auth.session.kill({ ids })
+      await this.api.rpc.auth.session.kill({
+        pubkeys: idsOf('pubkey'),
+        tokens: idsOf('token'),
+      })
       this.local$.next(all.filter(s => !ids.includes(s.id)))
       this.sessions()?.selected.set([])
     }, 'Terminating sessions')
   }
 }
 
-interface SessionWithId extends T.Session {
-  id: string
+function withIds({ sessions }: T.SessionList): SessionWithId[] {
+  const rows = (kind: SessionWithId['kind'], of: Record<string, T.Session>) =>
+    Object.entries(of).map(([id, session]) => ({ id, kind, ...session }))
+
+  return [
+    ...rows('pubkey', sessions.pubkeys),
+    ...rows('token', sessions.tokens),
+  ]
 }

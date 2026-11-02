@@ -1,5 +1,5 @@
 ---
-user-facing: true
+release-notes: true
 ---
 
-- **Network UPS Tools support monitors a directly connected UPS or a network NUT server**, with retained configuration, independent monitoring controls, and UPS status under System. UPS status uses a responsive card with aligned labels and values, with a single documentation link in the UPS card.
+- Monitor a directly connected UPS or a network NUT server from System, view its status, and shut down StartOS when the battery is low. Configure monitoring in a dialog and pause it without losing saved settings.

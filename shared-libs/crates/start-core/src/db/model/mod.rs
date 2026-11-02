@@ -4,7 +4,7 @@ use patch_db::HasModel;
 use serde::{Deserialize, Serialize};
 
 use crate::account::AccountInfo;
-use crate::auth::AuthKeys;
+use crate::auth::Sessions;
 use crate::backup::target::cifs::CifsTargets;
 use crate::db::model::private::Private;
 use crate::db::model::public::Public;
@@ -14,7 +14,7 @@ use crate::notifications::Notifications;
 use crate::prelude::*;
 use crate::ssh::SshKeys;
 use crate::system::KeyboardOptions;
-use crate::util::serde::Pem;
+use crate::util::serde::{Der64, Pem};
 
 pub mod package;
 pub mod private;
@@ -39,16 +39,17 @@ impl Database {
             private: Private {
                 key_store: KeyStore::new(account)?,
                 password: account.password.clone(),
-                session_pubkeys: AuthKeys::new(),
+                sessions: Sessions::default(),
                 ssh_privkey: Pem(account.ssh_key.clone()),
                 ssh_pubkeys: SshKeys::new(),
-                // Empty: `os_bindings` claims the admin UI's 80/443 as a privileged bind.
                 available_ports: AvailablePorts::new(),
                 notifications: Notifications::new(),
+                os_security_notifications: BTreeMap::new(),
+                push: Default::default(),
                 cifs: CifsTargets::new(),
                 package_stores: BTreeMap::new(),
-                developer_key: Pem(account.developer_key.clone()),
-            }, // TODO
+                developer_key: Der64(account.developer_key.clone()),
+            },
         })
     }
 }

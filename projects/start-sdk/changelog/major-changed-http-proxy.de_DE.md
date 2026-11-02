@@ -1,0 +1,4 @@
+- HTTP-Proxy-Authentifizierung und weitergeleitete Header werden unabhängig von `addSsl` in der Option `proxy` von `bindPort` konfiguriert. Die Authentifizierung gilt für die ursprüngliche Verbindung und die TLS-Wrapper-Verbindung.
+- Proxy-Standardwerte richten sich nach dem Protokoll: Für HTTP-Protokolle ist der Proxy aktiviert, sonst deaktiviert. Jedes Protokoll akzeptiert ein ausdrückliches `proxy`-Objekt oder `proxy: null`.
+- Beim Neubauen von Paketen `addSsl.auth` nach `proxy.auth` und `addSsl.addXForwardedHeaders` nach `proxy.addXForwardedHeaders` verschieben. TLS-Einstellungen bleiben unter `addSsl`.
+- Pakete, die mit diesem SDK gebaut wurden, benötigen StartOS ab 0.4.1.

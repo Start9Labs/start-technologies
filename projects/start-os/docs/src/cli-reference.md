@@ -34,7 +34,7 @@ await rpcClient.rpc.package.start({ id: 'bitcoind' })
 
 ## Authentication
 
-Log in, log out, manage enrolled device keys, and reset the master password.
+Log in, log out, manage enrolled device keys and bearer tokens, and reset the master password.
 
 ### `start-cli auth login`
 
@@ -54,13 +54,19 @@ Retrieve the server's public key.
 
 ### `start-cli auth session list`
 
-List all enrolled device keys.
+List all enrolled device keys and bearer tokens.
 
 - `--format` — Output format
 
-### `start-cli auth session kill [IDS...]`
+### `start-cli auth session kill [--pubkey <KEY>]... [--token <ID>]...`
 
-Remove one or more enrolled device keys.
+End one or more sessions. `--pubkey` removes an enrolled device key; `--token` revokes a bearer token by the ID `auth session list` shows.
+
+### `start-cli auth token create --name <NAME>`
+
+Create a bearer token for an API client that cannot sign requests. The token is printed once and is not stored; the client sends it as `Authorization: Bearer <token>`. It appears in `auth session list` under its name and is revoked with `auth session kill --token` or after 30 days unused.
+
+An MCP client authenticates with the same token to use the server's API as tools at `https://<server-address>/mcp`, over the streamable HTTP transport.
 
 ## Server
 
@@ -76,7 +82,9 @@ Shut down the server.
 
 ### `start-cli server update`
 
-Check the configured registry for OS updates and apply if available.
+Check the supplied registry for OS updates and apply if available. See [Trusted Keyrings](trusted-keys.md) for signer requirements.
+
+- `--trust` — Explicitly accept an untrusted signer while retaining signature and integrity checks
 
 ### `start-cli server update-firmware`
 
@@ -98,7 +106,7 @@ Display kernel logs. Same options as `server logs`.
 
 ### `start-cli server metrics`
 
-Display server metrics (CPU, RAM, disk, temperature).
+Display server metrics: CPU, RAM, disk, and temperature in °C.
 
 - `--format` — Output format
 
@@ -257,6 +265,9 @@ List all installed packages.
 Install a package from the registry or sideload a local `.s9pk` file.
 
 - `-s, --sideload` — Install from local file
+- `--trust` — Explicitly accept an untrusted signer while retaining signature and integrity checks
+
+Registry installs and sideloads require a signer from an enabled [trusted keyring](trusted-keys.md) by default.
 
 ### `start-cli package start <ID>`
 
@@ -274,7 +285,10 @@ the same startup coalesce into one additional restart.
 
 ### `start-cli package uninstall <ID>`
 
-Remove a package and its data.
+Remove a package and its data. See [Uninstalling](uninstalling.md).
+
+- `--soft` — Keep the package's data
+- `--force` — Remove the package even when its own uninstall step fails or can't run
 
 ### `start-cli package logs <ID>`
 
@@ -298,7 +312,7 @@ Open a shell inside a service's subcontainer (within the LXC container), or run 
 
 ### `start-cli package stats`
 
-Display LXC container resource usage for every installed service.
+Display LXC container memory usage and limit for every installed service. It does not report CPU use.
 
 - `--format` — Output format
 
@@ -693,7 +707,7 @@ Disable kiosk mode.
 
 ## Disks
 
-List and repair storage devices.
+List, repair, and format storage devices.
 
 ### `start-cli disk list`
 
@@ -705,6 +719,12 @@ partitions are omitted.
 ### `start-cli disk repair`
 
 Repair filesystem issues on the data partition.
+
+### `start-cli disk format <DISK>`
+
+Erase a whole drive and leave it with a single Btrfs partition ready for backups, then print the new partition. The drive holding StartOS or its data, the live boot medium, anything mounted, and drives smaller than 1 GiB are refused.
+
+- `--label <LABEL>` — Volume label, at most 255 bytes (default `StartOS Backups`)
 
 ## Diagnostics
 
@@ -971,6 +991,14 @@ Add a download mirror for a package.
 Remove a package mirror.
 
 - `--url <URL>` — Mirror URL to remove (required)
+
+### `start-cli registry package sign [FILE]`
+
+Add your signature to a package in the registry index.
+
+- `--no-verify` — Sign the commitments the registry lists instead of a local s9pk
+- `--id <ID>` — Package identifier (with `--no-verify`)
+- `--version <VERSION>` — Package version (with `--no-verify`)
 
 ### Registry Package Categories
 

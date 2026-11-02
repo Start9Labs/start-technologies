@@ -1,7 +1,10 @@
-use std::path::PathBuf;
+use std::path::Path;
 
+// start-core hosts the start-cli applet, which versions independently of start-core. Bake the
+// start-cli crate version in so the applet can report it (see bins::cli_version); the sibling
+// manifest is the single source of truth.
 fn main() {
-    let root = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../../..");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
 
     let manifest = root.join("projects/start-cli/Cargo.toml");
     println!("cargo:rerun-if-changed={}", manifest.display());
@@ -14,7 +17,9 @@ fn main() {
         .unwrap_or_else(|| panic!("no [package] version string in {}", manifest.display()));
     println!("cargo:rustc-env=START_CLI_VERSION={version}");
 
-    // StartOS versions can have four segments.
+    // The StartOS release version carries a revision segment no Cargo manifest can hold
+    // (0.4.0.1), so root package.json is its source of truth. `version::Current` must agree —
+    // asserted by version::tests::current_matches_manifest.
     let pkg_json = root.join("package.json");
     println!("cargo:rerun-if-changed={}", pkg_json.display());
     let contents = std::fs::read_to_string(&pkg_json)
