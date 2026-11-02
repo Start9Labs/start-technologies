@@ -142,6 +142,7 @@ export const ENGLISH: Record<string, number> = {
   'WireGuard endpoint': 127,
   'Defaults to this page’s host. Use an IP address or DNS name reachable by the device; the WireGuard port is unchanged.': 128,
   'Generate config': 129,
+  'Pass device addresses to the DNS server': 130,
 }
 
 export default ENGLISH

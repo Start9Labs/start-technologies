@@ -23,5 +23,10 @@ ip route add 10.59.0.3/32 dev to-client
 ip route add 10.59.0.13/32 dev to-device
 ip netns exec device env "$ROLE_VAR=device" "$exe" --exact "$test" --nocapture &
 env "$ROLE_VAR=proxy" "$exe" --exact "$test" --nocapture &
+proxy=$!
 ip netns exec client env "$ROLE_VAR=client" "$exe" --exact "$test" --nocapture
+kill "$proxy"
+wait "$proxy" 2>/dev/null || true
+env "$ROLE_VAR=proxy-preserve" "$exe" --exact "$test" --nocapture &
+ip netns exec client env "$ROLE_VAR=client-preserve" "$exe" --exact "$test" --nocapture
 ip netns exec device env "$ROLE_VAR=device-self" "$exe" --exact "$test" --nocapture

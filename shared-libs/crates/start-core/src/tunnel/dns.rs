@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use crate::net::dns::{DNS_RESPONSE_BUFFER_SIZE, name_server_socket_addr, parse_resolv_conf};
 use crate::net::dns_update::forwarding_catalog;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectingHandler, fallback_info};
-use crate::net::transparent::{ensure_divert_infra, transparent_connect, transparent_udp};
+use crate::net::transparent::{ensure_udp_divert_infra, transparent_connect, transparent_udp};
 use crate::prelude::*;
 use crate::tunnel::wg::{DnsConfig, WgServer};
 use crate::util::future::NonDetachingJoinHandle;
@@ -29,6 +29,7 @@ use crate::util::sync::SyncMutex;
 const DNS_PORT: u16 = 53;
 const FORWARD_TIMEOUT: Duration = Duration::from_secs(30);
 const RELAY_TIMEOUT: Duration = Duration::from_secs(5);
+const DIVERT_REPAIR_INTERVAL: Duration = Duration::from_secs(30);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A running per-subnet proxy: the hickory server's cancellation token plus the
@@ -48,6 +49,7 @@ struct ProxyHandle {
 #[derive(Default)]
 pub struct DnsProxyController {
     listeners: SyncMutex<BTreeMap<Ipv4Net, ProxyHandle>>,
+    divert_repair: SyncMutex<Option<NonDetachingJoinHandle<()>>>,
 }
 impl DnsProxyController {
     pub fn new() -> Self {
@@ -87,7 +89,11 @@ impl DnsProxyController {
                 tracing::warn!("no DNS upstreams for subnet {subnet}; proxy not started");
                 continue;
             }
-            let mut devices = origin_devices(*subnet, &upstreams);
+            let mut devices = if config.dns_preserve_source {
+                origin_devices(*subnet, &upstreams)
+            } else {
+                Vec::new()
+            };
             if !devices.is_empty() {
                 if divert_ready.is_none() {
                     divert_ready = Some(install_divert().await);
@@ -96,25 +102,13 @@ impl DnsProxyController {
                     devices.clear();
                 }
             }
-            let forwarder = match forwarding_catalog(upstreams, FORWARD_TIMEOUT) {
-                Ok(fallback) => OriginForwarder {
-                    subnet: *subnet,
-                    devices,
-                    fallback,
-                },
-                Err(e) => {
-                    tracing::error!("failed to configure DNS forwarding for {subnet}: {e}");
-                    tracing::debug!("{e:?}");
-                    continue;
-                }
-            };
             // The server's v6 on the subnet's delegated prefix, so v6-sourced
             // queries and RFC 2136 UPDATEs are served too. Best-effort: a v6
             // bind failure degrades to v4-only rather than killing the proxy.
             let server_v6 = config
                 .ipv6
                 .map(|prefix| crate::tunnel::wg6::host_v6(prefix, subnet.addr()));
-            match bind_proxy(subnet.addr(), server_v6, forwarder, injector.clone()).await {
+            match bind_proxy(*subnet, server_v6, upstreams, devices, injector.clone()).await {
                 Ok(handle) => {
                     listeners.insert(*subnet, handle);
                 }
@@ -125,6 +119,8 @@ impl DnsProxyController {
             }
         }
         self.listeners.mutate(|l| *l = listeners);
+        let repair = (divert_ready == Some(true)).then(spawn_divert_repair);
+        self.divert_repair.mutate(|r| *r = repair);
         Ok(())
     }
 }
@@ -141,7 +137,7 @@ async fn resolve_upstreams(config: &DnsConfig) -> Result<Vec<SocketAddr>, Error>
 /// Installs reply diversion for relayed queries. False keeps forwarding from the
 /// proxy's own address.
 async fn install_divert() -> bool {
-    match ensure_divert_infra().await {
+    match ensure_udp_divert_infra().await {
         Ok(_) => true,
         Err(e) => {
             tracing::warn!(
@@ -151,6 +147,35 @@ async fn install_divert() -> bool {
             false
         }
     }
+}
+
+/// Re-installs the relay reply path if it disappears while a subnet relays.
+fn spawn_divert_repair() -> NonDetachingJoinHandle<()> {
+    tokio::spawn(async {
+        let mut healthy = true;
+        loop {
+            tokio::time::sleep(DIVERT_REPAIR_INTERVAL).await;
+            match ensure_udp_divert_infra().await {
+                Ok(repaired) => {
+                    if repaired {
+                        tracing::warn!(
+                            "DNS relay reply-path divert infra was missing; re-installed"
+                        );
+                    } else if !healthy {
+                        tracing::info!("DNS relay reply-path divert re-assert recovered");
+                    }
+                    healthy = true;
+                }
+                Err(e) => {
+                    if healthy {
+                        tracing::warn!("DNS relay reply-path divert re-assert failed: {e}");
+                    }
+                    healthy = false;
+                }
+            }
+        }
+    })
+    .into()
 }
 
 /// An address on the subnet other than the proxy's own.
@@ -224,13 +249,11 @@ impl RequestHandler for OriginForwarder {
 
 /// Sends the request's raw query to `device` from `origin`, over the request's protocol.
 async fn relay(origin: Ipv4Addr, device: SocketAddrV4, request: &Request) -> io::Result<Message> {
-    let client = SocketAddr::from((origin, 0));
-    let device = SocketAddr::V4(device);
     let query = request.as_slice();
     let id = request.metadata.id.to_be_bytes();
     let exchange = async {
         if request.protocol() == Protocol::Udp {
-            let socket = transparent_udp(client, device)?;
+            let socket = transparent_udp(SocketAddrV4::new(origin, 0), device)?;
             socket.send(query).await?;
             let mut buf = vec![0; usize::from(u16::MAX)];
             loop {
@@ -243,7 +266,8 @@ async fn relay(origin: Ipv4Addr, device: SocketAddrV4, request: &Request) -> io:
         } else {
             let len = u16::try_from(query.len())
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "query exceeds 64 KiB"))?;
-            let mut stream = transparent_connect(client, device).await?;
+            let mut stream =
+                transparent_connect(SocketAddr::from((origin, 0)), SocketAddr::V4(device)).await?;
             stream
                 .write_all(&[&len.to_be_bytes()[..], query].concat())
                 .await?;
@@ -331,16 +355,18 @@ fn resolv_conf_upstreams(config: &ResolverConfig) -> Vec<SocketAddr> {
         .collect()
 }
 
-/// Bind UDP + TCP on `addr:53` (and `addr_v6:53` when the subnet carries a
-/// prefix) and spawn a `ServerFuture` forwarding through `forwarder`. Binds
-/// before spawning so bind failures surface to the caller.
+/// Bind UDP + TCP on the subnet's `.1:53` (and `addr_v6:53` when the subnet
+/// carries a prefix) and spawn a `ServerFuture` forwarding to `upstreams`,
+/// relaying through `devices`. Binds before spawning so bind failures surface
+/// to the caller.
 async fn bind_proxy(
-    addr: Ipv4Addr,
+    subnet: Ipv4Net,
     addr_v6: Option<Ipv6Addr>,
-    forwarder: OriginForwarder,
+    upstreams: Vec<SocketAddr>,
+    devices: Vec<SocketAddrV4>,
     injector: Arc<DnsInjector>,
 ) -> Result<ProxyHandle, Error> {
-    let listen = SocketAddrV4::new(addr, DNS_PORT);
+    let listen = SocketAddrV4::new(subnet.addr(), DNS_PORT);
     let udp = UdpSocket::bind(listen)
         .await
         .with_kind(ErrorKind::Network)?;
@@ -348,7 +374,14 @@ async fn bind_proxy(
         .await
         .with_kind(ErrorKind::Network)?;
 
-    let mut server = Server::new(InjectingHandler::new(injector, forwarder));
+    let mut server = Server::new(InjectingHandler::new(
+        injector,
+        OriginForwarder {
+            subnet,
+            devices,
+            fallback: forwarding_catalog(upstreams, FORWARD_TIMEOUT)?,
+        },
+    ));
     server.register_socket(udp);
     server.register_listener(tcp, FORWARD_TIMEOUT, DNS_RESPONSE_BUFFER_SIZE);
 
@@ -446,7 +479,8 @@ mod tests {
         const TEST: &str = "tunnel::dns::tests::relay::relays_queries_from_the_sender_address";
         const ROLE: &str = "STARTTUNNEL_DNS_RELAY_ROLE";
 
-        /// Relays a peer's query from the peer's address over UDP and TCP, and
+        /// Forwards from the proxy's address by default. With `dns_preserve_source`,
+        /// relays a peer's query from the peer's address over UDP and TCP, and
         /// forwards a device's own query from the proxy's address.
         #[test]
         fn relays_queries_from_the_sender_address() {
@@ -496,8 +530,10 @@ mod tests {
             rt.block_on(async {
                 match role.as_str() {
                     "device" => serve_whoami(addr("10.59.0.13:5300")).await,
-                    "proxy" => run_proxy().await,
-                    "client" => {
+                    "proxy" => run_proxy(false).await,
+                    "proxy-preserve" => run_proxy(true).await,
+                    "client" => assert_eq!(whoami(false).await, subnet().addr()),
+                    "client-preserve" => {
                         for tcp in [false, true] {
                             assert_eq!(
                                 whoami(tcp).await,
@@ -512,7 +548,7 @@ mod tests {
             });
         }
 
-        async fn run_proxy() {
+        async fn run_proxy(preserve_source: bool) {
             crate::net::forward::nft_ensure_base().await.unwrap();
             let mut server = WgServer::default();
             server.subnets = WgSubnetMap::default();
@@ -523,6 +559,7 @@ mod tests {
                     dns: DnsConfig::Custom {
                         servers: vec![addr("10.59.0.13:5300")],
                     },
+                    dns_preserve_source: preserve_source,
                     ..Default::default()
                 },
             );

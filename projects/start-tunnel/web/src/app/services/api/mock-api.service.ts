@@ -58,11 +58,16 @@ export class MockApiService extends ApiService {
             ? { type: 'custom', servers: params.servers }
             : { type: 'default' }
 
-      const patch: ReplaceOperation<T.Tunnel.DnsConfig>[] = [
+      const patch: ReplaceOperation<T.Tunnel.DnsConfig | boolean>[] = [
         {
           op: PatchOp.REPLACE,
           path: `/wg/subnets/${replaceSlashes(params.subnet)}/dns`,
           value: dns,
+        },
+        {
+          op: PatchOp.REPLACE,
+          path: `/wg/subnets/${replaceSlashes(params.subnet)}/dnsPreserveSource`,
+          value: params.preserveSource,
         },
       ]
       this.mockRevision(patch)

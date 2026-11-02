@@ -1316,7 +1316,7 @@ mod tests {
         assert!(!is_forward_script_tag("F4-ac286185d01cg612"));
         assert!(!is_forward_script_tag("base-established"));
         assert!(!is_forward_script_tag("pinhole:2001:db8::1:443"));
-        assert!(!is_forward_script_tag("transparent-divert"));
+        assert!(!is_forward_script_tag("sni-divert"));
     }
 
     #[test]
