@@ -1981,11 +1981,19 @@ export const CreateParams: z.ZodObject<{
 export const CreateSharedVolumeSource: z.ZodUnion<
   readonly [
     z.ZodObject<{ kind: z.ZodLiteral<'local'> }>,
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'disk'> }>,
+      z.ZodObject<{ logicalname: z.ZodString }>
+    >,
     z.ZodIntersection<z.ZodObject<{ kind: z.ZodLiteral<'cifs'> }>, typeof Cifs>,
   ]
 > = /* @__PURE__ */ z
   .union([
     object({ kind: z.literal('local') }),
+    z.intersection(
+      object({ kind: z.literal('disk') }),
+      object({ logicalname: z.string() }),
+    ),
     z.intersection(object({ kind: z.literal('cifs') }), Cifs),
   ])
   .meta({

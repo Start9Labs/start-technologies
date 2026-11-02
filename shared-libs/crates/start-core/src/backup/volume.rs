@@ -13,7 +13,8 @@ use super::target::{BackupTargetId, SharedVolumeBackupInfo};
 use super::{PackageBackupReport, VolumeBackupReport};
 use crate::context::{CliContext, RpcContext};
 use crate::disk::mount::backup::BackupMountGuard;
-use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
+use crate::disk::mount::filesystem::block_dev::BlockDev;
+use crate::disk::mount::filesystem::{FileSystem, ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::disk::mount::util::sync_directory;
 use crate::prelude::*;
@@ -119,25 +120,17 @@ pub(super) async fn backup_volume(
         .as_idx(id)
         .or_not_found(id)?
         .de()?;
-    if let (
-        SharedVolumeSource::Cifs { hostname, path },
-        super::target::BackupTargetFS::Cifs(target),
-    ) = (&volume.source, destination)
+    if source_overlaps_target(
+        &volume.source,
+        destination,
+        &backup.encrypted_relative_path(),
+    )
+    .await?
     {
-        let target_path = Path::new("/")
-            .join(&target.path)
-            .join(backup.encrypted_relative_path());
-        if crate::disk::mount::filesystem::cifs::locations_overlap(
-            (hostname, path),
-            (&target.hostname, &target_path),
-        )
-        .await?
-        {
-            return Err(Error::new(
-                eyre!(t!("backup.volume.overlapping-target")),
-                ErrorKind::Backup,
-            ));
-        }
+        return Err(Error::new(
+            eyre!(t!("backup.volume.overlapping-target")),
+            ErrorKind::Backup,
+        ));
     }
     let source = source::open_source(ctx, id, ReadOnly).await?;
     let result = stage_copy(&backup.shared_volume_data(id), source.path()).await;
@@ -146,6 +139,32 @@ pub(super) async fn backup_volume(
         name: volume.name,
         timestamp: Utc::now(),
         generation: result?,
+    })
+}
+
+async fn source_overlaps_target(
+    source: &SharedVolumeSource,
+    destination: &super::target::BackupTargetFS,
+    encrypted_relative_path: &Path,
+) -> Result<bool, Error> {
+    Ok(match (source, destination) {
+        (
+            SharedVolumeSource::Cifs { hostname, path },
+            super::target::BackupTargetFS::Cifs(target),
+        ) => {
+            let target_path = Path::new("/")
+                .join(&target.path)
+                .join(encrypted_relative_path);
+            crate::disk::mount::filesystem::cifs::locations_overlap(
+                (hostname, path),
+                (&target.hostname, &target_path),
+            )
+            .await?
+        }
+        (SharedVolumeSource::Disk { logicalname }, super::target::BackupTargetFS::Disk(target)) => {
+            BlockDev::new(logicalname).source_hash().await? == target.source_hash().await?
+        }
+        _ => false,
     })
 }
 
@@ -340,6 +359,29 @@ mod tests {
     use std::time::SystemTime;
 
     use super::*;
+
+    #[tokio::test]
+    async fn external_volume_backups_reject_the_same_partition_through_any_alias() {
+        let fixture = tempfile::tempdir().unwrap();
+        let disk = fixture.path().join("disk");
+        let alias = fixture.path().join("filesystem-uuid");
+        let other = fixture.path().join("other-disk");
+        std::fs::write(&disk, "source").unwrap();
+        std::fs::write(&other, "destination").unwrap();
+        symlink(&disk, &alias).unwrap();
+        let source = SharedVolumeSource::Disk { logicalname: alias };
+        let target = |path| super::super::target::BackupTargetFS::Disk(BlockDev::new(path));
+        assert!(
+            source_overlaps_target(&source, &target(disk), Path::new("backup"))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !source_overlaps_target(&source, &target(other), Path::new("backup"))
+                .await
+                .unwrap()
+        );
+    }
 
     fn info(generation: String) -> SharedVolumeBackupInfo {
         SharedVolumeBackupInfo {

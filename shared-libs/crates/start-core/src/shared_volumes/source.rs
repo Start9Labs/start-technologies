@@ -1,10 +1,12 @@
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::MountType;
 use crate::disk::mount::filesystem::bind::Bind;
+use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::cifs::{Cifs, SharedCifs};
+use crate::disk::mount::filesystem::idmapped::IdMapped;
 use crate::disk::mount::guard::TmpMountGuard;
 use crate::prelude::*;
 use crate::shared_volumes::{
@@ -39,6 +41,13 @@ pub async fn open_source(
         SharedVolumeSource::Local => {
             let path = local_path(crate::DATA_DIR, id);
             open_local(&path, mount_type).await
+        }
+        SharedVolumeSource::Disk { logicalname } => {
+            TmpMountGuard::mount(
+                &IdMapped::new(BlockDev::new(logicalname), vec![crate::lxc::BASE_IDMAP]),
+                mount_type,
+            )
+            .await
         }
         SharedVolumeSource::Cifs { hostname, path } => {
             let credentials = db
@@ -84,6 +93,25 @@ pub(crate) async fn record_availability(
         .result
 }
 
+pub(super) fn external_partition(
+    disks: &[crate::disk::util::DiskInfo],
+    logicalname: &Path,
+) -> Result<PathBuf, Error> {
+    disks
+        .iter()
+        .flat_map(|disk| &disk.partitions)
+        .find(|partition| {
+            partition.logicalname == logicalname || partition.stable_path == logicalname
+        })
+        .map(|partition| partition.logicalname.clone())
+        .ok_or_else(|| {
+            Error::new(
+                eyre!(t!("shared-volumes.invalid-drive")),
+                ErrorKind::InvalidRequest,
+            )
+        })
+}
+
 async fn open_local(path: &Path, mount_type: MountType) -> Result<TmpMountGuard, Error> {
     if !tokio::fs::metadata(path).await?.is_dir() {
         return Err(Error::new(
@@ -93,3 +121,6 @@ async fn open_local(path: &Path, mount_type: MountType) -> Result<TmpMountGuard,
     }
     TmpMountGuard::mount(&Bind::new(path), mount_type).await
 }
+
+#[cfg(test)]
+mod tests;

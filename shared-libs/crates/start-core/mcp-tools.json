@@ -11554,6 +11554,14 @@
               "additionalProperties": true
             },
             {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "disk" },
+                "logicalname": { "type": "string" }
+              },
+              "required": ["kind", "logicalname"]
+            },
+            {
               "allOf": [
                 {
                   "type": "object",

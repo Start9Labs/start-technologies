@@ -76,6 +76,7 @@ impl AsRef<str> for SharedVolumeId {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum SharedVolumeSource {
     Local,
+    Disk { logicalname: PathBuf },
     Cifs { hostname: String, path: PathBuf },
 }
 
@@ -169,6 +170,7 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum CreateSharedVolumeSource {
     Local,
+    Disk { logicalname: PathBuf },
     Cifs(Cifs),
 }
 
@@ -203,6 +205,15 @@ pub async fn create(
         CreateSharedVolumeSource::Local => {
             source::create_local_directory(&local_path(crate::DATA_DIR, &id)).await?;
             (SharedVolumeSource::Local, None)
+        }
+        CreateSharedVolumeSource::Disk { logicalname } => {
+            let disks = crate::disk::util::list(&ctx.os_partitions, None).await?;
+            let logicalname = tokio::fs::canonicalize(logicalname).await?;
+            let partition = source::external_partition(&disks, &logicalname)?;
+            let logicalname = crate::disk::mount::filesystem::block_dev::BlockDev::new(partition)
+                .persistent_path()
+                .await?;
+            (SharedVolumeSource::Disk { logicalname }, None)
         }
         CreateSharedVolumeSource::Cifs(cifs) => {
             cifs.validate()?;
@@ -361,7 +372,8 @@ pub async fn remove(
             );
         }
     }
-    errors.into_result()
+    errors.into_result()?;
+    delete_retained_data(&ctx, &id).await
 }
 
 fn remove_definition(
@@ -408,17 +420,26 @@ pub async fn delete_data(
             ErrorKind::InvalidRequest,
         ));
     }
-    remove(ctx.clone(), SharedVolumeParams { id: id.clone() }).await?;
-    match tokio::fs::remove_dir_all(local_path(crate::DATA_DIR, &id)).await {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
+    remove(ctx, SharedVolumeParams { id }).await
+}
+
+async fn delete_retained_data(ctx: &RpcContext, id: &SharedVolumeId) -> Result<(), Error> {
+    if !ctx
+        .db
+        .peek()
+        .await
+        .as_private()
+        .as_retained_shared_volumes()
+        .contains_key(id)?
+    {
+        return Ok(());
     }
+    crate::util::io::delete_dir(local_path(crate::DATA_DIR, id)).await?;
     ctx.db
         .mutate(|db| {
             db.as_private_mut()
                 .as_retained_shared_volumes_mut()
-                .remove(&id)?;
+                .remove(id)?;
             Ok(())
         })
         .await
@@ -514,14 +535,16 @@ mod tests {
     }
 
     #[test]
-    fn removed_local_names_survive_reload_and_retries_but_cifs_credentials_do_not() {
+    fn only_managed_local_data_is_retained_for_deletion_retries() {
         use crate::db::model::DatabaseModel;
         let local = SharedVolumeId::new();
         let cifs = SharedVolumeId::new();
+        let disk = SharedVolumeId::new();
         let mut db = DatabaseModel::from(to_value(&serde_json::json!({
             "public": { "sharedVolumes": {
                 local.to_string(): {"name":"Photos", "source":{"kind":"local"}, "grants":{}},
-                cifs.to_string(): {"name":"Remote", "source":{"kind":"cifs","hostname":"nas","path":"/share"}, "grants":{}}
+                cifs.to_string(): {"name":"Remote", "source":{"kind":"cifs","hostname":"nas","path":"/share"}, "grants":{}},
+                disk.to_string(): {"name":"Drive", "source":{"kind":"disk","logicalname":"/dev/disk/by-uuid/aabbccdd-0000-4000-8000-0123456789ab"}, "grants":{}}
             }, "packageData": {} },
             "private": { "sharedVolumeCredentials": {
                 cifs.to_string(): {"username":"private", "password":"secret"}
@@ -530,6 +553,7 @@ mod tests {
         remove_definition(&mut db, &local).unwrap();
         remove_definition(&mut db, &local).unwrap();
         remove_definition(&mut db, &cifs).unwrap();
+        remove_definition(&mut db, &disk).unwrap();
         let reloaded = DatabaseModel::from(to_value(&db).unwrap());
         assert_eq!(
             reloaded

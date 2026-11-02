@@ -1224,6 +1224,13 @@ disk.mount.filesystem.cifs.no-dns-addresses:
   fr_FR: "DNS n'a renvoyé aucune adresse"
   pl_PL: "DNS nie zwrócił żadnych adresów"
 
+disk.util.missing-filesystem-uuid:
+  en_US: "This partition has no persistent filesystem UUID. Format the drive before using it as a volume."
+  de_DE: "Diese Partition hat keine dauerhafte Dateisystem-UUID. Das Laufwerk vor der Verwendung als Volume formatieren."
+  es_ES: "Esta partición no tiene un UUID de sistema de archivos persistente. Formatea la unidad antes de usarla como volumen."
+  fr_FR: "Cette partition n’a pas d’UUID de système de fichiers persistant. Formatez le disque avant de l’utiliser comme volume."
+  pl_PL: "Ta partycja nie ma trwałego identyfikatora UUID systemu plików. Sformatuj dysk przed użyciem go jako woluminu."
+
 disk.util.not-canonical-block-device:
   en_US: "not a canonical block device"
   de_DE: "kein kanonisches Blockgerät"
@@ -3734,6 +3741,13 @@ shared-volumes.backup-isolation:
   es_ES: "Los volúmenes no son accesibles durante la copia de seguridad y restauración de un servicio"
   fr_FR: "Les volumes sont inaccessibles pendant la sauvegarde et la restauration d'un service"
   pl_PL: "Woluminy są niedostępne podczas tworzenia kopii zapasowej i przywracania usługi"
+
+shared-volumes.invalid-drive:
+  en_US: "Select a detected external drive partition"
+  de_DE: "Eine erkannte externe Laufwerkspartition auswählen"
+  es_ES: "Selecciona una partición detectada de una unidad externa"
+  fr_FR: "Sélectionnez une partition de disque externe détectée"
+  pl_PL: "Wybierz wykrytą partycję dysku zewnętrznego"
 
 shared-volumes.invalid-path:
   en_US: "Volume paths must stay within their permitted directory"
