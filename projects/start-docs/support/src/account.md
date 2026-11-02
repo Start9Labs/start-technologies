@@ -1,6 +1,6 @@
 # Your Account
 
-A Start9 Support account is created with an access code, and is yours for life. This page covers where to find your code, creating the account, getting back in when you forget your password, and deleting the account.
+A Start9 Support account is created with an access code. This page covers where to find your code, creating the account, getting back in when you forget your password, and deleting the account.
 
 ## Access Codes
 
