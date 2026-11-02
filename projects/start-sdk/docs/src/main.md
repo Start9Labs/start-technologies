@@ -403,6 +403,41 @@ Available on `sdk.healthCheck`:
 - **`checkWebUrl(effects, url, { successMessage, errorMessage })`** — fetches a URL, succeeds on any HTTP response.
 - **`runHealthScript(command, subcontainer, { errorMessage })`** — runs a command in a subcontainer, succeeds on exit code 0.
 
+### Gateway Consistency
+
+Replies to a connection leave through the gateway it arrived on, but connections a service starts leave through its outbound gateway, which the user chooses. A service that advertises a public address and then starts flows itself — a TURN relay, a mail server sending from an address its DNS records authorize — sends them from another address when the two gateways differ.
+
+`sdk.host.getAddressGateways(effects, hostId, addresses)` returns the service's outbound gateway and, for each address passed in, the gateway publishing it (`null` when none does). It reads both once per call, so a health check can call it on every poll without restarting the service. Pass the addresses the service actually advertises, read back from its rendered configuration, not the inputs it was rendered from:
+
+```typescript
+.addHealthCheck('gateway-match', {
+  ready: {
+    display: i18n('Outbound Gateway'),
+    fn: async () => {
+      const ips = await turnserverConf.read(c => c.externalIps).once()
+      if (!ips?.length) return { result: 'disabled' as const }
+      const { outbound, addresses } = await sdk.host.getAddressGateways(
+        effects,
+        turnHostId,
+        ips,
+      )
+      return addresses.every(a => a.gateway === outbound)
+        ? { result: 'success' as const }
+        : {
+            result: 'failure' as const,
+            message: i18n(
+              'Relayed traffic leaves through ${outbound}, not the gateway these addresses are published on. Set the outbound gateway to match.',
+              { outbound },
+            ),
+          }
+    },
+  },
+  requires: ['coturn'],
+})
+```
+
+Which rule applies — every address on the outbound gateway, or the outbound gateway among them — and what the message says belong to the package. A failing check reports a mismatch; it does not stop traffic already flowing. A passing one establishes that both directions use one gateway, not that outbound traffic carries an advertised source address: a gateway with several public addresses, or IPv6 source selection, can still pick another.
+
 ### Polling Triggers
 
 Every health status accepts a `message` string that the UI displays verbatim. Empty or absent messages use the localized status label. A `starting` or `loading` result can also set `waiting: true` to show a clock instead of a spinner while waiting for an external condition; omitting it defaults to `false`. Readiness still follows `result`, not the waiting flag.

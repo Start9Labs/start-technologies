@@ -5,6 +5,25 @@ All notable changes to StartTunnel are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0]
+
+### Changed
+
+- **`start-tunnel auth session kill` takes `--pubkey <key>` for each session to end**, in place of positional session IDs. The `auth.session.kill` RPC takes `pubkeys` in place of `ids`, and `auth.session.list` returns sessions as `{ pubkeys, tokens }`.
+
+### Fixed
+
+- Prevent Add device dialogs from opening before subnet data loads.
+
+- A dialog's Help toggle sits over the Help toggle in the header.
+
+- **WireGuard configs can use a separate endpoint when StartTunnel is behind NAT.**
+  The UI config dialog defaults to the browser URL's host and accepts an edited IP
+  address or DNS name. CLI `device show-config --endpoint` supplies the same
+  per-config override independently of the WAN address used for SNAT and forwarding.
+
+- Forwarded ports no longer occasionally fail to accept connections because the host was using the port for an outbound connection.
+
 ## [1.4.1]
 
 ### Removed

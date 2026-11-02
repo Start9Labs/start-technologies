@@ -1,1 +1,0 @@
-- Zachowuje wielowierszowe wartości środowiska obrazu w metadanych JSON pakietów używających Start SDK 3.1.2 lub nowszego.

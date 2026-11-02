@@ -189,6 +189,7 @@ export type SetDescriptionParamsInput = z.input<
 >
 export type SetIconParamsInput = z.input<typeof schemas.SetIconParams>
 export type SignAssetParamsInput = z.input<typeof schemas.SignAssetParams>
+export type SignPackageParamsInput = z.input<typeof schemas.SignPackageParams>
 export type SignerInfo = z.output<typeof schemas.SignerInfo>
 export type SignerInfoInput = z.input<typeof schemas.SignerInfo>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>

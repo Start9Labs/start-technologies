@@ -246,6 +246,18 @@ pub async fn remove_tunnel(
                 let host = host?;
                 host.as_public_domains_mut()
                     .mutate(|p| Ok(p.retain(|_, v| v.gateway != id)))?;
+                host.as_bindings_mut().mutate(|b| {
+                    for info in b.values_mut() {
+                        info.addresses.forget_gateway(&id);
+                    }
+                    Ok(())
+                })?;
+                host.as_binding_ranges_mut().mutate(|r| {
+                    for info in r.values_mut() {
+                        info.addresses.forget_gateway(&id);
+                    }
+                    Ok(())
+                })?;
                 host.update_addresses(&hostname, &gateways, &ports)?;
             }
 
