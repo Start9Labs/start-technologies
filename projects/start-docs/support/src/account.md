@@ -9,7 +9,7 @@ An access code creates one Start9 Support account. Every Start9 server and route
 - **On your server** — servers from before February 2025, and servers bought from a reseller, carry the code on a label on the bottom.
 - **In your email** — orders from Start9 since then get it by email, sent to the address the order was placed with.
 
-If you can't find it, choose **What is an access code, and where do I find mine?** on the sign-up page, enter your order number and the email you ordered with, and any unused access code on that order is emailed to that address. If nothing arrives, or the code was already used, email your order number to [support@start9.com](mailto:support@start9.com).
+If you can't find it, choose **What is an access code, and where do I find mine?** on the sign-up page, enter your order number and the email you ordered with, and any unused access code on that order is emailed to that address. If nothing arrives, or the code was already used, use the form on the [help page](https://start9.com/help): choose **Support portal access** and include your order number. The form emails you a link, and your message is sent once you open it, within 24 hours.
 
 ## Creating an Account
 
