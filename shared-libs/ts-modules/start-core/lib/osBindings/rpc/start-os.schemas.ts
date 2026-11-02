@@ -6680,10 +6680,6 @@ export const Api = {
               _PARAMS: /* @__PURE__ */ ConnectRegistryParams,
               _RETURN: /* @__PURE__ */ z.array(z.string()),
             },
-            'refresh-registry': {
-              _PARAMS: /* @__PURE__ */ TrustedRegistryParams,
-              _RETURN: /* @__PURE__ */ z.array(AnyVerifyingKey),
-            },
             remove: {
               _PARAMS: /* @__PURE__ */ RemoveTrustedKeyParams,
               _RETURN: /* @__PURE__ */ z.null(),

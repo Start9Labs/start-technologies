@@ -346,6 +346,16 @@ export type RegistryAsset<Commitment> = z.output<
 export type RegistryAssetInput<Commitment> = z.input<
   ReturnType<typeof schemas.RegistryAsset<z.ZodType<Commitment, Commitment>>>
 >
+
+/**
+ * Keys a connected registry newly offers, imported untrusted.
+ */
+export type RegistryKeysAdded = z.output<typeof schemas.RegistryKeysAdded>
+
+/**
+ * Keys a connected registry newly offers, imported untrusted.
+ */
+export type RegistryKeysAddedInput = z.input<typeof schemas.RegistryKeysAdded>
 export type RemoveAssetParams = z.output<typeof schemas.RemoveAssetParams>
 export type RemoveAssetParamsInput = z.input<typeof schemas.RemoveAssetParams>
 export type RemoveCategoryParams = z.output<typeof schemas.RemoveCategoryParams>

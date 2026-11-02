@@ -1432,6 +1432,32 @@ export const RegistryAsset = <Commitment extends z.ZodType>(
   })
   return self
 }
+
+/**
+ * Keys a connected registry newly offers, imported untrusted.
+ */
+export const RegistryKeysAdded: z.ZodIntersection<
+  z.ZodObject<{
+    kind: z.ZodCodec<
+      z.ZodOptional<z.ZodLiteral<'registry-keys-added'>>,
+      z.ZodLiteral<'registry-keys-added'>
+    >
+  }>,
+  z.ZodObject<{ registry: z.ZodString; keys: z.ZodArray<z.ZodString> }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      kind: wire(
+        z.literal('registry-keys-added').optional(),
+        z.literal('registry-keys-added'),
+      ),
+    }),
+    object({ registry: z.string(), keys: z.array(z.string()) }),
+  )
+  .meta({
+    id: 'RegistryKeysAdded',
+    description: 'Keys a connected registry newly offers, imported untrusted.',
+  })
 export const RemoveAssetParams: z.ZodObject<{
   version: z.ZodString
   platform: z.ZodString
