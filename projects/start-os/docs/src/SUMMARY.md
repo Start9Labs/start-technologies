@@ -4,6 +4,8 @@
 
 ---
 
+- [Overview](overview.md)
+
 # Getting Started
 
 - [Installing StartOS](installing-startos.md)
@@ -21,6 +23,7 @@
 - [Alternative Registries](alternative-registries.md)
 - [Installing](installing.md)
 - [Updating](updating.md)
+- [Uninstalling](uninstalling.md)
 - [Sideloading](sideloading.md)
 - [Flavors](flavors.md)
 - [Interfaces](interfaces.md)

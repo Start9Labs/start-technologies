@@ -4,7 +4,7 @@ How to use Start9 Support at [support.start9.com](https://support.start9.com): y
 
 ## What Start9 Support Is
 
-Start9 Support is a messaging app for getting help with Start9's products: StartOS, StartTunnel, StartWRT, Start9 hardware, and the services that run on them. You open a chat under a topic and describe what is going on. Dux, Start9's AI support technician, answers first, any time of day. A person from Start9 joins whenever you ask for one, or when Dux hands the case over. When a case looks like a bug in Start9's code, Helix, Start9's engineering agent, investigates it in the code.
+Start9 Support is a messaging app for getting help with Start9's products: StartOS, StartTunnel, StartWRT, Start9 hardware, and the services that run on them. You open a chat under a topic and describe what is going on. Dux, Start9's AI support agent, answers first, any time of day. A person from Start9 joins whenever you ask for one, or when Dux hands the case over. When a case looks like a bug in Start9's code, Helix, Start9's engineering agent, investigates it in the code.
 
 It runs in any modern browser and installs as an app on your phone or computer.
 
