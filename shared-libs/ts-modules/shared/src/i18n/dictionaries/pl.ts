@@ -844,7 +844,7 @@ export default {
   963: 'Wprowadź co najmniej jeden klucz publiczny Ed25519 w formacie PEM lub GPG.',
   964: 'Podpisany przez',
   965: 'Brak',
-  966: 'Ten pakiet usługi nie jest podpisany przez nikogo, komu ufasz',
+  966: 'Ten pakiet usługi nie jest podpisany przez nikogo, komu ufasz.',
   967: 'Zainstalować niezaufane oprogramowanie?',
   968: 'Ten pakiet usługi nie jest podpisany przez nikogo, komu ufasz. Złośliwe oprogramowanie mogłoby wykraść klucze prywatne i hasła, naruszyć bezpieczeństwo serwera lub trwale zniszczyć dane. Kontynuuj tylko wtedy, gdy ufasz źródłu i rozumiesz te zagrożenia.',
   969: 'Zainstaluj mimo to',
@@ -951,4 +951,9 @@ export default {
   1087: 'Dodany przez',
   1088: 'Ciebie',
   1089: 'Żaden połączony rejestr',
+  1090: 'Zapisane katalogi',
+  1091: 'Zarządzaj rejestrami',
+  1092: 'Sprawdź klucze',
+  1093: 'Nie teraz',
+  1094: 'Te klucze nie są jeszcze zaufane. Ufać im dla pakietów?',
 } satisfies i18n

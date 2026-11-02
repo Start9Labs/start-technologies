@@ -26,13 +26,13 @@ Confirm public keys through a source you already trust. A label or self-certifie
 
 A registry chooses which signers to offer and supplies their public keys, GPG identities, and contact details. When you add a registry, the keys it offers that your server does not already have are trusted for packages, and StartOS lists them. Keys your server already has keep their trust. A GPG key a registry adds is labeled with its GPG identity; when another registry offers the same key, its identities are merged and its label is kept.
 
-When you visit a connected registry, StartOS checks for keys it offers that your server does not have. They are added untrusted, and a dialog offers to open Trusted Keys.
+Whenever StartOS fetches packages or StartOS updates from a connected registry, it checks for keys the registry offers that your server does not have. They are added untrusted, and a notification offers to review them and trust them for packages.
 
 Choosing a registry for StartOS updates trusts the keys it offers for StartOS updates. When you remove a registry, StartOS offers to remove the keys it added that no connected registry still offers. See [Marketplace](marketplace.md#managing-registries).
 
 ## Installing Software
 
-Package details show a **Signed by** row with the labels and email addresses of package signers you trust. When none match, it shows known untrusted signers instead. Unknown signers are omitted, and the row is hidden when no known signer matches. Marketplace installation is blocked when no trusted signer matches; the warning links to Trusted Keys. [Sideloading](sideloading.md) allows an untrusted package after an explicit risk confirmation. OS updates from the UI require a signature from a key trusted for StartOS updates.
+Package details show a **Signed by** row with the labels and email addresses of package signers you trust. When none match, it shows known untrusted signers instead. Unknown signers are omitted, and the row is hidden when no known signer matches. When no trusted signer matches, the Marketplace and the Updates tab show a warning that links to Trusted Keys, and installing or updating the package asks you to confirm the risks first. [Sideloading](sideloading.md) works the same way. OS updates from the UI require a signature from a key trusted for StartOS updates; otherwise the update is blocked, and the dialog links to Trusted Keys.
 
 CLI package installs and OS updates also require trusted signers by default. To deliberately accept an untrusted signer, use `--trust`:
 

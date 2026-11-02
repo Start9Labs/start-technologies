@@ -844,7 +844,7 @@ export default {
   963: 'Introduce una o más claves públicas Ed25519 en formato PEM o GPG.',
   964: 'Firmado por',
   965: 'Ninguno',
-  966: 'Este paquete de servicio no está firmado por nadie en quien confíes',
+  966: 'Este paquete de servicio no está firmado por nadie en quien confíes.',
   967: '¿Instalar software no confiable?',
   968: 'Este paquete de servicio no está firmado por nadie en quien confíes. El software malicioso podría robar claves privadas y contraseñas, comprometer tu servidor o destruir tus datos permanentemente. Continúa solo si confías en la fuente y comprendes estos riesgos.',
   969: 'Instalar de todos modos',
@@ -951,4 +951,9 @@ export default {
   1087: 'Añadida por',
   1088: 'Usted',
   1089: 'Ningún registro conectado',
+  1090: 'Registros guardados',
+  1091: 'Administrar registros',
+  1092: 'Revisar claves',
+  1093: 'Ahora no',
+  1094: 'Estas claves aún no son de confianza. ¿Confiar en ellas para los paquetes?',
 } satisfies i18n

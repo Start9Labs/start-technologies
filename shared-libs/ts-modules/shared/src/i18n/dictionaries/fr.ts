@@ -844,7 +844,7 @@ export default {
   963: 'Saisissez une ou plusieurs clés publiques Ed25519 au format PEM ou GPG.',
   964: 'Signé par',
   965: 'Aucun',
-  966: 'Ce paquet de service n’est signé par personne à qui vous faites confiance',
+  966: 'Ce paquet de service n’est signé par personne à qui vous faites confiance.',
   967: 'Installer un logiciel non fiable ?',
   968: 'Ce paquet de service n’est signé par personne à qui vous faites confiance. Un logiciel malveillant pourrait voler des clés privées et des mots de passe, compromettre votre serveur ou détruire définitivement vos données. Continuez uniquement si vous faites confiance à la source et comprenez ces risques.',
   969: 'Installer quand même',
@@ -951,4 +951,9 @@ export default {
   1087: 'Ajoutée par',
   1088: 'Vous',
   1089: 'Aucun registre connecté',
+  1090: 'Bibliothèques enregistrées',
+  1091: 'Gérer les registres',
+  1092: 'Examiner les clés',
+  1093: 'Pas maintenant',
+  1094: 'Ces clés ne sont pas encore approuvées. Les approuver pour les paquets ?',
 } satisfies i18n

@@ -844,7 +844,7 @@ export default {
   963: 'Geben Sie einen oder mehrere öffentliche Ed25519-Schlüssel im PEM- oder GPG-Format ein.',
   964: 'Signiert von',
   965: 'Keine',
-  966: 'Dieses Dienstpaket ist von niemandem signiert, dem Sie vertrauen',
+  966: 'Dieses Dienstpaket ist von niemandem signiert, dem Sie vertrauen.',
   967: 'Nicht vertrauenswürdige Software installieren?',
   968: 'Dieses Dienstpaket ist von niemandem signiert, dem Sie vertrauen. Bösartige Software könnte private Schlüssel und Passwörter stehlen, Ihren Server kompromittieren oder Ihre Daten dauerhaft zerstören. Fahren Sie nur fort, wenn Sie der Quelle vertrauen und diese Risiken verstehen.',
   969: 'Trotzdem installieren',
@@ -951,4 +951,9 @@ export default {
   1087: 'Hinzugefügt von',
   1088: 'Ihnen',
   1089: 'Keine verbundene Registry',
+  1090: 'Gespeicherte Register',
+  1091: 'Registrys verwalten',
+  1092: 'Schlüssel prüfen',
+  1093: 'Nicht jetzt',
+  1094: 'Diese Schlüssel sind noch nicht vertrauenswürdig. Ihnen für Pakete vertrauen?',
 } satisfies i18n

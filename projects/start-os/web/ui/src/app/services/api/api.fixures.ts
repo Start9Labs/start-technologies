@@ -1178,6 +1178,22 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       seen: false,
     },
     {
+      id: 6,
+      packageId: null,
+      createdAt: '2019-12-27T09:12:00.000Z',
+      code: 4,
+      level: 'info',
+      title: 'New signing keys',
+      message:
+        'Start9 Registry added signing keys. They are not trusted until you trust them.',
+      data: {
+        kind: 'registry-keys-added',
+        registry: 'https://registry.start9.com/',
+        keys: ['MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A='],
+      },
+      seen: false,
+    },
+    {
       id: 5,
       packageId: null,
       createdAt: '2019-12-26T14:20:30.872Z',

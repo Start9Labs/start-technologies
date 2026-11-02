@@ -96,20 +96,54 @@ pub async fn connect(
         .result
 }
 
-pub async fn refresh(
-    ctx: RpcContext,
-    params: TrustedRegistryParams,
-) -> Result<BTreeSet<AnyVerifyingKey>, Error> {
-    let url = registry_url(&params.url)?;
+const KEY_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Imports keys a connected registry newly offers, untrusted, and notifies about them.
+pub async fn check_registry(ctx: RpcContext, url: &Url) -> Result<(), Error> {
+    let url = registry_url(url.as_str())?;
     let ui = ctx.db.peek().await.as_public().as_ui().de()?;
-    if !is_connected(&ui, url.as_str()) {
-        return Ok(BTreeSet::new());
+    let now = tokio::time::Instant::now();
+    if !is_connected(&ui, url.as_str())
+        || !ctx.registry_key_checks.mutate(|checks| {
+            let due = checks
+                .get(url.as_str())
+                .map_or(true, |last| now.duration_since(*last) >= KEY_CHECK_INTERVAL);
+            if due {
+                checks.insert(url.to_string(), now);
+            }
+            due
+        })
+    {
+        return Ok(());
     }
     let info = fetch_info(&ctx, &url).await?;
+    let registry = info
+        .name
+        .clone()
+        .unwrap_or_else(|| url.host_str().unwrap_or_default().to_owned());
     ctx.db
         .mutate(|db| {
-            db.as_public_mut()
-                .mutate(|public| refresh_public(public, &url, &info))
+            let keys = db
+                .as_public_mut()
+                .mutate(|public| refresh_public(public, &url, &info))?;
+            if keys.is_empty() {
+                return Ok(());
+            }
+            crate::notifications::notify(
+                db,
+                None,
+                crate::notifications::NotificationLevel::Info,
+                t!("trusted-keys.keys-added-title").to_string(),
+                t!(
+                    "trusted-keys.keys-added-message",
+                    registry = registry.as_str()
+                )
+                .to_string(),
+                crate::notifications::RegistryKeysAdded {
+                    registry: url.to_string(),
+                    keys,
+                },
+            )
         })
         .await
         .result
@@ -302,11 +336,12 @@ fn connect_public(
     Ok(added)
 }
 
+/// Returns the keys new to the server, which are imported untrusted.
 fn refresh_public(
     public: &mut Public,
     url: &Url,
     info: &RegistryInfo,
-) -> Result<BTreeSet<AnyVerifyingKey>, Error> {
+) -> Result<BTreeSet<InternedString>, Error> {
     let origin = url.as_str().trim_end_matches('/');
     if !is_connected(&public.ui, origin) {
         return Ok(BTreeSet::new());
@@ -316,21 +351,20 @@ fn refresh_public(
         .values()
         .map(|key| key.public_key.clone())
         .collect();
-    let mut snapshots = public.server_info.registry_keys.clone();
-    let previous: BTreeSet<_> = snapshots
-        .iter()
-        .filter(|(saved, _)| same_registry(saved, origin))
-        .flat_map(|(_, keys)| keys.iter().cloned())
+    let mut keys = public.server_info.trusted_keys.clone();
+    let added = proposal
+        .keys()
+        .filter(|id| !keys.contains_key(*id))
+        .cloned()
         .collect();
-    let newly_listed = proposed.difference(&previous).cloned().collect();
+    let mut snapshots = public.server_info.registry_keys.clone();
     snapshots.retain(|saved, _| !same_registry(saved, origin));
     snapshots.insert(origin.into(), proposed);
-    let mut keys = public.server_info.trusted_keys.clone();
     merge_individual_keys(&mut keys, proposal);
     protect_registry_keys(&mut keys, &snapshots, &public.ui);
     public.server_info.registry_keys = snapshots;
     public.server_info.trusted_keys = keys;
-    Ok(newly_listed)
+    Ok(added)
 }
 
 #[cfg(test)]
@@ -363,6 +397,12 @@ mod tests {
                     },
                 )
             })
+            .collect()
+    }
+
+    fn ids<'a>(keys: impl IntoIterator<Item = &'a AnyVerifyingKey>) -> BTreeSet<InternedString> {
+        keys.into_iter()
+            .map(AnyVerifyingKey::interned_der64)
             .collect()
     }
 
@@ -690,7 +730,7 @@ mod tests {
         let saved = public.server_info.trusted_keys[&manual.interned_der64()].clone();
         assert_eq!(
             refresh_public(&mut public, &url, &info).unwrap(),
-            signer.keys
+            ids(signer.keys.iter().filter(|key| *key != manual))
         );
         for key in &signer.keys {
             let entry = &public.server_info.trusted_keys[&key.interned_der64()];
@@ -722,7 +762,10 @@ mod tests {
         connect_public(&mut public, &url, None, &RegistryInfo::default()).unwrap();
         let mut info = gpg_info();
         let listed = info.trust_signers.values().next().unwrap().keys.clone();
-        assert_eq!(refresh_public(&mut public, &url, &info).unwrap(), listed);
+        assert_eq!(
+            refresh_public(&mut public, &url, &info).unwrap(),
+            ids(&listed)
+        );
         let id = listed.first().unwrap().interned_der64();
         let entry = public.server_info.trusted_keys.get_mut(&id).unwrap();
         entry.marketplace = true;
@@ -742,7 +785,7 @@ mod tests {
             }
         );
         info.name = Some("Untrusted replacement name".into());
-        assert_eq!(refresh_public(&mut public, &url, &info).unwrap(), listed);
+        assert!(refresh_public(&mut public, &url, &info).unwrap().is_empty());
         assert_eq!(public.server_info.trusted_keys[&id], saved);
         assert!(refresh_public(&mut public, &url, &info).unwrap().is_empty());
     }
@@ -947,7 +990,10 @@ mod tests {
         signer.gpg_exports.clear();
         export.armored = armor;
         signer.gpg_exports.insert(export);
-        assert_eq!(refresh_public(&mut public, &url, &info).unwrap(), listed);
+        assert_eq!(
+            refresh_public(&mut public, &url, &info).unwrap(),
+            ids(&listed)
+        );
         assert_eq!(
             public.ui["registries"]["https://REGISTRY.example/"],
             imbl_value::json!("My name")

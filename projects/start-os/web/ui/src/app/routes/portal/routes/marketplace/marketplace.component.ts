@@ -6,15 +6,15 @@ import { ActivatedRoute, Router } from '@angular/router'
 import {
   MarketplaceComponent,
   MarketplacePackageLinkComponent,
+  MarketplaceRegistrySelectComponent,
   MarketplaceTileComponent,
 } from '@start9labs/marketplace'
-import { DialogService, i18nPipe, registryUrl } from '@start9labs/shared'
-import { filter, switchMap, tap } from 'rxjs'
+import { i18nPipe, registryUrl } from '@start9labs/shared'
+import { tap } from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { StorageService } from 'src/app/services/storage.service'
 import { TitleDirective } from 'src/app/services/title.service'
-import { TRUSTED_KEYS_LINK } from '../system/system.const'
 
 import { MarketplaceControlsComponent } from './components/controls.component'
 
@@ -22,11 +22,11 @@ import { MarketplaceControlsComponent } from './components/controls.component'
   template: `
     <ng-container *title>{{ 'Marketplace' | i18n }}</ng-container>
     <marketplace
-      manageRegistriesLink="/system/registries"
       [registry]="registry()"
       [(category)]="category"
       [(query)]="query"
     >
+      <marketplace-registry-select manageRegistriesLink="/system/registries" />
       <a marketplacePackageLink actions></a>
       <ng-template let-pkg>
         <button [marketplaceTile]="pkg">
@@ -56,6 +56,7 @@ import { MarketplaceControlsComponent } from './components/controls.component'
     MarketplaceComponent,
     MarketplaceControlsComponent,
     MarketplacePackageLinkComponent,
+    MarketplaceRegistrySelectComponent,
     MarketplaceTileComponent,
   ],
 })
@@ -64,7 +65,6 @@ export default class Marketplace {
   private readonly configService = inject(ConfigService)
   private readonly router = inject(Router)
   private readonly storage = inject(StorageService)
-  private readonly dialogs = inject(DialogService)
 
   protected readonly category = signal('all')
   protected readonly query = signal('')
@@ -100,23 +100,4 @@ export default class Marketplace {
   protected readonly registry = toSignal(
     this.marketplaceService.currentRegistry$,
   )
-
-  private readonly registryKeyNotices =
-    this.marketplaceService.registryKeysAdded$
-      .pipe(
-        switchMap(() =>
-          this.dialogs.openConfirm({
-            label: 'New registry keys',
-            data: {
-              content:
-                'This registry has added signing keys. Newly imported keys are disabled. Review them in Trusted Keys.',
-              yes: 'Trusted Keys',
-              no: 'Dismiss',
-            },
-          }),
-        ),
-        filter(Boolean),
-        takeUntilDestroyed(),
-      )
-      .subscribe(() => this.router.navigate(TRUSTED_KEYS_LINK))
 }

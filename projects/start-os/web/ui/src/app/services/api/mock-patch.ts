@@ -86,12 +86,26 @@ export const mockPatchData: DataModel = {
     id: Mock.ServerId,
     registryKeys: {
       'https://registry.start9.com': [
+        'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=',
         'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
         'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
         'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=',
       ],
     },
     trustedKeys: {
+      'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=': {
+        name: 'Package publisher',
+        origin: 'https://registry.start9.com',
+        originRegistry: { name: 'Start9 Registry', icon: null },
+        publicKey:
+          'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=',
+        gpgExports: [],
+        contact: [{ email: 'packages@example.com' }],
+        addedAt: '2026-10-30T12:00:00.000Z',
+        removable: false,
+        marketplace: false,
+        os: false,
+      },
       'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=':
         mockStart9Key(
           'drbonez',

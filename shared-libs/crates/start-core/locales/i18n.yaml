@@ -7824,6 +7824,20 @@ trusted-keys.invalid-registry-url:
   fr_FR: "Saisissez une URL de registre HTTP ou HTTPS sans identifiants, requête ni fragment"
   pl_PL: "Podaj adres HTTP lub HTTPS rejestru bez danych logowania, zapytania i fragmentu"
 
+trusted-keys.keys-added-message:
+  en_US: "%{registry} added signing keys. They are not trusted until you trust them."
+  de_DE: "%{registry} hat Signaturschlüssel hinzugefügt. Sie sind nicht vertrauenswürdig, bis Sie ihnen vertrauen."
+  es_ES: "%{registry} añadió claves de firma. No son de confianza hasta que usted confíe en ellas."
+  fr_FR: "%{registry} a ajouté des clés de signature. Elles ne sont pas approuvées tant que vous ne les approuvez pas."
+  pl_PL: "%{registry} dodał klucze podpisujące. Nie są zaufane, dopóki im nie zaufasz."
+
+trusted-keys.keys-added-title:
+  en_US: "New signing keys"
+  de_DE: "Neue Signaturschlüssel"
+  es_ES: "Nuevas claves de firma"
+  fr_FR: "Nouvelles clés de signature"
+  pl_PL: "Nowe klucze podpisujące"
+
 trusted-keys.not-found:
   en_US: "Trusted keyring not found"
   de_DE: "Vertrauenswürdiger Schlüsselbund nicht gefunden"

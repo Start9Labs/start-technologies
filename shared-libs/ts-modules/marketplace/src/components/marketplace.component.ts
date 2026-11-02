@@ -46,7 +46,6 @@ import { TuiCardLarge, TuiHeader, TuiNavigation } from '@taiga-ui/layout'
 import { filterPackages } from '../pipes/filter-packages.pipe'
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreDataWithUrl } from '../types'
-import { MarketplaceRegistrySelectComponent } from './registry-select.component'
 
 const ICONS: Record<string, string> = {
   all: '@tui.layout-grid',
@@ -67,10 +66,7 @@ const ICONS: Record<string, string> = {
   selector: 'marketplace',
   template: `
     <aside [tuiNavigationAside]="open()">
-      <marketplace-registry-select
-        [manageRegistriesLink]="manageRegistriesLink()"
-      />
-      <hr />
+      <ng-content />
       <tui-textfield tuiTextfieldSize="s" iconStart="@tui.search">
         <input
           tuiInput
@@ -189,10 +185,6 @@ const ICONS: Record<string, string> = {
           display: none;
         }
 
-        hr {
-          margin-block: 0.5rem 0.75rem;
-        }
-
         tui-textfield {
           margin-bottom: 0.75rem;
           padding: 0 0.5rem;
@@ -254,7 +246,6 @@ const ICONS: Record<string, string> = {
     tuiButtonOptionsProvider({ size: 's', appearance: 'flat-grayscale' }),
   ],
   imports: [
-    MarketplaceRegistrySelectComponent,
     TuiNavigation,
     TuiInput,
     TuiNotification,
@@ -283,7 +274,6 @@ const ICONS: Record<string, string> = {
 })
 export class MarketplaceComponent {
   readonly registry = input<StoreDataWithUrl>()
-  readonly manageRegistriesLink = input('')
   readonly query = model('')
   readonly category = model('')
 

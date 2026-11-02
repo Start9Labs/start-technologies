@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::str::FromStr;
 
@@ -413,6 +413,18 @@ pub struct OsUpdateAvailable {}
 rpc_toolkit::reflect_ts!(OsUpdateAvailable);
 rpc_toolkit::ts_export!(OsUpdateAvailable, namespaces = [""]);
 
+/// Keys a connected registry newly offers, imported untrusted.
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
+#[serde(tag = "kind", rename = "registry-keys-added", rename_all = "camelCase")]
+#[visit(ts(rename = "RegistryKeysAdded"))]
+pub struct RegistryKeysAdded {
+    pub registry: String,
+    pub keys: BTreeSet<InternedString>,
+}
+
+rpc_toolkit::reflect_ts!(RegistryKeysAdded);
+rpc_toolkit::ts_export!(RegistryKeysAdded, namespaces = [""]);
+
 pub trait NotificationType:
     serde::Serialize + for<'de> serde::Deserialize<'de> + std::fmt::Debug
 {
@@ -430,6 +442,9 @@ impl NotificationType for String {
 }
 impl NotificationType for OsUpdateAvailable {
     const CODE: u32 = 3;
+}
+impl NotificationType for RegistryKeysAdded {
+    const CODE: u32 = 4;
 }
 
 #[instrument(skip(subtype, db))]

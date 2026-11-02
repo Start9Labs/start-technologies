@@ -308,21 +308,6 @@ export class MockApiService extends ApiService {
       await this.publishTrust()
       return added
     },
-    'server.trusted-keys.refresh-registry': async ({ url }) => {
-      if (
-        !Object.keys(mockPatchData.ui.registries).some(saved =>
-          sameUrl(saved, url),
-        )
-      )
-        return []
-      const normalized = registryUrl(url)
-      const { listed } = this.importRegistryKeys(
-        normalized,
-        this.mockRegistryInfo(normalized),
-      )
-      await this.publishTrust()
-      return listed
-    },
     'server.trusted-keys.remove-registry': async ({ url }) => {
       if (sameUrl(url, mockPatchData.ui.startosRegistry))
         throw new Error(
@@ -2488,9 +2473,8 @@ export class MockApiService extends ApiService {
   private importRegistryKeys(
     url: string,
     info: T.RegistryInfo,
-  ): { listed: string[]; added: string[] } {
+  ): { added: string[] } {
     const proposed = registrySigningKeys(info)
-    const previous = new Set(this.offeredKeys(url))
     const added: string[] = []
     for (const [id, identity] of Object.entries(proposed)) {
       const trusted = mockPatchData.serverInfo.trustedKeys[id]
@@ -2517,10 +2501,7 @@ export class MockApiService extends ApiService {
         delete mockPatchData.serverInfo.registryKeys[saved]
     }
     mockPatchData.serverInfo.registryKeys[url] = Object.keys(proposed)
-    return {
-      listed: Object.keys(proposed).filter(key => !previous.has(key)),
-      added,
-    }
+    return { added }
   }
 
   private mockRegistryInfo(url: string): T.RegistryInfo {

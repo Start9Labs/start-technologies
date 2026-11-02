@@ -1,5 +1,6 @@
 import { CommonModule, TitleCasePipe } from '@angular/common'
 import { Component, inject } from '@angular/core'
+import { Router } from '@angular/router'
 import {
   DialogService,
   i18nPipe,
@@ -12,11 +13,12 @@ import { TuiButton, TuiDialogContext, TuiScrollbar } from '@taiga-ui/core'
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { PatchDB } from 'patch-db-client'
-import { firstValueFrom } from 'rxjs'
+import { filter, firstValueFrom } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { OSService } from 'src/app/services/os.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { trustedOsUpdateSigners } from 'src/app/utils/os-update-signers'
+import { TRUSTED_KEYS_LINK } from '../../system.const'
 
 @Component({
   template: `
@@ -62,6 +64,7 @@ import { trustedOsUpdateSigners } from 'src/app/utils/os-update-signers'
 export class SystemUpdateModal {
   private readonly tasks = inject(TaskService)
   private readonly dialogs = inject(DialogService)
+  private readonly router = inject(Router)
   private readonly embassyApi = inject(ApiService)
   protected readonly os = inject(OSService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
@@ -87,11 +90,20 @@ export class SystemUpdateModal {
       if (this.os.updateCandidates()[0]?.version !== latest.version) return
       if (!trusted.length) {
         this.dialogs
-          .openAlert(
-            'No trusted signer is listed for this OS update. Installing it from the UI is blocked. A malicious OS update could take full control of your server, steal private keys and passwords, or permanently destroy your data.',
-            { label: 'OS update blocked' },
-          )
-          .subscribe()
+          .openConfirm({
+            label: 'OS update blocked',
+            data: {
+              content:
+                'No trusted signer is listed for this OS update. Installing it from the UI is blocked. A malicious OS update could take full control of your server, steal private keys and passwords, or permanently destroy your data.',
+              yes: 'Manage keys',
+              no: 'Close',
+            },
+          })
+          .pipe(filter(Boolean))
+          .subscribe(() => {
+            this.context.$implicit.complete()
+            this.router.navigate(TRUSTED_KEYS_LINK)
+          })
         return
       }
 

@@ -4,7 +4,7 @@ The Marketplace is where you discover services to install on your StartOS server
 
 ## Registry System and Navigation
 
-Each registry in the Marketplace is maintained independently. When you open the Marketplace, you browse one registry at a time. Your registries are listed at the top of the Marketplace sidebar; click one to switch to it. The gear beside the list opens **System → Registries**. A registry that declares a description shows it above its services.
+Each registry in the Marketplace is maintained independently. When you open the Marketplace, you browse one registry at a time. To switch between registries, open the registry selector above the search field. Its gear opens **System → Registries**. A registry that declares a description shows it above its services.
 
 StartOS ships with two [default registries](default-registries.md): the **Start9 Registry** and the **Community Registry**. You can also add [alternative registries](alternative-registries.md) or [sideload](sideloading.md) packages directly.
 
@@ -18,7 +18,7 @@ StartOS ships with two [default registries](default-registries.md): the **Start9
 
 ## Package Signers
 
-Package details show **Signed by** above **Version**, listing signing keys by label and email addresses, with fingerprints for unknown keys. Untrusted keys remain listed; trust selections determine which signatures the server accepts. The install button is disabled when no trusted signer matches. Manage individual keys and their package and StartOS-update trust under **System → [Trusted Keys](trusted-keys.md)**.
+Package details show **Signed by** above **Version**, listing signing keys by label and email addresses, with fingerprints for unknown keys. Untrusted keys remain listed; trust selections determine which signatures the server accepts. When no trusted signer matches, a warning links to Trusted Keys, and installing asks you to confirm the risks first. Manage individual keys and their package and StartOS-update trust under **System → [Trusted Keys](trusted-keys.md)**.
 
 ## Open Ecosystem
 

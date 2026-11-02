@@ -8,7 +8,6 @@ import {
   packageSigners,
 } from '@start9labs/marketplace'
 import {
-  DialogService,
   ErrorService,
   Exver,
   ExverComparesPipe,
@@ -18,7 +17,7 @@ import {
 } from '@start9labs/shared'
 import { TuiButton, TuiLink, TuiNotification } from '@taiga-ui/core'
 import { PatchDB } from 'patch-db-client'
-import { defaultIfEmpty, firstValueFrom, switchMap } from 'rxjs'
+import { firstValueFrom, switchMap } from 'rxjs'
 import { ToManifestPipe } from 'src/app/routes/portal/pipes/to-manifest'
 import { TRUSTED_KEYS_LINK } from 'src/app/routes/portal/routes/system/system.const'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
@@ -44,9 +43,9 @@ type KEYS =
   template: `
     @if (!trusted().length) {
       <div tuiNotification appearance="warning">
-        {{ "This service package isn't signed by anyone you trust" | i18n }}
-        <a tuiLink [routerLink]="manageTrustLink">
-          {{ 'Trusted Keys' | i18n }}
+        {{ "This service package isn't signed by anyone you trust." | i18n }}
+        <a tuiLink [routerLink]="trustedKeysLink">
+          {{ 'Manage keys' | i18n }}
         </a>
       </div>
     }
@@ -59,7 +58,6 @@ type KEYS =
                 tuiButton
                 type="button"
                 appearance="warning"
-                [disabled]="blocked()"
                 (click)="tryInstall()"
               >
                 {{ 'Downgrade' | i18n }}
@@ -70,7 +68,6 @@ type KEYS =
                 tuiButton
                 type="button"
                 appearance="primary"
-                [disabled]="blocked()"
                 (click)="tryInstall()"
               >
                 {{ 'Update' | i18n }}
@@ -81,7 +78,6 @@ type KEYS =
                 tuiButton
                 type="button"
                 appearance="secondary-grayscale"
-                [disabled]="blocked()"
                 (click)="tryInstall()"
               >
                 {{ 'Reinstall' | i18n }}
@@ -103,7 +99,6 @@ type KEYS =
           tuiButton
           type="button"
           appearance="primary"
-          [disabled]="blocked()"
           (click)="tryInstall()"
         >
           {{ (sameFlavor() ? 'Install' : 'Switch') | i18n }}
@@ -131,7 +126,6 @@ type KEYS =
 })
 export class MarketplaceControlsComponent {
   private readonly alerts = inject(MarketplaceAlertsService)
-  private readonly dialogs = inject(DialogService)
   private readonly trust = inject(TrustedKeysService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly tasks = inject(TaskService)
@@ -154,7 +148,7 @@ export class MarketplaceControlsComponent {
       !pkg ||
       this.exver.getFlavor(getManifest(pkg).version) === this.pkg().flavor,
   )
-  protected readonly manageTrustLink = TRUSTED_KEYS_LINK
+  protected readonly trustedKeysLink = TRUSTED_KEYS_LINK
   protected readonly trusted = computed(() =>
     matchingTrustedKeys(
       packageSigners(this.pkg()),
@@ -162,30 +156,9 @@ export class MarketplaceControlsComponent {
       'marketplace',
     ),
   )
-  protected readonly blocked = computed(
-    () => !this.file() && !this.trusted().length,
-  )
-
   async tryInstall() {
-    if (this.blocked()) return
-    const trustOverride = !!this.file() && !this.trusted().length
-    if (
-      trustOverride &&
-      !(await firstValueFrom(
-        this.dialogs
-          .openConfirm({
-            label: 'Install untrusted software?',
-            data: {
-              content:
-                'This service package is not signed by anyone you trust. Malicious software could steal private keys and passwords, compromise your server, or permanently destroy your data. Only continue if you trust the source and understand these risks.',
-              yes: 'Install anyway',
-              no: 'Cancel',
-            },
-          })
-          .pipe(defaultIfEmpty(false)),
-      ))
-    )
-      return
+    const trustOverride = !this.trusted().length
+    if (trustOverride && !(await this.alerts.alertUntrusted())) return
 
     const localPkg = this.localPkg()
     if (
@@ -247,7 +220,8 @@ export class MarketplaceControlsComponent {
     } else if (url) {
       const pkg = this.pkg()
       await this.tasks.run(
-        async () => await this.marketplace.installPackage(pkg, url),
+        async () =>
+          await this.marketplace.installPackage(pkg, url, trustOverride),
         'Beginning install',
       )
     }

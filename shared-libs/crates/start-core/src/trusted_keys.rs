@@ -11,6 +11,7 @@ use crate::sign::AnyVerifyingKey;
 use crate::sign::gpg::{GpgPublicKeyExport, ImportedPublicKeys, parse_public_keys};
 use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners};
 mod connection;
+pub use connection::check_registry;
 pub(crate) mod legacy;
 
 pub type TrustedKeys = BTreeMap<InternedString, TrustedKey>;
@@ -316,12 +317,6 @@ fn protect_registry_keys(
 
 pub fn api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand(
-            "refresh-registry",
-            from_fn_async(connection::refresh)
-                .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
-        )
         .subcommand(
             "remove-registry",
             from_fn_async(connection::remove)

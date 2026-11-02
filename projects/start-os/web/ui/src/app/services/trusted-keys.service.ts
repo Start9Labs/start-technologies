@@ -91,6 +91,22 @@ export class TrustedKeysService extends MarketplaceTrust {
     await this.update(id, { ...key, [context]: trusted })
   }
 
+  async trustForPackages(ids: readonly string[]): Promise<void> {
+    await this.save(async () => {
+      for (const id of ids) {
+        const key = this.keys()?.[id]
+        if (key && !key.marketplace) {
+          await this.api.rpc.server.trustedKeys.update({
+            id,
+            name: key.name,
+            marketplace: true,
+            os: key.os,
+          })
+        }
+      }
+    })
+  }
+
   async remove(id: string): Promise<void> {
     if (
       await this.confirm(

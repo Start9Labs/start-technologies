@@ -132,6 +132,7 @@ boundaries.set(
 )
 loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
+const { Router } = await import('@angular/router')
 const { RefreshAlertComponent } =
   await import('src/app/components/refresh-alert.component')
 const { PatchDB } = await import('patch-db-client')
@@ -232,6 +233,7 @@ function fixture(t, cachedVersion, providers = []) {
     alerts = [],
     tasks = [],
     confirmations = [],
+    navigations = [],
     updateErrors = []
   let completed = 0
   const api = {
@@ -305,6 +307,10 @@ function fixture(t, cachedVersion, providers = []) {
     { provide: ConfigService, useValue: {} },
     { provide: TrustedKeysService, useValue: {} },
     {
+      provide: Router,
+      useValue: { navigate: async path => navigations.push(path) },
+    },
+    {
       provide: CONTEXT,
       useValue: {
         $implicit: {
@@ -340,6 +346,7 @@ function fixture(t, cachedVersion, providers = []) {
     alerts,
     tasks,
     confirmations,
+    navigations,
     updateErrors,
     availability,
     shown,
@@ -1090,8 +1097,11 @@ test('live trust-list changes remove default trust and allow a custom signer', a
   f.trust({})
   await f.make(SystemUpdateModal).update()
   await tick()
-  assert.equal(f.alerts.length, 1)
-  assert.equal(f.confirmations.length, 0)
+  assert.deepEqual(
+    f.confirmations.map(c => c.options.label),
+    ['OS update blocked'],
+  )
+  assert.deepEqual(f.alerts, [])
   assert.deepEqual(f.submissions, [])
   await Promise.all(f.tasks)
 
@@ -1112,8 +1122,11 @@ test('live trust-list changes remove default trust and allow a custom signer', a
   })
   await f.make(SystemUpdateModal).update()
   await Promise.all(f.tasks)
-  assert.equal(f.alerts.length, 1)
-  assert.equal(f.confirmations.length, 0)
+  assert.deepEqual(
+    f.confirmations.map(c => c.options.label),
+    ['OS update blocked'],
+  )
+  assert.deepEqual(f.alerts, [])
   assert.deepEqual(f.submissions[0].acceptSigners, {
     any: [{ signer: untrustedSigner }],
   })
@@ -1179,12 +1192,18 @@ test('an untrusted update is blocked even when another platform or asset lists a
   })
   await f.make(SystemUpdateModal).update()
   await tick()
-  assert.equal(f.alerts.length, 1)
-  assert.equal(f.confirmations.length, 0)
+  assert.deepEqual(
+    f.confirmations.map(c => c.options.label),
+    ['OS update blocked'],
+  )
+  assert.deepEqual(f.alerts, [])
   assert.deepEqual(f.submissions, [])
   assert.equal(f.completed, 0)
   await Promise.all(f.tasks)
   assert.deepEqual(f.submissions, [])
+  f.confirmations[0].response.next(true)
+  assert.equal(f.completed, 1)
+  assert.deepEqual(f.navigations, [['/system', 'trusted-keys']])
 })
 
 for (const assets of [{ x86_64: { signatures: {} } }, {}]) {
@@ -1193,8 +1212,11 @@ for (const assets of [{ x86_64: { signatures: {} } }, {}]) {
     await f.load({ '0.4.0.4': { releaseNotes: '', squashfs: assets } })
     await f.make(SystemUpdateModal).update()
     await tick()
-    assert.equal(f.alerts.length, 1)
-    assert.equal(f.confirmations.length, 0)
+    assert.deepEqual(
+      f.confirmations.map(c => c.options.label),
+      ['OS update blocked'],
+    )
+    assert.deepEqual(f.alerts, [])
     assert.deepEqual(f.submissions, [])
     await Promise.all(f.tasks)
   })
@@ -1209,7 +1231,10 @@ test('trust removed during device lookup blocks submission', async t => {
   f.trust({})
   device.resolve({ os: { platform: 'x86_64' } })
   await Promise.all(f.tasks)
-  assert.equal(f.alerts.length, 1)
+  assert.deepEqual(
+    f.confirmations.map(c => c.options.label),
+    ['OS update blocked'],
+  )
   assert.deepEqual(f.submissions, [])
   assert.equal(f.completed, 0)
 })
@@ -1499,23 +1524,22 @@ test('individual keys match independently in each trust context and deduplicate 
 function controlsFixture({
   sideload = false,
   trusted = false,
-  confirmation = EMPTY,
+  confirmed = false,
 } = {}) {
   const calls = [],
     prompts = []
   const instance = {
     file: () => (sideload ? new File(['data'], 'test.s9pk') : undefined),
     trusted: () => (trusted ? [{ name: 'Publisher' }] : []),
-    blocked: () => !sideload && !trusted,
-    dialogs: {
-      openConfirm(options) {
-        prompts.push(options)
-        return confirmation
-      },
-    },
     localPkg: () => undefined,
     pkg: () => pkg,
-    alerts: { alertPreDownload: async () => true },
+    alerts: {
+      alertPreDownload: async () => true,
+      alertUntrusted: async () => {
+        prompts.push('untrusted')
+        return confirmed
+      },
+    },
     marketplace: { currentRegistryUrl$: of('https://registry.test') },
     installOrUpload: async (...params) => {
       calls.push(params)
@@ -1529,33 +1553,31 @@ function controlsFixture({
   }
 }
 
-test('untrusted marketplace installs cannot enter the install flow or ask for an override', async () => {
-  const f = controlsFixture()
-  await f.run()
-  assert.deepEqual(f.calls, [])
-  assert.deepEqual(f.prompts, [])
+test('an untrusted package installs only after confirmation, with the trust override', async () => {
+  for (const [sideload, url] of [
+    [true, null],
+    [false, 'https://registry.test'],
+  ]) {
+    const declined = controlsFixture({ sideload })
+    await declined.run()
+    assert.deepEqual(declined.prompts, ['untrusted'])
+    assert.deepEqual(declined.calls, [])
+    const confirmed = controlsFixture({ sideload, confirmed: true })
+    await confirmed.run()
+    assert.deepEqual(confirmed.calls, [[url, true]])
+  }
 })
 
-for (const confirmation of [EMPTY, of(false)]) {
-  test('dismissing or cancelling an untrusted sideload never starts an upload', async () => {
-    const f = controlsFixture({ sideload: true, confirmation })
+test('a trusted package installs without a prompt or override', async () => {
+  for (const [sideload, url] of [
+    [true, null],
+    [false, 'https://registry.test'],
+  ]) {
+    const f = controlsFixture({ sideload, trusted: true })
     await f.run()
-    assert.equal(f.prompts.length, 1)
-    assert.deepEqual(f.calls, [])
-  })
-}
-
-test('only a confirmed untrusted sideload receives the trust override', async () => {
-  const untrusted = controlsFixture({ sideload: true, confirmation: of(true) })
-  await untrusted.run()
-  assert.deepEqual(untrusted.calls, [[null, true]])
-  const trusted = controlsFixture({ sideload: true, trusted: true })
-  await trusted.run()
-  assert.deepEqual(trusted.calls, [[null, false]])
-  assert.deepEqual(trusted.prompts, [])
-  const marketplace = controlsFixture({ trusted: true })
-  await marketplace.run()
-  assert.deepEqual(marketplace.calls, [['https://registry.test', false]])
+    assert.deepEqual(f.prompts, [])
+    assert.deepEqual(f.calls, [[url, false]])
+  }
 })
 
 test('the upload RPC receives the confirmed override and failed setup does not navigate', async () => {
@@ -1603,7 +1625,7 @@ test('the upload RPC receives the confirmed override and failed setup does not n
   assert.equal(navigated, false)
 })
 
-test('marketplace dispatch delegates trust enforcement to the server without an override', async () => {
+test('marketplace installs send the trust override only when given one', async () => {
   const submissions = []
   const instance = {
     api: {
@@ -1616,13 +1638,27 @@ test('marketplace dispatch delegates trust enforcement to the server without an 
       },
     },
   }
-  await MarketplaceService.prototype.installPackage.call(
-    instance,
-    pkg,
-    'https://registry.test',
-  )
+  for (const trust of [undefined, true]) {
+    await MarketplaceService.prototype.installPackage.call(
+      instance,
+      pkg,
+      'https://registry.test',
+      trust,
+    )
+  }
   assert.deepEqual(submissions, [
-    { id: pkg.id, version: pkg.version, registry: 'https://registry.test' },
+    {
+      id: pkg.id,
+      version: pkg.version,
+      registry: 'https://registry.test',
+      trust: false,
+    },
+    {
+      id: pkg.id,
+      version: pkg.version,
+      registry: 'https://registry.test',
+      trust: true,
+    },
   ])
 })
 
@@ -2002,169 +2038,3 @@ test('registry removal uses the authoritative endpoint, clears a matching select
     ['selectedRegistry', null],
   ])
 })
-
-async function registryDiscoveryFixture(t, refresh) {
-  const { Exver } = await import('@start9labs/shared')
-  const { StorageService } = await import('src/app/services/storage.service')
-  const { PackageIconService } =
-    await import('src/app/services/package-icon.service')
-  const calls = []
-  const notices = []
-  const errors = []
-  const injector = createEnvironmentInjector(
-    [
-      { provide: PatchDB, useValue: { watch$: () => of({}) } },
-      { provide: Exver, useValue: {} },
-      { provide: StorageService, useValue: {} },
-      { provide: PackageIconService, useValue: {} },
-      {
-        provide: ErrorService,
-        useValue: { handleError: error => errors.push(error) },
-      },
-      {
-        provide: ApiService,
-        useValue: {
-          rpc: {
-            server: {
-              trustedKeys: {
-                refreshRegistry: params => {
-                  calls.push(params.url)
-                  return refresh(params.url)
-                },
-              },
-            },
-          },
-        },
-      },
-    ],
-    null,
-  )
-  t.after(() => injector.destroy())
-  const service = runInInjectionContext(
-    injector,
-    () => new MarketplaceService(),
-  )
-  const subscription = service.registryKeysAdded$.subscribe(value =>
-    notices.push(value),
-  )
-  t.after(() => subscription.unsubscribe())
-  return { service, calls, notices, errors }
-}
-
-const settleRegistry = () => new Promise(setImmediate)
-
-test('registry navigation checks once per selection and only reports discovered keys', async t => {
-  const first = 'https://first.test'
-  const second = 'https://second.test'
-  const f = await registryDiscoveryFixture(t, async url =>
-    url === first ? ['new-key'] : [],
-  )
-  f.service.currentRegistryUrl$.next(first)
-  await settleRegistry()
-  f.service.currentRegistryUrl$.next(first)
-  f.service.currentRegistryUrl$.next(second)
-  await settleRegistry()
-  assert.deepEqual(f.calls, [first, second])
-  assert.deepEqual(f.notices, [{ url: first, keys: ['new-key'] }])
-  f.service.currentRegistryUrl$.next(first)
-  await settleRegistry()
-  assert.deepEqual(f.calls, [first, second, first])
-})
-
-test('a registry discovery response cannot show a notice for an abandoned selection', async t => {
-  const pending = deferred()
-  const f = await registryDiscoveryFixture(t, url =>
-    url === 'https://old.test'
-      ? pending.promise
-      : Promise.resolve(['current-key']),
-  )
-  f.service.currentRegistryUrl$.next('https://old.test')
-  f.service.currentRegistryUrl$.next('https://current.test')
-  await settleRegistry()
-  pending.resolve(['old-key'])
-  await settleRegistry()
-  assert.deepEqual(f.notices, [
-    { url: 'https://current.test', keys: ['current-key'] },
-  ])
-})
-
-test('registry discovery errors are surfaced without ending future navigation checks', async t => {
-  const error = new Error('registry unavailable')
-  const f = await registryDiscoveryFixture(t, async url => {
-    if (url === 'https://broken.test') throw error
-    return ['new-key']
-  })
-  f.service.currentRegistryUrl$.next('https://broken.test')
-  await settleRegistry()
-  f.service.currentRegistryUrl$.next('https://working.test')
-  await settleRegistry()
-  assert.deepEqual(f.errors, [error])
-  assert.deepEqual(f.notices, [
-    { url: 'https://working.test', keys: ['new-key'] },
-  ])
-})
-
-for (const [choice, navigates] of [
-  [of(true), true],
-  [of(false), false],
-  [EMPTY, false],
-]) {
-  test(`registry key notice ${navigates ? 'opens Trusted Keys' : 'dismisses without navigation'}`, async t => {
-    const { ActivatedRoute, Router, convertToParamMap } =
-      await import('@angular/router')
-    const { StorageService } = await import('src/app/services/storage.service')
-    const { default: MarketplacePage } =
-      await import('src/app/routes/portal/routes/marketplace/marketplace.component')
-    const { TRUSTED_KEYS_LINK } =
-      await import('src/app/routes/portal/routes/system/system.const')
-    const notices = new Subject()
-    const prompts = []
-    const navigations = []
-    const injector = createEnvironmentInjector(
-      [
-        {
-          provide: MarketplaceService,
-          useValue: {
-            registryKeysAdded$: notices,
-            currentRegistry$: of({}),
-            currentRegistryUrl$: new Subject(),
-          },
-        },
-        {
-          provide: Router,
-          useValue: { navigate: async path => navigations.push(path) },
-        },
-        {
-          provide: ActivatedRoute,
-          useValue: {
-            queryParamMap: of(
-              convertToParamMap({ registry: 'https://registry.test' }),
-            ),
-          },
-        },
-        { provide: ConfigService, useValue: {} },
-        { provide: StorageService, useValue: {} },
-        {
-          provide: DialogService,
-          useValue: {
-            openConfirm: options => {
-              prompts.push(options)
-              return choice
-            },
-          },
-        },
-      ],
-      null,
-    )
-    t.after(() => injector.destroy())
-    runInInjectionContext(injector, () => new MarketplacePage())
-    notices.next({ url: 'https://registry.test', keys: ['disabled-key'] })
-    await settleRegistry()
-    assert.equal(prompts.length, 1)
-    assert.equal(prompts[0].label, 'New registry keys')
-    assert.equal(prompts[0].data.yes, 'Trusted Keys')
-    assert.equal(prompts[0].data.no, 'Dismiss')
-    assert.match(prompts[0].data.content, /disabled/)
-    assert.deepEqual(navigations, navigates ? [TRUSTED_KEYS_LINK] : [])
-  })
-}

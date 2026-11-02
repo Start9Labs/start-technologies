@@ -97,8 +97,8 @@ selecting a subset of the existing signer records. `registry.info` returns the
 selected IDs and complete records as `trustSigners: Record<Guid, SignerInfo>`.
 Signer records retain their original GPG exports and per-key identities and
 fingerprints. An empty selection proposes no keys. StartOS trusts newly offered
-keys for packages when connecting; keys discovered on later visits start
-disabled. A registry's keys gain OS trust only when a user chooses it for
+keys for packages when connecting; keys discovered on later package or OS
+update requests start disabled, with a notification. A registry's keys gain OS trust only when a user chooses it for
 StartOS updates.
 
 Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hold versions, dependency `VersionRange`s, and `RegistryAsset`s. Assets carry **Blake3 commitments** (`sign/commitment/blake3`) for content addressing and integrity, and are signed by registered signers.

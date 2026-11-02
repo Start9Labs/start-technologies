@@ -293,6 +293,7 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
         RegistryUrlParams { mut registry }: RegistryUrlParams,
     ) -> Result<Value, RpcError> {
         super::compat::pem_wire(&mut params);
+        let base = registry.clone();
         let mut headers = HeaderMap::new();
         let mut device_info = None;
         if metadata
@@ -331,6 +332,16 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
 
         if let Some(device_info) = device_info {
             device_info.filter_for_hardware(method, params, &mut res)?;
+        }
+
+        if matches!(method, "package.get" | "os.version.get") {
+            let ctx = self.clone();
+            tokio::spawn(async move {
+                if let Err(e) = crate::trusted_keys::check_registry(ctx, &base).await {
+                    tracing::warn!("{e}");
+                    tracing::debug!("{e:?}");
+                }
+            });
         }
 
         Ok(res)

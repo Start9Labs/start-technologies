@@ -7,11 +7,13 @@ import {
 } from '@start9labs/shared'
 import { schemas } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
-import { merge, of, shareReplay, Subject } from 'rxjs'
+import { filter, merge, of, shareReplay, Subject } from 'rxjs'
 import { REPORT } from 'src/app/components/backup-report.component'
+import { TRUSTED_KEYS_NOTICE } from 'src/app/components/trusted-keys/notice'
 import { ServerNotification } from 'src/app/services/api/api.types'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
+import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
 
 @Injectable({ providedIn: 'root' })
 export class NotificationService {
@@ -19,6 +21,7 @@ export class NotificationService {
   private readonly errorService = inject(ErrorService)
   private readonly api = inject(ApiService)
   private readonly dialogs = inject(DialogService)
+  private readonly trust = inject(TrustedKeysService)
   private readonly localUnreadCount$ = new Subject<number>()
 
   readonly unreadCount$ = merge(
@@ -92,6 +95,25 @@ export class NotificationService {
           })
           .subscribe()
         break
+
+      case 4: {
+        const parsed = schemas.RegistryKeysAdded.safeParse(data)
+        const ids = parsed.success ? parsed.data.keys : []
+        this.dialogs
+          .openComponent<boolean>(TRUSTED_KEYS_NOTICE, {
+            label: title as i18nKey,
+            data: {
+              message:
+                'These keys are not trusted yet. Trust them for packages?',
+              ids,
+              yes: 'Trust for packages',
+              no: 'Not now',
+            },
+          })
+          .pipe(filter(Boolean))
+          .subscribe(() => this.trust.trustForPackages(ids))
+        break
+      }
 
       default:
         this.dialogs

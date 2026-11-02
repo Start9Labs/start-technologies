@@ -19,7 +19,6 @@ import {
   TuiExpand,
   TuiIcon,
   TuiLink,
-  TuiNotification,
   TuiTitle,
 } from '@taiga-ui/core'
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
@@ -36,6 +35,7 @@ import { InstallingProgressPipe } from 'src/app/routes/portal/routes/services/pi
 import { HiddenUpdatesService } from 'src/app/services/hidden-updates.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
+import { TRUSTED_KEYS_LINK } from '../system/system.const'
 import {
   InstalledState,
   PackageDataEntry,
@@ -125,7 +125,6 @@ import UpdatesComponent from './updates.component'
             size="s"
             iconStart="@tui.download"
             [loading]="!ready()"
-            [disabled]="!trusted().length"
             [appearance]="error() ? 'destructive' : 'primary'"
             (click.stop)="update()"
           >
@@ -137,9 +136,14 @@ import UpdatesComponent from './updates.component'
     <tr>
       <td colspan="5">
         @if (!trusted().length) {
-          <div tuiNotification appearance="warning">
-            {{ "This service package isn't signed by anyone you trust" | i18n }}
-          </div>
+          <p class="g-warning">
+            {{
+              "This service package isn't signed by anyone you trust." | i18n
+            }}
+            <a tuiLink [routerLink]="trustedKeysLink">
+              {{ 'Manage keys' | i18n }}
+            </a>
+          </p>
         }
         @if (error()) {
           <p class="g-negative">{{ error() }}</p>
@@ -293,7 +297,6 @@ import UpdatesComponent from './updates.component'
     SafeLinksDirective,
     DatePipe,
     InstallingProgressPipe,
-    TuiNotification,
     i18nPipe,
   ],
 })
@@ -314,6 +317,8 @@ export class UpdatesItemComponent {
     input.required<PackageDataEntry<InstalledState | UpdatingState>>()
   readonly pending = input.required<boolean>()
 
+  protected readonly trustedKeysLink = TRUSTED_KEYS_LINK
+
   protected readonly trusted = computed(() =>
     matchingTrustedKeys(
       packageSigners(this.item()),
@@ -323,7 +328,9 @@ export class UpdatesItemComponent {
   )
 
   async update() {
-    if (!this.trusted().length) return
+    const trust = !this.trusted().length
+    if (trust && !(await this.alerts.alertUntrusted())) return
+
     const pkg = this.item()
     const { preDownloadAlert } = pkg
     const url = this.parent.current()?.url || ''
@@ -340,7 +347,7 @@ export class UpdatesItemComponent {
     this.ready.set(false)
 
     try {
-      await this.service.installPackage(pkg, url)
+      await this.service.installPackage(pkg, url, trust)
     } catch (e) {
       this.error.set(e instanceof Error ? e.message : String(e))
     } finally {

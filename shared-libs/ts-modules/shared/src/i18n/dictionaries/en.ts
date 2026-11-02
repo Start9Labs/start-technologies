@@ -845,7 +845,7 @@ export const ENGLISH: Record<string, number> = {
   'Enter one or more Ed25519 public keys in PEM or GPG format.': 963,
   'Signed by': 964,
   'None': 965,
-  "This service package isn't signed by anyone you trust": 966,
+  "This service package isn't signed by anyone you trust.": 966,
   'Install untrusted software?': 967,
   'This service package is not signed by anyone you trust. Malicious software could steal private keys and passwords, compromise your server, or permanently destroy your data. Only continue if you trust the source and understand these risks.': 968,
   'Install anyway': 969,
@@ -952,4 +952,9 @@ export const ENGLISH: Record<string, number> = {
   'Added by': 1087,
   'You': 1088,
   'No connected registry': 1089,
+  'Saved Registries': 1090,
+  'Manage Registries': 1091,
+  'Review keys': 1092,
+  'Not now': 1093,
+  'These keys are not trusted yet. Trust them for packages?': 1094,
 }
