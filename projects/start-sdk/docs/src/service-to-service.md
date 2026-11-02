@@ -109,6 +109,8 @@ async function readApiKey(effects: T.Effects): Promise<string | null> {
 }
 ```
 
+**When the app's client can't send the header** — upstream software that takes only a URL — run a small reverse proxy in your own package, bound to `127.0.0.1`, that adds `Authorization` and forwards to the dependency's bridge address. Point the app at the loopback address. The proxy is one more daemon in `setupMain`, configured from the resolved address and key like any other.
+
 - **Mount onto a volume you don't back up**, or the dependency's key lands in your backup.
 - **`.const()` restarts you when the dependency rotates its key**; `.once()` in an action, as above.
 - **Raise the dependency's `versionRange`** to the first release that publishes the key, so StartOS flags an older one instead of leaving you to dial a gate you can't pass.

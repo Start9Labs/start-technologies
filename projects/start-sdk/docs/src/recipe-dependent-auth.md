@@ -15,7 +15,7 @@ A binding gated with `addSsl.auth` challenges every client on every address, the
 
 1. Resolve the key-gated host's bridge address with `sdk.host.getBridgeAddress(...).const()`, importing the host id and port from the dependency's package.
 2. Read the key: mount the dependency's `public` volume read-only — `.mountDependency()` when only the daemon reads the file, `sdk.mount()` onto a volume you don't back up when your package code needs the value — and read `apiKey` with `.const()`.
-3. Send it as `Authorization: Bearer <key>`, or in whatever form the app's client takes an API key.
+3. Send it as `Authorization: Bearer <key>`, or in whatever form the app's client takes an API key. If the client takes only a URL, add a reverse-proxy daemon bound to `127.0.0.1` that injects the header, and give the app the loopback address.
 4. Raise the dependency's `versionRange` to its first release that publishes the key.
 
 **Reference:** [Authenticating at the Proxy](interfaces.md#authenticating-at-the-proxy) · [Admitting dependent services](interfaces.md#admitting-dependent-services) · [Reaching a gated dependency](service-to-service.md#reaching-a-gated-dependency) · [Mount Volumes from Another Service](recipe-mount-dependency.md)
