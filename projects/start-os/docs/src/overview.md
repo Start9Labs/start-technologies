@@ -28,7 +28,7 @@ A [gateway](gateways.md) carries your server's traffic. Your home router and a S
 
 ## Backups
 
-StartOS [backs up](backup-create.md) the whole server, or only the services you choose, to a drive plugged into the server or to a shared folder on another computer on your network. Backups are encrypted with your master password. Each new backup to a target updates the one already there, so each restore point needs its own target. You can [restore](backup-restore.md) a single service, or the whole server, including onto new hardware.
+StartOS [backs up](backup-create.md) the whole server, or only the services you choose, to a drive plugged into the server or to a shared folder on another computer on your network. Backups are encrypted with your master password. Each new backup to a target updates the one already there. Keep backups on multiple targets to protect against losing a drive or network share; advanced users can also retain [read-only snapshots](backup-create.md#read-only-snapshots) on one target. You can [restore](backup-restore.md) a single service, or the whole server, including onto new hardware.
 
 ## The command line
 
