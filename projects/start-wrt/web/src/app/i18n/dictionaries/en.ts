@@ -489,7 +489,6 @@ export const ENGLISH: Record<string, number> = {
   'Maximum value is {max}': 505,
   'Your ISP delegated a /{delegatedPrefix} prefix. Enter a value from {delegatedPrefix} to 64.': 506,
   'Enter a value between {min} and {max}': 507,
-  'Client': 508,
   'The new IP address takes effect the next time this device requests one from the router — the router cannot push it to a connected device. The fastest way to apply it is to disconnect and reconnect the device (Wi-Fi or Ethernet) or reboot it; this usually works but is not guaranteed to take effect immediately. Otherwise the device will pick up the new address on its own within up to 12 hours.': 509,
   'Got it': 510,
   'Trying to reach the router': 511,
@@ -573,4 +572,6 @@ export const ENGLISH: Record<string, number> = {
   'Lets this device announce IPv6 routes to your other devices (needed by Thread border routers such as an Apple TV, HomePod, or Home Assistant). Off by default.': 596,
   'Allow IPv6 Router Advertisements?': 597,
   'This device will be able to give your other devices IPv6 addresses, routes, DNS servers, and a default gateway, and could route their IPv6 traffic around the router. Grant this only to a device you trust, such as a Thread border router.': 598,
+  '{vpn} tunnel': 599,
+  'Your traffic': 600,
 }

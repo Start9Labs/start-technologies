@@ -195,30 +195,17 @@ export function getSafeTargets(
   ]
 }
 
-/**
- * Build the full connection path for a VPN
- * e.g., ['Mullvad', 'Proton', 'Internet']
- */
-export function buildConnectionPath(
-  vpnLabel: string,
-  allVpns: OutboundVpn[],
-): string[] {
-  const path: string[] = [vpnLabel]
+/** The VPN, then each VPN it connects through. Stops at a cycle. */
+export function buildChain(vpnLabel: string, allVpns: OutboundVpn[]): string[] {
+  const chain = [vpnLabel]
   let current = allVpns.find(v => v.label === vpnLabel)
-
-  // Follow the chain until we hit Internet or a cycle
-  const visited = new Set<string>([vpnLabel])
-  while (current && current.target !== 'Internet') {
-    if (visited.has(current.target)) {
-      // Cycle detected - shouldn't happen but handle gracefully
-      path.push('...')
-      break
-    }
-    visited.add(current.target)
-    path.push(current.target)
+  while (
+    current &&
+    current.target !== 'Internet' &&
+    !chain.includes(current.target)
+  ) {
+    chain.push(current.target)
     current = allVpns.find(v => v.label === current!.target)
   }
-
-  path.push('Internet')
-  return path
+  return chain
 }

@@ -484,7 +484,6 @@ export default {
   505: 'El valor máximo es {max}',
   506: 'Tu proveedor delegó un prefijo /{delegatedPrefix}. Introduce un valor entre {delegatedPrefix} y 64.',
   507: 'Introduce un valor entre {min} y {max}',
-  508: 'Cliente',
   509: 'La nueva dirección IP se aplicará la próxima vez que este dispositivo solicite una al router; el router no puede enviársela a un dispositivo conectado. La forma más rápida de aplicarla es desconectar y volver a conectar el dispositivo (Wi-Fi o Ethernet) o reiniciarlo; esto suele funcionar, pero no se garantiza que surta efecto de inmediato. De lo contrario, el dispositivo adoptará la nueva dirección por sí solo en un plazo de hasta 12 horas.',
   510: 'Entendido',
   511: 'Intentando contactar con el router',
@@ -568,4 +567,6 @@ export default {
   596: 'Permite que este dispositivo anuncie rutas IPv6 a tus otros dispositivos (necesario para routers de borde Thread como un Apple TV, HomePod o Home Assistant). Desactivado de forma predeterminada.',
   597: '¿Permitir anuncios de router IPv6?',
   598: 'Este dispositivo podrá asignar a tus otros dispositivos direcciones IPv6, rutas, servidores DNS y una puerta de enlace predeterminada, y podría desviar su tráfico IPv6 fuera del router. Concede esto solo a un dispositivo de confianza, como un router de borde Thread.',
+  599: 'Túnel de {vpn}',
+  600: 'Tu tráfico',
 } satisfies i18n
