@@ -26,7 +26,7 @@ A registry chooses which signer IDs to propose and supplies their public keys an
 
 ## Installing Software
 
-Package details show a **Signed by** row with each signer's GPG name and email addresses or saved label. Unrecognized signers show their fingerprint. Disabled keys remain identifiable here; the trust switches still determine whether their signatures are accepted. Marketplace installation is blocked when none match; the warning links to Manage Trust. [Sideloading](sideloading.md) allows an untrusted package after an explicit risk confirmation. OS updates from the UI require a signature from an enabled OS-update key.
+Package details show a **Signed by** row with the GPG names and email addresses or saved labels of enabled package signers. When none match, it shows known disabled signers instead. Unknown signers are omitted, and the row is hidden when no known signer matches. The trust switches determine whether signatures are accepted. Marketplace installation is blocked when none match; the warning links to Manage Trust. [Sideloading](sideloading.md) allows an untrusted package after an explicit risk confirmation. OS updates from the UI require a signature from an enabled OS-update key.
 
 CLI package installs and OS updates also require trusted signers by default. To deliberately accept an untrusted signer, use `--trust`:
 

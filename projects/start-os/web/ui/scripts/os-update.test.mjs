@@ -1294,7 +1294,7 @@ test('PEM and DER public keys share the complete SHA-256 SPKI fingerprint', () =
   )
 })
 
-test('marketplace signer identities stay visible when disabled and never borrow another key’s identity', () => {
+test('marketplace signer identities omit unknown keys and keep disabled identities as a fallback', () => {
   const first = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
   const second = 'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40='
   const known = {
@@ -1323,18 +1323,79 @@ test('marketplace signer identities stay visible when disabled and never borrow 
         second,
       ],
     },
-    { known },
+    { [first]: known },
   )
-  assert.equal(signers.length, 2)
+  assert.equal(signers.length, 1)
   assert.deepEqual(signers[0], {
     id: first,
     name: 'Alice',
     emails: ['alice@example.test', 'alice@other.test'],
     fingerprints: ['5456 DBFF 1B9D F905 041F A776 5259 ADFC 2D63 C217'],
   })
-  assert.equal(signers[1].name, null)
-  assert.deepEqual(signers[1].emails, [])
-  assert.match(signers[1].fingerprints[0], /^SHA256:/)
+})
+
+function signerDisplayFixture() {
+  const first = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
+  const second = 'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40='
+  const key = (name, publicKey, marketplace) => ({
+    name,
+    publicKey,
+    marketplace,
+    os: true,
+    origin: 'manual',
+    originRegistry: null,
+    removable: true,
+    gpgExports: [],
+  })
+  return {
+    first,
+    second,
+    pkg: { signers: [first, second, untrustedSigner] },
+    keys: {
+      [first]: key('First signer', first, true),
+      [second]: key('Second signer', second, false),
+    },
+    pipe: new PackageSignerIdentitiesPipe(),
+  }
+}
+
+test('marketplace signer identities prefer enabled package signers over disabled and unknown signers', () => {
+  const { first, second, pkg, keys, pipe } = signerDisplayFixture()
+  const shown = pipe.transform(pkg, keys)
+  assert.deepEqual(
+    shown.map(signer => signer.id),
+    [first],
+  )
+  assert.equal(shown[0].name, 'First signer')
+  assert.deepEqual(
+    pipe.transform({ signers: [second] }, keys).map(signer => signer.id),
+    [second],
+  )
+})
+
+test('marketplace signer identities show every matching enabled signer', () => {
+  const { first, second, pkg, keys, pipe } = signerDisplayFixture()
+  keys[second].marketplace = true
+  assert.deepEqual(
+    pipe.transform(pkg, keys).map(signer => signer.id),
+    [first, second],
+  )
+})
+
+test('marketplace signer identities fall back to all matching disabled signers regardless of OS trust', () => {
+  const { first, second, pkg, keys, pipe } = signerDisplayFixture()
+  keys[first].marketplace = false
+  assert.deepEqual(
+    pipe.transform(pkg, keys).map(signer => signer.id),
+    [first, second],
+  )
+})
+
+test('marketplace signer identities omit an unknown-only, unsigned or unavailable trust list', () => {
+  const { pkg, keys, pipe } = signerDisplayFixture()
+  assert.deepEqual(pipe.transform({ signers: [untrustedSigner] }, keys), [])
+  assert.deepEqual(pipe.transform({ s9pks: [] }, keys), [])
+  assert.deepEqual(pipe.transform(pkg, {}), [])
 })
 
 test('PEM form parsing canonicalizes multiple keys and rejects empty, private, non-Ed25519, and mixed input', () => {

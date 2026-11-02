@@ -18,16 +18,23 @@ export function packageSigners(
   return pkg.signers ?? Object.keys(pkg.s9pks[0]?.[1].signatures ?? {})
 }
 
+function matchingSigningKeys(
+  signers: string[],
+  keys: Record<string, T.TrustedKey>,
+) {
+  const signed = new Set(signers.map(auth.normalizeDer64))
+  return Object.entries(keys).filter(([, key]) =>
+    signed.has(auth.normalizeDer64(key.publicKey)),
+  )
+}
+
 export function matchingTrustedKeys(
   signers: string[],
   keys: Record<string, T.TrustedKey>,
   context: TrustContext,
 ) {
-  const signed = new Set(signers.map(auth.normalizeDer64))
-  return Object.entries(keys).flatMap(([id, key]) =>
-    key[context] && signed.has(auth.normalizeDer64(key.publicKey))
-      ? [{ id, name: key.name, publicKey: key.publicKey }]
-      : [],
+  return matchingSigningKeys(signers, keys).flatMap(([id, key]) =>
+    key[context] ? [{ id, name: key.name, publicKey: key.publicKey }] : [],
   )
 }
 
@@ -37,13 +44,11 @@ export class PackageSignerIdentitiesPipe {
     pkg: Pick<MarketplacePkgBase, 's9pks' | 'signers'>,
     keys: Record<string, T.TrustedKey>,
   ) {
-    return [...new Set(packageSigners(pkg).map(auth.normalizeDer64))].map(
-      id => {
-        const key = Object.values(keys).find(
-          key => auth.normalizeDer64(key.publicKey) === id,
-        )
-        return { id, ...signingKeyIdentity(id, key) }
-      },
-    )
+    const known = matchingSigningKeys(packageSigners(pkg), keys)
+    const enabled = known.filter(([, key]) => key.marketplace)
+    return (enabled.length ? enabled : known).map(([id, key]) => ({
+      id,
+      ...signingKeyIdentity(key.publicKey, key),
+    }))
   }
 }

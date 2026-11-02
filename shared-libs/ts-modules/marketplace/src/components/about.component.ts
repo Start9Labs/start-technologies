@@ -11,22 +11,20 @@ import { MarketplaceVersionsComponent } from './versions.component'
   selector: 'marketplace-about',
   template: `
     <section tuiCardLarge>
-      <div tuiCell>
-        <span tuiTitle>
-          <span tuiSubtitle>{{ 'Signed by' | i18n }}</span>
-          @for (
-            signer of pkg() | packageSignerIdentities: trust?.keys() ?? {};
-            track signer.id
-          ) {
-            <span>{{ signer.name || signer.fingerprints.join(' / ') }}</span>
-            @for (email of signer.emails; track email) {
-              <span tuiSubtitle>{{ email }}</span>
+      @let signers = pkg() | packageSignerIdentities: trust?.keys() ?? {};
+      @if (signers.length) {
+        <div tuiCell>
+          <span tuiTitle>
+            <span tuiSubtitle>{{ 'Signed by' | i18n }}</span>
+            @for (signer of signers; track signer.id) {
+              <span>{{ signer.name || signer.fingerprints.join(' / ') }}</span>
+              @for (email of signer.emails; track email) {
+                <span tuiSubtitle>{{ email }}</span>
+              }
             }
-          } @empty {
-            <span>{{ 'None' | i18n }}</span>
-          }
-        </span>
-      </div>
+          </span>
+        </div>
+      }
       @if ((versions()?.length || 0) > 1) {
         <button
           marketplaceVersions
