@@ -510,7 +510,7 @@ mod tests {
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>(),
             crate::trusted_keys::enabled_keys(
-                &legacy::individual_keys(&saved_trust).unwrap(),
+                &legacy::individual_keys(&saved_trust, chrono::Utc::now()).unwrap(),
                 crate::trusted_keys::TrustContext::Marketplace
             )
             .into_iter()

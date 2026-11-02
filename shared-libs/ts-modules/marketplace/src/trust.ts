@@ -1,12 +1,9 @@
 import { Pipe, Signal } from '@angular/core'
-import { auth, RPC, T } from '@start9labs/start-core'
+import { auth, T } from '@start9labs/start-core'
 import { MarketplacePkgBase } from './types'
 import { signingKeyIdentity } from './key-identity'
 
-export type TrustContext = RPC.RpcParamType<
-  RPC.StartOS,
-  'server.trusted-keys.add'
->['context']
+export type TrustContext = 'marketplace' | 'os'
 
 export abstract class MarketplaceTrust {
   abstract readonly keys: Signal<Record<string, T.TrustedKey> | undefined>

@@ -220,7 +220,7 @@ export namespace Mock {
       },
       'package-signer': {
         name: 'Package publisher',
-        contact: [],
+        contact: [{ email: 'packages@example.com' }],
         keys: ['MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A='],
         gpgExports: [],
       },

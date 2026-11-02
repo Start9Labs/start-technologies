@@ -216,7 +216,7 @@ fn set_os_registry_public(
     let mut ui = public.ui.clone();
     ui.as_object_mut()
         .ok_or_else(invalid_key)?
-        .insert("startosRegistry".into(), to_value(url.as_str())?);
+        .insert("startosRegistry".into(), to_value(url)?);
     let mut keys = public.server_info.trusted_keys.clone();
     let mut enabled = BTreeSet::new();
     for (id, key) in &mut keys {

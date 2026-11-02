@@ -1,19 +1,36 @@
-import { Component, inject, signal } from '@angular/core'
+import { Component, computed, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { Router, RouterLink } from '@angular/router'
+import { StoreIconDirective } from '@start9labs/marketplace'
 import {
-  registrySigningKeys,
-  StoreIconDirective,
-} from '@start9labs/marketplace'
-import { DialogService, i18nPipe, TaskService } from '@start9labs/shared'
-import { TuiButton, TuiCell, TuiLoader, TuiTitle } from '@taiga-ui/core'
-import { TuiAvatar } from '@taiga-ui/kit'
+  defaultRegistries,
+  DialogService,
+  DocsLinkDirective,
+  i18nKey,
+  i18nPipe,
+  registryUrl,
+  sameUrl,
+  TaskService,
+} from '@start9labs/shared'
+import { TuiButton, TuiDataList, TuiDropdown, TuiLoader } from '@taiga-ui/core'
+import { TuiAvatar, TuiBadge } from '@taiga-ui/kit'
+import { PatchDB } from 'patch-db-client'
 import { defaultIfEmpty, firstValueFrom } from 'rxjs'
+import { TRUSTED_KEYS_NOTICE } from 'src/app/components/trusted-keys/notice'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
+import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
+import { OSService } from 'src/app/services/os.service'
+import { DataModel } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
 import { TRUSTED_KEYS_LINK } from '../../system.const'
-import { CONFIRM_REGISTRY } from './confirm'
+
+interface Row {
+  url: string
+  name: string
+  os: boolean
+  builtin: boolean
+}
 
 @Component({
   template: `
@@ -28,54 +45,73 @@ import { CONFIRM_REGISTRY } from './confirm'
     <section class="g-card">
       <header>
         {{ 'Registries' | i18n }}
+        <a
+          tuiIconButton
+          docsLink
+          path="/start-os/marketplace.html"
+          size="xs"
+          appearance="icon"
+          iconStart="@tui.book-open-text"
+        >
+          {{ 'Documentation' | i18n }}
+        </a>
         <button tuiButton size="xs" iconStart="@tui.plus" (click)="add()">
           {{ 'Add registry' | i18n }}
         </button>
       </header>
-      <p>
-        {{
-          'Connect registries to browse their packages and review the keys they ask you to trust.'
-            | i18n
-        }}
-      </p>
-      @if (registries(); as registries) {
-        <table [appTable]="['Name', 'URL', null]">
-          @for (registry of registries; track registry.url) {
+      @if (rows(); as rows) {
+        <table [appTable]="[null, 'Name', 'URL', null]">
+          @for (row of rows; track row.url) {
             <tr>
-              <td>
-                <div tuiCell="s">
-                  <span tuiAvatar size="s">
-                    <img [storeIcon]="registry.url" />
-                  </span>
-                  <span tuiTitle>{{ registry.name }}</span>
-                </div>
+              <td [style.width.rem]="3">
+                <span tuiAvatar size="s"><img [storeIcon]="row.url" /></span>
               </td>
-              <td [attr.data-label]="'URL' | i18n">{{ registry.url }}</td>
               <td>
-                <button
-                  tuiButton
-                  size="s"
-                  appearance="outline-grayscale"
-                  [disabled]="saving()"
-                  (click)="review(registry.url)"
-                >
-                  {{ 'Review keys' | i18n }}
-                </button>
+                {{ row.name }}
+                @if (row.os) {
+                  <span tuiBadge appearance="info" size="s">
+                    {{ 'StartOS updates' | i18n }}
+                  </span>
+                }
+              </td>
+              <td [attr.data-label]="'URL' | i18n">{{ row.url }}</td>
+              <td>
                 <button
                   tuiIconButton
+                  tuiDropdown
+                  tuiDropdownAuto
+                  tuiDropdownAlign="end"
                   size="s"
                   appearance="flat-grayscale"
-                  iconStart="@tui.trash"
+                  iconStart="@tui.ellipsis-vertical"
                   [disabled]="saving()"
-                  (click)="remove(registry.url)"
                 >
-                  {{ 'Remove registry' | i18n }} {{ registry.name }}
+                  {{ 'More' | i18n }} {{ row.name }}
+                  <tui-data-list *tuiDropdown="let close" (click)="close()">
+                    <button tuiOption (click)="manageKeys(row.url)">
+                      {{ 'Manage keys' | i18n }}
+                    </button>
+                    @if (!row.os) {
+                      <button tuiOption (click)="useForUpdates(row.url)">
+                        {{ 'Use for StartOS updates' | i18n }}
+                      </button>
+                    }
+                    @if (!row.builtin) {
+                      <button
+                        tuiOption
+                        class="g-negative"
+                        (click)="remove(row)"
+                      >
+                        {{ 'Remove' | i18n }}
+                      </button>
+                    }
+                  </tui-data-list>
                 </button>
               </td>
             </tr>
           } @empty {
             <tr>
-              <td colspan="3">{{ 'No registries connected' | i18n }}</td>
+              <td colspan="4">{{ 'No registries connected' | i18n }}</td>
             </tr>
           }
         </table>
@@ -88,18 +124,21 @@ import { CONFIRM_REGISTRY } from './confirm'
     header button {
       margin-inline-start: auto;
     }
-    section > p {
-      margin: 1rem;
-      color: var(--tui-text-secondary);
+
+    [tuiBadge] {
+      margin-inline-start: 0.5rem;
     }
+
     td:last-child {
       text-align: end;
     }
+
     :host-context(tui-root._mobile) {
       td[data-label]::before {
         content: attr(data-label) ': ';
         color: var(--tui-text-secondary);
       }
+
       td:last-child {
         grid-area: 1 / 2 / 3;
         align-content: center;
@@ -107,29 +146,46 @@ import { CONFIRM_REGISTRY } from './confirm'
     }
   `,
   imports: [
+    DocsLinkDirective,
     RouterLink,
     StoreIconDirective,
     TableComponent,
     TitleDirective,
     TuiAvatar,
+    TuiBadge,
     TuiButton,
-    TuiCell,
+    TuiDataList,
+    TuiDropdown,
     TuiLoader,
-    TuiTitle,
     i18nPipe,
   ],
 })
 export default class Registries {
+  private readonly api = inject(ApiService)
   private readonly marketplace = inject(MarketplaceService)
+  private readonly os = inject(OSService)
   private readonly dialogs = inject(DialogService)
   private readonly tasks = inject(TaskService)
   private readonly router = inject(Router)
+  private readonly registries = toSignal(this.marketplace.registries$)
+  private readonly osRegistry = toSignal(
+    inject<PatchDB<DataModel>>(PatchDB).watch$('ui', 'startosRegistry'),
+  )
 
-  protected readonly registries = toSignal(this.marketplace.registries$)
   protected readonly saving = signal(false)
+  protected readonly rows = computed(() =>
+    this.registries()?.map<Row>(({ url, name }) => ({
+      url,
+      name,
+      os: sameUrl(url, this.osRegistry()),
+      builtin: Object.values(defaultRegistries).some(known =>
+        sameUrl(url, known),
+      ),
+    })),
+  )
 
   protected async add(): Promise<void> {
-    const url = await firstValueFrom(
+    const rawUrl = await firstValueFrom(
       this.dialogs
         .openPrompt<string>({
           label: 'Add registry',
@@ -137,68 +193,155 @@ export default class Registries {
             message: 'The domain or URL of the custom registry',
             label: 'URL',
             placeholder: 'e.g. registry.example.com',
-            buttonText: 'Continue',
+            buttonText: 'Add',
           },
         })
         .pipe(defaultIfEmpty('')),
     )
-    if (url) await this.connect(url)
-  }
 
-  protected async review(url: string): Promise<void> {
-    this.saving.set(true)
-    const refreshed = await this.tasks.run(
-      () => this.marketplace.refreshRegistry(url),
-      'Validating registry',
-    )
-    this.saving.set(false)
-    if (refreshed) await this.router.navigate(TRUSTED_KEYS_LINK)
-  }
+    if (!rawUrl) return
 
-  private async connect(url: string): Promise<void> {
-    let preview:
-      | Awaited<ReturnType<MarketplaceService['previewRegistry']>>
-      | undefined
-    await this.tasks.run(async () => {
-      preview = await this.marketplace.previewRegistry(url)
+    let added: string[] = []
+
+    await this.save(async () => {
+      added = await this.marketplace.connectRegistry(registryUrl(rawUrl))
     }, 'Validating registry')
-    if (!preview) return
-    const confirmed = await firstValueFrom(
-      this.dialogs
-        .openComponent<boolean>(CONFIRM_REGISTRY, { data: preview })
-        .pipe(defaultIfEmpty(false)),
-    )
-    if (!confirmed) return
-    const { url: registryUrl, info } = preview
-    this.saving.set(true)
-    await this.tasks.run(
-      () =>
-        this.marketplace.add(
-          registryUrl,
-          Object.keys(registrySigningKeys(info)),
-        ),
-      'Saving',
-    )
-    this.saving.set(false)
+
+    if (added.length) {
+      await this.notify(
+        'Registry added',
+        'These keys from the registry are now trusted for packages.',
+        added,
+      )
+    }
   }
 
-  protected async remove(url: string): Promise<void> {
+  protected manageKeys(url: string): void {
+    this.router.navigate(TRUSTED_KEYS_LINK, { queryParams: { registry: url } })
+  }
+
+  protected async useForUpdates(url: string): Promise<void> {
+    let publishes = false
+
+    const checked = await this.save(async () => {
+      publishes = await this.os.publishesUpdates(url)
+    }, 'Checking registry')
+
+    if (!checked) return
+
+    if (!publishes) {
+      await firstValueFrom(
+        this.dialogs
+          .openAlert('This registry does not publish StartOS updates.', {
+            label: 'StartOS updates unavailable',
+          })
+          .pipe(defaultIfEmpty(null)),
+      )
+      return
+    }
+
+    if (!sameUrl(url, defaultRegistries.start9)) {
+      const confirmed = await firstValueFrom(
+        this.dialogs
+          .openConfirm({
+            label: 'Warning',
+            data: {
+              content:
+                'Only Start9 publishes official StartOS updates. An update from another registry replaces the operating system on this server, so use one only if you fully trust whoever runs it.',
+              yes: 'Use for StartOS updates',
+              no: 'Cancel',
+            },
+          })
+          .pipe(defaultIfEmpty(false)),
+      )
+
+      if (!confirmed) return
+    }
+
+    let enabled: string[] = []
+    const saved = await this.save(async () => {
+      enabled = await this.marketplace.setOsRegistry(url)
+    }, 'Saving')
+
+    if (saved) {
+      await this.notify(
+        'StartOS updates',
+        enabled.length
+          ? 'StartOS updates now come from this registry. These keys are now trusted for StartOS updates.'
+          : 'StartOS updates now come from this registry.',
+        enabled,
+      )
+    }
+  }
+
+  protected async remove({ url, os }: Row): Promise<void> {
+    if (os) {
+      await firstValueFrom(
+        this.dialogs
+          .openAlert(
+            'This registry provides StartOS updates. Choose another registry for StartOS updates before removing it.',
+            { label: 'Registry in use' },
+          )
+          .pipe(defaultIfEmpty(null)),
+      )
+      return
+    }
+
     const confirmed = await firstValueFrom(
       this.dialogs
         .openConfirm({
           label: 'Remove registry?',
-          data: {
-            content:
-              'Its keys will remain in Manage Trust with their existing permissions.',
-            yes: 'Remove',
-            no: 'Cancel',
-          },
+          data: { yes: 'Remove', no: 'Cancel' },
         })
         .pipe(defaultIfEmpty(false)),
     )
+
     if (!confirmed) return
+
+    let orphaned: string[] = []
+
+    await this.save(async () => {
+      orphaned = await this.marketplace.removeRegistry(url)
+    }, 'Removing')
+
+    if (
+      orphaned.length &&
+      (await this.notify(
+        'Remove unused keys?',
+        'No connected registry offers these keys anymore. Remove them from Trusted Keys?',
+        orphaned,
+        'Keep',
+      ))
+    ) {
+      await this.save(async () => {
+        for (const id of orphaned) {
+          await this.api.rpc.server.trustedKeys.remove({ id })
+        }
+      }, 'Removing')
+    }
+  }
+
+  private async save(task: () => Promise<void>, label: i18nKey) {
     this.saving.set(true)
-    await this.tasks.run(() => this.marketplace.delete(url), 'Deleting')
+    const done = await this.tasks.run(task, label)
     this.saving.set(false)
+
+    return done
+  }
+
+  private notify(
+    label: i18nKey,
+    message: i18nKey,
+    ids: readonly string[],
+    no?: i18nKey,
+  ): Promise<boolean> {
+    return firstValueFrom(
+      this.dialogs
+        .openComponent<boolean>(TRUSTED_KEYS_NOTICE, {
+          label,
+          data: { message, ids, yes: no ? 'Remove keys' : 'Ok', no },
+        })
+        .pipe(defaultIfEmpty(false)),
+    )
   }
 }

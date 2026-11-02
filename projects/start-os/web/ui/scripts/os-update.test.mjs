@@ -1263,6 +1263,7 @@ const {
   PackageSignerIdentitiesPipe,
   signingKeyIdentity,
   registrySigningKeys,
+  keyIdentities,
 } = await import('@start9labs/marketplace')
 const { parsePublicKeys, publicKeyPem } =
   await import('src/app/utils/public-keys')
@@ -1328,7 +1329,7 @@ test('marketplace signer identities omit unknown keys and keep disabled identiti
   assert.equal(signers.length, 1)
   assert.deepEqual(signers[0], {
     id: first,
-    name: 'Alice',
+    name: 'Fallback publisher',
     emails: ['alice@example.test', 'alice@other.test'],
     fingerprints: ['5456 DBFF 1B9D F905 041F A776 5259 ADFC 2D63 C217'],
   })
@@ -1625,216 +1626,92 @@ test('marketplace dispatch delegates trust enforcement to the server without an 
   ])
 })
 
-const { default: TrustedKeysPage } =
-  await import('src/app/routes/portal/routes/system/routes/trusted-keys')
-const { EditTrustedKeyDialog } =
-  await import('src/app/components/trusted-keys/edit')
 const { AddTrustedKeyDialog } =
   await import('src/app/components/trusted-keys/form')
-test('built-in keys precede custom entries regardless of labels and input order', () => {
-  const custom = Object.values(trustedSigners)[0]
-  const entries = [
-    { key: '00000000-0000-4000-8000-000000000000', value: custom },
-    {
-      key: 'start9-alpha',
-      value: {
-        ...custom,
-        name: 'A renamed Alpha',
-        removable: false,
-        marketplace: false,
-        os: false,
-      },
-    },
-    { key: 'ffffffff-ffff-4fff-8fff-ffffffffffff', value: custom },
-    {
-      key: 'start9',
-      value: { ...custom, name: 'Z renamed Start9', removable: false },
-    },
-  ]
-  for (const input of [entries, [...entries].reverse()]) {
-    assert.deepEqual(
-      [...input].sort(TrustedKeysPage.prototype.compareKeys).map(x => x.key),
-      [
-        'start9',
-        'start9-alpha',
-        '00000000-0000-4000-8000-000000000000',
-        'ffffffff-ffff-4fff-8fff-ffffffffffff',
-      ],
-    )
-  }
-})
+const { default: RegistriesPage } =
+  await import('src/app/routes/portal/routes/system/routes/registries')
 
-function keyDialogFixture(t, component, key, reject = false) {
+const runTask = async work => {
+  try {
+    await work()
+    return true
+  } catch {
+    return false
+  }
+}
+
+function addKeyFixture(t, reject = false) {
   const mutations = []
   const closed = []
-  const context = {
-    data: { id: 'publisher', key },
-    $implicit: { complete: () => closed.push(true) },
-  }
-  const mutate = async params => {
-    mutations.push(params)
-    if (reject) throw new Error('offline')
-  }
+  const result = { added: ['publisher'], existing: [] }
   const injector = createEnvironmentInjector(
     [
       {
         provide: NonNullableFormBuilder,
         useValue: new FormBuilder().nonNullable,
       },
-      { provide: CONTEXT, useValue: context },
-      { provide: CopyService, useValue: { copy: () => {} } },
+      {
+        provide: CONTEXT,
+        useValue: {
+          completeWith: value => closed.push(value),
+          $implicit: { complete: () => closed.push(null) },
+        },
+      },
       {
         provide: ApiService,
         useValue: {
-          rpc: { server: { trustedKeys: { update: mutate, add: mutate } } },
-        },
-      },
-      {
-        provide: TaskService,
-        useValue: {
-          run: async work => {
-            try {
-              await work()
-              return true
-            } catch {
-              return false
-            }
+          rpc: {
+            server: {
+              trustedKeys: {
+                add: async params => {
+                  mutations.push(params)
+                  if (reject) throw new Error('offline')
+                  return result
+                },
+              },
+            },
           },
         },
       },
+      { provide: TaskService, useValue: { run: runTask } },
     ],
     null,
   )
   t.after(() => injector.destroy())
   return {
-    instance: runInInjectionContext(injector, () => new component()),
+    instance: runInInjectionContext(injector, () => new AddTrustedKeyDialog()),
     mutations,
     closed,
+    result,
   }
 }
 
-test('key editing disables built-in names without disabling either trust selection', t => {
-  for (const name of ['Start9', 'Start9 Alpha']) {
-    const { instance } = keyDialogFixture(t, EditTrustedKeyDialog, {
-      name,
-      removable: false,
-      marketplace: true,
-      os: false,
-    })
-    assert.equal(instance.form.controls.name.disabled, true)
-    assert.equal(instance.form.controls.marketplace.enabled, true)
-    assert.equal(instance.form.controls.os.enabled, true)
-  }
-  const { instance } = keyDialogFixture(t, EditTrustedKeyDialog, {
-    name: 'Publisher',
-    removable: true,
-    marketplace: true,
-    os: false,
-  })
-  assert.equal(instance.form.controls.name.enabled, true)
-})
-
-test('key edit submits name and both trust selections in one operation', async t => {
-  const f = keyDialogFixture(t, EditTrustedKeyDialog, {
-    name: 'Publisher',
-    removable: true,
-    marketplace: true,
-    os: false,
-  })
-  f.instance.form.setValue({ name: 'Renamed', marketplace: false, os: true })
-  await f.instance.save()
-  assert.deepEqual(f.mutations, [
-    { id: 'publisher', name: 'Renamed', marketplace: false, os: true },
-  ])
-  assert.deepEqual(f.closed, [true])
-  assert.equal(f.instance.saving(), false)
-})
-
-test('failed key edits keep their form values and dialog open', async t => {
-  const f = keyDialogFixture(
-    t,
-    EditTrustedKeyDialog,
-    { name: 'Publisher', removable: true, marketplace: true, os: false },
-    true,
-  )
-  f.instance.form.setValue({ name: 'Renamed', marketplace: false, os: true })
-  await f.instance.save()
-  assert.deepEqual(f.instance.form.getRawValue(), {
-    name: 'Renamed',
-    marketplace: false,
-    os: true,
-  })
-  assert.deepEqual(f.closed, [])
-  assert.equal(f.instance.saving(), false)
-})
-
-test('new manually added keys default to package trust only', async t => {
-  const f = keyDialogFixture(t, AddTrustedKeyDialog)
+test('a manually added key submits its label and keys and closes with the server result', async t => {
+  const f = addKeyFixture(t)
   f.instance.form.setValue({
     name: 'Publisher',
     publicKeys: OS_UPDATE_SIGNERS[0],
   })
   await f.instance.save()
   assert.deepEqual(f.mutations, [
-    {
-      name: 'Publisher',
-      publicKeys: [OS_UPDATE_SIGNERS[0]],
-      context: 'marketplace',
-    },
+    { name: 'Publisher', publicKeys: [OS_UPDATE_SIGNERS[0]] },
   ])
-  assert.deepEqual(f.closed, [true])
+  assert.deepEqual(f.closed, [f.result])
+  assert.equal(f.instance.saving(), false)
 })
 
-test('individual trust switches preserve the other context and restore the control on failure', async () => {
-  for (const context of ['marketplace', 'os']) {
-    for (const succeeds of [true, false]) {
-      const submissions = []
-      const resets = []
-      const key = { name: 'Publisher', marketplace: true, os: false }
-      const enabled = !key[context]
-      const instance = {
-        saving: signal(false),
-        api: {
-          rpc: {
-            server: {
-              trustedKeys: {
-                update: async params => {
-                  submissions.push(params)
-                  if (!succeeds) throw new Error('offline')
-                },
-              },
-            },
-          },
-        },
-        tasks: {
-          run: async work => {
-            try {
-              await work()
-              return true
-            } catch {
-              return false
-            }
-          },
-        },
-      }
-      await TrustedKeysPage.prototype.update.call(
-        instance,
-        'individual-key',
-        key,
-        context,
-        enabled,
-        { reset: value => resets.push(value) },
-      )
-      assert.deepEqual(submissions, [
-        { id: 'individual-key', ...key, [context]: enabled },
-      ])
-      assert.deepEqual(resets, succeeds ? [] : [key[context]])
-      assert.equal(instance.saving(), false)
-    }
-  }
+test('a failed manual key addition keeps the dialog open', async t => {
+  const f = addKeyFixture(t, true)
+  f.instance.form.setValue({
+    name: 'Publisher',
+    publicKeys: OS_UPDATE_SIGNERS[0],
+  })
+  await f.instance.save()
+  assert.deepEqual(f.closed, [])
+  assert.equal(f.instance.saving(), false)
 })
 
-test('registry signing-key identities retain complete GPG metadata from selected signer records', () => {
+test('registry signing-key identities keep GPG metadata under the key label', () => {
   const id = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
   const gpgExports = [
     {
@@ -1847,78 +1724,180 @@ test('registry signing-key identities retain complete GPG metadata from selected
   ]
   const proposed = registrySigningKeys({
     trustSigners: {
-      signer: { name: 'Fallback label', keys: [id], gpgExports },
+      signer: { name: 'Label', contact: [], keys: [id], gpgExports },
     },
   })
   assert.deepEqual(Object.keys(proposed), [id])
   assert.equal(proposed[id].gpgExports, gpgExports)
   assert.deepEqual(signingKeyIdentity(id, proposed[id]), {
-    name: 'Start9',
+    name: 'Label',
     emails: ['security@start9.com'],
     fingerprints: ['5456 DBFF 1B9D F905 041F A776 5259 ADFC 2D63 C217'],
   })
 })
 
-for (const success of [true, false]) {
-  test(`Review keys refresh ${success ? 'opens Trusted Keys' : 'failure prevents navigation'} without re-enabling trust`, async () => {
-    const { default: RegistriesPage } =
-      await import('src/app/routes/portal/routes/system/routes/registries')
-    const { TRUSTED_KEYS_LINK } =
-      await import('src/app/routes/portal/routes/system/system.const')
-    const calls = []
-    const instance = {
-      saving: signal(false),
-      marketplace: {
-        refreshRegistry: async url => {
-          calls.push(['refresh', url])
-          if (!success) throw new Error('offline')
-          return []
+test('key identities are GPG user IDs, or the emails registries publish for a plain key', () => {
+  const id = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
+  const contact = [{ email: 'dev@example.com' }, { matrix: '@dev:example.com' }]
+  assert.deepEqual(
+    keyIdentities({
+      publicKey: id,
+      contact,
+      gpgExports: [
+        { identities: { [id]: ['A <a@example.com>', 'B <b@example.com>'] } },
+        { identities: { [id]: ['A <a@example.com>'], other: ['C'] } },
+      ],
+    }),
+    ['A <a@example.com>', 'B <b@example.com>'],
+  )
+  assert.deepEqual(keyIdentities({ publicKey: id, contact, gpgExports: [] }), [
+    'dev@example.com',
+  ])
+})
+
+function registriesFixture({
+  publishes = true,
+  confirm = true,
+  orphaned = [],
+  cleanup = true,
+} = {}) {
+  const calls = []
+  const instance = {
+    saving: signal(false),
+    tasks: { run: runTask },
+    os: {
+      publishesUpdates: async url => {
+        calls.push(['check', url])
+        return publishes
+      },
+    },
+    marketplace: {
+      setOsRegistry: async url => {
+        calls.push(['set', url])
+        return ['key']
+      },
+      removeRegistry: async url => {
+        calls.push(['remove', url])
+        return orphaned
+      },
+    },
+    api: {
+      rpc: {
+        server: {
+          trustedKeys: {
+            remove: async ({ id }) => calls.push(['remove key', id]),
+          },
         },
       },
-      router: { navigate: async path => calls.push(['navigate', path]) },
-      tasks: {
-        run: async action => {
-          try {
-            await action()
-            return true
-          } catch {
-            return false
-          }
-        },
+    },
+    dialogs: {
+      openAlert: message => {
+        calls.push(['alert', message])
+        return of(null)
       },
-    }
-    await RegistriesPage.prototype.review.call(
-      instance,
-      'https://registry.test',
-    )
-    assert.deepEqual(calls, [
-      ['refresh', 'https://registry.test'],
-      ...(success ? [['navigate', TRUSTED_KEYS_LINK]] : []),
-    ])
-    assert.equal(instance.saving(), false)
-  })
+      openConfirm: ({ label }) => {
+        calls.push(['confirm', label])
+        return of(confirm)
+      },
+      openComponent: (_, { label, data }) => {
+        calls.push(['notice', label, data.ids])
+        return of(cleanup)
+      },
+    },
+    save: RegistriesPage.prototype.save,
+    notify: RegistriesPage.prototype.notify,
+  }
+  return { instance, calls }
 }
 
-test('registry preview grants no trust, and connection sends only the approved keys', async () => {
-  const calls = []
-  const info = {
-    name: 'Registry',
-    trustSigners: {
-      publisher: { name: 'Publisher', keys: ['approved'], gpgExports: [] },
-      other: { name: 'Other publisher', keys: ['unapproved'], gpgExports: [] },
-    },
+test('a registry that publishes no StartOS updates cannot provide them', async () => {
+  const { instance, calls } = registriesFixture({ publishes: false })
+  await RegistriesPage.prototype.useForUpdates.call(
+    instance,
+    'https://other.test',
+  )
+  assert.deepEqual(calls, [
+    ['check', 'https://other.test'],
+    ['alert', 'This registry does not publish StartOS updates.'],
+  ])
+})
+
+test('another registry provides StartOS updates only after a warning, and reports the keys it trusted', async () => {
+  for (const confirm of [false, true]) {
+    const { instance, calls } = registriesFixture({ confirm })
+    await RegistriesPage.prototype.useForUpdates.call(
+      instance,
+      'https://other.test',
+    )
+    assert.deepEqual(calls, [
+      ['check', 'https://other.test'],
+      ['confirm', 'Warning'],
+      ...(confirm
+        ? [
+            ['set', 'https://other.test'],
+            ['notice', 'StartOS updates', ['key']],
+          ]
+        : []),
+    ])
   }
+  const { instance, calls } = registriesFixture()
+  await RegistriesPage.prototype.useForUpdates.call(
+    instance,
+    'https://registry.test',
+  )
+  assert.deepEqual(calls, [
+    ['check', 'https://registry.test'],
+    ['set', 'https://registry.test'],
+    ['notice', 'StartOS updates', ['key']],
+  ])
+})
+
+test('the update registry cannot be removed', async () => {
+  const { instance, calls } = registriesFixture()
+  await RegistriesPage.prototype.remove.call(instance, {
+    url: 'https://registry.test',
+    os: true,
+  })
+  assert.deepEqual(calls, [
+    [
+      'alert',
+      'This registry provides StartOS updates. Choose another registry for StartOS updates before removing it.',
+    ],
+  ])
+})
+
+test('removing a registry offers to remove only the keys it left unoffered', async () => {
+  for (const [orphaned, cleanup] of [
+    [[], true],
+    [['first', 'second'], false],
+    [['first', 'second'], true],
+  ]) {
+    const { instance, calls } = registriesFixture({ orphaned, cleanup })
+    await RegistriesPage.prototype.remove.call(instance, {
+      url: 'https://other.test',
+      os: false,
+    })
+    assert.deepEqual(calls, [
+      ['confirm', 'Remove registry?'],
+      ['remove', 'https://other.test'],
+      ...(orphaned.length ? [['notice', 'Remove unused keys?', orphaned]] : []),
+      ...(orphaned.length && cleanup
+        ? orphaned.map(id => ['remove key', id])
+        : []),
+    ])
+  }
+})
+
+test('connecting a registry asks for no approvals and resolves to the keys it trusted', async () => {
+  const calls = []
   const instance = {
     api: {
       rpc: {
         server: {
           trustedKeys: {
-            registryPreview: async params => {
-              calls.push(['preview', params])
-              return info
-            },
             connectRegistry: async params => {
-              calls.push(['connect', params])
+              calls.push(params)
+              return ['added']
             },
           },
         },
@@ -1926,22 +1905,13 @@ test('registry preview grants no trust, and connection sends only the approved k
     },
   }
   assert.deepEqual(
-    await MarketplaceService.prototype.previewRegistry.call(
+    await MarketplaceService.prototype.connectRegistry.call(
       instance,
       'https://registry.test',
     ),
-    { url: 'https://registry.test', info },
+    ['added'],
   )
-  assert.deepEqual(calls, [['preview', { url: 'https://registry.test' }]])
-  await MarketplaceService.prototype.add.call(
-    instance,
-    'https://registry.test',
-    ['approved'],
-  )
-  assert.deepEqual(calls[1], [
-    'connect',
-    { url: 'https://registry.test', name: null, approvedKeys: ['approved'] },
-  ])
+  assert.deepEqual(calls, [{ url: 'https://registry.test', name: null }])
 })
 
 test('a late registry metadata response cannot restore a removed registry', async t => {
@@ -2000,13 +1970,18 @@ test('a late registry metadata response cannot restore a removed registry', asyn
   assert.deepEqual(writes, [])
 })
 
-test('registry removal uses the authoritative endpoint and clears a matching selected registry', async () => {
+test('registry removal uses the authoritative endpoint, clears a matching selected registry, and reports unoffered keys', async () => {
   const calls = []
   const instance = {
     api: {
       rpc: {
         server: {
-          trustedKeys: { removeRegistry: async params => calls.push(params) },
+          trustedKeys: {
+            removeRegistry: async params => {
+              calls.push(params)
+              return ['orphaned']
+            },
+          },
         },
       },
     },
@@ -2015,9 +1990,12 @@ test('registry removal uses the authoritative endpoint and clears a matching sel
       set: (...args) => calls.push(args),
     },
   }
-  await MarketplaceService.prototype.delete.call(
-    instance,
-    'https://registry.test',
+  assert.deepEqual(
+    await MarketplaceService.prototype.removeRegistry.call(
+      instance,
+      'https://registry.test',
+    ),
+    ['orphaned'],
   )
   assert.deepEqual(calls, [
     { url: 'https://registry.test' },

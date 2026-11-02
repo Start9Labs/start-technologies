@@ -23,7 +23,7 @@ start-registry admin signer list
 start-registry info set-trust-signers <SIGNER_ID> [SIGNER_ID...]
 ```
 
-Run `start-registry info set-trust-signers` without IDs to clear the selection. Registries start with no proposed signers. `registry.info` exposes the selected signer IDs and their complete signer records as `trustSigners`, including public keys and preserved GPG exports. StartOS asks users to approve package trust when connecting. Keys added later are imported disabled when users visit the registry, with a dialog linking to **Manage Trust**. Existing saved registries can fetch the latest proposal from **System → Manage Registries → Review keys**. These proposals do not grant OS-update trust.
+Run `start-registry info set-trust-signers` without IDs to clear the selection. Registries start with no proposed signers. `registry.info` exposes the selected signer IDs and their complete signer records as `trustSigners`, including public keys and preserved GPG exports. Connecting a registry in StartOS trusts the offered keys it does not already have for packages. Keys added later are imported untrusted when users visit the registry, with a dialog linking to **Trusted Keys**. Choosing the registry for StartOS updates trusts its offered keys for StartOS updates.
 
 ## Binary layout
 

@@ -4,7 +4,7 @@ import { auth, T } from '@start9labs/start-core'
 
 export type IdentityKey = Pick<
   T.TrustedKey,
-  'name' | 'publicKey' | 'gpgExports'
+  'name' | 'publicKey' | 'gpgExports' | 'contact'
 >
 
 export function registrySigningKeys(
@@ -18,10 +18,35 @@ export function registrySigningKeys(
           name: signer.name,
           publicKey: id,
           gpgExports: signer.gpgExports,
+          contact: signer.contact,
         },
       ]),
     ),
   )
+}
+
+export function keyType({
+  gpgExports,
+}: Pick<T.TrustedKey, 'gpgExports'>): 'GPG' | 'Ed25519' {
+  return gpgExports.length ? 'GPG' : 'Ed25519'
+}
+
+/** GPG user IDs, or the email addresses registries publish for a plain key. */
+export function keyIdentities(key: IdentityKey): string[] {
+  const canonical = auth.normalizeDer64(key.publicKey)
+  const userIds = key.gpgExports.flatMap(
+    exported => exported.identities[canonical] ?? [],
+  )
+
+  return [
+    ...new Set(
+      userIds.length
+        ? userIds
+        : key.contact.flatMap(contact =>
+            'email' in contact ? [contact.email] : [],
+          ),
+    ),
+  ]
 }
 
 /** Fingerprints use OpenPGP packets or SHA-256 over canonical SPKI. */
@@ -41,13 +66,16 @@ export function signingKeyIdentity(publicKey: string, key?: IdentityKey) {
       names.add(userId)
     }
   }
+  for (const contact of key?.contact ?? []) {
+    if ('email' in contact) emails.add(contact.email)
+  }
   const fingerprints = new Set(
     key?.gpgExports.flatMap(
       exported => exported.keyFingerprints[canonical] ?? [],
     ),
   )
   return {
-    name: [...names].join(', ') || key?.name || null,
+    name: key?.name || [...names].join(', ') || null,
     emails: [...emails],
     fingerprints: fingerprints.size
       ? [...fingerprints].map(value =>

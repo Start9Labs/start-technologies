@@ -18,6 +18,7 @@ import {
 import { TuiButtonLoading, TuiTextarea } from '@taiga-ui/kit'
 import { TuiForm, TuiHeader } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
+import { T } from '@start9labs/start-core'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { parsePublicKeys } from 'src/app/utils/public-keys'
 
@@ -91,7 +92,8 @@ export class AddTrustedKeyDialog {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
 
-  protected readonly context = injectContext<TuiDialogContext<void>>()
+  protected readonly context =
+    injectContext<TuiDialogContext<T.AddTrustedKeyRes>>()
   protected readonly saving = signal(false)
   protected readonly form = inject(NonNullableFormBuilder).group({
     name: ['', [Validators.required, Validators.pattern(/\S/)]],
@@ -113,15 +115,15 @@ export class AddTrustedKeyDialog {
     if (this.form.invalid || this.saving()) return
     this.saving.set(true)
     const { name, publicKeys } = this.form.getRawValue()
-    const saved = await this.tasks.run(async () => {
-      await this.api.rpc.server.trustedKeys.add({
-        name,
-        publicKeys: parsePublicKeys(publicKeys),
-        context: 'marketplace',
-      })
+    await this.tasks.run(async () => {
+      this.context.completeWith(
+        await this.api.rpc.server.trustedKeys.add({
+          name,
+          publicKeys: parsePublicKeys(publicKeys),
+        }),
+      )
     }, 'Saving')
     this.saving.set(false)
-    if (saved) this.context.$implicit.complete()
   }
 }
 

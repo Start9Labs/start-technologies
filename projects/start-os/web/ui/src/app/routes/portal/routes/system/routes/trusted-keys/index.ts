@@ -1,24 +1,28 @@
-import { KeyValue, KeyValuePipe } from '@angular/common'
-import { Component, inject, signal } from '@angular/core'
-import { FormsModule, NgModel } from '@angular/forms'
+import { Component, computed, inject, input } from '@angular/core'
 import { RouterLink } from '@angular/router'
-import { KeyIdentityPipe } from '@start9labs/marketplace'
+import { keyIdentities, keyType } from '@start9labs/marketplace'
 import {
   DialogService,
   DocsLinkDirective,
+  i18nKey,
   i18nPipe,
-  TaskService,
+  sameUrl,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import { TuiButton, TuiDataList, TuiDropdown, TuiLoader } from '@taiga-ui/core'
-import { TuiSwitch } from '@taiga-ui/kit'
+import {
+  TuiButton,
+  TuiDataList,
+  TuiDropdown,
+  TuiIcon,
+  TuiLoader,
+  TuiTitle,
+} from '@taiga-ui/core'
+import { TuiChip } from '@taiga-ui/kit'
 import { defaultIfEmpty, firstValueFrom } from 'rxjs'
-import { EDIT_TRUSTED_KEY } from 'src/app/components/trusted-keys/edit'
+import { TRUSTED_KEY_DETAILS } from 'src/app/components/trusted-keys/details'
 import { ADD_TRUSTED_KEY } from 'src/app/components/trusted-keys/form'
-import { KeyIdentity } from 'src/app/components/trusted-keys/identity'
-import { RegistryOrigin } from 'src/app/components/trusted-keys/origin'
+import { TRUSTED_KEYS_NOTICE } from 'src/app/components/trusted-keys/notice'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
-import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { TitleDirective } from 'src/app/services/title.service'
 import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
 
@@ -49,71 +53,72 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
           {{ 'Add key' | i18n }}
         </button>
       </header>
-      <p>
-        {{
-          'System keys and keys listed by a connected registry can only be disabled.'
-            | i18n
-        }}
-      </p>
-      @if (trust.keys(); as keys) {
-        <table [appTable]="['Name', 'Origin', 'Packages', 'OS Updates', null]">
-          @for (entry of keys | keyvalue: compareKeys; track entry.key) {
-            @let identity = entry.value | keyIdentity;
-            <tr>
-              <td><span [appKeyIdentity]="entry.value"></span></td>
-              <td [attr.data-label]="'Origin' | i18n">
-                @switch (entry.value.origin) {
-                  @case ('system') {
-                    {{ 'System' | i18n }}
+      @if (filter(); as filter) {
+        <a
+          tuiChip
+          size="s"
+          iconEnd="@tui.x"
+          [routerLink]="[]"
+          [queryParams]="{ registry: null }"
+        >
+          {{ 'Offered by' | i18n }} {{ filter.name }}
+        </a>
+      }
+      @if (rows(); as rows) {
+        <table
+          [appTable]="[
+            'Key',
+            'Type',
+            'Packages',
+            'StartOS updates',
+            'Registries',
+            null,
+          ]"
+        >
+          @for (row of rows; track row.id) {
+            <tr
+              tabindex="0"
+              (click)="details(row.id)"
+              (keydown.enter)="details(row.id)"
+            >
+              <td>
+                <span tuiTitle>
+                  <b>{{ row.key.name }}</b>
+                  @if (row.identities[0]; as identity) {
+                    <span tuiSubtitle>
+                      {{ identity }}
+                      @if (row.identities.length > 1) {
+                        +{{ row.identities.length - 1 }}
+                      }
+                    </span>
                   }
-                  @case ('manual') {
-                    {{ 'Manually Added' | i18n }}
-                  }
-                  @default {
-                    <div
-                      [appRegistryOrigin]="entry.value.origin"
-                      [identity]="entry.value.originRegistry"
-                    ></div>
-                  }
+                </span>
+              </td>
+              <td [attr.data-label]="'Type' | i18n">{{ row.type }}</td>
+              <td [attr.data-label]="'Packages' | i18n">
+                <tui-icon
+                  [icon]="row.key.marketplace ? '@tui.check' : '@tui.x'"
+                  [attr.aria-label]="
+                    (row.key.marketplace ? 'Trusted' : 'Not trusted') | i18n
+                  "
+                />
+              </td>
+              <td [attr.data-label]="'StartOS updates' | i18n">
+                <tui-icon
+                  [icon]="row.key.os ? '@tui.check' : '@tui.x'"
+                  [attr.aria-label]="
+                    (row.key.os ? 'Trusted' : 'Not trusted') | i18n
+                  "
+                />
+              </td>
+              <td [attr.data-label]="'Registries' | i18n">
+                @for (offer of row.offers; track offer.url) {
+                  <div>{{ offer.name }}</div>
+                } @empty {
+                  —
                 }
               </td>
-              <td [attr.data-label]="'Packages' | i18n">
-                <input
-                  #packages="ngModel"
-                  tuiSwitch
-                  type="checkbox"
-                  [attr.aria-label]="
-                    ('Packages' | i18n) + ' — ' + identity.name
-                  "
-                  [ngModel]="entry.value.marketplace"
-                  [disabled]="saving()"
-                  (ngModelChange)="
-                    update(
-                      entry.key,
-                      entry.value,
-                      'marketplace',
-                      $event,
-                      packages
-                    )
-                  "
-                />
-              </td>
-              <td [attr.data-label]="'OS Updates' | i18n">
-                <input
-                  #os="ngModel"
-                  tuiSwitch
-                  type="checkbox"
-                  [attr.aria-label]="
-                    ('OS Updates' | i18n) + ' — ' + identity.name
-                  "
-                  [ngModel]="entry.value.os"
-                  [disabled]="saving()"
-                  (ngModelChange)="
-                    update(entry.key, entry.value, 'os', $event, os)
-                  "
-                />
-              </td>
-              <td>
+              <td (click.stop)="(0)" (keydown.enter.stop)="(0)">
                 <button
                   tuiIconButton
                   tuiDropdown
@@ -122,25 +127,58 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
                   size="s"
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"
-                  [disabled]="saving()"
+                  [disabled]="trust.saving()"
                 >
-                  {{ 'More' | i18n }} {{ identity.name }}
+                  {{ 'More' | i18n }} {{ row.key.name }}
                   <tui-data-list *tuiDropdown="let close" (click)="close()">
-                    <button tuiOption (click)="edit(entry.key, entry.value)">
-                      {{ 'Edit' | i18n }}
+                    <button tuiOption (click)="trust.rename(row.id, row.key)">
+                      {{ 'Edit label' | i18n }}
                     </button>
-                    @if (entry.value.removable) {
+                    <button
+                      tuiOption
+                      (click)="
+                        trust.trust(
+                          row.id,
+                          row.key,
+                          'marketplace',
+                          !row.key.marketplace
+                        )
+                      "
+                    >
+                      {{
+                        (row.key.marketplace
+                          ? 'Distrust for packages'
+                          : 'Trust for packages'
+                        ) | i18n
+                      }}
+                    </button>
+                    <button
+                      tuiOption
+                      (click)="trust.trust(row.id, row.key, 'os', !row.key.os)"
+                    >
+                      {{
+                        (row.key.os
+                          ? 'Distrust for StartOS updates'
+                          : 'Trust for StartOS updates'
+                        ) | i18n
+                      }}
+                    </button>
+                    @if (row.key.removable) {
                       <button
                         tuiOption
                         class="g-negative"
-                        (click)="remove(entry.key)"
+                        (click)="trust.remove(row.id)"
                       >
-                        {{ 'Delete' | i18n }}
+                        {{ 'Remove' | i18n }}
                       </button>
                     }
                   </tui-data-list>
                 </button>
               </td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="6">{{ 'No keys' | i18n }}</td>
             </tr>
           }
         </table>
@@ -153,122 +191,132 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
     header > button {
       margin-inline-start: auto;
     }
-    section > p {
-      margin: 1rem;
-      color: var(--tui-text-secondary);
+
+    [tuiChip] {
+      margin: 0 0 1rem;
     }
-    td:first-child {
-      max-inline-size: 26rem;
+
+    tr {
+      cursor: pointer;
     }
-    td:nth-child(2) {
-      overflow-wrap: anywhere;
+
+    tui-icon {
+      font-size: 1rem;
     }
+
     td:last-child {
       text-align: end;
     }
+
     :host-context(tui-root._mobile) {
       td[data-label] {
         grid-column: 1;
+
         &::before {
           content: attr(data-label) ': ';
           color: var(--tui-text-secondary);
         }
       }
+
       td:last-child {
-        grid-area: 1 / 2 / 5;
+        grid-area: 1 / 2 / 6;
         align-content: center;
       }
     }
   `,
   imports: [
-    FormsModule,
-    KeyIdentity,
-    KeyIdentityPipe,
-    RegistryOrigin,
-    KeyValuePipe,
-    RouterLink,
     DocsLinkDirective,
+    RouterLink,
     TableComponent,
     TitleDirective,
     TuiButton,
+    TuiChip,
     TuiDataList,
     TuiDropdown,
+    TuiIcon,
     TuiLoader,
-    TuiSwitch,
+    TuiTitle,
     i18nPipe,
   ],
 })
 export default class TrustedKeys {
-  private readonly api = inject(ApiService)
   private readonly dialogs = inject(DialogService)
-  private readonly tasks = inject(TaskService)
 
   protected readonly trust = inject(TrustedKeysService)
-  protected readonly saving = signal(false)
 
-  protected compareKeys(
-    a: KeyValue<string, T.TrustedKey>,
-    b: KeyValue<string, T.TrustedKey>,
-  ): number {
-    return (
-      Number(a.value.removable) - Number(b.value.removable) ||
-      (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
-    )
-  }
+  public readonly registry = input<string>()
 
-  protected add(): void {
-    this.dialogs.openComponent(ADD_TRUSTED_KEY).subscribe()
-  }
+  protected readonly filter = computed((url = this.registry()) =>
+    url
+      ? Object.values(this.trust.offers())
+          .flat()
+          .find(offer => sameUrl(offer.url, url)) || { url, name: url }
+      : null,
+  )
 
-  protected edit(id: string, key: T.TrustedKey): void {
+  protected readonly rows = computed((keys = this.trust.keys()) => {
+    if (!keys) return undefined
+
+    const offers = this.trust.offers()
+    const filter = this.filter()
+
+    return Object.entries(keys)
+      .map(([id, key]) => ({
+        id,
+        key,
+        type: keyType(key),
+        identities: keyIdentities(key),
+        offers: offers[id] || [],
+      }))
+      .filter(
+        row =>
+          !filter || row.offers.some(offer => sameUrl(offer.url, filter.url)),
+      )
+      .sort((a, b) => a.key.name.localeCompare(b.key.name))
+  })
+
+  protected details(id: string): void {
     this.dialogs
-      .openComponent(EDIT_TRUSTED_KEY, { data: { id, key } })
+      .openComponent(TRUSTED_KEY_DETAILS, { data: id, size: 'm' })
       .subscribe()
   }
 
-  protected async update(
-    id: string,
-    key: T.TrustedKey,
-    context: 'marketplace' | 'os',
-    enabled: boolean,
-    control: NgModel,
-  ): Promise<void> {
-    this.saving.set(true)
-    const saved = await this.tasks.run(
-      () =>
-        this.api.rpc.server.trustedKeys.update({
-          id,
-          name: key.name,
-          marketplace: key.marketplace,
-          os: key.os,
-          [context]: enabled,
-        }),
-      'Saving',
+  protected async add(): Promise<void> {
+    const res = await firstValueFrom(
+      this.dialogs
+        .openComponent<T.AddTrustedKeyRes | null>(ADD_TRUSTED_KEY)
+        .pipe(defaultIfEmpty(null)),
     )
-    if (!saved) control.reset(key[context])
-    this.saving.set(false)
+
+    if (res?.added.length) {
+      await this.notify(
+        'Key added',
+        'These keys are now trusted for packages.',
+        res.added,
+      )
+    }
+
+    if (res?.existing.length) {
+      await this.notify(
+        'Key already present',
+        'These keys were already present. Their trust is unchanged, and any new GPG identities were added.',
+        res.existing,
+      )
+    }
   }
 
-  protected async remove(id: string): Promise<void> {
-    const confirmed = await firstValueFrom(
+  private notify(
+    label: i18nKey,
+    message: i18nKey,
+    ids: readonly string[],
+  ): Promise<unknown> {
+    return firstValueFrom(
       this.dialogs
-        .openConfirm({
-          label: 'Delete key?',
-          data: {
-            content:
-              'Deleting this key removes it from both package and OS-update trust.',
-            yes: 'Delete',
-            no: 'Cancel',
-          },
+        .openComponent<boolean>(TRUSTED_KEYS_NOTICE, {
+          label,
+          data: { message, ids, yes: 'Ok' },
         })
         .pipe(defaultIfEmpty(false)),
     )
-    if (!confirmed) return
-    this.saving.set(true)
-    await this.tasks.run(
-      () => this.api.rpc.server.trustedKeys.remove({ id }),
-      'Deleting',
-    )
-    this.saving.set(false)
   }
 }

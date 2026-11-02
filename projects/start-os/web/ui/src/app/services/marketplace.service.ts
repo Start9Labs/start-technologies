@@ -300,35 +300,44 @@ export class MarketplaceService extends AbstractMarketplaceService {
     this.storage.set('selectedRegistry', url)
   }
 
-  async previewRegistry(rawUrl: string) {
-    const url = registryUrl(rawUrl)
-    const info = await this.api.rpc.server.trustedKeys.registryPreview({ url })
-    return { url, info }
-  }
-
   async refreshRegistry(rawUrl: string): Promise<string[]> {
     return this.api.rpc.server.trustedKeys.refreshRegistry({
       url: registryUrl(rawUrl),
     })
   }
 
-  async add(rawUrl: string, approvedKeys: string[] = []): Promise<string> {
+  /** Resolves to the keys it newly trusted for packages. */
+  async connectRegistry(url: string): Promise<string[]> {
+    return this.api.rpc.server.trustedKeys.connectRegistry({ url, name: null })
+  }
+
+  async add(rawUrl: string): Promise<string> {
     const url = registryUrl(rawUrl)
-    await this.api.rpc.server.trustedKeys.connectRegistry({
-      url,
-      name: null,
-      approvedKeys,
-    })
+    await this.connectRegistry(url)
     return url
   }
 
-  async delete(url: string): Promise<void> {
-    await this.api.rpc.server.trustedKeys.removeRegistry({ url })
-
+  /** Resolves to the registry-added keys no connected registry still offers. */
+  async removeRegistry(url: string): Promise<string[]> {
+    const orphaned = await this.api.rpc.server.trustedKeys.removeRegistry({
+      url,
+    })
     const selected = this.storage.get<string>('selectedRegistry')
+
     if (selected && sameUrl(selected, url)) {
       this.storage.set('selectedRegistry', null)
     }
+
+    return orphaned
+  }
+
+  async delete(url: string): Promise<void> {
+    await this.removeRegistry(url)
+  }
+
+  /** Resolves to the keys it newly trusted for StartOS updates. */
+  async setOsRegistry(url: string): Promise<string[]> {
+    return this.api.rpc.server.trustedKeys.setOsRegistry({ url })
   }
 }
 

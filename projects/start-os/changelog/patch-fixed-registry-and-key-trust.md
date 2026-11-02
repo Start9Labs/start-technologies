@@ -2,5 +2,6 @@
 release-notes: false
 ---
 
-- Manage registries in System settings and review their proposed package-signing keys before connecting. Later additions are imported disabled and prompt a link to Manage Trust when visiting the registry. Manage Trust shows each key's GPG identity or label, fingerprint, origin, and independent package and OS-update permissions. System keys and keys listed by connected registries can be disabled but not deleted.
-- Marketplace package details identify enabled package signers by GPG name and email, falling back to known disabled signers only when no enabled signer matches. Unknown signers are hidden. Untrusted-package warnings link to Manage Trust.
+- Registries are listed in the Marketplace sidebar and managed under **System → Registries**, where you add or remove registries and choose which one provides StartOS updates. Adding a registry trusts its new keys for packages; keys it offers later are imported untrusted and prompt a review when you visit it.
+- **System → Trusted Keys** shows each key's label, identities, type, package and StartOS-update trust, the registries offering it, and who added it and when. At least one key stays trusted for StartOS updates, and keys a connected registry offers cannot be removed.
+- Marketplace package details identify trusted package signers by label and email, falling back to known untrusted signers only when no trusted signer matches. Unknown signers are hidden. Untrusted-package warnings link to Trusted Keys.

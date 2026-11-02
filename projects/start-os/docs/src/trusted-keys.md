@@ -1,32 +1,38 @@
-# Manage Trust
+# Trusted Keys
 
-Manage Trust lists the individual public keys whose signatures your server accepts for packages and OS updates. Package trust and OS-update trust are independent of each other and of the registry hosting the software.
+Trusted Keys lists the individual public keys whose signatures your server accepts for packages and StartOS updates. Package trust and StartOS-update trust are independent of each other and of the registry hosting the software.
 
-## Manage Keys
+## Viewing Keys
 
-Open **System → Manage Trust**, below **Manage Registries**. Each row shows the key's self-certified GPG name and email addresses, or a label when no GPG identity is available, together with its fingerprint and origin. GPG keys show their complete OpenPGP fingerprints; PEM keys show a SHA-256 fingerprint of their canonical public-key encoding. Open **Edit** from a row's menu to inspect or copy the full public key.
+Open **System → Trusted Keys**. Each row shows a key's label and first identity, its type (GPG or Ed25519), whether it is trusted for **Packages** and for **StartOS updates**, and the connected registries that offer it. An identity is a GPG user ID, or for a plain Ed25519 key the email address its registry publishes.
 
-The **Origin** column shows the adding registry's title and logo, **System** for built-in Start9 keys, or **Manually Added**. Registry provenance retains the title and logo recorded at first import, including after removal. The **Packages** and **OS Updates** switches control which signatures the server accepts. Enabling package trust does not enable OS-update trust.
+Click a row for the key's details: every identity, who added it and when, the registries offering it, its fingerprint, and its full public key, which you can copy. GPG keys show their complete OpenPGP fingerprints; PEM keys show a SHA-256 fingerprint of their canonical public-key encoding. A registry's **Manage keys** action in **System → Registries** opens Trusted Keys filtered to the keys that registry offers.
 
-System keys and keys listed by a connected registry cannot be deleted. Disable their trust switches to stop accepting their signatures. Other keys can be deleted from the row's overflow menu. Removing a registry leaves its keys and their permissions unchanged; keys become deletable when no connected registry lists them.
+## Changing Trust
 
-New installations include the drbonez, matthill, and Start9 signing keys, enabled in both contexts. The Alpha and community-registry build keys start disabled in both contexts. Upgrades preserve existing trust selections, including intentionally disabled keys.
+A key's menu and its details offer **Edit label**, trust or distrust for packages, trust or distrust for StartOS updates, and **Remove**. Trusting a key for StartOS updates asks for confirmation. At least one key must stay trusted for StartOS updates. Keys offered by a connected registry cannot be removed; distrust them instead.
 
-To import keys, click **Add key**, enter a **Label**, and paste one or more Ed25519 public keys into **Public keys**. The form accepts PEM public keys and armored GPG public-key exports, including a mixture of both formats. Each signing key gets its own row, with package trust enabled and OS-update trust disabled. Reimporting an existing key preserves its permissions.
+New installations include the drbonez, matthill, and Start9 signing keys, trusted for packages and StartOS updates. The Alpha and community-registry build keys start untrusted. Upgrades preserve existing trust selections, including intentionally untrusted keys.
 
-GPG imports retain the complete original public export, including user IDs, subkeys, expiry, and revocation information. Signing trust uses Ed25519 primary keys and Ed25519 signing subkeys; encryption keys and keys revoked in the pasted export are excluded. Revocation signatures are verified during import. Trust switches govern imported keys independently of GPG certificate lifetimes. Exports without a supported signing key are rejected.
+## Adding Keys
+
+Click **Add key**, enter a **Label**, and paste one or more Ed25519 public keys into **Public keys**. The form accepts PEM public keys and armored GPG public-key exports, including a mixture of both formats. Each signing key gets its own row, trusted for packages only. Adding a key that is already present keeps its label and trust and merges any new GPG identities.
+
+GPG imports retain the complete original public export, including user IDs, subkeys, expiry, and revocation information. Signing trust uses Ed25519 primary keys and Ed25519 signing subkeys; encryption keys and keys revoked in the pasted export are excluded. Revocation signatures are verified during import. Trust selections govern imported keys independently of GPG certificate lifetimes. Exports without a supported signing key are rejected.
 
 Confirm public keys through a source you already trust. A label or self-certified GPG identity does not establish that a key belongs to the person or organization it names.
 
-## Registry Trust Requests
+## Keys From Registries
 
-Open **System → Manage Registries** to add or remove registries. When adding a registry, StartOS shows the keys it asks you to trust. Review the keys before confirming. Approved keys appear in Manage Trust with **Packages** enabled; this does not enable **OS Updates**.
+A registry chooses which signers to offer and supplies their public keys, GPG identities, and contact details. When you add a registry, the keys it offers that your server does not already have are trusted for packages, and StartOS lists them. Keys your server already has keep their trust. A GPG key a registry adds is labeled with its GPG identity; when another registry offers the same key, its identities are merged and its label is kept.
 
-A registry chooses which signer IDs to propose and supplies their public keys and GPG identity information. When visiting a connected registry, StartOS checks for additional proposed keys. Newly imported keys appear in Manage Trust with both trust switches disabled. A dialog offers **Manage Trust** or **Dismiss**; dismissing leaves the keys disabled. Existing keys keep their permissions. Use **Review keys** beside a registry to fetch its latest proposal and open Manage Trust.
+When you visit a connected registry, StartOS checks for keys it offers that your server does not have. They are added untrusted, and a dialog offers to open Trusted Keys.
+
+Choosing a registry for StartOS updates trusts the keys it offers for StartOS updates. When you remove a registry, StartOS offers to remove the keys it added that no connected registry still offers. See [Marketplace](marketplace.md#managing-registries).
 
 ## Installing Software
 
-Package details show a **Signed by** row with the GPG names and email addresses or saved labels of enabled package signers. When none match, it shows known disabled signers instead. Unknown signers are omitted, and the row is hidden when no known signer matches. The trust switches determine whether signatures are accepted. Marketplace installation is blocked when none match; the warning links to Manage Trust. [Sideloading](sideloading.md) allows an untrusted package after an explicit risk confirmation. OS updates from the UI require a signature from an enabled OS-update key.
+Package details show a **Signed by** row with the labels and email addresses of package signers you trust. When none match, it shows known untrusted signers instead. Unknown signers are omitted, and the row is hidden when no known signer matches. Marketplace installation is blocked when no trusted signer matches; the warning links to Trusted Keys. [Sideloading](sideloading.md) allows an untrusted package after an explicit risk confirmation. OS updates from the UI require a signature from a key trusted for StartOS updates.
 
 CLI package installs and OS updates also require trusted signers by default. To deliberately accept an untrusted signer, use `--trust`:
 
@@ -41,7 +47,7 @@ start-cli server update https://registry.start9.com --trust
 
 Diagnostic mode cannot access the saved trust list. Diagnostic updates require a built-in Start9 key unless explicitly overridden with `start-cli diagnostic update --trust`.
 
-The existing OS-signer CLI commands continue to manage OS-update trust:
+The existing OS-signer CLI commands continue to manage StartOS-update trust:
 
 ```sh
 start-cli server update-signers list
@@ -51,4 +57,4 @@ start-cli server update-signers update "$(cat signer.pem)" --label "Renamed sign
 start-cli server update-signers remove "$(cat signer.pem)"
 ```
 
-Keys accept PEM or Der64 (padded standard Base64 DER); `list` returns Der64. Use Manage Trust to change package trust independently.
+Keys accept PEM or Der64 (padded standard Base64 DER); `list` returns Der64. Use Trusted Keys to change package trust independently.

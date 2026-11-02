@@ -40,7 +40,7 @@ function mockService(
   }
 }
 
-function mockSystemKey(
+function mockStart9Key(
   name: string,
   publicKey: string,
   userIds: string[],
@@ -49,8 +49,8 @@ function mockSystemKey(
 ): T.TrustedKey {
   return {
     name,
-    origin: 'system',
-    originRegistry: null,
+    origin: 'https://registry.start9.com',
+    originRegistry: { name: 'Start9 Registry', icon: null },
     publicKey,
     gpgExports: userIds.length
       ? [
@@ -63,6 +63,8 @@ function mockSystemKey(
           },
         ]
       : [],
+    contact: [],
+    addedAt: '2026-06-02T17:00:00.000Z',
     removable: false,
     marketplace: enabled,
     os: enabled,
@@ -85,7 +87,7 @@ export const mockPatchData: DataModel = {
     registryKeys: {},
     trustedKeys: {
       'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=':
-        mockSystemKey(
+        mockStart9Key(
           'drbonez',
           'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
           ['Aiden McClelland <aiden@start9.com>'],
@@ -93,7 +95,7 @@ export const mockPatchData: DataModel = {
           'b416c0e67b9df3f1718480ae7cffda41ca66056a',
         ),
       'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=':
-        mockSystemKey(
+        mockStart9Key(
           'matthill',
           'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
           ['Matt Hill <matthill@start9.com>'],
@@ -101,7 +103,7 @@ export const mockPatchData: DataModel = {
           'a969c8eba8b13613d2568a85ee395832e45a6664',
         ),
       'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=':
-        mockSystemKey(
+        mockStart9Key(
           'Start9',
           'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=',
           ['Start9 <security@start9.com>'],
@@ -109,14 +111,14 @@ export const mockPatchData: DataModel = {
           '5456dbff1b9df905041fa7765259adfc2d63c217',
         ),
       'MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=':
-        mockSystemKey(
+        mockStart9Key(
           'Start9 Alpha',
           'MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=',
           [],
           false,
         ),
       'MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=':
-        mockSystemKey(
+        mockStart9Key(
           'Community builds',
           'MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=',
           [],
