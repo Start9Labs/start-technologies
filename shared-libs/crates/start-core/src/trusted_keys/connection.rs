@@ -343,6 +343,7 @@ mod tests {
                 .unwrap();
         let mut public = Public::init(&account, false, None, None).unwrap();
         public.ui = imbl_value::json!({ "registries": {} });
+        mutate_public_keys(&mut public, |_| Ok(())).unwrap();
         public
     }
 
@@ -449,7 +450,10 @@ mod tests {
         entry.marketplace = false;
         entry.os = true;
         let key = entry.public_key.clone();
-        let saved = entry.clone();
+        let expected = TrustedKey {
+            removable: false,
+            ..entry.clone()
+        };
         let url = registry_url("https://registry.example").unwrap();
         let info = RegistryInfo {
             trust_signers: signers([(id.parse().unwrap(), "Other name")]),
@@ -460,7 +464,7 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert_eq!(public.server_info.trusted_keys[&id], saved);
+        assert_eq!(public.server_info.trusted_keys[&id], expected);
         assert_eq!(
             public.server_info.registry_keys["https://registry.example"],
             BTreeSet::from([key])

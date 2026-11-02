@@ -83,6 +83,14 @@ export type ActionId = z.output<typeof schemas.ActionId>
 export type ActionIdInput = z.input<typeof schemas.ActionId>
 export type ActionResultV0 = z.output<typeof schemas.ActionResultV0>
 export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
+export type AddTrustedKeyParamsInput = z.input<
+  typeof schemas.AddTrustedKeyParams
+>
+
+/**
+ * Keys an import added, and keys it found already present.
+ */
+export type AddTrustedKeyRes = z.output<typeof schemas.AddTrustedKeyRes>
 export type AnySignature = z.output<typeof schemas.AnySignature>
 export type AnySignatureInput = z.input<typeof schemas.AnySignature>
 export type AnyVerifyingKey = z.output<typeof schemas.AnyVerifyingKey>
@@ -104,6 +112,9 @@ export type CheckPortRes = z.output<typeof schemas.CheckPortRes>
  */
 export type CheckPortV6Res = z.output<typeof schemas.CheckPortV6Res>
 export type CifsAddParamsInput = z.input<typeof schemas.CifsAddParams>
+export type ConnectRegistryParamsInput = z.input<
+  typeof schemas.ConnectRegistryParams
+>
 export type ContactInfo = z.output<typeof schemas.ContactInfo>
 export type ContactInfoInput = z.input<typeof schemas.ContactInfo>
 export type ContainerId = z.output<typeof schemas.ContainerId>
@@ -247,9 +258,6 @@ export type QueryDnsRes = z.output<typeof schemas.QueryDnsRes>
 export type RegistryAsset<Commitment> = z.output<
   ReturnType<typeof schemas.RegistryAsset<z.ZodType<Commitment, Commitment>>>
 >
-export type RegistryPreviewParamsInput = z.input<
-  typeof schemas.RegistryPreviewParams
->
 export type RegistryUrlParamsInput = z.input<typeof schemas.RegistryUrlParams>
 export type RemoveAssetParamsInput = z.input<typeof schemas.RemoveAssetParams>
 export type RemoveCategoryParamsInput = z.input<
@@ -304,10 +312,12 @@ export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type TermSizeInput = z.input<typeof schemas.TermSize>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TrustCaParamsInput = z.input<typeof schemas.TrustCaParams>
-export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedCa = z.output<typeof schemas.TrustedCa>
 export type TrustedOsUpdateSigner = z.output<
   typeof schemas.TrustedOsUpdateSigner
+>
+export type TrustedRegistryParamsInput = z.input<
+  typeof schemas.TrustedRegistryParams
 >
 export type UiParamsInput = z.input<typeof schemas.UiParams>
 
@@ -358,9 +368,6 @@ export type AddPublicDomainParamsInput = z.input<
   typeof schemas.AddPublicDomainParams
 >
 export type AddSignerParamsInput = z.input<typeof schemas.AddSignerParams>
-export type AddTrustedKeyParamsInput = z.input<
-  typeof schemas.AddTrustedKeyParams
->
 export type AddTunnelParamsInput = z.input<typeof schemas.AddTunnelParams>
 export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type AddressInfo = z.output<typeof schemas.AddressInfo>
@@ -396,9 +403,6 @@ export type CheckPortParamsInput = z.input<typeof schemas.CheckPortParams>
 export type CifsRemoveParamsInput = z.input<typeof schemas.CifsRemoveParams>
 export type CifsUpdateParamsInput = z.input<typeof schemas.CifsUpdateParams>
 export type ClearTaskParamsInput = z.input<typeof schemas.ClearTaskParams>
-export type ConnectRegistryParamsInput = z.input<
-  typeof schemas.ConnectRegistryParams
->
 export type ControlParamsInput = z.input<typeof schemas.ControlParams>
 export type CreateParamsInput = z.input<typeof schemas.CreateParams>
 export type CurrentDependencyKind = z.output<

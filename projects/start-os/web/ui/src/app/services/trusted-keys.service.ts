@@ -48,7 +48,7 @@ export class TrustedKeysService extends MarketplaceTrust {
         return offers
       }),
     ),
-    { initialValue: {} },
+    { initialValue: {} as Record<string, RegistryOffer[]> },
   )
 
   async rename(id: string, key: T.TrustedKey): Promise<void> {

@@ -3,7 +3,7 @@ import { auth, T } from '@start9labs/start-core'
 import { MarketplacePkgBase } from './types'
 import { signingKeyIdentity } from './key-identity'
 
-export type TrustContext = 'marketplace' | 'os'
+export type TrustContext = T.TrustContext
 
 export abstract class MarketplaceTrust {
   abstract readonly keys: Signal<Record<string, T.TrustedKey> | undefined>

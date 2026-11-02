@@ -14,6 +14,16 @@ export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
 export type ActionResultValueInput = z.input<typeof schemas.ActionResultValue>
 export type ActionVisibility = z.output<typeof schemas.ActionVisibility>
 export type ActionVisibilityInput = z.input<typeof schemas.ActionVisibility>
+
+/**
+ * Keys an import added, and keys it found already present.
+ */
+export type AddTrustedKeyRes = z.output<typeof schemas.AddTrustedKeyRes>
+
+/**
+ * Keys an import added, and keys it found already present.
+ */
+export type AddTrustedKeyResInput = z.input<typeof schemas.AddTrustedKeyRes>
 export type Algorithm = z.output<typeof schemas.Algorithm>
 export type AlgorithmInput = z.input<typeof schemas.Algorithm>
 export type AllowedStatuses = z.output<typeof schemas.AllowedStatuses>
@@ -438,6 +448,8 @@ export type TaskSeverity = z.output<typeof schemas.TaskSeverity>
 export type TaskSeverityInput = z.input<typeof schemas.TaskSeverity>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TimeInfoInput = z.input<typeof schemas.TimeInfo>
+export type TrustContext = z.output<typeof schemas.TrustContext>
+export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedOsUpdateSigner = z.output<
   typeof schemas.TrustedOsUpdateSigner
 >

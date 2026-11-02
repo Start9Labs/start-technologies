@@ -99,6 +99,7 @@ pub enum TrustContext {
 }
 
 rpc_toolkit::reflect_ts!(TrustContext);
+rpc_toolkit::ts_export!(TrustContext, namespaces = [""]);
 
 pub fn enabled_keys(keys: &TrustedKeys, context: TrustContext) -> Vec<AnyVerifyingKey> {
     keys.values()
@@ -239,6 +240,7 @@ pub struct AddTrustedKeyRes {
 }
 
 rpc_toolkit::reflect_ts!(AddTrustedKeyRes);
+rpc_toolkit::ts_export!(AddTrustedKeyRes, namespaces = [""]);
 
 fn import_individual_keys(
     keys: &mut TrustedKeys,

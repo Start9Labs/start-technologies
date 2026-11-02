@@ -251,6 +251,53 @@ export const ActionResultValue: z.ZodUnion<
   .meta({
     id: 'ActionResultValue',
   })
+export const AddTrustedKeyParams: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * Ed25519 public keys in PEM or armored GPG format.
+   */
+  publicKeys: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * Ed25519 public keys in PEM or armored GPG format.
+   */
+  publicKeys: z.array(z.string()).meta({
+    description: 'Ed25519 public keys in PEM or armored GPG format.',
+  }),
+}).meta({
+  id: 'AddTrustedKeyParams',
+})
+
+/**
+ * Keys an import added, and keys it found already present.
+ */
+export const AddTrustedKeyRes: z.ZodObject<{
+  /**
+   * Trusted for packages.
+   */
+  added: z.ZodArray<z.ZodString>
+  /**
+   * Trust unchanged; GPG identities merged.
+   */
+  existing: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({
+  /**
+   * Trusted for packages.
+   */
+  added: z.array(z.string()).meta({
+    description: 'Trusted for packages.',
+  }),
+  /**
+   * Trust unchanged; GPG identities merged.
+   */
+  existing: z.array(z.string()).meta({
+    description: 'Trust unchanged; GPG identities merged.',
+  }),
+}).meta({
+  id: 'AddTrustedKeyRes',
+  description: 'Keys an import added, and keys it found already present.',
+})
 export const AnySignature: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'AnySignature',
 })
@@ -376,6 +423,18 @@ export const CifsAddParams: z.ZodObject<{
   password: wire(z.string().nullable().optional(), z.string().nullable()),
 }).meta({
   id: 'CifsAddParams',
+})
+export const ConnectRegistryParams: z.ZodObject<{
+  url: z.ZodString
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  url: z.string(),
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'ConnectRegistryParams',
 })
 export const ContactInfo: z.ZodUnion<
   readonly [
@@ -1142,10 +1201,6 @@ export const RegistryAsset = <Commitment extends z.ZodType>(
   })
   return self
 }
-export const RegistryPreviewParams: z.ZodObject<{ url: z.ZodString }> =
-  /* @__PURE__ */ object({ url: z.string() }).meta({
-    id: 'RegistryPreviewParams',
-  })
 export const RegistryUrlParams: z.ZodObject<{ registry: z.ZodString }> =
   /* @__PURE__ */ object({ registry: z.string() }).meta({
     id: 'RegistryUrlParams',
@@ -1390,10 +1445,6 @@ export const TrustCaParams: z.ZodObject<{ cert: typeof literal_0 }> =
   /* @__PURE__ */ object({ cert: literal_0 }).meta({
     id: 'TrustCaParams',
   })
-export const TrustContext: z.ZodEnum<{ marketplace: 'marketplace'; os: 'os' }> =
-  /* @__PURE__ */ z.enum(['marketplace', 'os']).meta({
-    id: 'TrustContext',
-  })
 export const TrustedCa: z.ZodObject<{
   subject: z.ZodString
   fingerprint: z.ZodString
@@ -1406,6 +1457,10 @@ export const TrustedCa: z.ZodObject<{
 export const TrustedOsUpdateSigner: z.ZodObject<{ label: z.ZodString }> =
   /* @__PURE__ */ object({ label: z.string() }).meta({
     id: 'TrustedOsUpdateSigner',
+  })
+export const TrustedRegistryParams: z.ZodObject<{ url: z.ZodString }> =
+  /* @__PURE__ */ object({ url: z.string() }).meta({
+    id: 'TrustedRegistryParams',
   })
 export const UiParams: z.ZodObject<{
   pointer: z.ZodString
@@ -1764,34 +1819,6 @@ export const AddSignerParams: z.ZodObject<{
 }).meta({
   id: 'AddSignerParams',
 })
-export const AddTrustedKeyParams: z.ZodObject<{
-  name: z.ZodString
-  /**
-   * Ed25519 public keys in PEM or armored GPG format.
-   */
-  publicKeys: z.ZodArray<z.ZodString>
-  /**
-   * New entries are enabled in this context and in the Marketplace.
-   */
-  context: typeof TrustContext
-}> = /* @__PURE__ */ object({
-  name: z.string(),
-  /**
-   * Ed25519 public keys in PEM or armored GPG format.
-   */
-  publicKeys: z.array(z.string()).meta({
-    description: 'Ed25519 public keys in PEM or armored GPG format.',
-  }),
-  /**
-   * New entries are enabled in this context and in the Marketplace.
-   */
-  context: TrustContext.meta({
-    description:
-      'New entries are enabled in this context and in the Marketplace.',
-  }),
-}).meta({
-  id: 'AddTrustedKeyParams',
-})
 export const AddTunnelParams: z.ZodObject<{
   name: z.ZodString
   config: z.ZodString
@@ -2020,29 +2047,6 @@ export const ClearTaskParams: z.ZodObject<{
   force: wire(z.boolean().optional(), z.boolean()),
 }).meta({
   id: 'ClearTaskParams',
-})
-export const ConnectRegistryParams: z.ZodObject<{
-  url: z.ZodString
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * Explicit consent to enable Marketplace trust for these proposed keys.
-   */
-  approvedKeys: z.ZodArray<typeof AnyVerifyingKey>
-}> = /* @__PURE__ */ object({
-  url: z.string(),
-  name: wire(z.string().nullable().optional(), z.string().nullable()),
-  /**
-   * Explicit consent to enable Marketplace trust for these proposed keys.
-   */
-  approvedKeys: z.array(AnyVerifyingKey).meta({
-    description:
-      'Explicit consent to enable Marketplace trust for these proposed keys.',
-  }),
-}).meta({
-  id: 'ConnectRegistryParams',
 })
 export const ControlParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
@@ -6670,27 +6674,27 @@ export const Api = {
           _CHILDREN: {
             add: {
               _PARAMS: /* @__PURE__ */ AddTrustedKeyParams,
-              _RETURN: /* @__PURE__ */ z.null(),
+              _RETURN: /* @__PURE__ */ AddTrustedKeyRes,
             },
             'connect-registry': {
               _PARAMS: /* @__PURE__ */ ConnectRegistryParams,
-              _RETURN: /* @__PURE__ */ z.null(),
+              _RETURN: /* @__PURE__ */ z.array(z.string()),
             },
             'refresh-registry': {
-              _PARAMS: /* @__PURE__ */ RegistryPreviewParams,
+              _PARAMS: /* @__PURE__ */ TrustedRegistryParams,
               _RETURN: /* @__PURE__ */ z.array(AnyVerifyingKey),
-            },
-            'registry-preview': {
-              _PARAMS: /* @__PURE__ */ RegistryPreviewParams,
-              _RETURN: /* @__PURE__ */ RegistryInfo,
             },
             remove: {
               _PARAMS: /* @__PURE__ */ RemoveTrustedKeyParams,
               _RETURN: /* @__PURE__ */ z.null(),
             },
             'remove-registry': {
-              _PARAMS: /* @__PURE__ */ RegistryPreviewParams,
-              _RETURN: /* @__PURE__ */ z.null(),
+              _PARAMS: /* @__PURE__ */ TrustedRegistryParams,
+              _RETURN: /* @__PURE__ */ z.array(z.string()),
+            },
+            'set-os-registry': {
+              _PARAMS: /* @__PURE__ */ TrustedRegistryParams,
+              _RETURN: /* @__PURE__ */ z.array(z.string()),
             },
             update: {
               _PARAMS: /* @__PURE__ */ UpdateTrustedKeyParams,

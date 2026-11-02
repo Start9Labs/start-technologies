@@ -287,6 +287,36 @@ export const ActionVisibility: z.ZodUnion<
   .meta({
     id: 'ActionVisibility',
   })
+
+/**
+ * Keys an import added, and keys it found already present.
+ */
+export const AddTrustedKeyRes: z.ZodObject<{
+  /**
+   * Trusted for packages.
+   */
+  added: z.ZodArray<z.ZodString>
+  /**
+   * Trust unchanged; GPG identities merged.
+   */
+  existing: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({
+  /**
+   * Trusted for packages.
+   */
+  added: z.array(z.string()).meta({
+    description: 'Trusted for packages.',
+  }),
+  /**
+   * Trust unchanged; GPG identities merged.
+   */
+  existing: z.array(z.string()).meta({
+    description: 'Trust unchanged; GPG identities merged.',
+  }),
+}).meta({
+  id: 'AddTrustedKeyRes',
+  description: 'Keys an import added, and keys it found already present.',
+})
 export const Algorithm: z.ZodEnum<{ ecdsa: 'ecdsa'; ed25519: 'ed25519' }> =
   /* @__PURE__ */ z.enum(['ecdsa', 'ed25519']).meta({
     id: 'Algorithm',
@@ -1745,6 +1775,10 @@ export const TaskSeverity: z.ZodEnum<{
 export const TimeInfo: z.ZodObject<{ now: z.ZodString; uptime: z.ZodInt }> =
   /* @__PURE__ */ object({ now: z.string(), uptime: z.int() }).meta({
     id: 'TimeInfo',
+  })
+export const TrustContext: z.ZodEnum<{ marketplace: 'marketplace'; os: 'os' }> =
+  /* @__PURE__ */ z.enum(['marketplace', 'os']).meta({
+    id: 'TrustContext',
   })
 export const TrustedOsUpdateSigner: z.ZodObject<{ label: z.ZodString }> =
   /* @__PURE__ */ object({ label: z.string() }).meta({
@@ -5184,7 +5218,7 @@ export const Task: z.ZodObject<{
 export const TrustedKey: z.ZodObject<{
   name: z.ZodString
   /**
-   * The first import source: system, manual, or a registry base URL.
+   * `manual`, or the base URL of the registry that first offered the key.
    */
   origin: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
   /**
@@ -5203,7 +5237,15 @@ export const TrustedKey: z.ZodObject<{
     z.ZodArray<typeof GpgPublicKeyExport>
   >
   /**
-   * False for System keys and keys listed by a connected registry.
+   * Contact details registries publish for the key's signer.
+   */
+  contact: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof ContactInfo>>,
+    z.ZodArray<typeof ContactInfo>
+  >
+  addedAt: z.ZodString
+  /**
+   * False while a connected registry offers the key.
    */
   removable: z.ZodBoolean
   marketplace: z.ZodBoolean
@@ -5211,11 +5253,11 @@ export const TrustedKey: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   name: z.string(),
   /**
-   * The first import source: system, manual, or a registry base URL.
+   * `manual`, or the base URL of the registry that first offered the key.
    */
   origin: wire(z.string().optional(), z.string()).meta({
     description:
-      'The first import source: system, manual, or a registry base URL.',
+      '`manual`, or the base URL of the registry that first offered the key.',
   }),
   /**
    * Registry identity recorded when this key was first imported.
@@ -5238,11 +5280,17 @@ export const TrustedKey: z.ZodObject<{
       'Original GPG exports; signing trust is determined by `public_key`.',
   }),
   /**
-   * False for System keys and keys listed by a connected registry.
+   * Contact details registries publish for the key's signer.
+   */
+  contact: wire(z.array(ContactInfo).optional(), z.array(ContactInfo)).meta({
+    description: "Contact details registries publish for the key's signer.",
+  }),
+  addedAt: z.string(),
+  /**
+   * False while a connected registry offers the key.
    */
   removable: z.boolean().meta({
-    description:
-      'False for System keys and keys listed by a connected registry.',
+    description: 'False while a connected registry offers the key.',
   }),
   marketplace: z.boolean(),
   os: z.boolean(),
