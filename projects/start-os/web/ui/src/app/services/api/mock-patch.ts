@@ -84,7 +84,13 @@ export const mockPatchData: DataModel = {
   },
   serverInfo: {
     id: Mock.ServerId,
-    registryKeys: {},
+    registryKeys: {
+      'https://registry.start9.com': [
+        'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
+        'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
+        'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=',
+      ],
+    },
     trustedKeys: {
       'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=':
         mockStart9Key(

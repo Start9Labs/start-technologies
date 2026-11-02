@@ -212,6 +212,16 @@ export namespace Mock {
 
   export const RegistryInfo: T.RegistryInfo = {
     trustSigners: {
+      'start9-signer': {
+        name: 'Start9',
+        contact: [{ email: 'security@start9.com' }],
+        keys: [
+          'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
+          'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
+          'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=',
+        ],
+        gpgExports: [],
+      },
       'alpha-signer': {
         name: 'Start9 Alpha',
         contact: [],
