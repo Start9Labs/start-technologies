@@ -29,12 +29,12 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
         <a routerLink=".." tuiIconButton iconStart="@tui.arrow-left">
           {{ 'Back' | i18n }}
         </a>
-        {{ 'Manage Trust' | i18n }}
+        {{ 'Trusted Keys' | i18n }}
       </div>
     </ng-container>
     <section class="g-card">
       <header>
-        {{ 'Manage Trust' | i18n }}
+        {{ 'Trusted Keys' | i18n }}
         <a
           tuiIconButton
           docsLink

@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
@@ -15,6 +16,12 @@ fn stored_keys(db: &mut Value) -> Result<&mut Value, Error> {
         .or_not_found("trustedKeys")
 }
 
+fn migrate(db: &mut Value, now: DateTime<Utc>) -> Result<(), Error> {
+    let stored = stored_keys(db)?;
+    *stored = to_value(&decode_keys(stored.clone(), now)?)?;
+    Ok(())
+}
+
 impl VersionT for Version {
     type Previous = v0_4_1_1::Version;
     type PreUpRes = ();
@@ -29,13 +36,12 @@ impl VersionT for Version {
         &V0_3_0_COMPAT
     }
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
-        let stored = stored_keys(db)?;
-        *stored = to_value(&decode_keys(stored.clone())?)?;
+        migrate(db, Utc::now())?;
         Ok(Value::Null)
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
         let stored = stored_keys(db)?;
-        *stored = to_value(&grouped_keys(decode_keys(stored.clone())?))?;
+        *stored = to_value(&grouped_keys(decode_keys(stored.clone(), Utc::now())?))?;
         Ok(())
     }
 }
@@ -59,11 +65,16 @@ mod tests {
         }
         let mut db =
             imbl_value::json!({ "public": { "serverInfo": { "trustedKeys": historical } } });
-        Version.up(&mut db, ()).unwrap();
+        let upgraded_at = Utc::now();
+        migrate(&mut db, upgraded_at).unwrap();
         let migrated: TrustedKeys =
             from_value(db["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
-        let expected = legacy::individual_keys(&groups).unwrap();
+        let expected = legacy::individual_keys(&groups, upgraded_at).unwrap();
         assert_eq!(migrated, expected);
+        for key in migrated.values() {
+            assert_eq!(key.added_at, upgraded_at);
+            assert_eq!(key.origin, crate::trusted_keys::START9_REGISTRY);
+        }
         for (id, key) in &migrated {
             assert_eq!(*id, key.public_key.interned_der64());
             let wire = to_value(key).unwrap();

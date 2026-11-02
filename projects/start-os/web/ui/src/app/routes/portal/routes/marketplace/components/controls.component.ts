@@ -20,7 +20,7 @@ import { TuiButton, TuiLink, TuiNotification } from '@taiga-ui/core'
 import { PatchDB } from 'patch-db-client'
 import { defaultIfEmpty, firstValueFrom, switchMap } from 'rxjs'
 import { ToManifestPipe } from 'src/app/routes/portal/pipes/to-manifest'
-import { MANAGE_TRUST_LINK } from 'src/app/routes/portal/routes/system/system.const'
+import { TRUSTED_KEYS_LINK } from 'src/app/routes/portal/routes/system/system.const'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
@@ -46,7 +46,7 @@ type KEYS =
       <div tuiNotification appearance="warning">
         {{ "This service package isn't signed by anyone you trust" | i18n }}
         <a tuiLink [routerLink]="manageTrustLink">
-          {{ 'Manage Trust' | i18n }}
+          {{ 'Trusted Keys' | i18n }}
         </a>
       </div>
     }
@@ -154,7 +154,7 @@ export class MarketplaceControlsComponent {
       !pkg ||
       this.exver.getFlavor(getManifest(pkg).version) === this.pkg().flavor,
   )
-  protected readonly manageTrustLink = MANAGE_TRUST_LINK
+  protected readonly manageTrustLink = TRUSTED_KEYS_LINK
   protected readonly trusted = computed(() =>
     matchingTrustedKeys(
       packageSigners(this.pkg()),

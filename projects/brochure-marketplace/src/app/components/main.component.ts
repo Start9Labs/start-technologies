@@ -9,7 +9,6 @@ import { ActivatedRoute, Router } from '@angular/router'
 import {
   MarketplaceComponent,
   MarketplacePackageLinkComponent,
-  MarketplaceRegistrySelectComponent,
   MarketplaceTileComponent,
 } from '@start9labs/marketplace'
 import {
@@ -30,7 +29,6 @@ import { MarketplaceService } from 'src/app/services/marketplace.service'
       [(category)]="category"
       [(query)]="query"
     >
-      <marketplace-registry-select />
       <a
         actions
         tuiButton
@@ -64,7 +62,6 @@ import { MarketplaceService } from 'src/app/services/marketplace.service'
     MarketplaceComponent,
     MarketplacePackageLinkComponent,
     MarketplaceTileComponent,
-    MarketplaceRegistrySelectComponent,
     TuiButton,
     i18nPipe,
   ],

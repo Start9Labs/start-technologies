@@ -37,6 +37,8 @@ fn package_commitment_requires_an_enabled_marketplace_signer() {
             removable: true,
             public_key: public,
             gpg_exports: Default::default(),
+            contact: Default::default(),
+            added_at: chrono::Utc::now(),
             marketplace: false,
             os: true,
         },

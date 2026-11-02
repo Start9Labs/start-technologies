@@ -7831,19 +7831,33 @@ trusted-keys.not-found:
   fr_FR: "Trousseau de confiance introuvable"
   pl_PL: "Nie znaleziono zaufanego pęku kluczy"
 
-trusted-keys.proposal-changed:
-  en_US: "The registry no longer proposes an approved key. Review its keys again."
-  de_DE: "Die Registry schlägt einen genehmigten Schlüssel nicht mehr vor. Prüfen Sie die Schlüssel erneut."
-  es_ES: "El registro ya no propone una clave aprobada. Revise sus claves de nuevo."
-  fr_FR: "Le registre ne propose plus une clé approuvée. Vérifiez à nouveau ses clés."
-  pl_PL: "Rejestr nie proponuje już zatwierdzonego klucza. Sprawdź ponownie jego klucze."
+trusted-keys.os-key-required:
+  en_US: "At least one key must stay trusted for StartOS updates"
+  de_DE: "Mindestens ein Schlüssel muss für StartOS-Updates vertrauenswürdig bleiben"
+  es_ES: "Al menos una clave debe seguir siendo de confianza para las actualizaciones de StartOS"
+  fr_FR: "Au moins une clé doit rester approuvée pour les mises à jour de StartOS"
+  pl_PL: "Co najmniej jeden klucz musi pozostać zaufany dla aktualizacji StartOS"
+
+trusted-keys.os-registry-in-use:
+  en_US: "This registry provides StartOS updates. Choose another registry for StartOS updates before removing it."
+  de_DE: "Diese Registry stellt StartOS-Updates bereit. Wählen Sie eine andere Registry für StartOS-Updates, bevor Sie sie entfernen."
+  es_ES: "Este registro proporciona las actualizaciones de StartOS. Elija otro registro para las actualizaciones de StartOS antes de eliminarlo."
+  fr_FR: "Ce registre fournit les mises à jour de StartOS. Choisissez un autre registre pour les mises à jour de StartOS avant de le supprimer."
+  pl_PL: "Ten rejestr dostarcza aktualizacje StartOS. Przed jego usunięciem wybierz inny rejestr dla aktualizacji StartOS."
 
 trusted-keys.protected:
-  en_US: "System keys and keys listed by connected registries cannot be deleted; disable their trust instead"
-  de_DE: "Systemschlüssel und von verbundenen Registries aufgeführte Schlüssel können nicht gelöscht werden; deaktivieren Sie stattdessen deren Vertrauen"
-  es_ES: "Las claves del sistema y las publicadas por registros conectados no se pueden eliminar; desactive su confianza"
-  fr_FR: "Les clés système et les clés répertoriées par les registres connectés ne peuvent pas être supprimées ; désactivez plutôt leur confiance"
-  pl_PL: "Kluczy systemowych i kluczy wymienionych przez połączone rejestry nie można usunąć; zamiast tego wyłącz zaufanie do nich"
+  en_US: "Keys offered by connected registries cannot be removed; distrust them instead"
+  de_DE: "Von verbundenen Registrys angebotene Schlüssel können nicht entfernt werden; entziehen Sie ihnen stattdessen das Vertrauen"
+  es_ES: "Las claves ofrecidas por registros conectados no se pueden eliminar; retíreles la confianza"
+  fr_FR: "Les clés proposées par des registres connectés ne peuvent pas être supprimées ; retirez-leur plutôt votre confiance"
+  pl_PL: "Kluczy oferowanych przez połączone rejestry nie można usunąć; zamiast tego cofnij zaufanie do nich"
+
+trusted-keys.registry-not-connected:
+  en_US: "Add this registry before using it for StartOS updates"
+  de_DE: "Fügen Sie diese Registry hinzu, bevor Sie sie für StartOS-Updates verwenden"
+  es_ES: "Añada este registro antes de usarlo para las actualizaciones de StartOS"
+  fr_FR: "Ajoutez ce registre avant de l’utiliser pour les mises à jour de StartOS"
+  pl_PL: "Dodaj ten rejestr, zanim użyjesz go dla aktualizacji StartOS"
 
 version.http-auth-downgrade-requires-tls:
   en_US: "Cannot downgrade: an HTTP authentication policy has no TLS wrapper. Add TLS to this binding before downgrading."

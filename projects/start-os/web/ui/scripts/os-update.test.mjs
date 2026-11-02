@@ -1860,10 +1860,10 @@ test('registry signing-key identities retain complete GPG metadata from selected
 })
 
 for (const success of [true, false]) {
-  test(`Review keys refresh ${success ? 'opens Manage Trust' : 'failure prevents navigation'} without re-enabling trust`, async () => {
+  test(`Review keys refresh ${success ? 'opens Trusted Keys' : 'failure prevents navigation'} without re-enabling trust`, async () => {
     const { default: RegistriesPage } =
       await import('src/app/routes/portal/routes/system/routes/registries')
-    const { MANAGE_TRUST_LINK } =
+    const { TRUSTED_KEYS_LINK } =
       await import('src/app/routes/portal/routes/system/system.const')
     const calls = []
     const instance = {
@@ -1893,7 +1893,7 @@ for (const success of [true, false]) {
     )
     assert.deepEqual(calls, [
       ['refresh', 'https://registry.test'],
-      ...(success ? [['navigate', MANAGE_TRUST_LINK]] : []),
+      ...(success ? [['navigate', TRUSTED_KEYS_LINK]] : []),
     ])
     assert.equal(instance.saving(), false)
   })
@@ -2131,13 +2131,13 @@ for (const [choice, navigates] of [
   [of(false), false],
   [EMPTY, false],
 ]) {
-  test(`registry key notice ${navigates ? 'opens Manage Trust' : 'dismisses without navigation'}`, async t => {
+  test(`registry key notice ${navigates ? 'opens Trusted Keys' : 'dismisses without navigation'}`, async t => {
     const { ActivatedRoute, Router, convertToParamMap } =
       await import('@angular/router')
     const { StorageService } = await import('src/app/services/storage.service')
     const { default: MarketplacePage } =
       await import('src/app/routes/portal/routes/marketplace/marketplace.component')
-    const { MANAGE_TRUST_LINK } =
+    const { TRUSTED_KEYS_LINK } =
       await import('src/app/routes/portal/routes/system/system.const')
     const notices = new Subject()
     const prompts = []
@@ -2184,9 +2184,9 @@ for (const [choice, navigates] of [
     await settleRegistry()
     assert.equal(prompts.length, 1)
     assert.equal(prompts[0].label, 'New registry keys')
-    assert.equal(prompts[0].data.yes, 'Manage Trust')
+    assert.equal(prompts[0].data.yes, 'Trusted Keys')
     assert.equal(prompts[0].data.no, 'Dismiss')
     assert.match(prompts[0].data.content, /disabled/)
-    assert.deepEqual(navigations, navigates ? [MANAGE_TRUST_LINK] : [])
+    assert.deepEqual(navigations, navigates ? [TRUSTED_KEYS_LINK] : [])
   })
 }

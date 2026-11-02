@@ -35,7 +35,7 @@ impl SignerInfo {
 rpc_toolkit::reflect_ts!(SignerInfo);
 rpc_toolkit::ts_export!(SignerInfo, namespaces = [""]);
 
-#[derive(Clone, Debug, Deserialize, Serialize, VisitVariants, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitVariants, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
 pub enum ContactInfo {
     Email(String),

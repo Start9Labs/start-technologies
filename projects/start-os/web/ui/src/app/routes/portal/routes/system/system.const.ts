@@ -1,10 +1,10 @@
 export const TRUSTED_KEYS_MENU_ITEM = {
   icon: '/assets/icons/key-chain.svg',
-  item: 'Manage Trust',
+  item: 'Trusted Keys',
   link: 'trusted-keys',
 } as const
 
-export const MANAGE_TRUST_LINK = ['/system', TRUSTED_KEYS_MENU_ITEM.link]
+export const TRUSTED_KEYS_LINK = ['/system', TRUSTED_KEYS_MENU_ITEM.link]
 
 export const SYSTEM_MENU = [
   [
@@ -57,6 +57,14 @@ export const SYSTEM_MENU = [
   ],
   [
     {
+      icon: '@tui.store',
+      item: 'Registries',
+      link: 'registries',
+    },
+    TRUSTED_KEYS_MENU_ITEM,
+  ],
+  [
+    {
       icon: '@tui.clock',
       item: 'Active Sessions',
       link: 'sessions',
@@ -66,12 +74,6 @@ export const SYSTEM_MENU = [
       item: 'SSH Access',
       link: 'ssh',
     },
-    {
-      icon: '@tui.store',
-      item: 'Manage Registries',
-      link: 'registries',
-    },
-    TRUSTED_KEYS_MENU_ITEM,
     {
       icon: '@tui.key',
       item: 'Change Password',

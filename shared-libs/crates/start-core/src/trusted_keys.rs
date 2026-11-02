@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use chrono::{DateTime, Utc};
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
 use crate::context::RpcContext;
 use crate::prelude::*;
-use crate::registry::signer::AcceptSigners;
+use crate::registry::signer::{AcceptSigners, ContactInfo};
 use crate::sign::AnyVerifyingKey;
 use crate::sign::gpg::{GpgPublicKeyExport, ImportedPublicKeys, parse_public_keys};
 use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners};
@@ -14,6 +15,8 @@ pub(crate) mod legacy;
 
 pub type TrustedKeys = BTreeMap<InternedString, TrustedKey>;
 pub const START9: &str = "start9";
+pub const START9_REGISTRY: &str = "https://registry.start9.com";
+const MANUAL: &str = "manual";
 
 #[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -32,7 +35,7 @@ rpc_toolkit::ts_export!(RegistryIdentity, namespaces = [""]);
 #[model = "Model<Self>"]
 pub struct TrustedKey {
     pub name: String,
-    /// The first import source: system, manual, or a registry base URL.
+    /// `manual`, or the base URL of the registry that first offered the key.
     #[serde(default = "manual_origin")]
     pub origin: String,
     /// Registry identity recorded when this key was first imported.
@@ -42,19 +45,46 @@ pub struct TrustedKey {
     /// Original GPG exports; signing trust is determined by `public_key`.
     #[serde(default)]
     pub gpg_exports: BTreeSet<GpgPublicKeyExport>,
-    /// False for System keys and keys listed by a connected registry.
+    /// Contact details registries publish for the key's signer.
+    #[serde(default)]
+    pub contact: BTreeSet<ContactInfo>,
+    pub added_at: DateTime<Utc>,
+    /// False while a connected registry offers the key.
     pub removable: bool,
     pub marketplace: bool,
     pub os: bool,
 }
 
 fn manual_origin() -> String {
-    "manual".into()
+    MANUAL.into()
 }
 
 impl TrustedKey {
     fn trusts_os_key(&self, key: &AnyVerifyingKey) -> bool {
         self.os && &self.public_key == key
+    }
+
+    /// The name in the key's first GPG user ID.
+    fn identity_name(&self) -> Option<String> {
+        let id = self.public_key.interned_der64();
+        let user_id: &str = self
+            .gpg_exports
+            .iter()
+            .filter_map(|export| export.identities.get(&id))
+            .flatten()
+            .next()?;
+        let name = user_id
+            .split_once('<')
+            .map_or(user_id, |(name, _)| name)
+            .trim();
+        Some(
+            if name.is_empty() {
+                user_id.trim()
+            } else {
+                name
+            }
+            .to_owned(),
+        )
     }
 }
 
@@ -139,7 +169,7 @@ pub fn initial_signers() -> TrustedOsUpdateSigners {
 }
 
 pub fn initial_trusted_keys() -> TrustedKeys {
-    legacy::individual_keys(&legacy::initial_keyrings()).unwrap()
+    legacy::individual_keys(&legacy::initial_keyrings(), Utc::now()).unwrap()
 }
 
 pub fn os_signers(keys: &TrustedKeys) -> TrustedOsUpdateSigners {
@@ -156,7 +186,11 @@ pub fn os_signers(keys: &TrustedKeys) -> TrustedOsUpdateSigners {
         .collect()
 }
 
-fn split_import(name: String, imported: ImportedPublicKeys) -> Result<TrustedKeys, Error> {
+fn split_import(
+    name: String,
+    imported: ImportedPublicKeys,
+    added_at: DateTime<Utc>,
+) -> Result<TrustedKeys, Error> {
     let exports = parse_public_keys(
         &imported
             .gpg_exports
@@ -183,6 +217,8 @@ fn split_import(name: String, imported: ImportedPublicKeys) -> Result<TrustedKey
                     origin_registry: None,
                     public_key,
                     gpg_exports,
+                    contact: BTreeSet::new(),
+                    added_at,
                     removable: true,
                     marketplace: false,
                     os: false,
@@ -192,46 +228,67 @@ fn split_import(name: String, imported: ImportedPublicKeys) -> Result<TrustedKey
         .collect())
 }
 
+/// Keys an import added, and keys it found already present.
+#[derive(Debug, Default, Deserialize, Serialize, VisitFields, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTrustedKeyRes {
+    /// Trusted for packages.
+    pub added: BTreeSet<InternedString>,
+    /// Trust unchanged; GPG identities merged.
+    pub existing: BTreeSet<InternedString>,
+}
+
+rpc_toolkit::reflect_ts!(AddTrustedKeyRes);
+
 fn import_individual_keys(
     keys: &mut TrustedKeys,
     name: String,
     imported: ImportedPublicKeys,
-    context: TrustContext,
-    origin: &str,
-) -> Result<(), Error> {
+) -> Result<AddTrustedKeyRes, Error> {
     let name = key_name(name)?;
     if imported.keys.is_empty() {
         return Err(invalid_key());
     }
-    let mut imported = split_import(name, imported)?;
+    let mut imported = split_import(name, imported, Utc::now())?;
     for key in imported.values_mut() {
-        key.origin = origin.into();
         key.marketplace = true;
-        key.os = matches!(context, TrustContext::Os);
     }
+    let (existing, added): (BTreeSet<_>, BTreeSet<_>) = imported
+        .keys()
+        .cloned()
+        .partition(|id| keys.contains_key(id));
     merge_individual_keys(keys, imported);
-    Ok(())
+    Ok(AddTrustedKeyRes { added, existing })
 }
 
 fn merge_individual_keys(keys: &mut TrustedKeys, imported: TrustedKeys) {
     for (id, key) in imported {
         if let Some(existing) = keys.get_mut(&id) {
             existing.gpg_exports.extend(key.gpg_exports);
+            existing.contact.extend(key.contact);
         } else {
             keys.insert(id, key);
         }
     }
 }
 
-pub(crate) fn mutate_public_keys(
+pub(crate) fn mutate_public_keys<T>(
     public: &mut crate::db::model::public::Public,
-    mutate: impl FnOnce(&mut TrustedKeys) -> Result<(), Error>,
-) -> Result<(), Error> {
+    mutate: impl FnOnce(&mut TrustedKeys) -> Result<T, Error>,
+) -> Result<T, Error> {
     let mut keys = protected_keys(public);
-    mutate(&mut keys)?;
+    let res = mutate(&mut keys)?;
+    if !keys.values().any(|key| key.os)
+        && public.server_info.trusted_keys.values().any(|key| key.os)
+    {
+        return Err(Error::new(
+            eyre!("{}", t!("trusted-keys.os-key-required")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
     protect_registry_keys(&mut keys, &public.server_info.registry_keys, &public.ui);
     public.server_info.trusted_keys = keys;
-    Ok(())
+    Ok(res)
 }
 
 fn protected_keys(public: &crate::db::model::public::Public) -> TrustedKeys {
@@ -251,16 +308,12 @@ fn protect_registry_keys(
         .flat_map(|(_, keys)| keys.iter().cloned())
         .collect::<BTreeSet<_>>();
     for entry in keys.values_mut() {
-        entry.removable = entry.origin != "system" && !listed.contains(&entry.public_key);
+        entry.removable = !listed.contains(&entry.public_key);
     }
 }
 
 pub fn api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand(
-            "registry-preview",
-            from_fn_async(connection::preview).no_cli(),
-        )
         .subcommand(
             "refresh-registry",
             from_fn_async(connection::refresh)
@@ -276,6 +329,12 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "connect-registry",
             from_fn_async(connection::connect)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_cli(),
+        )
+        .subcommand(
+            "set-os-registry",
+            from_fn_async(connection::set_os_registry)
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
         )
@@ -305,8 +364,6 @@ pub struct AddTrustedKeyParams {
     pub name: String,
     /// Ed25519 public keys in PEM or armored GPG format.
     pub public_keys: Vec<String>,
-    /// New entries are enabled in this context and in the Marketplace.
-    pub context: TrustContext,
 }
 
 rpc_toolkit::reflect_ts!(AddTrustedKeyParams);
@@ -373,13 +430,13 @@ pub fn remove_key(keys: &mut TrustedKeys, id: &str) -> Result<(), Error> {
     Ok(())
 }
 
-async fn add(ctx: RpcContext, params: AddTrustedKeyParams) -> Result<(), Error> {
+async fn add(ctx: RpcContext, params: AddTrustedKeyParams) -> Result<AddTrustedKeyRes, Error> {
     let public_keys = parse_public_keys(&params.public_keys)?;
     ctx.db
         .mutate(|db| {
             db.as_public_mut().mutate(|public| {
                 mutate_public_keys(public, |keys| {
-                    import_individual_keys(keys, params.name, public_keys, params.context, "manual")
+                    import_individual_keys(keys, params.name, public_keys)
                 })
             })
         })
@@ -412,7 +469,8 @@ pub fn legacy_add(
     key: AnyVerifyingKey,
     label: String,
 ) -> Result<(), Error> {
-    if let Some(existing) = keys.get_mut(&key.interned_der64()) {
+    let id = key.interned_der64();
+    if let Some(existing) = keys.get_mut(&id) {
         if existing.os {
             return Err(Error::new(
                 eyre!("{}", t!("update.signers.already-exists")),
@@ -422,7 +480,11 @@ pub fn legacy_add(
         existing.os = true;
         return Ok(());
     }
-    import_individual_keys(keys, label, vec![key].into(), TrustContext::Os, "manual")
+    import_individual_keys(keys, label, vec![key].into())?;
+    if let Some(added) = keys.get_mut(&id) {
+        added.os = true;
+    }
+    Ok(())
 }
 
 pub fn legacy_update(
@@ -457,7 +519,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_are_five_independent_canonical_system_keys() {
+    fn defaults_are_five_independent_start9_registry_keys() {
         let keys = initial_trusted_keys();
         assert_eq!(keys.len(), 5);
         assert_eq!(enabled_keys(&keys, TrustContext::Marketplace).len(), 3);
@@ -468,7 +530,7 @@ mod tests {
         );
         for (id, key) in &keys {
             assert_eq!(*id, key.public_key.interned_der64());
-            assert_eq!(key.origin, "system");
+            assert_eq!(key.origin, START9_REGISTRY);
             assert!(!key.removable);
             assert_eq!(key.marketplace, key.os);
             for export in &key.gpg_exports {
@@ -502,27 +564,21 @@ mod tests {
         let public_key = imported.keys.first().unwrap().clone();
         let id = public_key.interned_der64();
         let mut keys = TrustedKeys::new();
-        import_individual_keys(
-            &mut keys,
-            "Original".into(),
-            vec![public_key].into(),
-            TrustContext::Marketplace,
-            "https://registry.example",
-        )
-        .unwrap();
-        keys.get_mut(&id).unwrap().marketplace = false;
-        import_individual_keys(
-            &mut keys,
-            "Replacement".into(),
-            imported,
-            TrustContext::Os,
-            "manual",
-        )
-        .unwrap();
+        let res =
+            import_individual_keys(&mut keys, "Original".into(), vec![public_key].into()).unwrap();
+        assert_eq!(res.added, BTreeSet::from([id.clone()]));
+        let entry = keys.get_mut(&id).unwrap();
+        entry.marketplace = false;
+        entry.origin = "https://registry.example".into();
+        let added_at = entry.added_at;
+        let res = import_individual_keys(&mut keys, "Replacement".into(), imported).unwrap();
+        assert_eq!(res.existing, BTreeSet::from([id.clone()]));
+        assert!(res.added.is_empty());
         let key = &keys[&id];
         assert!(!key.marketplace && !key.os);
         assert_eq!(key.name, "Original");
         assert_eq!(key.origin, "https://registry.example");
+        assert_eq!(key.added_at, added_at);
         assert_eq!(key.gpg_exports.len(), 1);
         remove_key(&mut keys, &id).unwrap();
         assert!(keys.is_empty());
@@ -565,16 +621,7 @@ mod tests {
         let saved = keys.clone();
         let public_key = keys.values().next().unwrap().public_key.clone();
         for (name, imported) in [(" ", vec![public_key]), ("Empty", vec![])] {
-            assert!(
-                import_individual_keys(
-                    &mut keys,
-                    name.into(),
-                    imported.into(),
-                    TrustContext::Os,
-                    "manual"
-                )
-                .is_err()
-            );
+            assert!(import_individual_keys(&mut keys, name.into(), imported.into()).is_err());
             assert_eq!(keys, saved);
         }
         for (id, name) in [
@@ -598,20 +645,14 @@ mod tests {
     }
 
     #[test]
-    fn imports_have_context_defaults_and_singular_wire_material() {
+    fn imports_trust_packages_and_keep_singular_wire_material() {
         let imported =
             parse_public_keys(&[include_str!("sign/fixtures/ed25519-signers.asc").into()]).unwrap();
         let expected = imported.keys.clone();
         let mut keys = TrustedKeys::new();
-        import_individual_keys(
-            &mut keys,
-            " Publisher ".into(),
-            imported,
-            TrustContext::Marketplace,
-            "manual",
-        )
-        .unwrap();
+        let res = import_individual_keys(&mut keys, " Publisher ".into(), imported).unwrap();
         assert_eq!(keys.len(), 2);
+        assert_eq!(res.added, keys.keys().cloned().collect());
         for (id, key) in &keys {
             assert_eq!(key.name, "Publisher");
             assert!(expected.contains(&key.public_key));
@@ -633,14 +674,10 @@ mod tests {
         let imported = parse_public_keys(&[source.into()]).unwrap();
         let removed = imported.keys.first().unwrap().clone();
         let mut keys = TrustedKeys::new();
-        import_individual_keys(
-            &mut keys,
-            "Publisher".into(),
-            imported,
-            TrustContext::Os,
-            "manual",
-        )
-        .unwrap();
+        import_individual_keys(&mut keys, "Publisher".into(), imported).unwrap();
+        for key in keys.values_mut() {
+            key.os = true;
+        }
         legacy_remove(&mut keys, &removed).unwrap();
         let wire = to_value(&keys).unwrap();
         let restored: TrustedKeys = from_value(wire.clone()).unwrap();
@@ -659,7 +696,7 @@ mod tests {
                 .armored,
             source
         );
-        assert_eq!(legacy::decode_keys(wire).unwrap(), restored);
+        assert_eq!(legacy::decode_keys(wire, Utc::now()).unwrap(), restored);
     }
 
     #[test]
@@ -686,7 +723,8 @@ mod tests {
         let key = initial_signers().into_keys().next().unwrap();
         let historical = imbl_value::json!({ "name": "Publisher", "publicKeys": [key], "removable": true, "marketplace": true, "os": false });
         assert!(from_value::<TrustedKey>(historical.clone()).is_err());
-        let migrated = legacy::decode_keys(imbl_value::json!({ "legacy": historical })).unwrap();
+        let migrated =
+            legacy::decode_keys(imbl_value::json!({ "legacy": historical }), Utc::now()).unwrap();
         assert_eq!(migrated.len(), 1);
         let current = &migrated[&key];
         assert_eq!(current.public_key.interned_der64(), key);

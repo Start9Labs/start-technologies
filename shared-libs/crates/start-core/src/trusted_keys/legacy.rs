@@ -18,9 +18,22 @@ pub(crate) struct TrustedKeyring {
     #[serde(default)]
     pub gpg_exports: BTreeSet<GpgPublicKeyExport>,
 
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub contact: BTreeSet<ContactInfo>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added_at: Option<DateTime<Utc>>,
+
     pub removable: bool,
     pub marketplace: bool,
     pub os: bool,
+}
+
+pub(crate) fn start9_registry() -> RegistryIdentity {
+    RegistryIdentity {
+        name: Some("Start9 Registry".into()),
+        icon: None,
+    }
 }
 
 pub(crate) fn initial_keyrings() -> TrustedKeyrings {
@@ -32,19 +45,23 @@ pub(crate) fn initial_keyrings() -> TrustedKeyrings {
     BTreeMap::from([
         (START9.into(), TrustedKeyring {
             name: "Start9".into(),
-            origin: "system".into(),
-            origin_registry: None,
+            origin: START9_REGISTRY.into(),
+            origin_registry: Some(start9_registry()),
             removable: false,
             public_keys: start9.keys,
             gpg_exports: start9.gpg_exports,
+            contact: BTreeSet::new(),
+            added_at: None,
             marketplace: true,
             os: true,
         }),
         ("start9-alpha".into(), TrustedKeyring {
             name: "Start9 Alpha".into(),
-            origin: "system".into(),
-            origin_registry: None,
+            origin: START9_REGISTRY.into(),
+            origin_registry: Some(start9_registry()),
             removable: false,
+            contact: BTreeSet::new(),
+            added_at: None,
             public_keys: BTreeSet::from([
                 "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
                 "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
@@ -96,6 +113,8 @@ pub(crate) fn migrate_signers(legacy: TrustedOsUpdateSigners) -> Result<TrustedK
                     origin_registry: None,
                     public_keys: BTreeSet::from([public_key]),
                     gpg_exports: BTreeSet::new(),
+                    contact: BTreeSet::new(),
+                    added_at: None,
                     removable: true,
                     marketplace: true,
                     os: true,
@@ -114,6 +133,8 @@ impl From<TrustedKey> for TrustedKeyring {
             origin_registry: key.origin_registry,
             public_keys: BTreeSet::from([key.public_key]),
             gpg_exports: key.gpg_exports,
+            contact: key.contact,
+            added_at: Some(key.added_at),
             removable: key.removable,
             marketplace: key.marketplace,
             os: key.os,
@@ -128,7 +149,7 @@ enum StoredKey {
     Grouped(TrustedKeyring),
 }
 
-pub(crate) fn decode_keys(value: Value) -> Result<TrustedKeys, Error> {
+pub(crate) fn decode_keys(value: Value, now: DateTime<Utc>) -> Result<TrustedKeys, Error> {
     let stored: BTreeMap<InternedString, StoredKey> = from_value(value)?;
     let groups = stored
         .into_iter()
@@ -142,28 +163,36 @@ pub(crate) fn decode_keys(value: Value) -> Result<TrustedKeys, Error> {
             )
         })
         .collect();
-    individual_keys(&groups)
+    individual_keys(&groups, now)
 }
 
 pub(crate) fn grouped_keys(keys: TrustedKeys) -> TrustedKeyrings {
     keys.into_iter().map(|(id, key)| (id, key.into())).collect()
 }
 
-pub(crate) fn individual_keys(groups: &TrustedKeyrings) -> Result<TrustedKeys, Error> {
+pub(crate) fn individual_keys(
+    groups: &TrustedKeyrings,
+    now: DateTime<Utc>,
+) -> Result<TrustedKeys, Error> {
     let mut keys = TrustedKeys::new();
     for (group_id, group) in groups {
         let imported = ImportedPublicKeys {
             keys: group.public_keys.clone(),
             gpg_exports: group.gpg_exports.clone(),
         };
-        for (id, mut individual) in split_import(group.name.clone(), imported)? {
+        let builtin = group.origin == "system"
+            || (!group.removable && matches!(group_id.as_ref(), START9 | "start9-alpha"));
+        let added_at = group.added_at.unwrap_or(now);
+        for (id, mut individual) in split_import(group.name.clone(), imported, added_at)? {
             individual.origin = group.origin.clone();
             individual.origin_registry = group.origin_registry.clone();
+            individual.contact = group.contact.clone();
             individual.removable = group.removable;
             individual.marketplace = group.marketplace;
             individual.os = group.os;
-            if !group.removable && matches!(group_id.as_ref(), START9 | "start9-alpha") {
-                individual.origin = "system".into();
+            if builtin {
+                individual.origin = START9_REGISTRY.into();
+                individual.origin_registry = Some(start9_registry());
             }
             match keys.entry(id) {
                 std::collections::btree_map::Entry::Vacant(entry) => {
@@ -171,7 +200,7 @@ pub(crate) fn individual_keys(groups: &TrustedKeyrings) -> Result<TrustedKeys, E
                 }
                 std::collections::btree_map::Entry::Occupied(mut entry) => {
                     let existing = entry.get_mut();
-                    if individual.origin == "system" {
+                    if builtin {
                         if individual.os || !existing.os {
                             existing.name = individual.name;
                         }
@@ -182,6 +211,8 @@ pub(crate) fn individual_keys(groups: &TrustedKeyrings) -> Result<TrustedKeys, E
                     existing.marketplace |= individual.marketplace;
                     existing.os |= individual.os;
                     existing.gpg_exports.extend(individual.gpg_exports);
+                    existing.contact.extend(individual.contact);
+                    existing.added_at = existing.added_at.min(individual.added_at);
                 }
             }
         }
@@ -209,7 +240,7 @@ mod tests {
         overlap.removable = true;
         overlap.os = true;
         groups.insert("overlap".into(), overlap);
-        let keys = individual_keys(&groups).unwrap();
+        let keys = individual_keys(&groups, Utc::now()).unwrap();
         assert_eq!(keys.len(), 5);
         assert_eq!(
             crate::trusted_keys::os_signers(&keys)
@@ -220,8 +251,8 @@ mod tests {
         assert_eq!(enabled_keys(&keys, TrustContext::Marketplace).len(), 3);
         for (id, key) in &keys {
             assert_eq!(*id, key.public_key.interned_der64());
-            assert_eq!(key.origin, "system");
-            assert!(key.origin_registry.is_none());
+            assert_eq!(key.origin, START9_REGISTRY);
+            assert_eq!(key.origin_registry, Some(start9_registry()));
             assert!(!key.removable);
             assert!(
                 key.gpg_exports
@@ -230,7 +261,10 @@ mod tests {
             );
         }
         assert_eq!(keys[&public_key.interned_der64()].name, "Owner label");
-        assert_eq!(decode_keys(to_value(&keys).unwrap()).unwrap(), keys);
+        assert_eq!(
+            decode_keys(to_value(&keys).unwrap(), Utc::now()).unwrap(),
+            keys
+        );
     }
 
     #[test]
@@ -238,14 +272,17 @@ mod tests {
         let first = "MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=";
         let second = "MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=";
         let value = imbl_value::json!({ "historical": { "name": "Publisher", "publicKeys": [second, first, second], "removable": true, "marketplace": false, "os": true } });
-        let keys = decode_keys(value).unwrap();
+        let keys = decode_keys(value, Utc::now()).unwrap();
         assert_eq!(keys.len(), 2);
         assert_eq!(
             keys.keys().map(|key| &**key).collect::<BTreeSet<_>>(),
             BTreeSet::from([first, second])
         );
         assert!(keys.values().all(|key| key.os && !key.marketplace));
-        assert_eq!(decode_keys(to_value(&keys).unwrap()).unwrap(), keys);
+        assert_eq!(
+            decode_keys(to_value(&keys).unwrap(), Utc::now()).unwrap(),
+            keys
+        );
     }
 
     #[test]
@@ -272,7 +309,7 @@ mod tests {
                 .0
                 .parse::<AnyVerifyingKey>()
                 .unwrap();
-            let keys = individual_keys(&migrate_signers(legacy).unwrap()).unwrap();
+            let keys = individual_keys(&migrate_signers(legacy).unwrap(), Utc::now()).unwrap();
             assert!(
                 !crate::trusted_keys::os_signers(&keys).contains_key(&removed.interned_der64())
             );
@@ -293,10 +330,10 @@ mod tests {
         wire.as_object_mut()
             .unwrap()
             .insert("legacy".into(), to_value(&group).unwrap());
-        let keys = decode_keys(wire).unwrap();
+        let keys = decode_keys(wire, Utc::now()).unwrap();
         assert_eq!(keys.len(), initial.len());
         assert!(keys[&id].os);
-        assert_eq!(keys[&id].origin, "system");
+        assert_eq!(keys[&id].origin, START9_REGISTRY);
         assert!(!keys[&id].removable);
     }
 }

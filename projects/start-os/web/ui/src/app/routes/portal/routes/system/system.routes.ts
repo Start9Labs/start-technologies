@@ -67,7 +67,7 @@ export default [
       {
         path: 'registries',
         title: titleResolver,
-        data: { title: 'Manage Registries' },
+        data: { title: 'Registries' },
         loadComponent: () => import('./routes/registries'),
       },
       {

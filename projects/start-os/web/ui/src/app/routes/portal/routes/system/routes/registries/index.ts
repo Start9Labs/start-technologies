@@ -12,7 +12,7 @@ import { defaultIfEmpty, firstValueFrom } from 'rxjs'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { TitleDirective } from 'src/app/services/title.service'
-import { MANAGE_TRUST_LINK } from '../../system.const'
+import { TRUSTED_KEYS_LINK } from '../../system.const'
 import { CONFIRM_REGISTRY } from './confirm'
 
 @Component({
@@ -22,12 +22,12 @@ import { CONFIRM_REGISTRY } from './confirm'
         <a routerLink=".." tuiIconButton iconStart="@tui.arrow-left">
           {{ 'Back' | i18n }}
         </a>
-        {{ 'Manage Registries' | i18n }}
+        {{ 'Registries' | i18n }}
       </div>
     </ng-container>
     <section class="g-card">
       <header>
-        {{ 'Manage Registries' | i18n }}
+        {{ 'Registries' | i18n }}
         <button tuiButton size="xs" iconStart="@tui.plus" (click)="add()">
           {{ 'Add registry' | i18n }}
         </button>
@@ -152,7 +152,7 @@ export default class Registries {
       'Validating registry',
     )
     this.saving.set(false)
-    if (refreshed) await this.router.navigate(MANAGE_TRUST_LINK)
+    if (refreshed) await this.router.navigate(TRUSTED_KEYS_LINK)
   }
 
   private async connect(url: string): Promise<void> {

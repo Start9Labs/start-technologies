@@ -1,4 +1,4 @@
-import { Component, inject, input } from '@angular/core'
+import { Component, computed, inject, input } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { Router, RouterLink } from '@angular/router'
 import {
@@ -7,23 +7,10 @@ import {
   sameUrl,
   TaskService,
 } from '@start9labs/shared'
-import {
-  TUI_BREAKPOINT,
-  TuiButton,
-  TuiDataList,
-  TuiDropdown,
-  TuiIcon,
-  TuiLink,
-  TuiTitle,
-} from '@taiga-ui/core'
+import { TuiButton, TuiHint, TuiIcon } from '@taiga-ui/core'
 import { TuiAvatar, TuiFade } from '@taiga-ui/kit'
-import {
-  combineLatest,
-  defaultIfEmpty,
-  filter,
-  firstValueFrom,
-  map,
-} from 'rxjs'
+import { TuiAsideComponent, TuiNavigation } from '@taiga-ui/layout'
+import { defaultIfEmpty, filter, firstValueFrom } from 'rxjs'
 
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreIconDirective } from './store-icon.directive'
@@ -31,137 +18,100 @@ import { StoreIconDirective } from './store-icon.directive'
 @Component({
   selector: 'marketplace-registry-select',
   template: `
-    <button
-      tuiButton
-      tuiDropdown
-      iconEnd="@tui.chevron-right"
-      [tuiDropdownSided]="breakpoint() !== 'mobile'"
-      size="s"
-      appearance="flat-grayscale"
-      [(tuiDropdownOpen)]="open"
-    >
-      <span tuiAvatar appearance="action-grayscale" size="xs">
-        <img [storeIcon]="data()?.current?.url || data()?.currentUrl" />
-      </span>
-      <b tuiFade>
-        {{ data()?.current?.name || fetched()?.info?.name || 'Loading...' }}
-      </b>
-      @if (data(); as d) {
-        <tui-data-list *tuiDropdown size="m">
-          <div class="g-title">
-            <small>{{ 'Saved Registries' | i18n }}</small>
-            @if (manageRegistriesLink()) {
-              <a
-                tuiLink
-                [routerLink]="manageRegistriesLink()"
-                (click)="open = false"
-              >
-                {{ 'Manage Registries' | i18n }}
-              </a>
-            } @else {
-              <button
-                tuiButton
-                size="xs"
-                appearance="primary"
-                iconStart="@tui.plus"
-                (click)="add()"
-              >
-                {{ 'Add' | i18n }}
-              </button>
-            }
-          </div>
-          @for (
-            registry of manageRegistriesLink() ? d.registries : d.standard;
-            track registry.url
-          ) {
-            <button tuiOption (click)="connect(registry.url)">
-              <span tuiAvatar><img [storeIcon]="registry.url" /></span>
-              <span tuiTitle>
-                {{ registry.name }}
-                <span tuiSubtitle>{{ registry.url }}</span>
-              </span>
-              @if (registry.selected) {
-                <tui-icon icon="@tui.check" />
-              }
-            </button>
+    @if (aside.expanded()) {
+      <h3 class="g-title">
+        {{ 'Registries' | i18n }}
+        @if (manageRegistriesLink(); as link) {
+          <a
+            tuiIconButton
+            size="xs"
+            appearance="icon"
+            iconStart="@tui.settings"
+            [routerLink]="link"
+          >
+            {{ 'Manage' | i18n }}
+          </a>
+        } @else {
+          <button tuiButton size="xs" iconStart="@tui.plus" (click)="add()">
+            {{ 'Add' | i18n }}
+          </button>
+        }
+      </h3>
+    }
+    @if (data(); as d) {
+      @for (registry of d.registries; track registry.url) {
+        <button
+          tuiAsideItem
+          type="button"
+          [class._selected]="registry.selected"
+          [class._active]="registry.selected && !aside.expanded()"
+          (click)="connect(registry.url)"
+          (keydown.backspace)="registry.custom && delete(registry.url)"
+          (keydown.delete)="registry.custom && delete(registry.url)"
+        >
+          <span tuiAvatar size="xs"><img [storeIcon]="registry.url" /></span>
+          <span tuiFade>{{ registry.name }}</span>
+          @if (registry.custom) {
+            <tui-icon
+              icon="@tui.trash"
+              [tuiHint]="'Delete' | i18n"
+              (click.stop)="delete(registry.url)"
+            />
           }
-          @if (!manageRegistriesLink() && d.unsaved; as url) {
-            <hr />
-            <button tuiOption (click)="saveCurrent(url)">
-              <span tuiAvatar><img [storeIcon]="url" /></span>
-              <span tuiTitle>
-                {{ fetched()?.info?.name || url }}
-                <span tuiSubtitle>{{ 'Save this registry' | i18n }}</span>
-              </span>
-              <tui-icon icon="@tui.bookmark" />
-            </button>
-          }
-          @for (
-            registry of manageRegistriesLink() ? [] : d.custom;
-            track registry.url
-          ) {
-            @if ($first) {
-              <hr />
-            }
-            <button
-              tuiOption
-              (click)="connect(registry.url)"
-              (keydown.backspace)="delete(registry.url)"
-              (keydown.delete)="delete(registry.url)"
-            >
-              <span tuiAvatar><img [storeIcon]="registry.url" /></span>
-              <span tuiTitle>
-                {{ registry.name }}
-                <span tuiSubtitle>{{ registry.url }}</span>
-              </span>
-              <tui-icon icon="@tui.trash" (click.stop)="delete(registry.url)" />
-              @if (registry.selected) {
-                <tui-icon icon="@tui.check" />
-              }
-            </button>
-          }
-        </tui-data-list>
+        </button>
       }
-    </button>
+      @if (d.unsaved; as url) {
+        <button
+          tuiAsideItem
+          type="button"
+          class="_selected"
+          [class._active]="!aside.expanded()"
+        >
+          <span tuiAvatar size="xs"><img [storeIcon]="url" /></span>
+          <span tuiFade>{{ fetched()?.info?.name || url }}</span>
+          <tui-icon
+            icon="@tui.bookmark"
+            [tuiHint]="'Save this registry' | i18n"
+            (click.stop)="saveCurrent(url)"
+          />
+        </button>
+      }
+    }
   `,
   styles: `
     :host {
-      display: grid;
-      margin-block-end: 0.75rem;
-
-      [tuiAvatar] {
-        margin-inline-start: -0.375rem;
-      }
-
-      [tuiButton] {
-        justify-content: flex-start;
-
-        &::after {
-          margin-inline-start: auto;
-        }
-      }
-    }
-
-    tui-icon {
-      font-size: 1rem;
+      display: contents;
     }
 
     .g-title {
       justify-content: space-between;
-      margin: 0.5rem 0.5rem 0.25rem;
+      margin: 0.25rem 0 0.5rem;
+      padding-inline-start: 0.5rem;
+    }
+
+    ._selected {
+      font-weight: bold;
+    }
+
+    [tuiAvatar] {
+      margin-inline-start: -0.25rem;
+    }
+
+    tui-icon {
+      margin-inline-start: auto;
+      font-size: 1rem;
+      color: var(--tui-text-tertiary);
     }
   `,
   imports: [
-    StoreIconDirective,
     RouterLink,
-    TuiLink,
-    TuiButton,
-    TuiDropdown,
-    TuiDataList,
-    TuiIcon,
-    TuiTitle,
+    StoreIconDirective,
     TuiAvatar,
+    TuiButton,
     TuiFade,
+    TuiHint,
+    TuiIcon,
+    TuiNavigation,
     i18nPipe,
   ],
 })
@@ -171,41 +121,32 @@ export class MarketplaceRegistrySelectComponent {
   private readonly marketplace = inject(AbstractMarketplaceService)
   private readonly router = inject(Router)
 
-  public readonly manageRegistriesLink = input('')
-
-  protected open = false
-  protected readonly breakpoint = inject(TUI_BREAKPOINT)
-
+  protected readonly aside = inject(TuiAsideComponent)
   protected readonly fetched = toSignal(this.marketplace.currentRegistry$)
 
-  protected readonly data = toSignal(
-    combineLatest([
-      this.marketplace.registries$,
-      this.marketplace.currentRegistryUrl$,
-    ]).pipe(
-      map(([registries, currentUrl]) => {
-        const withSelected = registries.map(s => ({
-          ...s,
-          selected: sameUrl(s.url, currentUrl),
-        }))
-        const current = withSelected.find(s => s.selected)
+  public readonly manageRegistriesLink = input('')
 
-        return {
-          currentUrl,
-          current,
-          registries: withSelected,
-          standard: withSelected.slice(0, 2),
-          custom: withSelected.slice(2),
-          unsaved: current ? null : currentUrl,
-        }
-      }),
-    ),
+  private readonly registries = toSignal(this.marketplace.registries$)
+  private readonly currentUrl = toSignal(this.marketplace.currentRegistryUrl$)
+
+  protected readonly data = computed(
+    (registries = this.registries(), currentUrl = this.currentUrl()) =>
+      registries && {
+        registries: registries.map((registry, index) => ({
+          ...registry,
+          selected: sameUrl(registry.url, currentUrl),
+          custom: !this.manageRegistriesLink() && index > 1,
+        })),
+        unsaved:
+          this.manageRegistriesLink() ||
+          registries.some(({ url }) => sameUrl(url, currentUrl))
+            ? null
+            : currentUrl,
+      },
   )
 
   async connect(url: string): Promise<void> {
-    this.open = false
-
-    if (sameUrl(url, this.data()?.current?.url)) return
+    if (sameUrl(url, this.currentUrl())) return
 
     this.tasks.run(async () => {
       await this.marketplace.connect(url)
@@ -217,8 +158,6 @@ export class MarketplaceRegistrySelectComponent {
   }
 
   async add(): Promise<void> {
-    this.open = false
-
     const rawUrl = await firstValueFrom(
       this.dialog
         .openPrompt<string>({
@@ -241,8 +180,7 @@ export class MarketplaceRegistrySelectComponent {
     )
   }
 
-  async saveCurrent(url: string): Promise<void> {
-    this.open = false
+  saveCurrent(url: string): void {
     this.tasks.run(async () => await this.marketplace.add(url), 'Saving')
   }
 
