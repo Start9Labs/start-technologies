@@ -285,7 +285,10 @@ the same startup coalesce into one additional restart.
 
 ### `start-cli package uninstall <ID>`
 
-Remove a package and its data.
+Remove a package and its data. See [Uninstalling](uninstalling.md).
+
+- `--soft` — Keep the package's data
+- `--force` — Remove the package even when its own uninstall step fails or can't run
 
 ### `start-cli package logs <ID>`
 
