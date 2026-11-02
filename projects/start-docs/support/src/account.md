@@ -4,7 +4,7 @@ A Start9 Support account is created with an access code, and is yours for life. 
 
 ## Access Codes
 
-An access code creates one Start9 Support account. Every Start9 server and router comes with one, and so does every Start9 Support membership — a lifetime membership for anyone running StartOS, on any hardware, sold at [store.start9.com](https://store.start9.com/products/start9-support).
+An access code creates one Start9 Support account. Every Start9 server and router comes with one, and so does every [Premium Support](https://start9.com/premium-support) subscription.
 
 - **On your server** — servers from before February 2025, and servers bought from a reseller, carry the code on a label on the bottom.
 - **In your email** — orders from Start9 since then get it by email, sent to the address the order was placed with.
