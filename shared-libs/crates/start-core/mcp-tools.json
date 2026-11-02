@@ -5075,9 +5075,13 @@
             "keys": {
               "type": "array",
               "items": { "$ref": "#/$defs/AnyVerifyingKey" }
+            },
+            "gpgExports": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/GpgPublicKeyExport" }
             }
           },
-          "required": ["name", "contact", "keys"],
+          "required": ["name", "contact", "keys", "gpgExports"],
           "additionalProperties": true
         },
         "ContactInfo": {
@@ -5102,7 +5106,53 @@
             }
           ]
         },
-        "AnyVerifyingKey": { "type": "string" }
+        "AnyVerifyingKey": { "type": "string" },
+        "GpgPublicKeyExport": {
+          "type": "object",
+          "properties": {
+            "armored": {
+              "type": "string",
+              "description": "Original armor, preserving all certificate packets and headers."
+            },
+            "fingerprints": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Primary-key fingerprints of the certificates in this export."
+            },
+            "userIds": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Self-certified user IDs containing names, comments, and email addresses."
+            },
+            "identities": {
+              "description": "Self-certified claims indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "keyFingerprints": {
+              "description": "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          },
+          "required": [
+            "armored",
+            "fingerprints",
+            "userIds",
+            "identities",
+            "keyFingerprints"
+          ],
+          "additionalProperties": true,
+          "description": "An original public-key export and its self-certified identity claims."
+        }
       }
     }
   },
@@ -5140,7 +5190,7 @@
       "allOf": [
         { "type": "object", "properties": {}, "additionalProperties": true },
         { "$ref": "#/$defs/RegistryUrlParams" },
-        { "$ref": "#/$defs/SignerInfo" }
+        { "$ref": "#/$defs/AddSignerParams" }
       ],
       "$defs": {
         "RegistryUrlParams": {
@@ -5149,7 +5199,7 @@
           "required": ["registry"],
           "additionalProperties": true
         },
-        "SignerInfo": {
+        "AddSignerParams": {
           "type": "object",
           "properties": {
             "name": { "type": "string" },
@@ -5159,7 +5209,13 @@
             },
             "keys": {
               "type": "array",
-              "items": { "$ref": "#/$defs/AnyVerifyingKey" }
+              "items": { "type": "string" },
+              "description": "Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format."
+            },
+            "gpgExports": {
+              "description": "Retained certificates; `keys` determines the selected signing keys.",
+              "type": "array",
+              "items": { "$ref": "#/$defs/GpgPublicKeyExport" }
             }
           },
           "required": ["name", "contact", "keys"],
@@ -5187,7 +5243,46 @@
             }
           ]
         },
-        "AnyVerifyingKey": { "type": "string" }
+        "GpgPublicKeyExport": {
+          "type": "object",
+          "properties": {
+            "armored": {
+              "type": "string",
+              "description": "Original armor, preserving all certificate packets and headers."
+            },
+            "fingerprints": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Primary-key fingerprints of the certificates in this export."
+            },
+            "userIds": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Self-certified user IDs containing names, comments, and email addresses."
+            },
+            "identities": {
+              "description": "Self-certified claims indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "keyFingerprints": {
+              "description": "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          },
+          "required": ["armored", "fingerprints", "userIds"],
+          "additionalProperties": true,
+          "description": "An original public-key export and its self-certified identity claims."
+        }
       },
       "type": "object"
     }
@@ -5217,10 +5312,7 @@
               "type": "array",
               "items": { "$ref": "#/$defs/ContactInfo" }
             },
-            "addKey": {
-              "type": "array",
-              "items": { "$ref": "#/$defs/AnyVerifyingKey" }
-            },
+            "addKey": { "type": "array", "items": { "type": "string" } },
             "removeContact": {
               "type": "array",
               "items": { "$ref": "#/$defs/ContactInfo" }
@@ -5317,9 +5409,13 @@
             "keys": {
               "type": "array",
               "items": { "$ref": "#/$defs/AnyVerifyingKey" }
+            },
+            "gpgExports": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/GpgPublicKeyExport" }
             }
           },
-          "required": ["name", "contact", "keys"],
+          "required": ["name", "contact", "keys", "gpgExports"],
           "additionalProperties": true
         },
         "ContactInfo": {
@@ -5344,7 +5440,53 @@
             }
           ]
         },
-        "AnyVerifyingKey": { "type": "string" }
+        "AnyVerifyingKey": { "type": "string" },
+        "GpgPublicKeyExport": {
+          "type": "object",
+          "properties": {
+            "armored": {
+              "type": "string",
+              "description": "Original armor, preserving all certificate packets and headers."
+            },
+            "fingerprints": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Primary-key fingerprints of the certificates in this export."
+            },
+            "userIds": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Self-certified user IDs containing names, comments, and email addresses."
+            },
+            "identities": {
+              "description": "Self-certified claims indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "keyFingerprints": {
+              "description": "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          },
+          "required": [
+            "armored",
+            "fingerprints",
+            "userIds",
+            "identities",
+            "keyFingerprints"
+          ],
+          "additionalProperties": true,
+          "description": "An original public-key export and its self-certified identity claims."
+        }
       }
     }
   },
@@ -6072,9 +6214,13 @@
             "keys": {
               "type": "array",
               "items": { "$ref": "#/$defs/AnyVerifyingKey" }
+            },
+            "gpgExports": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/GpgPublicKeyExport" }
             }
           },
-          "required": ["name", "contact", "keys"],
+          "required": ["name", "contact", "keys", "gpgExports"],
           "additionalProperties": true
         },
         "ContactInfo": {
@@ -6099,7 +6245,53 @@
             }
           ]
         },
-        "AnyVerifyingKey": { "type": "string" }
+        "AnyVerifyingKey": { "type": "string" },
+        "GpgPublicKeyExport": {
+          "type": "object",
+          "properties": {
+            "armored": {
+              "type": "string",
+              "description": "Original armor, preserving all certificate packets and headers."
+            },
+            "fingerprints": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Primary-key fingerprints of the certificates in this export."
+            },
+            "userIds": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Self-certified user IDs containing names, comments, and email addresses."
+            },
+            "identities": {
+              "description": "Self-certified claims indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "keyFingerprints": {
+              "description": "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          },
+          "required": [
+            "armored",
+            "fingerprints",
+            "userIds",
+            "identities",
+            "keyFingerprints"
+          ],
+          "additionalProperties": true,
+          "description": "An original public-key export and its self-certified identity claims."
+        }
       },
       "type": "object",
       "properties": {
@@ -6182,11 +6374,11 @@
               "propertyNames": { "type": "string" },
               "additionalProperties": { "$ref": "#/$defs/Category" }
             },
-            "trustKeys": {
-              "description": "Proposed Marketplace signing keys and fallback labels, not an assertion of trust.",
+            "trustSigners": {
+              "description": "Registry-selected signers, not an assertion of trust.",
               "type": "object",
               "propertyNames": { "type": "string" },
-              "additionalProperties": { "type": "string" }
+              "additionalProperties": { "$ref": "#/$defs/SignerInfo" }
             }
           },
           "required": [
@@ -6194,7 +6386,7 @@
             "icon",
             "description",
             "categories",
-            "trustKeys"
+            "trustSigners"
           ],
           "additionalProperties": true
         },
@@ -6214,6 +6406,95 @@
           "properties": { "name": { "$ref": "#/$defs/LocaleString" } },
           "required": ["name"],
           "additionalProperties": true
+        },
+        "SignerInfo": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "contact": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/ContactInfo" }
+            },
+            "keys": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/AnyVerifyingKey" }
+            },
+            "gpgExports": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/GpgPublicKeyExport" }
+            }
+          },
+          "required": ["name", "contact", "keys", "gpgExports"],
+          "additionalProperties": true
+        },
+        "ContactInfo": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "email": { "type": "string" } },
+              "required": ["email"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": { "matrix": { "type": "string" } },
+              "required": ["matrix"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": { "website": { "type": "string" } },
+              "required": ["website"],
+              "additionalProperties": true
+            }
+          ]
+        },
+        "AnyVerifyingKey": { "type": "string" },
+        "GpgPublicKeyExport": {
+          "type": "object",
+          "properties": {
+            "armored": {
+              "type": "string",
+              "description": "Original armor, preserving all certificate packets and headers."
+            },
+            "fingerprints": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Primary-key fingerprints of the certificates in this export."
+            },
+            "userIds": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Self-certified user IDs containing names, comments, and email addresses."
+            },
+            "identities": {
+              "description": "Self-certified claims indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "keyFingerprints": {
+              "description": "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          },
+          "required": [
+            "armored",
+            "fingerprints",
+            "userIds",
+            "identities",
+            "keyFingerprints"
+          ],
+          "additionalProperties": true,
+          "description": "An original public-key export and its self-certified identity claims."
         }
       },
       "type": "object",
@@ -6231,14 +6512,14 @@
           "propertyNames": { "type": "string" },
           "additionalProperties": { "$ref": "#/$defs/Category" }
         },
-        "trustKeys": {
-          "description": "Proposed Marketplace signing keys and fallback labels, not an assertion of trust.",
+        "trustSigners": {
+          "description": "Registry-selected signers, not an assertion of trust.",
           "type": "object",
           "propertyNames": { "type": "string" },
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": { "$ref": "#/$defs/SignerInfo" }
         }
       },
-      "required": ["name", "icon", "description", "categories", "trustKeys"],
+      "required": ["name", "icon", "description", "categories", "trustSigners"],
       "additionalProperties": true
     }
   },
@@ -7760,9 +8041,13 @@
             "keys": {
               "type": "array",
               "items": { "$ref": "#/$defs/AnyVerifyingKey" }
+            },
+            "gpgExports": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/GpgPublicKeyExport" }
             }
           },
-          "required": ["name", "contact", "keys"],
+          "required": ["name", "contact", "keys", "gpgExports"],
           "additionalProperties": true
         },
         "ContactInfo": {
@@ -7787,7 +8072,53 @@
             }
           ]
         },
-        "AnyVerifyingKey": { "type": "string" }
+        "AnyVerifyingKey": { "type": "string" },
+        "GpgPublicKeyExport": {
+          "type": "object",
+          "properties": {
+            "armored": {
+              "type": "string",
+              "description": "Original armor, preserving all certificate packets and headers."
+            },
+            "fingerprints": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Primary-key fingerprints of the certificates in this export."
+            },
+            "userIds": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Self-certified user IDs containing names, comments, and email addresses."
+            },
+            "identities": {
+              "description": "Self-certified claims indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "keyFingerprints": {
+              "description": "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          },
+          "required": [
+            "armored",
+            "fingerprints",
+            "userIds",
+            "identities",
+            "keyFingerprints"
+          ],
+          "additionalProperties": true,
+          "description": "An original public-key export and its self-certified identity claims."
+        }
       }
     }
   },
@@ -8769,9 +9100,13 @@
             "keys": {
               "type": "array",
               "items": { "$ref": "#/$defs/AnyVerifyingKey" }
+            },
+            "gpgExports": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/GpgPublicKeyExport" }
             }
           },
-          "required": ["name", "contact", "keys"],
+          "required": ["name", "contact", "keys", "gpgExports"],
           "additionalProperties": true
         },
         "ContactInfo": {
@@ -8796,7 +9131,53 @@
             }
           ]
         },
-        "AnyVerifyingKey": { "type": "string" }
+        "AnyVerifyingKey": { "type": "string" },
+        "GpgPublicKeyExport": {
+          "type": "object",
+          "properties": {
+            "armored": {
+              "type": "string",
+              "description": "Original armor, preserving all certificate packets and headers."
+            },
+            "fingerprints": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Primary-key fingerprints of the certificates in this export."
+            },
+            "userIds": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Self-certified user IDs containing names, comments, and email addresses."
+            },
+            "identities": {
+              "description": "Self-certified claims indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "keyFingerprints": {
+              "description": "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          },
+          "required": [
+            "armored",
+            "fingerprints",
+            "userIds",
+            "identities",
+            "keyFingerprints"
+          ],
+          "additionalProperties": true,
+          "description": "An original public-key export and its self-certified identity claims."
+        }
       }
     }
   },
@@ -11159,6 +11540,24 @@
     }
   },
   {
+    "name": "server.trusted-keys.refresh-registry",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RegistryPreviewParams": {
+          "type": "object",
+          "properties": { "url": { "type": "string" } },
+          "required": ["url"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": { "url": { "type": "string" } },
+      "required": ["url"],
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "server.trusted-keys.registry-preview",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -11194,11 +11593,11 @@
               "propertyNames": { "type": "string" },
               "additionalProperties": { "$ref": "#/$defs/Category" }
             },
-            "trustKeys": {
-              "description": "Proposed Marketplace signing keys and fallback labels, not an assertion of trust.",
+            "trustSigners": {
+              "description": "Registry-selected signers, not an assertion of trust.",
               "type": "object",
               "propertyNames": { "type": "string" },
-              "additionalProperties": { "type": "string" }
+              "additionalProperties": { "$ref": "#/$defs/SignerInfo" }
             }
           },
           "required": [
@@ -11206,7 +11605,7 @@
             "icon",
             "description",
             "categories",
-            "trustKeys"
+            "trustSigners"
           ],
           "additionalProperties": true
         },
@@ -11226,6 +11625,95 @@
           "properties": { "name": { "$ref": "#/$defs/LocaleString" } },
           "required": ["name"],
           "additionalProperties": true
+        },
+        "SignerInfo": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "contact": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/ContactInfo" }
+            },
+            "keys": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/AnyVerifyingKey" }
+            },
+            "gpgExports": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/GpgPublicKeyExport" }
+            }
+          },
+          "required": ["name", "contact", "keys", "gpgExports"],
+          "additionalProperties": true
+        },
+        "ContactInfo": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "email": { "type": "string" } },
+              "required": ["email"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": { "matrix": { "type": "string" } },
+              "required": ["matrix"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": { "website": { "type": "string" } },
+              "required": ["website"],
+              "additionalProperties": true
+            }
+          ]
+        },
+        "AnyVerifyingKey": { "type": "string" },
+        "GpgPublicKeyExport": {
+          "type": "object",
+          "properties": {
+            "armored": {
+              "type": "string",
+              "description": "Original armor, preserving all certificate packets and headers."
+            },
+            "fingerprints": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Primary-key fingerprints of the certificates in this export."
+            },
+            "userIds": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Self-certified user IDs containing names, comments, and email addresses."
+            },
+            "identities": {
+              "description": "Self-certified claims indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "keyFingerprints": {
+              "description": "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          },
+          "required": [
+            "armored",
+            "fingerprints",
+            "userIds",
+            "identities",
+            "keyFingerprints"
+          ],
+          "additionalProperties": true,
+          "description": "An original public-key export and its self-certified identity claims."
         }
       },
       "type": "object",
@@ -11243,14 +11731,14 @@
           "propertyNames": { "type": "string" },
           "additionalProperties": { "$ref": "#/$defs/Category" }
         },
-        "trustKeys": {
-          "description": "Proposed Marketplace signing keys and fallback labels, not an assertion of trust.",
+        "trustSigners": {
+          "description": "Registry-selected signers, not an assertion of trust.",
           "type": "object",
           "propertyNames": { "type": "string" },
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": { "$ref": "#/$defs/SignerInfo" }
         }
       },
-      "required": ["name", "icon", "description", "categories", "trustKeys"],
+      "required": ["name", "icon", "description", "categories", "trustSigners"],
       "additionalProperties": true
     }
   },
@@ -11305,7 +11793,7 @@
           },
           "required": ["id", "name", "marketplace", "os"],
           "additionalProperties": true,
-          "description": "Changes a keyring's name and both trust selections atomically."
+          "description": "Changes a key's name and both trust selections atomically."
         }
       },
       "type": "object",
@@ -11317,7 +11805,7 @@
       },
       "required": ["id", "name", "marketplace", "os"],
       "additionalProperties": true,
-      "description": "Changes a keyring's name and both trust selections atomically."
+      "description": "Changes a key's name and both trust selections atomically."
     }
   },
   {

@@ -14,6 +14,8 @@ This directory is a thin product wrapper inside the `start-technologies` monorep
 
 ## Package trust proposals
 
+Pass an armored GPG public-key export to `admin signer add --key` or `admin signer edit --add-key` to retain its complete certificate, identities, and fingerprints. Signers stored with only DER keys need their public certificate reimported to supply this information.
+
 Choose which existing signers to propose when a user connects this registry:
 
 ```bash
@@ -21,7 +23,7 @@ start-registry admin signer list
 start-registry info set-trust-signers <SIGNER_ID> [SIGNER_ID...]
 ```
 
-Run `start-registry info set-trust-signers` without IDs to clear the selection. Registries start with no proposed signers. `registry.info` exposes the selected signers' public keys and labels as `trustKeys`; StartOS asks users to approve package trust before accepting them. Existing saved registries can review the proposal from **System → Manage Registries → Review keys**. These proposals do not grant OS-update trust.
+Run `start-registry info set-trust-signers` without IDs to clear the selection. Registries start with no proposed signers. `registry.info` exposes the selected signer IDs and their complete signer records as `trustSigners`, including public keys and preserved GPG exports. StartOS asks users to approve package trust when connecting. Keys added later are imported disabled when users visit the registry, with a dialog linking to **Manage Trust**. Existing saved registries can fetch the latest proposal from **System → Manage Registries → Review keys**. These proposals do not grant OS-update trust.
 
 ## Binary layout
 

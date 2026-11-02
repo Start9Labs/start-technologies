@@ -5,6 +5,7 @@ import {
   FALLBACK_ICON,
   GetPackageRes,
   GetPackagesRes,
+  registrySigningKeys,
 } from '@start9labs/marketplace'
 import {
   FullKeyboard,
@@ -301,32 +302,34 @@ export class MockApiService extends ApiService {
     }) => {
       const normalized = registryUrl(url)
       const info = this.mockRegistryInfo(normalized)
-      for (const key of approvedKeys) {
-        const label = info.trustKeys[key]
-        if (label === undefined)
-          throw new Error('Registry trust proposal changed')
-        const trusted = (mockPatchData.serverInfo.trustedKeys[key] ??= {
-          name: label || key,
-          origin: normalized,
-          originRegistry: { name: info.name, icon: info.icon },
-          publicKeys: [key],
-          gpgExports: [],
-          removable: false,
-          marketplace: false,
-          os: false,
-        })
-        trusted.marketplace = true
-      }
+      const proposed = registrySigningKeys(info)
+      if (approvedKeys.some(key => !proposed[key]))
+        throw new Error('Registry trust proposal changed')
+      this.importRegistryKeys(normalized, info)
+      for (const key of approvedKeys)
+        mockPatchData.serverInfo.trustedKeys[key]!.marketplace = true
       for (const saved of Object.keys(mockPatchData.ui.registries)) {
         if (sameUrl(saved, normalized))
           delete mockPatchData.ui.registries[saved]
       }
       mockPatchData.ui.registries[normalized] = name ?? info.name
-      mockPatchData.serverInfo.registryKeys[normalized] = Object.keys(
-        info.trustKeys,
-      )
       await this.publishTrust()
       return null
+    },
+    'server.trusted-keys.refresh-registry': async ({ url }) => {
+      if (
+        !Object.keys(mockPatchData.ui.registries).some(saved =>
+          sameUrl(saved, url),
+        )
+      )
+        return []
+      const normalized = registryUrl(url)
+      const added = this.importRegistryKeys(
+        normalized,
+        this.mockRegistryInfo(normalized),
+      )
+      await this.publishTrust()
+      return added
     },
     'server.trusted-keys.remove-registry': async ({ url }) => {
       for (const saved of Object.keys(mockPatchData.ui.registries)) {
@@ -347,7 +350,7 @@ export class MockApiService extends ApiService {
           origin: 'manual',
           originRegistry: null,
           gpgExports: [],
-          publicKeys: [id],
+          publicKey: id,
           removable: true,
           marketplace: true,
           os: context === 'os',
@@ -357,9 +360,9 @@ export class MockApiService extends ApiService {
       return null
     },
     'server.trusted-keys.update': async ({ id, name, marketplace, os }) => {
-      const keyring = mockPatchData.serverInfo.trustedKeys[id]
-      if (!keyring) throw new Error('Keyring not found')
-      const value = { ...keyring, name, marketplace, os }
+      const key = mockPatchData.serverInfo.trustedKeys[id]
+      if (!key) throw new Error('Key not found')
+      const value = { ...key, name, marketplace, os }
       mockPatchData.serverInfo.trustedKeys[id] = value
       await this.mockRevision([
         {
@@ -2439,6 +2442,32 @@ export class MockApiService extends ApiService {
     }
   }
 
+  private importRegistryKeys(url: string, info: T.RegistryInfo): string[] {
+    const proposed = registrySigningKeys(info)
+    const previous = new Set(
+      Object.entries(mockPatchData.serverInfo.registryKeys)
+        .filter(([saved]) => sameUrl(saved, url))
+        .flatMap(([, keys]) => keys),
+    )
+    for (const [id, identity] of Object.entries(proposed)) {
+      const trusted = (mockPatchData.serverInfo.trustedKeys[id] ??= {
+        ...identity,
+        origin: url,
+        originRegistry: { name: info.name, icon: info.icon },
+        removable: false,
+        marketplace: false,
+        os: false,
+      })
+      if (!trusted.gpgExports.length) trusted.gpgExports = identity.gpgExports
+    }
+    for (const saved of Object.keys(mockPatchData.serverInfo.registryKeys)) {
+      if (sameUrl(saved, url))
+        delete mockPatchData.serverInfo.registryKeys[saved]
+    }
+    mockPatchData.serverInfo.registryKeys[url] = Object.keys(proposed)
+    return Object.keys(proposed).filter(key => !previous.has(key))
+  }
+
   private mockRegistryInfo(url: string): T.RegistryInfo {
     return {
       ...Mock.RegistryInfo,
@@ -2454,9 +2483,7 @@ export class MockApiService extends ApiService {
       Object.values(mockPatchData.serverInfo.registryKeys).flat(),
     )
     for (const key of Object.values(mockPatchData.serverInfo.trustedKeys)) {
-      key.removable =
-        key.origin !== 'system' &&
-        !key.publicKeys.some(publicKey => listed.has(publicKey))
+      key.removable = key.origin !== 'system' && !listed.has(key.publicKey)
     }
     await this.mockRevision<unknown>([
       {

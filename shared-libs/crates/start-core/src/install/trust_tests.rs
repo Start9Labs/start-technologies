@@ -7,7 +7,7 @@ use crate::registry::asset::RegistryAsset;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::sign::ed25519::Ed25519ph;
 use crate::sign::{AnySignature, AnyVerifyingKey, SignatureScheme};
-use crate::trusted_keys::{TrustedKeyring, TrustedKeys, enabled_keys};
+use crate::trusted_keys::{TrustedKey, TrustedKeys, enabled_keys};
 use crate::util::serde::Base64;
 
 #[test]
@@ -27,14 +27,15 @@ fn package_commitment_requires_an_enabled_marketplace_signer() {
         commitment,
         signatures: HashMap::from([(public.clone(), AnySignature::Ed25519ph(signature))]),
     };
+    let id = public.interned_der64();
     let mut keys = TrustedKeys::from([(
-        "custom".into(),
-        TrustedKeyring {
+        id.clone(),
+        TrustedKey {
             name: "custom".into(),
             origin: "manual".into(),
             origin_registry: None,
             removable: true,
-            public_keys: std::collections::BTreeSet::from([public]),
+            public_key: public,
             gpg_exports: Default::default(),
             marketplace: false,
             os: true,
@@ -44,7 +45,7 @@ fn package_commitment_requires_an_enabled_marketplace_signer() {
         || trusted_keys::signer_policy(Some(enabled_keys(&keys, TrustContext::Marketplace)));
     assert!(asset.validate_all(SIG_CONTEXT, policy()).is_err());
     assert!(asset.validate_all(SIG_CONTEXT, None).is_ok());
-    keys.get_mut("custom").unwrap().marketplace = true;
+    keys.get_mut(&id).unwrap().marketplace = true;
     assert!(
         asset
             .validate_all(
@@ -89,14 +90,14 @@ fn production_and_community_build_signers_require_explicit_alpha_opt_in() {
                 )
                 .is_err()
         );
-        keys.get_mut("start9-alpha").unwrap().marketplace = true;
+        keys.get_mut(&signer.interned_der64()).unwrap().marketplace = true;
         asset
             .validate_all(
                 SIG_CONTEXT,
                 trusted_keys::signer_policy(Some(enabled_keys(&keys, TrustContext::Marketplace))),
             )
             .unwrap();
-        assert!(!keys["start9-alpha"].os);
+        assert!(!keys[&signer.interned_der64()].os);
     }
 }
 

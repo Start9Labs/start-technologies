@@ -46,12 +46,12 @@ function mockSystemKey(
   userIds: string[],
   enabled: boolean,
   fingerprint?: string,
-): T.TrustedKeyring {
+): T.TrustedKey {
   return {
     name,
     origin: 'system',
     originRegistry: null,
-    publicKeys: [publicKey],
+    publicKey,
     gpgExports: userIds.length
       ? [
           {

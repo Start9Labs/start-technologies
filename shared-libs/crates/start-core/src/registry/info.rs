@@ -11,9 +11,9 @@ use crate::prelude::*;
 use crate::registry::FullIndex;
 use crate::registry::context::RegistryContext;
 use crate::registry::package::index::Category;
+use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::manifest::LocaleString;
-use crate::sign::AnyVerifyingKey;
 use crate::util::DataUrl;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat};
 
@@ -76,9 +76,9 @@ pub struct RegistryInfo {
     /// Markdown, shown above the registry's services.
     pub description: Option<LocaleString>,
     pub categories: BTreeMap<InternedString, Category>,
-    /// Proposed Marketplace signing keys and fallback labels, not an assertion of trust.
+    /// Registry-selected signers, not an assertion of trust.
     #[serde(default)]
-    pub trust_keys: BTreeMap<AnyVerifyingKey, String>,
+    pub trust_signers: BTreeMap<Guid, SignerInfo>,
 }
 
 rpc_toolkit::reflect_ts!(RegistryInfo);
@@ -86,26 +86,25 @@ rpc_toolkit::ts_export!(RegistryInfo, namespaces = [""]);
 
 pub async fn get_info(ctx: RegistryContext) -> Result<RegistryInfo, Error> {
     let index: FullIndex = ctx.db.peek().await.into_index().de()?;
-    let trust_keys = proposed_keys(&index);
+    let trust_signers = proposed_signers(&index);
     Ok(RegistryInfo {
         name: index.name,
         icon: index.icon,
         description: index.description,
         categories: index.package.categories,
-        trust_keys,
+        trust_signers,
     })
 }
 
-fn proposed_keys(index: &FullIndex) -> BTreeMap<AnyVerifyingKey, String> {
+fn proposed_signers(index: &FullIndex) -> BTreeMap<Guid, SignerInfo> {
     index
         .trust_signers
         .iter()
-        .filter_map(|id| index.signers.get(id))
-        .flat_map(|signer| {
-            signer
-                .keys
-                .iter()
-                .map(|key| (key.clone(), signer.name.clone()))
+        .filter_map(|id| {
+            index
+                .signers
+                .get(id)
+                .map(|signer| (id.clone(), signer.clone()))
         })
         .collect()
 }
@@ -313,7 +312,7 @@ mod tests {
     #[test]
     fn registry_proposals_reject_malformed_keys_before_confirmation() {
         let mut value = serde_json::to_value(RegistryInfo::default()).unwrap();
-        value["trustKeys"] = serde_json::json!({ "invalid key": "Publisher" });
+        value["trustSigners"] = serde_json::json!({ Guid::new().to_string(): { "name": "Publisher", "contact": [], "keys": ["invalid key"] } });
         assert!(serde_json::from_value::<RegistryInfo>(value).is_err());
     }
 
@@ -338,9 +337,10 @@ mod tests {
         let first = Guid::new();
         let second = Guid::new();
         let mut index = FullIndex::default();
-        let keys = crate::trusted_keys::initial_trusted_keys()[crate::trusted_keys::START9]
-            .public_keys
-            .clone();
+        let keys = crate::trusted_keys::initial_trusted_keys()
+            .into_values()
+            .map(|key| key.public_key)
+            .collect::<BTreeSet<_>>();
         let first_key = keys.first().unwrap().clone();
         let second_key = keys.last().unwrap().clone();
         for (id, name, key) in [
@@ -353,23 +353,57 @@ mod tests {
                     name: name.into(),
                     contact: vec![],
                     keys: BTreeSet::from([key]),
+                    gpg_exports: BTreeSet::new(),
                 },
             );
         }
-        assert!(proposed_keys(&index).is_empty());
+        assert!(proposed_signers(&index).is_empty());
         select_trust_signers(&mut index, BTreeSet::from([first.clone()])).unwrap();
         assert_eq!(
-            proposed_keys(&index),
-            BTreeMap::from([(first_key, "First".into())])
+            proposed_signers(&index),
+            BTreeMap::from([(first.clone(), index.signers[&first].clone())])
         );
         assert!(select_trust_signers(&mut index, BTreeSet::from([Guid::new()])).is_err());
         assert_eq!(index.trust_signers, BTreeSet::from([first]));
         select_trust_signers(&mut index, BTreeSet::new()).unwrap();
-        assert!(proposed_keys(&index).is_empty());
+        assert!(proposed_signers(&index).is_empty());
         let mut old_index = serde_json::to_value(&index).unwrap();
         old_index.as_object_mut().unwrap().remove("trustSigners");
         let restored: FullIndex = serde_json::from_value(old_index).unwrap();
-        assert!(proposed_keys(&restored).is_empty());
+        assert!(proposed_signers(&restored).is_empty());
+    }
+
+    #[test]
+    fn selected_signer_proposals_round_trip_full_gpg_metadata() {
+        let imported = crate::sign::gpg::parse_public_keys(&[include_str!(
+            "../sign/fixtures/ed25519-signers.asc"
+        )
+        .into()])
+        .unwrap();
+        let id = Guid::new();
+        let signer = SignerInfo {
+            name: "Publisher".into(),
+            contact: vec![crate::registry::signer::ContactInfo::Email(
+                "publisher@example.com".into(),
+            )],
+            keys: imported.keys,
+            gpg_exports: imported.gpg_exports,
+        };
+        let mut index = FullIndex::default();
+        index.signers.insert(id.clone(), signer.clone());
+        select_trust_signers(&mut index, BTreeSet::from([id.clone()])).unwrap();
+        let info = RegistryInfo {
+            trust_signers: proposed_signers(&index),
+            ..Default::default()
+        };
+        let restored: RegistryInfo = from_value(to_value(&info).unwrap()).unwrap();
+        assert_eq!(
+            restored.trust_signers,
+            BTreeMap::from([(id.clone(), signer)])
+        );
+        index.signers.remove(&id);
+        assert!(proposed_signers(&index).is_empty());
+        assert_eq!(index.trust_signers, BTreeSet::from([id]));
     }
 
     #[test]

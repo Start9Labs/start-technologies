@@ -1188,12 +1188,12 @@ export type TaskParams = z.input<typeof schemas.Task>
 /**
  * Signing-key material and independent package and OS-update trust.
  */
-export type TrustedKeyring = z.output<typeof schemas.TrustedKeyring>
+export type TrustedKey = z.output<typeof schemas.TrustedKey>
 
 /**
  * Signing-key material and independent package and OS-update trust.
  */
-export type TrustedKeyringInput = z.input<typeof schemas.TrustedKeyring>
+export type TrustedKeyInput = z.input<typeof schemas.TrustedKey>
 export type UpdateSystemParams = z.output<typeof schemas.UpdateSystemParams>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type UrlPluginClearUrlsParams = z.output<

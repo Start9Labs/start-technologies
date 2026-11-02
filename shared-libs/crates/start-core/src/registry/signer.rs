@@ -8,16 +8,28 @@ use url::Url;
 
 use crate::prelude::*;
 use crate::sign::commitment::SignedCommitment;
+use crate::sign::gpg::{GpgPublicKeyExport, parse_public_keys};
 use crate::sign::{AnySignature, AnyVerifyingKey};
 use crate::util::FromStrParser;
 
-#[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
+#[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct SignerInfo {
     pub name: String,
     pub contact: Vec<ContactInfo>,
     pub keys: BTreeSet<AnyVerifyingKey>,
+    #[serde(default)]
+    pub gpg_exports: BTreeSet<GpgPublicKeyExport>,
+}
+
+impl SignerInfo {
+    pub fn import_keys(&mut self, values: &[String]) -> Result<(), Error> {
+        let imported = parse_public_keys(values)?;
+        self.keys.extend(imported.keys);
+        self.gpg_exports.extend(imported.gpg_exports);
+        Ok(())
+    }
 }
 
 rpc_toolkit::reflect_ts!(SignerInfo);

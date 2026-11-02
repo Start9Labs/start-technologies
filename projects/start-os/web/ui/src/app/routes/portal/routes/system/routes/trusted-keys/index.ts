@@ -57,7 +57,7 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
       </p>
       @if (trust.keys(); as keys) {
         <table [appTable]="['Name', 'Origin', 'Packages', 'OS Updates', null]">
-          @for (entry of keys | keyvalue: compareKeyrings; track entry.key) {
+          @for (entry of keys | keyvalue: compareKeys; track entry.key) {
             @let identity = entry.value | keyIdentity;
             <tr>
               <td><span [appKeyIdentity]="entry.value"></span></td>
@@ -206,9 +206,9 @@ export default class TrustedKeys {
   protected readonly trust = inject(TrustedKeysService)
   protected readonly saving = signal(false)
 
-  protected compareKeyrings(
-    a: KeyValue<string, T.TrustedKeyring>,
-    b: KeyValue<string, T.TrustedKeyring>,
+  protected compareKeys(
+    a: KeyValue<string, T.TrustedKey>,
+    b: KeyValue<string, T.TrustedKey>,
   ): number {
     return (
       Number(a.value.removable) - Number(b.value.removable) ||
@@ -220,15 +220,15 @@ export default class TrustedKeys {
     this.dialogs.openComponent(ADD_TRUSTED_KEY).subscribe()
   }
 
-  protected edit(id: string, keyring: T.TrustedKeyring): void {
+  protected edit(id: string, key: T.TrustedKey): void {
     this.dialogs
-      .openComponent(EDIT_TRUSTED_KEY, { data: { id, keyring } })
+      .openComponent(EDIT_TRUSTED_KEY, { data: { id, key } })
       .subscribe()
   }
 
   protected async update(
     id: string,
-    key: T.TrustedKeyring,
+    key: T.TrustedKey,
     context: 'marketplace' | 'os',
     enabled: boolean,
     control: NgModel,

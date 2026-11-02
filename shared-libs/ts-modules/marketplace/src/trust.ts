@@ -9,7 +9,7 @@ export type TrustContext = RPC.RpcParamType<
 >['context']
 
 export abstract class MarketplaceTrust {
-  abstract readonly keys: Signal<Record<string, T.TrustedKeyring> | undefined>
+  abstract readonly keys: Signal<Record<string, T.TrustedKey> | undefined>
 }
 
 export function packageSigners(
@@ -20,32 +20,27 @@ export function packageSigners(
 
 export function matchingTrustedKeys(
   signers: string[],
-  groups: Record<string, T.TrustedKeyring>,
+  keys: Record<string, T.TrustedKey>,
   context: TrustContext,
 ) {
   const signed = new Set(signers.map(auth.normalizeDer64))
-  return Object.entries(groups).flatMap(([id, group]) => {
-    const publicKeys = group.publicKeys.filter(key =>
-      signed.has(auth.normalizeDer64(key)),
-    )
-    return group[context] && publicKeys.length
-      ? [{ id, name: group.name, publicKeys }]
-      : []
-  })
+  return Object.entries(keys).flatMap(([id, key]) =>
+    key[context] && signed.has(auth.normalizeDer64(key.publicKey))
+      ? [{ id, name: key.name, publicKey: key.publicKey }]
+      : [],
+  )
 }
 
 @Pipe({ name: 'packageSignerIdentities' })
 export class PackageSignerIdentitiesPipe {
   transform(
     pkg: Pick<MarketplacePkgBase, 's9pks' | 'signers'>,
-    groups: Record<string, T.TrustedKeyring>,
+    keys: Record<string, T.TrustedKey>,
   ) {
     return [...new Set(packageSigners(pkg).map(auth.normalizeDer64))].map(
       id => {
-        const key = Object.values(groups).find(group =>
-          group.publicKeys.some(
-            publicKey => auth.normalizeDer64(publicKey) === id,
-          ),
+        const key = Object.values(keys).find(
+          key => auth.normalizeDer64(key.publicKey) === id,
         )
         return { id, ...signingKeyIdentity(id, key) }
       },

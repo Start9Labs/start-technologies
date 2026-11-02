@@ -211,11 +211,19 @@ export namespace Mock {
   }
 
   export const RegistryInfo: T.RegistryInfo = {
-    trustKeys: {
-      'MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=':
-        'Start9 Alpha',
-      'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=':
-        'Package publisher',
+    trustSigners: {
+      'alpha-signer': {
+        name: 'Start9 Alpha',
+        contact: [],
+        keys: ['MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y='],
+        gpgExports: [],
+      },
+      'package-signer': {
+        name: 'Package publisher',
+        contact: [],
+        keys: ['MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A='],
+        gpgExports: [],
+      },
     },
     name: 'Start9 Registry',
     icon: REGISTRY_ICON,

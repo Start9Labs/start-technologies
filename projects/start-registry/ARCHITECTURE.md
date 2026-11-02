@@ -93,10 +93,12 @@ registry.
 - `index: FullIndex` — `{ name, icon, description, package: PackageIndex, os: OsIndex, signers: BTreeMap<Guid, SignerInfo>, trustSigners: Set<Guid> }`.
 
 The admin-only RPC `registry.info.set-trust-signers` accepts `{ signers: Guid[] }`,
-selecting a subset of the existing signer records. `registry.info` returns their
-current keys as `trustKeys: Record<DER64, string>` with signer names as fallback
-labels. An empty selection proposes no keys. Clients ask for consent before
-accepting these Marketplace trust proposals; the registry cannot grant OS trust.
+selecting a subset of the existing signer records. `registry.info` returns the
+selected IDs and complete records as `trustSigners: Record<Guid, SignerInfo>`.
+Signer records retain their original GPG exports and per-key identities and
+fingerprints. An empty selection proposes no keys. StartOS asks for consent when
+connecting; keys discovered on later visits start disabled. Registry proposals
+do not grant OS trust.
 
 Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hold versions, dependency `VersionRange`s, and `RegistryAsset`s. Assets carry **Blake3 commitments** (`sign/commitment/blake3`) for content addressing and integrity, and are signed by registered signers.
 

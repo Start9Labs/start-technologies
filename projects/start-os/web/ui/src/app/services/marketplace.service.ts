@@ -9,7 +9,7 @@ import {
   packageResponse,
   packagesResponse,
 } from '@start9labs/marketplace'
-import { Exver, registryUrl, sameUrl } from '@start9labs/shared'
+import { ErrorService, Exver, registryUrl, sameUrl } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
@@ -44,6 +44,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly exver = inject(Exver)
   private readonly storage = inject(StorageService)
+  private readonly errors = inject(ErrorService)
 
   readonly registries$: Observable<StoreIdentity[]> = this.patch
     .watch$('ui', 'registries')
@@ -67,6 +68,20 @@ export class MarketplaceService extends AbstractMarketplaceService {
   readonly currentRegistryUrl$ = new ReplaySubject<string>(1)
 
   readonly requestErrors$ = new BehaviorSubject<string[]>([])
+
+  readonly registryKeysAdded$ = this.currentRegistryUrl$.pipe(
+    distinctUntilChanged<string>(sameUrl),
+    switchMap(url =>
+      from(this.refreshRegistry(url)).pipe(
+        map(keys => ({ url, keys })),
+        catchError(error => {
+          this.errors.handleError(error)
+          return of({ url, keys: [] })
+        }),
+      ),
+    ),
+    filter(({ keys }) => keys.length > 0),
+  )
 
   readonly marketplace$: Observable<Marketplace> = combineLatest([
     this.newRegistry$.pipe(
@@ -289,6 +304,12 @@ export class MarketplaceService extends AbstractMarketplaceService {
     const url = registryUrl(rawUrl)
     const info = await this.api.rpc.server.trustedKeys.registryPreview({ url })
     return { url, info }
+  }
+
+  async refreshRegistry(rawUrl: string): Promise<string[]> {
+    return this.api.rpc.server.trustedKeys.refreshRegistry({
+      url: registryUrl(rawUrl),
+    })
   }
 
   async add(rawUrl: string, approvedKeys: string[] = []): Promise<string> {

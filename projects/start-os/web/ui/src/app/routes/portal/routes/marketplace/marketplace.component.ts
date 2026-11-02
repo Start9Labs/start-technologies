@@ -9,12 +9,13 @@ import {
   MarketplaceRegistrySelectComponent,
   MarketplaceTileComponent,
 } from '@start9labs/marketplace'
-import { i18nPipe, registryUrl } from '@start9labs/shared'
-import { tap } from 'rxjs'
+import { DialogService, i18nPipe, registryUrl } from '@start9labs/shared'
+import { filter, switchMap, tap } from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { StorageService } from 'src/app/services/storage.service'
 import { TitleDirective } from 'src/app/services/title.service'
+import { MANAGE_TRUST_LINK } from '../system/system.const'
 
 import { MarketplaceControlsComponent } from './components/controls.component'
 
@@ -65,6 +66,7 @@ export default class Marketplace {
   private readonly configService = inject(ConfigService)
   private readonly router = inject(Router)
   private readonly storage = inject(StorageService)
+  private readonly dialogs = inject(DialogService)
 
   protected readonly category = signal('all')
   protected readonly query = signal('')
@@ -100,4 +102,23 @@ export default class Marketplace {
   protected readonly registry = toSignal(
     this.marketplaceService.currentRegistry$,
   )
+
+  private readonly registryKeyNotices =
+    this.marketplaceService.registryKeysAdded$
+      .pipe(
+        switchMap(() =>
+          this.dialogs.openConfirm({
+            label: 'New registry keys',
+            data: {
+              content:
+                'This registry has added signing keys. Newly imported keys are disabled. Review them in Manage Trust.',
+              yes: 'Manage Trust',
+              no: 'Dismiss',
+            },
+          }),
+        ),
+        filter(Boolean),
+        takeUntilDestroyed(),
+      )
+      .subscribe(() => this.router.navigate(MANAGE_TRUST_LINK))
 }

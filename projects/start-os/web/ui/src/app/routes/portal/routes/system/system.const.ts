@@ -1,8 +1,10 @@
-export const TRUSTED_KEYRINGS_MENU_ITEM = {
+export const TRUSTED_KEYS_MENU_ITEM = {
   icon: '/assets/icons/key-chain.svg',
   item: 'Manage Trust',
   link: 'trusted-keys',
 } as const
+
+export const MANAGE_TRUST_LINK = ['/system', TRUSTED_KEYS_MENU_ITEM.link]
 
 export const SYSTEM_MENU = [
   [
@@ -69,7 +71,7 @@ export const SYSTEM_MENU = [
       item: 'Manage Registries',
       link: 'registries',
     },
-    TRUSTED_KEYRINGS_MENU_ITEM,
+    TRUSTED_KEYS_MENU_ITEM,
     {
       icon: '@tui.key',
       item: 'Change Password',

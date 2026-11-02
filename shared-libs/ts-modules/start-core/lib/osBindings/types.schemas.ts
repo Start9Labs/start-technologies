@@ -2659,14 +2659,14 @@ export const EditSignerParams: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   addContact: z.ZodArray<typeof ContactInfo>
-  addKey: z.ZodArray<typeof AnyVerifyingKey>
+  addKey: z.ZodArray<z.ZodString>
   removeContact: z.ZodArray<typeof ContactInfo>
   removeKey: z.ZodArray<typeof AnyVerifyingKey>
 }> = /* @__PURE__ */ object({
   id: Guid,
   setName: wire(z.string().nullable().optional(), z.string().nullable()),
   addContact: z.array(ContactInfo),
-  addKey: z.array(AnyVerifyingKey),
+  addKey: z.array(z.string()),
   removeContact: z.array(ContactInfo),
   removeKey: z.array(AnyVerifyingKey),
 }).meta({
@@ -4102,10 +4102,18 @@ export const SignerInfo: z.ZodObject<{
   name: z.ZodString
   contact: z.ZodArray<typeof ContactInfo>
   keys: z.ZodArray<typeof AnyVerifyingKey>
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
 }> = /* @__PURE__ */ object({
   name: z.string(),
   contact: z.array(ContactInfo),
   keys: z.array(AnyVerifyingKey),
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ),
 }).meta({
   id: 'SignerInfo',
 })
@@ -5039,11 +5047,11 @@ export const RegistryInfo: z.ZodObject<{
   >
   categories: z.ZodRecord<z.ZodString, typeof Category>
   /**
-   * Proposed Marketplace signing keys and fallback labels, not an assertion of trust.
+   * Registry-selected signers, not an assertion of trust.
    */
-  trustKeys: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>,
-    z.ZodRecord<z.ZodString, z.ZodString>
+  trustSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof SignerInfo>>,
+    z.ZodRecord<z.ZodString, typeof SignerInfo>
   >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
@@ -5059,14 +5067,13 @@ export const RegistryInfo: z.ZodObject<{
   }),
   categories: z.record(z.string(), Category),
   /**
-   * Proposed Marketplace signing keys and fallback labels, not an assertion of trust.
+   * Registry-selected signers, not an assertion of trust.
    */
-  trustKeys: wire(
-    z.record(z.string(), z.string()).optional(),
-    z.record(z.string(), z.string()),
+  trustSigners: wire(
+    z.record(z.string(), SignerInfo).optional(),
+    z.record(z.string(), SignerInfo),
   ).meta({
-    description:
-      'Proposed Marketplace signing keys and fallback labels, not an assertion of trust.',
+    description: 'Registry-selected signers, not an assertion of trust.',
   }),
 }).meta({
   id: 'RegistryInfo',
@@ -5174,7 +5181,7 @@ export const Task: z.ZodObject<{
 /**
  * Signing-key material and independent package and OS-update trust.
  */
-export const TrustedKeyring: z.ZodObject<{
+export const TrustedKey: z.ZodObject<{
   name: z.ZodString
   /**
    * The first import source: system, manual, or a registry base URL.
@@ -5187,12 +5194,9 @@ export const TrustedKeyring: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof RegistryIdentity>>,
     z.ZodNullable<typeof RegistryIdentity>
   >
+  publicKey: typeof AnyVerifyingKey
   /**
-   * Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
-   */
-  publicKeys: z.ZodArray<typeof AnyVerifyingKey>
-  /**
-   * Original GPG exports; signing trust is determined by `public_keys`.
+   * Original GPG exports; signing trust is determined by `public_key`.
    */
   gpgExports: z.ZodCodec<
     z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
@@ -5222,22 +5226,16 @@ export const TrustedKeyring: z.ZodObject<{
   ).meta({
     description: 'Registry identity recorded when this key was first imported.',
   }),
+  publicKey: AnyVerifyingKey,
   /**
-   * Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
-   */
-  publicKeys: z.array(AnyVerifyingKey).meta({
-    description:
-      'Ed25519 public keys encoded as padded standard Base64 DER in canonical order.',
-  }),
-  /**
-   * Original GPG exports; signing trust is determined by `public_keys`.
+   * Original GPG exports; signing trust is determined by `public_key`.
    */
   gpgExports: wire(
     z.array(GpgPublicKeyExport).optional(),
     z.array(GpgPublicKeyExport),
   ).meta({
     description:
-      'Original GPG exports; signing trust is determined by `public_keys`.',
+      'Original GPG exports; signing trust is determined by `public_key`.',
   }),
   /**
    * False for System keys and keys listed by a connected registry.
@@ -5249,7 +5247,7 @@ export const TrustedKeyring: z.ZodObject<{
   marketplace: z.boolean(),
   os: z.boolean(),
 }).meta({
-  id: 'TrustedKeyring',
+  id: 'TrustedKey',
   description:
     'Signing-key material and independent package and OS-update trust.',
 })
@@ -6375,8 +6373,8 @@ export const ServerInfo: z.ZodObject<{
   >
   unreadNotificationCount: z.ZodInt
   trustedKeys: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof TrustedKeyring>>,
-    z.ZodRecord<z.ZodString, typeof TrustedKeyring>
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof TrustedKey>>,
+    z.ZodRecord<z.ZodString, typeof TrustedKey>
   >
   /**
    * Last observed trust proposals from connected registries.
@@ -6431,8 +6429,8 @@ export const ServerInfo: z.ZodObject<{
   statusInfo: wire(ServerStatus.optional(), ServerStatus),
   unreadNotificationCount: z.int(),
   trustedKeys: wire(
-    z.record(z.string(), TrustedKeyring).optional(),
-    z.record(z.string(), TrustedKeyring),
+    z.record(z.string(), TrustedKey).optional(),
+    z.record(z.string(), TrustedKey),
   ),
   /**
    * Last observed trust proposals from connected registries.

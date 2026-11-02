@@ -1,7 +1,10 @@
 import { Component, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { RouterLink } from '@angular/router'
-import { StoreIconDirective } from '@start9labs/marketplace'
+import { Router, RouterLink } from '@angular/router'
+import {
+  registrySigningKeys,
+  StoreIconDirective,
+} from '@start9labs/marketplace'
 import { DialogService, i18nPipe, TaskService } from '@start9labs/shared'
 import { TuiButton, TuiCell, TuiLoader, TuiTitle } from '@taiga-ui/core'
 import { TuiAvatar } from '@taiga-ui/kit'
@@ -9,6 +12,7 @@ import { defaultIfEmpty, firstValueFrom } from 'rxjs'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { TitleDirective } from 'src/app/services/title.service'
+import { MANAGE_TRUST_LINK } from '../../system.const'
 import { CONFIRM_REGISTRY } from './confirm'
 
 @Component({
@@ -119,6 +123,7 @@ export default class Registries {
   private readonly marketplace = inject(MarketplaceService)
   private readonly dialogs = inject(DialogService)
   private readonly tasks = inject(TaskService)
+  private readonly router = inject(Router)
 
   protected readonly registries = toSignal(this.marketplace.registries$)
   protected readonly saving = signal(false)
@@ -137,10 +142,20 @@ export default class Registries {
         })
         .pipe(defaultIfEmpty('')),
     )
-    if (url) await this.review(url)
+    if (url) await this.connect(url)
   }
 
   protected async review(url: string): Promise<void> {
+    this.saving.set(true)
+    const refreshed = await this.tasks.run(
+      () => this.marketplace.refreshRegistry(url),
+      'Validating registry',
+    )
+    this.saving.set(false)
+    if (refreshed) await this.router.navigate(MANAGE_TRUST_LINK)
+  }
+
+  private async connect(url: string): Promise<void> {
     let preview:
       | Awaited<ReturnType<MarketplaceService['previewRegistry']>>
       | undefined
@@ -157,7 +172,11 @@ export default class Registries {
     const { url: registryUrl, info } = preview
     this.saving.set(true)
     await this.tasks.run(
-      () => this.marketplace.add(registryUrl, Object.keys(info.trustKeys)),
+      () =>
+        this.marketplace.add(
+          registryUrl,
+          Object.keys(registrySigningKeys(info)),
+        ),
       'Saving',
     )
     this.saving.set(false)

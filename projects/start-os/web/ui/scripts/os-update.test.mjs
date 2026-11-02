@@ -52,6 +52,7 @@ boundary(
     'TuiIcon',
     'TuiInput',
     'TuiTitle',
+    'TuiLink',
   ],
   'export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => [];',
 )
@@ -126,7 +127,8 @@ boundaries.set(
       file =>
         `export * from ${JSON.stringify(new URL(`../../../../../shared-libs/ts-modules/marketplace/src/${file}`, import.meta.url).href)};`,
     )
-    .join('\n') + '\nexport class StoreIconDirective {}',
+    .join('\n') +
+    '\nexport class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {}',
 )
 loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
@@ -141,8 +143,14 @@ const { LocalizePipe: ProductionLocalizePipe } =
 const { I18N } =
   await import('../../../../../shared-libs/ts-modules/shared/src/i18n/i18n.providers.ts')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
-const { TaskService, CopyService, DialogService, i18nPipe, i18nService } =
-  await import('@start9labs/shared')
+const {
+  TaskService,
+  CopyService,
+  DialogService,
+  ErrorService,
+  i18nPipe,
+  i18nService,
+} = await import('@start9labs/shared')
 const { CONTEXT } = await import('@taiga-ui/polymorpheus')
 const { WA_WINDOW } = await import('@ng-web-apis/common')
 const { UiUpdateService } = await import('src/app/services/ui-update.service')
@@ -176,7 +184,7 @@ const trustedSigners = Object.fromEntries(
     key,
     {
       name: `Signer ${i}`,
-      publicKeys: [key],
+      publicKey: key,
       removable: true,
       marketplace: true,
       os: true,
@@ -1090,7 +1098,7 @@ test('live trust-list changes remove default trust and allow a custom signer', a
   f.trust({
     custom: {
       name: 'My custom release signer',
-      publicKeys: [untrustedSigner],
+      publicKey: untrustedSigner,
       removable: true,
       marketplace: false,
       os: true,
@@ -1124,7 +1132,7 @@ test('trusted signer matching ignores PEM whitespace but rejects unrelated keys 
   assert.deepEqual(trustedOsUpdateSigners([key], {}), [])
 })
 
-test('keyrings match PEM, Der64 and legacy base64url signers in both trust contexts', () => {
+test('individual keys match PEM, Der64 and legacy base64url signers in both trust contexts', () => {
   const pem =
     '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=\n-----END PUBLIC KEY-----\n'
   const der64 = 'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI='
@@ -1138,7 +1146,7 @@ test('keyrings match PEM, Der64 and legacy base64url signers in both trust conte
     const groups = {
       publisher: {
         name: 'Publisher',
-        publicKeys: [publicKey],
+        publicKey,
         marketplace: true,
         os: true,
       },
@@ -1150,7 +1158,7 @@ test('keyrings match PEM, Der64 and legacy base64url signers in both trust conte
     ]) {
       assert.deepEqual(
         matchingTrustedKeys(packageSigners(source), groups, 'marketplace'),
-        [{ id: 'publisher', name: 'Publisher', publicKeys: [publicKey] }],
+        [{ id: 'publisher', name: 'Publisher', publicKey }],
       )
     }
   }
@@ -1254,6 +1262,7 @@ const {
   packageSigners,
   PackageSignerIdentitiesPipe,
   signingKeyIdentity,
+  registrySigningKeys,
 } = await import('@start9labs/marketplace')
 const { parsePublicKeys, publicKeyPem } =
   await import('src/app/utils/public-keys')
@@ -1290,7 +1299,7 @@ test('marketplace signer identities stay visible when disabled and never borrow 
   const second = 'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40='
   const known = {
     name: 'Fallback publisher',
-    publicKeys: [first],
+    publicKey: first,
     marketplace: false,
     os: false,
     gpgExports: [
@@ -1391,37 +1400,38 @@ test('package signers select the install asset or the verified sideload signer, 
   assert.deepEqual(packageSigners({ s9pks: [] }), [])
 })
 
-test('named multi-key signer matching follows the selected trust context and deduplicates each identity', () => {
-  const groups = {
-    publisher: {
+test('individual keys match independently in each trust context and deduplicate repeated signatures', () => {
+  const [first, second] = OS_UPDATE_SIGNERS
+  const keys = {
+    first: {
       name: 'Publisher',
-      publicKeys: OS_UPDATE_SIGNERS,
-      os: false,
+      publicKey: first,
       marketplace: true,
+      os: false,
+    },
+    second: {
+      name: 'Publisher',
+      publicKey: second,
+      marketplace: true,
+      os: false,
     },
   }
   assert.deepEqual(
-    matchingTrustedKeys(
-      [OS_UPDATE_SIGNERS[0], OS_UPDATE_SIGNERS[1]],
-      groups,
-      'marketplace',
-    ),
+    matchingTrustedKeys([first, first, second], keys, 'marketplace'),
     [
-      {
-        id: 'publisher',
-        name: 'Publisher',
-        publicKeys: OS_UPDATE_SIGNERS.slice(0, 2),
-      },
+      { id: 'first', name: 'Publisher', publicKey: first },
+      { id: 'second', name: 'Publisher', publicKey: second },
     ],
   )
-  assert.deepEqual(matchingTrustedKeys(OS_UPDATE_SIGNERS, groups, 'os'), [])
-  groups.publisher.os = true
-  groups.publisher.marketplace = false
-  assert.deepEqual(
-    matchingTrustedKeys(OS_UPDATE_SIGNERS, groups, 'marketplace'),
-    [],
-  )
-  assert.equal(matchingTrustedKeys(OS_UPDATE_SIGNERS, groups, 'os').length, 1)
+  assert.deepEqual(matchingTrustedKeys([first, second], keys, 'os'), [])
+  keys.first.os = true
+  keys.first.marketplace = false
+  assert.deepEqual(matchingTrustedKeys([first, second], keys, 'marketplace'), [
+    { id: 'second', name: 'Publisher', publicKey: second },
+  ])
+  assert.deepEqual(matchingTrustedKeys([first, second], keys, 'os'), [
+    { id: 'first', name: 'Publisher', publicKey: first },
+  ])
 })
 
 function controlsFixture({
@@ -1554,13 +1564,13 @@ test('marketplace dispatch delegates trust enforcement to the server without an 
   ])
 })
 
-const { default: TrustedKeyrings } =
+const { default: TrustedKeysPage } =
   await import('src/app/routes/portal/routes/system/routes/trusted-keys')
 const { EditTrustedKeyDialog } =
   await import('src/app/components/trusted-keys/edit')
 const { AddTrustedKeyDialog } =
   await import('src/app/components/trusted-keys/form')
-test('built-in keyrings precede custom entries regardless of labels and input order', () => {
+test('built-in keys precede custom entries regardless of labels and input order', () => {
   const custom = Object.values(trustedSigners)[0]
   const entries = [
     { key: '00000000-0000-4000-8000-000000000000', value: custom },
@@ -1582,9 +1592,7 @@ test('built-in keyrings precede custom entries regardless of labels and input or
   ]
   for (const input of [entries, [...entries].reverse()]) {
     assert.deepEqual(
-      [...input]
-        .sort(TrustedKeyrings.prototype.compareKeyrings)
-        .map(x => x.key),
+      [...input].sort(TrustedKeysPage.prototype.compareKeys).map(x => x.key),
       [
         'start9',
         'start9-alpha',
@@ -1595,11 +1603,11 @@ test('built-in keyrings precede custom entries regardless of labels and input or
   }
 })
 
-function keyringDialogFixture(t, component, keyring, reject = false) {
+function keyDialogFixture(t, component, key, reject = false) {
   const mutations = []
   const closed = []
   const context = {
-    data: { id: 'publisher', keyring },
+    data: { id: 'publisher', key },
     $implicit: { complete: () => closed.push(true) },
   }
   const mutate = async params => {
@@ -1644,9 +1652,9 @@ function keyringDialogFixture(t, component, keyring, reject = false) {
   }
 }
 
-test('keyring editing disables built-in names without disabling either trust selection', t => {
+test('key editing disables built-in names without disabling either trust selection', t => {
   for (const name of ['Start9', 'Start9 Alpha']) {
-    const { instance } = keyringDialogFixture(t, EditTrustedKeyDialog, {
+    const { instance } = keyDialogFixture(t, EditTrustedKeyDialog, {
       name,
       removable: false,
       marketplace: true,
@@ -1656,7 +1664,7 @@ test('keyring editing disables built-in names without disabling either trust sel
     assert.equal(instance.form.controls.marketplace.enabled, true)
     assert.equal(instance.form.controls.os.enabled, true)
   }
-  const { instance } = keyringDialogFixture(t, EditTrustedKeyDialog, {
+  const { instance } = keyDialogFixture(t, EditTrustedKeyDialog, {
     name: 'Publisher',
     removable: true,
     marketplace: true,
@@ -1665,8 +1673,8 @@ test('keyring editing disables built-in names without disabling either trust sel
   assert.equal(instance.form.controls.name.enabled, true)
 })
 
-test('keyring edit submits name and both trust selections in one operation', async t => {
-  const f = keyringDialogFixture(t, EditTrustedKeyDialog, {
+test('key edit submits name and both trust selections in one operation', async t => {
+  const f = keyDialogFixture(t, EditTrustedKeyDialog, {
     name: 'Publisher',
     removable: true,
     marketplace: true,
@@ -1681,8 +1689,8 @@ test('keyring edit submits name and both trust selections in one operation', asy
   assert.equal(f.instance.saving(), false)
 })
 
-test('failed keyring edits keep their form values and dialog open', async t => {
-  const f = keyringDialogFixture(
+test('failed key edits keep their form values and dialog open', async t => {
+  const f = keyDialogFixture(
     t,
     EditTrustedKeyDialog,
     { name: 'Publisher', removable: true, marketplace: true, os: false },
@@ -1700,7 +1708,7 @@ test('failed keyring edits keep their form values and dialog open', async t => {
 })
 
 test('new manually added keys default to package trust only', async t => {
-  const f = keyringDialogFixture(t, AddTrustedKeyDialog)
+  const f = keyDialogFixture(t, AddTrustedKeyDialog)
   f.instance.form.setValue({
     name: 'Publisher',
     publicKeys: OS_UPDATE_SIGNERS[0],
@@ -1748,7 +1756,7 @@ test('individual trust switches preserve the other context and restore the contr
           },
         },
       }
-      await TrustedKeyrings.prototype.update.call(
+      await TrustedKeysPage.prototype.update.call(
         instance,
         'individual-key',
         key,
@@ -1765,11 +1773,79 @@ test('individual trust switches preserve the other context and restore the contr
   }
 })
 
+test('registry signing-key identities retain complete GPG metadata from selected signer records', () => {
+  const id = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
+  const gpgExports = [
+    {
+      armored: 'original export',
+      fingerprints: ['5456dbff1b9df905041fa7765259adfc2d63c217'],
+      userIds: ['Start9 <security@start9.com>'],
+      identities: { [id]: ['Start9 <security@start9.com>'] },
+      keyFingerprints: { [id]: ['5456dbff1b9df905041fa7765259adfc2d63c217'] },
+    },
+  ]
+  const proposed = registrySigningKeys({
+    trustSigners: {
+      signer: { name: 'Fallback label', keys: [id], gpgExports },
+    },
+  })
+  assert.deepEqual(Object.keys(proposed), [id])
+  assert.equal(proposed[id].gpgExports, gpgExports)
+  assert.deepEqual(signingKeyIdentity(id, proposed[id]), {
+    name: 'Start9',
+    emails: ['security@start9.com'],
+    fingerprints: ['5456 DBFF 1B9D F905 041F A776 5259 ADFC 2D63 C217'],
+  })
+})
+
+for (const success of [true, false]) {
+  test(`Review keys refresh ${success ? 'opens Manage Trust' : 'failure prevents navigation'} without re-enabling trust`, async () => {
+    const { default: RegistriesPage } =
+      await import('src/app/routes/portal/routes/system/routes/registries')
+    const { MANAGE_TRUST_LINK } =
+      await import('src/app/routes/portal/routes/system/system.const')
+    const calls = []
+    const instance = {
+      saving: signal(false),
+      marketplace: {
+        refreshRegistry: async url => {
+          calls.push(['refresh', url])
+          if (!success) throw new Error('offline')
+          return []
+        },
+      },
+      router: { navigate: async path => calls.push(['navigate', path]) },
+      tasks: {
+        run: async action => {
+          try {
+            await action()
+            return true
+          } catch {
+            return false
+          }
+        },
+      },
+    }
+    await RegistriesPage.prototype.review.call(
+      instance,
+      'https://registry.test',
+    )
+    assert.deepEqual(calls, [
+      ['refresh', 'https://registry.test'],
+      ...(success ? [['navigate', MANAGE_TRUST_LINK]] : []),
+    ])
+    assert.equal(instance.saving(), false)
+  })
+}
+
 test('registry preview grants no trust, and connection sends only the approved keys', async () => {
   const calls = []
   const info = {
     name: 'Registry',
-    trustKeys: { approved: 'Publisher', unapproved: 'Other publisher' },
+    trustSigners: {
+      publisher: { name: 'Publisher', keys: ['approved'], gpgExports: [] },
+      other: { name: 'Other publisher', keys: ['unapproved'], gpgExports: [] },
+    },
   }
   const instance = {
     api: {
@@ -1823,6 +1899,7 @@ test('a late registry metadata response cannot restore a removed registry', asyn
       { provide: Exver, useValue: {} },
       { provide: StorageService, useValue: { get: () => null } },
       { provide: PackageIconService, useValue: {} },
+      { provide: ErrorService, useValue: { handleError: assert.fail } },
       {
         provide: ApiService,
         useValue: {
@@ -1886,3 +1963,169 @@ test('registry removal uses the authoritative endpoint and clears a matching sel
     ['selectedRegistry', null],
   ])
 })
+
+async function registryDiscoveryFixture(t, refresh) {
+  const { Exver } = await import('@start9labs/shared')
+  const { StorageService } = await import('src/app/services/storage.service')
+  const { PackageIconService } =
+    await import('src/app/services/package-icon.service')
+  const calls = []
+  const notices = []
+  const errors = []
+  const injector = createEnvironmentInjector(
+    [
+      { provide: PatchDB, useValue: { watch$: () => of({}) } },
+      { provide: Exver, useValue: {} },
+      { provide: StorageService, useValue: {} },
+      { provide: PackageIconService, useValue: {} },
+      {
+        provide: ErrorService,
+        useValue: { handleError: error => errors.push(error) },
+      },
+      {
+        provide: ApiService,
+        useValue: {
+          rpc: {
+            server: {
+              trustedKeys: {
+                refreshRegistry: params => {
+                  calls.push(params.url)
+                  return refresh(params.url)
+                },
+              },
+            },
+          },
+        },
+      },
+    ],
+    null,
+  )
+  t.after(() => injector.destroy())
+  const service = runInInjectionContext(
+    injector,
+    () => new MarketplaceService(),
+  )
+  const subscription = service.registryKeysAdded$.subscribe(value =>
+    notices.push(value),
+  )
+  t.after(() => subscription.unsubscribe())
+  return { service, calls, notices, errors }
+}
+
+const settleRegistry = () => new Promise(setImmediate)
+
+test('registry navigation checks once per selection and only reports discovered keys', async t => {
+  const first = 'https://first.test'
+  const second = 'https://second.test'
+  const f = await registryDiscoveryFixture(t, async url =>
+    url === first ? ['new-key'] : [],
+  )
+  f.service.currentRegistryUrl$.next(first)
+  await settleRegistry()
+  f.service.currentRegistryUrl$.next(first)
+  f.service.currentRegistryUrl$.next(second)
+  await settleRegistry()
+  assert.deepEqual(f.calls, [first, second])
+  assert.deepEqual(f.notices, [{ url: first, keys: ['new-key'] }])
+  f.service.currentRegistryUrl$.next(first)
+  await settleRegistry()
+  assert.deepEqual(f.calls, [first, second, first])
+})
+
+test('a registry discovery response cannot show a notice for an abandoned selection', async t => {
+  const pending = deferred()
+  const f = await registryDiscoveryFixture(t, url =>
+    url === 'https://old.test'
+      ? pending.promise
+      : Promise.resolve(['current-key']),
+  )
+  f.service.currentRegistryUrl$.next('https://old.test')
+  f.service.currentRegistryUrl$.next('https://current.test')
+  await settleRegistry()
+  pending.resolve(['old-key'])
+  await settleRegistry()
+  assert.deepEqual(f.notices, [
+    { url: 'https://current.test', keys: ['current-key'] },
+  ])
+})
+
+test('registry discovery errors are surfaced without ending future navigation checks', async t => {
+  const error = new Error('registry unavailable')
+  const f = await registryDiscoveryFixture(t, async url => {
+    if (url === 'https://broken.test') throw error
+    return ['new-key']
+  })
+  f.service.currentRegistryUrl$.next('https://broken.test')
+  await settleRegistry()
+  f.service.currentRegistryUrl$.next('https://working.test')
+  await settleRegistry()
+  assert.deepEqual(f.errors, [error])
+  assert.deepEqual(f.notices, [
+    { url: 'https://working.test', keys: ['new-key'] },
+  ])
+})
+
+for (const [choice, navigates] of [
+  [of(true), true],
+  [of(false), false],
+  [EMPTY, false],
+]) {
+  test(`registry key notice ${navigates ? 'opens Manage Trust' : 'dismisses without navigation'}`, async t => {
+    const { ActivatedRoute, Router, convertToParamMap } =
+      await import('@angular/router')
+    const { StorageService } = await import('src/app/services/storage.service')
+    const { default: MarketplacePage } =
+      await import('src/app/routes/portal/routes/marketplace/marketplace.component')
+    const { MANAGE_TRUST_LINK } =
+      await import('src/app/routes/portal/routes/system/system.const')
+    const notices = new Subject()
+    const prompts = []
+    const navigations = []
+    const injector = createEnvironmentInjector(
+      [
+        {
+          provide: MarketplaceService,
+          useValue: {
+            registryKeysAdded$: notices,
+            currentRegistry$: of({}),
+            currentRegistryUrl$: new Subject(),
+          },
+        },
+        {
+          provide: Router,
+          useValue: { navigate: async path => navigations.push(path) },
+        },
+        {
+          provide: ActivatedRoute,
+          useValue: {
+            queryParamMap: of(
+              convertToParamMap({ registry: 'https://registry.test' }),
+            ),
+          },
+        },
+        { provide: ConfigService, useValue: {} },
+        { provide: StorageService, useValue: {} },
+        {
+          provide: DialogService,
+          useValue: {
+            openConfirm: options => {
+              prompts.push(options)
+              return choice
+            },
+          },
+        },
+      ],
+      null,
+    )
+    t.after(() => injector.destroy())
+    runInInjectionContext(injector, () => new MarketplacePage())
+    notices.next({ url: 'https://registry.test', keys: ['disabled-key'] })
+    await settleRegistry()
+    assert.equal(prompts.length, 1)
+    assert.equal(prompts[0].label, 'New registry keys')
+    assert.equal(prompts[0].data.yes, 'Manage Trust')
+    assert.equal(prompts[0].data.no, 'Dismiss')
+    assert.match(prompts[0].data.content, /disabled/)
+    assert.deepEqual(navigations, navigates ? [MANAGE_TRUST_LINK] : [])
+  })
+}

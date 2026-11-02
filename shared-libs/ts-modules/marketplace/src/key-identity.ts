@@ -3,9 +3,26 @@ import { sha256 } from '@noble/hashes/sha256'
 import { auth, T } from '@start9labs/start-core'
 
 export type IdentityKey = Pick<
-  T.TrustedKeyring,
-  'name' | 'publicKeys' | 'gpgExports'
+  T.TrustedKey,
+  'name' | 'publicKey' | 'gpgExports'
 >
+
+export function registrySigningKeys(
+  info: T.RegistryInfo,
+): Record<string, IdentityKey> {
+  return Object.fromEntries(
+    Object.values(info.trustSigners).flatMap(signer =>
+      signer.keys.map(id => [
+        id,
+        {
+          name: signer.name,
+          publicKey: id,
+          gpgExports: signer.gpgExports,
+        },
+      ]),
+    ),
+  )
+}
 
 /** Fingerprints use OpenPGP packets or SHA-256 over canonical SPKI. */
 export function signingKeyIdentity(publicKey: string, key?: IdentityKey) {
@@ -48,6 +65,6 @@ export function signingKeyIdentity(publicKey: string, key?: IdentityKey) {
 @Pipe({ name: 'keyIdentity' })
 export class KeyIdentityPipe {
   transform(key: IdentityKey) {
-    return signingKeyIdentity(key.publicKeys[0]!, key)
+    return signingKeyIdentity(key.publicKey, key)
   }
 }

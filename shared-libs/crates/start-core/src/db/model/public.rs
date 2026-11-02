@@ -132,7 +132,7 @@ impl Public {
                     restarting: false,
                     restart: None,
                 },
-                trusted_keys: crate::trusted_keys::individual_keys(&initial_trusted_keys())?,
+                trusted_keys: initial_trusted_keys(),
                 registry_keys: BTreeMap::new(),
                 unread_notification_count: 0,
                 pubkey: ssh_key::PublicKey::from(&account.ssh_key)

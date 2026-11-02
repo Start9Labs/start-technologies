@@ -156,6 +156,16 @@ export type GitHash = z.output<typeof schemas.GitHash>
 export type GitHashInput = z.input<typeof schemas.GitHash>
 export type Governor = z.output<typeof schemas.Governor>
 export type GovernorInput = z.input<typeof schemas.Governor>
+
+/**
+ * An original public-key export and its self-certified identity claims.
+ */
+export type GpgPublicKeyExport = z.output<typeof schemas.GpgPublicKeyExport>
+
+/**
+ * An original public-key export and its self-certified identity claims.
+ */
+export type GpgPublicKeyExportInput = z.input<typeof schemas.GpgPublicKeyExport>
 export type Guid = z.output<typeof schemas.Guid>
 export type GuidInput = z.input<typeof schemas.Guid>
 
@@ -302,7 +312,7 @@ export type TrustedOsUpdateSigner = z.output<
 export type UiParamsInput = z.input<typeof schemas.UiParams>
 
 /**
- * Changes a keyring's name and both trust selections atomically.
+ * Changes a key's name and both trust selections atomically.
  */
 export type UpdateTrustedKeyParamsInput = z.input<
   typeof schemas.UpdateTrustedKeyParams
@@ -347,6 +357,7 @@ export type AddPrivateDomainParamsInput = z.input<
 export type AddPublicDomainParamsInput = z.input<
   typeof schemas.AddPublicDomainParams
 >
+export type AddSignerParamsInput = z.input<typeof schemas.AddSignerParams>
 export type AddTrustedKeyParamsInput = z.input<
   typeof schemas.AddTrustedKeyParams
 >
@@ -539,7 +550,6 @@ export type SideloadResponse = z.output<typeof schemas.SideloadResponse>
 export type SignAssetParamsInput = z.input<typeof schemas.SignAssetParams>
 export type SignPackageParamsInput = z.input<typeof schemas.SignPackageParams>
 export type SignerInfo = z.output<typeof schemas.SignerInfo>
-export type SignerInfoInput = z.input<typeof schemas.SignerInfo>
 export type SmtpValueInput = z.input<typeof schemas.SmtpValue>
 export type SshAddParamsInput = z.input<typeof schemas.SshAddParams>
 

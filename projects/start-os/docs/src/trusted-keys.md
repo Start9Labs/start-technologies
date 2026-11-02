@@ -22,11 +22,11 @@ Confirm public keys through a source you already trust. A label or self-certifie
 
 Open **System → Manage Registries** to add or remove registries. When adding a registry, StartOS shows the keys it asks you to trust. Review the keys before confirming. Approved keys appear in Manage Trust with **Packages** enabled; this does not enable **OS Updates**.
 
-A registry chooses which of its signers to propose. Use **Review keys** beside an existing registry to review its latest proposal. Confirming enables package trust for the listed keys, including any you previously disabled. Browsing a registry does not grant trust to its keys.
+A registry chooses which signer IDs to propose and supplies their public keys and GPG identity information. When visiting a connected registry, StartOS checks for additional proposed keys. Newly imported keys appear in Manage Trust with both trust switches disabled. A dialog offers **Manage Trust** or **Dismiss**; dismissing leaves the keys disabled. Existing keys keep their permissions. Use **Review keys** beside a registry to fetch its latest proposal and open Manage Trust.
 
 ## Installing Software
 
-Package details show a **Signed by** row with each signer's GPG name and email addresses or saved label. Unrecognized signers show their fingerprint. Disabled keys remain identifiable here; the trust switches still determine whether their signatures are accepted. Marketplace installation is blocked when none match. [Sideloading](sideloading.md) allows an untrusted package after an explicit risk confirmation. OS updates from the UI require a signature from an enabled OS-update key.
+Package details show a **Signed by** row with each signer's GPG name and email addresses or saved label. Unrecognized signers show their fingerprint. Disabled keys remain identifiable here; the trust switches still determine whether their signatures are accepted. Marketplace installation is blocked when none match; the warning links to Manage Trust. [Sideloading](sideloading.md) allows an untrusted package after an explicit risk confirmation. OS updates from the UI require a signature from an enabled OS-update key.
 
 CLI package installs and OS updates also require trusted signers by default. To deliberately accept an untrusted signer, use `--trust`:
 

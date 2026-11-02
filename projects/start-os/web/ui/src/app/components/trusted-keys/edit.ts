@@ -31,11 +31,11 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
       <button
         tuiCell
         type="button"
-        (click)="copy.copy(context.data.keyring.publicKeys[0]!)"
+        (click)="copy.copy(context.data.key.publicKey)"
       >
         <span tuiTitle>
-          <span tuiSubtitle>{{ 'Public keys' | i18n }}</span>
-          <code>{{ context.data.keyring.publicKeys[0] }}</code>
+          <span tuiSubtitle>{{ 'Public key' | i18n }}</span>
+          <code>{{ context.data.key.publicKey }}</code>
         </span>
         <tui-icon icon="@tui.copy" />
       </button>
@@ -106,21 +106,19 @@ export class EditTrustedKeyDialog {
   private readonly tasks = inject(TaskService)
 
   protected readonly context =
-    injectContext<
-      TuiDialogContext<void, { id: string; keyring: T.TrustedKeyring }>
-    >()
+    injectContext<TuiDialogContext<void, { id: string; key: T.TrustedKey }>>()
   protected readonly copy = inject(CopyService)
   protected readonly saving = signal(false)
   protected readonly form = inject(NonNullableFormBuilder).group({
     name: [
       {
-        value: this.context.data.keyring.name,
-        disabled: !this.context.data.keyring.removable,
+        value: this.context.data.key.name,
+        disabled: !this.context.data.key.removable,
       },
       [Validators.required, Validators.pattern(/\S/)],
     ],
-    marketplace: [this.context.data.keyring.marketplace],
-    os: [this.context.data.keyring.os],
+    marketplace: [this.context.data.key.marketplace],
+    os: [this.context.data.key.os],
   })
 
   protected async save(): Promise<void> {

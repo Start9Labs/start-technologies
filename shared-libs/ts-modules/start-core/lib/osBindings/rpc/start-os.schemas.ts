@@ -723,6 +723,83 @@ export const GitHash: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 export const Governor: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Governor',
 })
+
+/**
+ * An original public-key export and its self-certified identity claims.
+ */
+export const GpgPublicKeyExport: z.ZodObject<{
+  /**
+   * Original armor, preserving all certificate packets and headers.
+   */
+  armored: z.ZodString
+  /**
+   * Primary-key fingerprints of the certificates in this export.
+   */
+  fingerprints: z.ZodArray<z.ZodString>
+  /**
+   * Self-certified user IDs containing names, comments, and email addresses.
+   */
+  userIds: z.ZodArray<z.ZodString>
+  /**
+   * Self-certified claims indexed by the signing key's canonical DER encoding.
+   */
+  identities: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
+  >
+  /**
+   * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
+   */
+  keyFingerprints: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Original armor, preserving all certificate packets and headers.
+   */
+  armored: z.string().meta({
+    description:
+      'Original armor, preserving all certificate packets and headers.',
+  }),
+  /**
+   * Primary-key fingerprints of the certificates in this export.
+   */
+  fingerprints: z.array(z.string()).meta({
+    description: 'Primary-key fingerprints of the certificates in this export.',
+  }),
+  /**
+   * Self-certified user IDs containing names, comments, and email addresses.
+   */
+  userIds: z.array(z.string()).meta({
+    description:
+      'Self-certified user IDs containing names, comments, and email addresses.',
+  }),
+  /**
+   * Self-certified claims indexed by the signing key's canonical DER encoding.
+   */
+  identities: wire(
+    z.record(z.string(), z.array(z.string())).optional(),
+    z.record(z.string(), z.array(z.string())),
+  ).meta({
+    description:
+      "Self-certified claims indexed by the signing key's canonical DER encoding.",
+  }),
+  /**
+   * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
+   */
+  keyFingerprints: wire(
+    z.record(z.string(), z.array(z.string())).optional(),
+    z.record(z.string(), z.array(z.string())),
+  ).meta({
+    description:
+      "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+  }),
+}).meta({
+  id: 'GpgPublicKeyExport',
+  description:
+    'An original public-key export and its self-certified identity claims.',
+})
 export const Guid: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Guid',
 })
@@ -1338,7 +1415,7 @@ export const UiParams: z.ZodObject<{
 })
 
 /**
- * Changes a keyring's name and both trust selections atomically.
+ * Changes a key's name and both trust selections atomically.
  */
 export const UpdateTrustedKeyParams: z.ZodObject<{
   id: z.ZodString
@@ -1352,7 +1429,7 @@ export const UpdateTrustedKeyParams: z.ZodObject<{
   os: z.boolean(),
 }).meta({
   id: 'UpdateTrustedKeyParams',
-  description: "Changes a keyring's name and both trust selections atomically.",
+  description: "Changes a key's name and both trust selections atomically.",
 })
 
 /**
@@ -1649,6 +1726,43 @@ export const AddPublicDomainParams: z.ZodObject<{
   internalPort: z.int(),
 }).meta({
   id: 'AddPublicDomainParams',
+})
+export const AddSignerParams: z.ZodObject<{
+  name: z.ZodString
+  contact: z.ZodArray<typeof ContactInfo>
+  /**
+   * Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.
+   */
+  keys: z.ZodArray<z.ZodString>
+  /**
+   * Retained certificates; `keys` determines the selected signing keys.
+   */
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  contact: z.array(ContactInfo),
+  /**
+   * Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.
+   */
+  keys: z.array(z.string()).meta({
+    description:
+      'Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.',
+  }),
+  /**
+   * Retained certificates; `keys` determines the selected signing keys.
+   */
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ).meta({
+    description:
+      'Retained certificates; `keys` determines the selected signing keys.',
+  }),
+}).meta({
+  id: 'AddSignerParams',
 })
 export const AddTrustedKeyParams: z.ZodObject<{
   name: z.ZodString
@@ -2053,14 +2167,14 @@ export const EditSignerParams: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   addContact: z.ZodArray<typeof ContactInfo>
-  addKey: z.ZodArray<typeof AnyVerifyingKey>
+  addKey: z.ZodArray<z.ZodString>
   removeContact: z.ZodArray<typeof ContactInfo>
   removeKey: z.ZodArray<typeof AnyVerifyingKey>
 }> = /* @__PURE__ */ object({
   id: Guid,
   setName: wire(z.string().nullable().optional(), z.string().nullable()),
   addContact: z.array(ContactInfo),
-  addKey: z.array(AnyVerifyingKey),
+  addKey: z.array(z.string()),
   removeContact: z.array(ContactInfo),
   removeKey: z.array(AnyVerifyingKey),
 }).meta({
@@ -3190,10 +3304,18 @@ export const SignerInfo: z.ZodObject<{
   name: z.ZodString
   contact: z.ZodArray<typeof ContactInfo>
   keys: z.ZodArray<typeof AnyVerifyingKey>
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
 }> = /* @__PURE__ */ object({
   name: z.string(),
   contact: z.array(ContactInfo),
   keys: z.array(AnyVerifyingKey),
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ),
 }).meta({
   id: 'SignerInfo',
 })
@@ -3908,11 +4030,11 @@ export const RegistryInfo: z.ZodObject<{
   >
   categories: z.ZodRecord<z.ZodString, typeof Category>
   /**
-   * Proposed Marketplace signing keys and fallback labels, not an assertion of trust.
+   * Registry-selected signers, not an assertion of trust.
    */
-  trustKeys: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>,
-    z.ZodRecord<z.ZodString, z.ZodString>
+  trustSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof SignerInfo>>,
+    z.ZodRecord<z.ZodString, typeof SignerInfo>
   >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
@@ -3928,14 +4050,13 @@ export const RegistryInfo: z.ZodObject<{
   }),
   categories: z.record(z.string(), Category),
   /**
-   * Proposed Marketplace signing keys and fallback labels, not an assertion of trust.
+   * Registry-selected signers, not an assertion of trust.
    */
-  trustKeys: wire(
-    z.record(z.string(), z.string()).optional(),
-    z.record(z.string(), z.string()),
+  trustSigners: wire(
+    z.record(z.string(), SignerInfo).optional(),
+    z.record(z.string(), SignerInfo),
   ).meta({
-    description:
-      'Proposed Marketplace signing keys and fallback labels, not an assertion of trust.',
+    description: 'Registry-selected signers, not an assertion of trust.',
   }),
 }).meta({
   id: 'RegistryInfo',
@@ -5604,7 +5725,7 @@ export const Api = {
                 add: {
                   _PARAMS: /* @__PURE__ */ z.intersection(
                     z.intersection(empty, RegistryUrlParams),
-                    SignerInfo,
+                    AddSignerParams,
                   ),
                   _RETURN: /* @__PURE__ */ Guid,
                 },
@@ -6554,6 +6675,10 @@ export const Api = {
             'connect-registry': {
               _PARAMS: /* @__PURE__ */ ConnectRegistryParams,
               _RETURN: /* @__PURE__ */ z.null(),
+            },
+            'refresh-registry': {
+              _PARAMS: /* @__PURE__ */ RegistryPreviewParams,
+              _RETURN: /* @__PURE__ */ z.array(AnyVerifyingKey),
             },
             'registry-preview': {
               _PARAMS: /* @__PURE__ */ RegistryPreviewParams,

@@ -53,6 +53,12 @@ pub(super) fn same_registry(first: &str, second: &str) -> bool {
     }
 }
 
+pub(super) fn is_connected(ui: &Value, url: &str) -> bool {
+    ui.get("registries")
+        .and_then(Value::as_object)
+        .is_some_and(|registries| registries.keys().any(|saved| same_registry(saved, url)))
+}
+
 async fn fetch_info(ctx: &RpcContext, url: &Url) -> Result<RegistryInfo, Error> {
     let value = call_remote_with_client(
         None,
@@ -86,6 +92,25 @@ pub async fn connect(ctx: RpcContext, params: ConnectRegistryParams) -> Result<(
         .result
 }
 
+pub async fn refresh(
+    ctx: RpcContext,
+    params: RegistryPreviewParams,
+) -> Result<BTreeSet<AnyVerifyingKey>, Error> {
+    let url = registry_url(&params.url)?;
+    let ui = ctx.db.peek().await.as_public().as_ui().de()?;
+    if !is_connected(&ui, url.as_str()) {
+        return Ok(BTreeSet::new());
+    }
+    let info = fetch_info(&ctx, &url).await?;
+    ctx.db
+        .mutate(|db| {
+            db.as_public_mut()
+                .mutate(|public| refresh_public(public, &url, &info))
+        })
+        .await
+        .result
+}
+
 pub async fn remove(ctx: RpcContext, params: RegistryPreviewParams) -> Result<(), Error> {
     let url = registry_url(&params.url)?;
     ctx.db
@@ -102,7 +127,7 @@ fn forget_registry(
     snapshots: &mut BTreeMap<InternedString, BTreeSet<AnyVerifyingKey>>,
     url: &str,
 ) -> Result<(), Error> {
-    let object = ui.as_object_mut().ok_or_else(invalid_group)?;
+    let object = ui.as_object_mut().ok_or_else(invalid_key)?;
     if !object.contains_key("registries") {
         object.insert("registries".into(), imbl_value::json!({}));
     }
@@ -110,7 +135,7 @@ fn forget_registry(
         .get_mut("registries")
         .unwrap()
         .as_object_mut()
-        .ok_or_else(invalid_group)?;
+        .ok_or_else(invalid_key)?;
     let aliases = registries
         .keys()
         .filter(|saved| same_registry(saved, url))
@@ -127,12 +152,37 @@ fn remove_public(public: &mut Public, url: &Url) -> Result<(), Error> {
     let mut ui = public.ui.clone();
     let mut snapshots = public.server_info.registry_keys.clone();
     forget_registry(&mut ui, &mut snapshots, url.as_str())?;
-    let mut keys = individual_keys(&public.server_info.trusted_keys)?;
+    let mut keys = public.server_info.trusted_keys.clone();
     protect_registry_keys(&mut keys, &snapshots, &ui);
     public.ui = ui;
     public.server_info.registry_keys = snapshots;
     public.server_info.trusted_keys = keys;
     Ok(())
+}
+
+fn proposed_keys(info: &RegistryInfo, origin: &str) -> Result<TrustedKeys, Error> {
+    let mut proposal = TrustedKeys::new();
+    for signer in info.trust_signers.values() {
+        let mut imported = split_import(
+            signer.name.clone(),
+            ImportedPublicKeys {
+                keys: signer.keys.clone(),
+                gpg_exports: signer.gpg_exports.clone(),
+            },
+        )?;
+        for (id, key) in &mut imported {
+            if key.name.trim().is_empty() {
+                key.name = id.to_string();
+            }
+            key.origin = origin.into();
+            key.origin_registry = Some(RegistryIdentity {
+                name: info.name.clone(),
+                icon: info.icon.clone(),
+            });
+        }
+        merge_individual_keys(&mut proposal, imported);
+    }
+    Ok(proposal)
 }
 
 fn connect_public(
@@ -142,41 +192,25 @@ fn connect_public(
     approved: &BTreeSet<AnyVerifyingKey>,
     info: &RegistryInfo,
 ) -> Result<(), Error> {
+    let origin = url.as_str().trim_end_matches('/');
+    let proposal = proposed_keys(info, origin)?;
     for key in approved {
-        if !info.trust_keys.contains_key(key) {
+        if !proposal.contains_key(&key.interned_der64()) {
             return Err(Error::new(
                 eyre!("{}", t!("trusted-keys.proposal-changed")),
                 ErrorKind::InvalidRequest,
             ));
         }
     }
-    let origin = url.as_str().trim_end_matches('/');
-    let mut keys = individual_keys(&public.server_info.trusted_keys)?;
+    let proposed = proposal
+        .values()
+        .map(|key| key.public_key.clone())
+        .collect();
+    let mut keys = public.server_info.trusted_keys.clone();
+    merge_individual_keys(&mut keys, proposal);
     for key in approved {
-        let id = key.interned_der64();
-        let label = info.trust_keys[key].trim();
-        let existing = keys.contains_key(&id);
-        import_individual_keys(
-            &mut keys,
-            if label.is_empty() {
-                id.to_string()
-            } else {
-                label.to_owned()
-            },
-            vec![key.clone()].into(),
-            TrustContext::Marketplace,
-            origin,
-        )?;
-        let key = keys.get_mut(&id).unwrap();
-        key.marketplace = true;
-        if !existing {
-            key.origin_registry = Some(RegistryIdentity {
-                name: info.name.clone(),
-                icon: info.icon.clone(),
-            });
-        }
+        keys.get_mut(&key.interned_der64()).unwrap().marketplace = true;
     }
-    let proposed = info.trust_keys.keys().cloned().collect();
     let mut ui = public.ui.clone();
     let mut snapshots = public.server_info.registry_keys.clone();
     forget_registry(&mut ui, &mut snapshots, origin)?;
@@ -198,6 +232,37 @@ fn connect_public(
     Ok(())
 }
 
+fn refresh_public(
+    public: &mut Public,
+    url: &Url,
+    info: &RegistryInfo,
+) -> Result<BTreeSet<AnyVerifyingKey>, Error> {
+    let origin = url.as_str().trim_end_matches('/');
+    if !is_connected(&public.ui, origin) {
+        return Ok(BTreeSet::new());
+    }
+    let proposal = proposed_keys(info, origin)?;
+    let proposed: BTreeSet<_> = proposal
+        .values()
+        .map(|key| key.public_key.clone())
+        .collect();
+    let mut snapshots = public.server_info.registry_keys.clone();
+    let previous: BTreeSet<_> = snapshots
+        .iter()
+        .filter(|(saved, _)| same_registry(saved, origin))
+        .flat_map(|(_, keys)| keys.iter().cloned())
+        .collect();
+    let newly_listed = proposed.difference(&previous).cloned().collect();
+    snapshots.retain(|saved, _| !same_registry(saved, origin));
+    snapshots.insert(origin.into(), proposed);
+    let mut keys = public.server_info.trusted_keys.clone();
+    merge_individual_keys(&mut keys, proposal);
+    protect_registry_keys(&mut keys, &snapshots, &public.ui);
+    public.server_info.registry_keys = snapshots;
+    public.server_info.trusted_keys = keys;
+    Ok(newly_listed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,6 +276,25 @@ mod tests {
         public
     }
 
+    fn signers<const N: usize>(
+        values: [(AnyVerifyingKey, &str); N],
+    ) -> BTreeMap<crate::rpc_continuations::Guid, crate::registry::signer::SignerInfo> {
+        values
+            .into_iter()
+            .map(|(key, name)| {
+                (
+                    crate::rpc_continuations::Guid::new(),
+                    crate::registry::signer::SignerInfo {
+                        name: name.into(),
+                        contact: vec![],
+                        keys: BTreeSet::from([key]),
+                        gpg_exports: BTreeSet::new(),
+                    },
+                )
+            })
+            .collect()
+    }
+
     fn key(seed: u8) -> AnyVerifyingKey {
         AnyVerifyingKey::Ed25519(ed25519_dalek::SigningKey::from_bytes(&[seed; 32]).verifying_key())
     }
@@ -221,9 +305,9 @@ mod tests {
         let url = registry_url("https://registry.example/base/").unwrap();
         let (approved, unapproved) = (key(40), key(41));
         let info = RegistryInfo {
-            trust_keys: BTreeMap::from([
-                (approved.clone(), "Approved".into()),
-                (unapproved.clone(), "Unapproved".into()),
+            trust_signers: signers([
+                (approved.clone(), "Approved"),
+                (unapproved.clone(), "Unapproved"),
             ]),
             ..Default::default()
         };
@@ -247,12 +331,12 @@ mod tests {
             .unwrap();
         assert_eq!(entry.origin, "https://registry.example/base");
         assert!(entry.marketplace && !entry.os && !entry.removable);
-        assert!(
-            !public
-                .server_info
-                .trusted_keys
-                .contains_key(&unapproved.interned_der64())
-        );
+        let disabled = public
+            .server_info
+            .trusted_keys
+            .remove(&unapproved.interned_der64())
+            .unwrap();
+        assert!(!disabled.marketplace && !disabled.os && !disabled.removable);
         assert_eq!(public.server_info.trusted_keys, before);
     }
 
@@ -265,7 +349,7 @@ mod tests {
         let mut info = RegistryInfo {
             name: Some("Original registry".into()),
             icon: Some("data:image/png;base64,aWNvbg==".parse().unwrap()),
-            trust_keys: BTreeMap::from([(signing_key.clone(), "Publisher".into())]),
+            trust_signers: signers([(signing_key.clone(), "Publisher")]),
             ..Default::default()
         };
         let approved = BTreeSet::from([signing_key]);
@@ -298,11 +382,11 @@ mod tests {
         let entry = public.server_info.trusted_keys.get_mut(&id).unwrap();
         entry.marketplace = false;
         entry.os = true;
-        let key = entry.public_keys.first().unwrap().clone();
+        let key = entry.public_key.clone();
         let saved = entry.clone();
         let url = registry_url("https://registry.example").unwrap();
         let info = RegistryInfo {
-            trust_keys: BTreeMap::from([(id.parse().unwrap(), "Other name".into())]),
+            trust_signers: signers([(id.parse().unwrap(), "Other name")]),
             ..Default::default()
         };
         connect_public(&mut public, &url, None, &BTreeSet::new(), &info).unwrap();
@@ -310,7 +394,7 @@ mod tests {
         connect_public(&mut public, &url, None, &BTreeSet::from([key]), &info).unwrap();
         assert_eq!(
             public.server_info.trusted_keys[&id],
-            TrustedKeyring {
+            TrustedKey {
                 marketplace: true,
                 ..saved
             }
@@ -337,7 +421,7 @@ mod tests {
         public.ui = imbl_value::json!({ "registries": false });
         let before = to_value(&public).unwrap();
         let info = RegistryInfo {
-            trust_keys: BTreeMap::from([(approved.clone(), "New key".into())]),
+            trust_signers: signers([(approved.clone(), "New key")]),
             ..Default::default()
         };
         assert!(
@@ -351,7 +435,7 @@ mod tests {
         let mut public = public();
         let saved = public.server_info.trusted_keys.clone();
         let info: RegistryInfo = serde_json::from_value(serde_json::json!({ "name": null, "icon": null, "description": null, "categories": {} })).unwrap();
-        assert!(info.trust_keys.is_empty());
+        assert!(info.trust_signers.is_empty());
         connect_public(
             &mut public,
             &registry_url("https://legacy.example/").unwrap(),
@@ -389,7 +473,7 @@ mod tests {
             .unwrap()
             .marketplace = false;
         let info = RegistryInfo {
-            trust_keys: BTreeMap::from([(id.parse().unwrap(), "Listed".into())]),
+            trust_signers: signers([(id.parse().unwrap(), "Listed")]),
             ..Default::default()
         };
         let first = registry_url("https://first.example").unwrap();
@@ -399,7 +483,7 @@ mod tests {
             assert!(!public.server_info.trusted_keys[&id].removable);
             assert!(!public.server_info.trusted_keys[&id].marketplace);
             assert_eq!(public.server_info.trusted_keys[&id].origin, "manual");
-            assert!(mutate_public_keys(&mut public, |keys| remove_group(keys, &id)).is_err());
+            assert!(mutate_public_keys(&mut public, |keys| remove_key(keys, &id)).is_err());
         }
         remove_public(&mut public, &first).unwrap();
         assert!(!public.server_info.trusted_keys[&id].removable);
@@ -414,7 +498,7 @@ mod tests {
                 .filter(|entry| entry.origin == "system")
                 .all(|entry| !entry.removable)
         );
-        mutate_public_keys(&mut public, |keys| remove_group(keys, &id)).unwrap();
+        mutate_public_keys(&mut public, |keys| remove_key(keys, &id)).unwrap();
         assert!(!public.server_info.trusted_keys.contains_key(&id));
     }
 
@@ -431,7 +515,7 @@ mod tests {
         let url = registry_url("https://registry.example/").unwrap();
         let info = RegistryInfo {
             name: Some("Fetched name".into()),
-            trust_keys: BTreeMap::from([(id.parse().unwrap(), "Key".into())]),
+            trust_signers: signers([(id.parse().unwrap(), "Key")]),
             ..Default::default()
         };
         connect_public(&mut public, &url, None, &BTreeSet::from([key]), &info).unwrap();
@@ -452,11 +536,264 @@ mod tests {
         assert!(public.server_info.registry_keys.is_empty());
         assert_eq!(
             public.server_info.trusted_keys[&id],
-            TrustedKeyring {
+            TrustedKey {
                 removable: true,
                 ..saved
             }
         );
+    }
+
+    fn gpg_info() -> RegistryInfo {
+        let imported =
+            parse_public_keys(&[include_str!("../sign/fixtures/ed25519-signers.asc").into()])
+                .unwrap();
+        RegistryInfo {
+            name: Some("Original registry".into()),
+            trust_signers: BTreeMap::from([(
+                crate::rpc_continuations::Guid::new(),
+                crate::registry::signer::SignerInfo {
+                    name: "Publisher".into(),
+                    contact: vec![],
+                    keys: imported.keys,
+                    gpg_exports: imported.gpg_exports,
+                },
+            )]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn connection_preserves_full_certificates_without_granting_os_trust() {
+        let mut public = public();
+        let url = registry_url("https://registry.example").unwrap();
+        let info = gpg_info();
+        let signer = info.trust_signers.values().next().unwrap();
+        let approved = signer.keys.first().unwrap();
+        connect_public(
+            &mut public,
+            &url,
+            None,
+            &BTreeSet::from([approved.clone()]),
+            &info,
+        )
+        .unwrap();
+        for key in &signer.keys {
+            let entry = &public.server_info.trusted_keys[&key.interned_der64()];
+            assert_eq!(entry.gpg_exports, signer.gpg_exports);
+            assert_eq!(entry.marketplace, key == approved);
+            assert!(!entry.os && !entry.removable);
+            assert_eq!(entry.origin, "https://registry.example");
+        }
+    }
+
+    #[test]
+    fn refresh_imports_disabled_keys_and_preserves_existing_global_permissions_and_provenance() {
+        let mut public = public();
+        let url = registry_url("https://registry.example").unwrap();
+        connect_public(
+            &mut public,
+            &url,
+            None,
+            &BTreeSet::new(),
+            &RegistryInfo::default(),
+        )
+        .unwrap();
+        let info = gpg_info();
+        let signer = info.trust_signers.values().next().unwrap();
+        let manual = signer.keys.first().unwrap();
+        mutate_public_keys(&mut public, |keys| {
+            import_individual_keys(
+                keys,
+                "Manual name".into(),
+                vec![manual.clone()].into(),
+                TrustContext::Os,
+                "manual",
+            )
+        })
+        .unwrap();
+        public
+            .server_info
+            .trusted_keys
+            .get_mut(&manual.interned_der64())
+            .unwrap()
+            .marketplace = false;
+        let saved = public.server_info.trusted_keys[&manual.interned_der64()].clone();
+        assert_eq!(
+            refresh_public(&mut public, &url, &info).unwrap(),
+            signer.keys
+        );
+        for key in &signer.keys {
+            let entry = &public.server_info.trusted_keys[&key.interned_der64()];
+            assert_eq!(entry.gpg_exports, signer.gpg_exports);
+            assert!(!entry.marketplace && !entry.removable);
+            if key == manual {
+                assert_eq!(entry.name, saved.name);
+                assert_eq!(entry.origin, saved.origin);
+                assert_eq!(entry.origin_registry, saved.origin_registry);
+                assert_eq!(entry.os, saved.os);
+            } else {
+                assert!(!entry.os);
+                assert_eq!(entry.origin_registry.as_ref().unwrap().name, info.name);
+            }
+        }
+        let mut reloaded: Public = from_value(to_value(&public).unwrap()).unwrap();
+        assert!(
+            refresh_public(&mut reloaded, &url, &info)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(to_value(&reloaded).unwrap(), to_value(&public).unwrap());
+    }
+
+    #[test]
+    fn discovery_snapshot_tracks_rotation_and_relisting_without_resetting_trust_or_origin() {
+        let mut public = public();
+        let url = registry_url("https://registry.example").unwrap();
+        connect_public(
+            &mut public,
+            &url,
+            None,
+            &BTreeSet::new(),
+            &RegistryInfo::default(),
+        )
+        .unwrap();
+        let mut info = gpg_info();
+        let listed = info.trust_signers.values().next().unwrap().keys.clone();
+        assert_eq!(refresh_public(&mut public, &url, &info).unwrap(), listed);
+        let id = listed.first().unwrap().interned_der64();
+        let entry = public.server_info.trusted_keys.get_mut(&id).unwrap();
+        entry.marketplace = true;
+        entry.os = true;
+        let saved = entry.clone();
+        assert!(refresh_public(&mut public, &url, &info).unwrap().is_empty());
+        assert!(
+            refresh_public(&mut public, &url, &RegistryInfo::default())
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            public.server_info.trusted_keys[&id],
+            TrustedKey {
+                removable: true,
+                ..saved.clone()
+            }
+        );
+        info.name = Some("Untrusted replacement name".into());
+        assert_eq!(refresh_public(&mut public, &url, &info).unwrap(), listed);
+        assert_eq!(public.server_info.trusted_keys[&id], saved);
+        assert!(refresh_public(&mut public, &url, &info).unwrap().is_empty());
+    }
+
+    #[test]
+    fn registry_membership_uses_saved_urls_not_stale_key_snapshots() {
+        let mut public = public();
+        let url = registry_url("https://registry.example/base/").unwrap();
+        public.server_info.registry_keys.insert(
+            "https://registry.example/base".into(),
+            BTreeSet::from([key(88)]),
+        );
+        assert!(!is_connected(&public.ui, url.as_str()));
+        let saved = to_value(&public).unwrap();
+        assert!(
+            refresh_public(&mut public, &url, &gpg_info())
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(to_value(&public).unwrap(), saved);
+        public.ui =
+            imbl_value::json!({ "registries": { "https://REGISTRY.example/base/": "Saved" } });
+        assert!(is_connected(&public.ui, url.as_str()));
+        assert!(!is_connected(&public.ui, "https://registry.example/other"));
+        assert!(!is_connected(&public.ui, "https://unknown.example/base"));
+    }
+
+    #[test]
+    fn in_flight_refresh_does_not_restore_a_removed_registry() {
+        let mut public = public();
+        let url = registry_url("https://registry.example").unwrap();
+        let fetched_info = gpg_info();
+        connect_public(
+            &mut public,
+            &url,
+            None,
+            &BTreeSet::new(),
+            &RegistryInfo::default(),
+        )
+        .unwrap();
+        remove_public(&mut public, &url).unwrap();
+        let saved = to_value(&public).unwrap();
+        assert!(
+            refresh_public(&mut public, &url, &fetched_info)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(to_value(&public).unwrap(), saved);
+        assert!(public.server_info.registry_keys.is_empty());
+    }
+
+    #[test]
+    fn rotation_keeps_shared_and_system_keys_protected() {
+        let mut public = public();
+        let first = registry_url("https://first.example").unwrap();
+        let second = registry_url("https://second.example").unwrap();
+        let info = RegistryInfo {
+            trust_signers: signers([(key(87), "Publisher")]),
+            ..Default::default()
+        };
+        let id = key(87).interned_der64();
+        for url in [&first, &second] {
+            connect_public(&mut public, url, None, &BTreeSet::new(), &info).unwrap();
+        }
+        refresh_public(&mut public, &first, &RegistryInfo::default()).unwrap();
+        assert!(!public.server_info.trusted_keys[&id].removable);
+        refresh_public(&mut public, &second, &RegistryInfo::default()).unwrap();
+        assert!(public.server_info.trusted_keys[&id].removable);
+        assert_eq!(
+            public.server_info.trusted_keys[&id].origin,
+            "https://first.example"
+        );
+        assert!(
+            public
+                .server_info
+                .trusted_keys
+                .values()
+                .filter(|entry| entry.origin == "system")
+                .all(|entry| !entry.removable)
+        );
+    }
+
+    #[test]
+    fn legacy_registry_discovery_canonicalizes_snapshot_aliases_and_is_atomic_on_invalid_exports() {
+        let mut public = public();
+        public.ui = imbl_value::json!({ "registries": { "https://REGISTRY.example/": "My name" } });
+        let url = registry_url("https://registry.example").unwrap();
+        let mut info = gpg_info();
+        let listed = info.trust_signers.values().next().unwrap().keys.clone();
+        let saved = to_value(&public).unwrap();
+        let signer = info.trust_signers.values_mut().next().unwrap();
+        let mut export = signer.gpg_exports.pop_first().unwrap();
+        let armor = export.armored.clone();
+        export.armored = "invalid".into();
+        signer.gpg_exports.insert(export.clone());
+        assert!(refresh_public(&mut public, &url, &info).is_err());
+        assert_eq!(to_value(&public).unwrap(), saved);
+        let signer = info.trust_signers.values_mut().next().unwrap();
+        signer.gpg_exports.clear();
+        export.armored = armor;
+        signer.gpg_exports.insert(export);
+        assert_eq!(refresh_public(&mut public, &url, &info).unwrap(), listed);
+        assert_eq!(
+            public.ui["registries"]["https://REGISTRY.example/"],
+            imbl_value::json!("My name")
+        );
+        assert_eq!(public.server_info.registry_keys.len(), 1);
+        assert!(
+            public
+                .server_info
+                .registry_keys
+                .contains_key("https://registry.example")
+        );
+        assert!(refresh_public(&mut public, &url, &info).unwrap().is_empty());
     }
 
     #[test]

@@ -1,5 +1,6 @@
 import { KeyValuePipe } from '@angular/common'
 import { Component } from '@angular/core'
+import { registrySigningKeys } from '@start9labs/marketplace'
 import { i18nPipe } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { TuiButton, TuiCell, TuiDialogContext, TuiTitle } from '@taiga-ui/core'
@@ -19,7 +20,8 @@ import { KeyIdentity } from 'src/app/components/trusted-keys/identity'
           <span tuiSubtitle>{{ context.data.url }}</span>
         </h2>
       </header>
-      @if (proposed.length) {
+      @let keys = proposed | keyvalue;
+      @if (keys.length) {
         <p>
           {{
             'This registry asks you to trust these keys for packages. Review them before connecting.'
@@ -27,15 +29,9 @@ import { KeyIdentity } from 'src/app/components/trusted-keys/identity'
           }}
         </p>
         <div>
-          @for (key of context.data.info.trustKeys | keyvalue; track key.key) {
+          @for (key of keys; track key.key) {
             <div tuiCell="m">
-              <span
-                [appKeyIdentity]="{
-                  name: key.value,
-                  publicKeys: [key.key],
-                  gpgExports: [],
-                }"
-              ></span>
+              <span [appKeyIdentity]="key.value"></span>
             </div>
           }
         </div>
@@ -54,7 +50,7 @@ import { KeyIdentity } from 'src/app/components/trusted-keys/identity'
           {{ 'Cancel' | i18n }}
         </button>
         <button tuiButton>
-          {{ (proposed.length ? 'Connect and trust' : 'Connect') | i18n }}
+          {{ (keys.length ? 'Connect and trust' : 'Connect') | i18n }}
         </button>
       </footer>
     </form>
@@ -75,7 +71,7 @@ class ConfirmRegistry {
     injectContext<
       TuiDialogContext<boolean, { url: string; info: T.RegistryInfo }>
     >()
-  protected readonly proposed = Object.keys(this.context.data.info.trustKeys)
+  protected readonly proposed = registrySigningKeys(this.context.data.info)
 }
 
 export const CONFIRM_REGISTRY = new PolymorpheusComponent(ConfirmRegistry)
