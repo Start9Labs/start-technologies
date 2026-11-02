@@ -56,7 +56,7 @@ Services are added by the community. If a service you want isn't available, you 
 
 ### Buy a Start9 server
 
-The easiest path. [Buy a server](https://store.start9.com) from Start9 and plug it in.
+The easiest path. [Buy a server](https://start9.com) from Start9 and plug it in.
 
 ### Build your own
 
