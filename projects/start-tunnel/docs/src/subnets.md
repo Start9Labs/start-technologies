@@ -19,6 +19,8 @@ Each subnet resolves domain names through one of three modes, chosen with the **
 - **Device** — designate one device already on the subnet as its resolver (at least one device must exist first). Use this to point the subnet at a resolver you run yourself.
 - **Custom** — enter up to three DNS server IP addresses to query directly.
 
+When the resolver is a device on the subnet — **Device** mode, or **Custom** servers that are all devices on the subnet — StartTunnel forwards each lookup from the tunnel address of the device that asked, so a resolver such as Pi-hole or AdGuard Home can tell your devices apart. Any other resolver sees every lookup coming from StartTunnel.
+
 This chooses the _upstream_ resolver the subnet uses. It is separate from the private DNS _records_ StartTunnel serves for your own hostnames — see [DNS Records](/start-tunnel/dns-records.html) for those.
 
 ## Outbound IP
