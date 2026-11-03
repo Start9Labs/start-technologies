@@ -2146,7 +2146,10 @@ const { SideloadPackageComponent } =
 test('sideload License opens the complete archive text instead of its manifest identifier', async () => {
   let displayed
   SideloadPackageComponent.prototype.onStatic.call({
-    pkg: () => ({ license: 'MIT', fullLicense: 'Complete license fixture text' }),
+    pkg: () => ({
+      license: 'MIT',
+      fullLicense: 'Complete license fixture text',
+    }),
     dialog: {
       openComponent: (_component, options) => {
         displayed = options.data
