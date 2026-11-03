@@ -177,6 +177,20 @@ async fn torrent_metadata_download_is_preferred_to_http() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn http_only_downloads_ignore_advertised_torrents() -> Result<(), Error> {
+    let swarm = Swarm::new().await?;
+    let asset = swarm.asset(swarm.url.join("metadata.torrent")?);
+    let progress = FullProgressTracker::new().add_phase("Downloading".into(), Some(100));
+    let mut content = Vec::new();
+    asset
+        .download(Client::new(), None, &mut content, progress)
+        .await?;
+    assert_eq!(content, swarm.content);
+    assert!(swarm.http_hits.load(Ordering::SeqCst) > 0);
+    Ok(())
+}
+
+#[tokio::test]
 async fn magnet_download_is_preferred_to_http() -> Result<(), Error> {
     let swarm = Swarm::new().await?;
     assert_eq!(

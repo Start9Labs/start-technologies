@@ -14,7 +14,9 @@ Package details show **Signed by** above **Version**, listing the enabled keyrin
 
 ## Download Transports
 
-When a registry advertises a BitTorrent source, StartOS prefers it for package downloads and OS updates, with HTTP fallback if the torrent is unavailable, stalls, or fails verification. Both transports use the same signed content commitments. BitTorrent sources must contain a single asset file.
+When a registry advertises a BitTorrent source, StartOS prefers it for package downloads and OS updates, with HTTP fallback if the torrent is unavailable, stalls, or fails verification. Both transports use the same signed content commitments. BitTorrent sources must contain a single asset file. Recovery-mode OS updates stream over HTTP directly to the image partition.
+
+BitTorrent downloads buffer a complete asset on the data disk before installation. Retained seeding keeps an additional copy.
 
 > [!WARNING]
 > BitTorrent peers can see the server's IP address and the torrent it requests. Onion registries use HTTP through Tor instead of BitTorrent.

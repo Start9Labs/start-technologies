@@ -91,7 +91,7 @@ See [patchdb.md](patchdb.md) for `TypedDbWatch<T>` construction, API, and usage 
 
 `registry::asset` owns signed asset commitments and source selection. Optional `torrent` metadata advertises an external magnet link or HTTP(S) torrent URL alongside HTTP mirrors. Registries store the metadata; operators seed the files elsewhere.
 
-`registry::bittorrent` uses librqbit for single-file transfers, bounds metadata and no-progress waits, and verifies complete downloads through the existing commitment implementations before exposing bytes or retaining them. Failed torrent attempts use the existing HTTP sources and mirror retries. Torrent buffering completes before archive parsing; HTTP downloads retain streaming reads.
+`registry::bittorrent` uses librqbit for single-file transfers, bounds metadata and no-progress waits, and verifies complete downloads through the existing commitment implementations before exposing bytes or retaining them. Failed torrent attempts use the existing HTTP sources and mirror retries. Torrent buffering completes before archive parsing; HTTP downloads retain streaming reads. Diagnostic OS updates stream over HTTP directly to the image partition; `/var/tmp` can remain RAM-backed before data-disk initialization.
 
 Each transient transfer owns a cancellable engine session. CLI sessions disable uploads and retain no seeds. StartOS owns its optional seed cache independently of installed archives and update images; existing cron ownership resumes verified cached files without blocking startup, and context shutdown stops its engine. Cache staging reuses `TmpDir` and per-cache/per-asset `FileLock`s. Onion registries and proxied CLI downloads exclude peer transport.
 
