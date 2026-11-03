@@ -80,7 +80,7 @@ start-wrt=1.3.x
 support=1.0.x
 ```
 
-`versions.conf` is the single source of truth — `build.sh` and the routing it writes into the tree (the redirect stubs and `404.html`) derive from it. Adding a book takes one line here (plus a `book_dir()` mapping if it lives outside this project).
+`versions.conf` is the single source of truth — `build.sh` and the routing it writes into the tree (the redirect stubs and `404.html`) derive from it. Adding a book takes one line here (plus a `book_dir()` mapping if it lives outside this project). The copy on `live-docs` is what the site publishes: on a tag, `docs-sync-on-tag.yml` updates only the released product's line there, deriving the StartOS and StartWRT labels from the tag.
 
 Build output goes to `docs/<book>/<version>/` (e.g. `docs/start-os/0.4.0.x/`). `MDBOOK_OUTPUT__HTML__SITE_URL` is set per-book at build time so mdBook generates correct search indexes and canonical URLs for the versioned path.
 
