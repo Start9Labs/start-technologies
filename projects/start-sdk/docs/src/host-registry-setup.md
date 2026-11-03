@@ -83,4 +83,4 @@ start-cli registry admin list
 
 The first lists registry metadata and packages (empty on a fresh install). The second should show the administrator you added in step 3. If either fails, check that the service is running, the API interface is reachable from your workstation, and your identity key matches the public key you registered.
 
-You're now ready to add signers, publish packages, and register StartOS versions. See [Administration](host-registry-administration.md).
+You're now ready to add signers, publish packages, and register StartOS versions. Before inviting users to connect, [select which signing keys your registry offers](host-registry-administration.md#offering-signing-keys-to-users). See [Administration](host-registry-administration.md) for these operations.
