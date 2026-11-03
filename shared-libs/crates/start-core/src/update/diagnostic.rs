@@ -119,10 +119,12 @@ async fn run_update(
 
     let (done_tx, done_rx) = oneshot::channel();
     let tracker_for_task = tracker.clone();
+    let task_ctx = ctx.clone();
     tokio::spawn(async move {
         let _guard = guard;
         let res = do_update(
             client,
+            Some(&task_ctx.torrents),
             asset,
             UpdateProgressHandles {
                 progress: tracker_for_task,

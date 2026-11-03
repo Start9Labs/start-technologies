@@ -14,6 +14,7 @@ use crate::util::sync::SyncMutex;
 
 pub struct DiagnosticContextSeed {
     pub(crate) dns: Arc<crate::net::dns::DnsController>,
+    pub torrents: crate::registry::bittorrent::TorrentClient,
     pub shutdown: Sender<Shutdown>,
     pub error: Arc<RpcError>,
     pub disk_guid: Option<InternedString>,
@@ -27,7 +28,7 @@ pub struct DiagnosticContext(Arc<DiagnosticContextSeed>);
 impl DiagnosticContext {
     #[instrument(skip_all)]
     pub fn init(
-        _config: &ServerConfig,
+        config: &ServerConfig,
         disk_guid: Option<InternedString>,
         error: Error,
         dns: Arc<crate::net::dns::DnsController>,
@@ -42,6 +43,10 @@ impl DiagnosticContext {
 
         Ok(Self(Arc::new(DiagnosticContextSeed {
             dns,
+            torrents: crate::registry::bittorrent::TorrentClient::for_server(
+                config.torrent_downloads.clone(),
+                None,
+            ),
             shutdown,
             disk_guid,
             error: Arc::new(error.into()),

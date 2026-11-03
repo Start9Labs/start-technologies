@@ -174,11 +174,12 @@ pub async fn install(
 
     let progress_tracker = FullProgressTracker::new();
     let download_progress = progress_tracker.add_phase("Downloading".into(), Some(100));
+    let torrents = ctx.torrents.for_source(&registry);
     let download = ctx
         .services
         .install(
             ctx.clone(),
-            || asset.deserialize_s9pk_buffered(ctx.client.get(), download_progress),
+            || asset.deserialize_s9pk_buffered(ctx.client.get(), torrents, download_progress),
             Some(registry),
             None::<Never>,
             Some(progress_tracker),

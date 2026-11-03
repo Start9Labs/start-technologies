@@ -77,6 +77,7 @@ pub struct CliContextSeed {
     pub tunnel_addr: Option<SocketAddr>,
     pub tunnel_listen: Option<SocketAddr>,
     pub client: Client,
+    pub torrents: crate::registry::bittorrent::TorrentClient,
     pub id_key_path: PathBuf,
     pub id_key_gpg: Option<String>,
     pub id_key: OnceCell<Signer>,
@@ -132,6 +133,21 @@ impl CliContext {
             tunnel_addr: config.tunnel,
             tunnel_listen: config.tunnel_listen,
             host_identity,
+            torrents: crate::registry::bittorrent::TorrentClient::download_only(
+                config.torrent_downloads,
+                config.proxy.is_some()
+                    || config.socks_listen.is_some()
+                    || [
+                        "HTTP_PROXY",
+                        "HTTPS_PROXY",
+                        "ALL_PROXY",
+                        "http_proxy",
+                        "https_proxy",
+                        "all_proxy",
+                    ]
+                    .iter()
+                    .any(|key| std::env::var_os(key).is_some_and(|value| !value.is_empty())),
+            ),
             client: {
                 let mut builder = Client::builder();
                 if let Some(proxy) = config.proxy.or_else(|| {
@@ -160,6 +176,15 @@ impl CliContext {
             root_ca: config.root_ca.unwrap_or_default(),
             insecure: config.insecure,
         })))
+    }
+
+    pub fn registry_torrents(
+        &self,
+    ) -> Result<Option<&crate::registry::bittorrent::TorrentClient>, Error> {
+        Ok(match &self.registry_url {
+            Some(registry) => self.torrents.for_source(registry.get()?),
+            None => Some(&self.torrents),
+        })
     }
 
     fn ws_tls_connector(&self) -> Result<Option<Connector>, Error> {

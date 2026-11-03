@@ -656,7 +656,12 @@ pub async fn cli_download(
     let dest = dest.unwrap_or_else(|| Path::new(".").join(id).with_extension("s9pk"));
     let dest_tmp = to_tmp_path(&dest)?;
     let (mut parsed, source) = s9pk
-        .download_to(&dest_tmp, ctx.client.clone(), download_progress)
+        .download_to(
+            &dest_tmp,
+            ctx.client.clone(),
+            ctx.registry_torrents()?,
+            download_progress,
+        )
         .await?;
     if let Some(size) = source.size().await {
         verify_progress.set_total(size);

@@ -2669,6 +2669,20 @@ registry.asset.failed-to-load-http-url:
   fr_FR: "Échec du chargement de toute URL HTTP"
   pl_PL: "Nie udało się załadować żadnego adresu HTTP"
 
+registry.bittorrent.invalid-metadata:
+  en_US: "Invalid registry torrent: expected a single asset file matching the commitment"
+  de_DE: "Ungültiger Registry-Torrent: Eine einzelne, zur Zusicherung passende Asset-Datei wurde erwartet"
+  es_ES: "Torrent de registro no válido: se esperaba un único archivo que coincida con el compromiso"
+  fr_FR: "Torrent de registre invalide : un fichier unique correspondant à l'engagement est attendu"
+  pl_PL: "Nieprawidłowy torrent rejestru: oczekiwano pojedynczego pliku zgodnego z zobowiązaniem"
+
+registry.bittorrent.stalled:
+  en_US: "BitTorrent download stopped making progress"
+  de_DE: "Der BitTorrent-Download macht keinen Fortschritt mehr"
+  es_ES: "La descarga BitTorrent dejó de avanzar"
+  fr_FR: "Le téléchargement BitTorrent ne progresse plus"
+  pl_PL: "Pobieranie BitTorrent przestało postępować"
+
 # registry/context.rs
 registry.context.missing-hostname:
   en_US: "Missing required configuration: registry-hostname"
@@ -4045,6 +4059,13 @@ help.arg.binding-enabled:
   fr_FR: "Activer ou désactiver cette liaison"
   pl_PL: "Włącz lub wyłącz to powiązanie"
 
+help.arg.bittorrent:
+  en_US: "Prefer BitTorrent for registry downloads (peer IP addresses are public); HTTP remains available"
+  de_DE: "BitTorrent für Registry-Downloads bevorzugen (Peer-IP-Adressen sind öffentlich); HTTP bleibt verfügbar"
+  es_ES: "Preferir BitTorrent para las descargas del registro (las IP de los pares son públicas); HTTP sigue disponible"
+  fr_FR: "Préférer BitTorrent pour les téléchargements du registre (les IP des pairs sont publiques) ; HTTP reste disponible"
+  pl_PL: "Preferuj BitTorrent przy pobieraniu z rejestru (adresy IP peerów są publiczne); HTTP pozostaje dostępne"
+
 help.arg.ca-certificate:
   en_US: "PEM-encoded CA certificate"
   de_DE: "PEM-codiertes CA-Zertifikat"
@@ -4885,6 +4906,13 @@ help.arg.tor-proxy-url:
   es_ES: "URL del proxy SOCKS de Tor"
   fr_FR: "URL du proxy SOCKS Tor"
   pl_PL: "URL proxy SOCKS Tor"
+
+help.arg.torrent:
+  en_US: "Magnet link or HTTP(S) torrent metadata URL; seed the asset separately"
+  de_DE: "Magnet-Link oder HTTP(S)-URL der Torrent-Metadaten; das Asset separat seeden"
+  es_ES: "Enlace magnet o URL HTTP(S) de metadatos torrent; compartir el archivo por separado"
+  fr_FR: "Lien magnet ou URL HTTP(S) des métadonnées torrent ; partager la ressource séparément"
+  pl_PL: "Link magnet lub adres HTTP(S) metadanych torrenta; udostępniaj zasób osobno"
 
 help.arg.trust:
   en_US: "Install without requiring a trusted signer; signature and integrity checks remain mandatory"

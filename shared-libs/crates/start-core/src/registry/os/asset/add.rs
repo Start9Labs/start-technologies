@@ -83,6 +83,10 @@ pub struct AddAssetParams {
     pub version: Version,
     pub platform: InternedString,
     pub url: Url,
+    #[serde(default)]
+    pub urls: Vec<Url>,
+    #[serde(default)]
+    pub torrent: Option<Url>,
     #[serde(rename = "__Auth_signer")]
     #[visit(ts(skip))]
     pub signer: AnyVerifyingKey,
@@ -99,6 +103,8 @@ async fn add_asset(
         version,
         platform,
         url,
+        urls,
+        torrent,
         signer,
         signature,
         commitment,
@@ -109,6 +115,9 @@ async fn add_asset(
     + UnwindSafe
     + Send,
 ) -> Result<(), Error> {
+    if let Some(torrent) = &torrent {
+        crate::registry::bittorrent::validate_torrent_url(torrent)?;
+    }
     let signature =
         crate::sign::compat::verify_commitment(&signer, &commitment, SIG_CONTEXT, &signature)?;
     ctx.db
@@ -136,6 +145,7 @@ async fn add_asset(
                     Ok(RegistryAsset {
                         published_at: Utc::now(),
                         urls: vec![url.clone()],
+                        torrent: None,
                         commitment: commitment.clone(),
                         signatures: HashMap::new(),
                     })
@@ -148,8 +158,13 @@ async fn add_asset(
                         ))
                     } else {
                         s.signatures.insert(signer, signature);
-                        if !s.urls.contains(&url) {
-                            s.urls.push(url);
+                        if let Some(torrent) = torrent {
+                            s.torrent = Some(torrent);
+                        }
+                        for url in std::iter::once(url).chain(urls) {
+                            if !s.urls.contains(&url) {
+                                s.urls.push(url);
+                            }
                         }
                         Ok(())
                     }
@@ -193,6 +208,8 @@ pub struct CliAddAssetParams {
     pub file: PathBuf,
     #[arg(help = "help.arg.asset-url")]
     pub url: Url,
+    #[arg(long, help = "help.arg.torrent")]
+    pub torrent: Option<Url>,
 }
 
 pub async fn cli_add_asset(
@@ -206,6 +223,7 @@ pub async fn cli_add_asset(
                 version,
                 file: path,
                 url,
+                torrent,
             },
         ..
     }: HandlerArgs<CliContext, CliAddAssetParams>,
@@ -279,6 +297,7 @@ pub async fn cli_add_asset(
             "platform": platform,
             "version": version,
             "url": &url,
+            "torrent": torrent,
             "signature": signature,
             "commitment": commitment,
         }),

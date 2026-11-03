@@ -24,6 +24,7 @@ fn package_commitment_requires_an_enabled_marketplace_signer() {
     let mut asset = RegistryAsset {
         published_at: chrono::Utc::now(),
         urls: vec![],
+        torrent: None,
         commitment,
         signatures: HashMap::from([(public.clone(), AnySignature::Ed25519ph(signature))]),
     };

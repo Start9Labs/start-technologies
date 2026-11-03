@@ -31,6 +31,8 @@ use crate::util::serde::Base64;
 #[serde(rename_all = "camelCase")]
 pub struct AddPackageParams {
     pub urls: Vec<Url>,
+    #[serde(default)]
+    pub torrent: Option<Url>,
     #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
     pub uploader: AnyVerifyingKey,
@@ -45,11 +47,15 @@ pub async fn add_package(
     ctx: RegistryContext,
     AddPackageParams {
         urls,
+        torrent,
         uploader,
         commitment,
         signature,
     }: AddPackageParams,
 ) -> Result<(), Error> {
+    if let Some(torrent) = &torrent {
+        crate::registry::bittorrent::validate_torrent_url(torrent)?;
+    }
     let signature =
         crate::sign::compat::verify_commitment(&uploader, &commitment, SIG_CONTEXT, &signature)?;
     let peek = ctx.db.peek().await;
@@ -80,6 +86,7 @@ pub async fn add_package(
 
     let mut info = PackageVersionInfo::from_s9pk(&s9pk, urls, &icons_dir(&ctx.datadir)).await?;
     for (_, s9pk) in &mut info.s9pks {
+        s9pk.torrent = torrent.clone();
         if !s9pk.signatures.contains_key(&uploader) && s9pk.commitment == commitment {
             s9pk.signatures.insert(uploader.clone(), signature.clone());
         }
@@ -140,6 +147,8 @@ pub struct CliAddPackageParams {
     pub file: PathBuf,
     #[arg(long, help = "help.arg.package-url")]
     pub url: Vec<Url>,
+    #[arg(long, help = "help.arg.torrent")]
+    pub torrent: Option<Url>,
     #[arg(long, help = "help.arg.no-verify")]
     pub no_verify: bool,
 }
@@ -149,17 +158,19 @@ pub async fn cli_add_package(
     CliAddPackageParams {
         file,
         url,
+        torrent,
         no_verify,
     }: CliAddPackageParams,
 ) -> Result<(), Error> {
     let s9pk = S9pk::open(&file, None).await?;
-    cli_add_package_impl(ctx, s9pk, url, no_verify).await
+    cli_add_package_impl(ctx, s9pk, url, torrent, no_verify).await
 }
 
 pub async fn cli_add_package_impl(
     ctx: CliContext,
     s9pk: S9pk,
     url: Vec<Url>,
+    torrent: Option<Url>,
     no_verify: bool,
 ) -> Result<(), Error> {
     let manifest = s9pk.as_manifest();
@@ -216,6 +227,7 @@ pub async fn cli_add_package_impl(
         "package.add",
         imbl_value::json!({
             "urls": &url,
+            "torrent": torrent,
             "signature": signature,
             "commitment": commitment,
         }),

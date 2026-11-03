@@ -5674,6 +5674,7 @@
                             "type": "array",
                             "items": { "type": "string" }
                           },
+                          "torrent": { "type": ["string", "null"] },
                           "commitment": {
                             "$ref": "#/$defs/MerkleArchiveCommitment"
                           },
@@ -5979,6 +5980,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -5998,6 +6000,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -6017,6 +6020,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -6704,6 +6708,8 @@
             "version": { "type": "string" },
             "platform": { "type": "string" },
             "url": { "type": "string" },
+            "urls": { "type": "array", "items": { "type": "string" } },
+            "torrent": { "type": ["string", "null"] },
             "signature": { "$ref": "#/$defs/AnySignature" },
             "commitment": { "$ref": "#/$defs/Blake3Commitment" }
           },
@@ -6750,6 +6756,8 @@
             "version": { "type": "string" },
             "platform": { "type": "string" },
             "url": { "type": "string" },
+            "urls": { "type": "array", "items": { "type": "string" } },
+            "torrent": { "type": ["string", "null"] },
             "signature": { "$ref": "#/$defs/AnySignature" },
             "commitment": { "$ref": "#/$defs/Blake3Commitment" }
           },
@@ -6796,6 +6804,8 @@
             "version": { "type": "string" },
             "platform": { "type": "string" },
             "url": { "type": "string" },
+            "urls": { "type": "array", "items": { "type": "string" } },
+            "torrent": { "type": ["string", "null"] },
             "signature": { "$ref": "#/$defs/AnySignature" },
             "commitment": { "$ref": "#/$defs/Blake3Commitment" }
           },
@@ -6854,6 +6864,7 @@
       "properties": {
         "publishedAt": { "type": "string" },
         "urls": { "type": "array", "items": { "type": "string" } },
+        "torrent": { "type": ["string", "null"] },
         "commitment": { "$ref": "#/$defs/Blake3Commitment" },
         "signatures": {
           "type": "object",
@@ -6915,6 +6926,7 @@
       "properties": {
         "publishedAt": { "type": "string" },
         "urls": { "type": "array", "items": { "type": "string" } },
+        "torrent": { "type": ["string", "null"] },
         "commitment": { "$ref": "#/$defs/Blake3Commitment" },
         "signatures": {
           "type": "object",
@@ -6976,6 +6988,7 @@
       "properties": {
         "publishedAt": { "type": "string" },
         "urls": { "type": "array", "items": { "type": "string" } },
+        "torrent": { "type": ["string", "null"] },
         "commitment": { "$ref": "#/$defs/Blake3Commitment" },
         "signatures": {
           "type": "object",
@@ -7256,6 +7269,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -7275,6 +7289,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -7294,6 +7309,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -7478,6 +7494,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -7497,6 +7514,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -7516,6 +7534,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -7766,6 +7785,7 @@
           "type": "object",
           "properties": {
             "urls": { "type": "array", "items": { "type": "string" } },
+            "torrent": { "type": ["string", "null"] },
             "commitment": { "$ref": "#/$defs/MerkleArchiveCommitment" },
             "signature": { "$ref": "#/$defs/AnySignature" }
           },
@@ -8197,6 +8217,7 @@
                             "type": "array",
                             "items": { "type": "string" }
                           },
+                          "torrent": { "type": ["string", "null"] },
                           "commitment": {
                             "$ref": "#/$defs/MerkleArchiveCommitment"
                           },

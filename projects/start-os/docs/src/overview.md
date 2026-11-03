@@ -8,6 +8,8 @@ A service is a piece of software, usually an open-source project developed elsew
 
 You install packages from the [Marketplace](marketplace.md), a network of registries. StartOS comes with two: the Start9 Registry, which carries the packages Start9 publishes, and the Community Registry, which carries packages other developers maintain. Anyone can run another registry, and you can also [sideload](sideloading.md) a package from a file.
 
+Registry downloads prefer BitTorrent when available, with HTTP fallback. Peers can see the server's IP address. [Download settings](marketplace.md#download-transports) support HTTP-only operation and optional continued seeding of verified downloads.
+
 Each service runs in its own isolated container. StartOS doesn't use Docker or Podman, so instructions written for them don't apply. A service's package sets its software's configuration, and can reset a setting that was changed by hand inside the container. Where a package gives you a way to change something, use it: instructions for installing and configuring the software elsewhere may not apply on StartOS.
 
 On a service's page, its package gives you:

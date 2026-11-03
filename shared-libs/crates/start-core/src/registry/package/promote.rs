@@ -133,6 +133,7 @@ pub async fn cli_promote(
             "package.add",
             imbl_value::json!({
                 "urls": &asset.urls,
+                "torrent": &asset.torrent,
                 "signature": signature,
                 "commitment": commitment,
             }),

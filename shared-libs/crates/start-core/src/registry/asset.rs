@@ -6,15 +6,18 @@ use chrono::{DateTime, Utc};
 use reqwest::header::RANGE;
 use reqwest::{Client, Response};
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWrite;
+use tokio::io::{AsyncRead, AsyncWrite};
 use url::Url;
 
 use crate::prelude::*;
 use crate::progress::PhaseProgressTrackerHandle;
+use crate::registry::bittorrent::{ContentCommitment, TorrentClient};
 use crate::registry::signer::AcceptSigners;
 use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
-use crate::s9pk::merkle_archive::source::{ArchiveSource, Section};
+use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
+use crate::s9pk::merkle_archive::source::{ArchiveSource, Section, TmpSource};
+use crate::sign::commitment::blake3::Blake3Commitment;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::sign::commitment::{Commitment, SignedCommitment};
 use crate::sign::{AnySignature, AnyVerifyingKey};
@@ -22,6 +25,7 @@ use crate::upload::{DownloadAttemptContext, DownloadHandle, UploadingFile};
 use crate::util::future::NonDetachingJoinHandle;
 #[cfg(test)]
 use crate::util::io::TmpDir;
+use crate::util::io::{create_file, open_file};
 
 /// A registry asset with a caller-selected commitment representation.
 #[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
@@ -29,6 +33,8 @@ use crate::util::io::TmpDir;
 pub struct RegistryAsset<Commitment> {
     pub published_at: DateTime<Utc>,
     pub urls: Vec<Url>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub torrent: Option<Url>,
     pub commitment: Commitment,
     pub signatures: HashMap<AnyVerifyingKey, AnySignature>,
 }
@@ -89,15 +95,90 @@ impl<Commitment: SignedCommitment> RegistryAsset<Commitment> {
         Ok(&self.commitment)
     }
 }
-impl<C: for<'a> Commitment<&'a HttpSource>> RegistryAsset<C> {
+impl RegistryAsset<Blake3Commitment> {
     pub async fn download(
         &self,
         client: Client,
+        torrents: Option<&TorrentClient>,
         dst: &mut (impl AsyncWrite + Unpin + Send + ?Sized),
-    ) -> Result<(), Error> {
+        mut progress: PhaseProgressTrackerHandle,
+    ) -> Result<PhaseProgressTrackerHandle, Error> {
+        if let Some(source) = self
+            .torrent_source(client.clone(), torrents, &mut progress, None)
+            .await?
+        {
+            source.copy_all_to(dst).await?;
+            return Ok(progress);
+        }
+        let mut writer = progress.writer(dst);
         self.commitment
-            .copy_to(&self.load_http_source(client).await?, dst)
+            .copy_to(&self.load_http_source(client).await?, &mut writer)
+            .await?;
+        Ok(writer.into_inner().1)
+    }
+}
+impl<C: Clone + Into<ContentCommitment>> RegistryAsset<C> {
+    async fn torrent_source(
+        &self,
+        client: Client,
+        torrents: Option<&TorrentClient>,
+        progress: &mut PhaseProgressTrackerHandle,
+        path: Option<&Path>,
+    ) -> Result<Option<BufferedAssetSource>, Error> {
+        let (Some(descriptor), Some(torrents)) = (&self.torrent, torrents) else {
+            return Ok(None);
+        };
+        if self
+            .urls
+            .iter()
+            .any(|url| torrents.for_source(url).is_none())
+        {
+            return Ok(None);
+        }
+        let (tmp, file) = match torrents
+            .download(descriptor, self.commitment.clone().into(), client, progress)
             .await
+        {
+            Ok(Some(source)) => source,
+            Ok(None) => return Ok(None),
+            Err(error) => {
+                tracing::warn!(%error, "BitTorrent unavailable; falling back to HTTP mirrors");
+                return Ok(None);
+            }
+        };
+        let file = if let Some(path) = path {
+            let mut dest = create_file(path).await?;
+            crate::util::writeback::set_no_cow(path).await;
+            tokio::io::copy(&mut open_file(&file).await?, &mut dest).await?;
+            MultiCursorFile::open(&dest).await?
+        } else {
+            MultiCursorFile::from(open_file(file).await?)
+        };
+        Ok(Some(BufferedAssetSource::Torrent(TmpSource::new(
+            tmp, file,
+        ))))
+    }
+
+    async fn load_buffered_source(
+        &self,
+        client: Client,
+        torrents: Option<&TorrentClient>,
+        mut progress: PhaseProgressTrackerHandle,
+        path: Option<&Path>,
+    ) -> Result<BufferedAssetSource, Error> {
+        if let Some(source) = self
+            .torrent_source(client.clone(), torrents, &mut progress, path)
+            .await?
+        {
+            return Ok(source);
+        }
+        Ok(BufferedAssetSource::Http(match path {
+            Some(path) => {
+                self.load_buffered_http_source_with_path(path, client, progress)
+                    .await?
+            }
+            None => self.load_buffered_http_source(client, progress).await?,
+        }))
     }
 }
 impl RegistryAsset<MerkleArchiveCommitment> {
@@ -114,10 +195,14 @@ impl RegistryAsset<MerkleArchiveCommitment> {
     pub async fn deserialize_s9pk_buffered(
         &self,
         client: Client,
+        torrents: Option<&TorrentClient>,
         progress: PhaseProgressTrackerHandle,
-    ) -> Result<S9pk<Section<Arc<BufferedHttpSource>>>, Error> {
+    ) -> Result<S9pk<Section<Arc<BufferedAssetSource>>>, Error> {
         S9pk::deserialize(
-            &Arc::new(self.load_buffered_http_source(client, progress).await?),
+            &Arc::new(
+                self.load_buffered_source(client, torrents, progress, None)
+                    .await?,
+            ),
             Some(&self.commitment),
         )
         .await
@@ -126,22 +211,59 @@ impl RegistryAsset<MerkleArchiveCommitment> {
         &self,
         path: impl AsRef<Path>,
         client: Client,
+        torrents: Option<&TorrentClient>,
         progress: PhaseProgressTrackerHandle,
     ) -> Result<
         (
-            S9pk<Section<Arc<BufferedHttpSource>>>,
-            Arc<BufferedHttpSource>,
+            S9pk<Section<Arc<BufferedAssetSource>>>,
+            Arc<BufferedAssetSource>,
         ),
         Error,
     > {
         let source = Arc::new(
-            self.load_buffered_http_source_with_path(path, client, progress)
+            self.load_buffered_source(client, torrents, progress, Some(path.as_ref()))
                 .await?,
         );
         Ok((
             S9pk::deserialize(&source, Some(&self.commitment)).await?,
             source,
         ))
+    }
+}
+
+/// Transport-selected source for buffered registry asset reads.
+pub enum BufferedAssetSource {
+    Http(BufferedHttpSource),
+    Torrent(TmpSource<MultiCursorFile>),
+}
+impl BufferedAssetSource {
+    pub async fn wait_for_buffered(&self) -> Result<(), Error> {
+        match self {
+            Self::Http(source) => source.wait_for_buffered().await,
+            Self::Torrent(_) => Ok(()),
+        }
+    }
+}
+impl ArchiveSource for BufferedAssetSource {
+    type FetchReader = Box<dyn AsyncRead + Unpin + Send>;
+    type FetchAllReader = Box<dyn AsyncRead + Unpin + Send>;
+    async fn size(&self) -> Option<u64> {
+        match self {
+            Self::Http(source) => source.size().await,
+            Self::Torrent(source) => source.size().await,
+        }
+    }
+    async fn fetch_all(&self) -> Result<Self::FetchAllReader, Error> {
+        Ok(match self {
+            Self::Http(source) => Box::new(source.fetch_all().await?),
+            Self::Torrent(source) => Box::new(source.fetch_all().await?),
+        })
+    }
+    async fn fetch(&self, position: u64, size: u64) -> Result<Self::FetchReader, Error> {
+        Ok(match self {
+            Self::Http(source) => Box::new(source.fetch(position, size).await?),
+            Self::Torrent(source) => Box::new(source.fetch(position, size).await?),
+        })
     }
 }
 
@@ -497,6 +619,7 @@ mod tests {
         let asset = RegistryAsset {
             published_at: Utc::now(),
             urls: vec![server.url.join("resume")?, server.url.join("complete")?],
+            torrent: None,
             commitment: (),
             signatures: HashMap::new(),
         };
@@ -515,6 +638,7 @@ mod tests {
                 server.url.join("range-ignored")?,
                 server.url.join("complete")?,
             ],
+            torrent: None,
             commitment: (),
             signatures: HashMap::new(),
         };
@@ -533,6 +657,7 @@ mod tests {
                 server.url.join("always-truncated")?,
                 server.url.join("complete")?,
             ],
+            torrent: None,
             commitment: (),
             signatures: HashMap::new(),
         };
@@ -548,6 +673,7 @@ mod tests {
         let asset = RegistryAsset {
             published_at: Utc::now(),
             urls: vec![server.url.join("changes")?, server.url.join("complete")?],
+            torrent: None,
             commitment: (),
             signatures: HashMap::new(),
         };
@@ -566,6 +692,7 @@ mod tests {
         let asset = RegistryAsset {
             published_at: Utc::now(),
             urls: vec![server.url.join("always-truncated")?],
+            torrent: None,
             commitment: (),
             signatures: HashMap::new(),
         };
@@ -580,6 +707,7 @@ mod tests {
         let asset = RegistryAsset {
             published_at: Utc::now(),
             urls: vec![server.url.join("slow-tail")?],
+            torrent: None,
             commitment: (),
             signatures: HashMap::new(),
         };

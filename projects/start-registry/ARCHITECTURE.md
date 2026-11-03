@@ -92,7 +92,9 @@ registry.
 - `admins` — set of admin `Guid`s.
 - `index: FullIndex` — `{ name, icon, package: PackageIndex, os: OsIndex, signers: BTreeMap<Guid, SignerInfo> }`.
 
-Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hold versions, dependency `VersionRange`s, and `RegistryAsset`s. Assets carry **Blake3 commitments** (`sign/commitment/blake3`) for content addressing and integrity, and are signed by registered signers.
+Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hold versions, dependency `VersionRange`s, and `RegistryAsset`s. OS assets carry Blake3 commitments; packages carry Merkle archive commitments. Registered signers sign these commitments independently of the transport.
+
+Each asset retains its HTTP `urls` and an optional `torrent` magnet link or HTTP(S) metadata URL. Publication validates the torrent URL format; consumers verify downloaded bytes against the existing commitment. Promotion carries the source metadata through unchanged. The registry stores these locations; external hosts own the asset files and BitTorrent seeding.
 
 OS versions use the shared `LocaleString` for `releaseNotes`, as package metadata does:
 a plain string or a locale-to-Markdown map. The compiler includes `en_US` in translated
@@ -117,7 +119,7 @@ index; stored notes remain unchanged.
 - Opens `<datadir>/registry.db` as a `TypedPatchDb<RegistryDatabase>`; initializes it on first run and runs pending migrations.
 - Stores package and dependency icons once each under `<datadir>/icons/blake3/`, named by the blake3 of their bytes, and deletes those the index no longer refers to.
 - Opens a SQLite connection for metrics.
-- Hosts asset files under the data directory.
+- Stores asset locations and commitments in the registry index; external hosts retain the asset files.
 
 ## Frontend
 

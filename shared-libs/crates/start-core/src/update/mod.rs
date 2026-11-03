@@ -299,7 +299,9 @@ async fn maybe_do_update(
                 "sourceVersion": current_version,
                 "targetVersion": target,
             }),
-            RegistryUrlParams { registry },
+            RegistryUrlParams {
+                registry: registry.clone(),
+            },
         )
         .await?,
     )?;
@@ -374,6 +376,7 @@ async fn maybe_do_update(
     tokio::spawn(async move {
         let res = do_update(
             ctx.client.get(),
+            ctx.torrents.for_source(&registry),
             asset,
             UpdateProgressHandles {
                 progress,
@@ -446,6 +449,7 @@ pub(crate) struct UpdateProgressHandles {
 #[instrument(skip_all)]
 pub(crate) async fn do_update(
     client: Client,
+    torrents: Option<&crate::registry::bittorrent::TorrentClient>,
     asset: RegistryAsset<Blake3Commitment>,
     UpdateProgressHandles {
         progress,
@@ -468,9 +472,9 @@ pub(crate) async fn do_update(
     download_phase.start();
     let path = Path::new("/media/startos/images/next.squashfs");
     let mut dst = AtomicFile::new(&path, None::<&Path>).await?;
-    let mut download_writer = download_phase.writer(&mut *dst);
-    asset.download(client, &mut download_writer).await?;
-    let (_, mut download_phase) = download_writer.into_inner();
+    let mut download_phase = asset
+        .download(client, torrents, &mut *dst, download_phase)
+        .await?;
     dst.sync_all().await?;
     download_phase.complete();
 

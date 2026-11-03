@@ -16,6 +16,7 @@ These apply to all subcommands.
 - `--s9pk-s3bucket <BUCKET>` — S3 bucket for publishing
 - `-t, --tunnel <URL>` — Tunnel server address
 - `-p, --proxy <URL>` — HTTP/SOCKS proxy
+- `--bittorrent <true|false>` — Prefer BitTorrent for local registry downloads (default: true), with HTTP fallback. CLI downloads upload no asset data. Explicit or environment HTTP/SOCKS proxies and onion registries use HTTP instead. This setting does not override a remote server's download configuration.
 - `--id-key-path <PATH>` — Identity signing key path (`--developer-key-path` is accepted as an alias)
 - `--id-key-gpg <KEY>` — Sign through gpg-agent with this GnuPG key (fingerprint, key ID, or user ID) instead of the identity key file
 
@@ -955,8 +956,9 @@ List all packages and categories.
 
 Add a package to the registry from a local s9pk file.
 
-- `--url <URL>` — URL of the package
-- `--no-verify` — Skip signature verification
+- `--url <URL>` — HTTP mirror of the package (repeatable)
+- `--torrent <URL>` — Externally seeded magnet link or HTTP(S) torrent metadata URL
+- `--no-verify` — Skip the local check of each HTTP mirror's complete contents; signature checks still apply
 
 ### `start-cli registry package remove <ID> <VERSION>`
 
@@ -1091,14 +1093,15 @@ List signers for an OS version.
 
 ### Registry OS Assets
 
-Upload and manage OS installation images (IMG, ISO, squashfs).
+Index and manage externally hosted OS installation images (IMG, ISO, squashfs).
 
 ### `start-cli registry os asset add <FILE> <URL>`
 
-Upload an OS asset to the registry.
+Register an externally hosted OS asset, signing its content commitment from the local file.
 
 - `-p, --platform <PLATFORM>` — Target platform (required)
 - `-v, --version <VERSION>` — OS version (required)
+- `--torrent <URL>` — Externally seeded magnet link or HTTP(S) torrent metadata URL
 
 ### `start-cli registry os asset sign <FILE>`
 

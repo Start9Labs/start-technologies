@@ -190,10 +190,14 @@ async fn cli_get_os_asset(
     let progress_task = progress.progress_bar_task("Downloading...");
 
     download_phase.start();
-    let mut download_writer = download_phase.writer(&mut *file);
-    res.download(ctx.client.clone(), &mut download_writer)
+    let mut download_phase = res
+        .download(
+            ctx.client.clone(),
+            ctx.registry_torrents()?,
+            &mut *file,
+            download_phase,
+        )
         .await?;
-    let (_, mut download_phase) = download_writer.into_inner();
     file.save().await?;
     download_phase.complete();
 

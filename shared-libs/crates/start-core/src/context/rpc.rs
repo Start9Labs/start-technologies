@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use fast_socks5::client::{Config as SocksConfig, Socks5Stream};
+use futures::FutureExt;
 use imbl::OrdMap;
 use imbl_value::InternedString;
 use josekit::jwk::Jwk;
@@ -84,6 +85,7 @@ pub struct RpcContextSeed {
     pub wifi_manager: RwLock<Option<WpaCli>>,
     pub current_secret: Arc<Jwk>,
     pub client: ReloadableHttpClient,
+    pub torrents: Arc<crate::registry::bittorrent::TorrentClient>,
     pub start_time: Instant,
     pub crons: SyncMutex<BTreeMap<Guid, NonDetachingJoinHandle<()>>>,
 }
@@ -458,11 +460,23 @@ impl RpcContext {
                 })?,
             ),
             client: ReloadableHttpClient::new(socks_proxy_url)?,
+            torrents: Arc::new(crate::registry::bittorrent::TorrentClient::for_server(
+                config.torrent_downloads.clone(),
+                config.bittorrent_seed.clone(),
+            )),
             start_time: Instant::now(),
             crons,
         });
 
         let res = Self(seed.clone());
+        if res.torrents.persistent_seeding_enabled() {
+            let torrents = res.torrents.clone();
+            res.add_cron(async move {
+                if let Err(error) = torrents.resume_seeding().boxed().await {
+                    tracing::warn!(%error, "Cannot resume registry asset seeding");
+                }
+            });
+        }
         res.cleanup_and_initialize(cleanup_init).await?;
         tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
 
@@ -500,6 +514,7 @@ impl RpcContext {
     pub async fn shutdown(self) -> Result<(), Error> {
         self.crons.mutate(|c| std::mem::take(c));
         self.services.shutdown_all().await?;
+        self.torrents.shutdown().await;
         self.is_closed.store(true, Ordering::SeqCst);
         self.closed.send_replace(true);
         tracing::info!("{}", t!("context.rpc.rpc-context-shutdown"));
