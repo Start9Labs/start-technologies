@@ -20,8 +20,11 @@ const CA_KEY_FILENAME: &str = "startwrt-ca.key";
 const INT_CERT_FILENAME: &str = "startwrt-int.pem";
 const INT_KEY_FILENAME: &str = "startwrt-int.key";
 
-/// Default SAN hostname for the router.
+/// The router's name in LAN DNS.
 pub(crate) const ROUTER_HOSTNAME: &str = "router.lan";
+/// The router's name over mDNS.
+pub(crate) const ROUTER_MDNS_HOSTNAME: &str = "router.local";
+pub(crate) const ROUTER_NAMES: [&str; 2] = [ROUTER_HOSTNAME, ROUTER_MDNS_HOSTNAME];
 
 pub fn ca_cert_path() -> PathBuf {
     Path::new(SSL_CERT_DIR).join(CA_CERT_FILENAME)

@@ -22,7 +22,7 @@ use startos::util::serde::{Der64, Pem};
 use visit_rs::Visit;
 
 use crate::prelude::*;
-use crate::ssl::{read_ca_chain, startwrt_branding, ROUTER_HOSTNAME};
+use crate::ssl::{read_ca_chain, startwrt_branding, ROUTER_HOSTNAME, ROUTER_NAMES};
 use crate::{captive, ServerContext};
 
 /// Holds private keys; the directory alone is readable by root.
@@ -132,7 +132,7 @@ fn http_alpn() -> Vec<Vec<u8>> {
     vec![b"h2".to_vec(), b"http/1.1".to_vec()]
 }
 
-/// Serves `router.lan` and the DDNS hostname by name, and any other
+/// Serves the router's names and the DDNS hostname by name, and any other
 /// connection by the router address it reached.
 #[derive(Clone)]
 pub struct RouterTlsHandler {
@@ -155,7 +155,11 @@ where
             return None;
         }
         let ddns = match hello.server_name() {
-            Some(name) if !name.eq_ignore_ascii_case(ROUTER_HOSTNAME) => {
+            Some(name)
+                if !ROUTER_NAMES
+                    .iter()
+                    .any(|router| name.eq_ignore_ascii_case(router)) =>
+            {
                 self.ctx.ddns_identity().await
             }
             _ => None,
@@ -175,7 +179,7 @@ where
     }
 }
 
-/// `router.lan` and the DDNS hostname are served by name. Any other name, or
+/// The router's names and the DDNS hostname are served by name. Any other name, or
 /// none, is served by the router address the connection reached.
 fn served(
     requested: Option<&str>,
@@ -185,7 +189,7 @@ fn served(
     let requested = requested
         .map(|name| InternedString::intern(name.trim_end_matches('.').to_ascii_lowercase()));
     match requested {
-        Some(name) if &*name == ROUTER_HOSTNAME || ddns == Some(&name) => name,
+        Some(name) if ROUTER_NAMES.contains(&&*name) || ddns == Some(&name) => name,
         _ => match dialed {
             Some(ip) => InternedString::from_display(&ip.to_canonical()),
             None => InternedString::intern(ROUTER_HOSTNAME),
@@ -201,6 +205,7 @@ mod tests {
     use startos::net::ssl::{gen_nistp256, make_int_cert, make_root_cert};
 
     use super::*;
+    use crate::ssl::ROUTER_MDNS_HOSTNAME;
 
     fn store() -> CertStore {
         let branding = startwrt_branding("test");
@@ -278,6 +283,10 @@ mod tests {
             local(ROUTER_HOSTNAME)
         );
         assert_eq!(
+            served(Some("Router.Local."), Some(&ddns), Some(v4)),
+            local(ROUTER_MDNS_HOSTNAME)
+        );
+        assert_eq!(
             served(Some("HOME.example.com."), Some(&ddns), Some(v4)),
             ddns.clone()
         );
@@ -310,6 +319,10 @@ mod tests {
         assert_eq!(
             issue(&db, ROUTER_HOSTNAME).await,
             (vec![ROUTER_HOSTNAME.to_string()], vec![])
+        );
+        assert_eq!(
+            issue(&db, ROUTER_MDNS_HOSTNAME).await,
+            (vec![ROUTER_MDNS_HOSTNAME.to_string()], vec![])
         );
     }
 
