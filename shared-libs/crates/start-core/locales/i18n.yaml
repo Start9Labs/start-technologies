@@ -2382,11 +2382,11 @@ nut.invalid-shutdown-delay:
   pl_PL: "Opóźnienie wyłączenia NUT musi wynosić maksymalnie 300 sekund"
 
 nut.invalid-token:
-  en_US: "Invalid NUT %{field}: value must be ASCII and contain no whitespace"
-  de_DE: "Ungültiges NUT-Feld %{field}: Der Wert muss ASCII sein und darf keine Leerzeichen enthalten"
-  es_ES: "Campo NUT %{field} no válido: el valor debe ser ASCII y no contener espacios"
-  fr_FR: "Champ NUT %{field} invalide : la valeur doit être en ASCII et ne contenir aucun espace"
-  pl_PL: "Nieprawidłowe pole NUT %{field}: wartość musi być ASCII i nie może zawierać spacji"
+  en_US: "Invalid NUT %{field}: use visible ASCII except #, backslash, or double quote"
+  de_DE: "Ungültiges NUT-Feld %{field}: Verwenden Sie sichtbare ASCII-Zeichen außer #, Rückstrich oder doppeltem Anführungszeichen"
+  es_ES: "Campo NUT %{field} no válido: use caracteres ASCII visibles excepto #, barra inversa o comillas dobles"
+  fr_FR: "Champ NUT %{field} invalide : utilisez des caractères ASCII visibles sauf #, barre oblique inverse ou guillemet double"
+  pl_PL: "Nieprawidłowe pole NUT %{field}: użyj widocznych znaków ASCII z wyjątkiem #, ukośnika odwrotnego i cudzysłowu"
 
 nut.disabled:
   en_US: "Network UPS Tools is disabled"
