@@ -29,7 +29,7 @@ pub struct Manifest {
     #[serde(default)]
     pub build: Option<Vec<String>>,
     pub release_notes: String,
-    pub license: String, // type of license
+    pub license: String,
     pub wrapper_repo: Url,
     pub upstream_repo: Url,
     pub support_site: Option<Url>,
@@ -40,16 +40,11 @@ pub struct Manifest {
     pub config: Option<ConfigActions>,
     pub properties: Option<PackageProcedure>,
     pub volumes: BTreeMap<VolumeId, Value>,
-    // #[serde(default)]
-    // pub interfaces: Interfaces,
-    // #[serde(default)]
     pub backup: BackupActions,
     #[serde(default)]
     pub migrations: Migrations,
     #[serde(default)]
     pub actions: BTreeMap<ActionId, Action>,
-    // #[serde(default)]
-    // pub permissions: Permissions,
     #[serde(default)]
     pub dependencies: BTreeMap<PackageId, DepInfo>,
 
@@ -74,12 +69,20 @@ impl Manifest {
             .values()
             .chain(self.migrations.from.values());
         let actions = self.actions.values().map(|a| &a.implementation);
+        let health_checks = self.health_checks.0.values().map(|a| &a.implementation);
+        let dependency_configs = self
+            .dependencies
+            .values()
+            .filter_map(|dependency| dependency.config.as_ref())
+            .flat_map(|config| [&config.check, &config.auto_configure]);
         main.chain(cfg_get)
             .chain(cfg_set)
             .chain(props)
             .chain(backups)
             .chain(migrations)
             .chain(actions)
+            .chain(health_checks)
+            .chain(dependency_configs)
     }
 }
 
@@ -110,7 +113,7 @@ pub struct DockerProcedure {
     #[serde(default)]
     pub sigterm_timeout: Option<Duration>,
     #[serde(default)]
-    pub shm_size_mb: Option<usize>, // TODO: use postfix sizing? like 1k vs 1m vs 1g
+    pub shm_size_mb: Option<usize>,
     #[serde(default)]
     pub gpu_acceleration: bool,
 }
@@ -155,9 +158,6 @@ pub struct Action {
     #[serde(default)]
     pub warning: Option<String>,
     pub implementation: PackageProcedure,
-    // pub allowed_statuses: Vec<DockerStatus>,
-    // #[serde(default)]
-    // pub input_spec: ConfigSpec,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
