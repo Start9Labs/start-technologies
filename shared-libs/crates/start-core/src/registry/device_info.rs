@@ -501,7 +501,11 @@ mod tests {
         let alpha = arm
             .signatures
             .keys()
-            .find(|key| keyrings["start9-alpha"].public_keys.contains(key))
+            .find(|key| {
+                keyrings
+                    .values()
+                    .any(|trusted| !trusted.os && trusted.public_key == **key)
+            })
             .unwrap()
             .clone();
         let mut x86 = arm.clone();

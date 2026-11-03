@@ -19,6 +19,14 @@ export class TaskService {
     const loader = this.loader.open(message ?? '').subscribe()
 
     try {
+      return await this.runInline(task)
+    } finally {
+      loader.unsubscribe()
+    }
+  }
+
+  async runInline(task: Function): Promise<boolean> {
+    try {
       await task()
 
       return true
@@ -26,8 +34,6 @@ export class TaskService {
       this.error.handleError(e)
 
       return false
-    } finally {
-      loader.unsubscribe()
     }
   }
 }

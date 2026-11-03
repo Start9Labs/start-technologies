@@ -2,7 +2,7 @@ import { Component, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { i18nKey, i18nPipe } from '@start9labs/shared'
 import { tuiIsString } from '@taiga-ui/cdk'
-import { TuiButton, TuiButtonX } from '@taiga-ui/core'
+import { TuiButton, TuiButtonX, TuiLoader } from '@taiga-ui/core'
 import {
   TuiAvatar,
   TuiFiles,
@@ -35,6 +35,11 @@ import { MarketplacePkgSideload, validateS9pk } from './sideload.utils'
               <p class="g-negative">{{ err | i18n }}</p>
               <button tuiButton>{{ 'Try again' | i18n }}</button>
             </div>
+          } @else if (file) {
+            <div>
+              <tui-loader size="l" />
+              <p>{{ 'Checking package signatures' | i18n }}</p>
+            </div>
           } @else {
             <div>
               <span tuiAvatar="@tui.upload" appearance="secondary"></span>
@@ -61,26 +66,28 @@ import { MarketplacePkgSideload, validateS9pk } from './sideload.utils'
     TuiAvatar,
     TuiButton,
     TuiButtonX,
+    TuiLoader,
     SideloadPackageComponent,
     TitleDirective,
     i18nPipe,
   ],
 })
 export default class SideloadComponent {
-  file: File | null = null
-  readonly package = signal<MarketplacePkgSideload | null>(null)
-  readonly error = signal<i18nKey | null>(null)
+  protected file: File | null = null
+  protected readonly package = signal<MarketplacePkgSideload | null>(null)
+  protected readonly error = signal<i18nKey | null>(null)
 
-  clear() {
+  protected clear() {
     this.file = null
     this.package.set(null)
     this.error.set(null)
   }
 
-  async onFile(file: File | null) {
+  protected async onFile(file: File | null) {
     this.file = file
 
     const parsed = file ? await validateS9pk(file) : ''
+    if (this.file !== file) return
 
     this.package.set(tuiIsString(parsed) ? null : parsed)
     this.error.set(tuiIsString(parsed) ? (parsed as i18nKey) : null)

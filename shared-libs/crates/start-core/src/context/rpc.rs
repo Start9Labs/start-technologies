@@ -75,6 +75,8 @@ pub struct RpcContextSeed {
     pub s9pk_arch: Option<&'static str>,
     pub services: ServiceMap,
     pub cancellable_installs: SyncMutex<BTreeMap<PackageId, oneshot::Sender<()>>>,
+    /// When each registry was last checked for newly offered keys.
+    pub registry_key_checks: SyncMutex<BTreeMap<String, Instant>>,
     pub installing_s9pks: SyncMutex<BTreeMap<PackageId, S9pk<DynFileSource>>>,
     pub metrics_cache: Watch<Option<crate::system::Metrics>>,
     pub shutdown: broadcast::Sender<Option<Shutdown>>,
@@ -442,6 +444,7 @@ impl RpcContext {
             },
             services,
             cancellable_installs: SyncMutex::new(BTreeMap::new()),
+            registry_key_checks: SyncMutex::new(BTreeMap::new()),
             installing_s9pks: SyncMutex::new(BTreeMap::new()),
             metrics_cache,
             rpc_continuations: RpcContinuations::new(),

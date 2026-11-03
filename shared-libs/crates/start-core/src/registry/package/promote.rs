@@ -135,6 +135,7 @@ pub async fn cli_promote(
                 "urls": &asset.urls,
                 "torrent": &asset.torrent,
                 "signature": signature,
+                "signatures": &asset.signatures,
                 "commitment": commitment,
             }),
         )

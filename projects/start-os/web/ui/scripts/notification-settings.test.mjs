@@ -15,8 +15,8 @@ loadTypeScript(
       '@start9labs/shared',
       'export class TaskService {} export class i18nPipe {}',
     ],
-    ['@taiga-ui/core', 'export class TuiCell {} export class TuiTitle {}'],
-    ['@taiga-ui/kit', 'export class TuiSwitch {}'],
+    ['@taiga-ui/core', 'export class TuiIcon {} export class TuiTitle {}'],
+    ['@taiga-ui/kit', 'export class TuiSwitch {} export class TuiTooltip {}'],
     ['@taiga-ui/layout', 'export class TuiHeader {}'],
     [
       '@taiga-ui/polymorpheus',

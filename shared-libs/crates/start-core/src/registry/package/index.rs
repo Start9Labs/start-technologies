@@ -23,6 +23,7 @@ use crate::s9pk::manifest::{Description, HardwareRequirements, LocaleString, cur
 use crate::s9pk::merkle_archive::source::FileSource;
 use crate::service::effects::plugin::PluginId;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
+#[cfg(test)]
 use crate::sign::{AnySignature, AnyVerifyingKey};
 use crate::util::VersionString;
 
@@ -198,12 +199,7 @@ impl PackageVersionInfo {
                     urls,
                     torrent: None,
                     commitment: s9pk.as_archive().commitment().await?,
-                    signatures: [(
-                        AnyVerifyingKey::Ed25519(s9pk.as_archive().signer()),
-                        AnySignature::Ed25519ph(s9pk.as_archive().signature().await?),
-                    )]
-                    .into_iter()
-                    .collect(),
+                    signatures: s9pk.signatures().await?,
                 },
             )],
         })
@@ -236,7 +232,7 @@ impl PackageVersionInfo {
                 .iter_mut()
                 .find(|(h, s)| s.commitment == asset.commitment && *h == hw_req)
             {
-                matching.signatures.extend(asset.signatures);
+                matching.merge_signatures(&asset.commitment, asset.signatures);
                 if asset.torrent.is_some() {
                     matching.torrent = asset.torrent;
                 }

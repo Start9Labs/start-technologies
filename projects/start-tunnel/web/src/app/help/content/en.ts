@@ -6,7 +6,7 @@
  * URL-keyed sidebar (`aside.ts`), or a synthetic dialog key (`/subnets/add`, …)
  * provided by a dialog via `provideHelp()` + `ModalHelp`. Each entry opens with
  * a `## Title` (hidden by `.g-help h2`, used as its search/label) and closes with
- * a "Learn more" link into https://start9.com/start-tunnel/.
+ * a "Learn more" link into https://docs.start9.com/start-tunnel/.
  *
  * Rendered through marked -> DOMPurify, so inline HTML is allowed — use
  * `<code>` rather than markdown backticks (backticks would close this template
@@ -33,7 +33,7 @@ How the subnet resolves domain names — the VPS provider's resolvers, a device 
 
 Which public address the subnet's traffic exits from, and its optional routed IPv6 block.
 
-<a href="https://start9.com/start-tunnel/subnets.html" target="_blank" rel="noreferrer">Learn more →</a>`,
+<a href="https://docs.start9.com/start-tunnel/subnets.html" target="_blank" rel="noreferrer">Learn more →</a>`,
 
   '/subnets/add': `## Add / Edit Subnet
 
@@ -63,7 +63,7 @@ Which of the VPS's public IPv4 addresses this subnet's outbound traffic leaves f
 
 An optional routed IPv6 block (e.g. <code>2001:db8:abcd::/64</code>) so every device gets a stable global address. Leave blank for none.
 
-<a href="https://start9.com/start-tunnel/subnets.html#creating-a-subnet" target="_blank" rel="noreferrer">Learn more →</a>`,
+<a href="https://docs.start9.com/start-tunnel/subnets.html#creating-a-subnet" target="_blank" rel="noreferrer">Learn more →</a>`,
 
   '/devices': `## Devices
 
@@ -81,7 +81,7 @@ Phones, laptops, and other peers that only connect out; they have no gateway-con
 
 Name, subnet, LAN IPv4, the public address traffic exits from (WAN IPv4), and each device's IPv6. Use a row's menu to edit it, view its WireGuard config, switch its role, or remove it.
 
-<a href="https://start9.com/start-tunnel/devices.html" target="_blank" rel="noreferrer">Learn more →</a>`,
+<a href="https://docs.start9.com/start-tunnel/devices.html" target="_blank" rel="noreferrer">Learn more →</a>`,
 
   '/devices/add': `## Add / Edit Device
 
@@ -107,7 +107,7 @@ Which public address this device's outbound traffic leaves from. **Subnet defaul
 
 Servers only. Let this server manage the tunnel's DNS records, and publish its own ports via PCP/UPnP. On by default — enable only for devices you trust.
 
-<a href="https://start9.com/start-tunnel/devices.html#adding-a-device" target="_blank" rel="noreferrer">Learn more →</a>`,
+<a href="https://docs.start9.com/start-tunnel/devices.html#adding-a-device" target="_blank" rel="noreferrer">Learn more →</a>`,
 
   '/devices/config': `## Device Configuration
 
@@ -125,7 +125,7 @@ A QR code of the same configuration. Scan it with the WireGuard mobile app to se
 
 For a StartOS server, add it under <code>System › Gateways</code> instead of a WireGuard app.
 
-<a href="https://start9.com/start-tunnel/devices.html#adding-a-device" target="_blank" rel="noreferrer">Learn more →</a>`,
+<a href="https://docs.start9.com/start-tunnel/devices.html#adding-a-device" target="_blank" rel="noreferrer">Learn more →</a>`,
 
   '/published-ports': `## Published Ports
 
@@ -143,7 +143,7 @@ Ports a server publishes for itself automatically (PCP/UPnP). Read-only here; ma
 
 Label, the target **Server**, an optional TLS **Hostname** (SNI), the External and Internal ports, the protocol (always TCP/UDP), and the public **IP** it's reachable on.
 
-<a href="https://start9.com/start-tunnel/published-ports.html" target="_blank" rel="noreferrer">Learn more →</a>`,
+<a href="https://docs.start9.com/start-tunnel/published-ports.html" target="_blank" rel="noreferrer">Learn more →</a>`,
 
   '/published-ports/add': `## Add published port
 
@@ -177,13 +177,13 @@ Reach the service over IPv4, IPv6, or both. IPv6 requires the server's subnet to
 
 A TLS/SSL domain (SNI) so several hostnames can share one external port. IPv4 only, and not available for ranges.
 
-<a href="https://start9.com/start-tunnel/published-ports.html#add-a-port-manually" target="_blank" rel="noreferrer">Learn more →</a>`,
+<a href="https://docs.start9.com/start-tunnel/published-ports.html#add-a-port-manually" target="_blank" rel="noreferrer">Learn more →</a>`,
 
   '/published-ports/edit-label': `## Edit Label
 
 Rename this published port, or add a label if it doesn't have one yet. The label is only for your reference in the list — it doesn't affect routing.
 
-<a href="https://start9.com/start-tunnel/published-ports.html#manual-and-automatic-ports" target="_blank" rel="noreferrer">Learn more →</a>`,
+<a href="https://docs.start9.com/start-tunnel/published-ports.html#manual-and-automatic-ports" target="_blank" rel="noreferrer">Learn more →</a>`,
 
   '/dns': `## DNS Records
 
@@ -199,7 +199,7 @@ A trusted server with **DNS injection** enabled registers its own service domain
 
 Each row shows the record's Hostname, Type, target Server (or value), and TTL.
 
-<a href="https://start9.com/start-tunnel/dns-records.html" target="_blank" rel="noreferrer">Learn more →</a>`,
+<a href="https://docs.start9.com/start-tunnel/dns-records.html" target="_blank" rel="noreferrer">Learn more →</a>`,
 
   '/dns/add': `## Add DNS Record
 
@@ -223,7 +223,7 @@ For A and AAAA, pick one of your server devices — or **Other (custom)** to typ
 
 How long other systems may cache this record before re-checking. Defaults to 300.
 
-<a href="https://start9.com/start-tunnel/dns-records.html#viewing-and-managing-records" target="_blank" rel="noreferrer">Learn more →</a>`,
+<a href="https://docs.start9.com/start-tunnel/dns-records.html#viewing-and-managing-records" target="_blank" rel="noreferrer">Learn more →</a>`,
 
   '/settings': `## Settings
 
@@ -233,7 +233,7 @@ The installed StartTunnel version. **Check for updates** looks for a newer relea
 
 ### HTTP Redirect (80 → 443)
 
-For each public IPv4, whether plain <code>http://</code> visitors are redirected to secure <code>https://</code>. On by default. An address can't have both a redirect and a published port on port 80 — the toggle is disabled while port 80 is published. See <a href="https://start9.com/start-tunnel/http-redirects.html" target="_blank" rel="noreferrer">HTTP Redirects</a>.
+For each public IPv4, whether plain <code>http://</code> visitors are redirected to secure <code>https://</code>. On by default. An address can't have both a redirect and a published port on port 80 — the toggle is disabled while port 80 is published. See <a href="https://docs.start9.com/start-tunnel/http-redirects.html" target="_blank" rel="noreferrer">HTTP Redirects</a>.
 
 ### Language
 
@@ -243,7 +243,7 @@ The language the interface is shown in.
 
 Change your login password, reboot the VPS, or log out.
 
-<a href="https://start9.com/start-tunnel/updating.html" target="_blank" rel="noreferrer">Learn more →</a>`,
+<a href="https://docs.start9.com/start-tunnel/updating.html" target="_blank" rel="noreferrer">Learn more →</a>`,
 
   '/settings/change-password': `## Change Password
 
@@ -259,7 +259,7 @@ Re-type it exactly; you'll see an error if the two don't match.
 
 If you ever forget it, reset it from the VPS with <code>start-tunnel auth reset-password</code>.
 
-<a href="https://start9.com/start-tunnel/faq.html#what-if-i-forget-my-password" target="_blank" rel="noreferrer">Learn more →</a>`,
+<a href="https://docs.start9.com/start-tunnel/faq.html#what-if-i-forget-my-password" target="_blank" rel="noreferrer">Learn more →</a>`,
 }
 
 export default HELP_EN

@@ -83,6 +83,7 @@ mod v0_4_0_beta_8;
 mod v0_4_0_beta_9;
 mod v0_4_1;
 mod v0_4_1_1;
+mod v0_4_1_2;
 mod v0_4_2;
 
 pub type Current = v0_4_2::Version; // VERSION_BUMP
@@ -233,6 +234,7 @@ enum Version {
     V0_4_0_5(Wrapper<v0_4_0_5::Version>),
     V0_4_1(Wrapper<v0_4_1::Version>),
     V0_4_1_1(Wrapper<v0_4_1_1::Version>),
+    V0_4_1_2(Wrapper<v0_4_1_2::Version>),
     V0_4_2(Wrapper<v0_4_2::Version>), // VERSION_BUMP
     Other(exver::Version),
 }
@@ -319,6 +321,7 @@ impl Version {
             Self::V0_4_0_5(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_1(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_1_1(v) => DynVersion(Box::new(v.0)),
+            Self::V0_4_1_2(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_2(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
             Self::Other(v) => {
                 return Err(Error::new(
@@ -397,6 +400,7 @@ impl Version {
             Version::V0_4_0_5(Wrapper(x)) => x.semver(),
             Version::V0_4_1(Wrapper(x)) => x.semver(),
             Version::V0_4_1_1(Wrapper(x)) => x.semver(),
+            Version::V0_4_1_2(Wrapper(x)) => x.semver(),
             Version::V0_4_2(Wrapper(x)) => x.semver(), // VERSION_BUMP
             Version::Other(x) => x.clone(),
         }
@@ -876,7 +880,7 @@ mod tests {
         for (from, to, revision) in [
             ("0.4.0.3", "0.4.0.4", 0),
             ("0.4.0.4", "0.4.0.5", 3),
-            ("0.4.1.1", "0.4.2", 0),
+            ("0.4.1.2", "0.4.2", 0),
         ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
@@ -922,7 +926,7 @@ mod tests {
 
     #[tokio::test]
     async fn maintenance_revisions_upgrade_to_keyrings_and_roll_back() {
-        use crate::trusted_keys::{TrustedKeys, os_signers};
+        use crate::trusted_keys::legacy::{TrustedKeyrings as TrustedKeys, os_signers};
         use crate::update::signers::{TrustedOsUpdateSigners, initial_signers};
 
         let current = Version::from_exver_version(v0_4_1::Version.semver())

@@ -84,6 +84,16 @@ export class OSService {
     this.updating$,
   ]).pipe(map(([available, updating]) => available && !updating))
 
+  async publishesUpdates(registry: string): Promise<boolean> {
+    const { id } = await getServerInfo(this.patch)
+    const versions = await this.api.rpc.registry.os.version.get({
+      registry,
+      serverId: id,
+    })
+
+    return Object.keys(versions).length > 0
+  }
+
   async loadOS(): Promise<void> {
     const { id } = await getServerInfo(this.patch)
     const { startosRegistry } = await firstValueFrom(this.patch.watch$('ui'))
