@@ -11,7 +11,7 @@ pub(crate) fn save_archive(layers: &[Vec<u8>], architecture: &str) -> (Vec<u8>, 
             "architecture": architecture,
             "os": "linux",
             "config": {"Cmd": ["serve", "--arm64"], "Entrypoint": ["/app/start"],
-                "Env": ["ARCH=arm64", "EMPTY="], "WorkingDir": "/arm64", "User": "1000:1000"},
+                "Env": ["ARCH=arm64", "EMPTY=", "MULTILINE=first\nsecond=value\n"], "WorkingDir": "/arm64", "User": "1000:1000"},
             "rootfs": {"type": "layers", "diff_ids": layers.iter()
                 .map(|bytes| format!("sha256:{}", hex::encode(Sha256::digest(bytes)))).collect::<Vec<_>>()},
         }),

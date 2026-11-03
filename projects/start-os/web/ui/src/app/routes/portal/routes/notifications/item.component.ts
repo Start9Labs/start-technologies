@@ -50,18 +50,39 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
           [content]="item.message"
           (overflownChange)="overflow = $event"
         />
-        @if ([1, 2].includes(item.code)) {
-          <button tuiLink (click.stop)="onClick(item)">
-            {{
-              item?.code === 1
-                ? ('View report' | i18n)
-                : ('View details' | i18n)
-            }}
-          </button>
-        } @else if (overflow) {
-          <button tuiLink (click.stop)="onClick(item)">
-            {{ 'View full' | i18n }}
-          </button>
+        @if (link(); as path) {
+          <a tuiLink [routerLink]="path" (click.stop)="(null)">
+            {{ 'Software Update' | i18n }}
+          </a>
+        }
+        @switch (item.code) {
+          @case (1) {
+            <button tuiLink (click.stop)="onClick(item)">
+              {{ 'View report' | i18n }}
+            </button>
+          }
+          @case (2) {
+            <button tuiLink (click.stop)="onClick(item)">
+              {{ 'View details' | i18n }}
+            </button>
+          }
+          @case (4) {
+            <button tuiLink (click.stop)="onClick(item)">
+              {{ 'View details' | i18n }}
+            </button>
+          }
+          @case (5) {
+            <button tuiLink (click.stop)="onClick(item)">
+              {{ 'View details' | i18n }}
+            </button>
+          }
+          @default {
+            @if (overflow) {
+              <button tuiLink (click.stop)="onClick(item)">
+                {{ 'View full' | i18n }}
+              </button>
+            }
+          }
         }
       </td>
     }
@@ -83,7 +104,7 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
        so its containing block has to be the row rather than this cell */
     .title {
       position: static;
-      width: 13rem;
+      width: 15.6rem;
     }
 
     .service {
@@ -180,6 +201,10 @@ export class NotificationItemComponent {
 
   readonly icon = computed((item = this.notificationItem()) =>
     item ? this.service.getIcon(item) : '',
+  )
+
+  readonly link = computed((item = this.notificationItem()) =>
+    item ? this.service.getLink(item) : null,
   )
 
   readonly pkg = toSignal(

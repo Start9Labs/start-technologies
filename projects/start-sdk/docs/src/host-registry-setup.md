@@ -12,7 +12,31 @@ On first install, StartOS surfaces two setup tasks under the service. **Both mus
 
 Run the **Configure Registry** action to set the registry's display name (max 32 characters), an optional icon, and an optional description. This is what users will see when they browse your registry from another StartOS device; the description appears above the registry's services and may use markdown.
 
+Use the description to identify who runs the registry, how to contact them, what packages it carries, and what support users can expect. Include a link to your package-signing public keys and instructions for trusting them.
+
 The registry's hostnames, listen address, Tor proxy, and data directory are managed by StartOS automatically — you don't configure them by hand. As the service's network addresses change (e.g. you add a clearnet domain to the API interface), the configured hostnames update to match.
+
+### Publish signing keys
+
+On StartOS 0.4.1 and 0.4.1.1, Marketplace installs and updates of a package are blocked unless one of its signing keys is in a keyring the user has enabled for service packages. Until users trust a signing key, the Marketplace install button stays disabled for those packages. Users add keys under **System → Trusted keyrings → Add**; see [Trusted Keyrings](/start-os/trusted-keys.html).
+
+Publish your public keys in PEM (`start-cli pubkey` prints yours) or armored GPG format. A registry signer's permission to publish and a user's decision to trust its signatures are separate.
+
+Publish the public keys, and the fingerprint of any GPG key, through an independent source users already trust, such as your website or GitHub profile, and link that source from the description. Users should confirm the key there before importing it; a key supplied only by the registry cannot establish authenticity if the registry is compromised. Publish public keys only, never private keys.
+
+For users on StartOS 0.4.1 or 0.4.1.1, replace these example links with your own:
+
+```markdown
+Maintained by Example Community. Contact: support@example.com.
+
+Experimental community packages; support is best-effort through our
+[issue tracker](https://github.com/example/packages/issues).
+
+Our [package-signing public key](https://example.com/signing-key.pem)
+is also on our [GitHub profile](https://github.com/example). Confirm the
+two match, then add it under System → Trusted keyrings → Add. See
+[Trusted Keyrings](https://docs.start9.com/start-os/trusted-keys.html).
+```
 
 ## 3. Add the first administrator
 

@@ -21,18 +21,27 @@ export class OSService {
   private readonly api = inject(ApiService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
 
-  private readonly catalog$ = new BehaviorSubject<T.OsVersionInfoMap>({})
+  private readonly catalog$ = new BehaviorSubject<{
+    versions: T.OsVersionInfoMap
+    gitHash: string | null
+  }>({ versions: {}, gitHash: null })
 
   readonly updateCandidates$ = combineLatest([
     this.catalog$,
     this.patch.watch$('serverInfo', 'version'),
   ]).pipe(
-    map(([catalog, installed]) => {
+    map(([{ versions, gitHash }, installed]) => {
       const current = Version.parse(installed)
-      return Object.entries(catalog)
-        .filter(
-          ([version]) => Version.parse(version).compare(current) === 'greater',
-        )
+      return Object.entries(versions)
+        .filter(([version, info]) => {
+          const comparison = Version.parse(version).compare(current)
+          return (
+            comparison === 'greater' ||
+            (comparison === 'equal' &&
+              !!info.gitHash &&
+              info.gitHash !== gitHash)
+          )
+        })
         .sort(([a], [b]) => Version.parse(b).compareForSort(Version.parse(a)))
         .map(([version, info]) => ({
           version,
@@ -75,15 +84,27 @@ export class OSService {
     this.updating$,
   ]).pipe(map(([available, updating]) => available && !updating))
 
+  async publishesUpdates(registry: string): Promise<boolean> {
+    const { id } = await getServerInfo(this.patch)
+    const versions = await this.api.rpc.registry.os.version.get({
+      registry,
+      serverId: id,
+    })
+
+    return Object.keys(versions).length > 0
+  }
+
   async loadOS(): Promise<void> {
     const { id } = await getServerInfo(this.patch)
     const { startosRegistry } = await firstValueFrom(this.patch.watch$('ui'))
 
-    this.catalog$.next(
-      await this.api.rpc.registry.os.version.get({
+    const [versions, gitHash] = await Promise.all([
+      this.api.rpc.registry.os.version.get({
         registry: startosRegistry,
         serverId: id,
       }),
-    )
+      this.api.rpc.gitInfo({}),
+    ])
+    this.catalog$.next({ versions, gitHash: gitHash.trim() })
   }
 }

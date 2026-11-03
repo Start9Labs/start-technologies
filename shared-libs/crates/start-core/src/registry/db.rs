@@ -44,6 +44,7 @@ pub fn db_api<C: Context>() -> ParentHandler<C> {
             "subscribe",
             from_fn_async(subscribe)
                 .with_metadata("authenticated", Value::Bool(false))
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .no_cli(),
         )
         .subcommand(

@@ -1,1 +1,0 @@
-- **Polecenia korzystające z potoku kończą działanie po zakończeniu wejścia.** Polecenia takie jak `cat`, uruchamiane przez `package attach`, otrzymują EOF ze standardowego wejścia przekazanego potokiem lub przez przekierowanie i kończą działanie normalnie.

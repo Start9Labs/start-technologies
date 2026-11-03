@@ -1,0 +1,1 @@
+- Les vérifications `ready` des daemons et celles d’`addHealthCheck()` ne consomment plus davantage de mémoire à chaque exécution pendant le fonctionnement du service. Reconstruisez les paquets avec cette version du SDK pour bénéficier du correctif.

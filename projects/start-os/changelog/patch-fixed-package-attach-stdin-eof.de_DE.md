@@ -1,1 +1,0 @@
-- **Befehle mit Pipe-Eingabe enden, sobald ihre Eingabe endet.** Befehle wie `cat`, die über `package attach` ausgeführt werden, erhalten EOF von der per Pipe oder Umleitung bereitgestellten Standardeingabe und beenden sich normal.

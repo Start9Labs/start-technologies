@@ -1,18 +1,21 @@
 import { blake3 } from '@noble/hashes/blake3'
 import { ArrayBufferReader } from '.'
 import { compare } from '..'
+import { checkedEnd } from './directoryContents'
 
 export class FileContents {
-  private constructor(readonly contents: Blob) {}
+  private constructor(
+    readonly contents: Blob,
+    readonly sourceEnd: bigint,
+  ) {}
   static deserialize(
     source: Blob,
     header: ArrayBufferReader,
     size: bigint,
   ): FileContents {
     const position = header.nextU64()
-    return new FileContents(
-      source.slice(Number(position), Number(position + size)),
-    )
+    const end = checkedEnd(source, position, size)
+    return new FileContents(source.slice(Number(position), Number(end)), end)
   }
   async verified(hash: Uint8Array): Promise<ArrayBuffer> {
     const res = await this.contents.arrayBuffer()

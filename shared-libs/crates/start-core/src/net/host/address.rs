@@ -771,12 +771,11 @@ mod test {
                 preferred_external_port: port,
                 add_ssl: ssl_port.map(|preferred_external_port| AddSslOptions {
                     preferred_external_port,
-                    add_x_forwarded_headers: false,
                     alpn: None,
                     upstream_cert_validation: None,
-                    auth: None,
                 }),
                 secure: Some(Security { ssl: false }),
+                proxy: None,
             },
             true,
         )

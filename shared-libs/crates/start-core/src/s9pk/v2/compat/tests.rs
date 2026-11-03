@@ -155,6 +155,52 @@ async fn pack_legacy(
 }
 
 #[tokio::test]
+async fn legacy_sideload_checks_original_signer_before_resigning() {
+    use crate::sign::AnyVerifyingKey;
+
+    let source = Arc::<[u8]>::from(legacy_package(&asset_tar(), Some(SCRIPT)).await);
+    let original = ed25519_dalek::SigningKey::from_bytes(&[19; 32]);
+    let host = ed25519_dalek::SigningKey::from_bytes(&[23; 32]);
+    assert!(
+        crate::s9pk::load_with_signers(
+            source.clone(),
+            || panic!("untrusted legacy archive must not reach conversion"),
+            None,
+            crate::trusted_keys::signer_policy(Some(vec![AnyVerifyingKey::Ed25519(
+                host.verifying_key()
+            )])),
+        )
+        .await
+        .is_err()
+    );
+    use crate::registry::signer::AcceptSigners;
+    assert!(
+        crate::s9pk::load_with_signers(
+            source.clone(),
+            || panic!("conversion key cannot satisfy request pins"),
+            None,
+            Some(AcceptSigners::All(vec![
+                AcceptSigners::Signer(AnyVerifyingKey::Ed25519(original.verifying_key())),
+                AcceptSigners::Signer(AnyVerifyingKey::Ed25519(host.verifying_key()))
+            ]))
+        )
+        .await
+        .is_err()
+    );
+    let converted = crate::s9pk::load_with_signers(
+        source,
+        || Ok(host.clone()),
+        None,
+        crate::trusted_keys::signer_policy(Some(vec![AnyVerifyingKey::Ed25519(
+            original.verifying_key(),
+        )])),
+    )
+    .await
+    .unwrap();
+    assert_eq!(converted.as_archive().signer(), host.verifying_key());
+}
+
+#[tokio::test]
 async fn assets_reader_ends_at_section_eof_before_scripts() {
     let assets = asset_tar();
     let bytes = legacy_package(&assets, Some(SCRIPT)).await;
@@ -386,9 +432,17 @@ async fn legacy_single_arch_images_convert_without_container_tools() {
             .unwrap();
         return;
     }
+    let docker = tagged_save_archive(&asset_tar(), "amd64", "start9/conversion-test/main:1.2.3");
+    assert_converts_without_container_tools(&docker).await;
+    assert_converts_without_container_tools(&super::super::image::legacy_docker_save_fixture(
+        &asset_tar(),
+    ))
+    .await;
+}
+
+fn tagged_save_archive(layer: &[u8], architecture: &str, tag: &str) -> Vec<u8> {
     use std::io::Read;
-    use std::os::unix::ffi::OsStrExt;
-    let (saved, _) = super::super::image::tests::save_archive(&[asset_tar()], "amd64");
+    let (saved, _) = super::super::image::tests::save_archive(&[layer.to_vec()], architecture);
     let mut docker = Vec::new();
     for entry in tar::Archive::new(saved.as_slice()).entries().unwrap() {
         let mut entry = entry.unwrap();
@@ -397,7 +451,7 @@ async fn legacy_single_arch_images_convert_without_container_tools() {
         entry.read_to_end(&mut bytes).unwrap();
         if path == Path::new("manifest.json") {
             let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-            manifest[0]["RepoTags"] = serde_json::json!(["start9/conversion-test/main:1.2.3"]);
+            manifest[0]["RepoTags"] = serde_json::json!([tag]);
             bytes = serde_json::to_vec(&manifest).unwrap();
         }
         crate::util::squashfs::test_support::append(
@@ -409,11 +463,179 @@ async fn legacy_single_arch_images_convert_without_container_tools() {
         );
     }
     docker.extend_from_slice(&[0; 1024]);
-    assert_converts_without_container_tools(&docker).await;
-    assert_converts_without_container_tools(&super::super::image::legacy_docker_save_fixture(
-        &asset_tar(),
-    ))
-    .await;
+    docker
+}
+
+#[test]
+fn dependency_configuration_images_are_collected_for_conversion() {
+    let mut manifest = legacy_manifest();
+    manifest.dependencies = serde_json::from_value(serde_json::json!({
+        "dependency": {
+            "version": "*", "requirement": {"type": "required"},
+            "config": {
+                "check": {"type": "docker", "image": "check", "entrypoint": "check"},
+                "auto-configure": {"type": "docker", "image": "configure", "entrypoint": "configure"}
+            }
+        }
+    }))
+    .unwrap();
+    let images = manifest
+        .package_procedures()
+        .filter_map(|procedure| match procedure {
+            PackageProcedure::Docker(procedure) => Some(procedure.image.to_string()),
+            PackageProcedure::Script(_) => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(images, ["check", "configure"]);
+}
+
+#[tokio::test]
+async fn legacy_system_images_resolve_outside_the_package_archive() {
+    const CHILD: &str = "STARTOS_LEGACY_SYSTEM_IMAGE_TEST";
+    const TEST: &str =
+        "s9pk::v2::compat::tests::legacy_system_images_resolve_outside_the_package_archive";
+    if std::env::var_os(CHILD).is_none() {
+        Command::new(std::env::current_exe().unwrap())
+            .arg(TEST)
+            .arg("--exact")
+            .env(CHILD, "1")
+            .env("PATH", "/nonexistent-startos-test-bin")
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+        return;
+    }
+    let workspace = Arc::new(TmpDir::new().await.unwrap());
+    let system_images = workspace.join("migration-images");
+    let saved = super::super::image::legacy_docker_save_fixture(&asset_tar());
+    let mut multiarch = tar::Builder::new(Vec::new());
+    let mut metadata = Vec::new();
+    serde_cbor::ser::into_writer(
+        &DockerMultiArch {
+            default: "x86_64".into(),
+            available: ["x86_64".into(), "aarch64".into()].into(),
+        },
+        &mut metadata,
+    )
+    .unwrap();
+    append(
+        &mut multiarch,
+        b"multiarch.cbor",
+        tar::EntryType::Regular,
+        0o644,
+        &metadata,
+        None,
+    );
+    for (arch, oci_arch) in [("x86_64", "amd64"), ("aarch64", "arm64")] {
+        append(
+            &mut multiarch,
+            format!("{arch}.tar").as_bytes(),
+            tar::EntryType::Regular,
+            0o644,
+            &tagged_save_archive(&asset_tar(), oci_arch, "start9/conversion-test/main:1.2.3"),
+            None,
+        );
+        tokio::fs::create_dir_all(system_images.join(arch))
+            .await
+            .unwrap();
+        for name in ["compat", "utils"] {
+            let mut layer = tar::Builder::new(Vec::new());
+            append(
+                &mut layer,
+                b"system-image",
+                tar::EntryType::Regular,
+                0o644,
+                format!("{name}/{arch}").as_bytes(),
+                None,
+            );
+            tokio::fs::write(
+                system_images
+                    .join(arch)
+                    .join(format!("start9_{name}_latest.tar")),
+                tagged_save_archive(
+                    &layer.into_inner().unwrap(),
+                    oci_arch,
+                    &format!("start9/{name}:latest"),
+                ),
+            )
+            .await
+            .unwrap();
+        }
+    }
+    for (docker, arches) in [
+        (saved, vec!["x86_64"]),
+        (multiarch.into_inner().unwrap(), vec!["aarch64", "x86_64"]),
+    ] {
+        let mut manifest = legacy_manifest();
+        manifest.main = serde_json::from_value(serde_json::json!({
+            "type": "docker", "image": "main", "entrypoint": "/bin/true"
+        }))
+        .unwrap();
+        manifest.backup = serde_json::from_value(serde_json::json!({
+            "create": {"type": "docker", "image": "compat", "system": true, "entrypoint": "backup"},
+            "restore": {"type": "docker", "image": "compat", "system": true, "entrypoint": "restore"}
+        }))
+        .unwrap();
+        manifest.health_checks = serde_json::from_value(serde_json::json!({
+            "check": {
+                "name": "Check", "success-message": "OK",
+                "type": "docker", "image": "utils", "system": true, "entrypoint": "check"
+            }
+        }))
+        .unwrap();
+        let bytes = pack_legacy(&manifest, &docker, &asset_tar(), None).await;
+        let reader = S9pkReader::from_reader(Cursor::new(bytes), true)
+            .await
+            .unwrap();
+        let converted = S9pk::from_v1_with_system_images(
+            reader,
+            workspace.clone(),
+            ed25519_dalek::SigningKey::from_bytes(&[23; 32]),
+            &system_images,
+        )
+        .await
+        .unwrap();
+        assert_eq!(converted.manifest.images.len(), 3);
+        for name in ["main", "compat", "utils"] {
+            assert_eq!(
+                converted.manifest.images[&name.parse().unwrap()].arch,
+                arches.iter().map(|arch| (*arch).into()).collect()
+            );
+            for arch in &arches {
+                let bytes = converted
+                    .as_archive()
+                    .contents()
+                    .get_path(format!("images/{arch}/{name}.squashfs"))
+                    .unwrap()
+                    .read_file_to_vec()
+                    .await
+                    .unwrap();
+                let image = Squashfs::deserialize(Arc::<[u8]>::from(bytes))
+                    .await
+                    .unwrap();
+                if name == "main" {
+                    assert!(image.contents().get_path("private").is_some());
+                    assert!(image.contents().get_path("system-image").is_none());
+                } else {
+                    let source = &image
+                        .contents()
+                        .get_path("system-image")
+                        .unwrap()
+                        .as_node()
+                        .unwrap()
+                        .contents;
+                    let NodeContents::File(source) = source else {
+                        panic!()
+                    };
+                    assert_eq!(
+                        source.to_vec(None).await.unwrap(),
+                        format!("{name}/{arch}").as_bytes()
+                    );
+                }
+            }
+        }
+    }
+    workspace.gc().await.unwrap();
 }
 
 async fn assert_converts_without_container_tools(docker: &[u8]) {

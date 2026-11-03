@@ -200,7 +200,12 @@ export type SetDeviceKindParamsInput = z.input<
 export type SetSubnetDnsParamsInput = z.input<typeof schemas.SetSubnetDnsParams>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type WgConfig = z.output<typeof schemas.WgConfig>
-export type SessionList = z.output<typeof schemas.SessionList>
+
+/**
+ * The server's sessions, by credential type.
+ */
+export type Sessions = z.output<typeof schemas.Sessions>
 export type WgSubnetClients = z.output<typeof schemas.WgSubnetClients>
+export type SessionList = z.output<typeof schemas.SessionList>
 export type WgSubnetConfig = z.output<typeof schemas.WgSubnetConfig>
 export type Api = RpcSchemaTree<typeof schemas.Api>
