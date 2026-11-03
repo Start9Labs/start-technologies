@@ -212,9 +212,11 @@ When making changes to the StartOS wrapper without upstream changes:
 
 `releaseNotes` renders as markdown in the StartOS UI. **Describe what changed in the release.** Read the upstream release notes / changelog for the bumped range, pull out the highlights that matter to a user (notable features, important fixes, security patches, breaking changes / required actions), and summarize them. Then link to the complete upstream release notes or changelog so the user can read the full detail. If the upstream release is genuinely trivial (e.g. a dependency-only patch), say that explicitly.
 
+**Say what a user observes, never how it was done.** Name the difference someone running the service will notice: a feature, a fix described by its symptom, a required action. Leave out the mechanism (the module, flag or config key that changed), the package's internals (an SDK bump, a refactor, a dependency refresh) and the history of a defect ("introduced in 2.37.0", "previously…"); they belong in the commit message and the PR body. A wrapper change nobody can observe gets no line of its own. Every instruction must be one a StartOS user can carry out from the StartOS UI or the service itself — never a host command (`sysctl`, `apt`) and never a pointer to guidance the note doesn't link.
+
 **Release notes are the only home for what an update asks of the user.** A step to take before or after updating, a warning, a credential to rotate, a client to upgrade: each goes here and nowhere else. `instructions.md` and `README.md` describe the service as it is to someone who never ran an older version, so an update adds nothing to them unless it changes that description ([Writing Instructions — What does not belong](./writing-instructions.md#what-does-not-belong-in-instructions)).
 
-**Match the length to the content.** A small release is a sentence or two; a larger one earns bullets, and bold section headers (`**Features**`, `**Fixes**`, `**Internal**`) once it spans more than one category. Localize prose and headers in every locale; don't leave them in English.
+**Match the length to the content.** A small release is a sentence or two; a larger one earns bullets, and bold section headers (`**Features**`, `**Fixes**`, `**Security**`) once it spans more than one category. Localize prose and headers in every locale; don't leave them in English.
 
 ```ts
 // Small release: a sentence naming the bump + the key change, then the link.
@@ -237,15 +239,16 @@ releaseNotes: {
 
 // Multiple categories spanning the wrapper and upstream: headers + bullets.
 releaseNotes: {
-  en_US: `Updated Ghost to 6.38.0 and bumped the start-sdk.
+  en_US: `Updated Ghost to 6.38.0 and added a Reset Password action.
 
 **Features**
 
 - New: scheduled newsletter sends
+- New: Reset Password action
 
 **Fixes**
 
-- Crash on backup restart
+- Crash on backup restore
 
 [Full upstream release notes](https://github.com/TryGhost/Ghost/releases/tag/v6.38.0)`,
   // …
