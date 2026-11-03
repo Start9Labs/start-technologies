@@ -674,6 +674,8 @@ const apiOrigin = await apiMulti.bindPort(apiPort, {
 
 The gate applies to every HTTP request on both the original and TLS-wrapper legs, including bridge and other enabled plaintext addresses, whenever HTTP proxying is enabled.
 
+**The gate covers every address the binding publishes, including its plaintext [bridge address](./service-to-service.md#the-host-bridge).** A service that depends on you is challenged like any other client, so if one must reach a gated binding, give it a credential — see [Admitting dependent services](#admitting-dependent-services).
+
 > [!NOTE]
 > The `username` field on `createInterface` is unrelated to this gate — it only embeds a username in the _displayed_ URL (e.g. `https://user@host/`). The enforced credential check is `proxy.auth`.
 
@@ -710,3 +712,54 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
 ```
 
 Seed `uiPassword` with a generated value during [install init](./init.md) so the gate is active from first start, and pair it with a `reset-password` action that rewrites the stored value and surfaces it to the user once. See [Reset Password](./recipe-reset-password.md).
+
+### Admitting dependent services
+
+A dependent can't run your action or read your `store.json`, so it needs a machine key it can fetch for itself. Generate one in [init](./init.md) whenever it is missing, and publish it on a `public` volume that dependents mount read-only. Declare the volume in the manifest (`volumes: [..., 'public']`) and add it to [backups](./recipe-backups.md), so a restore doesn't strand every dependent on a new key:
+
+```typescript
+// fileModels/credentials.json.ts
+export const credentialsJson = FileHelper.json({ base: sdk.volumes.public, subpath: 'credentials.json' }, z.looseObject({ apiKey: z.string().optional().catch(undefined) }))
+
+// init/initializeService.ts
+const apiKey = await credentialsJson.read(c => c.apiKey).const(effects)
+if (!apiKey) {
+  await credentialsJson.merge(effects, { apiKey: utils.getDefaultString({ charset: 'a-z,A-Z,0-9', len: 32 }) }, { allowWriteAfterConst: true })
+}
+```
+
+Then admit the key at the gate in the scheme the dependent's client can send.
+
+**If the gate already takes that scheme, add the key to its list.** A Bearer gate whose users mint tokens through an action takes the published key alongside them:
+
+```typescript
+const apiKey = await credentialsJson.read(c => c.apiKey).const(effects)
+const userTokens = (await storeJson.read(s => s.apiKeys).const(effects)) ?? []
+
+await sdk.MultiHost.of(effects, apiHostId).bindPort(apiPort, {
+  protocol: 'http',
+  addSsl: {
+    auth: {
+      type: 'bearer',
+      tokens: [...(apiKey ? [apiKey] : []), ...userTokens.map(k => k.token)],
+      realm: null,
+    },
+  },
+})
+```
+
+**If it doesn't, bind a second host on the same internal port.** A binding takes exactly one `ProxyAuth`. When browsers need Basic and the dependents' clients only send Bearer — an OpenAI-compatible API is the usual case — the two can't share a host. Keep the browser interface on its host and add a key-gated `api` interface beside it, bound only once the key exists:
+
+```typescript
+if (apiKey) {
+  const apiOrigin = await sdk.MultiHost.of(effects, apiKeyHostId).bindPort(apiPort, {
+    protocol: 'http',
+    addSsl: { auth: { type: 'bearer', tokens: [apiKey], realm: null } },
+  })
+  receipts.push(await apiOrigin.export([api])) // `type: 'api'`
+}
+```
+
+Export the key-gated host id and internal port from `startos/utils.ts`, where dependents import them. Read the key with `.const()` in `setupInterfaces`, so an action that rotates it rebinds the gate without restarting the daemon.
+
+Reading the key from the other side is in [Reaching a gated dependency](./service-to-service.md#reaching-a-gated-dependency).
