@@ -10,6 +10,8 @@ shopt -s expand_aliases
 PROFILE=${PROFILE:-debug}
 if [ "${PROFILE}" = "release" ]; then
 	BUILD_FLAGS="--release"
+elif [ "${PROFILE}" = "bindings" ]; then
+  BUILD_FLAGS="--profile bindings"
 else
   if [ "$PROFILE" != "debug" ]; then
     >&2 echo "Unknown profile $PROFILE: falling back to debug..."
