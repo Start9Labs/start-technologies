@@ -32,7 +32,7 @@ The StartOS, StartTunnel, Packaging, and StartWRT books are NOT here — they mo
 ## Adding or moving a book
 
 1. Add `book-name=version` to `versions.conf` (build and site routing derive from it; also add the source path to `.github/workflows/docs-deploy.yml`).
-2. If the book lives outside this project, add a `book_dir()` case in `build.sh` pointing at its source dir. Books with no mapping default to `<book-name>/` (relative to this project).
+2. If the book lives outside this project, add a `book_dir()` case in `build.sh` pointing at its source dir, and its product to `PRODUCT_BOOKS` in `scripts/docs-versions.mjs` at the repo root. Books with no mapping default to `<book-name>/` (relative to this project).
 
 ## Deployment
 
@@ -40,7 +40,7 @@ The StartOS, StartTunnel, Packaging, and StartWRT books are NOT here — they mo
 
 Content reaches `live-docs` two ways:
 
-- **On a tag.** `docs-sync-on-tag.yml` advances `live-docs` to the tagged tree for the released project, the shared libraries beneath it, and the repo root — **all of `projects/start-docs/`** included, whenever the released product ships a book — then dispatches the deploy. Every other `projects/*` stays on its own release, and a tag behind a release already synced leaves this project, `shared-libs/` and the root where the newer release put them. This is how a book — and any change you make in this project, including `versions.conf`, `build.sh`, and `theme/` — actually goes live. Work here therefore ships on someone else's release: if a site change needs to go out now, PR it to `live-docs` as below.
+- **On a tag.** `docs-sync-on-tag.yml` advances `live-docs` to the tagged tree for the released project, the shared libraries beneath it, and the repo root — **all of `projects/start-docs/`** included, whenever the released product ships a book — then dispatches the deploy. Every other `projects/*` stays on its own release, and a tag behind a release already synced leaves this project, `shared-libs/` and the root where the newer release put them. This is how a book — and any change you make in this project, including `build.sh` and `theme/` — actually goes live. In `versions.conf` a tag writes only its own book's line, deriving it from the version for StartOS and StartWRT, plus the lines of books in this project; other products' lines stay as published. Work here therefore ships on someone else's release: if a site change needs to go out now, PR it to `live-docs` as below.
 - **By PR into `live-docs`.** For fixing what is already published. It deploys on merge and is then pushed back to master automatically (`docs-backport.yml`), so don't also write the fix in master.
 
 Because a tag sync overwrites this whole project from the tagged tree, never hand-edit `projects/start-docs/**` on `live-docs` expecting it to survive — land it in master too (the backport does this for you).
