@@ -484,7 +484,6 @@ export default {
   505: 'Maksymalna wartość to {max}',
   506: 'Dostawca delegował prefiks /{delegatedPrefix}. Wprowadź wartość od {delegatedPrefix} do 64.',
   507: 'Wprowadź wartość z zakresu od {min} do {max}',
-  508: 'Klient',
   509: 'Nowy adres IP zacznie obowiązywać przy następnym żądaniu adresu przez to urządzenie od routera — router nie może go wymusić na podłączonym urządzeniu. Najszybszym sposobem na jego zastosowanie jest rozłączenie i ponowne podłączenie urządzenia (Wi-Fi lub Ethernet) albo jego ponowne uruchomienie; zwykle to działa, ale natychmiastowy skutek nie jest gwarantowany. W przeciwnym razie urządzenie samo pobierze nowy adres w ciągu maksymalnie 12 godzin.',
   510: 'Rozumiem',
   511: 'Próba połączenia z routerem',
@@ -568,4 +567,6 @@ export default {
   596: 'Pozwala temu urządzeniu ogłaszać trasy IPv6 innym Twoim urządzeniom (wymagane przez routery brzegowe Thread, takie jak Apple TV, HomePod lub Home Assistant). Domyślnie wyłączone.',
   597: 'Zezwolić na ogłoszenia routera IPv6?',
   598: 'To urządzenie będzie mogło przydzielać innym Twoim urządzeniom adresy IPv6, trasy, serwery DNS i bramę domyślną, a także kierować ich ruch IPv6 z pominięciem routera. Przyznaj to tylko zaufanemu urządzeniu, takiemu jak router brzegowy Thread.',
+  599: 'Tunel {vpn}',
+  600: 'Twój ruch',
 } satisfies i18n

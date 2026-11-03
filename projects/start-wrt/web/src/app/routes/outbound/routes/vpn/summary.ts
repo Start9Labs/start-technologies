@@ -1,13 +1,13 @@
 import { Component, computed, inject } from '@angular/core'
-import { TuiIcon } from '@taiga-ui/core'
-import { TuiAvatar, TuiAvatarLabeled, TuiBadge, TuiStatus } from '@taiga-ui/kit'
+import { TuiBadge, TuiStatus } from '@taiga-ui/kit'
 import { Summary } from 'src/app/components/summary'
-import { buildConnectionPath } from 'src/app/routes/outbound/utils'
+import { buildChain } from 'src/app/routes/outbound/utils'
 import OutboundVPN from 'src/app/routes/outbound/routes/vpn/index'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { i18nKey } from 'src/app/i18n/i18n.providers'
 import { i18nService } from 'src/app/i18n/i18n.service'
 import { OutboundVpn } from 'src/app/services/api/api.service'
+import { VPNChain } from './chain'
 
 const STATUS: Record<
   OutboundVpn['status'],
@@ -76,58 +76,17 @@ const STATUS: Record<
     <section>
       <label appSummary>
         {{ 'Connection path' | i18n }}
-        <span tuiSubtitle>
-          <tui-avatar-labeled [label]="'Client' | i18n">
-            <span
-              tuiAvatar="@tui.monitor-smartphone"
-              size="m"
-              appearance="action"
-            ></span>
-          </tui-avatar-labeled>
-          <tui-icon icon="@tui.arrow-right" />
-          @for (step of connectionPath(); track $index; let last = $last) {
-            @if (step === 'Internet') {
-              <tui-avatar-labeled [label]="'Internet' | i18n">
-                <span
-                  tuiAvatar="@tui.globe"
-                  size="m"
-                  appearance="action"
-                  class="g-positive"
-                ></span>
-              </tui-avatar-labeled>
-            } @else {
-              <tui-avatar-labeled [label]="step">
-                <span
-                  appearance="action"
-                  size="m"
-                  tuiAvatar="@tui.globe-lock"
-                ></span>
-              </tui-avatar-labeled>
-              <tui-icon icon="@tui.arrow-right" />
-            }
-          }
-        </span>
+        <vpn-chain tuiSubtitle [chain]="chain()" />
       </label>
     </section>
   `,
   styles: `
-    tui-avatar {
-      margin: 0;
-    }
-
-    [tuiSubtitle]:has(tui-avatar-labeled) {
-      color: var(--tui-text-primary);
+    label:has(vpn-chain) {
+      flex: 1;
+      min-inline-size: 0;
     }
   `,
-  imports: [
-    TuiBadge,
-    TuiStatus,
-    Summary,
-    TuiAvatarLabeled,
-    TuiAvatar,
-    TuiIcon,
-    i18nPipe,
-  ],
+  imports: [TuiBadge, TuiStatus, Summary, VPNChain, i18nPipe],
 })
 export class VPNSummary {
   protected readonly parent = inject(OutboundVPN)
@@ -147,12 +106,8 @@ export class VPNSummary {
     return this.relativeTime.format(-Math.floor(secs / 86400), 'day')
   })
 
-  readonly connectionPath = computed(() => {
-    const data = this.parent.data()
-    const allVpns = this.parent.service.data() ?? []
-    if (!data || allVpns.length === 0) {
-      return ['-', 'Internet']
-    }
-    return buildConnectionPath(data.label, allVpns)
+  readonly chain = computed(() => {
+    const label = this.parent.data()?.label
+    return label ? buildChain(label, this.parent.service.data() ?? []) : []
   })
 }

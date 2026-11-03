@@ -1,0 +1,1 @@
+- **Les chemins des VPN sortants sont représentés par des tunnels imbriqués.** La page d’un VPN montre le début et la fin de chaque tunnel de la chaîne, ceux qui passent à l’intérieur des autres et le serveur par lequel sort le trafic.

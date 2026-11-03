@@ -1,0 +1,1 @@
+- **Las rutas de VPN salientes se dibujan como túneles anidados.** La página de una VPN muestra dónde empieza y termina cada túnel de la cadena, cuáles van dentro de otros y por qué servidor sale el tráfico.

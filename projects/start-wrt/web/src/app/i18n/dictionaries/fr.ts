@@ -484,7 +484,6 @@ export default {
   505: 'La valeur maximale est {max}',
   506: 'Votre FAI a délégué un préfixe /{delegatedPrefix}. Saisissez une valeur de {delegatedPrefix} à 64.',
   507: 'Saisissez une valeur entre {min} et {max}',
-  508: 'Client',
   509: 'La nouvelle adresse IP prendra effet lorsque cet appareil en demandera une au routeur ; le routeur ne peut pas l’imposer à un appareil connecté. Le moyen le plus rapide de l’appliquer est de déconnecter puis de reconnecter l’appareil (Wi-Fi ou Ethernet) ou de le redémarrer ; cela fonctionne généralement, mais une prise d’effet immédiate n’est pas garantie. Sinon, l’appareil adoptera la nouvelle adresse de lui-même sous 12 heures au maximum.',
   510: 'Compris',
   511: 'Tentative de connexion au routeur',
@@ -568,4 +567,6 @@ export default {
   596: 'Permet à cet appareil d’annoncer des routes IPv6 à vos autres appareils (nécessaire pour les routeurs de bordure Thread comme une Apple TV, un HomePod ou Home Assistant). Désactivé par défaut.',
   597: 'Autoriser les annonces de routeur IPv6 ?',
   598: 'Cet appareil pourra attribuer à vos autres appareils des adresses IPv6, des routes, des serveurs DNS et une passerelle par défaut, et pourrait faire passer leur trafic IPv6 en dehors du routeur. N’accordez cela qu’à un appareil de confiance, comme un routeur de bordure Thread.',
+  599: 'Tunnel {vpn}',
+  600: 'Votre trafic',
 } satisfies i18n

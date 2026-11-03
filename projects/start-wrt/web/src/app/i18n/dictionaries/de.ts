@@ -484,7 +484,6 @@ export default {
   505: 'Höchstwert ist {max}',
   506: 'Ihr Anbieter hat ein /{delegatedPrefix}-Präfix delegiert. Geben Sie einen Wert von {delegatedPrefix} bis 64 ein.',
   507: 'Geben Sie einen Wert zwischen {min} und {max} ein',
-  508: 'Client',
   509: 'Die neue IP-Adresse wird wirksam, sobald dieses Gerät das nächste Mal eine Adresse vom Router anfordert – der Router kann sie einem verbundenen Gerät nicht aufzwingen. Am schnellsten wird sie übernommen, wenn Sie das Gerät (WLAN oder Ethernet) trennen und neu verbinden oder neu starten; das funktioniert meist, eine sofortige Übernahme ist jedoch nicht garantiert. Andernfalls übernimmt das Gerät die neue Adresse von selbst innerhalb von bis zu 12 Stunden.',
   510: 'Verstanden',
   511: 'Router wird kontaktiert',
@@ -568,4 +567,6 @@ export default {
   596: 'Erlaubt diesem Gerät, Ihren anderen Geräten IPv6-Routen anzukündigen (erforderlich für Thread-Border-Router wie Apple TV, HomePod oder Home Assistant). Standardmäßig aus.',
   597: 'IPv6-Router-Advertisements erlauben?',
   598: 'Dieses Gerät kann dann Ihren anderen Geräten IPv6-Adressen, Routen, DNS-Server und ein Standard-Gateway zuweisen und ihren IPv6-Verkehr am Router vorbeileiten. Gewähren Sie dies nur einem Gerät, dem Sie vertrauen, etwa einem Thread-Border-Router.',
+  599: '{vpn}-Tunnel',
+  600: 'Ihr Datenverkehr',
 } satisfies i18n
