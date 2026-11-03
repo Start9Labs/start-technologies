@@ -11479,11 +11479,16 @@
               "type": "array",
               "items": { "type": "string" },
               "description": "Ed25519 public keys in PEM or armored GPG format."
+            },
+            "trustFor": {
+              "description": "Grants this permission to every imported key, including existing keys.",
+              "anyOf": [{ "$ref": "#/$defs/TrustContext" }, { "type": "null" }]
             }
           },
           "required": ["name", "publicKeys"],
           "additionalProperties": true
-        }
+        },
+        "TrustContext": { "type": "string", "enum": ["marketplace", "os"] }
       },
       "type": "object",
       "properties": {
@@ -11495,6 +11500,10 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Ed25519 public keys in PEM or armored GPG format."
+        },
+        "trustFor": {
+          "description": "Grants this permission to every imported key, including existing keys.",
+          "anyOf": [{ "$ref": "#/$defs/TrustContext" }, { "type": "null" }]
         }
       },
       "required": ["name", "publicKeys"],
@@ -11514,7 +11523,7 @@
             "existing": {
               "type": "array",
               "items": { "type": "string" },
-              "description": "Trust unchanged; GPG identities merged."
+              "description": "GPG identities merged; explicit `trustFor` grants the requested permission."
             }
           },
           "required": ["added", "existing"],
@@ -11532,7 +11541,7 @@
         "existing": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Trust unchanged; GPG identities merged."
+          "description": "GPG identities merged; explicit `trustFor` grants the requested permission."
         }
       },
       "required": ["added", "existing"],
@@ -11579,6 +11588,28 @@
       "type": "object",
       "properties": { "id": { "type": "string" } },
       "required": ["id"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "server.trusted-keys.remove-many",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RemoveTrustedKeysParams": {
+          "type": "object",
+          "properties": {
+            "ids": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["ids"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "ids": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["ids"],
       "additionalProperties": true
     }
   },

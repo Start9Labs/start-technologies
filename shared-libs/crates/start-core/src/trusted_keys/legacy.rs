@@ -319,8 +319,9 @@ mod tests {
 
     #[test]
     fn mixed_current_and_historical_records_merge_by_canonical_identity() {
-        let initial = initial_trusted_keys();
+        let mut initial = initial_trusted_keys();
         let id = initial.keys().next().unwrap().clone();
+        initial.get_mut(&id).unwrap().removable = false;
         let mut wire = to_value(&initial).unwrap();
         let mut group: TrustedKeyring = initial[&id].clone().into();
         group.origin = "manual".into();

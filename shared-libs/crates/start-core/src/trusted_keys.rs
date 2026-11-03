@@ -171,7 +171,9 @@ pub fn initial_signers() -> TrustedOsUpdateSigners {
 }
 
 pub fn initial_trusted_keys() -> TrustedKeys {
-    legacy::individual_keys(&legacy::initial_keyrings(), Utc::now()).unwrap()
+    let mut keys = legacy::individual_keys(&legacy::initial_keyrings(), Utc::now()).unwrap();
+    protect_registry_keys(&mut keys, &BTreeMap::new(), &Value::Null);
+    keys
 }
 
 pub fn os_signers(keys: &TrustedKeys) -> TrustedOsUpdateSigners {
@@ -236,7 +238,7 @@ fn split_import(
 pub struct AddTrustedKeyRes {
     /// Trusted for packages.
     pub added: BTreeSet<InternedString>,
-    /// Trust unchanged; GPG identities merged.
+    /// GPG identities merged; explicit `trustFor` grants the requested permission.
     pub existing: BTreeSet<InternedString>,
 }
 
@@ -247,6 +249,7 @@ fn import_individual_keys(
     keys: &mut TrustedKeys,
     name: String,
     imported: ImportedPublicKeys,
+    trust_for: Option<TrustContext>,
 ) -> Result<AddTrustedKeyRes, Error> {
     if imported.keys.is_empty() {
         return Err(invalid_key());
@@ -263,6 +266,15 @@ fn import_individual_keys(
         .cloned()
         .partition(|id| keys.contains_key(id));
     merge_individual_keys(keys, imported);
+    if let Some(context) = trust_for {
+        for id in added.iter().chain(&existing) {
+            let key = keys.get_mut(id).unwrap();
+            match context {
+                TrustContext::Marketplace => key.marketplace = true,
+                TrustContext::Os => key.os = true,
+            }
+        }
+    }
     Ok(AddTrustedKeyRes { added, existing })
 }
 
@@ -302,7 +314,7 @@ fn protected_keys(public: &crate::db::model::public::Public) -> TrustedKeys {
     keys
 }
 
-fn protect_registry_keys(
+pub(crate) fn protect_registry_keys(
     keys: &mut TrustedKeys,
     registries: &BTreeMap<InternedString, BTreeSet<AnyVerifyingKey>>,
     ui: &Value,
@@ -355,6 +367,12 @@ pub fn api<C: Context>() -> ParentHandler<C> {
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
         )
+        .subcommand(
+            "remove-many",
+            from_fn_async(remove_many)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_cli(),
+        )
 }
 
 #[derive(Deserialize, Serialize, VisitFields)]
@@ -364,6 +382,9 @@ pub struct AddTrustedKeyParams {
     pub name: String,
     /// Ed25519 public keys in PEM or armored GPG format.
     pub public_keys: Vec<String>,
+    /// Grants this permission to every imported key, including existing keys.
+    #[serde(default)]
+    pub trust_for: Option<TrustContext>,
 }
 
 rpc_toolkit::reflect_ts!(AddTrustedKeyParams);
@@ -387,6 +408,14 @@ pub struct RemoveTrustedKeyParams {
 }
 
 rpc_toolkit::reflect_ts!(RemoveTrustedKeyParams);
+
+#[derive(Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveTrustedKeysParams {
+    pub ids: BTreeSet<InternedString>,
+}
+
+rpc_toolkit::reflect_ts!(RemoveTrustedKeysParams);
 
 fn not_found() -> Error {
     Error::new(
@@ -430,13 +459,20 @@ pub fn remove_key(keys: &mut TrustedKeys, id: &str) -> Result<(), Error> {
     Ok(())
 }
 
+fn remove_keys(keys: &mut TrustedKeys, ids: BTreeSet<InternedString>) -> Result<(), Error> {
+    for id in ids {
+        remove_key(keys, &id)?;
+    }
+    Ok(())
+}
+
 async fn add(ctx: RpcContext, params: AddTrustedKeyParams) -> Result<AddTrustedKeyRes, Error> {
     let public_keys = parse_public_keys(&params.public_keys)?;
     ctx.db
         .mutate(|db| {
             db.as_public_mut().mutate(|public| {
                 mutate_public_keys(public, |keys| {
-                    import_individual_keys(keys, params.name, public_keys)
+                    import_individual_keys(keys, params.name, public_keys, params.trust_for)
                 })
             })
         })
@@ -464,6 +500,16 @@ async fn remove(ctx: RpcContext, params: RemoveTrustedKeyParams) -> Result<(), E
         .result
 }
 
+async fn remove_many(ctx: RpcContext, params: RemoveTrustedKeysParams) -> Result<(), Error> {
+    ctx.db
+        .mutate(|db| {
+            db.as_public_mut()
+                .mutate(|public| mutate_public_keys(public, |keys| remove_keys(keys, params.ids)))
+        })
+        .await
+        .result
+}
+
 pub fn legacy_add(
     keys: &mut TrustedKeys,
     key: AnyVerifyingKey,
@@ -480,7 +526,7 @@ pub fn legacy_add(
         existing.os = true;
         return Ok(());
     }
-    import_individual_keys(keys, label, vec![key].into())?;
+    import_individual_keys(keys, label, vec![key].into(), None)?;
     if let Some(added) = keys.get_mut(&id) {
         added.os = true;
     }
@@ -531,7 +577,7 @@ mod tests {
         for (id, key) in &keys {
             assert_eq!(*id, key.public_key.interned_der64());
             assert_eq!(key.origin, START9_REGISTRY);
-            assert!(!key.removable);
+            assert!(key.removable);
             assert_eq!(key.marketplace, key.os);
             for export in &key.gpg_exports {
                 assert!(export.identities.contains_key(id));
@@ -565,13 +611,14 @@ mod tests {
         let id = public_key.interned_der64();
         let mut keys = TrustedKeys::new();
         let res =
-            import_individual_keys(&mut keys, "Original".into(), vec![public_key].into()).unwrap();
+            import_individual_keys(&mut keys, "Original".into(), vec![public_key].into(), None)
+                .unwrap();
         assert_eq!(res.added, BTreeSet::from([id.clone()]));
         let entry = keys.get_mut(&id).unwrap();
         entry.marketplace = false;
         entry.origin = "https://registry.example".into();
         let added_at = entry.added_at;
-        let res = import_individual_keys(&mut keys, "Replacement".into(), imported).unwrap();
+        let res = import_individual_keys(&mut keys, "Replacement".into(), imported, None).unwrap();
         assert_eq!(res.existing, BTreeSet::from([id.clone()]));
         assert!(res.added.is_empty());
         let key = &keys[&id];
@@ -585,9 +632,24 @@ mod tests {
     }
 
     #[test]
+    fn import_grant_is_optional_on_the_wire() {
+        let params: AddTrustedKeyParams = from_value(imbl_value::json!({
+            "name": "Publisher", "publicKeys": []
+        }))
+        .unwrap();
+        assert!(params.trust_for.is_none());
+        let params: AddTrustedKeyParams = from_value(imbl_value::json!({
+            "name": "Publisher", "publicKeys": [], "trustFor": "os"
+        }))
+        .unwrap();
+        assert!(matches!(params.trust_for, Some(TrustContext::Os)));
+    }
+
+    #[test]
     fn editing_changes_one_keys_name_and_contexts_without_changing_material() {
         let mut keys = initial_trusted_keys();
         let id = keys.keys().next().unwrap().clone();
+        keys.get_mut(&id).unwrap().removable = false;
         let saved = keys[&id].clone();
         let mut neighbors = keys.clone();
         neighbors.remove(&id);
@@ -621,7 +683,7 @@ mod tests {
         let saved = keys.clone();
         let public_key = keys.values().next().unwrap().public_key.clone();
         for (name, imported) in [(" ", vec![public_key]), ("Empty", vec![])] {
-            assert!(import_individual_keys(&mut keys, name.into(), imported.into()).is_err());
+            assert!(import_individual_keys(&mut keys, name.into(), imported.into(), None).is_err());
             assert_eq!(keys, saved);
         }
         for (id, name) in [
@@ -649,7 +711,7 @@ mod tests {
         let imported =
             parse_public_keys(&[include_str!("sign/fixtures/ed25519-signers.asc").into()]).unwrap();
         let mut keys = TrustedKeys::new();
-        import_individual_keys(&mut keys, " ".into(), imported).unwrap();
+        import_individual_keys(&mut keys, " ".into(), imported, None).unwrap();
         assert!(!keys.is_empty());
         for key in keys.values() {
             assert!(!key.name.is_empty());
@@ -663,7 +725,7 @@ mod tests {
             parse_public_keys(&[include_str!("sign/fixtures/ed25519-signers.asc").into()]).unwrap();
         let expected = imported.keys.clone();
         let mut keys = TrustedKeys::new();
-        let res = import_individual_keys(&mut keys, " Publisher ".into(), imported).unwrap();
+        let res = import_individual_keys(&mut keys, " Publisher ".into(), imported, None).unwrap();
         assert_eq!(keys.len(), 2);
         assert_eq!(res.added, keys.keys().cloned().collect());
         for (id, key) in &keys {
@@ -687,7 +749,7 @@ mod tests {
         let imported = parse_public_keys(&[source.into()]).unwrap();
         let removed = imported.keys.first().unwrap().clone();
         let mut keys = TrustedKeys::new();
-        import_individual_keys(&mut keys, "Publisher".into(), imported).unwrap();
+        import_individual_keys(&mut keys, "Publisher".into(), imported, None).unwrap();
         for key in keys.values_mut() {
             key.os = true;
         }
@@ -715,8 +777,9 @@ mod tests {
     #[test]
     fn legacy_commands_use_single_key_identity_and_preserve_other_keys() {
         let mut keys = initial_trusted_keys();
-        let original = keys.clone();
         let id = keys.iter().find(|(_, key)| key.os).unwrap().0.clone();
+        keys.get_mut(&id).unwrap().removable = false;
+        let original = keys.clone();
         let key = keys[&id].public_key.clone();
         legacy_remove(&mut keys, &key).unwrap();
         assert!(!keys[&id].os && keys[&id].marketplace);

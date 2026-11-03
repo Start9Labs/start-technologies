@@ -114,13 +114,7 @@ const PROGRESS: T.FullProgress = {
   ],
 }
 
-// A service's own install-time progress (setInitProgress). The host nests this
-// inside the install's finalization ("Installing") phase as a FullProgress — but
-// only once finalization begins; until then that phase is null (waiting), so the
-// sub-phases must not appear before the download/validation phases finish.
-// installProgress injects this then. An indeterminate sub-phase (like HA's
-// "Generating Home Assistant configuration", a value-less animated bar) plus a
-// determinate one exercise both render branches of the install card's sub-phases.
+// Nested under finalization after download and validation complete.
 const INIT_PROGRESS: T.FullProgress = {
   overall: { done: 0, total: 8, units: 'steps' },
   phases: [
@@ -159,6 +153,7 @@ export class MockApiService extends ApiService {
         mockPatchData.ui = { ...mockPatchData.ui, ...JSON.parse(stored) }
       }
 
+      this.protectTrust()
       return {
         dump: { id: this.sequence, value: mockPatchData },
         guid: 'db-guid',
@@ -346,30 +341,33 @@ export class MockApiService extends ApiService {
       await this.publishTrust()
       return enabled
     },
-    'server.trusted-keys.add': async ({ name, publicKeys }) => {
+    'server.trusted-keys.add': async ({ name, publicKeys, trustFor }) => {
       await pauseFor(2000)
+      const keys = structuredClone(mockPatchData.serverInfo.trustedKeys)
       const added: string[] = []
       const existing: string[] = []
       for (const key of parsePublicKeys(publicKeys.join('\n'))) {
         const id = auth.normalizeDer64(parsePemPublicKey(key))
-        if (mockPatchData.serverInfo.trustedKeys[id]) {
+        if (keys[id]) {
           existing.push(id)
-          continue
+        } else {
+          added.push(id)
+          keys[id] = {
+            name,
+            origin: 'manual',
+            originRegistry: null,
+            gpgExports: [],
+            contact: [],
+            addedAt: new Date().toISOString(),
+            publicKey: id,
+            removable: true,
+            marketplace: true,
+            os: false,
+          }
         }
-        added.push(id)
-        mockPatchData.serverInfo.trustedKeys[id] = {
-          name,
-          origin: 'manual',
-          originRegistry: null,
-          gpgExports: [],
-          contact: [],
-          addedAt: new Date().toISOString(),
-          publicKey: id,
-          removable: true,
-          marketplace: true,
-          os: false,
-        }
+        if (trustFor) keys[id]![trustFor] = true
       }
+      mockPatchData.serverInfo.trustedKeys = keys
       await this.publishTrust()
       return { added, existing }
     },
@@ -377,7 +375,7 @@ export class MockApiService extends ApiService {
       await pauseFor(2000)
       const key = mockPatchData.serverInfo.trustedKeys[id]
       if (!key) throw new Error('Key not found')
-      if (!os) this.keepOsKey(id)
+      if (!os) this.keepOsKeys([id])
       const value = { ...key, name, marketplace, os }
       mockPatchData.serverInfo.trustedKeys[id] = value
       await this.mockRevision([
@@ -389,20 +387,8 @@ export class MockApiService extends ApiService {
       ])
       return null
     },
-    'server.trusted-keys.remove': async ({ id }) => {
-      await pauseFor(2000)
-      if (!mockPatchData.serverInfo.trustedKeys[id]?.removable)
-        throw new Error('Protected key')
-      this.keepOsKey(id)
-      delete mockPatchData.serverInfo.trustedKeys[id]
-      await this.mockRevision([
-        {
-          op: PatchOp.REMOVE,
-          path: pathFromArray(['serverInfo', 'trustedKeys', id]),
-        },
-      ])
-      return null
-    },
+    'server.trusted-keys.remove': async ({ id }) => this.removeKeys([id]),
+    'server.trusted-keys.remove-many': async ({ ids }) => this.removeKeys(ids),
     'server.update': async params => {
       await pauseFor(2000)
       const initialProgress = {
@@ -2470,10 +2456,29 @@ export class MockApiService extends ApiService {
       .flatMap(([, keys]) => keys)
   }
 
-  private keepOsKey(id: string): void {
+  private keepOsKeys(ids: readonly string[]): void {
     const keys = Object.entries(mockPatchData.serverInfo.trustedKeys)
-    if (keys.every(([other, key]) => other === id || !key.os))
+    const removed = new Set(ids)
+    if (
+      keys.some(([, key]) => key.os) &&
+      !keys.some(([id, key]) => !removed.has(id) && key.os)
+    )
       throw new Error('At least one key must stay trusted for StartOS updates')
+  }
+
+  private async removeKeys(ids: readonly string[]): Promise<null> {
+    await pauseFor(2000)
+    const keys = structuredClone(mockPatchData.serverInfo.trustedKeys)
+    this.protectTrust(keys)
+    for (const id of ids) {
+      if (!keys[id]) throw new Error('Key not found')
+      if (!keys[id].removable) throw new Error('Protected key')
+    }
+    this.keepOsKeys(ids)
+    for (const id of ids) delete keys[id]
+    mockPatchData.serverInfo.trustedKeys = keys
+    await this.publishTrust()
+    return null
   }
 
   private importRegistryKeys(
@@ -2520,13 +2525,23 @@ export class MockApiService extends ApiService {
     }
   }
 
-  private async publishTrust(): Promise<void> {
+  private protectTrust(keys = mockPatchData.serverInfo.trustedKeys): void {
     const listed = new Set(
-      Object.values(mockPatchData.serverInfo.registryKeys).flat(),
+      Object.entries(mockPatchData.serverInfo.registryKeys)
+        .filter(([url]) =>
+          Object.keys(mockPatchData.ui.registries).some(saved =>
+            sameUrl(saved, url),
+          ),
+        )
+        .flatMap(([, ids]) => ids.map(auth.normalizeDer64)),
     )
-    for (const key of Object.values(mockPatchData.serverInfo.trustedKeys)) {
-      key.removable = !listed.has(key.publicKey)
+    for (const key of Object.values(keys)) {
+      key.removable = !listed.has(auth.normalizeDer64(key.publicKey))
     }
+  }
+
+  private async publishTrust(): Promise<void> {
+    this.protectTrust()
     await this.mockRevision<unknown>([
       {
         op: PatchOp.REPLACE,

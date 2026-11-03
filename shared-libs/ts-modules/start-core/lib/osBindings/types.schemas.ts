@@ -297,7 +297,7 @@ export const AddTrustedKeyRes: z.ZodObject<{
    */
   added: z.ZodArray<z.ZodString>
   /**
-   * Trust unchanged; GPG identities merged.
+   * GPG identities merged; explicit `trustFor` grants the requested permission.
    */
   existing: z.ZodArray<z.ZodString>
 }> = /* @__PURE__ */ object({
@@ -308,10 +308,11 @@ export const AddTrustedKeyRes: z.ZodObject<{
     description: 'Trusted for packages.',
   }),
   /**
-   * Trust unchanged; GPG identities merged.
+   * GPG identities merged; explicit `trustFor` grants the requested permission.
    */
   existing: z.array(z.string()).meta({
-    description: 'Trust unchanged; GPG identities merged.',
+    description:
+      'GPG identities merged; explicit `trustFor` grants the requested permission.',
   }),
 }).meta({
   id: 'AddTrustedKeyRes',

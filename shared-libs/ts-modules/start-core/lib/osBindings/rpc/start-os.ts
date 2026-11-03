@@ -83,9 +83,6 @@ export type ActionId = z.output<typeof schemas.ActionId>
 export type ActionIdInput = z.input<typeof schemas.ActionId>
 export type ActionResultV0 = z.output<typeof schemas.ActionResultV0>
 export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
-export type AddTrustedKeyParamsInput = z.input<
-  typeof schemas.AddTrustedKeyParams
->
 
 /**
  * Keys an import added, and keys it found already present.
@@ -270,6 +267,9 @@ export type RemovePassthroughParamsInput = z.input<
 export type RemoveTrustedKeyParamsInput = z.input<
   typeof schemas.RemoveTrustedKeyParams
 >
+export type RemoveTrustedKeysParamsInput = z.input<
+  typeof schemas.RemoveTrustedKeysParams
+>
 export type RemoveVersionParamsInput = z.input<
   typeof schemas.RemoveVersionParams
 >
@@ -312,6 +312,7 @@ export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type TermSizeInput = z.input<typeof schemas.TermSize>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TrustCaParamsInput = z.input<typeof schemas.TrustCaParams>
+export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedCa = z.output<typeof schemas.TrustedCa>
 export type TrustedOsUpdateSigner = z.output<
   typeof schemas.TrustedOsUpdateSigner
@@ -368,6 +369,9 @@ export type AddPublicDomainParamsInput = z.input<
   typeof schemas.AddPublicDomainParams
 >
 export type AddSignerParamsInput = z.input<typeof schemas.AddSignerParams>
+export type AddTrustedKeyParamsInput = z.input<
+  typeof schemas.AddTrustedKeyParams
+>
 export type AddTunnelParamsInput = z.input<typeof schemas.AddTunnelParams>
 export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type AddressInfo = z.output<typeof schemas.AddressInfo>

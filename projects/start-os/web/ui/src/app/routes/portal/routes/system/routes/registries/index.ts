@@ -334,9 +334,7 @@ export default class Registries {
       ))
     ) {
       await this.save(async () => {
-        for (const id of orphaned) {
-          await this.api.rpc.server.trustedKeys.remove({ id })
-        }
+        await this.api.rpc.server.trustedKeys.removeMany({ ids: orphaned })
       }, 'Removing')
     }
   }

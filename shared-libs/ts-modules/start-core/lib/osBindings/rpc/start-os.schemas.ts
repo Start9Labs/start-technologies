@@ -251,31 +251,6 @@ export const ActionResultValue: z.ZodUnion<
   .meta({
     id: 'ActionResultValue',
   })
-export const AddTrustedKeyParams: z.ZodObject<{
-  /**
-   * Blank names each GPG key after its identity.
-   */
-  name: z.ZodString
-  /**
-   * Ed25519 public keys in PEM or armored GPG format.
-   */
-  publicKeys: z.ZodArray<z.ZodString>
-}> = /* @__PURE__ */ object({
-  /**
-   * Blank names each GPG key after its identity.
-   */
-  name: z.string().meta({
-    description: 'Blank names each GPG key after its identity.',
-  }),
-  /**
-   * Ed25519 public keys in PEM or armored GPG format.
-   */
-  publicKeys: z.array(z.string()).meta({
-    description: 'Ed25519 public keys in PEM or armored GPG format.',
-  }),
-}).meta({
-  id: 'AddTrustedKeyParams',
-})
 
 /**
  * Keys an import added, and keys it found already present.
@@ -286,7 +261,7 @@ export const AddTrustedKeyRes: z.ZodObject<{
    */
   added: z.ZodArray<z.ZodString>
   /**
-   * Trust unchanged; GPG identities merged.
+   * GPG identities merged; explicit `trustFor` grants the requested permission.
    */
   existing: z.ZodArray<z.ZodString>
 }> = /* @__PURE__ */ object({
@@ -297,10 +272,11 @@ export const AddTrustedKeyRes: z.ZodObject<{
     description: 'Trusted for packages.',
   }),
   /**
-   * Trust unchanged; GPG identities merged.
+   * GPG identities merged; explicit `trustFor` grants the requested permission.
    */
   existing: z.array(z.string()).meta({
-    description: 'Trust unchanged; GPG identities merged.',
+    description:
+      'GPG identities merged; explicit `trustFor` grants the requested permission.',
   }),
 }).meta({
   id: 'AddTrustedKeyRes',
@@ -1242,6 +1218,11 @@ export const RemoveTrustedKeyParams: z.ZodObject<{ id: z.ZodString }> =
   /* @__PURE__ */ object({ id: z.string() }).meta({
     id: 'RemoveTrustedKeyParams',
   })
+export const RemoveTrustedKeysParams: z.ZodObject<{
+  ids: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({ ids: z.array(z.string()) }).meta({
+  id: 'RemoveTrustedKeysParams',
+})
 export const RemoveVersionParams: z.ZodObject<{ version: z.ZodString }> =
   /* @__PURE__ */ object({ version: z.string() }).meta({
     id: 'RemoveVersionParams',
@@ -1452,6 +1433,10 @@ export const TimeInfo: z.ZodObject<{ now: z.ZodString; uptime: z.ZodInt }> =
 export const TrustCaParams: z.ZodObject<{ cert: typeof literal_0 }> =
   /* @__PURE__ */ object({ cert: literal_0 }).meta({
     id: 'TrustCaParams',
+  })
+export const TrustContext: z.ZodEnum<{ marketplace: 'marketplace'; os: 'os' }> =
+  /* @__PURE__ */ z.enum(['marketplace', 'os']).meta({
+    id: 'TrustContext',
   })
 export const TrustedCa: z.ZodObject<{
   subject: z.ZodString
@@ -1826,6 +1811,48 @@ export const AddSignerParams: z.ZodObject<{
   }),
 }).meta({
   id: 'AddSignerParams',
+})
+export const AddTrustedKeyParams: z.ZodObject<{
+  /**
+   * Blank names each GPG key after its identity.
+   */
+  name: z.ZodString
+  /**
+   * Ed25519 public keys in PEM or armored GPG format.
+   */
+  publicKeys: z.ZodArray<z.ZodString>
+  /**
+   * Grants this permission to every imported key, including existing keys.
+   */
+  trustFor: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof TrustContext>>,
+    z.ZodNullable<typeof TrustContext>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Blank names each GPG key after its identity.
+   */
+  name: z.string().meta({
+    description: 'Blank names each GPG key after its identity.',
+  }),
+  /**
+   * Ed25519 public keys in PEM or armored GPG format.
+   */
+  publicKeys: z.array(z.string()).meta({
+    description: 'Ed25519 public keys in PEM or armored GPG format.',
+  }),
+  /**
+   * Grants this permission to every imported key, including existing keys.
+   */
+  trustFor: wire(
+    TrustContext.nullable().optional(),
+    TrustContext.nullable(),
+  ).meta({
+    description:
+      'Grants this permission to every imported key, including existing keys.',
+  }),
+}).meta({
+  id: 'AddTrustedKeyParams',
 })
 export const AddTunnelParams: z.ZodObject<{
   name: z.ZodString
@@ -6690,6 +6717,10 @@ export const Api = {
             },
             remove: {
               _PARAMS: /* @__PURE__ */ RemoveTrustedKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            'remove-many': {
+              _PARAMS: /* @__PURE__ */ RemoveTrustedKeysParams,
               _RETURN: /* @__PURE__ */ z.null(),
             },
             'remove-registry': {

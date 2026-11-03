@@ -158,6 +158,8 @@ const { UiUpdateService } = await import('src/app/services/ui-update.service')
 const { ConfigService } = await import('src/app/services/config.service')
 const { TrustedKeysService } =
   await import('src/app/services/trusted-keys.service')
+const { TrustedKeysService: ProductionTrustedKeysService } =
+  await import('../src/app/services/trusted-keys.service.ts')
 const { trustedOsUpdateSigners } =
   await import('src/app/utils/os-update-signers')
 const { default: General } =
@@ -1667,6 +1669,50 @@ const runTask = async work => {
   }
 }
 
+test('unknown-key trust uses one atomic import request and clears saving on failure', async () => {
+  for (const context of ['marketplace', 'os']) {
+    for (const reject of [false, true]) {
+      const calls = []
+      const instance = {
+        saving: signal(false),
+        tasks: { run: runTask },
+        save: ProductionTrustedKeysService.prototype.save,
+        api: {
+          rpc: {
+            server: {
+              trustedKeys: {
+                add: async params => {
+                  calls.push(['add', params])
+                  if (reject) throw new Error('Import refused')
+                  return { added: ['publisher'], existing: [] }
+                },
+                update: async params => calls.push(['update', params]),
+              },
+            },
+          },
+        },
+      }
+      await ProductionTrustedKeysService.prototype.add.call(
+        instance,
+        OS_UPDATE_SIGNERS[0],
+        'Publisher',
+        context,
+      )
+      assert.deepEqual(calls, [
+        [
+          'add',
+          {
+            name: 'Publisher',
+            publicKeys: [OS_UPDATE_SIGNERS[0]],
+            trustFor: context,
+          },
+        ],
+      ])
+      assert.equal(instance.saving(), false)
+    }
+  }
+})
+
 function addKeyFixture(t, reject = false) {
   const mutations = []
   const closed = []
@@ -1837,7 +1883,7 @@ function registriesFixture({
       rpc: {
         server: {
           trustedKeys: {
-            remove: async ({ id }) => calls.push(['remove key', id]),
+            removeMany: async ({ ids }) => calls.push(['remove keys', ids]),
           },
         },
       },
@@ -1933,11 +1979,29 @@ test('removing a registry offers to remove only the keys it left unoffered', asy
       ['confirm', 'Remove registry?'],
       ['remove', 'https://other.test'],
       ...(orphaned.length ? [['notice', 'Remove unused keys?', orphaned]] : []),
-      ...(orphaned.length && cleanup
-        ? orphaned.map(id => ['remove key', id])
-        : []),
+      ...(orphaned.length && cleanup ? [['remove keys', orphaned]] : []),
     ])
   }
+})
+
+test('failed registry-key cleanup submits one batch without per-key retries', async () => {
+  const { instance, calls } = registriesFixture({
+    orphaned: ['first', 'last-os'],
+  })
+  instance.api.rpc.server.trustedKeys.removeMany = async ({ ids }) => {
+    calls.push(['remove keys', ids])
+    throw new Error('Last OS key')
+  }
+  await RegistriesPage.prototype.remove.call(instance, {
+    url: 'https://other.test',
+    os: false,
+  })
+  assert.deepEqual(calls.at(-1), ['remove keys', ['first', 'last-os']])
+  assert.equal(
+    calls.filter(([operation]) => operation === 'remove keys').length,
+    1,
+  )
+  assert.equal(instance.saving(), false)
 })
 
 test('connecting a registry asks for no approvals and resolves to the keys it trusted', async () => {

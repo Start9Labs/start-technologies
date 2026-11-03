@@ -468,6 +468,136 @@ mod tests {
     }
 
     #[test]
+    fn fresh_public_keys_are_removable_without_observed_listings() {
+        let account =
+            crate::account::AccountInfo::new("password", std::time::SystemTime::now(), None)
+                .unwrap();
+        let public = Public::init(&account, false, None, None).unwrap();
+        assert!(public.server_info.registry_keys.is_empty());
+        assert!(
+            public
+                .server_info
+                .trusted_keys
+                .values()
+                .all(|key| key.removable)
+        );
+    }
+
+    #[test]
+    fn import_grants_requested_trust_to_new_and_concurrently_imported_keys() {
+        let source = include_str!("../sign/fixtures/ed25519-signers.asc");
+        for context in [TrustContext::Marketplace, TrustContext::Os] {
+            for other_permission in [false, true] {
+                let mut public = public();
+                let imported = parse_public_keys(&[source.into()]).unwrap();
+                let existing = imported.keys.first().unwrap().clone();
+                let id = existing.interned_der64();
+                mutate_public_keys(&mut public, |keys| {
+                    import_individual_keys(keys, "Original".into(), vec![existing].into(), None)
+                })
+                .unwrap();
+                let entry = public.server_info.trusted_keys.get_mut(&id).unwrap();
+                match context {
+                    TrustContext::Marketplace => {
+                        entry.marketplace = false;
+                        entry.os = other_permission;
+                    }
+                    TrustContext::Os => {
+                        entry.marketplace = other_permission;
+                        entry.os = false;
+                    }
+                }
+                entry.origin = "https://original.example".into();
+                entry.origin_registry = Some(RegistryIdentity {
+                    name: Some("Original registry".into()),
+                    icon: None,
+                });
+                let before = entry.clone();
+                let exports = imported
+                    .gpg_exports
+                    .iter()
+                    .filter(|export| export.identities.contains_key(&id))
+                    .cloned()
+                    .collect();
+                let res = mutate_public_keys(&mut public, |keys| {
+                    import_individual_keys(keys, "Replacement".into(), imported, Some(context))
+                })
+                .unwrap();
+                assert_eq!(res.existing, BTreeSet::from([id.clone()]));
+                assert_eq!(res.added.len(), 1);
+                let (marketplace, os) = match context {
+                    TrustContext::Marketplace => (true, other_permission),
+                    TrustContext::Os => (other_permission, true),
+                };
+                assert_eq!(
+                    public.server_info.trusted_keys[&id],
+                    TrustedKey {
+                        marketplace,
+                        os,
+                        gpg_exports: exports,
+                        ..before
+                    }
+                );
+                for added in res.added {
+                    let entry = &public.server_info.trusted_keys[&added];
+                    assert!(entry.marketplace);
+                    assert_eq!(entry.os, matches!(context, TrustContext::Os));
+                    assert!(entry.removable);
+                    assert_eq!(entry.name, "Replacement");
+                    assert_eq!(entry.origin, "manual");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn batch_removal_rolls_back_on_protected_missing_or_last_os_keys() {
+        for refusal in ["protected", "missing", "last-os"] {
+            let mut public = public();
+            let mut requested: BTreeSet<_> =
+                public.server_info.trusted_keys.keys().cloned().collect();
+            if refusal == "protected" {
+                let protected = public.server_info.trusted_keys[requested.last().unwrap()]
+                    .public_key
+                    .clone();
+                public.ui =
+                    imbl_value::json!({ "registries": { "https://registry.example": null } });
+                public.server_info.registry_keys.insert(
+                    "https://registry.example".into(),
+                    BTreeSet::from([protected]),
+                );
+                mutate_public_keys(&mut public, |_| Ok(())).unwrap();
+            } else if refusal == "missing" {
+                requested.insert("zz-missing".into());
+            }
+            let before = to_value(&public).unwrap();
+            assert!(mutate_public_keys(&mut public, |keys| remove_keys(keys, requested)).is_err());
+            assert_eq!(to_value(&public).unwrap(), before, "{refusal}");
+        }
+    }
+
+    #[test]
+    fn batch_removal_preserves_unrequested_keys_and_accepts_empty_requests() {
+        let mut public = public();
+        let requested: BTreeSet<_> = public
+            .server_info
+            .trusted_keys
+            .iter()
+            .filter(|(_, key)| !key.os)
+            .map(|(id, _)| id.clone())
+            .collect();
+        assert_eq!(requested.len(), 2);
+        let mut expected = public.server_info.trusted_keys.clone();
+        for id in &requested {
+            expected.remove(id);
+        }
+        mutate_public_keys(&mut public, |keys| remove_keys(keys, requested)).unwrap();
+        assert_eq!(public.server_info.trusted_keys, expected);
+        mutate_public_keys(&mut public, |keys| remove_keys(keys, BTreeSet::new())).unwrap();
+        assert_eq!(public.server_info.trusted_keys, expected);
+    }
+
+    #[test]
     fn connection_trusts_new_keys_for_packages_only() {
         let mut public = public();
         let url = registry_url("https://registry.example/base/").unwrap();
@@ -611,7 +741,7 @@ mod tests {
         let key = key(43);
         let id = key.interned_der64();
         mutate_public_keys(&mut public, |keys| {
-            import_individual_keys(keys, "Manual".into(), vec![key.clone()].into())
+            import_individual_keys(keys, "Manual".into(), vec![key.clone()].into(), None)
         })
         .unwrap();
         public
@@ -774,7 +904,12 @@ mod tests {
         let signer = info.trust_signers.values().next().unwrap();
         let manual = signer.keys.first().unwrap();
         mutate_public_keys(&mut public, |keys| {
-            import_individual_keys(keys, "Manual name".into(), vec![manual.clone()].into())
+            import_individual_keys(
+                keys,
+                "Manual name".into(),
+                vec![manual.clone()].into(),
+                None,
+            )
         })
         .unwrap();
         let entry = public
@@ -928,7 +1063,7 @@ mod tests {
         let (listed, unlisted) = (key(60), key(61));
         assert!(set_os_registry_public(&mut public, &url).is_err());
         mutate_public_keys(&mut public, |keys| {
-            import_individual_keys(keys, "Manual".into(), vec![unlisted.clone()].into())
+            import_individual_keys(keys, "Manual".into(), vec![unlisted.clone()].into(), None)
         })
         .unwrap();
         let info = RegistryInfo {
@@ -966,7 +1101,7 @@ mod tests {
         let second = registry_url("https://second.example").unwrap();
         let (shared, own, manual) = (key(70), key(71), key(72));
         mutate_public_keys(&mut public, |keys| {
-            import_individual_keys(keys, "Manual".into(), vec![manual.clone()].into())
+            import_individual_keys(keys, "Manual".into(), vec![manual.clone()].into(), None)
         })
         .unwrap();
         connect_public(

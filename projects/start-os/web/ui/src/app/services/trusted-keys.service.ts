@@ -81,27 +81,14 @@ export class TrustedKeysService extends MarketplaceTrust {
     await this.update(id, { ...key, [context]: trusted })
   }
 
-  /** Adds an unknown key, which also trusts it for packages. */
   async add(id: string, name: string, context: TrustContext): Promise<void> {
-    await this.save(async () => {
-      const { added } = await this.api.rpc.server.trustedKeys.add({
+    await this.save(() =>
+      this.api.rpc.server.trustedKeys.add({
         name,
         publicKeys: [parsePemPublicKey(id)],
-      })
-
-      if (context === 'os') {
-        await Promise.all(
-          added.map(key =>
-            this.api.rpc.server.trustedKeys.update({
-              id: key,
-              name,
-              marketplace: true,
-              os: true,
-            }),
-          ),
-        )
-      }
-    })
+        trustFor: context,
+      }),
+    )
   }
 
   viewKey(id: string): void {
