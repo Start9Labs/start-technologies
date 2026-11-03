@@ -36,10 +36,8 @@ function fixture(t) {
   writeFileSync(join(root, 'package-lock.json'), '{}')
   const sdk = join(root, 'node_modules/@start9labs/start-sdk')
   mkdirSync(sdk, { recursive: true })
-  symlinkSync(
-    join(dirname(source), 'check-cli.mjs'),
-    join(sdk, 'check-cli.mjs'),
-  )
+  for (const script of ['check-cli.mjs', 'pack.mjs'])
+    symlinkSync(join(dirname(source), script), join(sdk, script))
   writeFileSync(
     join(root, 'Makefile'),
     `TS_CHECK := echo typecheck >> steps

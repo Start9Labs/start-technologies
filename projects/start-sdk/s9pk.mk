@@ -71,12 +71,12 @@ riscv riscv64: arch/riscv64
 $(BASE_NAME).s9pk: $(INGREDIENTS) $(GIT_DEPS) | check-deps check-cli
 	@$(MAKE) --no-print-directory ingredients
 	@echo "   Packing '$@'..."
-	start-cli s9pk pack -o $@
+	node $(SDK_DIR)/pack.mjs $@
 
 $(BASE_NAME)_%.s9pk: $(INGREDIENTS) $(GIT_DEPS) | check-deps check-cli
 	@$(MAKE) --no-print-directory ingredients
 	@echo "   Packing '$@'..."
-	start-cli s9pk pack --arch=$* -o $@
+	node $(SDK_DIR)/pack.mjs $@ --arch=$*
 
 ingredients: $(INGREDIENTS)
 	@echo "   Re-evaluating ingredients..."
