@@ -12,7 +12,30 @@ On first install, StartOS surfaces two setup tasks under the service. **Both mus
 
 Run the **Configure Registry** action to set the registry's display name (max 32 characters), an optional icon, and an optional description. This is what users will see when they browse your registry from another StartOS device; the description appears above the registry's services and may use markdown.
 
+Use the description to identify who runs the registry, how to contact them, what packages it carries, and what support users can expect. Include a link to your package-signing public keys and instructions for trusting them.
+
 The registry's hostnames, listen address, Tor proxy, and data directory are managed by StartOS automatically — you don't configure them by hand. As the service's network addresses change (e.g. you add a clearnet domain to the API interface), the configured hostnames update to match.
+
+### Publish signing keys
+
+For a package to be recognized as trusted, a user's server must trust at least one key that signed it for service packages. Publish those public keys in PEM or armored GPG format, and link users to the StartOS [trust settings](/start-os/trusted-keys.html) for importing them. A registry signer's permission to publish and a user's decision to trust its signatures are separate.
+
+Publish the public keys and their fingerprints through an independent source users already trust, such as your website or GitHub profile, and link that source from the description. Users should confirm the key there before importing it; a key supplied only by the registry cannot establish authenticity if the registry is compromised. Publish public keys only, never private keys.
+
+For example, replace these links and the fingerprint with your own:
+
+```markdown
+Maintained by Example Community. Contact: support@example.com.
+
+Experimental community packages; support is best-effort through our
+[issue tracker](https://github.com/example/packages/issues).
+
+Our [package-signing public key](https://example.com/signing-key.pem)
+has fingerprint `<fingerprint>`. Confirm it through our
+[GitHub profile](https://github.com/example) before importing it into
+[StartOS trust settings](https://docs.start9.com/start-os/trusted-keys.html)
+for service packages.
+```
 
 ## 3. Add the first administrator
 
