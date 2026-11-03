@@ -31,6 +31,8 @@ switchMap(() => from(this.load()).pipe(catchError(...))), share())` → `data = 
   - Monorepo: `TaskService.run(task, 'Saving')` (`@start9labs/shared`) — opens a
     `TuiNotificationMiddleService` loader, catches into `ErrorService` (negative toast, code-0
     network mapping, optional support link), returns `Promise<boolean>` success.
+    Use `TaskService.runInline(task)` when the control already shows progress; it shares the
+    error handling and success result without opening a blocking loader.
   - start-wrt: `ActionService.run(action, { loading, success, fail, restart })` — same idea,
     reconnect-aware.
   - Errors classify as `HttpError` (transport) / `RpcError` (application), shaped alike so the

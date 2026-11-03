@@ -117,6 +117,7 @@ impl std::fmt::Display for MinMax {
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallParams {
+    pub accept_signers: Option<crate::registry::signer::AcceptSigners>,
     registry: Url,
     id: PackageId,
     version: VersionString,
@@ -136,6 +137,7 @@ pub async fn install(
         id,
         version,
         trust,
+        accept_signers,
     }: InstallParams,
 ) -> Result<(), Error> {
     let package: GetPackageResponse = from_value(
@@ -171,6 +173,9 @@ pub async fn install(
         trusted_keys::required(&ctx, TrustContext::Marketplace, trust).await?,
     );
     asset.validate_all(SIG_CONTEXT, policy)?;
+    if let Some(policy) = accept_signers {
+        asset.validate(SIG_CONTEXT, policy)?;
+    }
 
     let progress_tracker = FullProgressTracker::new();
     let download_progress = progress_tracker.add_phase("Downloading".into(), Some(100));
@@ -192,6 +197,7 @@ pub async fn install(
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SideloadParams {
+    pub accept_signers: Option<crate::registry::signer::AcceptSigners>,
     /// Accepts an untrusted signer without skipping signature or integrity verification.
     #[serde(default)]
     trust: bool,
@@ -216,7 +222,11 @@ rpc_toolkit::ts_export!(SideloadResponse, namespaces = [""]);
 #[instrument(skip_all)]
 pub async fn sideload(
     ctx: RpcContext,
-    SideloadParams { signer, trust }: SideloadParams,
+    SideloadParams {
+        signer,
+        trust,
+        accept_signers,
+    }: SideloadParams,
 ) -> Result<SideloadResponse, Error> {
     let (err_send, err_recv) = oneshot::channel::<Error>();
     // fused: the select! loop below re-polls this, which panics on a bare oneshot once resolved
@@ -284,7 +294,17 @@ pub async fn sideload(
     tokio::spawn(async move {
         if let Err(e) = async {
             let key = ctx.db.peek().await.into_private().into_developer_key();
-            let accepted = trusted_keys::required(&ctx, TrustContext::Marketplace, trust).await?;
+            let server_policy = trusted_keys::signer_policy(
+                trusted_keys::required(&ctx, TrustContext::Marketplace, trust).await?,
+            );
+            let accepted = match (server_policy, accept_signers) {
+                (Some(server), Some(client)) => {
+                    Some(crate::registry::signer::AcceptSigners::All(vec![
+                        server, client,
+                    ]))
+                }
+                (server, client) => server.or(client),
+            };
 
             ctx.services
                 .install(
@@ -294,7 +314,7 @@ pub async fn sideload(
                             file.clone(),
                             || Ok(key.de()?.0),
                             Some(&progress_tracker),
-                            accepted.as_deref(),
+                            accepted,
                         )
                     },
                     None,
@@ -462,6 +482,7 @@ pub async fn cli_install(
     let method = parent_method.into_iter().chain(method).collect_vec();
     match params {
         CliInstallParams::Sideload { path, trust } => {
+            let accept_signers = local_sideload_policy(&path).await?;
             let file = open_file(path).await?;
 
             let SideloadResponse { upload, progress } = from_value::<SideloadResponse>(
@@ -470,7 +491,7 @@ pub async fn cli_install(
                         .into_iter()
                         .chain(std::iter::once(&"sideload"))
                         .join("."),
-                    imbl_value::json!({ "trust": trust }),
+                    imbl_value::json!({ "trust": trust, "acceptSigners": accept_signers }),
                 )
                 .await?,
             )?;
@@ -595,12 +616,35 @@ pub async fn cli_install(
                     registry,
                     version,
                     trust,
+                    accept_signers: None,
                 })?,
             )
             .await?;
         }
     }
     Ok(())
+}
+
+async fn local_sideload_policy(
+    path: &PathBuf,
+) -> Result<Option<crate::registry::signer::AcceptSigners>, Error> {
+    use tokio::io::AsyncReadExt;
+
+    use crate::registry::signer::AcceptSigners;
+    let mut magic = [0; 3];
+    open_file(path).await?.read_exact(&mut magic).await?;
+    if magic == crate::s9pk::v2::compat::MAGIC_AND_VERSION {
+        return Ok(None);
+    }
+    let package = crate::s9pk::S9pk::open(path, None).await?;
+    Ok(Some(AcceptSigners::Any(
+        package
+            .signatures()
+            .await?
+            .into_keys()
+            .map(AcceptSigners::Signer)
+            .collect(),
+    )))
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]

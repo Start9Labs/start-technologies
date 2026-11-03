@@ -220,6 +220,26 @@ impl FileSource for Arc<[u8]> {
     }
 }
 
+pub(crate) async fn checked_end(
+    source: &impl ArchiveSource,
+    position: u64,
+    size: u64,
+) -> Result<u64, Error> {
+    let end = position.checked_add(size).ok_or_else(|| {
+        Error::new(
+            eyre!("{}", t!("s9pk.source.invalid-range")),
+            ErrorKind::ParseS9pk,
+        )
+    })?;
+    ensure_code!(
+        source.size().await.is_none_or(|limit| end <= limit),
+        ErrorKind::ParseS9pk,
+        "{}",
+        t!("s9pk.source.invalid-range")
+    );
+    Ok(end)
+}
+
 pub trait ArchiveSource: Send + Sync + Sized + 'static {
     type FetchReader: AsyncRead + Unpin + Send;
     type FetchAllReader: AsyncRead + Unpin + Send;
@@ -290,6 +310,9 @@ impl<T: ArchiveSource> ArchiveSource for Arc<T> {
 }
 
 impl ArchiveSource for Arc<[u8]> {
+    async fn size(&self) -> Option<u64> {
+        Some(self.len() as u64)
+    }
     type FetchReader = tokio::io::Take<std::io::Cursor<Self>>;
     type FetchAllReader = std::io::Cursor<Self>;
     async fn fetch_all(&self) -> Result<Self::FetchAllReader, Error> {
@@ -311,6 +334,9 @@ pub struct Section<S> {
     size: u64,
 }
 impl<S> Section<S> {
+    pub(crate) fn end(&self) -> u64 {
+        self.position + self.size
+    }
     pub fn source(&self) -> &S {
         &self.source
     }

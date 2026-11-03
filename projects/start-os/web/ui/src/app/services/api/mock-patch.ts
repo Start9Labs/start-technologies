@@ -40,6 +40,37 @@ function mockService(
   }
 }
 
+function mockStart9Key(
+  name: string,
+  publicKey: string,
+  userIds: string[],
+  enabled: boolean,
+  fingerprint?: string,
+): T.TrustedKey {
+  return {
+    name,
+    origin: 'https://registry.start9.com',
+    originRegistry: { name: 'Start9 Registry', icon: null },
+    publicKey,
+    gpgExports: userIds.length
+      ? [
+          {
+            armored: '',
+            fingerprints: [],
+            userIds,
+            identities: { [publicKey]: userIds },
+            keyFingerprints: fingerprint ? { [publicKey]: [fingerprint] } : {},
+          },
+        ]
+      : [],
+    contact: [],
+    addedAt: '2026-06-02T17:00:00.000Z',
+    removable: false,
+    marketplace: enabled,
+    os: enabled,
+  }
+}
+
 export const mockPatchData: DataModel = {
   sharedVolumes: {},
   ui: {
@@ -54,30 +85,74 @@ export const mockPatchData: DataModel = {
   },
   serverInfo: {
     id: Mock.ServerId,
+    registryKeys: {
+      'https://registry.start9.com': [
+        'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=',
+        'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
+        'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
+        'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=',
+      ],
+      'https://community-registry.start9.com': [
+        'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
+      ],
+    },
     trustedKeys: {
-      start9: {
-        name: 'Start9',
+      'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=': {
+        name: 'Package publisher',
+        origin: 'https://registry.start9.com',
+        originRegistry: { name: 'Start9 Registry', icon: null },
+        publicKey:
+          'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=',
         gpgExports: [],
-        publicKeys: [
-          'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
-          'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
-          'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=',
-        ],
-        removable: false,
-        marketplace: true,
-        os: true,
-      },
-      'start9-alpha': {
-        name: 'Start9 Alpha',
-        gpgExports: [],
-        publicKeys: [
-          'MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=',
-          'MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=',
-        ],
+        contact: [{ email: 'packages@example.com' }],
+        addedAt: '2026-10-30T12:00:00.000Z',
         removable: false,
         marketplace: false,
         os: false,
       },
+      'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=':
+        mockStart9Key(
+          'drbonez',
+          'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
+          [
+            'Aiden McClelland <aiden@start9.com>',
+            'Aiden McClelland <me@drbonez.dev>',
+            'Aiden McClelland <aiden@mcclelland.family>',
+            'Aiden McClelland <aiden@tenletters.net>',
+          ],
+          true,
+          'b416c0e67b9df3f1718480ae7cffda41ca66056a',
+        ),
+      'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=':
+        mockStart9Key(
+          'matthill',
+          'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
+          ['Matt Hill <matthill@start9.com>'],
+          true,
+          'a969c8eba8b13613d2568a85ee395832e45a6664',
+        ),
+      'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=':
+        mockStart9Key(
+          'Start9',
+          'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=',
+          ['Start9 <security@start9.com>'],
+          true,
+          '5456dbff1b9df905041fa7765259adfc2d63c217',
+        ),
+      'MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=':
+        mockStart9Key(
+          'Start9 Alpha',
+          'MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=',
+          [],
+          false,
+        ),
+      'MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=':
+        mockStart9Key(
+          'Community builds',
+          'MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=',
+          [],
+          false,
+        ),
     },
     version,
     lastBackup: new Date(new Date().valueOf() - 604800001).toISOString(),

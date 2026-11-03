@@ -90,7 +90,16 @@ registry.
 
 - `migrations` — applied migration names (`registry/migrations`).
 - `admins` — set of admin `Guid`s.
-- `index: FullIndex` — `{ name, icon, package: PackageIndex, os: OsIndex, signers: BTreeMap<Guid, SignerInfo> }`.
+- `index: FullIndex` — `{ name, icon, description, package: PackageIndex, os: OsIndex, signers: BTreeMap<Guid, SignerInfo>, trustSigners: Set<Guid> }`.
+
+The admin-only RPC `registry.info.set-trust-signers` accepts `{ signers: Guid[] }`,
+selecting a subset of the existing signer records. `registry.info` returns the
+selected IDs and complete records as `trustSigners: Record<Guid, SignerInfo>`.
+Signer records retain their original GPG exports and per-key identities and
+fingerprints. An empty selection proposes no keys. StartOS trusts newly offered
+keys for packages when connecting; keys discovered on later package or OS
+update requests start disabled, with a notification. StartOS trusts a registry's keys for OS updates automatically only when a user
+chooses it for StartOS updates.
 
 Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hold versions, dependency `VersionRange`s, and `RegistryAsset`s. Assets carry **Blake3 commitments** (`sign/commitment/blake3`) for content addressing and integrity, and are signed by registered signers.
 

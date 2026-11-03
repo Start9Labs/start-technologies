@@ -251,6 +251,37 @@ export const ActionResultValue: z.ZodUnion<
   .meta({
     id: 'ActionResultValue',
   })
+
+/**
+ * Keys an import added, and keys it found already present.
+ */
+export const AddTrustedKeyRes: z.ZodObject<{
+  /**
+   * Trusted for packages.
+   */
+  added: z.ZodArray<z.ZodString>
+  /**
+   * GPG identities merged; explicit `trustFor` grants the requested permission.
+   */
+  existing: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({
+  /**
+   * Trusted for packages.
+   */
+  added: z.array(z.string()).meta({
+    description: 'Trusted for packages.',
+  }),
+  /**
+   * GPG identities merged; explicit `trustFor` grants the requested permission.
+   */
+  existing: z.array(z.string()).meta({
+    description:
+      'GPG identities merged; explicit `trustFor` grants the requested permission.',
+  }),
+}).meta({
+  id: 'AddTrustedKeyRes',
+  description: 'Keys an import added, and keys it found already present.',
+})
 export const AnySignature: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'AnySignature',
 })
@@ -392,6 +423,18 @@ export const CifsAddParams: z.ZodObject<{
   password: wire(z.string().nullable().optional(), z.string().nullable()),
 }).meta({
   id: 'CifsAddParams',
+})
+export const ConnectRegistryParams: z.ZodObject<{
+  url: z.ZodString
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  url: z.string(),
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'ConnectRegistryParams',
 })
 export const ContactInfo: z.ZodUnion<
   readonly [
@@ -738,6 +781,83 @@ export const GitHash: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 })
 export const Governor: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Governor',
+})
+
+/**
+ * An original public-key export and its self-certified identity claims.
+ */
+export const GpgPublicKeyExport: z.ZodObject<{
+  /**
+   * Original armor, preserving all certificate packets and headers.
+   */
+  armored: z.ZodString
+  /**
+   * Primary-key fingerprints of the certificates in this export.
+   */
+  fingerprints: z.ZodArray<z.ZodString>
+  /**
+   * Self-certified user IDs containing names, comments, and email addresses.
+   */
+  userIds: z.ZodArray<z.ZodString>
+  /**
+   * Self-certified claims indexed by the signing key's canonical DER encoding.
+   */
+  identities: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
+  >
+  /**
+   * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
+   */
+  keyFingerprints: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Original armor, preserving all certificate packets and headers.
+   */
+  armored: z.string().meta({
+    description:
+      'Original armor, preserving all certificate packets and headers.',
+  }),
+  /**
+   * Primary-key fingerprints of the certificates in this export.
+   */
+  fingerprints: z.array(z.string()).meta({
+    description: 'Primary-key fingerprints of the certificates in this export.',
+  }),
+  /**
+   * Self-certified user IDs containing names, comments, and email addresses.
+   */
+  userIds: z.array(z.string()).meta({
+    description:
+      'Self-certified user IDs containing names, comments, and email addresses.',
+  }),
+  /**
+   * Self-certified claims indexed by the signing key's canonical DER encoding.
+   */
+  identities: wire(
+    z.record(z.string(), z.array(z.string())).optional(),
+    z.record(z.string(), z.array(z.string())),
+  ).meta({
+    description:
+      "Self-certified claims indexed by the signing key's canonical DER encoding.",
+  }),
+  /**
+   * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
+   */
+  keyFingerprints: wire(
+    z.record(z.string(), z.array(z.string())).optional(),
+    z.record(z.string(), z.array(z.string())),
+  ).meta({
+    description:
+      "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+  }),
+}).meta({
+  id: 'GpgPublicKeyExport',
+  description:
+    'An original public-key export and its self-certified identity claims.',
 })
 export const Guid: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Guid',
@@ -1114,6 +1234,11 @@ export const RemoveTrustedKeyParams: z.ZodObject<{ id: z.ZodString }> =
   /* @__PURE__ */ object({ id: z.string() }).meta({
     id: 'RemoveTrustedKeyParams',
   })
+export const RemoveTrustedKeysParams: z.ZodObject<{
+  ids: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({ ids: z.array(z.string()) }).meta({
+  id: 'RemoveTrustedKeysParams',
+})
 export const RemoveVersionParams: z.ZodObject<{ version: z.ZodString }> =
   /* @__PURE__ */ object({ version: z.string() }).meta({
     id: 'RemoveVersionParams',
@@ -1272,22 +1397,6 @@ export const ShutdownParams: z.ZodObject<{
 }).meta({
   id: 'ShutdownParams',
 })
-export const SideloadParams: z.ZodObject<{
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-}> = /* @__PURE__ */ object({
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Accepts an untrusted signer without skipping signature or integrity verification.',
-  }),
-}).meta({
-  id: 'SideloadParams',
-})
 
 /**
  * So a signal strength is a number between 0-100, I want the null option to be 0 since there is no signal
@@ -1381,6 +1490,10 @@ export const TrustedOsUpdateSigner: z.ZodObject<{ label: z.ZodString }> =
   /* @__PURE__ */ object({ label: z.string() }).meta({
     id: 'TrustedOsUpdateSigner',
   })
+export const TrustedRegistryParams: z.ZodObject<{ url: z.ZodString }> =
+  /* @__PURE__ */ object({ url: z.string() }).meta({
+    id: 'TrustedRegistryParams',
+  })
 export const UiParams: z.ZodObject<{
   pointer: z.ZodString
   value: z.ZodUnknown
@@ -1389,7 +1502,7 @@ export const UiParams: z.ZodObject<{
 })
 
 /**
- * Changes a keyring's name and both trust selections atomically.
+ * Changes a key's name and both trust selections atomically.
  */
 export const UpdateTrustedKeyParams: z.ZodObject<{
   id: z.ZodString
@@ -1403,7 +1516,7 @@ export const UpdateTrustedKeyParams: z.ZodObject<{
   os: z.boolean(),
 }).meta({
   id: 'UpdateTrustedKeyParams',
-  description: "Changes a keyring's name and both trust selections atomically.",
+  description: "Changes a key's name and both trust selections atomically.",
 })
 
 /**
@@ -1624,10 +1737,18 @@ export const AddMirrorParams: z.ZodObject<{
   url: z.ZodString
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
 }> = /* @__PURE__ */ object({
   url: z.string(),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
 }).meta({
   id: 'AddMirrorParams',
 })
@@ -1635,10 +1756,18 @@ export const AddPackageParams: z.ZodObject<{
   urls: z.ZodArray<z.ZodString>
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
 }> = /* @__PURE__ */ object({
   urls: z.array(z.string()),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
 }).meta({
   id: 'AddPackageParams',
 })
@@ -1701,18 +1830,66 @@ export const AddPublicDomainParams: z.ZodObject<{
 }).meta({
   id: 'AddPublicDomainParams',
 })
+export const AddSignerParams: z.ZodObject<{
+  name: z.ZodString
+  contact: z.ZodArray<typeof ContactInfo>
+  /**
+   * Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.
+   */
+  keys: z.ZodArray<z.ZodString>
+  /**
+   * Retained certificates; `keys` determines the selected signing keys.
+   */
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  contact: z.array(ContactInfo),
+  /**
+   * Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.
+   */
+  keys: z.array(z.string()).meta({
+    description:
+      'Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.',
+  }),
+  /**
+   * Retained certificates; `keys` determines the selected signing keys.
+   */
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ).meta({
+    description:
+      'Retained certificates; `keys` determines the selected signing keys.',
+  }),
+}).meta({
+  id: 'AddSignerParams',
+})
 export const AddTrustedKeyParams: z.ZodObject<{
+  /**
+   * Blank names each GPG key after its identity.
+   */
   name: z.ZodString
   /**
    * Ed25519 public keys in PEM or armored GPG format.
    */
   publicKeys: z.ZodArray<z.ZodString>
   /**
-   * New entries are enabled in this context and in the Marketplace.
+   * Grants this permission to every imported key, including existing keys.
    */
-  context: typeof TrustContext
+  trustFor: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof TrustContext>>,
+    z.ZodNullable<typeof TrustContext>
+  >
 }> = /* @__PURE__ */ object({
-  name: z.string(),
+  /**
+   * Blank names each GPG key after its identity.
+   */
+  name: z.string().meta({
+    description: 'Blank names each GPG key after its identity.',
+  }),
   /**
    * Ed25519 public keys in PEM or armored GPG format.
    */
@@ -1720,11 +1897,14 @@ export const AddTrustedKeyParams: z.ZodObject<{
     description: 'Ed25519 public keys in PEM or armored GPG format.',
   }),
   /**
-   * New entries are enabled in this context and in the Marketplace.
+   * Grants this permission to every imported key, including existing keys.
    */
-  context: TrustContext.meta({
+  trustFor: wire(
+    TrustContext.nullable().optional(),
+    TrustContext.nullable(),
+  ).meta({
     description:
-      'New entries are enabled in this context and in the Marketplace.',
+      'Grants this permission to every imported key, including existing keys.',
   }),
 }).meta({
   id: 'AddTrustedKeyParams',
@@ -2108,14 +2288,14 @@ export const EditSignerParams: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   addContact: z.ZodArray<typeof ContactInfo>
-  addKey: z.ZodArray<typeof AnyVerifyingKey>
+  addKey: z.ZodArray<z.ZodString>
   removeContact: z.ZodArray<typeof ContactInfo>
   removeKey: z.ZodArray<typeof AnyVerifyingKey>
 }> = /* @__PURE__ */ object({
   id: Guid,
   setName: wire(z.string().nullable().optional(), z.string().nullable()),
   addContact: z.array(ContactInfo),
-  addKey: z.array(AnyVerifyingKey),
+  addKey: z.array(z.string()),
   removeContact: z.array(ContactInfo),
   removeKey: z.array(AnyVerifyingKey),
 }).meta({
@@ -2459,28 +2639,6 @@ export const InitAcmeParams: z.ZodObject<{
   contact: z.array(z.string()),
 }).meta({
   id: 'InitAcmeParams',
-})
-export const InstallParams: z.ZodObject<{
-  registry: z.ZodString
-  id: typeof PackageId
-  version: typeof Version
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-}> = /* @__PURE__ */ object({
-  registry: z.string(),
-  id: PackageId,
-  version: Version,
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Accepts an untrusted signer without skipping signature or integrity verification.',
-  }),
-}).meta({
-  id: 'InstallParams',
 })
 export const InstalledVersionParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
@@ -3254,6 +3412,11 @@ export const SetStaticDnsParams: z.ZodObject<{
 }).meta({
   id: 'SetStaticDnsParams',
 })
+export const SetTrustSignersParams: z.ZodObject<{
+  signers: z.ZodArray<typeof Guid>
+}> = /* @__PURE__ */ object({ signers: z.array(Guid) }).meta({
+  id: 'SetTrustSignersParams',
+})
 export const SharedVolumeInspection: z.ZodObject<{
   availability: typeof SharedVolumeAvailability
   available: z.ZodCodec<
@@ -3309,10 +3472,18 @@ export const SignerInfo: z.ZodObject<{
   name: z.ZodString
   contact: z.ZodArray<typeof ContactInfo>
   keys: z.ZodArray<typeof AnyVerifyingKey>
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
 }> = /* @__PURE__ */ object({
   name: z.string(),
   contact: z.array(ContactInfo),
   keys: z.array(AnyVerifyingKey),
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ),
 }).meta({
   id: 'SignerInfo',
 })
@@ -3754,6 +3925,36 @@ export const HostnameInfo: z.ZodObject<{
 }).meta({
   id: 'HostnameInfo',
 })
+export const InstallParams: z.ZodObject<{
+  acceptSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
+    z.ZodNullable<typeof AcceptSigners>
+  >
+  registry: z.ZodString
+  id: typeof PackageId
+  version: typeof Version
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  acceptSigners: wire(
+    AcceptSigners.nullable().optional(),
+    AcceptSigners.nullable(),
+  ),
+  registry: z.string(),
+  id: PackageId,
+  version: Version,
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
+}).meta({
+  id: 'InstallParams',
+})
 export const Metrics: z.ZodObject<{
   general: typeof MetricsGeneral
   memory: typeof MetricsMemory
@@ -4051,6 +4252,13 @@ export const RegistryInfo: z.ZodObject<{
     z.ZodNullable<typeof LocaleString>
   >
   categories: z.ZodRecord<z.ZodString, typeof Category>
+  /**
+   * Registry-selected signers, not an assertion of trust.
+   */
+  trustSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof SignerInfo>>,
+    z.ZodRecord<z.ZodString, typeof SignerInfo>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -4064,6 +4272,15 @@ export const RegistryInfo: z.ZodObject<{
     description: "Markdown, shown above the registry's services.",
   }),
   categories: z.record(z.string(), Category),
+  /**
+   * Registry-selected signers, not an assertion of trust.
+   */
+  trustSigners: wire(
+    z.record(z.string(), SignerInfo).optional(),
+    z.record(z.string(), SignerInfo),
+  ).meta({
+    description: 'Registry-selected signers, not an assertion of trust.',
+  }),
 }).meta({
   id: 'RegistryInfo',
 })
@@ -4126,6 +4343,30 @@ export const Sessions: z.ZodObject<{
 }).meta({
   id: 'Sessions',
   description: "The server's sessions, by credential type.",
+})
+export const SideloadParams: z.ZodObject<{
+  acceptSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
+    z.ZodNullable<typeof AcceptSigners>
+  >
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  acceptSigners: wire(
+    AcceptSigners.nullable().optional(),
+    AcceptSigners.nullable(),
+  ),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
+}).meta({
+  id: 'SideloadParams',
 })
 export const UpdateSystemParams: z.ZodObject<{
   registry: z.ZodString
@@ -4707,6 +4948,10 @@ export const FullIndex: z.ZodObject<{
   package: typeof PackageIndex
   os: typeof OsIndex
   signers: z.ZodRecord<z.ZodString, typeof SignerInfo>
+  trustSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof Guid>>,
+    z.ZodArray<typeof Guid>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -4717,6 +4962,7 @@ export const FullIndex: z.ZodObject<{
   package: PackageIndex,
   os: OsIndex,
   signers: z.record(z.string(), SignerInfo),
+  trustSigners: wire(z.array(Guid).optional(), z.array(Guid)),
 }).meta({
   id: 'FullIndex',
 })
@@ -5735,7 +5981,7 @@ export const Api = {
                 add: {
                   _PARAMS: /* @__PURE__ */ z.intersection(
                     z.intersection(empty, RegistryUrlParams),
-                    SignerInfo,
+                    AddSignerParams,
                   ),
                   _RETURN: /* @__PURE__ */ Guid,
                 },
@@ -5885,6 +6131,24 @@ export const Api = {
                   ),
                 ),
                 SetNameParams,
+              ),
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            'set-trust-signers': {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  z.intersection(empty, RegistryUrlParams),
+                  z.intersection(
+                    object({
+                      format: wire(
+                        IoFormat.nullable().optional(),
+                        IoFormat.nullable(),
+                      ),
+                    }),
+                    empty,
+                  ),
+                ),
+                SetTrustSignersParams,
               ),
               _RETURN: /* @__PURE__ */ z.null(),
             },
@@ -6662,11 +6926,27 @@ export const Api = {
           _CHILDREN: {
             add: {
               _PARAMS: /* @__PURE__ */ AddTrustedKeyParams,
-              _RETURN: /* @__PURE__ */ z.null(),
+              _RETURN: /* @__PURE__ */ AddTrustedKeyRes,
+            },
+            'connect-registry': {
+              _PARAMS: /* @__PURE__ */ ConnectRegistryParams,
+              _RETURN: /* @__PURE__ */ z.array(z.string()),
             },
             remove: {
               _PARAMS: /* @__PURE__ */ RemoveTrustedKeyParams,
               _RETURN: /* @__PURE__ */ z.null(),
+            },
+            'remove-many': {
+              _PARAMS: /* @__PURE__ */ RemoveTrustedKeysParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            'remove-registry': {
+              _PARAMS: /* @__PURE__ */ TrustedRegistryParams,
+              _RETURN: /* @__PURE__ */ z.array(z.string()),
+            },
+            'set-os-registry': {
+              _PARAMS: /* @__PURE__ */ TrustedRegistryParams,
+              _RETURN: /* @__PURE__ */ z.array(z.string()),
             },
             update: {
               _PARAMS: /* @__PURE__ */ UpdateTrustedKeyParams,

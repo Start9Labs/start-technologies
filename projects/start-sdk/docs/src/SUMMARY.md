@@ -64,6 +64,7 @@
 - [Depend on Another Service](recipe-dependency.md)
 - [Enforce Settings on a Dependency](recipe-enforce-dependency.md)
 - [Mount Volumes from Another Service](recipe-mount-dependency.md)
+- [Let Dependents Through a Proxy Auth Gate](recipe-dependent-auth.md)
 - [Support Alternative Dependencies](recipe-alternative-deps.md)
 
 ## Data & Health

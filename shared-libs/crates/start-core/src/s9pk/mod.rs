@@ -12,6 +12,7 @@ pub use v2::{S9pk, manifest};
 
 use crate::prelude::*;
 use crate::progress::FullProgressTracker;
+use crate::registry::signer::AcceptSigners;
 use crate::s9pk::merkle_archive::source::{ArchiveSource, DynFileSource};
 use crate::s9pk::v1::reader::S9pkReader;
 use crate::s9pk::v2::compat::MAGIC_AND_VERSION;
@@ -35,7 +36,7 @@ pub async fn load_with_signers<S, K>(
     source: S,
     key: K,
     progress: Option<&FullProgressTracker>,
-    accepted: Option<&[AnyVerifyingKey]>,
+    accepted: Option<AcceptSigners>,
 ) -> Result<S9pk<DynFileSource>, Error>
 where
     S: ArchiveSource,
@@ -59,7 +60,10 @@ where
         tracing::info!("Converting package to v2 s9pk");
         let tmp_dir = TmpDir::new().await?;
         let reader = S9pkReader::from_reader(source.fetch_all().await?, true).await?;
-        validate_signer(*reader.developer_key(), accepted)?;
+        if let Some(mut policy) = accepted {
+            policy.process_verified_signer(&AnyVerifyingKey::Ed25519(*reader.developer_key()));
+            policy.try_accept()?;
+        }
         let s9pk = S9pk::from_v1(reader, Arc::new(tmp_dir), key()?).await?;
         tracing::info!("Converted s9pk successfully");
         if let Some(mut phase) = phase {
@@ -67,23 +71,16 @@ where
         }
         Ok(s9pk.into_dyn())
     } else {
-        let s9pk = S9pk::deserialize(&Arc::new(source), None).await?;
-        validate_signer(s9pk.as_archive().signer(), accepted)?;
+        let s9pk = S9pk::deserialize_local(&Arc::new(source), None).await?;
+        if let Some(mut policy) = accepted {
+            let commitment = s9pk.as_archive().commitment().await?;
+            for (signer, signature) in s9pk.signatures().await? {
+                policy.process_signature(&signer, &commitment, v2::SIG_CONTEXT, &signature)?;
+            }
+            policy.try_accept()?;
+        }
         Ok(s9pk.into_dyn())
     }
-}
-
-fn validate_signer(
-    signer: ed25519_dalek::VerifyingKey,
-    accepted: Option<&[AnyVerifyingKey]>,
-) -> Result<(), Error> {
-    if accepted.is_some_and(|keys| !keys.contains(&AnyVerifyingKey::Ed25519(signer))) {
-        return Err(Error::new(
-            eyre!("{}", t!("registry.signer.not-accepted")),
-            ErrorKind::InvalidSignature,
-        ));
-    }
-    Ok(())
 }
 
 #[cfg(test)]
