@@ -459,10 +459,18 @@ export const AddMirrorParams: z.ZodObject<{
   url: z.ZodString
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
 }> = /* @__PURE__ */ object({
   url: z.string(),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
 }).meta({
   id: 'AddMirrorParams',
 })
@@ -470,10 +478,18 @@ export const AddPackageParams: z.ZodObject<{
   urls: z.ZodArray<z.ZodString>
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
 }> = /* @__PURE__ */ object({
   urls: z.array(z.string()),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
 }).meta({
   id: 'AddPackageParams',
 })

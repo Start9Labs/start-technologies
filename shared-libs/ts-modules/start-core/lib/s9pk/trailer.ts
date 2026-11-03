@@ -1,5 +1,8 @@
-import { ed25519PublicKeyDer64, parseEd25519PublicKey } from '../auth/signature'
-import { verifyMerkleCommitment } from '../auth/commitment'
+import {
+  bytesToBase64,
+  ed25519PublicKeyDer64,
+  parseEd25519PublicKey,
+} from '../auth/signature'
 import { MerkleArchive } from './merkleArchive'
 import { s9pkHeaderSize } from '.'
 
@@ -99,137 +102,23 @@ export async function readTrailer(
   }
   for (const record of records) {
     if (record.type !== 1) continue
-    const offset = Number(start) + record.offset
-    let value: Record<string, unknown>
     try {
-      const parsed: unknown = strictJson(
-        new TextDecoder('utf-8', { fatal: true }).decode(
-          raw.slice(record.offset + 10, record.end),
-        ),
-      )
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-        throw new Error('Invalid signature record')
-      value = parsed as Record<string, unknown>
-      if (
-        typeof value.signer !== 'string' ||
-        typeof value.signature !== 'string'
-      )
-        throw new Error('Invalid signature record')
+      const value = record.offset + 10
+      if (record.end - value < 8) throw new Error('Missing public key length')
+      const keyLength = view.getBigUint64(value)
+      if (keyLength === 0n || keyLength >= BigInt(record.end - value - 8))
+        throw new Error('Invalid public key length')
+      const keyEnd = value + 8 + Number(keyLength)
+      const signer = bytesToBase64(raw.subarray(value + 8, keyEnd))
+      parseEd25519PublicKey(signer)
+      signers.add(signer)
     } catch {
       diagnose(
         'invalid-record',
         'Ignoring malformed supplemental signature record',
-        offset,
-      )
-      continue
-    }
-    try {
-      const signer = value.signer as string
-      if (
-        !verifyMerkleCommitment(
-          signer,
-          value.signature as string,
-          archive.root,
-          archive.signer.maxSize,
-          's9pk',
-        )
-      ) {
-        throw new Error('Invalid signature')
-      }
-      signers.add(ed25519PublicKeyDer64(parseEd25519PublicKey(signer)))
-    } catch {
-      diagnose(
-        'invalid-signature',
-        'Ignoring invalid or unsupported supplemental signature',
-        offset,
+        Number(start) + record.offset,
       )
     }
   }
   return result()
-}
-
-function strictJson(text: string): unknown {
-  let pos = 0
-  const fail = (): never => {
-    throw new Error('Malformed JSON or duplicate key')
-  }
-  const whitespace = () => {
-    while (/[\x20\t\r\n]/.test(text[pos] ?? '') && pos < text.length) pos++
-  }
-  const string = (): string => {
-    const pattern =
-      /"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/y
-    pattern.lastIndex = pos
-    const match = pattern.exec(text)
-    if (!match) return fail()
-    pos = pattern.lastIndex
-    const value = JSON.parse(match[0]) as string
-    if (
-      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(
-        value,
-      )
-    )
-      fail()
-    return value
-  }
-  const value = (depth: number): unknown => {
-    if (depth > 64) return fail()
-    whitespace()
-    if (text[pos] === '"') return string()
-    if (text[pos] === '{') {
-      pos++
-      whitespace()
-      const result = Object.create(null) as Record<string, unknown>
-      const keys = new Set<string>()
-      if (text[pos] === '}') {
-        pos++
-        return result
-      }
-      while (true) {
-        const key = string()
-        if (keys.has(key)) return fail()
-        keys.add(key)
-        whitespace()
-        if (text[pos++] !== ':') return fail()
-        result[key] = value(depth + 1)
-        whitespace()
-        const delimiter = text[pos++]
-        if (delimiter === '}') return result
-        if (delimiter !== ',') return fail()
-        whitespace()
-      }
-    }
-    if (text[pos] === '[') {
-      pos++
-      whitespace()
-      const result: unknown[] = []
-      if (text[pos] === ']') {
-        pos++
-        return result
-      }
-      while (true) {
-        result.push(value(depth + 1))
-        whitespace()
-        const delimiter = text[pos++]
-        if (delimiter === ']') return result
-        if (delimiter !== ',') return fail()
-      }
-    }
-    for (const literal of ['true', 'false', 'null']) {
-      if (text.startsWith(literal, pos)) {
-        pos += literal.length
-        return JSON.parse(literal)
-      }
-    }
-    const number = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y
-    number.lastIndex = pos
-    const match = number.exec(text)
-    if (!match || !Number.isFinite(Number(match[0]))) return fail()
-    pos = number.lastIndex
-    return Number(match[0])
-  }
-  const result = value(0)
-  whitespace()
-  if (pos !== text.length) fail()
-  return result
 }

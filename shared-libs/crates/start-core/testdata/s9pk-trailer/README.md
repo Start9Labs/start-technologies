@@ -4,7 +4,7 @@ Both native and TypeScript tests consume these frozen files. `vectors.json` reco
 
 - `base.s9pk`: embedded signer only.
 - `endorsed.s9pk`: three valid supplemental signers, without diagnostics.
-- `mixed.s9pk`: the same endorsements, a PEM identity alias, an invalid cryptographic record, an unknown TLV, and unknown nested JSON fields with a large integer.
+- `mixed.s9pk`: the same binary DER endorsements, a repeated valid signer, an invalid cryptographic record, and an unknown TLV.
 - `overlap.s9pk`: a fully verified archive whose unused image payload ends in a trailer-like footer. Its commitment differs from `base.s9pk`.
 
 Every archive has a manifest, version, dependencies, icon, and license usable by the sideload preview. Image/JavaScript payloads are test sentinels, not installable service files.

@@ -152,9 +152,6 @@ export function base64ToBytes(b64: string): Uint8Array {
 }
 
 const ED25519_SPKI_PREFIX = hexToBytes('302a300506032b6570032100')
-export const PH_SIGNATURE_PREFIX = hexToBytes(
-  '30593015061369aef5f5b1e7898a85c99c9ae3bb85fbf2895b0440',
-)
 
 /** Canonical padded Base64 SPKI for a raw Ed25519 public key. */
 export function ed25519PublicKeyDer64(raw32: Uint8Array): string {

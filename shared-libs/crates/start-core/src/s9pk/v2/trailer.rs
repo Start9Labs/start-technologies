@@ -1,9 +1,7 @@
-use std::collections::{HashMap, HashSet};
-use std::fmt;
+use std::collections::HashMap;
 use std::path::Path;
 
-use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::prelude::*;
@@ -11,6 +9,7 @@ use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::sign::{AnySignature, AnyVerifyingKey};
 use crate::util::io::{AtomicFile, open_file};
+use crate::util::serde::der64::DerEncoding;
 
 pub(super) const MAX_REGION: u64 = 1024 * 1024;
 const MAGIC: &[u8; 8] = b"S9PKEXT1";
@@ -28,14 +27,8 @@ pub struct Trailer {
     pub(crate) diagnostics: Vec<Diagnostic>,
     start: Option<u64>,
     raw: Vec<u8>,
-    editable: bool,
+    pub(super) editable: bool,
     present: bool,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Endorsement {
-    signer: String,
-    signature: String,
 }
 
 impl Trailer {
@@ -84,7 +77,7 @@ impl Trailer {
         }
         let mut footer = [0; 16];
         source
-            .fetch_tail(size - 16, 16)
+            .fetch(size - 16, 16)
             .await?
             .read_exact(&mut footer)
             .await?;
@@ -117,7 +110,7 @@ impl Trailer {
         };
         let mut raw = vec![0; length as usize];
         source
-            .fetch_tail(start, length)
+            .fetch(start, length)
             .await?
             .read_exact(&mut raw)
             .await?;
@@ -152,9 +145,8 @@ impl Trailer {
                 continue;
             }
             let value = &raw[pos + 10..end];
-            let parsed =
-                strict_json(value).and_then(|()| serde_json::from_slice::<Endorsement>(value));
-            let record = match parsed {
+            let parsed = decode_endorsement(value);
+            let (key, signature) = match parsed {
                 Ok(record) => record,
                 Err(_) => {
                     result.editable = false;
@@ -166,25 +158,24 @@ impl Trailer {
                     continue;
                 }
             };
-            let verified = record.signer.parse::<AnyVerifyingKey>().and_then(|key| {
-                let signature = record.signature.parse::<AnySignature>()?;
-                let signature = crate::sign::compat::verify_commitment(
-                    &key,
-                    commitment,
-                    super::SIG_CONTEXT,
-                    &signature,
-                )?;
-                Ok((key, signature))
-            });
+            let verified = crate::sign::compat::verify_commitment(
+                &key,
+                commitment,
+                super::SIG_CONTEXT,
+                &signature,
+            )
+            .map(|signature| (key, signature));
             match verified {
                 Ok((key, signature)) => {
                     result.signatures.entry(key).or_insert(signature);
                 }
-                Err(_) => result.diagnose(
-                    "invalid-signature",
-                    &t!("s9pk.trailer.invalid-signature"),
-                    Some(start + pos as u64),
-                ),
+                Err(_) => {
+                    result.diagnose(
+                        "invalid-signature",
+                        &t!("s9pk.trailer.invalid-signature"),
+                        Some(start + pos as u64),
+                    );
+                }
             }
         }
         result.raw = raw;
@@ -200,28 +191,28 @@ impl Trailer {
     ) -> Result<(), Error> {
         let package = super::S9pk::open(path, None).await?;
         let trailer = &package.trailer;
-        ensure_code!(
-            trailer.editable,
-            ErrorKind::ParseS9pk,
-            "{}",
-            t!("s9pk.trailer.edit-refused")
-        );
+        let needed = package.needs_endorsement(&signer).await?;
         crate::sign::compat::verify_commitment(
             &signer,
             &package.as_archive().commitment().await?,
             super::SIG_CONTEXT,
             &signature,
         )?;
-        let record =
-            serde_json::to_vec(&serde_json::json!({ "signer": signer, "signature": signature }))
-                .with_kind(ErrorKind::Serialization)?;
-        let length = trailer.raw.len() as u64 + 10 + record.len() as u64;
+        if !needed {
+            return Ok(());
+        }
+        let record = encode_endorsement(&signer, &signature)?;
+        let length = (trailer.raw.len() as u64)
+            .checked_add(10)
+            .and_then(|length| length.checked_add(record.len() as u64))
+            .filter(|length| *length <= MAX_REGION);
         ensure_code!(
-            length <= MAX_REGION,
+            length.is_some(),
             ErrorKind::ParseS9pk,
             "{}",
             t!("s9pk.trailer.too-large")
         );
+        let length = length.unwrap();
         let mut region = trailer.raw.clone();
         region.extend_from_slice(&1_u16.to_be_bytes());
         region.extend_from_slice(&(record.len() as u64).to_be_bytes());
@@ -256,59 +247,37 @@ impl Trailer {
     }
 }
 
-fn strict_json(bytes: &[u8]) -> Result<(), serde_json::Error> {
-    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-    StrictJson(0).deserialize(&mut deserializer)?;
-    deserializer.end()
+fn decode_endorsement(value: &[u8]) -> Result<(AnyVerifyingKey, AnySignature), Error> {
+    let parsed = || -> Option<_> {
+        let length = u64::from_be_bytes(value.get(..8)?.try_into().ok()?);
+        let end = 8_usize.checked_add(usize::try_from(length).ok()?)?;
+        if length == 0 || end >= value.len() {
+            return None;
+        }
+        let key = AnyVerifyingKey::from_der::<serde::de::value::Error>(value.get(8..end)?).ok()?;
+        let signature =
+            AnySignature::from_der::<serde::de::value::Error>(value.get(end..)?).ok()?;
+        Some((key, signature))
+    };
+    parsed().ok_or_else(|| {
+        Error::new(
+            eyre!("{}", t!("s9pk.trailer.invalid-record")),
+            ErrorKind::ParseS9pk,
+        )
+    })
 }
 
-struct StrictJson(usize);
-impl<'de> DeserializeSeed<'de> for StrictJson {
-    type Value = ();
-    fn deserialize<D: serde::Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
-        if self.0 > 64 {
-            return Err(serde::de::Error::custom("JSON nesting limit"));
-        }
-        deserializer.deserialize_any(self)
-    }
-}
-impl<'de> Visitor<'de> for StrictJson {
-    type Value = ();
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("JSON without duplicate keys")
-    }
-    fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<(), E> {
-        Ok(())
-    }
-    fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<(), E> {
-        Ok(())
-    }
-    fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<(), E> {
-        Ok(())
-    }
-    fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<(), E> {
-        Ok(())
-    }
-    fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<(), E> {
-        Ok(())
-    }
-    fn visit_unit<E: serde::de::Error>(self) -> Result<(), E> {
-        Ok(())
-    }
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
-        while seq.next_element_seed(StrictJson(self.0 + 1))?.is_some() {}
-        Ok(())
-    }
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
-        let mut keys = HashSet::new();
-        while let Some(key) = map.next_key::<String>()? {
-            if !keys.insert(key) {
-                return Err(serde::de::Error::custom("duplicate JSON key"));
-            }
-            map.next_value_seed(StrictJson(self.0 + 1))?;
-        }
-        Ok(())
-    }
+fn encode_endorsement(key: &AnyVerifyingKey, signature: &AnySignature) -> Result<Vec<u8>, Error> {
+    let key = key
+        .to_der::<serde::de::value::Error>()
+        .with_kind(ErrorKind::Serialization)?;
+    let signature = signature
+        .to_der::<serde::de::value::Error>()
+        .with_kind(ErrorKind::Serialization)?;
+    let mut value = (key.len() as u64).to_be_bytes().to_vec();
+    value.extend(key);
+    value.extend(signature);
+    Ok(value)
 }
 
 #[cfg(test)]

@@ -204,6 +204,11 @@ async fn s9pk_sign_uses_identity_without_a_workspace_and_preserves_base() {
         .unwrap();
     let result = tokio::fs::read(&path).await.unwrap();
     assert_eq!(&result[..original.len()], original);
+    server
+        .handle_command("sign", imbl_value::json!({"s9pk": path}))
+        .await
+        .unwrap();
+    assert_eq!(tokio::fs::read(&path).await.unwrap(), result);
     let package = S9pk::open(&path, None).await.unwrap();
     assert_eq!(package.signatures().await.unwrap().len(), 2);
     assert!(

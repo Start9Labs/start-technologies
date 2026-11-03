@@ -36,6 +36,29 @@ export function matchingTrustedKeys(
   )
 }
 
+export function acceptSignerPolicy(
+  signers: readonly string[],
+): T.AcceptSigners {
+  return {
+    any: signers.map(signer => ({ signer })),
+  }
+}
+
+export function packageSignerPolicy(
+  pkg: Pick<MarketplacePkgBase, 's9pks' | 'signers'>,
+  keys: Record<string, T.TrustedKey>,
+  trustOverride: boolean,
+): T.AcceptSigners {
+  const signers = packageSigners(pkg)
+  return acceptSignerPolicy(
+    trustOverride
+      ? signers
+      : matchingTrustedKeys(signers, keys, 'marketplace').map(
+          key => key.publicKey,
+        ),
+  )
+}
+
 export type SignerStatus = 'trusted' | 'untrusted' | 'unknown'
 
 export type Signer = ReturnType<typeof signingKeyIdentity> & {

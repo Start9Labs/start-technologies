@@ -322,12 +322,6 @@ s9pk.source.invalid-range:
   es_ES: "El rango del archivo se desborda o supera la longitud del origen"
   fr_FR: "La plage de l’archive déborde ou dépasse la taille de la source"
   pl_PL: "Zakres archiwum przepełnia się lub przekracza długość źródła"
-s9pk.source.invalid-range-response:
-  en_US: "Invalid HTTP range response"
-  de_DE: "Ungültige HTTP-Bereichsantwort"
-  es_ES: "Respuesta de rango HTTP inválida"
-  fr_FR: "Réponse de plage HTTP invalide"
-  pl_PL: "Nieprawidłowa odpowiedź zakresu HTTP"
 s9pk.trailer.discarded:
   en_US: "Archive rewrite discarded supplemental metadata; sign the resulting package again"
   de_DE: "Beim Neuschreiben des Archivs wurden zusätzliche Metadaten verworfen; signieren Sie das entstandene Paket erneut"

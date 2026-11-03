@@ -36,7 +36,7 @@ import { MarketplacePkgSideload } from './sideload.utils'
     @if (pkg().signatureDiagnostics.length) {
       <div tuiNotification appearance="warning">
         {{
-          'Some supplemental signatures could not be verified and were ignored.'
+          'Some supplemental signature records could not be read and were ignored.'
             | i18n
         }}
       </div>

@@ -293,7 +293,6 @@ export type SetWifiEnabledParamsInput = z.input<
   typeof schemas.SetWifiEnabledParams
 >
 export type ShutdownParamsInput = z.input<typeof schemas.ShutdownParams>
-export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 
 /**
  * So a signal strength is a number between 0-100, I want the null option to be 0 since there is no signal
@@ -453,7 +452,6 @@ export type HostnameMetadata = z.output<typeof schemas.HostnameMetadata>
 export type HostnameMetadataInput = z.input<typeof schemas.HostnameMetadata>
 export type InfoParamsInput = z.input<typeof schemas.InfoParams>
 export type InitAcmeParamsInput = z.input<typeof schemas.InitAcmeParams>
-export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type InstalledVersionParamsInput = z.input<
   typeof schemas.InstalledVersionParams
 >
@@ -595,6 +593,7 @@ export type HardwareInfo = z.output<typeof schemas.HardwareInfo>
 export type HostAddress = z.output<typeof schemas.HostAddress>
 export type HostnameInfo = z.output<typeof schemas.HostnameInfo>
 export type HostnameInfoInput = z.input<typeof schemas.HostnameInfo>
+export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type Metrics = z.output<typeof schemas.Metrics>
 export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
 export type NotificationWithId = z.output<typeof schemas.NotificationWithId>
@@ -612,6 +611,7 @@ export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
  * The server's sessions, by credential type.
  */
 export type Sessions = z.output<typeof schemas.Sessions>
+export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type WifiListInfo = z.output<typeof schemas.WifiListInfo>
 export type AddSslOptions = z.output<typeof schemas.AddSslOptions>

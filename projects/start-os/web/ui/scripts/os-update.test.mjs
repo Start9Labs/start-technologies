@@ -1306,6 +1306,7 @@ test('a candidate disappearing during the asynchronous UI registry lookup preven
 const {
   matchingTrustedKeys,
   packageSigners,
+  packageSignerPolicy,
   SignerStatusesPipe,
   signingKeyIdentity,
   registrySigningKeys,
@@ -1482,7 +1483,7 @@ test('GPG form input preserves armored exports for backend validation alongside 
   )
 })
 
-test('package signers select the install asset or the verified sideload signer, not other assets', () => {
+test('package signers select the install asset or claimed sideload keys, not other assets', () => {
   assert.deepEqual(
     packageSigners({
       ...pkg,
@@ -1531,6 +1532,28 @@ test('individual keys match independently in each trust context and deduplicate 
   assert.deepEqual(matchingTrustedKeys([first, second], keys, 'os'), [
     { id: 'first', name: 'Publisher', publicKey: first },
   ])
+})
+
+test('package pins reuse the OS any-signer policy without granting OS-only or unknown keys', () => {
+  const [first, second] = OS_UPDATE_SIGNERS
+  const source = { s9pks: [], signers: [first, second, untrustedSigner] }
+  const keys = {
+    first: { name: 'Packages', publicKey: first, marketplace: true, os: false },
+    second: {
+      name: 'OS only',
+      publicKey: second,
+      marketplace: false,
+      os: true,
+    },
+  }
+  assert.deepEqual(packageSignerPolicy(source, keys, false), {
+    any: [{ signer: first }],
+  })
+  assert.deepEqual(packageSignerPolicy(source, keys, true), {
+    any: [{ signer: first }, { signer: second }, { signer: untrustedSigner }],
+  })
+  assert.deepEqual(packageSignerPolicy(source, {}, false), { any: [] })
+  assert.deepEqual(packageSignerPolicy({ s9pks: [] }, keys, true), { any: [] })
 })
 
 function controlsFixture({
@@ -1597,6 +1620,8 @@ test('the upload RPC receives the confirmed override and failed setup does not n
   const file = new File(['data'], 'test.s9pk')
   const instance = {
     file: () => file,
+    pkg: () => ({ s9pks: [], signers: [untrustedSigner] }),
+    trust: { keys: () => ({}) },
     tasks: {
       run: async work => {
         await work()
@@ -1619,7 +1644,9 @@ test('the upload RPC receives the confirmed override and failed setup does not n
     },
   }
   assert.equal(await Controls.prototype.upload.call(instance, true), true)
-  assert.deepEqual(calls, [{ trust: true }])
+  assert.deepEqual(calls, [
+    { trust: true, acceptSigners: { any: [{ signer: untrustedSigner }] } },
+  ])
   let navigated = false
   await Controls.prototype.installOrUpload.call(
     {
@@ -1637,9 +1664,46 @@ test('the upload RPC receives the confirmed override and failed setup does not n
   assert.equal(navigated, false)
 })
 
-test('marketplace installs send the trust override only when given one', async () => {
+test('sideload pins only matching package-trusted keys without an override', async () => {
+  const calls = []
+  const instance = {
+    file: () => new File(['data'], 'test.s9pk'),
+    pkg: () => ({
+      s9pks: [],
+      signers: [OS_UPDATE_SIGNERS[0], untrustedSigner],
+    }),
+    trust: { keys: () => trustedSigners },
+    tasks: {
+      run: async work => {
+        await work()
+        return true
+      },
+    },
+    api: {
+      rpc: {
+        package: {
+          sideload: async params => {
+            calls.push(params)
+            return { upload: 'upload-guid' }
+          },
+        },
+      },
+      uploadFile: async () => {},
+    },
+  }
+  assert.equal(await Controls.prototype.upload.call(instance, false), true)
+  assert.deepEqual(calls, [
+    {
+      trust: false,
+      acceptSigners: { any: [{ signer: OS_UPDATE_SIGNERS[0] }] },
+    },
+  ])
+})
+
+test('marketplace installs send the matched signer pins with the explicit override intent', async () => {
   const submissions = []
   const instance = {
+    patch: { watch$: () => of(trustedSigners) },
     api: {
       rpc: {
         package: {
@@ -1664,12 +1728,14 @@ test('marketplace installs send the trust override only when given one', async (
       version: pkg.version,
       registry: 'https://registry.test',
       trust: false,
+      acceptSigners: { any: [{ signer: OS_UPDATE_SIGNERS[0] }] },
     },
     {
       id: pkg.id,
       version: pkg.version,
       registry: 'https://registry.test',
       trust: true,
+      acceptSigners: { any: [{ signer: OS_UPDATE_SIGNERS[0] }] },
     },
   ])
 })

@@ -5,7 +5,7 @@ use std::task::Poll;
 
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
-use reqwest::header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, RANGE};
+use reqwest::header::CONTENT_LENGTH;
 use reqwest::{Client, Url};
 use tokio::io::{AsyncRead, AsyncReadExt, ReadBuf, Take};
 use tokio_util::io::StreamReader;
@@ -19,7 +19,6 @@ pub struct HttpSource {
     url: Url,
     client: Client,
     size: Option<u64>,
-    accepts_ranges: bool,
     // GitHub's release-asset CDN performs poorly with repeated range requests.
     pool: Arc<Mutex<BTreeSet<TrackingIO<HttpBodyReader>>>>,
 }
@@ -32,10 +31,6 @@ impl HttpSource {
             .with_kind(ErrorKind::Network)?
             .error_for_status()
             .with_kind(ErrorKind::Network)?;
-        let accepts_ranges = head
-            .headers()
-            .get(ACCEPT_RANGES)
-            .is_some_and(|value| value == "bytes");
         let size = head
             .headers()
             .get(CONTENT_LENGTH)
@@ -45,7 +40,6 @@ impl HttpSource {
             url,
             client,
             size,
-            accepts_ranges,
             pool: Arc::new(Mutex::new(BTreeSet::new())),
         })
     }
@@ -103,86 +97,23 @@ impl ArchiveSource for HttpSource {
             let to_skip = position - reader.position();
             tokio::io::copy(&mut (&mut reader).take(to_skip), &mut tokio::io::sink()).await?;
         }
-        Ok(HttpReader::Rangeless {
+        Ok(HttpReader {
             pool: self.pool.clone(),
             reader: Some(reader.take(size)),
         })
     }
-    async fn fetch_tail(&self, position: u64, size: u64) -> Result<Self::FetchReader, Error> {
-        if !self.accepts_ranges {
-            return self.fetch(position, size).await;
-        }
-        if size == 0 {
-            return Ok(HttpReader::Range(
-                StreamReader::new(futures::stream::empty().apply(boxed)).take(0),
-            ));
-        }
-        let end = position.checked_add(size - 1).ok_or_else(|| {
-            Error::new(
-                eyre!("{}", t!("s9pk.source.invalid-range")),
-                ErrorKind::Network,
-            )
-        })?;
-        let response = self
-            .client
-            .get(self.url.clone())
-            .header(RANGE, format!("bytes={position}-{end}"))
-            .send()
-            .await
-            .with_kind(ErrorKind::Network)?
-            .error_for_status()
-            .with_kind(ErrorKind::Network)?;
-        let partial = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
-        if partial {
-            let expected = format!("bytes {position}-{end}/");
-            ensure_code!(
-                response
-                    .headers()
-                    .get(CONTENT_RANGE)
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|v| v.strip_prefix(&expected))
-                    .and_then(|v| v.parse::<u64>().ok())
-                    .is_some_and(|total| total > end && self.size.is_none_or(|size| size == total)),
-                ErrorKind::Network,
-                "{}",
-                t!("s9pk.source.invalid-range-response")
-            );
-        } else {
-            ensure_code!(
-                response.status() == reqwest::StatusCode::OK,
-                ErrorKind::Network,
-                "{}",
-                t!("s9pk.source.invalid-range-response")
-            );
-            tracing::debug!(url = %self.url, "HTTP source ignored range; streaming whole-response fallback");
-        }
-        let mut reader = StreamReader::new(
-            response
-                .bytes_stream()
-                .map_err(|e| std::io::Error::other(e))
-                .apply(boxed),
-        );
-        if !partial {
-            tokio::io::copy(&mut (&mut reader).take(position), &mut tokio::io::sink()).await?;
-        }
-        Ok(HttpReader::Range(reader.take(size)))
-    }
 }
-
 type BoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>>;
 fn boxed<'a, T>(stream: impl Stream<Item = T> + Send + Sync + 'a) -> BoxStream<'a, T> {
     Box::pin(stream)
 }
 type HttpBodyReader = StreamReader<BoxStream<'static, Result<Bytes, std::io::Error>>, Bytes>;
 
-#[pin_project::pin_project(project = HttpReaderProj, PinnedDrop)]
-pub enum HttpReader {
-    Range(#[pin] Take<HttpBodyReader>),
-    Rangeless {
-        pool: Arc<Mutex<BTreeSet<TrackingIO<HttpBodyReader>>>>,
-        #[pin]
-        reader: Option<Take<TrackingIO<HttpBodyReader>>>,
-    },
+#[pin_project::pin_project(PinnedDrop)]
+pub struct HttpReader {
+    pool: Arc<Mutex<BTreeSet<TrackingIO<HttpBodyReader>>>>,
+    #[pin]
+    reader: Option<Take<TrackingIO<HttpBodyReader>>>,
 }
 impl AsyncRead for HttpReader {
     fn poll_read(
@@ -190,33 +121,25 @@ impl AsyncRead for HttpReader {
         cx: &mut std::task::Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        match self.project() {
-            HttpReaderProj::Range(r) => r.poll_read(cx, buf),
-            HttpReaderProj::Rangeless { mut reader, .. } => {
-                let mut finished = false;
-                if let Some(reader) = reader.as_mut().as_pin_mut() {
-                    let start = buf.filled().len();
-                    futures::ready!(reader.poll_read(cx, buf)?);
-                    finished = start == buf.filled().len();
-                }
-                if finished {
-                    reader.take();
-                }
-                Poll::Ready(Ok(()))
-            }
+        let mut reader = self.project().reader;
+        let mut finished = false;
+        if let Some(reader) = reader.as_mut().as_pin_mut() {
+            let start = buf.filled().len();
+            futures::ready!(reader.poll_read(cx, buf)?);
+            finished = start == buf.filled().len();
         }
+        if finished {
+            reader.take();
+        }
+        Poll::Ready(Ok(()))
     }
 }
 #[pin_project::pinned_drop]
 impl PinnedDrop for HttpReader {
     fn drop(self: Pin<&mut Self>) {
-        match self.project() {
-            HttpReaderProj::Range(_) => (),
-            HttpReaderProj::Rangeless { pool, mut reader } => {
-                if let Some(reader) = reader.take() {
-                    pool.lock().unwrap().insert(reader.into_inner());
-                }
-            }
+        let mut this = self.project();
+        if let Some(reader) = this.reader.take() {
+            this.pool.lock().unwrap().insert(reader.into_inner());
         }
     }
 }

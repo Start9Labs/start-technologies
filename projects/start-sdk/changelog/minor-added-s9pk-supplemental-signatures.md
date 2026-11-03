@@ -2,4 +2,4 @@
 release-notes: false
 ---
 
-- S9PK readers expose verified embedded and supplemental signer identities and optional metadata diagnostics; shared Ed25519 public-key codecs accept canonical DER64 and PEM.
+- Browser S9PK readers expose declared embedded and supplemental signing keys and metadata parsing diagnostics. Signature validation belongs to the backend, using the caller's signer pins. Shared Ed25519 public-key codecs accept canonical DER64 and PEM.

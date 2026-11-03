@@ -1,8 +1,6 @@
 import { MerkleArchiveCommitment } from '../../osBindings'
 import { DirectoryContents } from './directoryContents'
 import { FileContents } from './fileContents'
-import { verifyEd25519phStrict } from '../../auth/ed25519'
-import { merkleCommitmentBytes } from '../../auth/commitment'
 import { VarIntProcessor } from './varint'
 import { compare } from '..'
 
@@ -58,7 +56,6 @@ export class MerkleArchive {
     DirectoryContents.headerSize
   private constructor(
     readonly signer: Signer,
-    readonly root: Uint8Array,
     readonly contents: DirectoryContents,
   ) {}
   static async deserialize(
@@ -72,17 +69,6 @@ export class MerkleArchive {
     const sighash = new Uint8Array(header.next(32))
     const rootMaxSizeBytes = header.next(8)
     const maxSize = new DataView(rootMaxSizeBytes).getBigUint64(0)
-
-    if (
-      !verifyEd25519phStrict(
-        signature,
-        merkleCommitmentBytes(sighash, maxSize),
-        pubkey,
-        new TextEncoder().encode(context),
-      )
-    ) {
-      throw new Error('signature verification failed')
-    }
 
     if (commitment) {
       if (
@@ -116,7 +102,6 @@ export class MerkleArchive {
         maxSize,
         context,
       },
-      sighash,
       contents,
     )
   }

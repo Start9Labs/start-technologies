@@ -124,6 +124,9 @@ async fn sign(ctx: CliContext, S9pkPath { s9pk: path }: S9pkPath) -> Result<(), 
     let package = super::S9pk::open(&path, None).await?;
     let identity = ctx.id_key()?;
     let signer = identity.verifying_key().await?;
+    if !package.needs_endorsement(&signer).await? {
+        return Ok(());
+    }
     let signature = identity
         .sign_commitment(&package.as_archive().commitment().await?, SIG_CONTEXT)
         .await?;

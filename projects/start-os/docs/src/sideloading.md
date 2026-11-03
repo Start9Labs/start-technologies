@@ -10,7 +10,7 @@ Sideloading lets you install a service from a `.s9pk` file without using any reg
 
 1. Review the package details, including **Signed by**, and click **Install**, **Update**, or **Reinstall**. If no key trusted for packages in [Trusted Keys](trusted-keys.md) signs the package, a warning appears and you must confirm the risks before installation starts.
 
-**Signed by** includes the embedded signer and any valid supplemental signatures carried by a v2 package. **View all** opens any keys hidden by the preview, and selecting a key opens the same details and trust controls as the Marketplace. A key included in a file is not automatically trusted. Unverifiable supplemental signatures produce a warning and are ignored; the package's embedded signature and content must still be valid.
+**Signed by** lists the signing keys declared by a v2 package, including its supplemental records. **View all** opens any keys hidden by the preview, and selecting a key opens the same details and trust controls as the Marketplace. A key included in a file is not automatically trusted. The preview matches keys without verifying signatures; StartOS verifies the uploaded file against the matching keys before installing it. Unreadable supplemental records produce a warning and are ignored. A false signing claim cannot bypass signature or file-integrity checks.
 
 Keep the browser tab open while the file uploads. Large files and slow connections can take several minutes; follow progress in **Services**. If the upload fails, StartOS shows an error message.
 

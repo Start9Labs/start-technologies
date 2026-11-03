@@ -57,7 +57,7 @@ async fn sideload_enforces_trust_on_verified_archive_signatures() {
             source.clone(),
             || panic!("v2 needs no conversion key"),
             None,
-            accepted.as_deref(),
+            crate::trusted_keys::signer_policy(accepted),
         )
         .await
         .unwrap();
@@ -72,7 +72,7 @@ async fn sideload_enforces_trust_on_verified_archive_signatures() {
                 source.clone(),
                 || panic!("v2 needs no conversion key"),
                 None,
-                Some(&accepted)
+                crate::trusted_keys::signer_policy(Some(accepted))
             )
             .await
             .is_err()

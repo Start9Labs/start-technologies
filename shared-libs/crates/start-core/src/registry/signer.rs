@@ -2,7 +2,6 @@ use std::collections::BTreeSet;
 use std::str::FromStr;
 
 use clap::builder::ValueParserFactory;
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -119,51 +118,41 @@ impl AcceptSigners {
         context: &str,
         signature: &AnySignature,
     ) -> Result<(), Error> {
-        let mut res = Ok(());
-        let new = match std::mem::replace(self, Self::null()) {
+        crate::sign::compat::verify_commitment(signer, commitment, context, signature)?;
+        self.process_verified_signer(signer);
+        Ok(())
+    }
+
+    pub(crate) fn process_verified_signer(&mut self, signer: &AnyVerifyingKey) {
+        *self = match std::mem::replace(self, Self::null()) {
             Self::Accepted => Self::Accepted,
             Self::Signer(s) => {
                 if &s == signer {
-                    res = crate::sign::compat::verify_commitment(
-                        signer, commitment, context, signature,
-                    )
-                    .map(|_| ());
                     Self::Accepted
                 } else {
                     Self::Signer(s)
                 }
             }
-            Self::All(mut s) => {
-                res = s
-                    .iter_mut()
-                    .map(|s| s.process_signature(signer, commitment, context, signature))
-                    .collect();
-                if s.iter().all(|s| s.accepted()) {
+            Self::All(mut policies) => {
+                for policy in &mut policies {
+                    policy.process_verified_signer(signer);
+                }
+                if policies.iter().all(Self::accepted) {
                     Self::Accepted
                 } else {
-                    Self::All(s)
+                    Self::All(policies)
                 }
             }
-            Self::Any(mut s) => {
-                match s
-                    .iter_mut()
-                    .map(|s| {
-                        s.process_signature(signer, commitment, context, signature)?;
-                        Ok(s)
-                    })
-                    .filter_ok(|s| s.accepted())
-                    .next()
-                {
-                    Some(Ok(s)) => std::mem::replace(s, Self::null()),
-                    Some(Err(e)) => {
-                        res = Err(e);
-                        Self::Any(s)
-                    }
-                    None => Self::Any(s),
+            Self::Any(mut policies) => {
+                for policy in &mut policies {
+                    policy.process_verified_signer(signer);
+                }
+                if policies.iter().any(Self::accepted) {
+                    Self::Accepted
+                } else {
+                    Self::Any(policies)
                 }
             }
         };
-        *self = new;
-        res
     }
 }

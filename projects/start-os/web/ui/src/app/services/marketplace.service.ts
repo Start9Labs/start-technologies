@@ -8,6 +8,7 @@ import {
   StoreIdentity,
   packageResponse,
   packagesResponse,
+  packageSignerPolicy,
 } from '@start9labs/marketplace'
 import { Exver, registryUrl, sameUrl } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
@@ -19,6 +20,7 @@ import {
   distinctUntilChanged,
   filter,
   from,
+  firstValueFrom,
   map,
   mergeMap,
   Observable,
@@ -269,11 +271,15 @@ export class MarketplaceService extends AbstractMarketplaceService {
   }
 
   async installPackage(
-    pkg: Pick<MarketplacePkg, 'id' | 'version'>,
+    pkg: Pick<MarketplacePkg, 'id' | 'version' | 's9pks' | 'signers'>,
     url: string,
     trust = false,
   ): Promise<void> {
+    const keys = await firstValueFrom(
+      this.patch.watch$('serverInfo', 'trustedKeys'),
+    )
     await this.api.rpc.package.install({
+      acceptSigners: packageSignerPolicy(pkg, keys, trust),
       id: pkg.id,
       version: pkg.version,
       registry: url,

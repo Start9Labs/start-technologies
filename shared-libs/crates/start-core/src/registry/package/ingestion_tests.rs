@@ -12,8 +12,8 @@ use super::*;
 use crate::registry::package::add::{AddMirrorParams, AddPackageParams, add_mirror, add_package};
 use crate::rpc_continuations::Guid;
 use crate::s9pk::S9pk;
+use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
-use crate::s9pk::merkle_archive::source::{ArchiveSource, TmpSource};
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::sign::ed25519::Ed25519ph;
 use crate::sign::{AnySignature, SignatureScheme};
@@ -44,6 +44,7 @@ fn larger_bound_fixture() -> (Vec<u8>, MerkleArchiveCommitment) {
 }
 
 async fn context(datadir: PathBuf, uploader: AnyVerifyingKey) -> RegistryContext {
+    tokio::fs::create_dir_all(&datadir).await.unwrap();
     let db =
         TypedPatchDb::load_unchecked(PatchDb::open(datadir.join("registry.db")).await.unwrap());
     let mut database = RegistryDatabase::init();
@@ -61,7 +62,7 @@ async fn context(datadir: PathBuf, uploader: AnyVerifyingKey) -> RegistryContext
     );
     db.put(&ROOT, &database).await.unwrap();
     RegistryContext(Arc::new(RegistryContextSeed {
-        hostnames: vec!["localhost".into()],
+        hostnames: vec!["localhost".into(), "127.0.0.1".into()],
         listen: "127.0.0.1:0".parse().unwrap(),
         db,
         datadir,
@@ -150,193 +151,170 @@ async fn server(
     (url, requests, task.into())
 }
 
+async fn local_package() -> S9pk {
+    let file = tempfile::tempfile().unwrap();
+    let mut file = tokio::fs::File::from_std(file);
+    use tokio::io::AsyncWriteExt;
+    file.write_all(&fixture("endorsed.s9pk")).await.unwrap();
+    S9pk::from_file(file).await.unwrap()
+}
+
+async fn registry_server(
+    ctx: RegistryContext,
+) -> (Url, crate::util::future::NonDetachingJoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap())
+        .parse()
+        .unwrap();
+    let task = tokio::spawn(async move {
+        axum::serve(listener, crate::registry::registry_router(ctx))
+            .await
+            .unwrap();
+    });
+    (url, task.into())
+}
+
 #[tokio::test]
-async fn registry_ingests_verified_trailer_signatures_from_secondary_urls_without_trust_changes() {
+async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserves_mirror_and_promotion()
+ {
+    use crate::context::config::ClientConfig;
+    use crate::developer::write_signing_key;
+    use crate::registry::package::add::cli_add_package_impl;
+    use crate::registry::package::promote::{CliPromoteParams, cli_promote};
+
     let uploader_key = SigningKey::from_bytes(&[12; 32]);
     let uploader = AnyVerifyingKey::Ed25519(uploader_key.verifying_key());
     let temp = tempfile::tempdir().unwrap();
-    let ctx = context(temp.path().into(), uploader.clone()).await;
+    let ctx = context(temp.path().join("first"), uploader.clone()).await;
     let before = ctx.db.peek().await.as_index().de().unwrap();
-    let base = fixture("base.s9pk");
-    let base_size = base.len();
-    let mixed = fixture("mixed.s9pk");
-    let package = S9pk::deserialize(&Arc::<[u8]>::from(base.clone()), None)
-        .await
-        .unwrap();
-    let commitment = package.as_archive().commitment().await.unwrap();
-    let signature = AnySignature::Ed25519ph(
-        Ed25519ph
-            .sign_commitment(&uploader_key, &commitment, "s9pk")
-            .unwrap(),
-    );
-    let (url, requests, task) = server(
+    let (host, requests, host_task) = server(
         [
-            ("base".into(), base),
-            ("mixed".into(), mixed.clone()),
-            ("ignored".into(), mixed.clone()),
+            ("base".into(), fixture("base.s9pk")),
+            ("mirror".into(), fixture("base.s9pk")),
         ]
         .into(),
     )
     .await;
-    add_package(
-        ctx.clone(),
-        AddPackageParams {
-            urls: vec![url.join("base").unwrap(), url.join("mixed").unwrap()],
-            uploader: uploader.clone(),
-            commitment,
-            signature: signature.clone(),
-        },
+    let (registry, registry_task) = registry_server(ctx.clone()).await;
+    let key_path = temp.path().join("identity.pem");
+    write_signing_key(&uploader_key, &key_path).await.unwrap();
+    let cli = CliContext::init(ClientConfig {
+        id_key_path: Some(key_path.clone()),
+        registry: Some(registry.to_string().parse().unwrap()),
+        ..Default::default()
+    })
+    .unwrap();
+    cli_add_package_impl(
+        cli.clone(),
+        local_package().await,
+        vec![host.join("base").unwrap()],
+        false,
     )
     .await
     .unwrap();
     let after = ctx.db.peek().await.as_index().de().unwrap();
     assert_eq!(before.signers, after.signers);
     assert_eq!(before.trust_signers, after.trust_signers);
-    let info = &after.package.packages["trust-fixture"].versions
-        [&"1.0.0:0".parse::<crate::util::VersionString>().unwrap()];
-    let asset = &info.s9pks[0].1;
+    let version: crate::util::VersionString = "1.0.0:0".parse().unwrap();
+    let asset = &after.package.packages["trust-fixture"].versions[&version].s9pks[0].1;
     assert_eq!(asset.signatures.len(), 5);
-    assert_eq!(asset.commitment, commitment);
     for (key, signature) in &asset.signatures {
-        key.verify_commitment(&commitment, "s9pk", signature)
+        key.verify_commitment(&asset.commitment, "s9pk", signature)
             .unwrap();
     }
-    assert_eq!(
-        reqwest::get(url.join("mixed").unwrap())
-            .await
-            .unwrap()
-            .bytes()
-            .await
-            .unwrap()
-            .as_ref(),
-        mixed
+    assert!(requests.lock().unwrap().iter().all(Option::is_none));
+
+    let local_path = temp.path().join("local.s9pk");
+    tokio::fs::write(&local_path, fixture("endorsed.s9pk"))
+        .await
+        .unwrap();
+    let cli_server = rpc_toolkit::Server::new(
+        {
+            let cli = cli.clone();
+            move || {
+                let cli = cli.clone();
+                async move { Ok(cli) }
+            }
+        },
+        crate::registry::registry_api(),
     );
-    let ranged: Vec<_> = requests.lock().unwrap().iter().copied().flatten().collect();
-    assert_eq!(
-        ranged,
-        [
-            (base_size - 16, base_size - 1),
-            (mixed.len() - 16, mixed.len() - 1),
-            (base_size, mixed.len() - 17),
-        ]
-    );
-    add_mirror(
-        ctx.clone(),
-        AddMirrorParams {
-            url: url.join("ignored").unwrap(),
-            uploader: uploader.clone(),
-            commitment,
-            signature: signature.clone(),
+    cli_server.handle_command("package.add-mirror", imbl_value::json!({"file":local_path,"url":host.join("mirror").unwrap(),"noVerify":true})).await.unwrap();
+    let mirrored = ctx.db.peek().await.as_index().de().unwrap();
+    let mirrored = &mirrored.package.packages["trust-fixture"].versions[&version].s9pks[0].1;
+    assert_eq!(mirrored.signatures, asset.signatures);
+    assert_eq!(mirrored.urls.len(), 2);
+
+    let target = context(temp.path().join("second"), uploader.clone()).await;
+    let (destination, destination_task) = registry_server(target.clone()).await;
+    cli_promote(
+        cli.clone(),
+        CliPromoteParams {
+            from: Some(registry),
+            to: Some(destination),
+            id: "trust-fixture".parse().unwrap(),
+            version: version.clone(),
         },
     )
     .await
     .unwrap();
-    let fallback = S9pk::deserialize(
-        &Arc::new(
-            HttpSource::new(Client::new(), url.join("ignored").unwrap())
-                .await
-                .unwrap(),
-        ),
-        None,
-    )
-    .await
-    .unwrap();
-    assert_eq!(fallback.signatures().await.unwrap().len(), 4);
+    let promoted = target.db.peek().await.as_index().de().unwrap();
+    let promoted = &promoted.package.packages["trust-fixture"].versions[&version].s9pks[0].1;
+    assert_eq!(promoted.signatures, asset.signatures);
+    assert_eq!(promoted.urls, mirrored.urls);
+
     ctx.db
         .mutate(|db| db.as_admins_mut().ser(&BTreeSet::<Guid>::new()))
         .await
         .result
         .unwrap();
     assert!(
-        add_package(
-            ctx.clone(),
-            AddPackageParams {
-                urls: vec![url.join("mixed").unwrap()],
-                uploader,
-                commitment,
-                signature
-            }
+        cli_add_package_impl(
+            cli,
+            local_package().await,
+            vec![host.join("base").unwrap()],
+            true
         )
         .await
         .is_err()
     );
-    task.abort();
+    assert_eq!(
+        ctx.db.peek().await.as_index().de().unwrap().signers,
+        before.signers
+    );
+    host_task.abort();
+    registry_task.abort();
+    destination_task.abort();
 }
 
 #[tokio::test]
-async fn registry_does_not_advertise_secondary_signatures_against_a_different_actual_bound() {
+async fn registry_rejects_submitted_invalid_signatures_atomically_and_defaults_old_requests() {
     let uploader_key = SigningKey::from_bytes(&[12; 32]);
     let uploader = AnyVerifyingKey::Ed25519(uploader_key.verifying_key());
     let temp = tempfile::tempdir().unwrap();
     let ctx = context(temp.path().into(), uploader.clone()).await;
-    let (larger, commitment) = larger_bound_fixture();
+    let local = local_package().await;
+    let commitment = local.as_archive().commitment().await.unwrap();
     let signature = AnySignature::Ed25519ph(
         Ed25519ph
             .sign_commitment(&uploader_key, &commitment, "s9pk")
             .unwrap(),
     );
-    let (url, _, task) = server(
-        [
-            ("larger".into(), larger),
-            ("mixed".into(), fixture("mixed.s9pk")),
-        ]
-        .into(),
-    )
-    .await;
-    add_package(
-        ctx.clone(),
-        AddPackageParams {
-            urls: vec![url.join("larger").unwrap(), url.join("mixed").unwrap()],
-            uploader,
-            commitment,
-            signature,
-        },
-    )
-    .await
-    .unwrap();
-    let index = ctx.db.peek().await.as_index().de().unwrap();
-    let info = &index.package.packages["trust-fixture"].versions
-        [&"1.0.0:0".parse::<crate::util::VersionString>().unwrap()];
-    assert_eq!(info.s9pks[0].1.signatures.len(), 2);
-    for (key, signature) in &info.s9pks[0].1.signatures {
-        key.verify_commitment(&commitment, "s9pk", signature)
-            .unwrap();
-    }
-    task.abort();
-}
-
-#[tokio::test]
-async fn registry_rejects_mirror_that_exceeds_the_actual_indexed_bound() {
-    let uploader_key = SigningKey::from_bytes(&[12; 32]);
-    let uploader = AnyVerifyingKey::Ed25519(uploader_key.verifying_key());
-    let temp = tempfile::tempdir().unwrap();
-    let ctx = context(temp.path().into(), uploader.clone()).await;
-    let (larger, commitment) = larger_bound_fixture();
-    let signature = AnySignature::Ed25519ph(
-        Ed25519ph
-            .sign_commitment(&uploader_key, &commitment, "s9pk")
-            .unwrap(),
+    let (url, requests, task) = server([("base".into(), fixture("base.s9pk"))].into()).await;
+    let old = serde_json::json!({"urls":[url.join("base").unwrap()],"__Auth_signer":uploader,"commitment":commitment,"signature":signature});
+    let params: AddPackageParams = serde_json::from_value(old.clone()).unwrap();
+    assert!(params.signatures.is_empty());
+    let mut supplied = local.signatures().await.unwrap();
+    let good_key = supplied.keys().next().unwrap().clone();
+    supplied.insert(
+        good_key,
+        AnySignature::Ed25519ph(ed25519_dalek::Signature::from_bytes(&[0; 64])),
     );
-    let (url, _, task) = server(
-        [
-            ("base".into(), fixture("base.s9pk")),
-            ("larger".into(), larger),
-        ]
-        .into(),
-    )
-    .await;
+    let mut invalid = old.clone();
+    invalid["signatures"] = serde_json::to_value(supplied).unwrap();
     assert!(
-        add_package(
-            ctx.clone(),
-            AddPackageParams {
-                urls: vec![url.join("base").unwrap(), url.join("larger").unwrap()],
-                uploader,
-                commitment,
-                signature,
-            }
-        )
-        .await
-        .is_err()
+        add_package(ctx.clone(), serde_json::from_value(invalid).unwrap())
+            .await
+            .is_err()
     );
     assert!(
         ctx.db
@@ -349,53 +327,86 @@ async fn registry_rejects_mirror_that_exceeds_the_actual_indexed_bound() {
             .packages
             .is_empty()
     );
+    add_package(ctx.clone(), params).await.unwrap();
+    let before = serde_json::to_value(ctx.db.peek().await.as_index().de().unwrap()).unwrap();
+    let mut invalid = serde_json::json!({"url":url.join("base").unwrap(),"__Auth_signer":uploader,"commitment":commitment,"signature":signature,"signatures":local.signatures().await.unwrap()});
+    let mirror: AddMirrorParams = serde_json::from_value(invalid.clone()).unwrap();
+    add_mirror(ctx.clone(), mirror).await.unwrap();
+    invalid["signatures"] = serde_json::json!({uploader.to_string():AnySignature::Ed25519ph(ed25519_dalek::Signature::from_bytes(&[0;64]))});
+    let after = serde_json::to_value(ctx.db.peek().await.as_index().de().unwrap()).unwrap();
+    assert!(
+        add_mirror(ctx.clone(), serde_json::from_value(invalid).unwrap())
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        serde_json::to_value(ctx.db.peek().await.as_index().de().unwrap()).unwrap(),
+        after
+    );
+    assert_ne!(before, after);
+    assert!(requests.lock().unwrap().iter().all(Option::is_none));
     task.abort();
 }
 
 #[tokio::test]
-async fn registry_optional_malformed_trailer_does_not_block_authorized_ingestion() {
+async fn registry_rejects_endorsements_signed_for_a_different_actual_bound() {
     let uploader_key = SigningKey::from_bytes(&[12; 32]);
     let uploader = AnyVerifyingKey::Ed25519(uploader_key.verifying_key());
     let temp = tempfile::tempdir().unwrap();
     let ctx = context(temp.path().into(), uploader.clone()).await;
-    let commitment = serde_json::from_value(vectors()["overlapCommitment"].clone()).unwrap();
+    let (larger, commitment) = larger_bound_fixture();
     let signature = AnySignature::Ed25519ph(
         Ed25519ph
             .sign_commitment(&uploader_key, &commitment, "s9pk")
             .unwrap(),
     );
-    let (url, _, task) = server([("overlap".into(), fixture("overlap.s9pk"))].into()).await;
-    add_package(
-        ctx.clone(),
-        AddPackageParams {
-            urls: vec![url.join("overlap").unwrap()],
-            uploader,
-            commitment,
-            signature,
-        },
+    let (url, _, task) = server(
+        [
+            ("larger".into(), larger),
+            ("base".into(), fixture("base.s9pk")),
+        ]
+        .into(),
     )
-    .await
-    .unwrap();
-    let index = ctx.db.peek().await.as_index().de().unwrap();
-    let info = &index.package.packages["trust-fixture"].versions
-        [&"1.0.0:0".parse::<crate::util::VersionString>().unwrap()];
-    assert_eq!(info.s9pks[0].1.signatures.len(), 2);
+    .await;
+    for name in ["larger", "base"] {
+        assert!(
+            add_package(
+                ctx.clone(),
+                AddPackageParams {
+                    urls: vec![url.join(name).unwrap()],
+                    uploader: uploader.clone(),
+                    commitment,
+                    signature: signature.clone(),
+                    signatures: local_package().await.signatures().await.unwrap()
+                }
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            ctx.db
+                .peek()
+                .await
+                .as_index()
+                .de()
+                .unwrap()
+                .package
+                .packages
+                .is_empty()
+        );
+    }
     task.abort();
 }
 
 #[tokio::test]
-async fn http_source_preserves_pooled_bulk_reads_and_forwards_tail_capability() {
+async fn http_metadata_never_discovers_endorsements_and_reuses_exact_position() {
     use tokio::io::AsyncReadExt;
-
     let bytes = fixture("endorsed.s9pk");
     let (url, requests, task) = server([("endorsed".into(), bytes.clone())].into()).await;
-    let source = TmpSource::new(
-        Arc::new(crate::util::io::TmpDir::new().await.unwrap()),
-        Arc::new(
-            HttpSource::new(Client::new(), url.join("endorsed").unwrap())
-                .await
-                .unwrap(),
-        ),
+    let source = Arc::new(
+        HttpSource::new(Client::new(), url.join("endorsed").unwrap())
+            .await
+            .unwrap(),
     );
     for (position, length) in [(0, 8), (8, 8), (80, 4)] {
         let mut read = vec![0; length];
@@ -409,89 +420,10 @@ async fn http_source_preserves_pooled_bulk_reads_and_forwards_tail_capability() 
         assert_eq!(read, bytes[position..position + length]);
     }
     assert_eq!(*requests.lock().unwrap(), [None]);
-    let mut footer = [0; 16];
-    source
-        .fetch_tail(bytes.len() as u64 - 16, 16)
-        .await
-        .unwrap()
-        .read_exact(&mut footer)
-        .await
-        .unwrap();
-    assert_eq!(&footer[8..], b"S9PKEXT1");
-    let mut empty = Vec::new();
-    source
-        .fetch_tail(0, 0)
-        .await
-        .unwrap()
-        .read_to_end(&mut empty)
-        .await
-        .unwrap();
-    assert!(empty.is_empty());
-    assert_eq!(
-        *requests.lock().unwrap(),
-        [None, Some((bytes.len() - 16, bytes.len() - 1))]
-    );
-    source.gc().await.unwrap();
-    task.abort();
-}
-
-#[tokio::test]
-async fn http_source_tail_falls_back_without_ranges_or_when_they_are_ignored() {
-    for name in ["no-ranges", "ignored"] {
-        let (url, requests, task) = server([(name.into(), fixture("endorsed.s9pk"))].into()).await;
-        let source = Arc::new(
-            HttpSource::new(Client::new(), url.join(name).unwrap())
-                .await
-                .unwrap(),
-        );
-        let package = S9pk::deserialize(&source, None).await.unwrap();
-        assert_eq!(package.signatures().await.unwrap().len(), 4);
-        assert!(package.diagnostics().is_empty());
-        let ranged = requests
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|range| range.is_some())
-            .count();
-        assert_eq!(ranged, if name == "no-ranges" { 0 } else { 2 });
-        task.abort();
-    }
-}
-
-#[tokio::test]
-async fn http_source_rejects_invalid_tail_range_response_without_rejecting_base() {
-    let (url, _, task) = server([("bad-range".into(), fixture("endorsed.s9pk"))].into()).await;
-    let source = Arc::new(
-        HttpSource::new(Client::new(), url.join("bad-range").unwrap())
-            .await
-            .unwrap(),
-    );
     let package = S9pk::deserialize(&source, None).await.unwrap();
     assert_eq!(package.signatures().await.unwrap().len(), 1);
-    assert_eq!(package.diagnostics()[0].kind, "read-failed");
-    task.abort();
-}
-
-#[tokio::test]
-async fn http_source_discovers_the_footer_with_a_direct_range_request() {
-    let fixture = fixture("mixed.s9pk");
-    let (url, requests, task) = server([("mixed".into(), fixture.clone())].into()).await;
-    let source = HttpSource::new(Client::new(), url.join("mixed").unwrap())
-        .await
-        .unwrap();
-    let mut footer = [0; 16];
-    use tokio::io::AsyncReadExt;
-    source
-        .fetch_tail(fixture.len() as u64 - 16, 16)
-        .await
-        .unwrap()
-        .read_exact(&mut footer)
-        .await
-        .unwrap();
-    assert_eq!(&footer[8..], b"S9PKEXT1");
-    assert_eq!(
-        *requests.lock().unwrap(),
-        [Some((fixture.len() - 16, fixture.len() - 1))]
-    );
+    assert!(package.diagnostics().is_empty());
+    assert!(requests.lock().unwrap().iter().all(Option::is_none));
+    assert!(package.as_archive().contents().source_end() < bytes.len() as u64);
     task.abort();
 }

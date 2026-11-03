@@ -134,6 +134,7 @@ pub async fn cli_promote(
             imbl_value::json!({
                 "urls": &asset.urls,
                 "signature": signature,
+                "signatures": &asset.signatures,
                 "commitment": commitment,
             }),
         )

@@ -1342,22 +1342,6 @@ export const ShutdownParams: z.ZodObject<{
 }).meta({
   id: 'ShutdownParams',
 })
-export const SideloadParams: z.ZodObject<{
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-}> = /* @__PURE__ */ object({
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Accepts an untrusted signer without skipping signature or integrity verification.',
-  }),
-}).meta({
-  id: 'SideloadParams',
-})
 
 /**
  * So a signal strength is a number between 0-100, I want the null option to be 0 since there is no signal
@@ -1698,10 +1682,18 @@ export const AddMirrorParams: z.ZodObject<{
   url: z.ZodString
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
 }> = /* @__PURE__ */ object({
   url: z.string(),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
 }).meta({
   id: 'AddMirrorParams',
 })
@@ -1709,10 +1701,18 @@ export const AddPackageParams: z.ZodObject<{
   urls: z.ZodArray<z.ZodString>
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
 }> = /* @__PURE__ */ object({
   urls: z.array(z.string()),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
 }).meta({
   id: 'AddPackageParams',
 })
@@ -2557,28 +2557,6 @@ export const InitAcmeParams: z.ZodObject<{
   contact: z.array(z.string()),
 }).meta({
   id: 'InitAcmeParams',
-})
-export const InstallParams: z.ZodObject<{
-  registry: z.ZodString
-  id: typeof PackageId
-  version: typeof Version
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-}> = /* @__PURE__ */ object({
-  registry: z.string(),
-  id: PackageId,
-  version: Version,
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Accepts an untrusted signer without skipping signature or integrity verification.',
-  }),
-}).meta({
-  id: 'InstallParams',
 })
 export const InstalledVersionParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
@@ -3771,6 +3749,36 @@ export const HostnameInfo: z.ZodObject<{
 }).meta({
   id: 'HostnameInfo',
 })
+export const InstallParams: z.ZodObject<{
+  acceptSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
+    z.ZodNullable<typeof AcceptSigners>
+  >
+  registry: z.ZodString
+  id: typeof PackageId
+  version: typeof Version
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  acceptSigners: wire(
+    AcceptSigners.nullable().optional(),
+    AcceptSigners.nullable(),
+  ),
+  registry: z.string(),
+  id: PackageId,
+  version: Version,
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
+}).meta({
+  id: 'InstallParams',
+})
 export const Metrics: z.ZodObject<{
   general: typeof MetricsGeneral
   memory: typeof MetricsMemory
@@ -4159,6 +4167,30 @@ export const Sessions: z.ZodObject<{
 }).meta({
   id: 'Sessions',
   description: "The server's sessions, by credential type.",
+})
+export const SideloadParams: z.ZodObject<{
+  acceptSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
+    z.ZodNullable<typeof AcceptSigners>
+  >
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  acceptSigners: wire(
+    AcceptSigners.nullable().optional(),
+    AcceptSigners.nullable(),
+  ),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
+}).meta({
+  id: 'SideloadParams',
 })
 export const UpdateSystemParams: z.ZodObject<{
   registry: z.ZodString

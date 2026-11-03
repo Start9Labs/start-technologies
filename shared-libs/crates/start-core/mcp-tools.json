@@ -4538,6 +4538,9 @@
         "InstallParams": {
           "type": "object",
           "properties": {
+            "acceptSigners": {
+              "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
+            },
             "registry": { "type": "string" },
             "id": { "$ref": "#/$defs/PackageId" },
             "version": { "$ref": "#/$defs/Version" },
@@ -4549,11 +4552,47 @@
           "required": ["registry", "id", "version"],
           "additionalProperties": true
         },
+        "AcceptSigners": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "signer": { "$ref": "#/$defs/AnyVerifyingKey" } },
+              "required": ["signer"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "any": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/AcceptSigners" }
+                }
+              },
+              "required": ["any"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "all": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/AcceptSigners" }
+                }
+              },
+              "required": ["all"],
+              "additionalProperties": true
+            }
+          ]
+        },
+        "AnyVerifyingKey": { "type": "string" },
         "PackageId": { "type": "string" },
         "Version": { "type": "string" }
       },
       "type": "object",
       "properties": {
+        "acceptSigners": {
+          "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
+        },
         "registry": { "type": "string" },
         "id": { "$ref": "#/$defs/PackageId" },
         "version": { "$ref": "#/$defs/Version" },
@@ -4849,16 +4888,55 @@
         "SideloadParams": {
           "type": "object",
           "properties": {
+            "acceptSigners": {
+              "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
+            },
             "trust": {
               "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
               "type": "boolean"
             }
           },
           "additionalProperties": true
-        }
+        },
+        "AcceptSigners": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "signer": { "$ref": "#/$defs/AnyVerifyingKey" } },
+              "required": ["signer"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "any": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/AcceptSigners" }
+                }
+              },
+              "required": ["any"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "all": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/AcceptSigners" }
+                }
+              },
+              "required": ["all"],
+              "additionalProperties": true
+            }
+          ]
+        },
+        "AnyVerifyingKey": { "type": "string" }
       },
       "type": "object",
       "properties": {
+        "acceptSigners": {
+          "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
+        },
         "trust": {
           "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
           "type": "boolean"
@@ -8173,7 +8251,12 @@
           "properties": {
             "urls": { "type": "array", "items": { "type": "string" } },
             "commitment": { "$ref": "#/$defs/MerkleArchiveCommitment" },
-            "signature": { "$ref": "#/$defs/AnySignature" }
+            "signature": { "$ref": "#/$defs/AnySignature" },
+            "signatures": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/AnySignature" }
+            }
           },
           "required": ["urls", "commitment", "signature"],
           "additionalProperties": true
@@ -8217,7 +8300,12 @@
           "properties": {
             "url": { "type": "string" },
             "commitment": { "$ref": "#/$defs/MerkleArchiveCommitment" },
-            "signature": { "$ref": "#/$defs/AnySignature" }
+            "signature": { "$ref": "#/$defs/AnySignature" },
+            "signatures": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/AnySignature" }
+            }
           },
           "required": ["url", "commitment", "signature"],
           "additionalProperties": true

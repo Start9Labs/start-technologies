@@ -952,7 +952,7 @@ export default {
   1100: 'Verknüpft mit',
   1101: 'Benachrichtigungen in diesem Browser empfangen, während die StartOS-Oberfläche geschlossen ist.',
   1102: 'Alle anzeigen',
-  1103: 'Einige zusätzliche Signaturen konnten nicht verifiziert werden und wurden ignoriert.',
+  1103: 'Einige zusätzliche Signaturdatensätze konnten nicht gelesen werden und wurden ignoriert.',
   1104: 'Paketsignaturen werden geprüft',
   1105: 'Für Dienstpakete aktiviert',
   1106: 'Für StartOS-Updates aktiviert',

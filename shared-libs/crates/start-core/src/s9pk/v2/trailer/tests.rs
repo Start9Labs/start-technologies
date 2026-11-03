@@ -30,15 +30,17 @@ fn with_region(mut base: Vec<u8>, region: &[u8]) -> Vec<u8> {
     base
 }
 async fn read(bytes: Vec<u8>) -> S9pk<crate::s9pk::merkle_archive::source::Section<Arc<[u8]>>> {
-    S9pk::deserialize(&Arc::<[u8]>::from(bytes), None)
+    S9pk::deserialize_local(&Arc::<[u8]>::from(bytes), None)
         .await
         .unwrap()
 }
+fn record(record: &Value) -> Vec<u8> {
+    let key = key_from_record(record);
+    let signature: AnySignature = serde_json::from_value(record["signature"].clone()).unwrap();
+    tlv(1, &encode_endorsement(&key, &signature).unwrap())
+}
 fn good() -> Vec<u8> {
-    tlv(
-        1,
-        &serde_json::to_vec(&vectors()["endorsements"][0]).unwrap(),
-    )
+    record(&vectors()["endorsements"][0])
 }
 fn key(index: usize) -> AnyVerifyingKey {
     serde_json::from_value(vectors()["endorsements"][index]["signer"].clone()).unwrap()
@@ -49,7 +51,7 @@ fn key(index: usize) -> AnyVerifyingKey {
 async fn regenerate_s9pk_trailer_fixtures() {
     let dir = fixtures();
     std::fs::create_dir_all(&dir).unwrap();
-    let base = crate::s9pk::trust_tests::fixture_bytes(&[42; 128]).await;
+    let base = bytes("base.s9pk");
     let package = read(base.clone()).await;
     let commitment = package.as_archive().commitment().await.unwrap();
     let mut endorsements = Vec::new();
@@ -73,20 +75,16 @@ async fn regenerate_s9pk_trailer_fixtures() {
         endorsements.push(json!({"signer": AnyVerifyingKey::Ed25519(key.verifying_key()), "signature": signature}));
     }
     let mut raw = tlv(65535, b"unknown\0record");
-    raw.extend(tlv(1, br#"{"signer":"bad","signature":"bad"}"#));
-    for record in &endorsements {
-        raw.extend(tlv(1, &serde_json::to_vec(record).unwrap()));
+    let bad = AnySignature::Ed25519ph(ed25519_dalek::Signature::from_bytes(&[0; 64]));
+    raw.extend(tlv(
+        1,
+        &encode_endorsement(&key_from_record(&endorsements[0]), &bad).unwrap(),
+    ));
+    for item in &endorsements {
+        raw.extend(record(item));
     }
-    let alias = json!({"signer": key_from_record(&endorsements[0]).to_string(), "signature": endorsements[0]["signature"]});
-    raw.extend(tlv(1, &serde_json::to_vec(&alias).unwrap()));
-    let mut extended = serde_json::to_string(&endorsements[1]).unwrap();
-    extended.pop();
-    extended.push_str(",\"unknown\":{\"large\":18446744073709551615,\"a\":[1,2]}}");
-    raw.extend(tlv(1, extended.as_bytes()));
-    let endorsed = endorsements
-        .iter()
-        .flat_map(|r| tlv(1, &serde_json::to_vec(r).unwrap()))
-        .collect::<Vec<_>>();
+    raw.extend(record(&endorsements[0]));
+    let endorsed = endorsements.iter().flat_map(record).collect::<Vec<_>>();
     std::fs::write(
         dir.join("endorsed.s9pk"),
         with_region(base.clone(), &endorsed),
@@ -136,7 +134,7 @@ async fn regenerate_s9pk_trailer_fixtures() {
     });
     std::fs::write(
         dir.join("vectors.json"),
-        serde_json::to_vec_pretty(&manifest).unwrap(),
+        format!("{}\n", serde_json::to_string_pretty(&manifest).unwrap()),
     )
     .unwrap();
 }
@@ -179,9 +177,14 @@ async fn s9pk_trailer_verified_map_and_trust_policy() {
         Some(vec![key(1)]),
         Some(vec![key(2)]),
     ] {
-        load_with_signers(source.clone(), || panic!(), None, policy.as_deref())
-            .await
-            .unwrap();
+        load_with_signers(
+            source.clone(),
+            || panic!(),
+            None,
+            crate::trusted_keys::signer_policy(policy),
+        )
+        .await
+        .unwrap();
     }
     for policy in [
         vec![],
@@ -190,30 +193,110 @@ async fn s9pk_trailer_verified_map_and_trust_policy() {
         )],
     ] {
         assert!(
-            load_with_signers(source.clone(), || panic!(), None, Some(&policy))
-                .await
-                .is_err()
+            load_with_signers(
+                source.clone(),
+                || panic!(),
+                None,
+                crate::trusted_keys::signer_policy(Some(policy))
+            )
+            .await
+            .is_err()
         );
     }
     let mut corrupt = source.to_vec();
     corrupt[35] ^= 1;
     assert!(
-        S9pk::deserialize(&Arc::<[u8]>::from(corrupt), None)
+        S9pk::deserialize_local(&Arc::<[u8]>::from(corrupt), None)
             .await
             .is_err()
     );
 }
 
 #[tokio::test]
+async fn s9pk_trailer_backend_authority_rejects_a_pinned_invalid_claim() {
+    let invalid = AnySignature::Ed25519ph(ed25519_dalek::Signature::from_bytes(&[0; 64]));
+    let mut region = tlv(1, &encode_endorsement(&key(0), &invalid).unwrap());
+    region.extend(record(&vectors()["endorsements"][1]));
+    let source = Arc::<[u8]>::from(with_region(bytes("base.s9pk"), &region));
+    let package = S9pk::deserialize_local(&source, None).await.unwrap();
+    let signatures = package.signatures().await.unwrap();
+    assert_eq!(signatures.len(), 2);
+    assert!(!signatures.contains_key(&key(0)));
+    assert!(signatures.contains_key(&key(1)));
+    assert_eq!(package.diagnostics()[0].kind, "invalid-signature");
+    for (pins, accepted) in [
+        (None, true),
+        (Some(vec![key(1)]), true),
+        (Some(vec![key(0)]), false),
+    ] {
+        let result = load_with_signers(
+            source.clone(),
+            || panic!("v2 requires no conversion key"),
+            None,
+            crate::trusted_keys::signer_policy(pins),
+        )
+        .await;
+        if accepted {
+            assert!(result.is_ok());
+        } else {
+            assert_eq!(result.err().unwrap().kind, ErrorKind::InvalidSignature);
+        }
+    }
+}
+
+#[tokio::test]
+async fn s9pk_trailer_backend_authority_requires_valid_embedded_signature_with_matching_pins() {
+    let valid = with_region(bytes("base.s9pk"), &good());
+    let commitment = read(valid.clone())
+        .await
+        .as_archive()
+        .commitment()
+        .await
+        .unwrap();
+    let signature: AnySignature =
+        serde_json::from_value(vectors()["endorsements"][0]["signature"].clone()).unwrap();
+    key(0)
+        .verify_commitment(&commitment, "s9pk", &signature)
+        .unwrap();
+    load_with_signers(
+        Arc::<[u8]>::from(valid.clone()),
+        || panic!("v2 requires no conversion key"),
+        None,
+        crate::trusted_keys::signer_policy(Some(vec![key(0)])),
+    )
+    .await
+    .unwrap();
+    let mut corrupt = valid;
+    corrupt[35] ^= 1;
+    for pins in [None, Some(vec![key(0)])] {
+        let result = load_with_signers(
+            Arc::<[u8]>::from(corrupt.clone()),
+            || panic!("v2 requires no conversion key"),
+            None,
+            crate::trusted_keys::signer_policy(pins),
+        )
+        .await;
+        assert_eq!(result.err().unwrap().kind, ErrorKind::InvalidSignature);
+    }
+}
+
+#[tokio::test]
 async fn s9pk_trailer_bad_records_are_isolated_but_bad_framing_discards_all() {
+    let mut truncated_key = 999_u64.to_be_bytes().to_vec();
+    truncated_key.extend_from_slice(&[1; 16]);
+    let valid = encode_endorsement(
+        &key(0),
+        &serde_json::from_value(vectors()["endorsements"][0]["signature"].clone()).unwrap(),
+    )
+    .unwrap();
     let malformed = [
-        br#"{"signer":"x","sign\u0065r":"y","signature":"z"}"#.to_vec(),
-        br#"{"signer":"x","signature":"y","unknown":{"a":1,"\u0061":2}}"#.to_vec(),
-        br#"{"signer":1,"signature":"y"}"#.to_vec(),
-        b"[]".to_vec(),
-        b"null".to_vec(),
+        vec![],
         vec![255],
-        format!("{}0{}", "[".repeat(70), "]".repeat(70)).into_bytes(),
+        0_u64.to_be_bytes().to_vec(),
+        u64::MAX.to_be_bytes().to_vec(),
+        truncated_key,
+        valid[..8 + 44].to_vec(),
+        [valid.as_slice(), &[0]].concat(),
     ];
     for record in malformed {
         let mut region = tlv(1, &record);
@@ -222,6 +305,7 @@ async fn s9pk_trailer_bad_records_are_isolated_but_bad_framing_discards_all() {
         assert_eq!(package.signatures().await.unwrap().len(), 2);
         assert_eq!(package.diagnostics()[0].kind, "invalid-record");
         assert!(!package.trailer.editable);
+        assert!(package.needs_endorsement(&key(0)).await.is_err());
     }
     for tail in [
         vec![0],
@@ -258,27 +342,6 @@ async fn s9pk_trailer_bad_records_are_isolated_but_bad_framing_discards_all() {
 }
 
 #[tokio::test]
-async fn s9pk_trailer_rejects_noncanonical_key_encodings() {
-    let signer = "MCowBQYDK2VwAyEAE5j2LG0aRXxRumpLXz29L2n8qTIWIY3ImX5Ba9F9k8o=";
-    for invalid in [
-        signer.replace("k8o=", "k8p="),
-        format!("{signer} "),
-        format!("-----BEGIN PUBLIC KEY-----\n{signer}\n-----END OTHER KEY-----\n"),
-    ] {
-        assert!(invalid.parse::<AnyVerifyingKey>().is_err());
-        let record =
-            json!({"signer": invalid, "signature": vectors()["endorsements"][0]["signature"]});
-        let package = read(with_region(
-            bytes("base.s9pk"),
-            &tlv(1, &serde_json::to_vec(&record).unwrap()),
-        ))
-        .await;
-        assert_eq!(package.signatures().await.unwrap().len(), 1);
-        assert_eq!(package.diagnostics()[0].kind, "invalid-signature");
-    }
-}
-
-#[tokio::test]
 async fn s9pk_trailer_toc_ranges_and_lazy_files_are_accounted() {
     let mut base = bytes("base.s9pk");
     let position = u64::from_be_bytes(base[139..147].try_into().unwrap()) as usize;
@@ -294,7 +357,7 @@ async fn s9pk_trailer_toc_ranges_and_lazy_files_are_accounted() {
     let mut bad = bytes("base.s9pk");
     bad[139..147].copy_from_slice(&u64::MAX.to_be_bytes());
     assert!(
-        S9pk::deserialize(&Arc::<[u8]>::from(bad), None)
+        S9pk::deserialize_local(&Arc::<[u8]>::from(bad), None)
             .await
             .is_err()
     );
@@ -306,7 +369,9 @@ async fn s9pk_trailer_writer_preserves_raw_base_and_unknowns_and_refuses_damage(
     let path = temp.path().join("test.s9pk");
     let record = &vectors()["endorsements"][0];
     let signature: AnySignature = serde_json::from_value(record["signature"].clone()).unwrap();
-    let original = bytes("mixed.s9pk");
+    let mut region = tlv(65535, b"unknown\0record");
+    region.extend(good());
+    let original = with_region(bytes("base.s9pk"), &region);
     tokio::fs::write(&path, &original).await.unwrap();
     for _ in 0..2 {
         Trailer::append(&path, key(0), signature.clone())
@@ -320,7 +385,62 @@ async fn s9pk_trailer_writer_preserves_raw_base_and_unknowns_and_refuses_damage(
     );
     let package = S9pk::open(&path, None).await.unwrap();
     assert_eq!(package.trailer.start, Some(bytes("base.s9pk").len() as u64));
-    assert_eq!(package.signatures().await.unwrap().len(), 4);
+    assert_eq!(package.signatures().await.unwrap().len(), 2);
+    assert_eq!(updated, original);
+    assert!(!package.needs_endorsement(&key(0)).await.unwrap());
+    assert!(package.needs_endorsement(&key(1)).await.unwrap());
+    let embedded = serde_json::from_value(vectors()["embedded"].clone()).unwrap();
+    assert!(!package.needs_endorsement(&embedded).await.unwrap());
+    let second_signature =
+        serde_json::from_value(vectors()["endorsements"][1]["signature"].clone()).unwrap();
+    Trailer::append(&path, key(1), second_signature)
+        .await
+        .unwrap();
+    let appended = tokio::fs::read(&path).await.unwrap();
+    assert_eq!(
+        &appended[..original.len() - 16],
+        &original[..original.len() - 16]
+    );
+    assert_eq!(
+        S9pk::open(&path, None)
+            .await
+            .unwrap()
+            .signatures()
+            .await
+            .unwrap()
+            .len(),
+        3
+    );
+    let invalid_signature = AnySignature::Ed25519ph(ed25519_dalek::Signature::from_bytes(&[0; 64]));
+    let invalid_record = tlv(1, &encode_endorsement(&key(0), &invalid_signature).unwrap());
+    let invalid_original = with_region(bytes("base.s9pk"), &invalid_record);
+    tokio::fs::write(&path, &invalid_original).await.unwrap();
+    assert!(
+        S9pk::open(&path, None)
+            .await
+            .unwrap()
+            .needs_endorsement(&key(0))
+            .await
+            .unwrap()
+    );
+    Trailer::append(&path, key(0), signature.clone())
+        .await
+        .unwrap();
+    let repaired = tokio::fs::read(&path).await.unwrap();
+    assert_eq!(
+        &repaired[..invalid_original.len() - 16],
+        &invalid_original[..invalid_original.len() - 16]
+    );
+    assert_eq!(
+        S9pk::open(&path, None)
+            .await
+            .unwrap()
+            .signatures()
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
     for mut bad in [
         bytes("overlap.s9pk"),
         with_region(bytes("base.s9pk"), &tlv(1, b"{}")),
@@ -338,6 +458,24 @@ async fn s9pk_trailer_writer_preserves_raw_base_and_unknowns_and_refuses_damage(
         }
     }
     tokio::fs::write(&path, bytes("base.s9pk")).await.unwrap();
+    let embedded = SigningKey::from_bytes(&[7; 32]);
+    let embedded_signature = AnySignature::Ed25519ph(
+        Ed25519ph
+            .sign_commitment(
+                &embedded,
+                &package.as_archive().commitment().await.unwrap(),
+                "s9pk",
+            )
+            .unwrap(),
+    );
+    Trailer::append(
+        &path,
+        AnyVerifyingKey::Ed25519(embedded.verifying_key()),
+        embedded_signature,
+    )
+    .await
+    .unwrap();
+    assert_eq!(tokio::fs::read(&path).await.unwrap(), bytes("base.s9pk"));
     let invalid = AnySignature::Ed25519ph(ed25519_dalek::Signature::from_bytes(&[0; 64]));
     assert!(Trailer::append(&path, key(0), invalid).await.is_err());
     assert_eq!(tokio::fs::read(&path).await.unwrap(), bytes("base.s9pk"));
@@ -356,18 +494,6 @@ async fn s9pk_trailer_content_rewrite_drops_old_metadata_diagnostically() {
     let result = read(sink.into_inner()).await;
     assert_eq!(result.signatures().await.unwrap().len(), 1);
     assert!(result.diagnostics().is_empty());
-}
-
-#[test]
-fn s9pk_trailer_strict_json_rejects_duplicate_keys_and_deep_input() {
-    for bad in [
-        br#"{"a":1,"a":2}"#.as_slice(),
-        br#"{"a":{"x":1,"\u0078":2}}"#,
-        b"{} 1",
-    ] {
-        assert!(strict_json(bad).is_err());
-    }
-    assert!(strict_json(br#"{"a":[{"x":1}],"big":18446744073709551615}"#).is_ok());
 }
 
 #[tokio::test]
@@ -418,7 +544,10 @@ async fn s9pk_trailer_commitment_bounds_and_embedded_collision_remain_exact() {
         embedded
             .sign(&signing_message(crate::sign::COMMITMENT_SIG_TAG, &commitment, "s9pk").unwrap()),
     );
-    let region = tlv(1, &serde_json::to_vec(&json!({"signer": AnyVerifyingKey::Ed25519(embedded.verifying_key()), "signature": pure})).unwrap());
+    let region = tlv(
+        1,
+        &encode_endorsement(&AnyVerifyingKey::Ed25519(embedded.verifying_key()), &pure).unwrap(),
+    );
     let package = read(with_region(bytes("base.s9pk"), &region)).await;
     assert_eq!(package.signatures().await.unwrap().len(), 1);
     assert!(matches!(
@@ -442,9 +571,10 @@ impl ArchiveSource for UnknownSize {
 
 #[tokio::test]
 async fn s9pk_trailer_unknown_length_is_not_reported_as_absent() {
-    let package = S9pk::deserialize(&UnknownSize(Arc::<[u8]>::from(bytes("mixed.s9pk"))), None)
-        .await
-        .unwrap();
+    let package =
+        S9pk::deserialize_local(&UnknownSize(Arc::<[u8]>::from(bytes("mixed.s9pk"))), None)
+            .await
+            .unwrap();
     assert_eq!(package.diagnostics()[0].kind, "unknown-size");
     assert_eq!(package.signatures().await.unwrap().len(), 1);
 }
@@ -458,7 +588,7 @@ async fn s9pk_trailer_lazy_file_overflow_and_writer_cap_are_enforced() {
     for offset in [u64::MAX, base.len() as u64] {
         base[position..position + 8].copy_from_slice(&offset.to_be_bytes());
         assert!(
-            S9pk::deserialize(&Arc::<[u8]>::from(base.clone()), None)
+            S9pk::deserialize_local(&Arc::<[u8]>::from(base.clone()), None)
                 .await
                 .is_err()
         );
@@ -564,7 +694,15 @@ impl ArchiveSource for UnreadableTail {
 
 #[tokio::test]
 async fn s9pk_trailer_read_failure_keeps_valid_base_and_refuses_editing() {
-    let package = S9pk::deserialize(
+    let generic = S9pk::deserialize(
+        &UnreadableTail(Arc::<[u8]>::from(bytes("mixed.s9pk"))),
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(generic.diagnostics().is_empty());
+    assert_eq!(generic.signatures().await.unwrap().len(), 1);
+    let package = S9pk::deserialize_local(
         &UnreadableTail(Arc::<[u8]>::from(bytes("mixed.s9pk"))),
         None,
     )

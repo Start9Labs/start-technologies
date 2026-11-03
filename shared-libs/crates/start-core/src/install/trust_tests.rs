@@ -129,3 +129,83 @@ fn cli_override_is_explicit_for_registry_and_sideload() {
     let params: SideloadParams = serde_json::from_value(serde_json::json!({})).unwrap();
     assert!(!params.trust);
 }
+
+#[tokio::test]
+async fn package_request_pins_use_update_policy_and_remain_required_with_override() {
+    use crate::registry::signer::AcceptSigners;
+    use crate::s9pk::load_with_signers;
+
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("testdata/s9pk-trailer/endorsed.s9pk");
+    let package = crate::s9pk::S9pk::open(&path, None).await.unwrap();
+    let signatures = package.signatures().await.unwrap();
+    let embedded = AnyVerifyingKey::Ed25519(SigningKey::from_bytes(&[7; 32]).verifying_key());
+    let endorsement = AnyVerifyingKey::Ed25519(SigningKey::from_bytes(&[8; 32]).verifying_key());
+    let unrelated = AnyVerifyingKey::Ed25519(SigningKey::from_bytes(&[1; 32]).verifying_key());
+    let asset = RegistryAsset {
+        published_at: chrono::Utc::now(),
+        urls: vec![],
+        commitment: package.as_archive().commitment().await.unwrap(),
+        signatures,
+    };
+    let source = std::sync::Arc::<[u8]>::from(tokio::fs::read(&path).await.unwrap());
+    for (server, client, expected) in [
+        (None, None, true),
+        (None, Some(vec![]), false),
+        (None, Some(vec![endorsement.clone()]), true),
+        (None, Some(vec![unrelated.clone()]), false),
+        (Some(vec![]), Some(vec![endorsement.clone()]), false),
+        (
+            Some(vec![embedded.clone()]),
+            Some(vec![endorsement.clone()]),
+            true,
+        ),
+        (Some(vec![embedded]), Some(vec![unrelated]), false),
+    ] {
+        let server = trusted_keys::signer_policy(server);
+        let client = trusted_keys::signer_policy(client);
+        let registry_result = asset
+            .validate_all(SIG_CONTEXT, server.clone())
+            .and_then(|()| {
+                if let Some(policy) = client.clone() {
+                    asset.validate(SIG_CONTEXT, policy).map(|_| ())
+                } else {
+                    Ok(())
+                }
+            });
+        assert_eq!(registry_result.is_ok(), expected);
+        let policy = match (server, client) {
+            (Some(server), Some(client)) => Some(AcceptSigners::All(vec![server, client])),
+            (server, client) => server.or(client),
+        };
+        assert_eq!(
+            load_with_signers(source.clone(), || panic!("v2"), None, policy)
+                .await
+                .is_ok(),
+            expected
+        );
+    }
+    for value in [
+        serde_json::json!({}),
+        serde_json::json!({"acceptSigners": null}),
+    ] {
+        let params: SideloadParams = serde_json::from_value(value).unwrap();
+        assert!(params.accept_signers.is_none());
+        assert!(!params.trust);
+    }
+    let wire = serde_json::json!({"trust":true,"acceptSigners":{"any":[{"signer":endorsement}]}});
+    let params: SideloadParams = serde_json::from_value(wire.clone()).unwrap();
+    assert!(params.trust);
+    assert_eq!(
+        serde_json::to_value(params.accept_signers).unwrap(),
+        wire["acceptSigners"]
+    );
+    let pins = local_sideload_policy(&path).await.unwrap().unwrap();
+    asset.validate(SIG_CONTEXT, pins).unwrap();
+    let mut install = wire;
+    install["registry"] = serde_json::json!("https://example.com");
+    install["id"] = serde_json::json!("trust-fixture");
+    install["version"] = serde_json::json!("1.0.0:0");
+    let params: InstallParams = serde_json::from_value(install).unwrap();
+    assert!(params.accept_signers.is_some());
+}

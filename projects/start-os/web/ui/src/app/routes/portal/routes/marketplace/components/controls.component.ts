@@ -6,6 +6,7 @@ import {
   MarketplacePkg,
   matchingTrustedKeys,
   packageSigners,
+  packageSignerPolicy,
 } from '@start9labs/marketplace'
 import {
   ErrorService,
@@ -224,7 +225,14 @@ export class MarketplaceControlsComponent {
     const file = this.file()
     if (!file) throw new Error('no file detected')
     return this.tasks.run(async () => {
-      const res = await this.api.rpc.package.sideload({ trust })
+      const res = await this.api.rpc.package.sideload({
+        trust,
+        acceptSigners: packageSignerPolicy(
+          this.pkg(),
+          this.trust.keys() ?? {},
+          trust,
+        ),
+      })
       this.api
         .uploadFile(res.upload, file)
         .catch(e => this.error.handleError(e))

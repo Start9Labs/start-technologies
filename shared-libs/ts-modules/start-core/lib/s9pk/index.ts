@@ -31,7 +31,7 @@ export function compare(a: Uint8Array, b: Uint8Array) {
 /**
  * Represents a parsed `.s9pk` package archive — the binary distribution format for StartOS services.
  *
- * An `S9pk` wraps a verified {@link Manifest}, a {@link MerkleArchive} containing the package's
+ * An `S9pk` wraps a parsed {@link Manifest}, a {@link MerkleArchive} containing the package's
  * assets (icon, license, dependency metadata), and the total archive size in bytes.
  *
  * @example
@@ -51,7 +51,7 @@ export class S9pk {
     readonly archive: MerkleArchive,
     /** The total size of the archive in bytes. */
     readonly size: number,
-    /** Verified canonical DER64 identities, including the embedded signer. */
+    /** Claimed canonical DER64 signing identities; the backend must verify their signatures. */
     readonly signers: readonly string[],
     /** Optional metadata issues; these never replace base archive validation. */
     readonly diagnostics: readonly S9pkDiagnostic[],
@@ -72,7 +72,8 @@ export class S9pk {
    * Deserializes an `S9pk` from a `Blob` (e.g. a `File` from a browser file input).
    *
    * Validates the magic bytes and version header, then parses the Merkle archive structure.
-   * The embedded signature is always verified; an external commitment additionally pins the archive.
+   * Signature bytes are not verified. Callers must pin the matched keys for backend validation.
+   * An external commitment additionally pins the archive's Merkle root and size bound.
    *
    * @param source - The raw `.s9pk` file as a `Blob`
    * @param commitment - An optional Merkle commitment to verify the archive against, or `null` to skip external commitment pinning

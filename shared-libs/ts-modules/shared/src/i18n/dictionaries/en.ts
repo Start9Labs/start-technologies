@@ -953,7 +953,7 @@ export const ENGLISH: Record<string, number> = {
   'Linked to': 1100,
   'Receive notifications in this browser while the StartOS UI is closed.': 1101,
   'View all': 1102,
-  'Some supplemental signatures could not be verified and were ignored.': 1103,
+  'Some supplemental signature records could not be read and were ignored.': 1103,
   'Checking package signatures': 1104,
   'Enabled for service packages': 1105,
   'Enabled for StartOS updates': 1106,

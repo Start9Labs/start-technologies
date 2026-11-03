@@ -99,6 +99,19 @@ impl<S: FileSource + Clone> S9pk<S> {
         }
         Ok(signatures)
     }
+    pub(crate) async fn needs_endorsement(
+        &self,
+        signer: &crate::sign::AnyVerifyingKey,
+    ) -> Result<bool, Error> {
+        ensure_code!(
+            self.trailer.editable,
+            ErrorKind::ParseS9pk,
+            "{}",
+            t!("s9pk.trailer.edit-refused")
+        );
+        Ok(!self.signatures().await?.contains_key(signer))
+    }
+
     pub async fn new(archive: MerkleArchive<S>, size: Option<u64>) -> Result<Self, Error> {
         let manifest = extract_manifest(&archive).await?;
         Ok(Self {
@@ -342,10 +355,19 @@ impl<S: ArchiveSource + Clone> S9pk<Section<S>> {
             (None, None) => std::cmp::Ordering::Equal,
         });
 
+        Self::new(archive, source.size().await).await
+    }
+
+    /// Reads a complete local package, including supplemental endorsements.
+    pub async fn deserialize_local(
+        source: &S,
+        commitment: Option<&MerkleArchiveCommitment>,
+    ) -> Result<Self, Error> {
+        let mut package = Self::deserialize(source, commitment).await?;
         let trailer = trailer::Trailer::read(
             source,
-            &archive.commitment().await?,
-            archive.contents().source_end(),
+            &package.archive.commitment().await?,
+            package.archive.contents().source_end(),
         )
         .await;
         for diagnostic in &trailer.diagnostics {
@@ -356,14 +378,13 @@ impl<S: ArchiveSource + Clone> S9pk<Section<S>> {
                 diagnostic.message
             );
         }
-        let mut package = Self::new(archive, source.size().await).await?;
         package.trailer = trailer;
         Ok(package)
     }
 }
 impl S9pk {
     pub async fn from_file(file: File) -> Result<Self, Error> {
-        Self::deserialize(&MultiCursorFile::from(file), None).await
+        Self::deserialize_local(&MultiCursorFile::from(file), None).await
     }
     pub async fn open(path: impl AsRef<Path>, id: Option<&PackageId>) -> Result<Self, Error> {
         let res = Self::from_file(open_file(path).await?).await?;

@@ -428,8 +428,6 @@ export type SetupInfo = z.output<typeof schemas.SetupInfo>
 export type SetupInfoInput = z.input<typeof schemas.SetupInfo>
 export type ShutdownParams = z.output<typeof schemas.ShutdownParams>
 export type ShutdownParamsInput = z.input<typeof schemas.ShutdownParams>
-export type SideloadParams = z.output<typeof schemas.SideloadParams>
-export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 
 /**
  * So a signal strength is a number between 0-100, I want the null option to be 0 since there is no signal
@@ -808,8 +806,6 @@ export type InfoParams = z.output<typeof schemas.InfoParams>
 export type InfoParamsInput = z.input<typeof schemas.InfoParams>
 export type InitAcmeParams = z.output<typeof schemas.InitAcmeParams>
 export type InitAcmeParamsInput = z.input<typeof schemas.InitAcmeParams>
-export type InstallParams = z.output<typeof schemas.InstallParams>
-export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type InstalledVersionParams = z.output<
   typeof schemas.InstalledVersionParams
 >
@@ -1158,6 +1154,8 @@ export type ImageConfigRepr = z.output<typeof schemas.ImageConfigRepr>
 export type ImageConfigReprInput = z.input<typeof schemas.ImageConfigRepr>
 export type InitProgressRes = z.output<typeof schemas.InitProgressRes>
 export type InitProgressResInput = z.input<typeof schemas.InitProgressRes>
+export type InstallParams = z.output<typeof schemas.InstallParams>
+export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type MetadataSrc = z.output<typeof schemas.MetadataSrc>
 export type MetadataSrcInput = z.input<typeof schemas.MetadataSrc>
 export type Metrics = z.output<typeof schemas.Metrics>
@@ -1214,6 +1212,8 @@ export type SetDependenciesParamsInput = z.input<
 >
 export type SetupProgress = z.output<typeof schemas.SetupProgress>
 export type SetupProgressInput = z.input<typeof schemas.SetupProgress>
+export type SideloadParams = z.output<typeof schemas.SideloadParams>
+export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 export type Task = z.output<typeof schemas.Task>
 export type TaskParams = z.input<typeof schemas.Task>
 

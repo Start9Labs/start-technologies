@@ -27,9 +27,9 @@ Run `start-registry info set-trust-signers` without IDs to clear the selection. 
 
 ## Package endorsements
 
-Package add and add-mirror import the embedded signature and independently verified supplemental signatures from the hosted v2 S9PK files. Promotion uses the same ingestion path. Multiple URL variants contribute endorsements only for the exact indexed Merkle root and signed bound. Invalid optional metadata is diagnosed without rejecting a valid base archive; source URLs and bytes remain unchanged.
+Package add and add-mirror import the hosted archive's embedded signature and a submitted `signatures` map. The CLI reads verified endorsements from its local v2 S9PK and submits that map separately from the authenticated uploader's signature. Promotion forwards the existing indexed map. Every submitted endorsement must verify against the exact indexed Merkle root, signed bound, and `s9pk` context; an invalid entry rejects the request atomically. Hosted URLs can serve the base archive alone. Source URLs and bytes remain unchanged.
 
-Supplemental keys enter the asset's signature map, not the registry signer directory or trust proposal. Publishing authorization still belongs to the registered uploader. Operators can prepare a sideloadable endorsed file with `start-cli s9pk sign <file.s9pk>` before hosting it.
+Supplemental keys enter the asset's signature map, not the registry signer directory or trust proposal. Publishing authorization still belongs to the registered uploader. Operators can prepare an endorsed file with `start-cli s9pk sign <file.s9pk>` and pass it to `registry package add` or `add-mirror`.
 
 ## Binary layout
 

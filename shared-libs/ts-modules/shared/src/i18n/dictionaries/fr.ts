@@ -952,7 +952,7 @@ export default {
   1100: 'Liée à',
   1101: 'Recevez des notifications dans ce navigateur lorsque l’interface de StartOS est fermée.',
   1102: 'Tout afficher',
-  1103: 'Certaines signatures supplémentaires n’ont pas pu être vérifiées et ont été ignorées.',
+  1103: 'Certains enregistrements de signatures supplémentaires n’ont pas pu être lus et ont été ignorés.',
   1104: 'Vérification des signatures du paquet',
   1105: 'Activée pour les paquets de services',
   1106: 'Activée pour les mises à jour de StartOS',

@@ -2,7 +2,10 @@ import { CommonModule, TitleCasePipe } from '@angular/common'
 import { Component, computed, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { Router } from '@angular/router'
-import { MarketplaceSignersComponent } from '@start9labs/marketplace'
+import {
+  acceptSignerPolicy,
+  MarketplaceSignersComponent,
+} from '@start9labs/marketplace'
 import {
   DialogService,
   i18nPipe,
@@ -136,9 +139,7 @@ export class SystemUpdateModal {
         targetVersion: `=${latest.version}`,
         registry: startosRegistry,
         progress: false,
-        acceptSigners: {
-          any: trusted.map(signer => ({ signer })),
-        },
+        acceptSigners: acceptSignerPolicy(trusted),
       })
       this.context.$implicit.complete()
     }, 'Beginning update')
