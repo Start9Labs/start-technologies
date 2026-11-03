@@ -9331,6 +9331,42 @@
     }
   },
   {
+    "name": "server.bittorrent.enabled",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
+    }
+  },
+  {
+    "name": "server.bittorrent.set-seeding",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SetSeedingParams": {
+          "type": "object",
+          "properties": { "enabled": { "type": "boolean" } },
+          "required": ["enabled"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": { "enabled": { "type": "boolean" } },
+      "required": ["enabled"],
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "server.clear-smtp",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

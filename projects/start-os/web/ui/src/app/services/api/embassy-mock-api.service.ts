@@ -232,6 +232,18 @@ export class MockApiService extends ApiService {
         guid: 'logs-guid',
       }
     },
+    'server.bittorrent.enabled': async () => true,
+    'server.bittorrent.set-seeding': async ({ enabled }) => {
+      await pauseFor(500)
+      await this.mockRevision([
+        {
+          op: PatchOp.REPLACE,
+          path: '/serverInfo/registrySeeding',
+          value: enabled,
+        },
+      ])
+      return null
+    },
     'server.time': async params => {
       await pauseFor(2000)
       return {

@@ -73,6 +73,14 @@ An MCP client authenticates with the same token to use the server's API as tools
 
 Restart, shut down, update, and configure the server.
 
+### `start-cli server bittorrent enabled`
+
+Show whether the server's configuration permits BitTorrent downloads and continued seeding.
+
+### `start-cli server bittorrent set-seeding --enabled <true|false>`
+
+Retain completed, verified BitTorrent downloads for continued seeding, or stop continued seeding without deleting retained files. Disabled by default; changes apply live and persist across restarts. This controls the server, not local CLI transfers, and leaves uploads during active server downloads unchanged. See [Download Transports](marketplace.md#download-transports) for storage and peer visibility.
+
 ### `start-cli server restart`
 
 Restart the server.

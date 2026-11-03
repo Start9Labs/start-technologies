@@ -1295,6 +1295,10 @@ export const SetNameParams: z.ZodObject<{ name: z.ZodString }> =
   /* @__PURE__ */ object({ name: z.string() }).meta({
     id: 'SetNameParams',
   })
+export const SetSeedingParams: z.ZodObject<{ enabled: z.ZodBoolean }> =
+  /* @__PURE__ */ object({ enabled: z.boolean() }).meta({
+    id: 'SetSeedingParams',
+  })
 export const SetServerHostnameParams: z.ZodObject<{
   /**
    * The server's `.local` hostname: up to 32 lowercase letters, numbers, and
@@ -6441,6 +6445,30 @@ export const Api = {
     server: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
+        bittorrent: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            enabled: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
+              _RETURN: /* @__PURE__ */ z.boolean(),
+            },
+            'set-seeding': {
+              _PARAMS: /* @__PURE__ */ SetSeedingParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+          },
+        },
         'clear-smtp': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),

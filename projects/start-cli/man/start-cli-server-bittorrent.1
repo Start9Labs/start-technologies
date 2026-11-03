@@ -1,0 +1,20 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-bittorrent 1  "bittorrent "
+.SH NAME
+start\-cli\-server\-bittorrent \- Manage continued BitTorrent seeding
+.SH SYNOPSIS
+\fBstart\-cli server bittorrent\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Manage continued BitTorrent seeding
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+start\-cli\-server\-bittorrent\-enabled(1)
+Show whether BitTorrent is enabled on the server
+.TP
+start\-cli\-server\-bittorrent\-set\-seeding(1)
+Set continued seeding of completed, verified downloads

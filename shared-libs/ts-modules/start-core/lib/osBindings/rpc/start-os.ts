@@ -282,6 +282,7 @@ export type SetEchoipUrlsParamsInput = z.input<
 >
 export type SetLanguageParamsInput = z.input<typeof schemas.SetLanguageParams>
 export type SetNameParamsInput = z.input<typeof schemas.SetNameParams>
+export type SetSeedingParamsInput = z.input<typeof schemas.SetSeedingParams>
 export type SetServerHostnameParamsInput = z.input<
   typeof schemas.SetServerHostnameParams
 >

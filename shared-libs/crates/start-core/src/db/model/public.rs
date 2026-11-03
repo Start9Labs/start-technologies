@@ -141,6 +141,7 @@ impl Public {
                 ca_fingerprint: x509_sha256_fingerprint(&account.root_ca_cert).unwrap(),
                 ntp_synced: false,
                 zram: false,
+                registry_seeding: default_registry_seeding(),
                 governor: None,
                 epp: None,
                 smtp: None,
@@ -163,6 +164,10 @@ pub fn default_echoip_urls() -> Vec<Url> {
         "https://ipconfig.io".parse().unwrap(),
         "https://ifconfig.co".parse().unwrap(),
     ]
+}
+
+pub(crate) fn default_registry_seeding() -> bool {
+    false
 }
 
 #[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
@@ -193,6 +198,9 @@ pub struct ServerInfo {
     pub ntp_synced: bool,
     #[serde(default)]
     pub zram: bool,
+    /// Persisted intent to retain verified torrents after downloads.
+    #[serde(default = "default_registry_seeding")]
+    pub registry_seeding: bool,
     pub governor: Option<Governor>,
     #[serde(default)]
     pub epp: Option<Epp>,

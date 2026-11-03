@@ -472,18 +472,21 @@ impl RpcContext {
         });
 
         let res = Self(seed.clone());
-        if res.torrents.persistent_seeding_enabled() {
-            let torrents = res.torrents.clone();
-            res.add_cron(async move {
-                if let Err(error) = torrents.resume_seeding().boxed().await {
-                    tracing::warn!(%error, "Cannot resume registry asset seeding");
-                }
-            });
-        }
         res.cleanup_and_initialize(cleanup_init).await?;
         tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
 
         crate::version::post_init(&res, run_migrations).await?;
+        let seeding = res
+            .db
+            .watch("/public/serverInfo/registrySeeding".parse().unwrap())
+            .await
+            .typed::<bool>();
+        let torrents = res.torrents.clone();
+        res.add_cron(async move {
+            if let Err(error) = torrents.maintain_seeding(seeding).boxed().await {
+                tracing::warn!(%error, "Registry seeding watcher stopped");
+            }
+        });
         let weak = Arc::downgrade(&seed);
         let db = res.db.clone();
         res.add_cron(crate::update::security::watch_updates(db, move || {
@@ -515,9 +518,10 @@ impl RpcContext {
 
     #[instrument(skip_all)]
     pub async fn shutdown(self) -> Result<(), Error> {
-        self.crons.mutate(|c| std::mem::take(c));
-        self.services.shutdown_all().await?;
+        let crons = self.crons.mutate(std::mem::take);
+        futures::future::join_all(crons.into_values().map(|cron| cron.wait_for_abort())).await;
         self.torrents.shutdown().await;
+        self.services.shutdown_all().await?;
         self.is_closed.store(true, Ordering::SeqCst);
         self.closed.send_replace(true);
         tracing::info!("{}", t!("context.rpc.rpc-context-shutdown"));

@@ -11,7 +11,7 @@ use librqbit::{
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
-use tokio::sync::OnceCell;
+use tokio::sync::{OnceCell, RwLock};
 use tokio::time::{Instant, timeout};
 use url::Url;
 
@@ -137,7 +137,8 @@ pub struct TorrentClient {
     enabled: bool,
     disable_upload: bool,
     seed: Option<TorrentSeedConfig>,
-    seeds: OnceCell<seeds::SeedService>,
+    cache: OnceCell<Arc<seeds::SeedCache>>,
+    seeds: RwLock<Option<Arc<seeds::SeedService>>>,
 }
 
 impl std::fmt::Debug for TorrentClient {
@@ -157,18 +158,20 @@ impl TorrentClient {
             enabled: config.enabled() && !proxy,
             disable_upload: true,
             seed: None,
-            seeds: OnceCell::new(),
+            cache: OnceCell::new(),
+            seeds: RwLock::new(None),
         }
     }
 
-    /// Allows uploads during downloads; retained seeding requires configured storage.
+    /// Allows uploads during downloads; retained seeding starts disabled.
     pub fn for_server(config: TorrentDownloadConfig, seed: Option<TorrentSeedConfig>) -> Self {
         let enabled = config.enabled();
         Self {
             enabled,
             disable_upload: false,
-            seed: seed.filter(|_| enabled),
-            seeds: OnceCell::new(),
+            seed: enabled.then(|| seed.unwrap_or_default()),
+            cache: OnceCell::new(),
+            seeds: RwLock::new(None),
         }
     }
 
@@ -181,17 +184,45 @@ impl TorrentClient {
         .then_some(self)
     }
 
-    pub(crate) fn persistent_seeding_enabled(&self) -> bool {
-        self.seed.is_some()
+    pub(crate) fn downloads_enabled(&self) -> bool {
+        self.enabled
     }
 
-    /// Validates retained files before adding them to the seeding session.
-    pub async fn resume_seeding(&self) -> Result<(), Error> {
+    pub(crate) async fn maintain_seeding(
+        &self,
+        mut enabled: patch_db::TypedDbWatch<bool>,
+    ) -> Result<(), Error> {
+        loop {
+            let should_seed: bool = from_value(enabled.as_mut().peek_and_mark_seen()?)?;
+            let changed = tokio::select! {
+                biased;
+                result = enabled.changed() => result,
+                result = async {
+                    if should_seed {
+                        if let Err(error) = self.resume_seeding().await {
+                            tracing::warn!(%error, "Cannot resume registry asset seeding");
+                        }
+                    }
+                    std::future::pending::<Result<(), patch_db::Error>>().await
+                } => result,
+            };
+            self.shutdown().await;
+            changed?;
+        }
+    }
+
+    async fn resume_seeding(&self) -> Result<(), Error> {
         if let Some(config) = &self.seed {
-            let service = self
-                .seeds
-                .get_or_try_init(|| seeds::SeedService::start(config.clone()))
+            let cache = self
+                .cache
+                .get_or_try_init(|| async {
+                    seeds::SeedCache::open(config.directory.clone())
+                        .await
+                        .map(Arc::new)
+                })
                 .await?;
+            let service = Arc::new(seeds::SeedService::start(cache.clone(), config.listen).await?);
+            *self.seeds.write().await = Some(service.clone());
             service.refresh().await?;
         }
         Ok(())
@@ -199,7 +230,8 @@ impl TorrentClient {
 
     /// Stops retained seeding without deleting the cache.
     pub async fn shutdown(&self) {
-        if let Some(service) = self.seeds.get() {
+        let service = self.seeds.write().await.take();
+        if let Some(service) = service {
             service.stop().await;
         }
     }
@@ -289,12 +321,10 @@ impl TorrentClient {
         }
         session.0.stop().await;
         commitment.verify(&path).await?;
-        if let Some(config) = &self.seed {
-            let retained = seeds::retain(&config.directory, &path, &bytes, &commitment).await;
-            if let Err(error) = retained {
+        let seed = self.seeds.read().await.clone();
+        if let Some(seed) = seed {
+            if let Err(error) = seed.retain(&path, &bytes, &commitment).await {
                 tracing::warn!(%error, "Cannot retain registry asset for seeding");
-            } else if let Err(error) = self.resume_seeding().await {
-                tracing::warn!(%error, "Cannot start registry asset seeding");
             }
         }
         progress.complete();

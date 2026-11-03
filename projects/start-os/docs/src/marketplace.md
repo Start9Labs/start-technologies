@@ -33,16 +33,24 @@ To use HTTP exclusively, set `bittorrent: false` in `/media/startos/config/confi
 
 ### Optional Seeding
 
-Completed, verified BitTorrent downloads can be retained for seeding after installation or an update. Add the following to `/media/startos/config/config.yaml` and restart StartOS:
+Continued seeding of completed, verified BitTorrent downloads is disabled by default. Enable it with:
+
+```sh
+start-cli server bittorrent set-seeding --enabled true
+```
+
+This preference applies without restarting and persists across restarts. StartOS keeps additional copies under `/media/startos/data/package-data/registry-seeds` and revalidates them before resuming seeding. Active BitTorrent downloads can upload regardless of this preference.
+
+Use `--enabled false` to stop continued seeding without deleting the cache. The cache grows as assets are retained. To reclaim its disk space, disable seeding, restart StartOS, then delete the cache or selected entries inside it.
+
+Seeding uses outgoing peer connections by default. To accept incoming connections, configure the following in `/media/startos/config/config.yaml`, restart StartOS, and arrange TCP reachability for that address and port:
 
 ```yaml
 bittorrent-seed:
-  directory: /media/startos/data/package-data/registry-seeds
+  listen: '[::]:6882'
 ```
 
-StartOS keeps separate copies of these downloads and resumes seeding them after a restart. The cache grows as assets are retained. To reclaim it, remove the `bittorrent-seed` setting, restart StartOS, then delete the dedicated cache directory or selected entries inside it.
-
-Seeding uses outgoing peer connections by default. To accept incoming connections, add `listen: '[::]:6882'` under `bittorrent-seed` and arrange TCP reachability for that address and port. Router and firewall configuration remain the administrator's responsibility. Disabling BitTorrent also disables retained seeding.
+An optional `directory` under `bittorrent-seed` overrides the cache location; these storage/listener options do not enable seeding. Router and firewall configuration remain the administrator's responsibility. `bittorrent: false` suppresses both peer downloads and continued seeding while preserving the saved seeding preference.
 
 ## Open Ecosystem
 

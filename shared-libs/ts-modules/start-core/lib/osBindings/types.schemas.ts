@@ -6541,6 +6541,10 @@ export const ServerInfo: z.ZodObject<{
   caFingerprint: z.ZodString
   ntpSynced: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   zram: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  /**
+   * Persisted intent to retain verified torrents after downloads.
+   */
+  registrySeeding: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   governor: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof Governor>>,
     z.ZodNullable<typeof Governor>
@@ -6599,6 +6603,13 @@ export const ServerInfo: z.ZodObject<{
   caFingerprint: z.string(),
   ntpSynced: wire(z.boolean().optional(), z.boolean()),
   zram: wire(z.boolean().optional(), z.boolean()),
+  /**
+   * Persisted intent to retain verified torrents after downloads.
+   */
+  registrySeeding: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Persisted intent to retain verified torrents after downloads.',
+  }),
   governor: wire(Governor.nullable().optional(), Governor.nullable()),
   epp: wire(Epp.nullable().optional(), Epp.nullable()),
   smtp: wire(SmtpValue.nullable().optional(), SmtpValue.nullable()),

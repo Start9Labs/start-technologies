@@ -497,6 +497,43 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
   assert.equal(data.serverInfo.trustedKeys[ids[2]].os, true)
 })
 
+test('StartOS seeding mock changes persisted intent through PatchDB revisions', async () => {
+  const { applyPatch } = require('fast-json-patch')
+  const storage = Symbol('session storage')
+  const data = {
+    ui: { registries: {} },
+    serverInfo: { registrySeeding: false, trustedKeys: {}, registryKeys: {} },
+  }
+  const { dependencies, tokens, load } = harness(
+    new Map([
+      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
+      ['src/app/utils/acme', {}],
+      ['./api.fixures', { Mock: {} }],
+      ['./mock-patch', { mockPatchData: data }],
+      ['./md-sample.md', ''],
+    ]),
+  )
+  dependencies.set(storage, null)
+  dependencies.set(tokens.AuthService, { isVerified$: of(true) })
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: data }))
+  const client = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+  ).MockApiService)()
+  const subscription = client.mockWsSource$.subscribe(revision => {
+    applyPatch(data, revision.patch)
+  })
+  assert.equal(await client.rpc.server.bittorrent.enabled({}), true)
+  assert.equal(data.serverInfo.registrySeeding, false)
+  for (const enabled of [true, false]) {
+    assert.equal(
+      await client.rpc.server.bittorrent.setSeeding({ enabled }),
+      null,
+    )
+    assert.equal(data.serverInfo.registrySeeding, enabled)
+  }
+  subscription.unsubscribe()
+})
+
 test('StartOS DNS mock updates the selected gateway using live gateway state', async () => {
   const storage = Symbol('session storage')
   const { dependencies, tokens, load } = harness(

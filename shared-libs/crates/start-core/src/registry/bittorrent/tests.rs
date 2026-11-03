@@ -247,8 +247,9 @@ async fn torrent_metadata_download_is_preferred_to_http() -> Result<(), Error> {
     );
     assert_eq!(swarm.http_hits.load(Ordering::SeqCst), 0);
     assert!(client.disable_upload);
-    assert!(!client.persistent_seeding_enabled());
-    assert!(client.seeds.get().is_none());
+    client.resume_seeding().await?;
+    assert!(client.cache.get().is_none());
+    assert!(client.seeds.read().await.is_none());
     Ok(())
 }
 
@@ -506,7 +507,7 @@ async fn package_download_parses_and_verifies_the_committed_torrent_archive() ->
 
 #[tokio::test]
 async fn startos_retains_completed_torrents_only_when_enabled() -> Result<(), Error> {
-    let swarm = Swarm::new().await?;
+    let swarm = Swarm::hybrid().await?;
     let cache = TmpDir::new().await?;
     let config = TorrentSeedConfig {
         directory: cache.to_path_buf(),
@@ -515,15 +516,159 @@ async fn startos_retains_completed_torrents_only_when_enabled() -> Result<(), Er
     let client = TorrentClient::for_server(TorrentDownloadConfig::default(), Some(config));
     let asset = swarm.asset(swarm.url.join("metadata.torrent")?);
     assert_eq!(swarm.download(&asset, &client).await?, swarm.content);
+    assert!(client.cache.get().is_none());
+    assert!(client.seeds.read().await.is_none());
+    client.resume_seeding().await?;
+    assert_eq!(swarm.download(&asset, &client).await?, swarm.content);
     let meta = validate_metadata(&swarm.torrent, &asset.commitment.into())?;
     let retained = cache
         .join(meta.info_hash.as_string())
         .join("data")
         .join(file_name(&meta)?);
     assert_eq!(tokio::fs::read(retained).await?, swarm.content);
-    assert!(client.seeds.get().is_some());
-    assert!(client.persistent_seeding_enabled());
+    assert!(client.seeds.read().await.is_some());
     client.shutdown().await;
+    assert!(client.seeds.read().await.is_none());
+    client.resume_seeding().await?;
+    assert!(client.seeds.read().await.is_some());
+    client.shutdown().await;
+    Ok(())
+}
+
+async fn wait_for_seeding(client: &TorrentClient, enabled: bool) {
+    timeout(Duration::from_secs(10), async {
+        while client.seeds.read().await.is_some() != enabled {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("seeding state did not follow persisted intent");
+}
+
+#[tokio::test]
+async fn seeding_follows_persisted_intent_and_can_restart_with_an_old_service_reference()
+-> Result<(), Error> {
+    let cache = TmpDir::new().await?;
+    let client = Arc::new(TorrentClient::for_server(
+        TorrentDownloadConfig::default(),
+        Some(TorrentSeedConfig {
+            directory: cache.to_path_buf(),
+            listen: None,
+        }),
+    ));
+    let db = patch_db::PatchDb::in_memory();
+    let ptr: patch_db::json_ptr::JsonPointer = "/enabled".parse().unwrap();
+    db.put(
+        &patch_db::json_ptr::ROOT,
+        &imbl_value::json!({"enabled": false}),
+    )
+    .await?;
+    let watch = db.watch(ptr.clone()).await.typed::<bool>();
+    let owner = client.clone();
+    let task: NonDetachingJoinHandle<_> =
+        tokio::spawn(async move { Box::pin(owner.maintain_seeding(watch)).await }).into();
+    db.put(&ptr, &true).await?;
+    wait_for_seeding(&client, true).await;
+    let old = client.seeds.read().await.clone().unwrap();
+    let lease = client.cache.get().unwrap().clone();
+    db.put(&ptr, &false).await?;
+    wait_for_seeding(&client, false).await;
+    db.put(&ptr, &true).await?;
+    wait_for_seeding(&client, true).await;
+    assert!(Arc::ptr_eq(&lease, client.cache.get().unwrap()));
+    assert!(!Arc::ptr_eq(
+        &old,
+        client.seeds.read().await.as_ref().unwrap()
+    ));
+    db.put(&ptr, &false).await?;
+    wait_for_seeding(&client, false).await;
+    drop(task);
+    Ok(())
+}
+
+#[tokio::test]
+async fn disabling_seeding_cancels_pending_retention_and_rejects_stale_callbacks()
+-> Result<(), Error> {
+    let swarm = Swarm::new().await?;
+    let cache = TmpDir::new().await?;
+    let client = TorrentClient::for_server(
+        TorrentDownloadConfig::default(),
+        Some(TorrentSeedConfig {
+            directory: cache.to_path_buf(),
+            listen: None,
+        }),
+    );
+    client.resume_seeding().await?;
+    let old = client.seeds.read().await.clone().unwrap();
+    let commitment: ContentCommitment = swarm.asset(swarm.magnet.clone()).commitment.into();
+    let meta = validate_metadata(&swarm.torrent, &commitment)?;
+    let lock = crate::util::FileLock::new(
+        cache.join(format!("{}.lock", meta.info_hash.as_string())),
+        true,
+    )
+    .await?;
+    let source = swarm._tmp.join("payload.bin");
+    let mut retention = std::pin::pin!(old.retain(&source, &swarm.torrent, &commitment));
+    assert!(futures::poll!(&mut retention).is_pending());
+    client.shutdown().await;
+    let completed = timeout(Duration::from_secs(10), &mut retention).await;
+    lock.unlock().await?;
+    completed.unwrap()?;
+    old.retain(&source, &swarm.torrent, &commitment).await?;
+    assert!(!cache.join(meta.info_hash.as_string()).exists());
+    client.resume_seeding().await?;
+    assert!(client.seeds.read().await.is_some());
+    client.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn cancelling_the_seeding_worker_prevents_late_service_publication() -> Result<(), Error> {
+    let cache = TmpDir::new().await?;
+    let client = Arc::new(TorrentClient::for_server(
+        TorrentDownloadConfig::default(),
+        Some(TorrentSeedConfig {
+            directory: cache.to_path_buf(),
+            listen: None,
+        }),
+    ));
+    let db = patch_db::PatchDb::in_memory();
+    db.put(&patch_db::json_ptr::ROOT, &imbl_value::json!(true))
+        .await?;
+    let watch = db
+        .watch(patch_db::json_ptr::ROOT.to_owned())
+        .await
+        .typed::<bool>();
+    let publication = client.seeds.write().await;
+    let owner = client.clone();
+    let task: NonDetachingJoinHandle<_> =
+        tokio::spawn(async move { Box::pin(owner.maintain_seeding(watch)).await }).into();
+    timeout(Duration::from_secs(10), async {
+        while client.cache.get().is_none() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(task.wait_for_abort().await.unwrap_err().is_cancelled());
+    drop(publication);
+    client.shutdown().await;
+    assert!(client.seeds.read().await.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn http_only_server_cannot_start_retained_seeding() -> Result<(), Error> {
+    let client = TorrentClient::for_server(
+        TorrentDownloadConfig {
+            bittorrent: Some(false),
+        },
+        None,
+    );
+    client.resume_seeding().await?;
+    assert!(!client.downloads_enabled());
+    assert!(client.seeds.read().await.is_none());
+    assert!(client.cache.get().is_none());
     Ok(())
 }
 
