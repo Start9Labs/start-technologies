@@ -1,53 +1,55 @@
 import { DatePipe } from '@angular/common'
-import { Component, computed, inject, input, signal } from '@angular/core'
-import { RouterLink } from '@angular/router'
+import {
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  signal,
+} from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
+import { ActivatedRoute, Router } from '@angular/router'
 import {
   MarketplaceIconDirective,
   MarketplacePkg,
+  MarketplacePreviewComponent,
   matchingTrustedKeys,
   packageSigners,
 } from '@start9labs/marketplace'
-import {
-  DialogService,
-  i18nPipe,
-  LocalizePipe,
-  MarkdownPipe,
-  SafeLinksDirective,
-} from '@start9labs/shared'
+import { DialogService, i18nPipe } from '@start9labs/shared'
 import {
   TuiButton,
-  TuiExpand,
+  TuiButtonX,
   TuiIcon,
-  TuiLink,
-  TuiNotification,
+  TuiPopup,
   TuiTitle,
 } from '@taiga-ui/core'
-import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import {
   TuiAvatar,
   TuiButtonLoading,
-  TuiChevron,
+  TuiDrawer,
   TuiFade,
   TuiProgressCircle,
   TuiSkeleton,
 } from '@taiga-ui/kit'
-import { filter } from 'rxjs'
+import { debounceTime, filter } from 'rxjs'
 import { InstallingProgressPipe } from 'src/app/routes/portal/routes/services/pipes/install-progress.pipe'
 import { HiddenUpdatesService } from 'src/app/services/hidden-updates.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
-import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
 import {
   InstalledState,
   PackageDataEntry,
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
+import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
+import { MarketplaceControlsComponent } from '../marketplace/components/controls.component'
 import { MarketplaceAlertsService } from '../marketplace/services/alerts.service'
 import UpdatesComponent from './updates.component'
 
 @Component({
   selector: 'updates-item',
   template: `
-    <tr (click)="expanded.set(!expanded())">
+    <tr [class._note]="error() || !trusted().length" (click)="toggle(true)">
       <td>
         <div [style.gap.rem]="0.75" [style.padding-inline-end.rem]="1">
           <span
@@ -74,6 +76,37 @@ import UpdatesComponent from './updates.component'
             </span>
           </span>
         </div>
+        @if (error(); as error) {
+          <p class="note g-negative">{{ error }}</p>
+        } @else if (!trusted().length) {
+          <p class="note g-warning">
+            {{
+              "This service package isn't signed by anyone you trust." | i18n
+            }}
+          </p>
+        }
+        <tui-drawer
+          *tuiPopup="open()"
+          [overlay]="true"
+          (click.self)="toggle(false)"
+        >
+          <marketplace-preview
+            [pkgId]="item().id"
+            [pkg]="item()"
+            [controls]="controls"
+          >
+            <button
+              tuiButtonX
+              [tuiAppearanceFocus]="false"
+              (click)="toggle(false)"
+            >
+              {{ 'Close' | i18n }}
+            </button>
+          </marketplace-preview>
+        </tui-drawer>
+        <ng-template #controls let-pkg>
+          <marketplace-controls [pkg]="pkg" />
+        </ng-template>
       </td>
       <td class="desktop">
         <div>
@@ -89,14 +122,6 @@ import UpdatesComponent from './updates.component'
         {{ item().s9pks[0]?.[1]?.publishedAt | date }}
       </td>
       <td>
-        <button
-          tuiIconButton
-          size="m"
-          appearance="icon"
-          [tuiChevron]="expanded()"
-        >
-          {{ 'Show more' | i18n }}
-        </button>
         @if (local().stateInfo.state === 'updating') {
           <tui-progress-circle
             size="xs"
@@ -115,7 +140,7 @@ import UpdatesComponent from './updates.component'
             tuiIconButton
             size="s"
             appearance="secondary"
-            iconStart="@tui.x"
+            iconStart="@tui.eye-off"
             (click.stop)="hide()"
           >
             {{ 'Hide' | i18n }}
@@ -125,59 +150,12 @@ import UpdatesComponent from './updates.component'
             size="s"
             iconStart="@tui.download"
             [loading]="!ready()"
-            [disabled]="!trusted().length"
             [appearance]="error() ? 'destructive' : 'primary'"
             (click.stop)="update()"
           >
             {{ error() ? ('Retry' | i18n) : ('Update' | i18n) }}
           </button>
         }
-      </td>
-    </tr>
-    <tr>
-      <td colspan="5">
-        @if (!trusted().length) {
-          <div tuiNotification appearance="warning">
-            {{ "This service package isn't signed by anyone you trust" | i18n }}
-          </div>
-        }
-        @if (error()) {
-          <p class="g-negative">{{ error() }}</p>
-        }
-        <tui-expand [expanded]="expanded()">
-          <p tuiTitle class="mobile">
-            <b>{{ 'Package Hash' | i18n }}</b>
-            <span tuiSubtitle>{{ item().gitHash }}</span>
-          </p>
-          <p tuiTitle class="mobile">
-            <b>{{ 'Published' | i18n }}</b>
-            <span tuiSubtitle>
-              {{ item().s9pks[0]?.[1]?.publishedAt | date }}
-            </span>
-          </p>
-          <p tuiTitle>
-            <span>
-              <b>{{ 'Release notes' | i18n }}</b>
-              (
-              <a
-                tuiLink
-                iconEnd="@tui.external-link"
-                routerLink="/marketplace"
-                [queryParams]="{
-                  registry: parent.current()?.url,
-                  id: item().id,
-                  flavor: item().flavor,
-                }"
-                [textContent]="'View listing' | i18n"
-              ></a>
-              )
-            </span>
-          </p>
-          <p
-            safeLinks
-            [innerHTML]="item().releaseNotes | localize | markdown | dompurify"
-          ></p>
-        </tui-expand>
       </td>
     </tr>
   `,
@@ -202,11 +180,29 @@ import UpdatesComponent from './updates.component'
       white-space: nowrap;
     }
 
-    tr:first-child {
+    tr {
+      position: relative;
       min-height: var(--tui-height-l);
       word-break: break-word;
       clip-path: inset(0 round var(--tui-radius-s));
       cursor: pointer;
+
+      &._note td {
+        padding-block-end: 2.125rem;
+
+        &:first-child {
+          position: static;
+        }
+      }
+    }
+
+    .note {
+      position: absolute;
+      z-index: 1;
+      inset-inline: 3.5rem 0.75rem;
+      inset-block-end: 0.875rem;
+      margin: 0;
+      white-space: normal;
     }
 
     td {
@@ -225,17 +221,6 @@ import UpdatesComponent from './updates.component'
           margin-inline-start: 0.375rem;
         }
       }
-
-      &[colspan]:only-child {
-        padding: 0 3rem;
-        text-align: left;
-        white-space: normal;
-        overflow-wrap: anywhere;
-      }
-    }
-
-    [tuiTitle] {
-      margin: 1rem 0;
     }
 
     .pending {
@@ -247,16 +232,33 @@ import UpdatesComponent from './updates.component'
       display: none;
     }
 
+    tui-drawer {
+      top: 0;
+      width: 28rem;
+      border-radius: 0;
+    }
+
     :host-context(tui-root._mobile) {
-      tr:first-child {
+      tr {
         display: grid;
         grid-template-columns: 1fr min-content;
         align-items: center;
         padding: 0.5rem 0;
+
+        &._note {
+          padding-block-end: 0.875rem;
+
+          td {
+            padding-block-end: 0;
+          }
+        }
       }
 
-      td[colspan]:only-child {
-        padding: 0 0.5rem;
+      .note {
+        position: static;
+        margin: 0.25rem 0 0 2.75rem;
+        font: var(--tui-typography-body-s);
+        white-space: normal;
       }
 
       .desktop {
@@ -274,26 +276,22 @@ import UpdatesComponent from './updates.component'
     }
   `,
   imports: [
+    DatePipe,
+    InstallingProgressPipe,
+    MarketplaceControlsComponent,
     MarketplaceIconDirective,
-    RouterLink,
-    TuiExpand,
+    MarketplacePreviewComponent,
+    TuiAvatar,
     TuiButton,
     TuiButtonLoading,
-    TuiChevron,
-    TuiAvatar,
-    TuiLink,
+    TuiButtonX,
+    TuiDrawer,
+    TuiFade,
     TuiIcon,
+    TuiPopup,
     TuiProgressCircle,
     TuiSkeleton,
     TuiTitle,
-    TuiFade,
-    LocalizePipe,
-    MarkdownPipe,
-    NgDompurifyPipe,
-    SafeLinksDirective,
-    DatePipe,
-    InstallingProgressPipe,
-    TuiNotification,
     i18nPipe,
   ],
 })
@@ -303,9 +301,12 @@ export class UpdatesItemComponent {
   private readonly dialog = inject(DialogService)
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
   private readonly alerts = inject(MarketplaceAlertsService)
+  private readonly router = inject(Router)
+  private readonly params = toSignal(
+    inject(ActivatedRoute).queryParamMap.pipe(debounceTime(100)),
+  )
 
   readonly parent = inject(UpdatesComponent)
-  readonly expanded = signal(false)
   readonly error = signal('')
   readonly ready = signal(true)
 
@@ -321,9 +322,33 @@ export class UpdatesItemComponent {
       'marketplace',
     ),
   )
+  protected readonly open = computed(
+    () =>
+      this.params()?.get('id') === this.item().id &&
+      this.params()?.get('flavor') === this.item().flavor,
+  )
+
+  constructor() {
+    effect(() => {
+      const url = this.parent.current()?.url
+      if (this.open() && url) this.service.currentRegistryUrl$.next(url)
+    })
+  }
+
+  toggle(open: boolean) {
+    this.router.navigate([], {
+      queryParams: {
+        id: open ? this.item().id : null,
+        flavor: open ? this.item().flavor : null,
+      },
+      queryParamsHandling: 'merge',
+    })
+  }
 
   async update() {
-    if (!this.trusted().length) return
+    const trust = !this.trusted().length
+    if (trust && !(await this.alerts.alertUntrusted())) return
+
     const pkg = this.item()
     const { preDownloadAlert } = pkg
     const url = this.parent.current()?.url || ''
@@ -340,7 +365,7 @@ export class UpdatesItemComponent {
     this.ready.set(false)
 
     try {
-      await this.service.installPackage(pkg, url)
+      await this.service.installPackage(pkg, url, trust)
     } catch (e) {
       this.error.set(e instanceof Error ? e.message : String(e))
     } finally {
