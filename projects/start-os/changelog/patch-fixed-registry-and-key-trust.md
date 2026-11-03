@@ -11,4 +11,4 @@ release-notes: false
 - Replacing or clearing a sideload selection ignores older validation results. The sideload license dialog shows the full license text.
 - Selecting an available update opens the same package details as the Marketplace.
 - The StartOS update dialog lists every key that signed the update and whether you trust it for StartOS updates.
-- Package details preview up to three trusted signing keys, falling back to known untrusted keys and then unknown keys. **View all** opens the complete signer list when keys are hidden. Selecting a key there, in the StartOS update dialog, in Trusted Keys, or in a notification shows its details, where you can trust or distrust it for packages and StartOS updates.
+- Package details preview up to three trusted signing keys, falling back to known untrusted keys and then unknown keys. Known but untrusted signers use a neutral grey dash. **View all** opens the complete signer list when keys are hidden. Selecting a key there, in the StartOS update dialog, in Trusted Keys, or in a notification shows its details, where you can trust or distrust it for packages and StartOS updates.

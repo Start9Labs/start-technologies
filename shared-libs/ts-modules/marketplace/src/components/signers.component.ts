@@ -13,7 +13,7 @@ const STATUSES: Record<
   { icon: string; class: string; label: i18nKey }
 > = {
   trusted: { icon: '@tui.check', class: 'g-positive', label: 'Trusted' },
-  untrusted: { icon: '@tui.x', class: 'g-negative', label: 'Not trusted' },
+  untrusted: { icon: '@tui.minus', class: 'g-secondary', label: 'Not trusted' },
   unknown: { icon: '@tui.minus', class: 'g-secondary', label: 'Unknown key' },
 }
 
