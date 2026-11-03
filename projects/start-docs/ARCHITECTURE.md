@@ -4,13 +4,13 @@ How the documentation site is built, versioned, and deployed.
 
 ## Place in the monorepo
 
-This is the `projects/start-docs/` project in the `start-technologies` monorepo. It owns the site build infra (`build.sh`, `serve.sh`, `versions.conf`), the shared mdBook `theme/`, the `landing/` page, and the Bitcoin Guides book — and it wires together the per-product books that live in their own product dirs (`../start-os/docs/`, `../start-tunnel/docs/`, `../start-sdk/docs/`, `../start-wrt/docs/`) into one deployed site. CI (`.github/workflows/docs-deploy.yml`) consumes its output to deploy `docs.start9.com`.
+This is the `projects/start-docs/` project in the `start-technologies` monorepo. It owns the site build infra (`build.sh`, `serve.sh`, `versions.conf`), the shared mdBook `theme/`, the `landing/` page, and the Bitcoin Guides and Start9 Support books — and it wires together the per-product books that live in their own product dirs (`../start-os/docs/`, `../start-tunnel/docs/`, `../start-sdk/docs/`, `../start-wrt/docs/`) into one deployed site. CI (`.github/workflows/docs-deploy.yml`) consumes its output to deploy `docs.start9.com`.
 
 ## Multi-Book Design
 
 The site is composed of independent mdBook instances — one per product. Each book has its own `book.toml`, `src/SUMMARY.md`, and content tree. Books build into subdirectories of `docs/` (the build output, gitignored) and are deployed together under a shared domain.
 
-The per-product books live **next to the code they document**, not inside this directory. This `docs/` project owns only the build infra, the shared theme, the landing page, and the Bitcoin Guides book.
+The per-product books live **next to the code they document**, not inside this directory. This `docs/` project owns only the build infra, the shared theme, the landing page, and the Bitcoin Guides and Start9 Support books.
 
 ```
 start-technologies/ (monorepo root)
@@ -21,7 +21,7 @@ start-technologies/ (monorepo root)
 └── projects/start-docs/           ← THIS project: site build + landing + bitcoin-guides + support
     ├── build.sh          ← builds all books into docs/ output
     ├── serve.sh          ← build + local dev server
-    ├── versions.conf     ← book → version list (single source of truth)
+    ├── versions.conf     ← book labels consumed by build.sh
     ├── theme/            ← shared theme (CSS, JS, favicon); books symlink here
     ├── landing/          ← static landing page at docs.start9.com/
     ├── scripts/          ← build-time tooling (llms.txt generator)
