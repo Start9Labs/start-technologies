@@ -73,6 +73,14 @@ impl GitHash {
     }
 }
 
+impl std::str::FromStr for GitHash {
+    type Err = std::convert::Infallible;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(Self(value.to_owned()))
+    }
+}
+
 impl AsRef<str> for GitHash {
     fn as_ref(&self) -> &str {
         &self.0

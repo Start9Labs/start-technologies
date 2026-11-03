@@ -1,9 +1,11 @@
 import { DatePipe } from '@angular/common'
-import { Component, inject, input, output } from '@angular/core'
+import { Component, computed, inject, input, output } from '@angular/core'
 import { CopyService, i18nPipe, LocalizePipe } from '@start9labs/shared'
 import { TuiCell, TuiIcon, TuiTitle } from '@taiga-ui/core'
 import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { MarketplacePkgBase } from '../types'
+import { MarketplaceTrust, packageSigners } from '../trust'
+import { MarketplaceSignerPreview } from './signer-preview'
 import { MarketplaceVersionsComponent } from './versions.component'
 
 @Component({
@@ -63,14 +65,25 @@ import { MarketplaceVersionsComponent } from './versions.component'
         <tui-icon icon="@tui.chevron-right" />
       </button>
     </section>
+    @if (trust) {
+      <section tuiCardLarge appearance="secondary-grayscale">
+        <header tuiHeader>{{ 'Signed by' | i18n }}</header>
+        <marketplace-signer-preview [keys]="signers()" />
+      </section>
+    }
     <section tuiCardLarge appearance="secondary-grayscale">
       <header tuiHeader>{{ 'Description' | i18n }}</header>
       <div [innerHTML]="pkg().description.long | localize"></div>
     </section>
   `,
-  styles: ':host { display: contents; }',
+  styles: `
+    :host {
+      display: contents;
+    }
+  `,
   imports: [
     MarketplaceVersionsComponent,
+    MarketplaceSignerPreview,
     DatePipe,
     i18nPipe,
     TuiCell,
@@ -82,9 +95,12 @@ import { MarketplaceVersionsComponent } from './versions.component'
   ],
 })
 export class MarketplaceAboutComponent {
+  protected readonly trust = inject(MarketplaceTrust, { optional: true })
   readonly copyService = inject(CopyService)
 
   readonly pkg = input.required<MarketplacePkgBase>()
+
+  protected readonly signers = computed(() => packageSigners(this.pkg()))
   readonly versions = input<string[] | null>(null)
 
   readonly static = output<'license'>()

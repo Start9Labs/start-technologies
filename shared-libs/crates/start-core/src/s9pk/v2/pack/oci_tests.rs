@@ -103,6 +103,10 @@ esac
             .unwrap(),
     )
     .unwrap();
+    assert_eq!(
+        serde_json::to_value(&metadata.env).unwrap(),
+        serde_json::json!({"HELLO": "world"})
+    );
     assert_eq!(metadata.cmd.unwrap(), ["serve"]);
     assert_eq!(
         files

@@ -230,6 +230,83 @@ export const GetUsersParams: z.ZodObject<{
 export const GitHash: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'GitHash',
 })
+
+/**
+ * An original public-key export and its self-certified identity claims.
+ */
+export const GpgPublicKeyExport: z.ZodObject<{
+  /**
+   * Original armor, preserving all certificate packets and headers.
+   */
+  armored: z.ZodString
+  /**
+   * Primary-key fingerprints of the certificates in this export.
+   */
+  fingerprints: z.ZodArray<z.ZodString>
+  /**
+   * Self-certified user IDs containing names, comments, and email addresses.
+   */
+  userIds: z.ZodArray<z.ZodString>
+  /**
+   * Self-certified claims indexed by the signing key's canonical DER encoding.
+   */
+  identities: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
+  >
+  /**
+   * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
+   */
+  keyFingerprints: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Original armor, preserving all certificate packets and headers.
+   */
+  armored: z.string().meta({
+    description:
+      'Original armor, preserving all certificate packets and headers.',
+  }),
+  /**
+   * Primary-key fingerprints of the certificates in this export.
+   */
+  fingerprints: z.array(z.string()).meta({
+    description: 'Primary-key fingerprints of the certificates in this export.',
+  }),
+  /**
+   * Self-certified user IDs containing names, comments, and email addresses.
+   */
+  userIds: z.array(z.string()).meta({
+    description:
+      'Self-certified user IDs containing names, comments, and email addresses.',
+  }),
+  /**
+   * Self-certified claims indexed by the signing key's canonical DER encoding.
+   */
+  identities: wire(
+    z.record(z.string(), z.array(z.string())).optional(),
+    z.record(z.string(), z.array(z.string())),
+  ).meta({
+    description:
+      "Self-certified claims indexed by the signing key's canonical DER encoding.",
+  }),
+  /**
+   * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
+   */
+  keyFingerprints: wire(
+    z.record(z.string(), z.array(z.string())).optional(),
+    z.record(z.string(), z.array(z.string())),
+  ).meta({
+    description:
+      "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+  }),
+}).meta({
+  id: 'GpgPublicKeyExport',
+  description:
+    'An original public-key export and its self-certified identity claims.',
+})
 export const Guid: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Guid',
 })
@@ -382,10 +459,18 @@ export const AddMirrorParams: z.ZodObject<{
   url: z.ZodString
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
 }> = /* @__PURE__ */ object({
   url: z.string(),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
 }).meta({
   id: 'AddMirrorParams',
 })
@@ -393,10 +478,18 @@ export const AddPackageParams: z.ZodObject<{
   urls: z.ZodArray<z.ZodString>
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
 }> = /* @__PURE__ */ object({
   urls: z.array(z.string()),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
 }).meta({
   id: 'AddPackageParams',
 })
@@ -422,16 +515,65 @@ export const AddPackageToCategoryParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ id: z.string(), package: PackageId }).meta({
   id: 'AddPackageToCategoryParams',
 })
+export const AddSignerParams: z.ZodObject<{
+  name: z.ZodString
+  contact: z.ZodArray<typeof ContactInfo>
+  /**
+   * Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.
+   */
+  keys: z.ZodArray<z.ZodString>
+  /**
+   * Retained certificates; `keys` determines the selected signing keys.
+   */
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  contact: z.array(ContactInfo),
+  /**
+   * Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.
+   */
+  keys: z.array(z.string()).meta({
+    description:
+      'Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.',
+  }),
+  /**
+   * Retained certificates; `keys` determines the selected signing keys.
+   */
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ).meta({
+    description:
+      'Retained certificates; `keys` determines the selected signing keys.',
+  }),
+}).meta({
+  id: 'AddSignerParams',
+})
 export const AddVersionParams: z.ZodObject<{
   version: z.ZodString
   headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  expectedGitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   version: z.string(),
   headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  expectedGitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  security: wire(z.boolean().optional(), z.boolean()),
 }).meta({
   id: 'AddVersionParams',
 })
@@ -510,14 +652,14 @@ export const EditSignerParams: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   addContact: z.ZodArray<typeof ContactInfo>
-  addKey: z.ZodArray<typeof AnyVerifyingKey>
+  addKey: z.ZodArray<z.ZodString>
   removeContact: z.ZodArray<typeof ContactInfo>
   removeKey: z.ZodArray<typeof AnyVerifyingKey>
 }> = /* @__PURE__ */ object({
   id: Guid,
   setName: wire(z.string().nullable().optional(), z.string().nullable()),
   addContact: z.array(ContactInfo),
-  addKey: z.array(AnyVerifyingKey),
+  addKey: z.array(z.string()),
   removeContact: z.array(ContactInfo),
   removeKey: z.array(AnyVerifyingKey),
 }).meta({
@@ -599,6 +741,17 @@ export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
+  /**
+   * Commit that produced the OS image, if recorded at publication.
+   */
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   authorized: z.ZodArray<typeof Guid>
   iso: z.ZodRecord<
     z.ZodString,
@@ -616,6 +769,19 @@ export const OsVersionInfo: z.ZodObject<{
   headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
+  /**
+   * Commit that produced the OS image, if recorded at publication.
+   */
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()).meta({
+    description:
+      'Commit that produced the OS image, if recorded at publication.',
+  }),
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Whether the release includes security fixes.',
+  }),
   authorized: z.array(Guid),
   iso: z.record(z.string(), RegistryAsset(Blake3Commitment)),
   squashfs: z.record(z.string(), RegistryAsset(Blake3Commitment)),
@@ -715,6 +881,11 @@ export const SetIconParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ icon: DataUrl.nullable() }).meta({
   id: 'SetIconParams',
 })
+export const SetTrustSignersParams: z.ZodObject<{
+  signers: z.ZodArray<typeof Guid>
+}> = /* @__PURE__ */ object({ signers: z.array(Guid) }).meta({
+  id: 'SetTrustSignersParams',
+})
 export const SignAssetParams: z.ZodObject<{
   version: z.ZodString
   platform: z.ZodString
@@ -726,14 +897,35 @@ export const SignAssetParams: z.ZodObject<{
 }).meta({
   id: 'SignAssetParams',
 })
+export const SignPackageParams: z.ZodObject<{
+  id: typeof PackageId
+  version: typeof Version
+  commitment: typeof MerkleArchiveCommitment
+  signature: typeof AnySignature
+}> = /* @__PURE__ */ object({
+  id: PackageId,
+  version: Version,
+  commitment: MerkleArchiveCommitment,
+  signature: AnySignature,
+}).meta({
+  id: 'SignPackageParams',
+})
 export const SignerInfo: z.ZodObject<{
   name: z.ZodString
   contact: z.ZodArray<typeof ContactInfo>
   keys: z.ZodArray<typeof AnyVerifyingKey>
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
 }> = /* @__PURE__ */ object({
   name: z.string(),
   contact: z.array(ContactInfo),
   keys: z.array(AnyVerifyingKey),
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ),
 }).meta({
   id: 'SignerInfo',
 })
@@ -894,6 +1086,13 @@ export const RegistryInfo: z.ZodObject<{
     z.ZodNullable<typeof LocaleString>
   >
   categories: z.ZodRecord<z.ZodString, typeof Category>
+  /**
+   * Registry-selected signers, not an assertion of trust.
+   */
+  trustSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof SignerInfo>>,
+    z.ZodRecord<z.ZodString, typeof SignerInfo>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -907,6 +1106,15 @@ export const RegistryInfo: z.ZodObject<{
     description: "Markdown, shown above the registry's services.",
   }),
   categories: z.record(z.string(), Category),
+  /**
+   * Registry-selected signers, not an assertion of trust.
+   */
+  trustSigners: wire(
+    z.record(z.string(), SignerInfo).optional(),
+    z.record(z.string(), SignerInfo),
+  ).meta({
+    description: 'Registry-selected signers, not an assertion of trust.',
+  }),
 }).meta({
   id: 'RegistryInfo',
 })
@@ -1028,6 +1236,10 @@ export const FullIndex: z.ZodObject<{
   package: typeof PackageIndex
   os: typeof OsIndex
   signers: z.ZodRecord<z.ZodString, typeof SignerInfo>
+  trustSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof Guid>>,
+    z.ZodArray<typeof Guid>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -1038,6 +1250,7 @@ export const FullIndex: z.ZodObject<{
   package: PackageIndex,
   os: OsIndex,
   signers: z.record(z.string(), SignerInfo),
+  trustSigners: wire(z.array(Guid).optional(), z.array(Guid)),
 }).meta({
   id: 'FullIndex',
 })
@@ -1074,7 +1287,7 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {
             add: {
-              _PARAMS: /* @__PURE__ */ SignerInfo,
+              _PARAMS: /* @__PURE__ */ AddSignerParams,
               _RETURN: /* @__PURE__ */ Guid,
             },
             edit: {
@@ -1184,6 +1397,21 @@ export const Api = {
               empty,
             ),
             SetNameParams,
+          ),
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        'set-trust-signers': {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            SetTrustSignersParams,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
         },
@@ -1473,6 +1701,10 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ RemoveMirrorParams,
           _RETURN: /* @__PURE__ */ z.null(),
         },
+        sign: {
+          _PARAMS: /* @__PURE__ */ SignPackageParams,
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
         signer: {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {
@@ -1507,4 +1739,62 @@ export const Api = {
       },
     },
   },
+}
+/**
+ * MCP tool descriptions of a schema tree's callable methods, the catalog
+ * `rpc_toolkit::mcp::McpServer` serves. Methods without bindings are omitted;
+ * an `outputSchema` describes object results only, as MCP requires.
+ */
+export function toolCatalog(tree: unknown): object[] {
+  type JsonSchema = {
+    type?: unknown
+    allOf?: unknown
+    $ref?: unknown
+    $defs?: { [name: string]: JsonSchema }
+    [keyword: string]: unknown
+  }
+  type Node = {
+    _PARAMS: z.ZodType
+    _RETURN?: z.ZodType
+    _CHILDREN?: { [name: string]: Node }
+    _OPAQUE?: true
+  }
+  const render = (schema: z.ZodType, io: 'input' | 'output'): JsonSchema => {
+    const rendered = z.toJSONSchema(schema, {
+      io,
+      unrepresentable: 'any',
+    }) as JsonSchema
+    const ref = rendered.$ref
+    const root =
+      typeof ref === 'string' && ref.startsWith('#/$defs/')
+        ? rendered.$defs?.[ref.slice('#/$defs/'.length)]
+        : undefined
+    if (!root) return rendered
+    const { $ref, ...rest } = rendered
+    return { ...rest, ...root }
+  }
+  const isObject = (schema: JsonSchema) =>
+    schema.type === 'object' ||
+    (schema.type === undefined && Array.isArray(schema.allOf))
+  const tools: object[] = []
+  const walk = (node: Node, path: string[]) => {
+    if (path.length && node._RETURN && !node._OPAQUE) {
+      const input = render(node._PARAMS, 'input')
+      if (input.type === undefined || input.type === 'object') {
+        const output = render(node._RETURN, 'output')
+        tools.push({
+          name: path.join('.'),
+          inputSchema: { ...input, type: 'object' },
+          ...(isObject(output)
+            ? { outputSchema: { ...output, type: 'object' } }
+            : {}),
+        })
+      }
+    }
+    for (const [name, child] of Object.entries(node._CHILDREN ?? {})) {
+      walk(child, [...path, name])
+    }
+  }
+  walk(tree as Node, [])
+  return tools
 }

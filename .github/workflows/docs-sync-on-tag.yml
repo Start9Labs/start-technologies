@@ -24,7 +24,7 @@ name: Sync a release onto live-docs
 # project, while a backfilled or re-cut tag cannot roll anything back.
 on:
   push:
-    tags: ['*/v*']
+    tags: ['*/v*', '!start-os/v*-rc.*']
 
 permissions:
   contents: read

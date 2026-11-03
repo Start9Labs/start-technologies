@@ -44,6 +44,14 @@ Assign a custom name to easily identify this device. If left empty, the device's
 
 Reserve an IP address to assign a fixed IPv4 address that won't change between reboots. Useful for servers, printers, NAS devices, or anything you need to access by a consistent IP address. IPv6 addresses cannot be reserved: each device chooses its own IPv6 address, so the router has no say in it.
 
+### Permissions
+
+**Allow automatic port forwarding**: Lets this device open and renew its own port forwards via UPnP/PCP (used by StartOS servers, game consoles, and similar). Off by default; active forwards appear on the Published Ports page.
+
+**Allow DNS record publishing**: Lets this device publish DNS names for itself into the router, so every device on your network can resolve them (used by StartOS servers for private domains). Off by default; published names appear below the settings.
+
+**Allow IPv6 router advertisements**: Lets this device announce IPv6 routes to your other devices (needed by Thread border routers such as an Apple TV, HomePod, or Home Assistant). Off by default.
+
 ### Forget
 
 Removes an offline device from your device list. Any custom name or reserved IP settings will be lost. If the device reconnects, it will appear as a new device.`,

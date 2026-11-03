@@ -17,6 +17,7 @@ use tokio::process::Command;
 use tracing::instrument;
 
 pub mod diagnostic;
+pub mod security;
 pub mod signers;
 
 #[cfg(test)]
@@ -42,6 +43,7 @@ use crate::sign::commitment::blake3::Blake3Commitment;
 use crate::sound::{
     CIRCLE_OF_5THS_SHORT, UPDATE_FAILED_1, UPDATE_FAILED_2, UPDATE_FAILED_3, UPDATE_FAILED_4,
 };
+use crate::trusted_keys::{self, TrustContext};
 use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::AtomicFile;
@@ -56,6 +58,10 @@ pub struct UpdateSystemParams {
     /// Additional signer requirements checked before starting the update.
     #[arg(skip)]
     pub accept_signers: Option<AcceptSigners>,
+    /// Accepts an untrusted signer without skipping signature or integrity verification.
+    #[arg(long, help = "help.arg.trust")]
+    #[serde(default)]
+    pub trust: bool,
     #[arg(
         long = "to",
         value_name = "TARGET",
@@ -87,6 +93,7 @@ pub async fn update_system(
         registry,
         progress,
         accept_signers,
+        trust,
     }: UpdateSystemParams,
 ) -> Result<UpdateSystemRes, Error> {
     if ctx
@@ -110,6 +117,7 @@ pub async fn update_system(
         registry,
         target.unwrap_or(VersionRange::Any),
         accept_signers,
+        trust,
     )
     .await?;
     let progress = if progress && target.is_some() {
@@ -256,15 +264,21 @@ pub fn display_update_result(_: UpdateSystemParams, status: UpdateResult) {
     }
 }
 
+pub(crate) fn is_os_update(
+    version: &Version,
+    git_hash: Option<&crate::s9pk::git_hash::GitHash>,
+    installed: &Version,
+    installed_hash: &str,
+) -> bool {
+    version > installed
+        || (version == installed && git_hash.is_some_and(|hash| hash.as_ref() != installed_hash))
+}
+
 fn validate_update_signatures(
     asset: &RegistryAsset<Blake3Commitment>,
     accept_signers: Option<AcceptSigners>,
 ) -> Result<(), Error> {
-    asset.validate(SIG_CONTEXT, asset.all_signers())?;
-    if let Some(accept_signers) = accept_signers {
-        asset.validate(SIG_CONTEXT, accept_signers)?;
-    }
-    Ok(())
+    asset.validate_all(SIG_CONTEXT, accept_signers)
 }
 
 #[instrument(skip_all)]
@@ -273,6 +287,7 @@ async fn maybe_do_update(
     registry: Url,
     target: VersionRange,
     accept_signers: Option<AcceptSigners>,
+    trust: bool,
 ) -> Result<Option<Version>, Error> {
     let peeked = ctx.db.peek().await;
     let current_version = peeked.as_public().as_server_info().as_version().de()?;
@@ -301,7 +316,12 @@ async fn maybe_do_update(
         ));
     }
 
-    validate_update_signatures(&asset, accept_signers)?;
+    let policy =
+        trusted_keys::signer_policy(trusted_keys::required(&ctx, TrustContext::Os, trust).await?);
+    validate_update_signatures(&asset, policy)?;
+    if let Some(policy) = accept_signers {
+        asset.validate(SIG_CONTEXT, policy)?;
+    }
 
     let progress = FullProgressTracker::new();
     let prune_phase = progress.add_phase("Pruning Old OS Images".into(), Some(2));
@@ -498,10 +518,15 @@ mod tests {
             "https://registry.start9.com",
             "--to",
             "=0.4.0.2",
+            "--trust",
         ])
         .unwrap();
         let value = serde_json::to_value(params).unwrap();
         assert_eq!(value["targetVersion"], "=0.4.0.2:0");
         assert!(value.get("target").is_none());
+        assert_eq!(value["trust"], true);
+        let default =
+            UpdateSystemParams::try_parse_from(["update", "https://registry.start9.com"]).unwrap();
+        assert!(!default.trust);
     }
 }

@@ -1,0 +1,1 @@
+- **Fehler- und Erfolgsmeldungen sind im hellen Design lesbar.** Sie verwendeten zuvor die Farben des dunklen Designs, die auf weißem Hintergrund zu blass waren.

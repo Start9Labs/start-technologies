@@ -36,6 +36,19 @@ pub struct RegistryAsset<Commitment> {
 rpc_toolkit::reflect_ts!(generic RegistryAsset<Commitment>);
 rpc_toolkit::ts_export!(generic RegistryAsset<Commitment>, namespaces = [""]);
 impl<Commitment> RegistryAsset<Commitment> {
+    pub fn merge_signatures(
+        &mut self,
+        commitment: &Commitment,
+        signatures: impl IntoIterator<Item = (AnyVerifyingKey, AnySignature)>,
+    ) where
+        Commitment: PartialEq,
+    {
+        if &self.commitment == commitment {
+            for (key, signature) in signatures {
+                self.signatures.entry(key).or_insert(signature);
+            }
+        }
+    }
     pub fn all_signers(&self) -> AcceptSigners {
         AcceptSigners::All(
             self.signatures
@@ -73,6 +86,14 @@ impl<Commitment> RegistryAsset<Commitment> {
     }
 }
 impl<Commitment: SignedCommitment> RegistryAsset<Commitment> {
+    pub fn validate_all(&self, context: &str, policy: Option<AcceptSigners>) -> Result<(), Error> {
+        self.validate(context, self.all_signers())?;
+        if let Some(policy) = policy {
+            self.validate(context, policy)?;
+        }
+        Ok(())
+    }
+
     pub fn validate(&self, context: &str, mut accept: AcceptSigners) -> Result<&Commitment, Error> {
         for (signer, signature) in &self.signatures {
             accept.process_signature(signer, &self.commitment, context, signature)?;

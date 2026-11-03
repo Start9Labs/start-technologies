@@ -32,7 +32,7 @@ StartTunnel occupies a unique position between Cloudflare Tunnel and Tailscale. 
 
 This is the most important difference. It comes down to: **who can see your traffic?**
 
-**StartTunnel**: Nobody but you. Published ports operate at Layer 3/4 (iptables DNAT), meaning the VPS rewrites IP headers and forwards packets without inspecting payloads. If a service uses HTTPS, TLS terminates at the service itself — the VPS never sees plaintext. For VPN traffic between devices, WireGuard provides end-to-end encryption. Since you own the VPS, there is no third party with access to your traffic or metadata.
+**StartTunnel**: Nobody but you. Published ports operate at Layer 3/4 (iptables DNAT), meaning the VPS rewrites IP headers and forwards packets without inspecting payloads. If a service uses HTTPS, TLS terminates at the service itself — the VPS never sees plaintext. For VPN traffic between devices, each device's WireGuard tunnel ends at the VPS, which passes the traffic from one tunnel into the other; whatever an app encrypts itself, such as HTTPS, stays encrypted end to end. Since you own the VPS, there is no third party with access to your traffic or metadata.
 
 **Cloudflare Tunnel**: Cloudflare terminates TLS at their edge and re-encrypts to your origin. This means Cloudflare can — and does — see plaintext traffic. They offer "TLS inspection" as a feature and can scan request bodies, filter content, and inject responses. Using Cloudflare Tunnel requires trusting a publicly traded company not to misuse its position as a man-in-the-middle on all your traffic.
 
@@ -91,7 +91,7 @@ StartTunnel is built on [WireGuard](https://www.wireguard.com/), a modern VPN pr
 
 - **Encryption**: ChaCha20-Poly1305 for symmetric encryption, Curve25519 for key exchange, BLAKE2s for hashing
 - **Pre-shared keys**: Each peer connection uses an additional pre-shared key (PSK) for a layer of post-quantum resistance
-- **Key isolation**: Private keys are generated on-device and never leave the device. Only public keys are exchanged.
+- **Device keys**: StartTunnel generates each device's key pair and pre-shared key on the VPS and keeps them, which is how it can show a device's configuration again. That configuration contains the device's private key, so anyone holding it can connect as that device: share it only with the device itself, and delete any device whose configuration may have leaked.
 - **TLS passthrough**: Traffic to a published port is not decrypted by the VPS. If your service uses HTTPS, TLS terminates at the service, not the tunnel.
 
 ## Requirements

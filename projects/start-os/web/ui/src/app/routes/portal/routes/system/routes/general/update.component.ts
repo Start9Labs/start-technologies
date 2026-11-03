@@ -1,5 +1,11 @@
 import { CommonModule, TitleCasePipe } from '@angular/common'
-import { Component, inject } from '@angular/core'
+import { Component, computed, inject } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
+import { Router } from '@angular/router'
+import {
+  acceptSignerPolicy,
+  MarketplaceSignersComponent,
+} from '@start9labs/marketplace'
 import {
   DialogService,
   i18nPipe,
@@ -9,18 +15,26 @@ import {
   TaskService,
 } from '@start9labs/shared'
 import { TuiButton, TuiDialogContext, TuiScrollbar } from '@taiga-ui/core'
+import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { PatchDB } from 'patch-db-client'
-import { firstValueFrom } from 'rxjs'
+import { catchError, filter, firstValueFrom, from, map, of } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { OSService } from 'src/app/services/os.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { trustedOsUpdateSigners } from 'src/app/utils/os-update-signers'
+import { TRUSTED_KEYS_LINK } from '../../system.const'
 
 @Component({
   template: `
     <h2 style="margin-top: 0">{{ 'Release notes' | i18n | titlecase }}</h2>
+    @if (signers().length) {
+      <section tuiCardLarge appearance="secondary-grayscale">
+        <header tuiHeader="h6">{{ 'Signed by' | i18n }}</header>
+        <marketplace-signers [keys]="signers()" context="os" />
+      </section>
+    }
     <tui-scrollbar style="margin-bottom: 24px; max-height: 50vh;">
       @for (v of os.updateCandidates(); track v.version) {
         <h4 class="version-header">{{ v.version }}</h4>
@@ -51,9 +65,12 @@ import { trustedOsUpdateSigners } from 'src/app/utils/os-update-signers'
     CommonModule,
     LocalizePipe,
     MarkdownPipe,
+    MarketplaceSignersComponent,
     NgDompurifyPipe,
     SafeLinksDirective,
     TuiButton,
+    TuiCardLarge,
+    TuiHeader,
     TuiScrollbar,
     i18nPipe,
     TitleCasePipe,
@@ -62,10 +79,24 @@ import { trustedOsUpdateSigners } from 'src/app/utils/os-update-signers'
 export class SystemUpdateModal {
   private readonly tasks = inject(TaskService)
   private readonly dialogs = inject(DialogService)
+  private readonly router = inject(Router)
   private readonly embassyApi = inject(ApiService)
   protected readonly os = inject(OSService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly context = injectContext<TuiDialogContext<void>>()
+  private readonly platform = toSignal(
+    from(this.embassyApi.rpc.server.deviceInfo({})).pipe(
+      map(({ os }) => os.platform),
+      catchError(() => of(null)),
+    ),
+  )
+
+  protected readonly signers = computed(() =>
+    Object.keys(
+      this.os.updateCandidates()[0]?.squashfs[this.platform() ?? '']
+        ?.signatures ?? {},
+    ),
+  )
 
   async update() {
     if (!this.os.updateCandidates().length) return
@@ -81,17 +112,26 @@ export class SystemUpdateModal {
         latest.squashfs[os.platform]?.signatures ?? {},
       )
       const trustedSigners = await firstValueFrom(
-        this.patch.watch$('serverInfo', 'trustedOsUpdateSigners'),
+        this.patch.watch$('serverInfo', 'trustedKeys'),
       )
       const trusted = trustedOsUpdateSigners(signers, trustedSigners)
       if (this.os.updateCandidates()[0]?.version !== latest.version) return
       if (!trusted.length) {
         this.dialogs
-          .openAlert(
-            'No trusted signer is listed for this OS update. Installing it from the UI is blocked. A malicious OS update could take full control of your server, steal private keys and passwords, or permanently destroy your data.',
-            { label: 'OS update blocked' },
-          )
-          .subscribe()
+          .openConfirm({
+            label: 'OS update blocked',
+            data: {
+              content:
+                'No trusted signer is listed for this OS update. Installing it from the UI is blocked. A malicious OS update could take full control of your server, steal private keys and passwords, or permanently destroy your data.',
+              yes: 'Manage keys',
+              no: 'Close',
+            },
+          })
+          .pipe(filter(Boolean))
+          .subscribe(() => {
+            this.context.$implicit.complete()
+            this.router.navigate(TRUSTED_KEYS_LINK)
+          })
         return
       }
 
@@ -99,9 +139,7 @@ export class SystemUpdateModal {
         targetVersion: `=${latest.version}`,
         registry: startosRegistry,
         progress: false,
-        acceptSigners: {
-          any: trusted.map(signer => ({ signer })),
-        },
+        acceptSigners: acceptSignerPolicy(trusted),
       })
       this.context.$implicit.complete()
     }, 'Beginning update')

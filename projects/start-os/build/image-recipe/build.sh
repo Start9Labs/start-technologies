@@ -404,8 +404,6 @@ mkdir -p /media/startos
 chmod 750 /media/startos
 chown root:startos /media/startos
 
-start-cli --registry=https://registry.start9.com registry package download tor -d /usr/lib/startos/tor_${QEMU_ARCH}.s9pk -a "${QEMU_ARCH}"
-
 EOF
 
 SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(date '+%s')}"
@@ -418,6 +416,14 @@ else
 	exit $EXIT
 fi
 lb chroot
+
+# riscv64 binaries target RVA23, which the build host may lack.
+RUN_TARGET=()
+if [ "${QEMU_ARCH}" = riscv64 ]; then
+	RUN_TARGET=(qemu-riscv64-static -cpu max)
+fi
+"${RUN_TARGET[@]}" ./chroot/usr/bin/startbox start-cli --registry=https://registry.start9.com registry package download tor -d ./chroot/usr/lib/startos/tor_${QEMU_ARCH}.s9pk -a "${QEMU_ARCH}"
+
 lb installer
 lb binary_chroot
 lb chroot_prep install all mode-apt-install-binary mode-archives-chroot

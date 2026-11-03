@@ -298,13 +298,12 @@ export class DevicesAdd {
       }
 
       if (!device) {
-        const config = await this.api.rpc.device.showConfig({
-          subnet: data.subnet,
-          ip,
-        })
-
         this.dialogs
-          .open(DEVICES_CONFIG, { data: config, closable: false, size: 'm' })
+          .open(DEVICES_CONFIG, {
+            data: { subnet: data.subnet, ip },
+            closable: false,
+            size: 'm',
+          })
           .subscribe()
       }
       this.context.$implicit.complete()
