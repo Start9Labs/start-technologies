@@ -127,9 +127,10 @@ pub(super) async fn prepare_external_source(
         let drive = TmpMountGuard::mount(&BlockDev::new(&logicalname), ReadOnly).await?;
         let root = drive.path().to_owned();
         let relative = path.clone();
-        let existing = tokio::task::spawn_blocking(move || open_beneath(&root, &relative))
-            .await
-            .with_kind(ErrorKind::Unknown)?;
+        let existing =
+            tokio::task::spawn_blocking(move || open_beneath(&root, &relative).map(drop))
+                .await
+                .with_kind(ErrorKind::Unknown)?;
         drive.unmount().await?;
         if let Err(error) = existing {
             if !error

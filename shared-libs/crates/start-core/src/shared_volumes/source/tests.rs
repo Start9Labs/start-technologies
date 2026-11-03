@@ -36,6 +36,9 @@ async fn external_folder_is_created_pinned_and_limits_consumer_subpaths() {
         panic!("disk source")
     };
     assert_eq!(path, Path::new("created-folder/view"));
+    prepare_external_source(device.clone(), path.clone())
+        .await
+        .unwrap();
     let source = PreparedSource::open(
         open_external(&logicalname, ReadWrite).await.unwrap(),
         Some(path.clone()),
