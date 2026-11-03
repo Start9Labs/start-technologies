@@ -1434,29 +1434,56 @@ export const RegistryAsset = <Commitment extends z.ZodType>(
 }
 
 /**
- * Keys a connected registry newly offers, imported untrusted.
+ * A key a connected registry newly offers, imported untrusted.
  */
-export const RegistryKeysAdded: z.ZodIntersection<
+export const RegistryKeyAdded: z.ZodIntersection<
   z.ZodObject<{
     kind: z.ZodCodec<
-      z.ZodOptional<z.ZodLiteral<'registry-keys-added'>>,
-      z.ZodLiteral<'registry-keys-added'>
+      z.ZodOptional<z.ZodLiteral<'registry-key-added'>>,
+      z.ZodLiteral<'registry-key-added'>
     >
   }>,
-  z.ZodObject<{ registry: z.ZodString; keys: z.ZodArray<z.ZodString> }>
+  z.ZodObject<{ registry: z.ZodString; key: z.ZodString }>
 > = /* @__PURE__ */ z
   .intersection(
     object({
       kind: wire(
-        z.literal('registry-keys-added').optional(),
-        z.literal('registry-keys-added'),
+        z.literal('registry-key-added').optional(),
+        z.literal('registry-key-added'),
       ),
     }),
-    object({ registry: z.string(), keys: z.array(z.string()) }),
+    object({ registry: z.string(), key: z.string() }),
   )
   .meta({
-    id: 'RegistryKeysAdded',
-    description: 'Keys a connected registry newly offers, imported untrusted.',
+    id: 'RegistryKeyAdded',
+    description: 'A key a connected registry newly offers, imported untrusted.',
+  })
+
+/**
+ * A key a connected registry stopped offering; its trust is unchanged.
+ */
+export const RegistryKeyDropped: z.ZodIntersection<
+  z.ZodObject<{
+    kind: z.ZodCodec<
+      z.ZodOptional<z.ZodLiteral<'registry-key-dropped'>>,
+      z.ZodLiteral<'registry-key-dropped'>
+    >
+  }>,
+  z.ZodObject<{ registry: z.ZodString; key: z.ZodString }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      kind: wire(
+        z.literal('registry-key-dropped').optional(),
+        z.literal('registry-key-dropped'),
+      ),
+    }),
+    object({ registry: z.string(), key: z.string() }),
+  )
+  .meta({
+    id: 'RegistryKeyDropped',
+    description:
+      'A key a connected registry stopped offering; its trust is unchanged.',
   })
 export const RemoveAssetParams: z.ZodObject<{
   version: z.ZodString

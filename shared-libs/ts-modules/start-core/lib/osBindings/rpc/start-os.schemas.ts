@@ -252,13 +252,21 @@ export const ActionResultValue: z.ZodUnion<
     id: 'ActionResultValue',
   })
 export const AddTrustedKeyParams: z.ZodObject<{
+  /**
+   * Blank names each GPG key after its identity.
+   */
   name: z.ZodString
   /**
    * Ed25519 public keys in PEM or armored GPG format.
    */
   publicKeys: z.ZodArray<z.ZodString>
 }> = /* @__PURE__ */ object({
-  name: z.string(),
+  /**
+   * Blank names each GPG key after its identity.
+   */
+  name: z.string().meta({
+    description: 'Blank names each GPG key after its identity.',
+  }),
   /**
    * Ed25519 public keys in PEM or armored GPG format.
    */

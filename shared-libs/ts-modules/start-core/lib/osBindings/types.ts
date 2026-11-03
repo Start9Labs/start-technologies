@@ -348,14 +348,24 @@ export type RegistryAssetInput<Commitment> = z.input<
 >
 
 /**
- * Keys a connected registry newly offers, imported untrusted.
+ * A key a connected registry newly offers, imported untrusted.
  */
-export type RegistryKeysAdded = z.output<typeof schemas.RegistryKeysAdded>
+export type RegistryKeyAdded = z.output<typeof schemas.RegistryKeyAdded>
 
 /**
- * Keys a connected registry newly offers, imported untrusted.
+ * A key a connected registry newly offers, imported untrusted.
  */
-export type RegistryKeysAddedInput = z.input<typeof schemas.RegistryKeysAdded>
+export type RegistryKeyAddedInput = z.input<typeof schemas.RegistryKeyAdded>
+
+/**
+ * A key a connected registry stopped offering; its trust is unchanged.
+ */
+export type RegistryKeyDropped = z.output<typeof schemas.RegistryKeyDropped>
+
+/**
+ * A key a connected registry stopped offering; its trust is unchanged.
+ */
+export type RegistryKeyDroppedInput = z.input<typeof schemas.RegistryKeyDropped>
 export type RemoveAssetParams = z.output<typeof schemas.RemoveAssetParams>
 export type RemoveAssetParamsInput = z.input<typeof schemas.RemoveAssetParams>
 export type RemoveCategoryParams = z.output<typeof schemas.RemoveCategoryParams>

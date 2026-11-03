@@ -804,10 +804,9 @@ mod tests {
             }
         }
         let mut reloaded: Public = from_value(to_value(&public).unwrap()).unwrap();
-        assert!(
-            refresh_public(&mut reloaded, &url, &info)
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            refresh_public(&mut reloaded, &url, &info).unwrap(),
+            KeyChanges::default()
         );
         assert_eq!(to_value(&reloaded).unwrap(), to_value(&public).unwrap());
     }
@@ -871,10 +870,9 @@ mod tests {
         );
         assert!(!is_connected(&public.ui, url.as_str()));
         let saved = to_value(&public).unwrap();
-        assert!(
-            refresh_public(&mut public, &url, &gpg_info())
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            refresh_public(&mut public, &url, &gpg_info()).unwrap(),
+            KeyChanges::default()
         );
         assert_eq!(to_value(&public).unwrap(), saved);
         public.ui =
@@ -892,10 +890,9 @@ mod tests {
         connect_public(&mut public, &url, None, &RegistryInfo::default()).unwrap();
         remove_public(&mut public, &url).unwrap();
         let saved = to_value(&public).unwrap();
-        assert!(
-            refresh_public(&mut public, &url, &fetched_info)
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            refresh_public(&mut public, &url, &fetched_info).unwrap(),
+            KeyChanges::default()
         );
         assert_eq!(to_value(&public).unwrap(), saved);
         assert!(public.server_info.registry_keys.is_empty());

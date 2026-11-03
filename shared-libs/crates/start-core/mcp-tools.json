@@ -11471,7 +11471,10 @@
         "AddTrustedKeyParams": {
           "type": "object",
           "properties": {
-            "name": { "type": "string" },
+            "name": {
+              "type": "string",
+              "description": "Blank names each GPG key after its identity."
+            },
             "publicKeys": {
               "type": "array",
               "items": { "type": "string" },
@@ -11484,7 +11487,10 @@
       },
       "type": "object",
       "properties": {
-        "name": { "type": "string" },
+        "name": {
+          "type": "string",
+          "description": "Blank names each GPG key after its identity."
+        },
         "publicKeys": {
           "type": "array",
           "items": { "type": "string" },
