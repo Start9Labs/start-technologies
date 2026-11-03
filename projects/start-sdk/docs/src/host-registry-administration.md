@@ -8,12 +8,14 @@ All commands below assume your `start-cli` is pointed at your registry — eithe
 
 A **signer** is a public key authorized to publish a specific package, OS version, or asset. Admins are themselves signers — when you added the first admin, you registered a signer identity with admin privileges.
 
+Publishing authorization does not configure users' package trust. When adding or changing a package-signing key, [publish its public key](host-registry-setup.md#publish-signing-keys) so users can verify it and configure package trust. Put registry ownership and support contacts in the registry description; registering an administrator's contact details is not a substitute.
+
 Register a new signer (without admin rights):
 
 ```sh
 start-cli registry admin signer add \
   --name "Alice" \
-  --contact "alice@example.com" \
+  --contact "mailto:alice@example.com" \
   --key "$(cat alice.pub.pem)"
 ```
 
