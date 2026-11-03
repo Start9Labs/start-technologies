@@ -5,7 +5,14 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms'
-import { ConvertBytesPipe, i18nPipe, TaskService } from '@start9labs/shared'
+import {
+  ConvertBytesPipe,
+  ErrorService,
+  HttpError,
+  i18nPipe,
+  TaskService,
+} from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
 import { WA_IS_MOBILE } from '@ng-web-apis/platform'
 import { TuiAutoFocus, tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
 import {
@@ -16,6 +23,7 @@ import {
   TuiError,
   TuiIcon,
   TuiInput,
+  TuiLoader,
   TuiTitle,
 } from '@taiga-ui/core'
 import { TuiChevron, TuiPassword, TuiRadioList, TuiSelect } from '@taiga-ui/kit'
@@ -23,7 +31,6 @@ import { TuiForm, TuiHeader } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 
 import { ApiService } from 'src/app/services/api/embassy-api.service'
-import { BackupService } from '../backups/backup.service'
 
 @Component({
   template: `
@@ -55,13 +62,17 @@ import { BackupService } from '../backups/backup.service'
           <label tuiLabel>{{ 'Drive' | i18n }}</label>
           <input tuiSelect formControlName="logicalname" required />
           <tui-data-list *tuiDropdown>
-            @for (target of targets.drives(); track target.id) {
-              <button tuiOption [value]="target.entry.logicalname">
-                {{ target.entry.label || target.entry.logicalname }} ·
-                {{ target.entry.capacity | convertBytes }}
-              </button>
-            } @empty {
-              {{ 'No drives detected' | i18n }}
+            @if (loading()) {
+              <tui-loader size="s" />
+            } @else {
+              @for (drive of drives(); track drive.logicalname) {
+                <button tuiOption [value]="drive.logicalname">
+                  {{ drive.label || drive.logicalname }} ·
+                  {{ drive.capacity | convertBytes }}
+                </button>
+              } @empty {
+                {{ 'No drives detected' | i18n }}
+              }
             }
           </tui-data-list>
         </tui-textfield>
@@ -72,7 +83,8 @@ import { BackupService } from '../backups/backup.service'
           size="s"
           appearance="flat"
           iconStart="@tui.refresh-cw"
-          (click)="targets.getBackupTargets()"
+          [disabled]="loading()"
+          (click)="loadDrives()"
         >
           {{ 'Refresh' | i18n }}
         </button>
@@ -156,6 +168,7 @@ import { BackupService } from '../backups/backup.service'
     TuiError,
     TuiIcon,
     TuiInput,
+    TuiLoader,
     TuiTitle,
     TuiPassword,
     TuiRadioList,
@@ -166,8 +179,10 @@ import { BackupService } from '../backups/backup.service'
 export class CreateVolume {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
+  private readonly errors = inject(ErrorService)
 
-  protected readonly targets = inject(BackupService)
+  protected readonly drives = signal<T.PartitionInfo[]>([])
+  protected readonly loading = signal(true)
   protected readonly isMobile = inject(WA_IS_MOBILE)
   protected readonly context = injectContext<TuiDialogContext<void>>()
   protected readonly sources = [
@@ -187,13 +202,23 @@ export class CreateVolume {
   })
 
   protected readonly driveLabel = (logicalname: string) =>
-    this.targets
-      .drives()
-      .find(target => target.entry.logicalname === logicalname)?.entry.label ||
+    this.drives().find(drive => drive.logicalname === logicalname)?.label ||
     logicalname
 
   constructor() {
-    this.targets.getBackupTargets()
+    this.loadDrives()
+  }
+
+  protected async loadDrives() {
+    this.loading.set(true)
+    try {
+      const disks = await this.api.rpc.disk.list({})
+      this.drives.set(disks.flatMap(disk => disk.partitions))
+    } catch (error) {
+      this.errors.handleError(error as HttpError)
+    } finally {
+      this.loading.set(false)
+    }
   }
 
   protected async save() {

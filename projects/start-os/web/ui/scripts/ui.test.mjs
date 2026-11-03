@@ -1274,8 +1274,7 @@ const { CreateVolume } =
   await import('src/app/routes/portal/routes/system/routes/volumes/create')
 const { FormatDrive } =
   await import('src/app/routes/portal/components/format-drive')
-const { BackupService } =
-  await import('src/app/routes/portal/routes/system/routes/backups/backup.service')
+const { Mock: VolumeMock } = await import('src/app/services/api/api.fixures')
 const { TuiNotificationService } = await import('@taiga-ui/core')
 const { WA_IS_MOBILE } = await import('@ng-web-apis/platform')
 const { getManifest, getCurrentManifest } =
@@ -1321,6 +1320,12 @@ function volumeFixture(t, packageData = {}) {
   let driveLoads = 0
   const api = {
     rpc: {
+      disk: {
+        list: async () => {
+          driveLoads++
+          return VolumeMock.Disks
+        },
+      },
       backup: {
         create: async params => {
           requests.push({ kind: 'backup', params })
@@ -1407,15 +1412,6 @@ function volumeFixture(t, packageData = {}) {
       },
     },
     {
-      provide: BackupService,
-      useValue: {
-        drives: () => [],
-        getBackupTargets() {
-          driveLoads++
-        },
-      },
-    },
-    {
       provide: Router,
       useValue: {
         async navigate(route) {
@@ -1487,14 +1483,14 @@ function volumeFixture(t, packageData = {}) {
   }
 }
 
-test('creating a drive volume uses backup discovery and sends only the selected source', async t => {
+test('creating a drive volume uses physical discovery and sends only the selected source', async t => {
   const f = volumeFixture(t)
   const model = f.make(CreateVolume)
   assert.equal(f.driveLoads, 1)
   model.source.set('External drive')
   model.form.patchValue({
     name: 'Photos',
-    logicalname: '/dev/sdz1',
+    logicalname: '/dev/sdc1',
     username: 'unused-user',
     password: 'unused-password',
   })
@@ -1504,11 +1500,26 @@ test('creating a drive volume uses backup discovery and sends only the selected 
       kind: 'create-volume',
       params: {
         name: 'Photos',
-        source: { kind: 'disk', logicalname: '/dev/sdz1' },
+        source: { kind: 'disk', logicalname: '/dev/sdc1' },
       },
     },
   ])
   assert.equal(f.completed, 1)
+})
+
+test('drive discovery failures preserve volume input and avoid a global task', async t => {
+  const f = volumeFixture(t)
+  const error = new Error('discovery unavailable')
+  f.api.rpc.disk.list = async () => {
+    throw error
+  }
+  const model = f.make(CreateVolume)
+  model.form.controls.name.setValue('Keep this name')
+  await Promise.resolve()
+  assert.equal(model.loading(), false)
+  assert.equal(model.form.controls.name.value, 'Keep this name')
+  assert.deepEqual(f.errors, [error])
+  assert.deepEqual(f.taskCalls, [])
 })
 
 test('shared drive formatting refreshes callers only after successful completion', t => {
