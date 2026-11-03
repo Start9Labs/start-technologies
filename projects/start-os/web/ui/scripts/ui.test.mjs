@@ -1335,6 +1335,34 @@ const { TuiNotificationService } = await import('@taiga-ui/core')
 const { WA_IS_MOBILE } = await import('@ng-web-apis/platform')
 const { getManifest, getCurrentManifest } =
   await import('src/app/utils/get-package-data')
+const { getPartitionName } = await import('src/app/utils/get-partition-name')
+
+test('partition names distinguish partitions on one drive and fall back to their device path', () => {
+  const drive = { vendor: 'Same vendor', model: 'Same drive' }
+  assert.equal(
+    getPartitionName({
+      ...drive,
+      label: 'Server One',
+      logicalname: '/dev/sdb1',
+    }),
+    'Server One',
+  )
+  assert.equal(
+    getPartitionName({
+      ...drive,
+      label: 'Server Two',
+      logicalname: '/dev/sdb2',
+    }),
+    'Server Two',
+  )
+  for (const label of [null, '']) {
+    assert.equal(
+      getPartitionName({ label, logicalname: '/dev/sdb3' }),
+      '/dev/sdb3',
+    )
+  }
+})
+
 const volumeA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
 const volumeB = 'BCDEFGHIJKLMNOPQRSTUVWXYZ234567A'
 

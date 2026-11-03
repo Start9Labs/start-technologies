@@ -6,6 +6,7 @@ import { FormatDrive } from 'src/app/routes/portal/components/format-drive'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { DiskBackupTarget } from 'src/app/services/api/api.types'
+import { getPartitionName } from 'src/app/utils/get-partition-name'
 import { BackupService, MappedBackupTarget } from './backup.service'
 import { BackupConversion, ConversionLabel } from './conversion'
 import { BackupLegacyWarningComponent } from './legacy-warning.component'
@@ -39,7 +40,7 @@ import { BackupStatusComponent } from './status.component'
             <span [backupStatus]="target.hasAnyBackup" [physical]="true"></span>
           </td>
           <td class="name">{{ target.entry.logicalname }}</td>
-          <td>{{ driveName(target.entry) }}</td>
+          <td>{{ partitionName(target.entry) }}</td>
           <td>{{ formatCapacity(target.entry.capacity) }}</td>
           <td>
             @if (target.entry.available !== null) {
@@ -167,17 +168,10 @@ export class BackupPhysicalComponent {
   private readonly dialog = inject(DialogService)
   protected readonly type = inject(ActivatedRoute).snapshot.data['type']
 
-  private readonly i18n = inject(i18nPipe)
+  protected readonly partitionName = getPartitionName
 
   readonly service = inject(BackupService)
   readonly physicalFolders = output<MappedBackupTarget<DiskBackupTarget>>()
-
-  driveName(entry: DiskBackupTarget): string {
-    return (
-      [entry.vendor, entry.model].filter(Boolean).join(' ') ||
-      this.i18n.transform('Unknown Drive')
-    )
-  }
 
   formatCapacity(bytes: number): string {
     const gb = bytes / 1e9

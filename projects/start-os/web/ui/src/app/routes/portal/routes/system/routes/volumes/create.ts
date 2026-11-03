@@ -31,6 +31,7 @@ import { TuiForm, TuiHeader } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 
 import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { getPartitionName } from 'src/app/utils/get-partition-name'
 
 @Component({
   template: `
@@ -67,7 +68,7 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
             } @else {
               @for (drive of drives(); track drive.logicalname) {
                 <button tuiOption [value]="drive.logicalname">
-                  {{ drive.label || drive.logicalname }} ·
+                  {{ partitionName(drive) }} ·
                   {{ drive.capacity | convertBytes }}
                 </button>
               } @empty {
@@ -216,9 +217,13 @@ export class CreateVolume {
     password: [''],
   })
 
-  protected readonly driveLabel = (logicalname: string) =>
-    this.drives().find(drive => drive.logicalname === logicalname)?.label ||
-    logicalname
+  protected readonly partitionName = getPartitionName
+  protected readonly driveLabel = (logicalname: string) => {
+    const partition = this.drives().find(
+      drive => drive.logicalname === logicalname,
+    )
+    return partition ? getPartitionName(partition) : logicalname
+  }
 
   constructor() {
     this.loadDrives()
