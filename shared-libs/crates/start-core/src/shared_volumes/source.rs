@@ -83,7 +83,15 @@ pub async fn open_source(
 }
 
 fn source_result(result: Result<PreparedSource, Error>) -> Result<PreparedSource, Error> {
-    result.with_ctx(|error| (error.kind, t!("shared-volumes.source-unavailable")))
+    result.with_ctx(|error| {
+        (
+            match error.kind {
+                ErrorKind::InvalidRequest => ErrorKind::Filesystem,
+                kind => kind,
+            },
+            t!("shared-volumes.source-unavailable"),
+        )
+    })
 }
 
 pub(crate) async fn record_availability(

@@ -23,6 +23,39 @@ fn source_failures_keep_their_reason_kind_and_metadata() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn stored_folder_failures_are_source_errors_without_recreating_paths() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("photos")).unwrap();
+    std::fs::rename(root.path().join("photos"), root.path().join("renamed")).unwrap();
+    std::fs::write(root.path().join("file"), b"not a directory").unwrap();
+    symlink(outside.path(), root.path().join("escape")).unwrap();
+    symlink("cycle", root.path().join("cycle")).unwrap();
+    for path in ["photos", "file/child", "escape", "cycle"] {
+        let error = open_beneath(root.path(), Path::new(path)).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+        let cause = error.source.downcast_ref::<std::io::Error>().unwrap();
+        let reason = cause.to_string();
+        let errno = cause.raw_os_error();
+        let error = source_result(Err(error)).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Filesystem);
+        assert!(error.to_string().contains(&reason));
+        assert_eq!(
+            error
+                .source
+                .downcast_ref::<std::io::Error>()
+                .unwrap()
+                .raw_os_error(),
+            errno
+        );
+    }
+    assert!(!root.path().join("photos").exists());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn folder_creation_is_confined_and_preserves_existing_contents() {
     use std::os::unix::fs::symlink;
     let root = tempfile::tempdir().unwrap();

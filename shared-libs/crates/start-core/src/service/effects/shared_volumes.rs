@@ -212,9 +212,6 @@ pub async fn mount_shared_volume(
     let source = match source {
         Ok(prepared) => prepared?,
         Err(error) => {
-            if matches!(error.kind, ErrorKind::InvalidRequest) {
-                return Err(error);
-            }
             return Ok(SharedVolumeMountResult::Unavailable {
                 reason: if matches!(error.kind, ErrorKind::Timeout) {
                     SharedVolumeUnavailableReason::Timeout
