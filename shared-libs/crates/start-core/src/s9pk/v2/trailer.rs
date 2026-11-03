@@ -84,7 +84,7 @@ impl Trailer {
         }
         let mut footer = [0; 16];
         source
-            .fetch(size - 16, 16)
+            .fetch_tail(size - 16, 16)
             .await?
             .read_exact(&mut footer)
             .await?;
@@ -117,7 +117,7 @@ impl Trailer {
         };
         let mut raw = vec![0; length as usize];
         source
-            .fetch(start, length)
+            .fetch_tail(start, length)
             .await?
             .read_exact(&mut raw)
             .await?;

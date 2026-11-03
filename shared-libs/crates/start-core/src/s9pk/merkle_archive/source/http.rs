@@ -19,7 +19,9 @@ pub struct HttpSource {
     url: Url,
     client: Client,
     size: Option<u64>,
-    range_support: Result<(), Arc<Mutex<BTreeSet<TrackingIO<HttpBodyReader>>>>>,
+    accepts_ranges: bool,
+    // GitHub's release-asset CDN performs poorly with repeated range requests.
+    pool: Arc<Mutex<BTreeSet<TrackingIO<HttpBodyReader>>>>,
 }
 impl HttpSource {
     pub async fn new(client: Client, url: Url) -> Result<Self, Error> {
@@ -30,13 +32,10 @@ impl HttpSource {
             .with_kind(ErrorKind::Network)?
             .error_for_status()
             .with_kind(ErrorKind::Network)?;
-        let range_support = head
+        let accepts_ranges = head
             .headers()
             .get(ACCEPT_RANGES)
             .is_some_and(|value| value == "bytes");
-        if !range_support {
-            tracing::debug!(%url, "HTTP source does not advertise ranges; tail discovery may stream the full response");
-        }
         let size = head
             .headers()
             .get(CONTENT_LENGTH)
@@ -46,11 +45,8 @@ impl HttpSource {
             url,
             client,
             size,
-            range_support: if range_support {
-                Ok(())
-            } else {
-                Err(Arc::new(Mutex::new(BTreeSet::new())))
-            },
+            accepts_ranges,
+            pool: Arc::new(Mutex::new(BTreeSet::new())),
         })
     }
 }
@@ -75,106 +71,101 @@ impl ArchiveSource for HttpSource {
         ))
     }
     async fn fetch(&self, position: u64, size: u64) -> Result<Self::FetchReader, Error> {
-        match &self.range_support {
-            Ok(_) => {
-                if size == 0 {
-                    return Ok(HttpReader::Range(
-                        StreamReader::new(futures::stream::empty().apply(boxed)).take(0),
-                    ));
-                }
-                let end = position.checked_add(size - 1).ok_or_else(|| {
-                    Error::new(
-                        eyre!("{}", t!("s9pk.source.invalid-range")),
-                        ErrorKind::Network,
-                    )
-                })?;
-                let response = self
-                    .client
-                    .get(self.url.clone())
-                    .header(RANGE, format!("bytes={position}-{end}"))
-                    .send()
-                    .await
-                    .with_kind(ErrorKind::Network)?
-                    .error_for_status()
-                    .with_kind(ErrorKind::Network)?;
-                let partial = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
-                if partial {
-                    let expected = format!("bytes {position}-{end}/");
-                    ensure_code!(
-                        response
-                            .headers()
-                            .get(CONTENT_RANGE)
-                            .and_then(|v| v.to_str().ok())
-                            .and_then(|v| v.strip_prefix(&expected))
-                            .and_then(|v| v.parse::<u64>().ok())
-                            .is_some_and(
-                                |total| total > end && self.size.is_none_or(|size| size == total)
-                            ),
-                        ErrorKind::Network,
-                        "{}",
-                        t!("s9pk.source.invalid-range-response")
-                    );
-                } else {
-                    ensure_code!(
-                        response.status() == reqwest::StatusCode::OK,
-                        ErrorKind::Network,
-                        "{}",
-                        t!("s9pk.source.invalid-range-response")
-                    );
-                    tracing::debug!(url = %self.url, "HTTP source ignored range; streaming whole-response fallback");
-                }
-                let mut reader = StreamReader::new(
-                    response
-                        .bytes_stream()
-                        .map_err(|e| std::io::Error::other(e))
-                        .apply(boxed),
-                );
-                if !partial {
-                    tokio::io::copy(&mut (&mut reader).take(position), &mut tokio::io::sink())
-                        .await?;
-                }
-                Ok(HttpReader::Range(reader.take(size)))
-            }
-            Err(pool) => {
-                fn get_reader_for(
-                    pool: &Arc<Mutex<BTreeSet<TrackingIO<HttpBodyReader>>>>,
-                    position: u64,
-                ) -> Option<TrackingIO<HttpBodyReader>> {
-                    let mut lock = pool.lock().unwrap();
-                    let pos = lock.range(..position).last()?.position();
-                    lock.take(&pos)
-                }
-                let reader = get_reader_for(pool, position);
-                let mut reader = if let Some(reader) = reader {
-                    reader
-                } else {
-                    TrackingIO::new(
-                        0,
-                        StreamReader::new(
-                            self.client
-                                .get(self.url.clone())
-                                .send()
-                                .await
-                                .with_kind(ErrorKind::Network)?
-                                .error_for_status()
-                                .with_kind(ErrorKind::Network)?
-                                .bytes_stream()
-                                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-                                .apply(boxed),
-                        ),
-                    )
-                };
-                if reader.position() < position {
-                    let to_skip = position - reader.position();
-                    tokio::io::copy(&mut (&mut reader).take(to_skip), &mut tokio::io::sink())
-                        .await?;
-                }
-                Ok(HttpReader::Rangeless {
-                    pool: pool.clone(),
-                    reader: Some(reader.take(size)),
-                })
-            }
+        fn get_reader_for(
+            pool: &Arc<Mutex<BTreeSet<TrackingIO<HttpBodyReader>>>>,
+            position: u64,
+        ) -> Option<TrackingIO<HttpBodyReader>> {
+            let mut lock = pool.lock().unwrap();
+            let pos = lock.range(..=position).last()?.position();
+            lock.take(&pos)
         }
+        let reader = get_reader_for(&self.pool, position);
+        let mut reader = if let Some(reader) = reader {
+            reader
+        } else {
+            TrackingIO::new(
+                0,
+                StreamReader::new(
+                    self.client
+                        .get(self.url.clone())
+                        .send()
+                        .await
+                        .with_kind(ErrorKind::Network)?
+                        .error_for_status()
+                        .with_kind(ErrorKind::Network)?
+                        .bytes_stream()
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                        .apply(boxed),
+                ),
+            )
+        };
+        if reader.position() < position {
+            let to_skip = position - reader.position();
+            tokio::io::copy(&mut (&mut reader).take(to_skip), &mut tokio::io::sink()).await?;
+        }
+        Ok(HttpReader::Rangeless {
+            pool: self.pool.clone(),
+            reader: Some(reader.take(size)),
+        })
+    }
+    async fn fetch_tail(&self, position: u64, size: u64) -> Result<Self::FetchReader, Error> {
+        if !self.accepts_ranges {
+            return self.fetch(position, size).await;
+        }
+        if size == 0 {
+            return Ok(HttpReader::Range(
+                StreamReader::new(futures::stream::empty().apply(boxed)).take(0),
+            ));
+        }
+        let end = position.checked_add(size - 1).ok_or_else(|| {
+            Error::new(
+                eyre!("{}", t!("s9pk.source.invalid-range")),
+                ErrorKind::Network,
+            )
+        })?;
+        let response = self
+            .client
+            .get(self.url.clone())
+            .header(RANGE, format!("bytes={position}-{end}"))
+            .send()
+            .await
+            .with_kind(ErrorKind::Network)?
+            .error_for_status()
+            .with_kind(ErrorKind::Network)?;
+        let partial = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+        if partial {
+            let expected = format!("bytes {position}-{end}/");
+            ensure_code!(
+                response
+                    .headers()
+                    .get(CONTENT_RANGE)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.strip_prefix(&expected))
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .is_some_and(|total| total > end && self.size.is_none_or(|size| size == total)),
+                ErrorKind::Network,
+                "{}",
+                t!("s9pk.source.invalid-range-response")
+            );
+        } else {
+            ensure_code!(
+                response.status() == reqwest::StatusCode::OK,
+                ErrorKind::Network,
+                "{}",
+                t!("s9pk.source.invalid-range-response")
+            );
+            tracing::debug!(url = %self.url, "HTTP source ignored range; streaming whole-response fallback");
+        }
+        let mut reader = StreamReader::new(
+            response
+                .bytes_stream()
+                .map_err(|e| std::io::Error::other(e))
+                .apply(boxed),
+        );
+        if !partial {
+            tokio::io::copy(&mut (&mut reader).take(position), &mut tokio::io::sink()).await?;
+        }
+        Ok(HttpReader::Range(reader.take(size)))
     }
 }
 

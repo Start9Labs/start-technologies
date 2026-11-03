@@ -252,6 +252,14 @@ pub trait ArchiveSource: Send + Sync + Sized + 'static {
         position: u64,
         size: u64,
     ) -> impl Future<Output = Result<Self::FetchReader, Error>> + Send;
+    /// Reads end-of-file metadata using bounded requests where supported.
+    fn fetch_tail(
+        &self,
+        position: u64,
+        size: u64,
+    ) -> impl Future<Output = Result<Self::FetchReader, Error>> + Send {
+        self.fetch(position, size)
+    }
     fn copy_all_to<W: AsyncWrite + Unpin + Send + ?Sized>(
         &self,
         w: &mut W,
@@ -292,6 +300,9 @@ impl<T: ArchiveSource> ArchiveSource for Arc<T> {
     }
     async fn fetch(&self, position: u64, size: u64) -> Result<Self::FetchReader, Error> {
         self.deref().fetch(position, size).await
+    }
+    async fn fetch_tail(&self, position: u64, size: u64) -> Result<Self::FetchReader, Error> {
+        self.deref().fetch_tail(position, size).await
     }
     async fn copy_all_to<W: AsyncWrite + Unpin + Send + ?Sized>(
         &self,
@@ -409,6 +420,9 @@ impl<S: ArchiveSource> ArchiveSource for TmpSource<S> {
     }
     async fn fetch(&self, position: u64, size: u64) -> Result<Self::FetchReader, Error> {
         self.source.fetch(position, size).await
+    }
+    async fn fetch_tail(&self, position: u64, size: u64) -> Result<Self::FetchReader, Error> {
+        self.source.fetch_tail(position, size).await
     }
     async fn copy_all_to<W: AsyncWrite + Unpin + Send + ?Sized>(
         &self,

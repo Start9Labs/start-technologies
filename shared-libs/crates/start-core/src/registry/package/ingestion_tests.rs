@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use axum::body::Body;
 use axum::extract::Path as RoutePath;
@@ -12,8 +12,8 @@ use super::*;
 use crate::registry::package::add::{AddMirrorParams, AddPackageParams, add_mirror, add_package};
 use crate::rpc_continuations::Guid;
 use crate::s9pk::S9pk;
-use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
+use crate::s9pk::merkle_archive::source::{ArchiveSource, TmpSource};
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::sign::ed25519::Ed25519ph;
 use crate::sign::{AnySignature, SignatureScheme};
@@ -76,19 +76,21 @@ async fn context(datadir: PathBuf, uploader: AnyVerifyingKey) -> RegistryContext
     }))
 }
 
+type Requests = Arc<Mutex<Vec<Option<(usize, usize)>>>>;
+
 async fn server(
     files: BTreeMap<String, Vec<u8>>,
 ) -> (
     Url,
-    Arc<AtomicUsize>,
+    Requests,
     crate::util::future::NonDetachingJoinHandle<()>,
 ) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url: Url = format!("http://{}/", listener.local_addr().unwrap())
         .parse()
         .unwrap();
-    let ranges = Arc::new(AtomicUsize::new(0));
-    let count = ranges.clone();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let observed = requests.clone();
     let router = axum::Router::new().route(
         "/{name}",
         get(
@@ -96,7 +98,7 @@ async fn server(
                   method: axum::http::Method,
                   headers: axum::http::HeaderMap| {
                 let files = files.clone();
-                let count = count.clone();
+                let observed = observed.clone();
                 async move {
                     let bytes = &files[&name];
                     let head = method == axum::http::Method::HEAD;
@@ -111,16 +113,22 @@ async fn server(
                                 end.parse::<usize>().unwrap(),
                             )
                         });
-                    if range.is_some() {
-                        count.fetch_add(1, Ordering::Relaxed);
+                    if !head {
+                        observed.lock().unwrap().push(range);
                     }
-                    let mut response = Response::builder().header("Accept-Ranges", "bytes");
+                    let mut response = Response::builder();
+                    if name != "no-ranges" {
+                        response = response.header("Accept-Ranges", "bytes");
+                    }
                     if let Some((start, end)) = range.filter(|_| name != "ignored") {
                         response = response
                             .status(206)
                             .header(
                                 "Content-Range",
-                                format!("bytes {start}-{end}/{}", bytes.len()),
+                                format!(
+                                    "bytes {start}-{end}/{}",
+                                    bytes.len() + usize::from(name == "bad-range")
+                                ),
                             )
                             .header("Content-Length", end - start + 1);
                         response
@@ -139,7 +147,7 @@ async fn server(
     let task = tokio::spawn(async move {
         axum::serve(listener, router).await.unwrap();
     });
-    (url, ranges, task.into())
+    (url, requests, task.into())
 }
 
 #[tokio::test]
@@ -150,6 +158,7 @@ async fn registry_ingests_verified_trailer_signatures_from_secondary_urls_withou
     let ctx = context(temp.path().into(), uploader.clone()).await;
     let before = ctx.db.peek().await.as_index().de().unwrap();
     let base = fixture("base.s9pk");
+    let base_size = base.len();
     let mixed = fixture("mixed.s9pk");
     let package = S9pk::deserialize(&Arc::<[u8]>::from(base.clone()), None)
         .await
@@ -160,7 +169,7 @@ async fn registry_ingests_verified_trailer_signatures_from_secondary_urls_withou
             .sign_commitment(&uploader_key, &commitment, "s9pk")
             .unwrap(),
     );
-    let (url, ranges, task) = server(
+    let (url, requests, task) = server(
         [
             ("base".into(), base),
             ("mixed".into(), mixed.clone()),
@@ -202,7 +211,15 @@ async fn registry_ingests_verified_trailer_signatures_from_secondary_urls_withou
             .as_ref(),
         mixed
     );
-    assert!(ranges.load(Ordering::Relaxed) > 0);
+    let ranged: Vec<_> = requests.lock().unwrap().iter().copied().flatten().collect();
+    assert_eq!(
+        ranged,
+        [
+            (base_size - 16, base_size - 1),
+            (mixed.len() - 16, mixed.len() - 1),
+            (base_size, mixed.len() - 17),
+        ]
+    );
     add_mirror(
         ctx.clone(),
         AddMirrorParams {
@@ -367,22 +384,114 @@ async fn registry_optional_malformed_trailer_does_not_block_authorized_ingestion
 }
 
 #[tokio::test]
-async fn http_source_discovers_the_footer_with_a_direct_range_request() {
-    let fixture = fixture("mixed.s9pk");
-    let (url, ranges, task) = server([("mixed".into(), fixture.clone())].into()).await;
-    let source = HttpSource::new(Client::new(), url.join("mixed").unwrap())
-        .await
-        .unwrap();
-    let mut footer = [0; 16];
+async fn http_source_preserves_pooled_bulk_reads_and_forwards_tail_capability() {
     use tokio::io::AsyncReadExt;
+
+    let bytes = fixture("endorsed.s9pk");
+    let (url, requests, task) = server([("endorsed".into(), bytes.clone())].into()).await;
+    let source = TmpSource::new(
+        Arc::new(crate::util::io::TmpDir::new().await.unwrap()),
+        Arc::new(
+            HttpSource::new(Client::new(), url.join("endorsed").unwrap())
+                .await
+                .unwrap(),
+        ),
+    );
+    for (position, length) in [(0, 8), (8, 8), (80, 4)] {
+        let mut read = vec![0; length];
+        source
+            .fetch(position as u64, length as u64)
+            .await
+            .unwrap()
+            .read_exact(&mut read)
+            .await
+            .unwrap();
+        assert_eq!(read, bytes[position..position + length]);
+    }
+    assert_eq!(*requests.lock().unwrap(), [None]);
+    let mut footer = [0; 16];
     source
-        .fetch(fixture.len() as u64 - 16, 16)
+        .fetch_tail(bytes.len() as u64 - 16, 16)
         .await
         .unwrap()
         .read_exact(&mut footer)
         .await
         .unwrap();
     assert_eq!(&footer[8..], b"S9PKEXT1");
-    assert_eq!(ranges.load(Ordering::Relaxed), 1);
+    let mut empty = Vec::new();
+    source
+        .fetch_tail(0, 0)
+        .await
+        .unwrap()
+        .read_to_end(&mut empty)
+        .await
+        .unwrap();
+    assert!(empty.is_empty());
+    assert_eq!(
+        *requests.lock().unwrap(),
+        [None, Some((bytes.len() - 16, bytes.len() - 1))]
+    );
+    source.gc().await.unwrap();
+    task.abort();
+}
+
+#[tokio::test]
+async fn http_source_tail_falls_back_without_ranges_or_when_they_are_ignored() {
+    for name in ["no-ranges", "ignored"] {
+        let (url, requests, task) = server([(name.into(), fixture("endorsed.s9pk"))].into()).await;
+        let source = Arc::new(
+            HttpSource::new(Client::new(), url.join(name).unwrap())
+                .await
+                .unwrap(),
+        );
+        let package = S9pk::deserialize(&source, None).await.unwrap();
+        assert_eq!(package.signatures().await.unwrap().len(), 4);
+        assert!(package.diagnostics().is_empty());
+        let ranged = requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|range| range.is_some())
+            .count();
+        assert_eq!(ranged, if name == "no-ranges" { 0 } else { 2 });
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn http_source_rejects_invalid_tail_range_response_without_rejecting_base() {
+    let (url, _, task) = server([("bad-range".into(), fixture("endorsed.s9pk"))].into()).await;
+    let source = Arc::new(
+        HttpSource::new(Client::new(), url.join("bad-range").unwrap())
+            .await
+            .unwrap(),
+    );
+    let package = S9pk::deserialize(&source, None).await.unwrap();
+    assert_eq!(package.signatures().await.unwrap().len(), 1);
+    assert_eq!(package.diagnostics()[0].kind, "read-failed");
+    task.abort();
+}
+
+#[tokio::test]
+async fn http_source_discovers_the_footer_with_a_direct_range_request() {
+    let fixture = fixture("mixed.s9pk");
+    let (url, requests, task) = server([("mixed".into(), fixture.clone())].into()).await;
+    let source = HttpSource::new(Client::new(), url.join("mixed").unwrap())
+        .await
+        .unwrap();
+    let mut footer = [0; 16];
+    use tokio::io::AsyncReadExt;
+    source
+        .fetch_tail(fixture.len() as u64 - 16, 16)
+        .await
+        .unwrap()
+        .read_exact(&mut footer)
+        .await
+        .unwrap();
+    assert_eq!(&footer[8..], b"S9PKEXT1");
+    assert_eq!(
+        *requests.lock().unwrap(),
+        [Some((fixture.len() - 16, fixture.len() - 1))]
+    );
     task.abort();
 }
