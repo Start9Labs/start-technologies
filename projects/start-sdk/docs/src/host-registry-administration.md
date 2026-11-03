@@ -15,7 +15,7 @@ Register a new signer (without admin rights):
 ```sh
 start-cli registry admin signer add \
   --name "Alice" \
-  --contact "alice@example.com" \
+  --contact "mailto:alice@example.com" \
   --key "$(cat alice.pub.pem)"
 ```
 
