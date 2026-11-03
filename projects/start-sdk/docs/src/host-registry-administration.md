@@ -21,16 +21,6 @@ The registry returns the signer's ID. Use that ID with `start-cli registry admin
 
 To grant a signer admin privileges (or revoke them), use `start-cli registry admin add <SIGNER_ID>` / `... admin remove <SIGNER_ID>`.
 
-### Offering signers to StartOS users
-
-StartOS accepts a package only from signing keys the server trusts, whichever registry hosts it. To offer your signers' keys to the servers that add your registry, select them:
-
-```sh
-start-cli registry info set-trust-signers <SIGNER_ID> [SIGNER_ID...]
-```
-
-A server that adds your registry trusts the offered keys it does not already have for packages. Keys you offer later reach existing users untrusted, each with a notification. Run the command without signer IDs to stop offering signers. Register a signer with its armored GPG export as `--key` so StartOS shows its identities and OpenPGP fingerprint.
-
 ## Packages
 
 ### Authorizing a signer for a package
