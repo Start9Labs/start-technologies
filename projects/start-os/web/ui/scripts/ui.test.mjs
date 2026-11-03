@@ -1491,6 +1491,7 @@ test('creating a drive volume uses physical discovery and sends only the selecte
   model.form.patchValue({
     name: 'Photos',
     logicalname: '/dev/sdc1',
+    path: 'library/photos',
     username: 'unused-user',
     password: 'unused-password',
   })
@@ -1500,7 +1501,11 @@ test('creating a drive volume uses physical discovery and sends only the selecte
       kind: 'create-volume',
       params: {
         name: 'Photos',
-        source: { kind: 'disk', logicalname: '/dev/sdc1' },
+        source: {
+          kind: 'disk',
+          logicalname: '/dev/sdc1',
+          path: 'library/photos',
+        },
       },
     },
   ])
@@ -1558,7 +1563,44 @@ test('retained-volume page failures reach ErrorService without a global task', a
   assert.deepEqual(f.taskCalls, [])
 })
 
-test('volume deletion waits for confirmation and distinguishes managed data from external storage', async t => {
+test('table refresh waits for every volume, preserves failed observations and uses no global task', async t => {
+  const f = volumeFixture(t)
+  let finish
+  const pending = new Promise(resolve => {
+    finish = resolve
+  })
+  const requested = []
+  const error = new Error('refresh failed')
+  const previous = {
+    availability: 'unavailable',
+    available: null,
+    error: 'Old observation',
+  }
+  const current = { availability: 'available', available: 1234, error: null }
+  f.api.rpc.volumes.inspect = async ({ id }) => {
+    requested.push(id)
+    if (id === volumeA) return pending
+    throw error
+  }
+  const model = f.make(SystemVolumes)
+  model.inspections.set({ [volumeB]: previous })
+  const refresh = model.refresh()
+  await Promise.resolve()
+  assert.equal(model.refreshing(), true)
+  assert.deepEqual(requested, [volumeA, volumeB])
+  assert.deepEqual(model.inspections()[volumeB], previous)
+  finish(current)
+  await refresh
+  assert.equal(model.refreshing(), false)
+  assert.deepEqual(model.inspections(), {
+    [volumeA]: current,
+    [volumeB]: previous,
+  })
+  assert.deepEqual(f.errors, [error])
+  assert.deepEqual(f.taskCalls, [])
+})
+
+test('volume removal uses distinct local Delete and external Remove confirmations', async t => {
   const f = volumeFixture(t)
   const model = f.make(SystemVolumes)
   const local = { name: 'Local', source: { kind: 'local' } }
@@ -1571,15 +1613,21 @@ test('volume deletion waits for confirmation and distinguishes managed data from
     f.confirmations.at(-1).data.content,
     'Delete this volume and all service access? Its local folder and all contents will be permanently deleted.',
   )
+  assert.equal(f.confirmations.at(-1).data.yes, 'Delete')
+  assert.equal(f.confirmations.at(-1).data.appearance, 'primary-destructive')
   for (const source of [
-    { kind: 'disk', logicalname: '/dev/disk/by-uuid/photos' },
+    { kind: 'disk', logicalname: '/dev/disk/by-uuid/photos', path: 'library' },
     { kind: 'cifs', hostname: 'nas', path: '/photos' },
   ]) {
     await model.remove(volumeB, { name: 'External', source })
     assert.equal(
       f.confirmations.at(-1).data.content,
-      'Delete this volume and all service access? Data on the external drive or CIFS share will not be deleted.',
+      'Remove this volume and all service access? Data on the external drive or CIFS share will not be deleted.',
     )
+    assert.equal(f.confirmations.at(-1).label, 'Remove')
+    assert.equal(f.confirmations.at(-1).data.yes, 'Remove')
+    assert.equal(f.confirmations.at(-1).data.appearance, 'primary')
+    assert.equal(f.taskCalls.at(-1), 'Removing')
     assert.deepEqual(f.requests.at(-1), {
       kind: 'remove-volume',
       params: { id: volumeB },
@@ -1873,7 +1921,16 @@ test('production mocks support inspection, independent failed backups and new-lo
     name: 'External',
     source: diskSource,
   })
-  assert.deepEqual(cache.value.value.sharedVolumes[disk].source, diskSource)
+  assert.deepEqual(cache.value.value.sharedVolumes[disk].source, {
+    ...diskSource,
+    path: '',
+  })
+  const folderSource = { ...diskSource, path: 'library/photos' }
+  const folder = await api.rpc.volumes.create({
+    name: 'External folder',
+    source: folderSource,
+  })
+  assert.deepEqual(cache.value.value.sharedVolumes[folder].source, folderSource)
   assert.match(local, /^[A-Z2-7]{32}$/)
   assert.match(remote, /^[A-Z2-7]{32}$/)
   assert.equal(cache.value.value.sharedVolumes[remote].availability, 'unknown')

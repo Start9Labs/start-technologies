@@ -17,8 +17,10 @@ import {
   TuiDataList,
   TuiDropdown,
   TuiHint,
+  TuiIcon,
   TuiTitle,
 } from '@taiga-ui/core'
+import { TuiButtonLoading } from '@taiga-ui/kit'
 import { TuiHeader } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
 import { firstValueFrom } from 'rxjs'
@@ -43,6 +45,17 @@ import { VOLUME_GRANTS } from './grants'
     <header tuiHeader>
       <h3 tuiTitle>{{ 'Volumes' | i18n }}</h3>
       <aside tuiAccessories>
+        <button
+          tuiIconButton
+          size="s"
+          appearance="secondary"
+          iconStart="@tui.refresh-cw"
+          [loading]="refreshing()"
+          [disabled]="refreshing()"
+          (click)="refresh()"
+        >
+          {{ 'Refresh' | i18n }}
+        </button>
         <button formatDrive size="s"></button>
         <button tuiButton size="s" iconStart="@tui.plus" (click)="create()">
           {{ 'New' | i18n }}
@@ -65,6 +78,7 @@ import { VOLUME_GRANTS } from './grants'
               <span tuiTitle>
                 {{ 'External drive' | i18n }}
                 <span tuiSubtitle>{{ volume.source.logicalname }}</span>
+                <span tuiSubtitle>{{ volume.source.path || '/' }}</span>
               </span>
             } @else {
               <span tuiTitle>
@@ -75,7 +89,21 @@ import { VOLUME_GRANTS } from './grants'
           </td>
           <td>
             <span tuiTitle>
-              {{ statuses[volume.availability] | i18n }}
+              <span>
+                <tui-icon
+                  [icon]="
+                    volume.source.kind === 'cifs'
+                      ? '@tui.signal-high'
+                      : volume.source.kind === 'disk'
+                        ? '@tui.hard-drive'
+                        : '@tui.folder'
+                  "
+                  [class.g-positive]="volume.availability === 'available'"
+                  [class.g-negative]="volume.availability === 'unavailable'"
+                  [style.font-size.rem]="1"
+                />
+                {{ statuses[volume.availability] | i18n }}
+              </span>
               @if (inspections()[id]?.error; as error) {
                 <span tuiSubtitle>{{ error }}</span>
               }
@@ -103,13 +131,6 @@ import { VOLUME_GRANTS } from './grants'
             >
               {{ 'More' | i18n }}
               <tui-data-list *tuiDropdown="let close" (click)="close()">
-                <button
-                  tuiOption
-                  iconStart="@tui.refresh-cw"
-                  (click)="inspect(id)"
-                >
-                  {{ 'Check availability' | i18n }}
-                </button>
                 <button tuiOption iconStart="@tui.users" (click)="manage(id)">
                   {{ 'Service access' | i18n }}
                 </button>
@@ -125,7 +146,7 @@ import { VOLUME_GRANTS } from './grants'
                   iconStart="@tui.trash-2"
                   (click)="remove(id, volume)"
                 >
-                  {{ 'Delete' | i18n }}
+                  {{ 'Remove' | i18n }}
                 </button>
               </tui-data-list>
             </button>
@@ -179,6 +200,8 @@ import { VOLUME_GRANTS } from './grants'
     TuiDataList,
     TuiDropdown,
     TuiHint,
+    TuiIcon,
+    TuiButtonLoading,
     KeyValuePipe,
     TuiTitle,
     TuiHeader,
@@ -201,6 +224,7 @@ export default class Volumes {
     Record<string, Result<'volumes.inspect'>>
   >({})
   protected readonly retained = signal<Result<'volumes.list-retained'>>({})
+  protected readonly refreshing = signal(false)
   protected readonly statuses: Record<T.SharedVolumeAvailability, i18nKey> = {
     unknown: 'Unknown',
     available: 'Available',
@@ -227,11 +251,22 @@ export default class Volumes {
     this.dialogs.openComponent(VOLUME_GRANTS, { data: { id } }).subscribe()
   }
 
-  protected inspect(id: string) {
-    return this.tasks.run(async () => {
-      const result = await this.api.rpc.volumes.inspect({ id })
-      this.inspections.update(all => ({ ...all, [id]: result }))
-    }, 'Checking availability')
+  protected async refresh() {
+    this.refreshing.set(true)
+    try {
+      await Promise.all(
+        Object.keys(this.volumes() || {}).map(async id => {
+          try {
+            const result = await this.api.rpc.volumes.inspect({ id })
+            this.inspections.update(all => ({ ...all, [id]: result }))
+          } catch (error) {
+            this.errors.handleError(error as HttpError)
+          }
+        }),
+      )
+    } finally {
+      this.refreshing.set(false)
+    }
   }
 
   protected async rename(id: string, volume: T.SharedVolume) {
@@ -255,24 +290,28 @@ export default class Volumes {
   }
 
   protected async remove(id: string, volume: T.SharedVolume) {
+    const local = volume.source.kind === 'local'
     if (
       !(await firstValueFrom(
         this.dialogs.openConfirm({
-          label: 'Delete',
+          label: local ? 'Delete' : 'Remove',
           data: {
-            content:
-              volume.source.kind === 'local'
-                ? 'Delete this volume and all service access? Its local folder and all contents will be permanently deleted.'
-                : 'Delete this volume and all service access? Data on the external drive or CIFS share will not be deleted.',
-            yes: 'Delete',
+            content: local
+              ? 'Delete this volume and all service access? Its local folder and all contents will be permanently deleted.'
+              : 'Remove this volume and all service access? Data on the external drive or CIFS share will not be deleted.',
+            yes: local ? 'Delete' : 'Remove',
             no: 'Cancel',
+            appearance: local ? 'primary-destructive' : 'primary',
           },
         }),
         { defaultValue: false },
       ))
     )
       return
-    await this.tasks.run(() => this.api.rpc.volumes.remove({ id }), 'Deleting')
+    await this.tasks.run(
+      () => this.api.rpc.volumes.remove({ id }),
+      local ? 'Deleting' : 'Removing',
+    )
     await this.refreshRetained()
   }
 
@@ -286,6 +325,7 @@ export default class Volumes {
               'Permanently delete this local volume folder and all its contents?',
             yes: 'Delete local data',
             no: 'Cancel',
+            appearance: 'primary-destructive',
           },
         }),
         { defaultValue: false },

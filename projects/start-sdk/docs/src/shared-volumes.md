@@ -1,6 +1,6 @@
 # Volumes
 
-System volumes are user-owned local folders, attached-drive partitions or CIFS/SMB shares granted to selected services. They are separate from package-owned `sdk.volumes` and dependency mounts.
+System volumes are user-owned local folders, folders on attached drives or CIFS/SMB shares granted to selected services. They are separate from package-owned `sdk.volumes` and dependency mounts.
 
 ## Declare support
 

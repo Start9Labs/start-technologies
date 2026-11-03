@@ -76,8 +76,15 @@ impl AsRef<str> for SharedVolumeId {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum SharedVolumeSource {
     Local,
-    Disk { logicalname: PathBuf },
-    Cifs { hostname: String, path: PathBuf },
+    Disk {
+        logicalname: PathBuf,
+        #[serde(default)]
+        path: PathBuf,
+    },
+    Cifs {
+        hostname: String,
+        path: PathBuf,
+    },
 }
 
 rpc_toolkit::reflect_ts!(SharedVolumeSource);
@@ -170,7 +177,11 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum CreateSharedVolumeSource {
     Local,
-    Disk { logicalname: PathBuf },
+    Disk {
+        logicalname: PathBuf,
+        #[serde(default)]
+        path: PathBuf,
+    },
     Cifs(Cifs),
 }
 
@@ -206,14 +217,14 @@ pub async fn create(
             source::create_local_directory(&local_path(crate::DATA_DIR, &id)).await?;
             (SharedVolumeSource::Local, None)
         }
-        CreateSharedVolumeSource::Disk { logicalname } => {
+        CreateSharedVolumeSource::Disk { logicalname, path } => {
             let disks = crate::disk::util::list(&ctx.os_partitions, None).await?;
             let logicalname = tokio::fs::canonicalize(logicalname).await?;
             let partition = source::external_partition(&disks, &logicalname)?;
-            let logicalname = crate::disk::mount::filesystem::block_dev::BlockDev::new(partition)
-                .persistent_path()
-                .await?;
-            (SharedVolumeSource::Disk { logicalname }, None)
+            (
+                source::prepare_external_source(partition, path).await?,
+                None,
+            )
         }
         CreateSharedVolumeSource::Cifs(cifs) => {
             cifs.validate()?;
@@ -531,6 +542,19 @@ mod tests {
         assert_eq!(
             local_path("/data", &id).parent().unwrap(),
             Path::new("/data/shared-volumes")
+        );
+    }
+
+    #[test]
+    fn external_sources_without_a_path_keep_the_filesystem_root() {
+        let source = serde_json::json!({"kind":"disk", "logicalname":"/dev/disk/by-uuid/photos"});
+        let stored: SharedVolumeSource = serde_json::from_value(source.clone()).unwrap();
+        let created: CreateSharedVolumeSource = serde_json::from_value(source).unwrap();
+        assert!(
+            matches!(stored, SharedVolumeSource::Disk { path, .. } if path.as_os_str().is_empty())
+        );
+        assert!(
+            matches!(created, CreateSharedVolumeSource::Disk { path, .. } if path.as_os_str().is_empty())
         );
     }
 

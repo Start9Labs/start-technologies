@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::os::fd::{AsFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::disk::mount::filesystem::syscall::{
     DetachedMount, MountNamespace, open_beneath, open_tree_clone_fd, unmount_fd,
 };
-use crate::disk::mount::guard::TmpMountGuard;
+use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::shared_volumes::{SharedVolumeGrant, SharedVolumeId};
@@ -55,21 +55,58 @@ impl Drop for AttachedMount {
     }
 }
 
+#[derive(Debug)]
 pub struct PreparedSource {
     directory: OwnedFd,
     guard: TmpMountGuard,
+    path: PathBuf,
 }
 
 impl PreparedSource {
+    fn from_directory(guard: TmpMountGuard, directory: OwnedFd) -> Self {
+        let path = PathBuf::from(format!(
+            "/proc/{}/fd/{}",
+            std::process::id(),
+            directory.as_raw_fd()
+        ));
+        Self {
+            directory,
+            guard,
+            path,
+        }
+    }
+
     pub async fn open(guard: TmpMountGuard, subpath: Option<PathBuf>) -> Result<Self, Error> {
-        use crate::disk::mount::guard::GenericMountGuard;
         tokio::task::spawn_blocking(move || {
             let relative = confined_relative(subpath.as_deref().unwrap_or(Path::new("")))?;
             let directory = open_beneath(guard.path(), &relative)?;
-            Ok(Self { directory, guard })
+            Ok(Self::from_directory(guard, directory))
         })
         .await
         .with_kind(ErrorKind::Unknown)?
+    }
+
+    pub async fn into_subpath(self, subpath: Option<PathBuf>) -> Result<Self, Error> {
+        let Some(subpath) = subpath else {
+            return Ok(self);
+        };
+        tokio::task::spawn_blocking(move || {
+            let directory = open_beneath(self.path(), &confined_relative(&subpath)?)?;
+            Ok(Self::from_directory(self.guard, directory))
+        })
+        .await
+        .with_kind(ErrorKind::Unknown)?
+    }
+}
+
+impl GenericMountGuard for PreparedSource {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    async fn unmount(self) -> Result<(), Error> {
+        drop(self.directory);
+        self.guard.unmount().await
     }
 }
 

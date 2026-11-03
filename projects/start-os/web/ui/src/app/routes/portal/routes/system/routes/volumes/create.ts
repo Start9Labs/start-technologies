@@ -88,6 +88,21 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
         >
           {{ 'Refresh' | i18n }}
         </button>
+        <tui-textfield>
+          <label tuiLabel>{{ 'Path' | i18n }}</label>
+          <input
+            tuiInput
+            formControlName="path"
+            placeholder="/"
+            autocapitalize="off"
+          />
+        </tui-textfield>
+        <p>
+          {{
+            'Relative to the selected drive. Missing folders will be created.'
+              | i18n
+          }}
+        </p>
       }
       @if (source() === 'CIFS share') {
         <tui-textfield>
@@ -235,7 +250,7 @@ export class CreateVolume {
               this.source() === 'Local folder'
                 ? { kind: 'local' }
                 : this.source() === 'External drive'
-                  ? { kind: 'disk', logicalname }
+                  ? { kind: 'disk', logicalname, path }
                   : { kind: 'cifs', hostname, path, username, password },
           }),
         'Saving',

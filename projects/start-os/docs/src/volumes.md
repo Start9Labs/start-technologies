@@ -7,10 +7,10 @@ Volumes are folders managed independently of services. A volume can use your ser
 Open **System → Volumes** and create a volume with a name and a source:
 
 - **Local folder** creates a managed folder on the server's data drive.
-- **External drive** selects a connected partition from the same drive discovery used by Backups. Its filesystem UUID identifies it independently of device names and USB ports. Keep it connected while services use it. The filesystem must support Linux ownership mapping; mounting does not rewrite its existing file ownership.
+- **External drive** selects a connected partition from the same drive discovery used by Backups and a folder path relative to that partition. Missing folders are created; an empty path or `/` selects the filesystem root. The selected folder becomes the volume root, and services cannot use it to access parent or sibling folders. Its filesystem UUID identifies it independently of device names and USB ports. Keep it connected while services use it. The filesystem must support Linux ownership mapping; mounting does not rewrite its existing file ownership.
 - **CIFS share** takes a host, share path, username and password. The share path begins with the share name, such as `Photos/albums`, rather than the remote computer's filesystem path. A network volume can be saved while its source is offline.
 
-**Check availability** probes the source and updates its status and free space; it does not browse files. A successful check is an observation, not a guarantee that a device will remain connected.
+The table's **Refresh** button updates status and free space for every volume. For local folders it checks the directory and available data-drive space; it is not a connectivity test. CIFS rows use the same signal bars as Backups. A successful refresh is an observation, not a guarantee that a device will remain connected.
 
 **Format a drive** opens the same formatting dialog as Backups. It permanently erases the selected drive and creates one Btrfs partition. System and active mounted drives are protected. Formatting a drive changes its filesystem UUID: an existing volume for its old filesystem becomes unavailable rather than acquiring access to the replacement.
 
@@ -28,12 +28,12 @@ The **Volumes** tab appears only for services that support volumes. Creating a v
 
 Revoking access detaches that service's attachments without detaching other consumers. How a service responds to missing storage depends on its package. Prefer volumes for optional media, documents and other shared files rather than operation-critical databases.
 
-## Delete a volume
+## Remove a volume
 
-**Delete** revokes the volume's service access. Its confirmation distinguishes the data being removed:
+Choose **Remove** from a volume's menu to revoke service access. The confirmation depends on the source:
 
-- For a managed **Local folder**, the folder and its contents are permanently deleted after attachments are detached.
-- For an **External drive** or **CIFS share**, the volume configuration is deleted but the source's contents remain untouched.
+- For a managed **Local folder**, the red **Delete** button permanently deletes the folder and its contents after attachments are detached.
+- For an **External drive** or **CIFS share**, **Remove** deletes the volume configuration but leaves the source's contents untouched.
 
 If detachment or local cleanup fails, the error is reported. Managed local contents remain under **Pending local deletion** for a retry; they are not deleted while detachment has failed.
 

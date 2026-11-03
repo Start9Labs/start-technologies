@@ -157,7 +157,7 @@ pub async fn mount_shared_volume(
     use crate::disk::mount::filesystem::syscall::MountNamespace;
     use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
     use crate::disk::mount::guard::GenericMountGuard;
-    use crate::shared_volumes::mounts::{PreparedSource, PreparedTarget, confined_relative};
+    use crate::shared_volumes::mounts::{PreparedTarget, confined_relative};
     let service = context.deref()?;
     let container = &service.seed.persistent_container;
     container.shared_volumes.lock().await.check_allowed()?;
@@ -179,7 +179,7 @@ pub async fn mount_shared_volume(
     )
     .await
     {
-        Ok(source) => Ok(PreparedSource::open(source, subpath).await),
+        Ok(source) => Ok(source.into_subpath(subpath).await),
         Err(error) => Err(error),
     };
     let lxc = container

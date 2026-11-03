@@ -808,7 +808,9 @@ export class MockApiService extends ApiService {
         source:
           source.kind === 'cifs'
             ? { kind: 'cifs', hostname: source.hostname, path: source.path }
-            : source,
+            : source.kind === 'disk'
+              ? { ...source, path: source.path ?? '' }
+              : source,
         grants: {},
         availability: 'unknown',
       }

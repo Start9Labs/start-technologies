@@ -1,6 +1,124 @@
 use super::*;
 
 #[cfg(target_os = "linux")]
+#[test]
+fn folder_creation_is_confined_and_preserves_existing_contents() {
+    use std::os::unix::fs::symlink;
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    create_directory_beneath(root.path(), Path::new("/library/photos")).unwrap();
+    let sentinel = root.path().join("library/photos/sentinel");
+    std::fs::write(&sentinel, b"preserved").unwrap();
+    create_directory_beneath(root.path(), Path::new("library/photos")).unwrap();
+    assert_eq!(std::fs::read(sentinel).unwrap(), b"preserved");
+    symlink(outside.path(), root.path().join("escape")).unwrap();
+    for path in ["../outside", "escape/new", "library/photos/sentinel/child"] {
+        assert!(create_directory_beneath(root.path(), Path::new(path)).is_err());
+    }
+    assert!(!outside.path().join("new").exists());
+    symlink("library", root.path().join("inside")).unwrap();
+    create_directory_beneath(root.path(), Path::new("inside/allowed")).unwrap();
+    assert!(root.path().join("library/allowed").is_dir());
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "requires root, STARTOS_TEST_EXTERNAL_PARTITION and STARTOS_TEST_USERNS_HELPER"]
+async fn external_folder_is_created_pinned_and_limits_consumer_subpaths() {
+    use crate::disk::mount::filesystem::bind::Bind;
+    use crate::disk::mount::guard::MountGuard;
+    use crate::util::Invoke;
+    let device = PathBuf::from(std::env::var_os("STARTOS_TEST_EXTERNAL_PARTITION").unwrap());
+    let chosen = prepare_external_source(device.clone(), PathBuf::from("/created-folder/view"))
+        .await
+        .unwrap();
+    let SharedVolumeSource::Disk { logicalname, path } = chosen else {
+        panic!("disk source")
+    };
+    assert_eq!(path, Path::new("created-folder/view"));
+    let source = PreparedSource::open(
+        open_external(&logicalname, ReadWrite).await.unwrap(),
+        Some(path.clone()),
+    )
+    .await
+    .unwrap();
+    assert!(!source.path().join("external-sentinel").exists());
+    let consumer_root = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(consumer_root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let consumer_path = consumer_root.path().join("volume");
+    let consumer = MountGuard::mount(&Bind::new(source.path()), &consumer_path, ReadWrite)
+        .await
+        .unwrap();
+    let uid = crate::lxc::BASE_IDMAP.to_id.to_string();
+    tokio::process::Command::new("setpriv")
+        .args([
+            "--reuid",
+            &uid,
+            "--regid",
+            &uid,
+            "--clear-groups",
+            "sh",
+            "-c",
+        ])
+        .arg("mkdir -p \"$1/child\"; printf 'selected-only\\n' > \"$1/child/file\"")
+        .arg("_")
+        .arg(&consumer_path)
+        .invoke(ErrorKind::Filesystem)
+        .await
+        .unwrap();
+    consumer.unmount(true).await.unwrap();
+    let raw = TmpMountGuard::mount(&BlockDev::new(&device), ReadWrite)
+        .await
+        .unwrap();
+    std::fs::rename(
+        raw.path().join(&path),
+        raw.path().join("created-folder/renamed"),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read(source.path().join("child/file")).unwrap(),
+        b"selected-only\n"
+    );
+    let child = source
+        .into_subpath(Some(PathBuf::from("child")))
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read(child.path().join("file")).unwrap(),
+        b"selected-only\n"
+    );
+    assert!(
+        child
+            .into_subpath(Some(PathBuf::from("../..")))
+            .await
+            .is_err()
+    );
+    std::fs::rename(
+        raw.path().join("created-folder/renamed"),
+        raw.path().join(&path),
+    )
+    .unwrap();
+    raw.unmount().await.unwrap();
+    let readonly = PreparedSource::open(
+        open_external(&logicalname, ReadOnly).await.unwrap(),
+        Some(path),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        std::fs::read(readonly.path().join("child/file")).unwrap(),
+        b"selected-only\n"
+    );
+    assert_eq!(
+        std::fs::write(readonly.path().join("forbidden"), b"no")
+            .unwrap_err()
+            .raw_os_error(),
+        Some(libc::EROFS)
+    );
+    readonly.unmount().await.unwrap();
+}
+
+#[cfg(target_os = "linux")]
 #[tokio::test]
 #[ignore = "requires root, STARTOS_TEST_EXTERNAL_PARTITION and STARTOS_TEST_USERNS_HELPER"]
 async fn external_partition_maps_service_ownership_without_changing_disk_owners() {

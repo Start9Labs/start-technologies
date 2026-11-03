@@ -161,9 +161,10 @@ async fn source_overlaps_target(
             )
             .await?
         }
-        (SharedVolumeSource::Disk { logicalname }, super::target::BackupTargetFS::Disk(target)) => {
-            BlockDev::new(logicalname).source_hash().await? == target.source_hash().await?
-        }
+        (
+            SharedVolumeSource::Disk { logicalname, .. },
+            super::target::BackupTargetFS::Disk(target),
+        ) => BlockDev::new(logicalname).source_hash().await? == target.source_hash().await?,
         _ => false,
     })
 }
@@ -369,7 +370,10 @@ mod tests {
         std::fs::write(&disk, "source").unwrap();
         std::fs::write(&other, "destination").unwrap();
         symlink(&disk, &alias).unwrap();
-        let source = SharedVolumeSource::Disk { logicalname: alias };
+        let source = SharedVolumeSource::Disk {
+            logicalname: alias,
+            path: PathBuf::new(),
+        };
         let target = |path| super::super::target::BackupTargetFS::Disk(BlockDev::new(path));
         assert!(
             source_overlaps_target(&source, &target(disk), Path::new("backup"))

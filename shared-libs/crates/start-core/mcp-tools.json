@@ -11604,7 +11604,8 @@
               "type": "object",
               "properties": {
                 "kind": { "type": "string", "const": "disk" },
-                "logicalname": { "type": "string" }
+                "logicalname": { "type": "string" },
+                "path": { "type": "string" }
               },
               "required": ["kind", "logicalname"]
             },

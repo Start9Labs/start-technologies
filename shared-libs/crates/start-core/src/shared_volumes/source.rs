@@ -2,13 +2,15 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::context::RpcContext;
-use crate::disk::mount::filesystem::MountType;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::cifs::{Cifs, SharedCifs};
 use crate::disk::mount::filesystem::idmapped::IdMapped;
-use crate::disk::mount::guard::TmpMountGuard;
+use crate::disk::mount::filesystem::syscall::open_beneath;
+use crate::disk::mount::filesystem::{MountType, ReadOnly, ReadWrite};
+use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::prelude::*;
+use crate::shared_volumes::mounts::{PreparedSource, confined_relative};
 use crate::shared_volumes::{
     SharedVolumeAvailability, SharedVolumeId, SharedVolumeSource, local_path,
 };
@@ -28,7 +30,7 @@ pub async fn open_source(
     ctx: &RpcContext,
     id: &SharedVolumeId,
     mount_type: MountType,
-) -> Result<TmpMountGuard, Error> {
+) -> Result<PreparedSource, Error> {
     let db = ctx.db.peek().await;
     let source = db
         .as_public()
@@ -37,12 +39,14 @@ pub async fn open_source(
         .or_not_found(id)?
         .as_source()
         .de()?;
-    let result = match source {
+    let (mounted, subpath) = match source {
         SharedVolumeSource::Local => {
             let path = local_path(crate::DATA_DIR, id);
-            open_local(&path, mount_type).await
+            (open_local(&path, mount_type).await, None)
         }
-        SharedVolumeSource::Disk { logicalname } => open_external(&logicalname, mount_type).await,
+        SharedVolumeSource::Disk { logicalname, path } => {
+            (open_external(&logicalname, mount_type).await, Some(path))
+        }
         SharedVolumeSource::Cifs { hostname, path } => {
             let credentials = db
                 .as_private()
@@ -50,17 +54,24 @@ pub async fn open_source(
                 .as_idx(id)
                 .or_not_found(id)?
                 .de()?;
-            TmpMountGuard::mount(
-                &SharedCifs(Cifs {
-                    hostname,
-                    path,
-                    username: credentials.username,
-                    password: credentials.password,
-                }),
-                mount_type,
+            (
+                TmpMountGuard::mount(
+                    &SharedCifs(Cifs {
+                        hostname,
+                        path,
+                        username: credentials.username,
+                        password: credentials.password,
+                    }),
+                    mount_type,
+                )
+                .await,
+                None,
             )
-            .await
         }
+    };
+    let result = match mounted {
+        Ok(guard) => PreparedSource::open(guard, subpath).await,
+        Err(error) => Err(error),
     };
     let availability = if result.is_ok() {
         SharedVolumeAvailability::Available
@@ -106,9 +117,63 @@ pub(super) fn external_partition(
         })
 }
 
-async fn open_external(path: &Path, mount_type: MountType) -> Result<TmpMountGuard, Error> {
+pub(super) async fn prepare_external_source(
+    device: PathBuf,
+    path: PathBuf,
+) -> Result<SharedVolumeSource, Error> {
+    let path = confined_relative(&path)?;
+    let logicalname = BlockDev::new(device).persistent_path().await?;
+    if !path.as_os_str().is_empty() {
+        let drive = TmpMountGuard::mount(&BlockDev::new(&logicalname), ReadOnly).await?;
+        let root = drive.path().to_owned();
+        let relative = path.clone();
+        let existing = tokio::task::spawn_blocking(move || open_beneath(&root, &relative))
+            .await
+            .with_kind(ErrorKind::Unknown)?;
+        drive.unmount().await?;
+        if let Err(error) = existing {
+            if !error
+                .source
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+            {
+                return Err(error);
+            }
+            let drive = TmpMountGuard::mount(&BlockDev::new(&logicalname), ReadWrite).await?;
+            let root = drive.path().to_owned();
+            let relative = path.clone();
+            let result =
+                tokio::task::spawn_blocking(move || create_directory_beneath(&root, &relative))
+                    .await
+                    .with_kind(ErrorKind::Unknown)?;
+            let unmount = drive.unmount().await;
+            result?;
+            unmount?;
+        }
+    }
+    Ok(SharedVolumeSource::Disk { logicalname, path })
+}
+
+fn create_directory_beneath(root: &Path, path: &Path) -> Result<(), Error> {
+    use nix::errno::Errno;
+    use nix::sys::stat::{Mode, mkdirat};
+    let relative = confined_relative(path)?;
+    let mut parent = PathBuf::new();
+    for name in relative.iter() {
+        let directory = open_beneath(root, &parent)?;
+        match mkdirat(&directory, name, Mode::from_bits_truncate(0o755)) {
+            Ok(()) | Err(Errno::EEXIST) => {}
+            Err(error) => return Err(Error::new(error, ErrorKind::Filesystem)),
+        }
+        parent.push(name);
+    }
+    open_beneath(root, &relative)?;
+    Ok(())
+}
+
+async fn open_external(device: &Path, mount_type: MountType) -> Result<TmpMountGuard, Error> {
     TmpMountGuard::mount(
-        &IdMapped::new(BlockDev::new(path), vec![crate::lxc::BASE_IDMAP]),
+        &IdMapped::new(BlockDev::new(device), vec![crate::lxc::BASE_IDMAP]),
         mount_type,
     )
     .await

@@ -1626,7 +1626,10 @@ export const SharedVolumeSource: z.ZodUnion<
     z.ZodObject<{ kind: z.ZodLiteral<'local'> }>,
     z.ZodIntersection<
       z.ZodObject<{ kind: z.ZodLiteral<'disk'> }>,
-      z.ZodObject<{ logicalname: z.ZodString }>
+      z.ZodObject<{
+        logicalname: z.ZodString
+        path: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+      }>
     >,
     z.ZodIntersection<
       z.ZodObject<{ kind: z.ZodLiteral<'cifs'> }>,
@@ -1638,7 +1641,10 @@ export const SharedVolumeSource: z.ZodUnion<
     object({ kind: z.literal('local') }),
     z.intersection(
       object({ kind: z.literal('disk') }),
-      object({ logicalname: z.string() }),
+      object({
+        logicalname: z.string(),
+        path: wire(z.string().optional(), z.string()),
+      }),
     ),
     z.intersection(
       object({ kind: z.literal('cifs') }),
