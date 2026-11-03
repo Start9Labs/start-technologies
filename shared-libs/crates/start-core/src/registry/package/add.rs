@@ -60,7 +60,7 @@ pub async fn add_package(
     let peek = ctx.db.peek().await;
     let uploader_guid = peek.as_index().as_signers().get_signer(&uploader)?;
 
-    let Some(url) = urls.first() else {
+    let Some(([url], rest)) = urls.split_at_checked(1) else {
         return Err(Error::new(
             eyre!("{}", t!("registry.package.add.must-specify-url")),
             ErrorKind::InvalidRequest,
@@ -73,6 +73,15 @@ pub async fn add_package(
     )
     .instrument(tracing::info_span!("registry-package-source", %url))
     .await?;
+
+    for url in rest {
+        S9pk::deserialize(
+            &Arc::new(HttpSource::new(ctx.client.clone(), url.clone()).await?),
+            Some(&commitment),
+        )
+        .instrument(tracing::info_span!("registry-package-source", %url))
+        .await?;
+    }
 
     let manifest = s9pk.as_manifest();
 

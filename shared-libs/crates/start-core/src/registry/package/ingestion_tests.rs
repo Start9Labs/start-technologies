@@ -399,6 +399,85 @@ async fn registry_rejects_endorsements_signed_for_a_different_actual_bound() {
 }
 
 #[tokio::test]
+async fn registry_validates_every_package_url_without_importing_remote_endorsements() {
+    let uploader_key = SigningKey::from_bytes(&[12; 32]);
+    let uploader = AnyVerifyingKey::Ed25519(uploader_key.verifying_key());
+    let temp = tempfile::tempdir().unwrap();
+    let ctx = context(temp.path().into(), uploader.clone()).await;
+    let commitment = local_package()
+        .await
+        .as_archive()
+        .commitment()
+        .await
+        .unwrap();
+    let signature = AnySignature::Ed25519ph(
+        Ed25519ph
+            .sign_commitment(&uploader_key, &commitment, "s9pk")
+            .unwrap(),
+    );
+    let (wrong, _) = larger_bound_fixture();
+    let (url, requests, task) = server(
+        [
+            ("base".into(), fixture("base.s9pk")),
+            ("wrong-bound".into(), wrong),
+            ("wrong-root".into(), fixture("overlap.s9pk")),
+            ("truncated".into(), fixture("base.s9pk")[..100].to_vec()),
+            ("endorsed".into(), fixture("endorsed.s9pk")),
+        ]
+        .into(),
+    )
+    .await;
+    for secondary in ["wrong-bound", "wrong-root", "truncated"] {
+        assert!(
+            add_package(
+                ctx.clone(),
+                AddPackageParams {
+                    urls: vec![url.join("base").unwrap(), url.join(secondary).unwrap()],
+                    uploader: uploader.clone(),
+                    commitment,
+                    signature: signature.clone(),
+                    signatures: Default::default(),
+                }
+            )
+            .await
+            .is_err(),
+            "{secondary}"
+        );
+        assert!(
+            ctx.db
+                .peek()
+                .await
+                .as_index()
+                .de()
+                .unwrap()
+                .package
+                .packages
+                .is_empty()
+        );
+    }
+    let urls = vec![url.join("base").unwrap(), url.join("endorsed").unwrap()];
+    add_package(
+        ctx.clone(),
+        AddPackageParams {
+            urls: urls.clone(),
+            uploader,
+            commitment,
+            signature,
+            signatures: Default::default(),
+        },
+    )
+    .await
+    .unwrap();
+    let index = ctx.db.peek().await.as_index().de().unwrap();
+    let version: crate::util::VersionString = "1.0.0:0".parse().unwrap();
+    let asset = &index.package.packages["trust-fixture"].versions[&version].s9pks[0].1;
+    assert_eq!(asset.urls, urls);
+    assert_eq!(asset.signatures.len(), 2);
+    assert!(requests.lock().unwrap().iter().all(Option::is_none));
+    task.abort();
+}
+
+#[tokio::test]
 async fn http_metadata_never_discovers_endorsements_and_reuses_exact_position() {
     use tokio::io::AsyncReadExt;
     let bytes = fixture("endorsed.s9pk");
