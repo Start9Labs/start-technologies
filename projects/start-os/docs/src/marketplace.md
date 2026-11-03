@@ -18,7 +18,7 @@ StartOS ships with two [default registries](default-registries.md): the **Start9
 
 ## Package Signers
 
-Package details show **Signed by** above **Version**, listing signing keys by label and email addresses, with fingerprints for unknown keys. Untrusted keys remain listed; trust selections determine which signatures the server accepts. When no trusted signer matches, a warning links to Trusted Keys, and installing asks you to confirm the risks first. Manage individual keys and their package and StartOS-update trust under **System → [Trusted Keys](trusted-keys.md)**.
+Package details include a **Signed by** section listing every key that signed the package: a green check for a key you trust for packages, a red X for a key you know but do not trust, and a gray dash with the key's fingerprint for a key your server does not know. Select a key to see its details and trust or distrust it for packages or StartOS updates; an unknown key needs a label first. Confirm a key's fingerprint through a source you already trust before trusting it. When no trusted signer matches, a warning appears, and installing asks you to confirm the risks first. Manage individual keys and their package and StartOS-update trust under **System → [Trusted Keys](trusted-keys.md)**.
 
 ## Open Ecosystem
 

@@ -39,6 +39,16 @@ import { SSHTableComponent } from './table.component'
     <section class="g-card">
       <header>
         {{ 'SSH Access' | i18n }}
+        <a
+          tuiIconButton
+          size="xs"
+          docsLink
+          path="/start-os/ssh.html"
+          appearance="icon"
+          iconStart="@tui.book-open-text"
+        >
+          {{ 'Documentation' | i18n }}
+        </a>
         @if (tableKeys()?.selected()?.length) {
           <button
             tuiButton

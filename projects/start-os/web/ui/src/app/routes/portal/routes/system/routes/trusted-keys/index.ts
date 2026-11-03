@@ -19,9 +19,9 @@ import {
 } from '@taiga-ui/core'
 import { TuiChip } from '@taiga-ui/kit'
 import { defaultIfEmpty, firstValueFrom } from 'rxjs'
-import { TRUSTED_KEY_DETAILS } from 'src/app/components/trusted-keys/details'
 import { ADD_TRUSTED_KEY } from 'src/app/components/trusted-keys/form'
 import { TRUSTED_KEYS_NOTICE } from 'src/app/components/trusted-keys/notice'
+import { BackDirective } from 'src/app/routes/portal/components/back'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { TitleDirective } from 'src/app/services/title.service'
 import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
@@ -30,9 +30,9 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
   template: `
     <ng-container *title>
       <div>
-        <a routerLink=".." tuiIconButton iconStart="@tui.arrow-left">
+        <button tuiIconButton appBack iconStart="@tui.arrow-left">
           {{ 'Back' | i18n }}
-        </a>
+        </button>
         {{ 'Trusted Keys' | i18n }}
       </div>
     </ng-container>
@@ -60,27 +60,21 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
           iconEnd="@tui.x"
           [routerLink]="[]"
           [queryParams]="{ registry: null }"
+          [replaceUrl]="true"
         >
-          {{ 'Offered by' | i18n }} {{ filter.name }}
+          {{ 'Linked to' | i18n }} {{ filter.name }}
         </a>
       }
       @if (rows(); as rows) {
-        <table
-          [appTable]="[
-            'Key',
-            'Type',
-            'Packages',
-            'StartOS updates',
-            'Registries',
-            null,
-          ]"
-        >
+        <table [appTable]="[]">
+          <th>{{ 'Key' | i18n }}</th>
+          <th>{{ 'Type' | i18n }}</th>
+          <th class="trust">{{ 'Packages' | i18n }}</th>
+          <th class="trust">{{ 'StartOS updates' | i18n }}</th>
+          <th>{{ 'Linked registries' | i18n }}</th>
+          <th></th>
           @for (row of rows; track row.id) {
-            <tr
-              tabindex="0"
-              (click)="details(row.id)"
-              (keydown.enter)="details(row.id)"
-            >
+            <tr>
               <td>
                 <span tuiTitle>
                   <b>{{ row.key.name }}</b>
@@ -94,31 +88,35 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
                   }
                 </span>
               </td>
-              <td [attr.data-label]="'Type' | i18n">{{ row.type }}</td>
-              <td [attr.data-label]="'Packages' | i18n">
+              <td class="extra" [attr.data-label]="'Type' | i18n">
+                {{ row.type }}
+              </td>
+              <td class="trust" [attr.data-label]="'Packages' | i18n">
                 <tui-icon
                   [icon]="row.key.marketplace ? '@tui.check' : '@tui.x'"
+                  [class]="row.key.marketplace ? 'g-positive' : 'g-negative'"
                   [attr.aria-label]="
                     (row.key.marketplace ? 'Trusted' : 'Not trusted') | i18n
                   "
                 />
               </td>
-              <td [attr.data-label]="'StartOS updates' | i18n">
+              <td class="trust" [attr.data-label]="'StartOS updates' | i18n">
                 <tui-icon
                   [icon]="row.key.os ? '@tui.check' : '@tui.x'"
+                  [class]="row.key.os ? 'g-positive' : 'g-negative'"
                   [attr.aria-label]="
                     (row.key.os ? 'Trusted' : 'Not trusted') | i18n
                   "
                 />
               </td>
-              <td [attr.data-label]="'Registries' | i18n">
+              <td class="extra" [attr.data-label]="'Linked registries' | i18n">
                 @for (offer of row.offers; track offer.url) {
                   <div>{{ offer.name }}</div>
                 } @empty {
                   —
                 }
               </td>
-              <td (click.stop)="(0)" (keydown.enter.stop)="(0)">
+              <td>
                 <button
                   tuiIconButton
                   tuiDropdown
@@ -131,6 +129,9 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
                 >
                   {{ 'More' | i18n }} {{ row.key.name }}
                   <tui-data-list *tuiDropdown="let close" (click)="close()">
+                    <button tuiOption (click)="trust.viewKey(row.id)">
+                      {{ 'View details' | i18n }}
+                    </button>
                     <button tuiOption (click)="trust.rename(row.id, row.key)">
                       {{ 'Edit label' | i18n }}
                     </button>
@@ -196,8 +197,8 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
       margin: 0 0 1rem;
     }
 
-    tr {
-      cursor: pointer;
+    .trust {
+      text-align: center;
     }
 
     tui-icon {
@@ -209,6 +210,14 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
     }
 
     :host-context(tui-root._mobile) {
+      .trust {
+        text-align: start;
+      }
+
+      .extra {
+        display: none;
+      }
+
       td[data-label] {
         grid-column: 1;
 
@@ -219,12 +228,13 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
       }
 
       td:last-child {
-        grid-area: 1 / 2 / 6;
+        grid-area: 1 / 2 / 4;
         align-content: center;
       }
     }
   `,
   imports: [
+    BackDirective,
     DocsLinkDirective,
     RouterLink,
     TableComponent,
@@ -274,12 +284,6 @@ export default class TrustedKeys {
       )
       .sort((a, b) => a.key.name.localeCompare(b.key.name))
   })
-
-  protected details(id: string): void {
-    this.dialogs
-      .openComponent(TRUSTED_KEY_DETAILS, { data: id, size: 'm' })
-      .subscribe()
-  }
 
   protected async add(): Promise<void> {
     const res = await firstValueFrom(

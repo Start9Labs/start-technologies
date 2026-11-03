@@ -91,6 +91,9 @@ export const mockPatchData: DataModel = {
         'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
         'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=',
       ],
+      'https://community-registry.start9.com': [
+        'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
+      ],
     },
     trustedKeys: {
       'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=': {
@@ -110,7 +113,12 @@ export const mockPatchData: DataModel = {
         mockStart9Key(
           'drbonez',
           'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
-          ['Aiden McClelland <aiden@start9.com>'],
+          [
+            'Aiden McClelland <aiden@start9.com>',
+            'Aiden McClelland <me@drbonez.dev>',
+            'Aiden McClelland <aiden@mcclelland.family>',
+            'Aiden McClelland <aiden@tenletters.net>',
+          ],
           true,
           'b416c0e67b9df3f1718480ae7cffda41ca66056a',
         ),

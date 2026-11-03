@@ -7,6 +7,7 @@ export type TrustContext = T.TrustContext
 
 export abstract class MarketplaceTrust {
   abstract readonly keys: Signal<Record<string, T.TrustedKey> | undefined>
+  abstract viewSigner(signer: Signer): void
 }
 
 export function packageSigners(
@@ -35,17 +36,41 @@ export function matchingTrustedKeys(
   )
 }
 
-@Pipe({ name: 'packageSignerIdentities' })
-export class PackageSignerIdentitiesPipe {
+export type SignerStatus = 'trusted' | 'untrusted' | 'unknown'
+
+export type Signer = ReturnType<typeof signingKeyIdentity> & {
+  id: string
+  status: SignerStatus
+}
+
+const STATUS_ORDER: SignerStatus[] = ['trusted', 'untrusted', 'unknown']
+
+/** Each key with its trust on this server, for packages by default. */
+@Pipe({ name: 'signerStatuses' })
+export class SignerStatusesPipe {
   transform(
-    pkg: Pick<MarketplacePkgBase, 's9pks' | 'signers'>,
+    signers: readonly string[],
     keys: Record<string, T.TrustedKey>,
-  ) {
-    const known = matchingSigningKeys(packageSigners(pkg), keys)
-    const enabled = known.filter(([, key]) => key.marketplace)
-    return (enabled.length ? enabled : known).map(([id, key]) => ({
-      id,
-      ...signingKeyIdentity(key.publicKey, key),
-    }))
+    context: TrustContext = 'marketplace',
+  ): Signer[] {
+    const known = new Map(
+      Object.values(keys).map(key => [auth.normalizeDer64(key.publicKey), key]),
+    )
+
+    return [...new Set(signers.map(auth.normalizeDer64))]
+      .map(id => {
+        const key = known.get(id)
+        const status: SignerStatus = !key
+          ? 'unknown'
+          : key[context]
+            ? 'trusted'
+            : 'untrusted'
+
+        return { id, status, ...signingKeyIdentity(id, key) }
+      })
+      .sort(
+        (a, b) =>
+          STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status),
+      )
   }
 }

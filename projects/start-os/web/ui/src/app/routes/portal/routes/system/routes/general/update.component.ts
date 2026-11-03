@@ -1,6 +1,8 @@
 import { CommonModule, TitleCasePipe } from '@angular/common'
-import { Component, inject } from '@angular/core'
+import { Component, computed, inject } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
 import { Router } from '@angular/router'
+import { MarketplaceSignersComponent } from '@start9labs/marketplace'
 import {
   DialogService,
   i18nPipe,
@@ -10,10 +12,11 @@ import {
   TaskService,
 } from '@start9labs/shared'
 import { TuiButton, TuiDialogContext, TuiScrollbar } from '@taiga-ui/core'
+import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { PatchDB } from 'patch-db-client'
-import { filter, firstValueFrom } from 'rxjs'
+import { catchError, filter, firstValueFrom, from, map, of } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { OSService } from 'src/app/services/os.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
@@ -23,6 +26,12 @@ import { TRUSTED_KEYS_LINK } from '../../system.const'
 @Component({
   template: `
     <h2 style="margin-top: 0">{{ 'Release notes' | i18n | titlecase }}</h2>
+    @if (signers().length) {
+      <section tuiCardLarge appearance="secondary-grayscale">
+        <header tuiHeader="h6">{{ 'Signed by' | i18n }}</header>
+        <marketplace-signers [keys]="signers()" context="os" />
+      </section>
+    }
     <tui-scrollbar style="margin-bottom: 24px; max-height: 50vh;">
       @for (v of os.updateCandidates(); track v.version) {
         <h4 class="version-header">{{ v.version }}</h4>
@@ -53,9 +62,12 @@ import { TRUSTED_KEYS_LINK } from '../../system.const'
     CommonModule,
     LocalizePipe,
     MarkdownPipe,
+    MarketplaceSignersComponent,
     NgDompurifyPipe,
     SafeLinksDirective,
     TuiButton,
+    TuiCardLarge,
+    TuiHeader,
     TuiScrollbar,
     i18nPipe,
     TitleCasePipe,
@@ -69,6 +81,19 @@ export class SystemUpdateModal {
   protected readonly os = inject(OSService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly context = injectContext<TuiDialogContext<void>>()
+  private readonly platform = toSignal(
+    from(this.embassyApi.rpc.server.deviceInfo({})).pipe(
+      map(({ os }) => os.platform),
+      catchError(() => of(null)),
+    ),
+  )
+
+  protected readonly signers = computed(() =>
+    Object.keys(
+      this.os.updateCandidates()[0]?.squashfs[this.platform() ?? '']
+        ?.signatures ?? {},
+    ),
+  )
 
   async update() {
     if (!this.os.updateCandidates().length) return

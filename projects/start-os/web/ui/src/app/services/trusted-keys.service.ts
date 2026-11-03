@@ -1,6 +1,6 @@
 import { inject, Service, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { MarketplaceTrust, TrustContext } from '@start9labs/marketplace'
+import { MarketplaceTrust, Signer, TrustContext } from '@start9labs/marketplace'
 import {
   DialogService,
   i18nKey,
@@ -10,6 +10,8 @@ import {
 import { T } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import { combineLatest, defaultIfEmpty, firstValueFrom, map } from 'rxjs'
+import { TRUSTED_KEY_DETAILS } from 'src/app/components/trusted-keys/details'
+import { parsePemPublicKey } from 'src/app/utils/public-keys'
 import { ApiService } from './api/embassy-api.service'
 import { DataModel } from './patch-db/data-model'
 
@@ -76,35 +78,38 @@ export class TrustedKeysService extends MarketplaceTrust {
     context: TrustContext,
     trusted: boolean,
   ): Promise<void> {
-    if (
-      context === 'os' &&
-      trusted &&
-      !(await this.confirm(
-        'Trust for StartOS updates?',
-        'StartOS installs any update this key signs, replacing the operating system on this server.',
-        'Trust',
-      ))
-    ) {
-      return
-    }
-
     await this.update(id, { ...key, [context]: trusted })
   }
 
-  async trustForPackages(ids: readonly string[]): Promise<void> {
+  /** Adds an unknown key, which also trusts it for packages. */
+  async add(id: string, name: string, context: TrustContext): Promise<void> {
     await this.save(async () => {
-      for (const id of ids) {
-        const key = this.keys()?.[id]
-        if (key && !key.marketplace) {
-          await this.api.rpc.server.trustedKeys.update({
-            id,
-            name: key.name,
-            marketplace: true,
-            os: key.os,
-          })
-        }
+      const { added } = await this.api.rpc.server.trustedKeys.add({
+        name,
+        publicKeys: [parsePemPublicKey(id)],
+      })
+
+      if (context === 'os') {
+        await Promise.all(
+          added.map(key =>
+            this.api.rpc.server.trustedKeys.update({
+              id: key,
+              name,
+              marketplace: true,
+              os: true,
+            }),
+          ),
+        )
       }
     })
+  }
+
+  viewKey(id: string): void {
+    this.dialogs.openComponent(TRUSTED_KEY_DETAILS, { data: id }).subscribe()
+  }
+
+  viewSigner({ id }: Signer): void {
+    this.viewKey(id)
   }
 
   async remove(id: string): Promise<void> {

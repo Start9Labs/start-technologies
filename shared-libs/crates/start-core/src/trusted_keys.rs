@@ -248,12 +248,14 @@ fn import_individual_keys(
     name: String,
     imported: ImportedPublicKeys,
 ) -> Result<AddTrustedKeyRes, Error> {
-    let name = key_name(name)?;
     if imported.keys.is_empty() {
         return Err(invalid_key());
     }
-    let mut imported = split_import(name, imported, Utc::now())?;
+    let mut imported = split_import(name.trim().to_owned(), imported, Utc::now())?;
     for key in imported.values_mut() {
+        if key.name.is_empty() {
+            key.name = key.identity_name().ok_or_else(invalid_key)?;
+        }
         key.marketplace = true;
     }
     let (existing, added): (BTreeSet<_>, BTreeSet<_>) = imported
@@ -358,6 +360,7 @@ pub fn api<C: Context>() -> ParentHandler<C> {
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct AddTrustedKeyParams {
+    /// Blank names each GPG key after its identity.
     pub name: String,
     /// Ed25519 public keys in PEM or armored GPG format.
     pub public_keys: Vec<String>,
@@ -638,6 +641,19 @@ mod tests {
                 .is_err()
             );
             assert_eq!(keys, saved);
+        }
+    }
+
+    #[test]
+    fn blank_import_names_take_the_gpg_identity_name() {
+        let imported =
+            parse_public_keys(&[include_str!("sign/fixtures/ed25519-signers.asc").into()]).unwrap();
+        let mut keys = TrustedKeys::new();
+        import_individual_keys(&mut keys, " ".into(), imported).unwrap();
+        assert!(!keys.is_empty());
+        for key in keys.values() {
+            assert!(!key.name.is_empty());
+            assert_eq!(Some(key.name.clone()), key.identity_name());
         }
     }
 

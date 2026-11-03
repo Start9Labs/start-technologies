@@ -68,7 +68,12 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
           }
           @case (4) {
             <button tuiLink (click.stop)="onClick(item)">
-              {{ 'Review keys' | i18n }}
+              {{ 'View details' | i18n }}
+            </button>
+          }
+          @case (5) {
+            <button tuiLink (click.stop)="onClick(item)">
+              {{ 'View details' | i18n }}
             </button>
           }
           @default {
@@ -99,7 +104,7 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
        so its containing block has to be the row rather than this cell */
     .title {
       position: static;
-      width: 13rem;
+      width: 15.6rem;
     }
 
     .service {

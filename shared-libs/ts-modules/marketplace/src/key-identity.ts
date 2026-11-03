@@ -27,8 +27,8 @@ export function registrySigningKeys(
 
 export function keyType({
   gpgExports,
-}: Pick<T.TrustedKey, 'gpgExports'>): 'GPG' | 'Ed25519' {
-  return gpgExports.length ? 'GPG' : 'Ed25519'
+}: Pick<T.TrustedKey, 'gpgExports'>): 'GPG' | 'PEM' {
+  return gpgExports.length ? 'GPG' : 'PEM'
 }
 
 /** GPG user IDs, or the email addresses registries publish for a plain key. */

@@ -17,7 +17,6 @@ import {
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { TuiButton } from '@taiga-ui/core'
-import { TuiHeader } from '@taiga-ui/layout'
 import { PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { filter } from 'rxjs'
 import { distinctUntilChanged, skip } from 'rxjs/operators'
@@ -32,18 +31,17 @@ import { NotificationsTableComponent } from './table.component'
 @Component({
   template: `
     <ng-container *title>{{ 'Notifications' | i18n }}</ng-container>
-    <header tuiHeader="body-l">
-      <aside tuiAccessories [style.margin-inline-start]="'auto'">
-        <button
-          tuiIconButton
-          type="button"
-          appearance="icon"
-          iconStart="@tui.settings"
-          (click)="settings()"
-        >
-          {{ 'Notification settings' | i18n }}
-        </button>
-      </aside>
+    <header>
+      <button
+        tuiIconButton
+        type="button"
+        size="s"
+        appearance="secondary"
+        iconStart="@tui.settings"
+        (click)="settings()"
+      >
+        {{ 'Notification settings' | i18n }}
+      </button>
     </header>
     @if (table()?.selected()?.length) {
       <button
@@ -64,6 +62,12 @@ import { NotificationsTableComponent } from './table.component'
       padding: 1rem;
     }
 
+    header {
+      display: flex;
+      justify-content: flex-end;
+      margin-block-end: 1rem;
+    }
+
     .fab {
       position: fixed;
       right: 1rem;
@@ -76,13 +80,7 @@ import { NotificationsTableComponent } from './table.component'
     }
   `,
   host: { class: 'g-page' },
-  imports: [
-    TuiButton,
-    NotificationsTableComponent,
-    TitleDirective,
-    i18nPipe,
-    TuiHeader,
-  ],
+  imports: [TuiButton, NotificationsTableComponent, TitleDirective, i18nPipe],
 })
 export default class NotificationsComponent implements OnInit {
   private readonly router = inject(Router)
@@ -124,6 +122,7 @@ export default class NotificationsComponent implements OnInit {
     this.dialogs
       .openComponent(
         new PolymorpheusComponent(NotificationSettings, this.injector),
+        { size: 's' },
       )
       .subscribe()
   }

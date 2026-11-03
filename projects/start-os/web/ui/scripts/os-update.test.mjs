@@ -68,10 +68,10 @@ boundary('@taiga-ui/kit', [
 ])
 boundary(
   '@taiga-ui/cdk',
-  ['TuiAnimated'],
+  ['TuiAnimated', 'TuiMapperPipe', 'TuiValidator'],
   'export const tuiMarkControlAsTouchedAndValidate = () => {}; export const tuiProvide = () => [];',
 )
-boundary('@taiga-ui/layout', ['TuiHeader', 'TuiForm'])
+boundary('@taiga-ui/layout', ['TuiCardLarge', 'TuiHeader', 'TuiForm'])
 boundary('@taiga-ui/addon-table', ['TuiTable', 'TuiTableDirective'])
 boundary('@taiga-ui/addon-mobile', ['TuiResponsiveDialog'])
 boundary(
@@ -128,7 +128,7 @@ boundaries.set(
         `export * from ${JSON.stringify(new URL(`../../../../../shared-libs/ts-modules/marketplace/src/${file}`, import.meta.url).href)};`,
     )
     .join('\n') +
-    '\nexport class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {}',
+    '\nexport class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {} export class MarketplaceSignersComponent {}',
 )
 loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
@@ -1285,7 +1285,7 @@ test('a candidate disappearing during the asynchronous UI registry lookup preven
 const {
   matchingTrustedKeys,
   packageSigners,
-  PackageSignerIdentitiesPipe,
+  SignerStatusesPipe,
   signingKeyIdentity,
   registrySigningKeys,
   keyIdentities,
@@ -1320,49 +1320,10 @@ test('PEM and DER public keys share the complete SHA-256 SPKI fingerprint', () =
   )
 })
 
-test('marketplace signer identities omit unknown keys and keep disabled identities as a fallback', () => {
+function signerStatusFixture() {
   const first = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
   const second = 'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40='
-  const known = {
-    name: 'Fallback publisher',
-    publicKey: first,
-    marketplace: false,
-    os: false,
-    gpgExports: [
-      {
-        identities: {
-          [first]: ['Alice <alice@example.test>', 'Alice <alice@other.test>'],
-          [second]: ['Bob <bob@example.test>'],
-        },
-        keyFingerprints: {
-          [first]: ['5456dbff1b9df905041fa7765259adfc2d63c217'],
-          [second]: ['a969c8eba8b13613d2568a85ee395832e45a6664'],
-        },
-      },
-    ],
-  }
-  const signers = new PackageSignerIdentitiesPipe().transform(
-    {
-      signers: [
-        first,
-        `-----BEGIN PUBLIC KEY-----\n${first}\n-----END PUBLIC KEY-----`,
-        second,
-      ],
-    },
-    { [first]: known },
-  )
-  assert.equal(signers.length, 1)
-  assert.deepEqual(signers[0], {
-    id: first,
-    name: 'Fallback publisher',
-    emails: ['alice@example.test', 'alice@other.test'],
-    fingerprints: ['5456 DBFF 1B9D F905 041F A776 5259 ADFC 2D63 C217'],
-  })
-})
-
-function signerDisplayFixture() {
-  const first = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
-  const second = 'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40='
+  const unknown = 'MCowBQYDK2VwAyEAgkNzc04Bav9FbjK8hzF46OqjUL0bD9ZxuT7C1FgTDDE='
   const key = (name, publicKey, marketplace) => ({
     name,
     publicKey,
@@ -1372,56 +1333,86 @@ function signerDisplayFixture() {
     originRegistry: null,
     removable: true,
     gpgExports: [],
+    contact: [],
   })
   return {
     first,
     second,
-    pkg: { signers: [first, second, untrustedSigner] },
+    unknown,
+    signers: [unknown, second, first],
     keys: {
       [first]: key('First signer', first, true),
       [second]: key('Second signer', second, false),
     },
-    pipe: new PackageSignerIdentitiesPipe(),
+    pipe: new SignerStatusesPipe(),
   }
 }
 
-test('marketplace signer identities prefer enabled package signers over disabled and unknown signers', () => {
-  const { first, second, pkg, keys, pipe } = signerDisplayFixture()
-  const shown = pipe.transform(pkg, keys)
+test('every package signer is listed: trusted, then untrusted, then unknown', () => {
+  const { first, second, unknown, signers, keys, pipe } = signerStatusFixture()
+  const shown = pipe.transform(signers, keys)
   assert.deepEqual(
-    shown.map(signer => signer.id),
-    [first],
+    shown.map(signer => [signer.id, signer.status]),
+    [
+      [first, 'trusted'],
+      [second, 'untrusted'],
+      [unknown, 'unknown'],
+    ],
   )
-  assert.equal(shown[0].name, 'First signer')
   assert.deepEqual(
-    pipe.transform({ signers: [second] }, keys).map(signer => signer.id),
-    [second],
+    shown.map(signer => signer.name),
+    ['First signer', 'Second signer', null],
   )
+  assert.match(shown[2].fingerprints[0], /^SHA256:/)
 })
 
-test('marketplace signer identities show every matching enabled signer', () => {
-  const { first, second, pkg, keys, pipe } = signerDisplayFixture()
-  keys[second].marketplace = true
-  assert.deepEqual(
-    pipe.transform(pkg, keys).map(signer => signer.id),
-    [first, second],
-  )
-})
-
-test('marketplace signer identities fall back to all matching disabled signers regardless of OS trust', () => {
-  const { first, second, pkg, keys, pipe } = signerDisplayFixture()
+test('package signer status ignores OS trust and repeated signatures in other encodings', () => {
+  const { first, keys, pipe } = signerStatusFixture()
   keys[first].marketplace = false
   assert.deepEqual(
-    pipe.transform(pkg, keys).map(signer => signer.id),
-    [first, second],
+    pipe
+      .transform(
+        [
+          first,
+          `-----BEGIN PUBLIC KEY-----\n${first}\n-----END PUBLIC KEY-----`,
+        ],
+        keys,
+      )
+      .map(signer => [signer.id, signer.status]),
+    [[first, 'untrusted']],
   )
 })
 
-test('marketplace signer identities omit an unknown-only, unsigned or unavailable trust list', () => {
-  const { pkg, keys, pipe } = signerDisplayFixture()
-  assert.deepEqual(pipe.transform({ signers: [untrustedSigner] }, keys), [])
-  assert.deepEqual(pipe.transform({ s9pks: [] }, keys), [])
-  assert.deepEqual(pipe.transform(pkg, {}), [])
+test('no signers list nothing, and without a trust list every signer is unknown', () => {
+  const { signers, keys, pipe } = signerStatusFixture()
+  assert.deepEqual(pipe.transform([], keys), [])
+  assert.deepEqual(
+    pipe.transform(signers, {}).map(signer => signer.status),
+    ['unknown', 'unknown', 'unknown'],
+  )
+})
+
+test('known GPG signers show their label and every email address', () => {
+  const { first, keys, pipe } = signerStatusFixture()
+  keys[first].gpgExports = [
+    {
+      identities: {
+        [first]: ['Alice <alice@example.test>', 'Alice <alice@other.test>'],
+      },
+      keyFingerprints: {
+        [first]: ['5456dbff1b9df905041fa7765259adfc2d63c217'],
+      },
+    },
+  ]
+  assert.deepEqual(pipe.transform([first], keys), [
+    {
+      id: first,
+      status: 'trusted',
+      name: 'First signer',
+      emails: ['alice@example.test', 'alice@other.test'],
+      fingerprints: ['5456 DBFF 1B9D F905 041F A776 5259 ADFC 2D63 C217'],
+    },
+  ])
 })
 
 test('PEM form parsing canonicalizes multiple keys and rejects empty, private, non-Ed25519, and mixed input', () => {
@@ -1734,6 +1725,31 @@ test('a manually added key submits its label and keys and closes with the server
   ])
   assert.deepEqual(f.closed, [f.result])
   assert.equal(f.instance.saving(), false)
+})
+
+test('a manual key asks for a label only when it is PEM', async t => {
+  const f = addKeyFixture(t)
+  const gpg =
+    '-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n-----END PGP PUBLIC KEY BLOCK-----'
+  assert.equal(f.instance.isPem(OS_UPDATE_SIGNERS[0]), true)
+  assert.equal(f.instance.isPem(gpg), false)
+  assert.deepEqual(f.instance.required({ value: ' ' }), { required: true })
+  assert.equal(f.instance.required({ value: 'Publisher' }), null)
+  f.instance.form.setValue({ name: 'Hidden', publicKeys: gpg })
+  await f.instance.save()
+  assert.deepEqual(f.mutations, [{ name: '', publicKeys: [gpg] }])
+})
+
+test('a manual key addition accepts exactly one key', async t => {
+  const f = addKeyFixture(t)
+  f.instance.form.setValue({
+    name: 'Publisher',
+    publicKeys: `${OS_UPDATE_SIGNERS[0]}\n${OS_UPDATE_SIGNERS[1]}`,
+  })
+  await f.instance.save()
+  assert.deepEqual(f.mutations, [])
+  assert.deepEqual(f.closed, [])
+  assert.equal(f.instance.form.controls.publicKeys.hasError('publicKeys'), true)
 })
 
 test('a failed manual key addition keeps the dialog open', async t => {

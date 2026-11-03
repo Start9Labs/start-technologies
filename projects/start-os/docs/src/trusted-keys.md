@@ -4,19 +4,19 @@ Trusted Keys lists the individual public keys whose signatures your server accep
 
 ## Viewing Keys
 
-Open **System → Trusted Keys**. Each row shows a key's label and first identity, its type (GPG or Ed25519), whether it is trusted for **Packages** and for **StartOS updates**, and the connected registries that offer it. An identity is a GPG user ID, or for a plain Ed25519 key the email address its registry publishes.
+Open **System → Trusted Keys**. Each row shows a key's label and first identity, its type (GPG or PEM), whether it is trusted for **Packages** and for **StartOS updates**, and its **Linked registries**, the connected registries that offer it. An identity is a GPG user ID, or for a PEM key the email address its registry publishes.
 
-Click a row for the key's details: every identity, who added it and when, the registries offering it, its fingerprint, and its full public key, which you can copy. GPG keys show their complete OpenPGP fingerprints; PEM keys show a SHA-256 fingerprint of their canonical public-key encoding. A registry's **Manage keys** action in **System → Registries** opens Trusted Keys filtered to the keys that registry offers.
+Choose **View details** from a key's menu to see every identity, who added it and when, its linked registries, its fingerprint, and its full public key, which you can copy, with buttons to trust or distrust it for packages and for StartOS updates. The same details open from the **Signed by** list of a package or StartOS update, and from a key notification. GPG keys show their complete OpenPGP fingerprints; PEM keys show a SHA-256 fingerprint of their canonical public-key encoding. A registry's **Manage keys** action in **System → Registries** opens Trusted Keys filtered to the keys that registry offers.
 
 ## Changing Trust
 
-A key's menu and its details offer **Edit label**, trust or distrust for packages, trust or distrust for StartOS updates, and **Remove**. Trusting a key for StartOS updates asks for confirmation. At least one key must stay trusted for StartOS updates. Keys offered by a connected registry cannot be removed; distrust them instead.
+A key's menu also offers **Edit label**, trust or distrust for packages, trust or distrust for StartOS updates, and **Remove**. At least one key must stay trusted for StartOS updates. Keys offered by a connected registry cannot be removed; distrust them instead.
 
 New installations include the drbonez, matthill, and Start9 signing keys, trusted for packages and StartOS updates. The Alpha and community-registry build keys start untrusted. Upgrades preserve existing trust selections, including intentionally untrusted keys.
 
 ## Adding Keys
 
-Click **Add key**, enter a **Label**, and paste one or more Ed25519 public keys into **Public keys**. The form accepts PEM public keys and armored GPG public-key exports, including a mixture of both formats. Each signing key gets its own row, trusted for packages only. Adding a key that is already present keeps its label and trust and merges any new GPG identities.
+Click **Add key** and paste an Ed25519 public key into **Public key**, either as a PEM public key or as an armored GPG public-key export. A PEM key also asks for a **Label**; a GPG key is labeled with its GPG identity name. Each signing key in a GPG export gets its own row. A new key is trusted for packages only. Adding a key that is already present keeps its label and trust and merges any new GPG identities.
 
 GPG imports retain the complete original public export, including user IDs, subkeys, expiry, and revocation information. Signing trust uses Ed25519 primary keys and Ed25519 signing subkeys; encryption keys and keys revoked in the pasted export are excluded. Revocation signatures are verified during import. Trust selections govern imported keys independently of GPG certificate lifetimes. Exports without a supported signing key are rejected.
 
@@ -26,13 +26,13 @@ Confirm public keys through a source you already trust. A label or self-certifie
 
 A registry chooses which signers to offer and supplies their public keys, GPG identities, and contact details. When you add a registry, the keys it offers that your server does not already have are trusted for packages, and StartOS lists them. Keys your server already has keep their trust. A GPG key a registry adds is labeled with its GPG identity; when another registry offers the same key, its identities are merged and its label is kept.
 
-Whenever StartOS fetches packages or StartOS updates from a connected registry, it checks for keys the registry offers that your server does not have. They are added untrusted, and a notification offers to review them and trust them for packages.
+Whenever StartOS fetches packages or StartOS updates from a connected registry, it checks for keys the registry offers that your server does not have. Each is added untrusted, with a notification that opens the key so you can review and trust it. When a registry stops offering a key, the key keeps its trust and a notification names it; that notification is a warning when the key is trusted for StartOS updates or the registry provides StartOS updates.
 
 Choosing a registry for StartOS updates trusts the keys it offers for StartOS updates. When you remove a registry, StartOS offers to remove the keys it added that no connected registry still offers. See [Marketplace](marketplace.md#managing-registries).
 
 ## Installing Software
 
-Package details show a **Signed by** row with the labels and email addresses of package signers you trust. When none match, it shows known untrusted signers instead. Unknown signers are omitted, and the row is hidden when no known signer matches. When no trusted signer matches, the Marketplace and the Updates tab show a warning that links to Trusted Keys, and installing or updating the package asks you to confirm the risks first. [Sideloading](sideloading.md) works the same way. OS updates from the UI require a signature from a key trusted for StartOS updates; otherwise the update is blocked, and the dialog links to Trusted Keys.
+Package details list every key that signed the package and whether you trust it for packages; a key your server does not know shows its fingerprint. Select a key to open its details. An unknown key needs a label before you trust it, and adding it also trusts it for packages. When no trusted signer matches, the Marketplace and the Updates tab show a warning, and installing or updating the package asks you to confirm the risks first. [Sideloading](sideloading.md) works the same way. OS updates from the UI require a signature from a key trusted for StartOS updates; otherwise the update is blocked, and the dialog links to Trusted Keys. The update dialog's **Signed by** lists every key that signed the update and whether you trust it for StartOS updates; select a key to see its details and change its trust.
 
 CLI package installs and OS updates also require trusted signers by default. To deliberately accept an untrusted signer, use `--trust`:
 

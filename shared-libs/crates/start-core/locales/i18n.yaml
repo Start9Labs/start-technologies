@@ -7824,19 +7824,33 @@ trusted-keys.invalid-registry-url:
   fr_FR: "Saisissez une URL de registre HTTP ou HTTPS sans identifiants, requête ni fragment"
   pl_PL: "Podaj adres HTTP lub HTTPS rejestru bez danych logowania, zapytania i fragmentu"
 
-trusted-keys.keys-added-message:
-  en_US: "%{registry} added signing keys. They are not trusted until you trust them."
-  de_DE: "%{registry} hat Signaturschlüssel hinzugefügt. Sie sind nicht vertrauenswürdig, bis Sie ihnen vertrauen."
-  es_ES: "%{registry} añadió claves de firma. No son de confianza hasta que usted confíe en ellas."
-  fr_FR: "%{registry} a ajouté des clés de signature. Elles ne sont pas approuvées tant que vous ne les approuvez pas."
-  pl_PL: "%{registry} dodał klucze podpisujące. Nie są zaufane, dopóki im nie zaufasz."
+trusted-keys.key-added-message:
+  en_US: "%{registry} added the signing key \"%{name}\". It is not trusted until you trust it."
+  de_DE: "%{registry} hat den Signaturschlüssel „%{name}“ hinzugefügt. Er ist nicht vertrauenswürdig, bis Sie ihm vertrauen."
+  es_ES: "%{registry} añadió la clave de firma «%{name}». No es de confianza hasta que usted confíe en ella."
+  fr_FR: "%{registry} a ajouté la clé de signature « %{name} ». Elle n'est pas approuvée tant que vous ne l'approuvez pas."
+  pl_PL: "%{registry} dodał klucz podpisujący „%{name}”. Nie jest zaufany, dopóki mu nie zaufasz."
 
-trusted-keys.keys-added-title:
-  en_US: "New signing keys"
-  de_DE: "Neue Signaturschlüssel"
-  es_ES: "Nuevas claves de firma"
-  fr_FR: "Nouvelles clés de signature"
-  pl_PL: "Nowe klucze podpisujące"
+trusted-keys.key-added-title:
+  en_US: "New signing key"
+  de_DE: "Neuer Signaturschlüssel"
+  es_ES: "Nueva clave de firma"
+  fr_FR: "Nouvelle clé de signature"
+  pl_PL: "Nowy klucz podpisujący"
+
+trusted-keys.key-dropped-message:
+  en_US: "%{registry} no longer offers the signing key \"%{name}\". Its trust is unchanged."
+  de_DE: "%{registry} bietet den Signaturschlüssel „%{name}“ nicht mehr an. Sein Vertrauensstatus bleibt unverändert."
+  es_ES: "%{registry} ya no ofrece la clave de firma «%{name}». Su confianza no cambia."
+  fr_FR: "%{registry} ne propose plus la clé de signature « %{name} ». Son approbation est inchangée."
+  pl_PL: "%{registry} nie oferuje już klucza podpisującego „%{name}”. Jego zaufanie pozostaje bez zmian."
+
+trusted-keys.key-dropped-title:
+  en_US: "Signing key no longer offered"
+  de_DE: "Signaturschlüssel nicht mehr angeboten"
+  es_ES: "Clave de firma que ya no se ofrece"
+  fr_FR: "Clé de signature plus proposée"
+  pl_PL: "Klucz podpisujący nie jest już oferowany"
 
 trusted-keys.not-found:
   en_US: "Trusted keyring not found"

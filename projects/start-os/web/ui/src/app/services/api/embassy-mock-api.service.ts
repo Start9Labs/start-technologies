@@ -218,7 +218,7 @@ export class MockApiService extends ApiService {
     },
     'diagnostic.update': async () => {
       await pauseFor(1000)
-      return { target: '0.4.1', progress: 'update-progress-guid' }
+      return { target: '0.4.2', progress: 'update-progress-guid' }
     },
     'diagnostic.logs': async params => {
       return this.handlers['server.logs']!(params)
@@ -295,6 +295,7 @@ export class MockApiService extends ApiService {
       hardware: null,
     }),
     'server.trusted-keys.connect-registry': async ({ url, name }) => {
+      await pauseFor(2000)
       const normalized = registryUrl(url)
       const info = this.mockRegistryInfo(normalized)
       const { added } = this.importRegistryKeys(normalized, info)
@@ -309,6 +310,7 @@ export class MockApiService extends ApiService {
       return added
     },
     'server.trusted-keys.remove-registry': async ({ url }) => {
+      await pauseFor(2000)
       if (sameUrl(url, mockPatchData.ui.startosRegistry))
         throw new Error(
           'This registry provides StartOS updates. Choose another registry for StartOS updates before removing it.',
@@ -328,6 +330,7 @@ export class MockApiService extends ApiService {
       })
     },
     'server.trusted-keys.set-os-registry': async ({ url }) => {
+      await pauseFor(2000)
       if (
         !Object.keys(mockPatchData.ui.registries).some(saved =>
           sameUrl(saved, url),
@@ -344,6 +347,7 @@ export class MockApiService extends ApiService {
       return enabled
     },
     'server.trusted-keys.add': async ({ name, publicKeys }) => {
+      await pauseFor(2000)
       const added: string[] = []
       const existing: string[] = []
       for (const key of parsePublicKeys(publicKeys.join('\n'))) {
@@ -370,6 +374,7 @@ export class MockApiService extends ApiService {
       return { added, existing }
     },
     'server.trusted-keys.update': async ({ id, name, marketplace, os }) => {
+      await pauseFor(2000)
       const key = mockPatchData.serverInfo.trustedKeys[id]
       if (!key) throw new Error('Key not found')
       if (!os) this.keepOsKey(id)
@@ -385,6 +390,7 @@ export class MockApiService extends ApiService {
       return null
     },
     'server.trusted-keys.remove': async ({ id }) => {
+      await pauseFor(2000)
       if (!mockPatchData.serverInfo.trustedKeys[id]?.removable)
         throw new Error('Protected key')
       this.keepOsKey(id)

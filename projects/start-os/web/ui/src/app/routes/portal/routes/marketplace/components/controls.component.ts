@@ -1,7 +1,7 @@
 import { CommonModule, TitleCasePipe } from '@angular/common'
 import { Component, computed, inject, input } from '@angular/core'
 import { toObservable, toSignal } from '@angular/core/rxjs-interop'
-import { Router, RouterLink } from '@angular/router'
+import { Router } from '@angular/router'
 import {
   MarketplacePkg,
   matchingTrustedKeys,
@@ -15,11 +15,10 @@ import {
   sameUrl,
   TaskService,
 } from '@start9labs/shared'
-import { TuiButton, TuiLink, TuiNotification } from '@taiga-ui/core'
+import { TuiButton, TuiNotification } from '@taiga-ui/core'
 import { PatchDB } from 'patch-db-client'
 import { firstValueFrom, switchMap } from 'rxjs'
 import { ToManifestPipe } from 'src/app/routes/portal/pipes/to-manifest'
-import { TRUSTED_KEYS_LINK } from 'src/app/routes/portal/routes/system/system.const'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
@@ -44,9 +43,6 @@ type KEYS =
     @if (!trusted().length) {
       <div tuiNotification appearance="warning">
         {{ "This service package isn't signed by anyone you trust." | i18n }}
-        <a tuiLink [routerLink]="trustedKeysLink">
-          {{ 'Manage keys' | i18n }}
-        </a>
       </div>
     }
     <div class="g-buttons">
@@ -115,9 +111,7 @@ type KEYS =
   imports: [
     CommonModule,
     ExverComparesPipe,
-    RouterLink,
     TuiButton,
-    TuiLink,
     TuiNotification,
     ToManifestPipe,
     i18nPipe,
@@ -148,7 +142,6 @@ export class MarketplaceControlsComponent {
       !pkg ||
       this.exver.getFlavor(getManifest(pkg).version) === this.pkg().flavor,
   )
-  protected readonly trustedKeysLink = TRUSTED_KEYS_LINK
   protected readonly trusted = computed(() =>
     matchingTrustedKeys(
       packageSigners(this.pkg()),

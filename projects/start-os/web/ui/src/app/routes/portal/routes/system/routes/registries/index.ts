@@ -1,6 +1,6 @@
 import { Component, computed, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { Router, RouterLink } from '@angular/router'
+import { Router } from '@angular/router'
 import { StoreIconDirective } from '@start9labs/marketplace'
 import {
   defaultRegistries,
@@ -17,6 +17,7 @@ import { TuiAvatar, TuiBadge } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
 import { defaultIfEmpty, firstValueFrom } from 'rxjs'
 import { TRUSTED_KEYS_NOTICE } from 'src/app/components/trusted-keys/notice'
+import { BackDirective } from 'src/app/routes/portal/components/back'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
@@ -36,9 +37,9 @@ interface Row {
   template: `
     <ng-container *title>
       <div>
-        <a routerLink=".." tuiIconButton iconStart="@tui.arrow-left">
+        <button tuiIconButton appBack iconStart="@tui.arrow-left">
           {{ 'Back' | i18n }}
-        </a>
+        </button>
         {{ 'Registries' | i18n }}
       </div>
     </ng-container>
@@ -66,15 +67,15 @@ interface Row {
               <td [style.width.rem]="3">
                 <span tuiAvatar size="s"><img [storeIcon]="row.url" /></span>
               </td>
-              <td>
-                {{ row.name }}
+              <td class="name">
+                <span>{{ row.name }}</span>
                 @if (row.os) {
-                  <span tuiBadge appearance="info" size="s">
+                  <span tuiBadge appearance="primary">
                     {{ 'StartOS updates' | i18n }}
                   </span>
                 }
               </td>
-              <td [attr.data-label]="'URL' | i18n">{{ row.url }}</td>
+              <td class="url">{{ row.url }}</td>
               <td>
                 <button
                   tuiIconButton
@@ -134,20 +135,39 @@ interface Row {
     }
 
     :host-context(tui-root._mobile) {
-      td[data-label]::before {
-        content: attr(data-label) ': ';
-        color: var(--tui-text-secondary);
+      tr {
+        grid-template-columns: auto 1fr auto;
+        column-gap: 0.75rem;
+      }
+
+      td:first-child {
+        grid-area: 1 / 1 / 3;
+        align-content: center;
+      }
+
+      .name {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.25rem 0.5rem;
+        font: var(--tui-typography-body-m);
+        font-weight: bold;
+        color: var(--tui-text-primary);
+      }
+
+      [tuiBadge] {
+        margin: 0;
       }
 
       td:last-child {
-        grid-area: 1 / 2 / 3;
+        grid-area: 1 / 3 / 3;
         align-content: center;
       }
     }
   `,
   imports: [
+    BackDirective,
     DocsLinkDirective,
-    RouterLink,
     StoreIconDirective,
     TableComponent,
     TitleDirective,

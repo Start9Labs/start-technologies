@@ -1,190 +1,138 @@
-import { DatePipe } from '@angular/common'
 import { Component, computed, inject } from '@angular/core'
 import {
-  keyIdentities,
-  keyType,
-  signingKeyIdentity,
-} from '@start9labs/marketplace'
-import { CopyService, i18nPipe } from '@start9labs/shared'
+  NonNullableFormBuilder,
+  ReactiveFormsModule,
+  Validators,
+} from '@angular/forms'
+import { TrustContext } from '@start9labs/marketplace'
+import { i18nPipe } from '@start9labs/shared'
+import { tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
 import {
   TuiButton,
-  TuiCell,
   TuiDialogContext,
-  TuiIcon,
+  TuiError,
+  TuiInput,
+  TuiNotification,
   TuiTitle,
+  tuiValidationErrorsProvider,
 } from '@taiga-ui/core'
-import { TuiHeader } from '@taiga-ui/layout'
+import { TuiForm, TuiHeader } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
-import { RegistryOrigin } from './origin'
+import { TrustedKeyFacts } from './facts'
 
 @Component({
   template: `
-    @if (key(); as key) {
-      <header tuiHeader>
-        <hgroup tuiTitle>
-          <h2 [id]="context.id">{{ key.name }}</h2>
-          <p tuiSubtitle>{{ type() }}</p>
-        </hgroup>
-      </header>
-      <div tuiCell>
-        <span tuiTitle>
-          <span tuiSubtitle>{{ 'Identities' | i18n }}</span>
-          @for (identity of identities(); track identity) {
-            <span>{{ identity }}</span>
-          } @empty {
-            <span>—</span>
-          }
-        </span>
-      </div>
-      <div tuiCell>
-        <span tuiTitle>
-          <span tuiSubtitle>{{ 'Trusted for' | i18n }}</span>
-          <span>
-            <tui-icon [icon]="key.marketplace ? '@tui.check' : '@tui.x'" />
-            {{ 'Packages' | i18n }}
-          </span>
-          <span>
-            <tui-icon [icon]="key.os ? '@tui.check' : '@tui.x'" />
-            {{ 'StartOS updates' | i18n }}
-          </span>
-        </span>
-      </div>
-      <div tuiCell>
-        <span tuiTitle>
-          <span tuiSubtitle>{{ 'Added by' | i18n }}</span>
-          @if (key.origin === 'manual') {
-            <span>{{ 'You' | i18n }}</span>
-          } @else {
-            <div
-              [appRegistryOrigin]="key.origin"
-              [identity]="key.originRegistry"
-            ></div>
-          }
-          <span>{{ key.addedAt | date: 'mediumDate' }}</span>
-        </span>
-      </div>
-      <div tuiCell>
-        <span tuiTitle>
-          <span tuiSubtitle>{{ 'Offered by' | i18n }}</span>
-          @for (offer of trust.offers()[context.data]; track offer.url) {
-            <span>{{ offer.name }}</span>
-          } @empty {
-            <span>{{ 'No connected registry' | i18n }}</span>
-          }
-        </span>
-      </div>
-      <div tuiCell>
-        <span tuiTitle>
-          <span tuiSubtitle>{{ 'Fingerprint' | i18n }}</span>
-          @for (fingerprint of fingerprints(); track fingerprint) {
-            <code>{{ fingerprint }}</code>
-          }
-        </span>
-      </div>
-      <button tuiCell type="button" (click)="copy.copy(key.publicKey)">
-        <span tuiTitle>
-          <span tuiSubtitle>{{ 'Public key' | i18n }}</span>
-          <code>{{ key.publicKey }}</code>
-        </span>
-        <tui-icon icon="@tui.copy" />
-      </button>
-      <footer class="g-buttons">
+    <header tuiHeader>
+      <h2 tuiTitle [id]="context.id">
+        {{ key()?.name || ('Unknown key' | i18n) }}
+      </h2>
+    </header>
+    <form
+      tuiForm="m"
+      [formGroup]="form"
+      (submit.prevent)="toggle('marketplace')"
+    >
+      <trusted-key-facts [publicKey]="context.data" [key]="key()" />
+      @if (!key()?.marketplace || !key()?.os) {
+        <p tuiNotification appearance="warning">
+          {{
+            'Anyone can sign a package. Only trust this key after confirming its fingerprint through a source you already trust, such as the developer’s website, a signed release announcement, or the developer in person. A registry or the package itself cannot vouch for a key.'
+              | i18n
+          }}
+        </p>
+      }
+      @if (!key()) {
+        <tui-textfield>
+          <label tuiLabel>{{ 'Label' | i18n }}</label>
+          <input tuiInput formControlName="name" />
+        </tui-textfield>
+        <tui-error formControlName="name" />
+      }
+      <footer>
         <button
           tuiButton
-          size="s"
-          appearance="secondary"
+          type="button"
+          [appearance]="key()?.marketplace ? 'secondary' : 'primary'"
           [disabled]="trust.saving()"
-          (click)="trust.rename(context.data, key)"
-        >
-          {{ 'Edit label' | i18n }}
-        </button>
-        <button
-          tuiButton
-          size="s"
-          appearance="secondary"
-          [disabled]="trust.saving()"
-          (click)="
-            trust.trust(context.data, key, 'marketplace', !key.marketplace)
-          "
+          (click)="toggle('marketplace')"
         >
           {{
-            (key.marketplace ? 'Distrust for packages' : 'Trust for packages')
-              | i18n
+            (key()?.marketplace
+              ? 'Distrust for packages'
+              : 'Trust for packages'
+            ) | i18n
           }}
         </button>
         <button
           tuiButton
-          size="s"
-          appearance="secondary"
+          type="button"
+          [appearance]="key()?.os ? 'secondary' : 'primary'"
           [disabled]="trust.saving()"
-          (click)="trust.trust(context.data, key, 'os', !key.os)"
+          (click)="toggle('os')"
         >
           {{
-            (key.os
+            (key()?.os
               ? 'Distrust for StartOS updates'
               : 'Trust for StartOS updates'
             ) | i18n
           }}
         </button>
-        @if (key.removable) {
-          <button
-            tuiButton
-            size="s"
-            appearance="secondary-destructive"
-            [disabled]="trust.saving()"
-            (click)="remove()"
-          >
-            {{ 'Remove' | i18n }}
-          </button>
-        }
       </footer>
-    }
+    </form>
   `,
   styles: `
-    code {
-      overflow-wrap: anywhere;
-      white-space: normal;
-    }
-
-    tui-icon {
-      font-size: 1rem;
-    }
-
-    footer {
-      margin-block-start: 1rem;
+    :host-context(tui-root._mobile) footer {
+      flex-direction: column;
     }
   `,
   imports: [
-    DatePipe,
-    RegistryOrigin,
+    ReactiveFormsModule,
+    TrustedKeyFacts,
     TuiButton,
-    TuiCell,
+    TuiError,
+    TuiForm,
     TuiHeader,
-    TuiIcon,
+    TuiInput,
+    TuiNotification,
     TuiTitle,
     i18nPipe,
+  ],
+  providers: [
+    tuiValidationErrorsProvider(() => {
+      const i18n = inject(i18nPipe)
+      return {
+        required: i18n.transform('Required'),
+        pattern: i18n.transform('Required'),
+      }
+    }),
   ],
 })
 class TrustedKeyDetails {
   protected readonly context = injectContext<TuiDialogContext<void, string>>()
   protected readonly trust = inject(TrustedKeysService)
-  protected readonly copy = inject(CopyService)
   protected readonly key = computed(
     () => this.trust.keys()?.[this.context.data],
   )
-  protected readonly identities = computed((key = this.key()) =>
-    key ? keyIdentities(key) : [],
-  )
-  protected readonly type = computed((key = this.key()) => key && keyType(key))
-  protected readonly fingerprints = computed((key = this.key()) =>
-    key ? signingKeyIdentity(key.publicKey, key).fingerprints : [],
-  )
+  protected readonly form = inject(NonNullableFormBuilder).group({
+    name: ['', [Validators.required, Validators.pattern(/\S/)]],
+  })
 
-  protected async remove(): Promise<void> {
-    await this.trust.remove(this.context.data)
+  protected async toggle(context: TrustContext): Promise<void> {
+    const key = this.key()
 
-    if (!this.key()) this.context.$implicit.complete()
+    if (key) {
+      await this.trust.trust(this.context.data, key, context, !key[context])
+    } else {
+      tuiMarkControlAsTouchedAndValidate(this.form)
+      if (this.form.valid) {
+        await this.trust.add(
+          this.context.data,
+          this.form.getRawValue().name,
+          context,
+        )
+      }
+    }
   }
 }
 

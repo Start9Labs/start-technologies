@@ -98,7 +98,7 @@ pub async fn connect(
 
 const KEY_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// Imports keys a connected registry newly offers, untrusted, and notifies about them.
+/// Imports keys a connected registry newly offers, untrusted, and notifies about each new and dropped key.
 pub async fn check_registry(ctx: RpcContext, url: &Url) -> Result<(), Error> {
     let url = registry_url(url.as_str())?;
     let ui = ctx.db.peek().await.as_public().as_ui().de()?;
@@ -123,27 +123,74 @@ pub async fn check_registry(ctx: RpcContext, url: &Url) -> Result<(), Error> {
         .unwrap_or_else(|| url.host_str().unwrap_or_default().to_owned());
     ctx.db
         .mutate(|db| {
-            let keys = db
-                .as_public_mut()
-                .mutate(|public| refresh_public(public, &url, &info))?;
-            if keys.is_empty() {
-                return Ok(());
+            let (added, dropped) = db.as_public_mut().mutate(|public| {
+                let changes = refresh_public(public, &url, &info)?;
+                let os_registry = public
+                    .ui
+                    .get("startosRegistry")
+                    .and_then(Value::as_str)
+                    .is_some_and(|os| same_registry(os, url.as_str()));
+                let keys = &public.server_info.trusted_keys;
+                let name = |id: &InternedString| {
+                    keys.get(id)
+                        .map_or_else(|| id.to_string(), |key| key.name.clone())
+                };
+                let added = changes
+                    .added
+                    .into_iter()
+                    .map(|id| (name(&id), id))
+                    .collect::<Vec<_>>();
+                let dropped = changes
+                    .dropped
+                    .into_iter()
+                    .map(|id| {
+                        let critical = os_registry || keys.get(&id).is_some_and(|key| key.os);
+                        (name(&id), critical, id)
+                    })
+                    .collect::<Vec<_>>();
+                Ok((added, dropped))
+            })?;
+            for (name, key) in added {
+                crate::notifications::notify(
+                    db,
+                    None,
+                    crate::notifications::NotificationLevel::Info,
+                    t!("trusted-keys.key-added-title").to_string(),
+                    t!(
+                        "trusted-keys.key-added-message",
+                        registry = registry.as_str(),
+                        name = name.as_str()
+                    )
+                    .to_string(),
+                    crate::notifications::RegistryKeyAdded {
+                        registry: url.to_string(),
+                        key,
+                    },
+                )?;
             }
-            crate::notifications::notify(
-                db,
-                None,
-                crate::notifications::NotificationLevel::Info,
-                t!("trusted-keys.keys-added-title").to_string(),
-                t!(
-                    "trusted-keys.keys-added-message",
-                    registry = registry.as_str()
-                )
-                .to_string(),
-                crate::notifications::RegistryKeysAdded {
-                    registry: url.to_string(),
-                    keys,
-                },
-            )
+            for (name, critical, key) in dropped {
+                crate::notifications::notify(
+                    db,
+                    None,
+                    if critical {
+                        crate::notifications::NotificationLevel::Warning
+                    } else {
+                        crate::notifications::NotificationLevel::Info
+                    },
+                    t!("trusted-keys.key-dropped-title").to_string(),
+                    t!(
+                        "trusted-keys.key-dropped-message",
+                        registry = registry.as_str(),
+                        name = name.as_str()
+                    )
+                    .to_string(),
+                    crate::notifications::RegistryKeyDropped {
+                        registry: url.to_string(),
+                        key,
+                    },
+                )?;
+            }
+            Ok(())
         })
         .await
         .result
@@ -336,20 +383,30 @@ fn connect_public(
     Ok(added)
 }
 
-/// Returns the keys new to the server, which are imported untrusted.
+/// Keys new to the server, imported untrusted, and keys the registry stopped offering.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct KeyChanges {
+    added: BTreeSet<InternedString>,
+    dropped: BTreeSet<InternedString>,
+}
+
 fn refresh_public(
     public: &mut Public,
     url: &Url,
     info: &RegistryInfo,
-) -> Result<BTreeSet<InternedString>, Error> {
+) -> Result<KeyChanges, Error> {
     let origin = url.as_str().trim_end_matches('/');
     if !is_connected(&public.ui, origin) {
-        return Ok(BTreeSet::new());
+        return Ok(KeyChanges::default());
     }
     let proposal = proposed_keys(info, origin)?;
     let proposed: BTreeSet<_> = proposal
         .values()
         .map(|key| key.public_key.clone())
+        .collect();
+    let dropped = offered_keys(public, origin)
+        .difference(&proposed)
+        .map(AnyVerifyingKey::interned_der64)
         .collect();
     let mut keys = public.server_info.trusted_keys.clone();
     let added = proposal
@@ -364,7 +421,7 @@ fn refresh_public(
     protect_registry_keys(&mut keys, &snapshots, &public.ui);
     public.server_info.registry_keys = snapshots;
     public.server_info.trusted_keys = keys;
-    Ok(added)
+    Ok(KeyChanges { added, dropped })
 }
 
 #[cfg(test)]
@@ -729,7 +786,7 @@ mod tests {
         entry.os = true;
         let saved = public.server_info.trusted_keys[&manual.interned_der64()].clone();
         assert_eq!(
-            refresh_public(&mut public, &url, &info).unwrap(),
+            refresh_public(&mut public, &url, &info).unwrap().added,
             ids(signer.keys.iter().filter(|key| *key != manual))
         );
         for key in &signer.keys {
@@ -764,18 +821,26 @@ mod tests {
         let listed = info.trust_signers.values().next().unwrap().keys.clone();
         assert_eq!(
             refresh_public(&mut public, &url, &info).unwrap(),
-            ids(&listed)
+            KeyChanges {
+                added: ids(&listed),
+                dropped: BTreeSet::new(),
+            }
         );
         let id = listed.first().unwrap().interned_der64();
         let entry = public.server_info.trusted_keys.get_mut(&id).unwrap();
         entry.marketplace = true;
         entry.os = true;
         let saved = entry.clone();
-        assert!(refresh_public(&mut public, &url, &info).unwrap().is_empty());
-        assert!(
-            refresh_public(&mut public, &url, &RegistryInfo::default())
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            refresh_public(&mut public, &url, &info).unwrap(),
+            KeyChanges::default()
+        );
+        assert_eq!(
+            refresh_public(&mut public, &url, &RegistryInfo::default()).unwrap(),
+            KeyChanges {
+                added: BTreeSet::new(),
+                dropped: ids(&listed),
+            }
         );
         assert_eq!(
             public.server_info.trusted_keys[&id],
@@ -785,9 +850,15 @@ mod tests {
             }
         );
         info.name = Some("Untrusted replacement name".into());
-        assert!(refresh_public(&mut public, &url, &info).unwrap().is_empty());
+        assert_eq!(
+            refresh_public(&mut public, &url, &info).unwrap(),
+            KeyChanges::default()
+        );
         assert_eq!(public.server_info.trusted_keys[&id], saved);
-        assert!(refresh_public(&mut public, &url, &info).unwrap().is_empty());
+        assert_eq!(
+            refresh_public(&mut public, &url, &info).unwrap(),
+            KeyChanges::default()
+        );
     }
 
     #[test]
@@ -991,7 +1062,7 @@ mod tests {
         export.armored = armor;
         signer.gpg_exports.insert(export);
         assert_eq!(
-            refresh_public(&mut public, &url, &info).unwrap(),
+            refresh_public(&mut public, &url, &info).unwrap().added,
             ids(&listed)
         );
         assert_eq!(
@@ -1005,7 +1076,10 @@ mod tests {
                 .registry_keys
                 .contains_key("https://registry.example")
         );
-        assert!(refresh_public(&mut public, &url, &info).unwrap().is_empty());
+        assert_eq!(
+            refresh_public(&mut public, &url, &info).unwrap(),
+            KeyChanges::default()
+        );
     }
 
     #[test]

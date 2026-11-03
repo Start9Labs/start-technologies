@@ -1,30 +1,17 @@
 import { DatePipe } from '@angular/common'
-import { Component, inject, input, output } from '@angular/core'
+import { Component, computed, inject, input, output } from '@angular/core'
 import { CopyService, i18nPipe, LocalizePipe } from '@start9labs/shared'
 import { TuiCell, TuiIcon, TuiTitle } from '@taiga-ui/core'
 import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { MarketplacePkgBase } from '../types'
-import { MarketplaceTrust, PackageSignerIdentitiesPipe } from '../trust'
+import { MarketplaceTrust, packageSigners } from '../trust'
+import { MarketplaceSignersComponent } from './signers.component'
 import { MarketplaceVersionsComponent } from './versions.component'
 
 @Component({
   selector: 'marketplace-about',
   template: `
     <section tuiCardLarge>
-      @let signers = pkg() | packageSignerIdentities: trust?.keys() ?? {};
-      @if (signers.length) {
-        <div tuiCell>
-          <span tuiTitle>
-            <span tuiSubtitle>{{ 'Signed by' | i18n }}</span>
-            @for (signer of signers; track signer.id) {
-              <span>{{ signer.name || signer.fingerprints.join(' / ') }}</span>
-              @for (email of signer.emails; track email) {
-                <span tuiSubtitle>{{ email }}</span>
-              }
-            }
-          </span>
-        </div>
-      }
       @if ((versions()?.length || 0) > 1) {
         <button
           marketplaceVersions
@@ -78,15 +65,25 @@ import { MarketplaceVersionsComponent } from './versions.component'
         <tui-icon icon="@tui.chevron-right" />
       </button>
     </section>
+    @if (trust) {
+      <section tuiCardLarge appearance="secondary-grayscale">
+        <header tuiHeader>{{ 'Signed by' | i18n }}</header>
+        <marketplace-signers [keys]="signers()" />
+      </section>
+    }
     <section tuiCardLarge appearance="secondary-grayscale">
       <header tuiHeader>{{ 'Description' | i18n }}</header>
       <div [innerHTML]="pkg().description.long | localize"></div>
     </section>
   `,
-  styles: ':host { display: contents; }',
+  styles: `
+    :host {
+      display: contents;
+    }
+  `,
   imports: [
     MarketplaceVersionsComponent,
-    PackageSignerIdentitiesPipe,
+    MarketplaceSignersComponent,
     DatePipe,
     i18nPipe,
     TuiCell,
@@ -102,6 +99,8 @@ export class MarketplaceAboutComponent {
   readonly copyService = inject(CopyService)
 
   readonly pkg = input.required<MarketplacePkgBase>()
+
+  protected readonly signers = computed(() => packageSigners(this.pkg()))
   readonly versions = input<string[] | null>(null)
 
   readonly static = output<'license'>()
