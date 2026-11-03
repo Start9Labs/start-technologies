@@ -18,11 +18,13 @@ The registry's hostnames, listen address, Tor proxy, and data directory are mana
 
 ### Publish signing keys
 
-For a package to be recognized as trusted, a user's server must trust at least one key that signed it for service packages. Publish those public keys in PEM or armored GPG format, and link users to the StartOS [trust settings](/start-os/trusted-keys.html) for importing them. A registry signer's permission to publish and a user's decision to trust its signatures are separate.
+On StartOS 0.4.1 and 0.4.1.1, Marketplace installs and updates of a package are blocked unless one of its signing keys is in a keyring the user has enabled for service packages. Until users trust a signing key, the Marketplace install button stays disabled for those packages. Users add keys under **System → Trusted keyrings → Add**; see [Trusted Keyrings](/start-os/trusted-keys.html).
 
-Publish the public keys and their fingerprints through an independent source users already trust, such as your website or GitHub profile, and link that source from the description. Users should confirm the key there before importing it; a key supplied only by the registry cannot establish authenticity if the registry is compromised. Publish public keys only, never private keys.
+Publish your public keys in PEM (`start-cli pubkey` prints yours) or armored GPG format. A registry signer's permission to publish and a user's decision to trust its signatures are separate.
 
-For example, replace these links and the fingerprint with your own:
+Publish the public keys, and the fingerprint of any GPG key, through an independent source users already trust, such as your website or GitHub profile, and link that source from the description. Users should confirm the key there before importing it; a key supplied only by the registry cannot establish authenticity if the registry is compromised. Publish public keys only, never private keys.
+
+For users on StartOS 0.4.1 or 0.4.1.1, replace these example links with your own:
 
 ```markdown
 Maintained by Example Community. Contact: support@example.com.
@@ -31,10 +33,9 @@ Experimental community packages; support is best-effort through our
 [issue tracker](https://github.com/example/packages/issues).
 
 Our [package-signing public key](https://example.com/signing-key.pem)
-has fingerprint `<fingerprint>`. Confirm it through our
-[GitHub profile](https://github.com/example) before importing it into
-[StartOS trust settings](https://docs.start9.com/start-os/trusted-keys.html)
-for service packages.
+is also on our [GitHub profile](https://github.com/example). Confirm the
+two match, then add it under System → Trusted keyrings → Add. See
+[Trusted Keyrings](https://docs.start9.com/start-os/trusted-keys.html).
 ```
 
 ## 3. Add the first administrator
