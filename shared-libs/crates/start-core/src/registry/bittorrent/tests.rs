@@ -13,6 +13,22 @@ use crate::registry::asset::RegistryAsset;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::serde::Base64;
 
+#[test]
+fn torrent_arguments_preserve_parent_command_descriptions() {
+    use clap::Args;
+
+    let command = TorrentDownloadConfig::augment_args(
+        clap::Command::new("parent")
+            .about("Parent command")
+            .long_about("Parent command details"),
+    );
+    assert_eq!(command.get_about().unwrap().to_string(), "Parent command");
+    assert_eq!(
+        command.get_long_about().unwrap().to_string(),
+        "Parent command details"
+    );
+}
+
 struct Swarm {
     _tmp: TmpDir,
     _seed: TorrentSession,

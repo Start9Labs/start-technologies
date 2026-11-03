@@ -38,11 +38,11 @@ fn torrent_error(error: impl std::fmt::Display) -> Error {
     Error::new(eyre!("{error:#}"), ErrorKind::Network)
 }
 
-/// Controls whether registry downloads may use peer traffic.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Parser)]
 #[group(skip)]
 #[serde(rename_all = "kebab-case")]
 pub struct TorrentDownloadConfig {
+    /// Enables peer downloads when unset.
     #[arg(long, help = "help.arg.bittorrent", action = clap::ArgAction::Set)]
     pub bittorrent: Option<bool>,
 }
