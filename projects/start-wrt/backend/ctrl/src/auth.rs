@@ -276,7 +276,9 @@ fn signing_identities(
     addresses: impl IntoIterator<Item = IpAddr>,
     ddns: Option<InternedString>,
 ) -> BTreeSet<InternedString> {
-    std::iter::once(InternedString::intern(crate::ssl::ROUTER_HOSTNAME))
+    crate::ssl::ROUTER_NAMES
+        .into_iter()
+        .map(InternedString::intern)
         .chain(addresses.into_iter().map(url_host_str))
         .chain(ddns)
         .collect()
@@ -713,11 +715,16 @@ mod tests {
             ["192.168.0.1".parse().unwrap(), "fd00::1".parse().unwrap()],
             Some("home.example.com".into()),
         );
-        let expected: BTreeSet<InternedString> =
-            ["router.lan", "192.168.0.1", "[fd00::1]", "home.example.com"]
-                .into_iter()
-                .map(InternedString::intern)
-                .collect();
+        let expected: BTreeSet<InternedString> = [
+            "router.lan",
+            "router.local",
+            "192.168.0.1",
+            "[fd00::1]",
+            "home.example.com",
+        ]
+        .into_iter()
+        .map(InternedString::intern)
+        .collect();
         assert_eq!(identities, expected);
     }
 
