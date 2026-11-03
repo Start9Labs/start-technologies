@@ -951,4 +951,5 @@ export default {
   1099: 'Registres liés',
   1100: 'Liée à',
   1101: 'Recevez des notifications dans ce navigateur lorsque l’interface de StartOS est fermée.',
+  1102: 'Tout afficher',
 } satisfies i18n

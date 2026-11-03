@@ -951,4 +951,5 @@ export default {
   1099: 'Verknüpfte Registrys',
   1100: 'Verknüpft mit',
   1101: 'Benachrichtigungen in diesem Browser empfangen, während die StartOS-Oberfläche geschlossen ist.',
+  1102: 'Alle anzeigen',
 } satisfies i18n

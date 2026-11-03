@@ -952,4 +952,5 @@ export const ENGLISH: Record<string, number> = {
   'Linked registries': 1099,
   'Linked to': 1100,
   'Receive notifications in this browser while the StartOS UI is closed.': 1101,
+  'View all': 1102,
 }

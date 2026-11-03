@@ -951,4 +951,5 @@ export default {
   1099: 'Powiązane rejestry',
   1100: 'Powiązany z',
   1101: 'Otrzymuj powiadomienia w tej przeglądarce, gdy interfejs StartOS jest zamknięty.',
+  1102: 'Pokaż wszystko',
 } satisfies i18n

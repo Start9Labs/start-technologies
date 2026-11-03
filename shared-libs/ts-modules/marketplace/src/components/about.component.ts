@@ -5,7 +5,7 @@ import { TuiCell, TuiIcon, TuiTitle } from '@taiga-ui/core'
 import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { MarketplacePkgBase } from '../types'
 import { MarketplaceTrust, packageSigners } from '../trust'
-import { MarketplaceSignersComponent } from './signers.component'
+import { MarketplaceSignerPreview } from './signer-preview'
 import { MarketplaceVersionsComponent } from './versions.component'
 
 @Component({
@@ -68,7 +68,7 @@ import { MarketplaceVersionsComponent } from './versions.component'
     @if (trust) {
       <section tuiCardLarge appearance="secondary-grayscale">
         <header tuiHeader>{{ 'Signed by' | i18n }}</header>
-        <marketplace-signers [keys]="signers()" />
+        <marketplace-signer-preview [keys]="signers()" />
       </section>
     }
     <section tuiCardLarge appearance="secondary-grayscale">
@@ -83,7 +83,7 @@ import { MarketplaceVersionsComponent } from './versions.component'
   `,
   imports: [
     MarketplaceVersionsComponent,
-    MarketplaceSignersComponent,
+    MarketplaceSignerPreview,
     DatePipe,
     i18nPipe,
     TuiCell,
