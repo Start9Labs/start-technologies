@@ -79,7 +79,11 @@ pub async fn open_source(
         SharedVolumeAvailability::Unavailable
     };
     record_availability(ctx, id, availability).await?;
-    result.map_err(|error| Error::new(eyre!(t!("shared-volumes.source-unavailable")), error.kind))
+    source_result(result)
+}
+
+fn source_result(result: Result<PreparedSource, Error>) -> Result<PreparedSource, Error> {
+    result.with_ctx(|error| (error.kind, t!("shared-volumes.source-unavailable")))
 }
 
 pub(crate) async fn record_availability(

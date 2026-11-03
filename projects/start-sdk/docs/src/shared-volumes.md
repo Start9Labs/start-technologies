@@ -54,7 +54,9 @@ export async function indexOptionalVolume(effects: T.Effects, id: string) {
 }
 ```
 
-An unavailable source returns `{ kind: 'unavailable', reason: 'sourceUnavailable' | 'timeout' }`. Authorization, invalid paths and internal errors reject instead. Do not catch every rejection as an optional outage. A failed or revoked attachment leaves an inaccessible, read-only placeholder, not writable local storage.
+An unavailable source returns `{ kind: 'unavailable', reason: 'sourceUnavailable' | 'timeout' }`. Authorization, invalid paths and internal errors reject instead. Do not catch every rejection as an optional outage. An unavailable source or successful revocation leaves its tracked mountpoint inaccessible and read-only.
+
+Mount outside package-owned and dependency volumes, on the subcontainer's own filesystem. A directory created inside a persistent package volume survives later starts even when nothing mounts there; writes can then land in that directory instead of the shared source. Use the stable volume ID rather than its editable name when deriving paths. If a persistent mountpoint is necessary, remove stale empty directories at startup before launching the workload.
 
 Report an unavailable optional feature through its existing health check and keep unaffected daemons running. Preserve the selected ID. Retry the affected workload through the existing daemon retry or reconciliation lifecycle; a successful mount can later lose connectivity, and the application must handle I/O errors. The one-shot helper above does not retry itself.
 
@@ -73,6 +75,8 @@ export function essentialVolumeMount(grant: T.GrantedSharedVolume) {
 ```
 
 Unavailability rejects construction with the volume ID, mountpoint and reason. A separate optional-feature daemon can use this declaration and the existing daemon startup retries without preventing unrelated daemons from starting. Make the entire service depend on it only when the workload is genuinely essential.
+
+Grants do not pass through dependency mounts. A service reading another service's package volume sees the underlying directory, not shared-volume attachments nested inside it. Each consuming service needs its own grant and mount.
 
 StartOS checks the manifest capability, current grant, access mode and confined paths when attaching. Read-only access cannot be escalated by requesting read/write. Subpaths must remain within the granted source. Revocation detaches the service's attachments without detaching other consumers; applications must respond through their reactive configuration and normal workload lifecycle.
 

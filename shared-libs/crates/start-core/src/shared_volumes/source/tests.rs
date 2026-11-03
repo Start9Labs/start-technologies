@@ -1,5 +1,26 @@
 use super::*;
 
+#[test]
+fn source_failures_keep_their_reason_kind_and_metadata() {
+    for (kind, reason) in [
+        (ErrorKind::Network, "DNS could not resolve the server"),
+        (ErrorKind::Filesystem, "mount error(13): Permission denied"),
+        (ErrorKind::Timeout, "mount deadline elapsed"),
+    ] {
+        let info = imbl_value::json!({ "operation": "source" });
+        let error = source_result(Err(Error::new(eyre!(reason), kind).with_info(info.clone())))
+            .unwrap_err();
+        assert_eq!(error.kind, kind);
+        assert_eq!(error.info, info);
+        assert!(error.to_string().contains(reason));
+        assert!(
+            error
+                .to_string()
+                .contains(&*t!("shared-volumes.source-unavailable"))
+        );
+    }
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn folder_creation_is_confined_and_preserves_existing_contents() {

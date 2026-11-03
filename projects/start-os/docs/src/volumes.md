@@ -8,7 +8,7 @@ Open **System → Volumes** and create a volume with a name and a source:
 
 - **Local folder** creates a managed folder on the server's data drive.
 - **External drive** selects a connected partition from the same drive discovery used by Backups and a folder path relative to that partition. Missing folders are created; an empty path or `/` selects the filesystem root. The selected folder becomes the volume root, and services cannot use it to access parent or sibling folders. Its filesystem UUID identifies it independently of device names and USB ports. Keep it connected while services use it. The filesystem must support Linux ownership mapping; mounting does not rewrite its existing file ownership.
-- **CIFS share** takes a host, share path, username and password. The share path begins with the share name, such as `Photos/albums`, rather than the remote computer's filesystem path. A network volume can be saved while its source is offline.
+- **CIFS share** takes a host, share path, username and password. The share path begins with the share name, such as `Photos/albums`, rather than the remote computer's filesystem path. A network volume can be saved while its source is offline. Saving records the definition without connecting; **Refresh** checks the source and credentials and reports mount failures.
 
 The table's **Refresh** button updates status and free space for every volume. For local folders it checks the directory and available data-drive space; it is not a connectivity test. CIFS rows use the same signal bars as Backups. A successful refresh is an observation, not a guarantee that a device will remain connected.
 
