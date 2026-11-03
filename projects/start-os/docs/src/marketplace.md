@@ -22,7 +22,7 @@ Package details include a **Signed by** section listing every key that signed th
 
 ## Download Transports
 
-When a registry advertises a BitTorrent source, StartOS prefers it for package downloads and OS updates, with HTTP fallback if the torrent is unavailable, stalls, or fails verification. Both transports use the same signed content commitments. BitTorrent sources must contain a single asset file. Recovery-mode OS updates stream over HTTP directly to the image partition.
+When a registry advertises a BitTorrent source, StartOS prefers it for package downloads and OS updates, with HTTP fallback if the torrent is unavailable, stalls, or fails verification. Both transports use the same signed content commitments. BitTorrent sources must contain a single asset file. V1/v2 hybrid torrents use their v1-compatible swarm. Recovery-mode OS updates stream over HTTP directly to the image partition.
 
 BitTorrent downloads buffer a complete asset on the data disk before installation. Retained seeding keeps an additional copy.
 

@@ -9225,6 +9225,7 @@ dependencies = [
  "lettre",
  "libc",
  "librqbit",
+ "librqbit-bencode",
  "log",
  "mbrman",
  "miette",

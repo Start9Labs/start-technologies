@@ -48,8 +48,70 @@ impl Swarm {
     async fn with_content(content: Vec<u8>) -> Result<Self, Error> {
         let tmp = TmpDir::new().await?;
         tokio::fs::write(tmp.join("payload.bin"), &content).await?;
+        let torrent = librqbit::create_torrent(
+            &tmp.join("payload.bin"),
+            CreateTorrentOptions::default(),
+            &librqbit::spawn_utils::BlockingSpawner::new(num_cpus::get()),
+        )
+        .await
+        .map_err(torrent_error)?
+        .as_bytes()
+        .map_err(torrent_error)?;
+        Self::serve_torrent(tmp, content, torrent).await
+    }
+
+    async fn hybrid() -> Result<Self, Error> {
+        let content = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/testdata/s9pk-trailer/base.s9pk"
+        ))
+        .to_vec();
+        let torrent = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/testdata/bittorrent/base-hybrid.torrent"
+        ));
+        let tmp = TmpDir::new().await?;
+        tokio::fs::write(tmp.join("base.s9pk"), &content).await?;
+        let mut swarm = Self::serve_torrent(tmp, content, torrent.to_vec().into()).await?;
+        swarm.magnet.query_pairs_mut().append_pair(
+            "xt",
+            "urn:btmh:12208485f107f399acd3087f4043f4075bd7ca878ffbe18eb41a64b2d86669545762",
+        );
+        Ok(swarm)
+    }
+
+    async fn serve_torrent(
+        tmp: TmpDir,
+        content: Vec<u8>,
+        bytes: bytes::Bytes,
+    ) -> Result<Self, Error> {
+        use librqbit_bencode::{BencodeValueOwned, bencode_serialize_to_writer};
+
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let url: Url = format!("http://{}/", listener.local_addr()?).parse()?;
+        let BencodeValueOwned::Dict(mut metadata) =
+            librqbit_bencode::from_bytes(&bytes).map_err(torrent_error)?
+        else {
+            panic!("torrent fixture is not a dictionary");
+        };
+        metadata.insert(
+            b"announce-list".as_slice().into(),
+            BencodeValueOwned::List(vec![BencodeValueOwned::List(vec![
+                BencodeValueOwned::Bytes(url.join("announce")?.as_str().as_bytes().into()),
+            ])]),
+        );
+        let mut torrent = Vec::new();
+        bencode_serialize_to_writer(&BencodeValueOwned::Dict(metadata), &mut torrent)
+            .map_err(torrent_error)?;
+        let torrent: bytes::Bytes = torrent.into();
+        let meta = librqbit::torrent_from_bytes(&torrent).map_err(torrent_error)?;
+        let magnet = librqbit::Magnet::from_id20(
+            meta.info_hash,
+            vec![url.join("announce")?.to_string()],
+            None,
+        )
+        .to_string()
+        .parse()?;
         let seed = TorrentSession::new(
             tmp.to_path_buf(),
             SessionOptions {
@@ -64,23 +126,21 @@ impl Swarm {
             },
         )
         .await?;
-        let (torrent, handle) = seed
-            .0
-            .create_and_serve_torrent(
-                &tmp.join("payload.bin"),
-                CreateTorrentOptions {
-                    trackers: vec![url.join("announce")?.to_string()],
+        seed.0
+            .add_torrent(
+                AddTorrent::from_bytes(torrent.clone()),
+                Some(AddTorrentOptions {
+                    overwrite: true,
                     ..Default::default()
-                },
+                }),
             )
             .await
-            .map_err(torrent_error)?;
-        handle
+            .map_err(torrent_error)?
+            .into_handle()
+            .unwrap()
             .wait_until_initialized()
             .await
             .map_err(torrent_error)?;
-        let magnet = torrent.as_magnet().to_string().parse()?;
-        let torrent = torrent.as_bytes().map_err(torrent_error)?;
         let port = seed.0.listen_addr().unwrap().port();
         let mut peers = b"d8:intervali1e5:peers6:".to_vec();
         peers.extend([127, 0, 0, 1]);
@@ -203,6 +263,34 @@ async fn http_only_downloads_ignore_advertised_torrents() -> Result<(), Error> {
         .await?;
     assert_eq!(content, swarm.content);
     assert!(swarm.http_hits.load(Ordering::SeqCst) > 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn hybrid_metainfo_and_dual_hash_magnets_use_the_compatible_swarm() -> Result<(), Error> {
+    use sha2::Digest;
+
+    let swarm = Swarm::hybrid().await?;
+    let meta = librqbit::torrent_from_bytes(&swarm.torrent).map_err(torrent_error)?;
+    assert_eq!(
+        meta.info_hash.as_string(),
+        "aa7225bd6288e39b146b3aeb18d4846d9a4b011a"
+    );
+    assert_eq!(
+        hex::encode(sha2::Sha256::digest(meta.info.raw_bytes.as_ref())),
+        "8485f107f399acd3087f4043f4075bd7ca878ffbe18eb41a64b2d86669545762"
+    );
+    let magnet = librqbit::Magnet::parse(swarm.magnet.as_str()).map_err(torrent_error)?;
+    assert!(magnet.as_id20().is_some());
+    assert!(magnet.as_id32().is_some());
+    for torrent in [swarm.url.join("metadata.torrent")?, swarm.magnet.clone()] {
+        let client = cli_client();
+        assert_eq!(
+            swarm.download(&swarm.asset(torrent), &client).await?,
+            swarm.content
+        );
+    }
+    assert_eq!(swarm.http_hits.load(Ordering::SeqCst), 0);
     Ok(())
 }
 
