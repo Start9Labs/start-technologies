@@ -23,6 +23,7 @@ import { TuiHeader } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
 import { firstValueFrom } from 'rxjs'
 
+import { FormatDrive } from 'src/app/routes/portal/components/format-drive'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { Result } from 'src/app/services/api/api.types'
 import { DataModel } from 'src/app/services/patch-db/data-model'
@@ -42,6 +43,7 @@ import { VOLUME_GRANTS } from './grants'
     <header tuiHeader>
       <h3 tuiTitle>{{ 'Volumes' | i18n }}</h3>
       <aside tuiAccessories>
+        <button formatDrive size="s"></button>
         <button tuiButton size="s" iconStart="@tui.plus" (click)="create()">
           {{ 'New' | i18n }}
         </button>
@@ -59,6 +61,11 @@ import { VOLUME_GRANTS } from './grants'
           <td>
             @if (volume.source.kind === 'local') {
               {{ 'Local folder' | i18n }}
+            } @else if (volume.source.kind === 'disk') {
+              <span tuiTitle>
+                {{ 'External drive' | i18n }}
+                <span tuiSubtitle>{{ volume.source.logicalname }}</span>
+              </span>
             } @else {
               <span tuiTitle>
                 {{ volume.source.hostname }}
@@ -96,8 +103,12 @@ import { VOLUME_GRANTS } from './grants'
             >
               {{ 'More' | i18n }}
               <tui-data-list *tuiDropdown="let close" (click)="close()">
-                <button tuiOption iconStart="@tui.search" (click)="inspect(id)">
-                  {{ 'Inspect' | i18n }}
+                <button
+                  tuiOption
+                  iconStart="@tui.refresh-cw"
+                  (click)="inspect(id)"
+                >
+                  {{ 'Check availability' | i18n }}
                 </button>
                 <button tuiOption iconStart="@tui.users" (click)="manage(id)">
                   {{ 'Service access' | i18n }}
@@ -111,10 +122,10 @@ import { VOLUME_GRANTS } from './grants'
                 </button>
                 <button
                   tuiOption
-                  iconStart="@tui.unlink"
+                  iconStart="@tui.trash-2"
                   (click)="remove(id, volume)"
                 >
-                  {{ 'Remove definition' | i18n }}
+                  {{ 'Delete' | i18n }}
                 </button>
               </tui-data-list>
             </button>
@@ -130,11 +141,11 @@ import { VOLUME_GRANTS } from './grants'
     @if (retainedItems.length) {
       <section>
         <header tuiHeader>
-          <h3 tuiTitle>{{ 'Retained local data' | i18n }}</h3>
+          <h3 tuiTitle>{{ 'Pending local deletion' | i18n }}</h3>
         </header>
         <p>
           {{
-            'Removing a definition retains its data. Deleting local data is permanent.'
+            'Local data left after an unsuccessful deletion. Retry to delete it permanently.'
               | i18n
           }}
         </p>
@@ -172,6 +183,7 @@ import { VOLUME_GRANTS } from './grants'
     TuiTitle,
     TuiHeader,
     TableComponent,
+    FormatDrive,
     TitleDirective,
   ],
 })
@@ -219,7 +231,7 @@ export default class Volumes {
     return this.tasks.run(async () => {
       const result = await this.api.rpc.volumes.inspect({ id })
       this.inspections.update(all => ({ ...all, [id]: result }))
-    }, 'Inspecting volume')
+    }, 'Checking availability')
   }
 
   protected async rename(id: string, volume: T.SharedVolume) {
@@ -246,11 +258,13 @@ export default class Volumes {
     if (
       !(await firstValueFrom(
         this.dialogs.openConfirm({
-          label: 'Remove definition',
+          label: 'Delete',
           data: {
             content:
-              'Remove this volume and all service access? Its data will be retained.',
-            yes: 'Remove definition',
+              volume.source.kind === 'local'
+                ? 'Delete this volume and all service access? Its local folder and all contents will be permanently deleted.'
+                : 'Delete this volume and all service access? Data on the external drive or CIFS share will not be deleted.',
+            yes: 'Delete',
             no: 'Cancel',
           },
         }),
@@ -258,14 +272,8 @@ export default class Volumes {
       ))
     )
       return
-    if (
-      await this.tasks.run(
-        () => this.api.rpc.volumes.remove({ id }),
-        'Removing',
-      )
-    ) {
-      await this.refreshRetained()
-    }
+    await this.tasks.run(() => this.api.rpc.volumes.remove({ id }), 'Deleting')
+    await this.refreshRetained()
   }
 
   protected async deleteData(id: string) {

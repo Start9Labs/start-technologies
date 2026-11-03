@@ -5,23 +5,25 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms'
-import { i18nPipe, TaskService } from '@start9labs/shared'
+import { ConvertBytesPipe, i18nPipe, TaskService } from '@start9labs/shared'
 import { WA_IS_MOBILE } from '@ng-web-apis/platform'
 import { TuiAutoFocus, tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
 import {
   tuiValidationErrorsProvider,
   TuiButton,
+  TuiDataList,
   TuiDialogContext,
   TuiError,
   TuiIcon,
   TuiInput,
   TuiTitle,
 } from '@taiga-ui/core'
-import { TuiPassword, TuiRadioList } from '@taiga-ui/kit'
+import { TuiChevron, TuiPassword, TuiRadioList, TuiSelect } from '@taiga-ui/kit'
 import { TuiForm, TuiHeader } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 
 import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { BackupService } from '../backups/backup.service'
 
 @Component({
   template: `
@@ -44,6 +46,37 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
         />
         <ng-template #sourceContent let-item>{{ item | i18n }}</ng-template>
       </fieldset>
+      @if (source() === 'External drive') {
+        <tui-textfield
+          tuiChevron
+          [stringify]="driveLabel"
+          [tuiTextfieldCleaner]="false"
+        >
+          <label tuiLabel>{{ 'Drive' | i18n }}</label>
+          <input tuiSelect formControlName="logicalname" required />
+          <tui-data-list *tuiDropdown>
+            @for (target of targets.drives(); track target.id) {
+              <button tuiOption [value]="target.entry.logicalname">
+                {{ target.entry.label || target.entry.logicalname }} ·
+                {{ target.entry.capacity | convertBytes }}
+              </button>
+            } @empty {
+              {{ 'No drives detected' | i18n }}
+            }
+          </tui-data-list>
+        </tui-textfield>
+        <tui-error formControlName="logicalname" />
+        <button
+          tuiButton
+          type="button"
+          size="s"
+          appearance="flat"
+          iconStart="@tui.refresh-cw"
+          (click)="targets.getBackupTargets()"
+        >
+          {{ 'Refresh' | i18n }}
+        </button>
+      }
       @if (source() === 'CIFS share') {
         <tui-textfield>
           <label tuiLabel>{{ 'Hostname' | i18n }}</label>
@@ -114,7 +147,11 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
     FormsModule,
     ReactiveFormsModule,
     i18nPipe,
+    ConvertBytesPipe,
     TuiButton,
+    TuiChevron,
+    TuiDataList,
+    TuiSelect,
     TuiAutoFocus,
     TuiError,
     TuiIcon,
@@ -126,27 +163,44 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
     TuiHeader,
   ],
 })
-class CreateVolume {
+export class CreateVolume {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
 
+  protected readonly targets = inject(BackupService)
   protected readonly isMobile = inject(WA_IS_MOBILE)
   protected readonly context = injectContext<TuiDialogContext<void>>()
-  protected readonly sources = ['Local folder', 'CIFS share'] as const
+  protected readonly sources = [
+    'Local folder',
+    'External drive',
+    'CIFS share',
+  ] as const
   protected readonly source =
     signal<(typeof this.sources)[number]>('Local folder')
   protected readonly form = inject(NonNullableFormBuilder).group({
     name: ['', Validators.required],
+    logicalname: [''],
     hostname: [''],
     path: [''],
     username: [''],
     password: [''],
   })
 
+  protected readonly driveLabel = (logicalname: string) =>
+    this.targets
+      .drives()
+      .find(target => target.entry.logicalname === logicalname)?.entry.label ||
+    logicalname
+
+  constructor() {
+    this.targets.getBackupTargets()
+  }
+
   protected async save() {
     tuiMarkControlAsTouchedAndValidate(this.form)
     if (this.form.invalid) return
-    const { name, hostname, path, username, password } = this.form.getRawValue()
+    const { name, logicalname, hostname, path, username, password } =
+      this.form.getRawValue()
     if (
       await this.tasks.run(
         () =>
@@ -155,7 +209,9 @@ class CreateVolume {
             source:
               this.source() === 'Local folder'
                 ? { kind: 'local' }
-                : { kind: 'cifs', hostname, path, username, password },
+                : this.source() === 'External drive'
+                  ? { kind: 'disk', logicalname }
+                  : { kind: 'cifs', hostname, path, username, password },
           }),
         'Saving',
       )

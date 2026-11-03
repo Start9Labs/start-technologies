@@ -806,9 +806,9 @@ export class MockApiService extends ApiService {
       const volume: T.SharedVolume = {
         name,
         source:
-          source.kind === 'local'
-            ? { kind: 'local' }
-            : { kind: 'cifs', hostname: source.hostname, path: source.path },
+          source.kind === 'cifs'
+            ? { kind: 'cifs', hostname: source.hostname, path: source.path }
+            : source,
         grants: {},
         availability: 'unknown',
       }
@@ -856,8 +856,6 @@ export class MockApiService extends ApiService {
         `/sharedVolumes/${id}`,
       )
       if (!volume) return null
-      if (volume.source.kind === 'local')
-        this.retainedVolumes.set(id, volume.name)
       await this.mockRevision([
         { op: PatchOp.REMOVE, path: `/sharedVolumes/${id}` },
       ])
@@ -866,8 +864,6 @@ export class MockApiService extends ApiService {
     'volumes.delete-data': async ({ id }) => {
       if (this.mockData(`/sharedVolumes/${id}`))
         throw new Error('Remove the volume definition first')
-      if (!this.retainedVolumes.has(id))
-        throw new Error('No retained local volume data')
       this.retainedVolumes.delete(id)
       return null
     },

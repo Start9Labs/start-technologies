@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core'
+import { Component, inject, output, signal } from '@angular/core'
 import {
   AbstractControl,
   NonNullableFormBuilder,
@@ -10,6 +10,7 @@ import { WA_IS_MOBILE } from '@ng-web-apis/platform'
 import {
   convertBytes,
   ConvertBytesPipe,
+  DialogService,
   ErrorService,
   HttpError,
   i18nPipe,
@@ -17,7 +18,8 @@ import {
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import {
-  TUI_VALIDATION_ERRORS,
+  tuiIconStart,
+  tuiValidationErrorsProvider,
   TuiButton,
   TuiCell,
   TuiCheckbox,
@@ -25,12 +27,14 @@ import {
   TuiError,
   TuiLoader,
   TuiNotification,
+  TuiNotificationService,
   TuiTextfield,
   TuiTitle,
 } from '@taiga-ui/core'
 import { TuiChevron, TuiDataListWrapper, TuiSelect } from '@taiga-ui/kit'
 import { TuiForm, TuiHeader } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
+import { filter } from 'rxjs'
 import { Result } from 'src/app/services/api/api.types'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 
@@ -57,8 +61,7 @@ function labelValidator(control: AbstractControl): ValidationErrors | null {
         <h2 [id]="context.id">{{ 'Format a drive' | i18n }}</h2>
         <p>
           {{
-            'Erases a drive and prepares it as a single Btrfs partition for backups.'
-              | i18n
+            'Erases a drive and prepares it as a single Btrfs partition.' | i18n
           }}
         </p>
       </hgroup>
@@ -166,21 +169,18 @@ function labelValidator(control: AbstractControl): ValidationErrors | null {
     TuiTitle,
   ],
   providers: [
-    {
-      provide: TUI_VALIDATION_ERRORS,
-      useFactory: () => {
-        const i18n = inject(i18nPipe)
-        return {
-          required: i18n.transform('Required'),
-          labelMaxBytes: i18n.transform(
+    tuiValidationErrorsProvider(() => {
+      const i18n = inject(i18nPipe)
+      return {
+        required: () => i18n.transform('Required'),
+        labelMaxBytes: () =>
+          i18n.transform(
             'Must be 255 bytes or less (accented letters and symbols take more than one)',
           ),
-          labelControlCharacters: i18n.transform(
-            'Must not contain control characters',
-          ),
-        }
-      },
-    },
+        labelControlCharacters: () =>
+          i18n.transform('Must not contain control characters'),
+      }
+    }),
   ],
 })
 export class FormatDriveDialog {
@@ -238,4 +238,41 @@ export class FormatDriveDialog {
   }
 }
 
-export const FORMAT_DRIVE = new PolymorpheusComponent(FormatDriveDialog)
+const FORMAT_DRIVE = new PolymorpheusComponent(FormatDriveDialog)
+
+@Component({
+  selector: 'button[formatDrive]',
+  template: `
+    {{ 'Format a drive' | i18n }}
+  `,
+  hostDirectives: [{ directive: TuiButton, inputs: ['size'] }],
+  host: {
+    tuiButton: '',
+    type: 'button',
+    '(click)': 'format()',
+  },
+  imports: [i18nPipe],
+})
+export class FormatDrive {
+  private readonly dialogs = inject(DialogService)
+  private readonly alerts = inject(TuiNotificationService)
+  private readonly i18n = inject(i18nPipe)
+
+  protected readonly icon = tuiIconStart('@tui.hard-drive')
+
+  public readonly formatted = output<void>()
+
+  protected format() {
+    this.dialogs
+      .openComponent<boolean>(FORMAT_DRIVE, { size: 'm' })
+      .pipe(filter(Boolean))
+      .subscribe(() => {
+        this.alerts
+          .open(this.i18n.transform('Drive formatted'), {
+            appearance: 'positive',
+          })
+          .subscribe()
+        this.formatted.emit()
+      })
+  }
+}

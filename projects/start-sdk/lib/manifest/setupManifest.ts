@@ -43,7 +43,7 @@ export function setupManifest<
   return manifest
 }
 
-const sharedVolumeOsVersion = '0.4.1'
+const sharedVolumeOsVersion = '0.4.2'
 
 function manifestOsVersion(manifest: SDKManifest): string {
   const required = manifest.sharedVolumes ? sharedVolumeOsVersion : OSVersion

@@ -13,8 +13,14 @@ import { TuiSegmented } from '@taiga-ui/kit'
 
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 
+const grantOptions = [
+  { label: 'No Access', icon: '@tui.x', grant: null },
+  { label: 'Read', icon: '@tui.eye', grant: { readonly: true } },
+  { label: 'Read/write', icon: '@tui.pencil', grant: { readonly: false } },
+] as const
+
 const permission = (grant: T.SharedVolumeGrant | undefined) =>
-  !grant ? 'Off' : grant.readonly ? 'Read' : 'Read/write'
+  grantOptions.find(option => option.grant?.readonly === grant?.readonly)!.label
 
 @Component({
   selector: 'volume-grant',
@@ -49,11 +55,7 @@ export class VolumeGrant {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
 
-  protected readonly options = [
-    { label: 'Off', icon: '@tui.x' },
-    { label: 'Read', icon: '@tui.eye' },
-    { label: 'Read/write', icon: '@tui.pencil' },
-  ] as const
+  protected readonly options = grantOptions
   protected readonly pending = signal(false)
   protected readonly value = linkedSignal({
     source: () => ({
@@ -82,7 +84,7 @@ export class VolumeGrant {
         this.api.rpc.volumes.setGrant({
           id: this.volumeId(),
           packageId: this.packageId(),
-          grant: value === 'Off' ? null : { readonly: value === 'Read' },
+          grant: this.options.find(option => option.label === value)!.grant,
         }),
       'Saving',
     )

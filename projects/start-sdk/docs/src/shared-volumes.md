@@ -1,6 +1,6 @@
 # Volumes
 
-System volumes are user-owned local folders or CIFS/SMB shares granted to selected services. They are separate from package-owned `sdk.volumes` and dependency mounts.
+System volumes are user-owned local folders, attached-drive partitions or CIFS/SMB shares granted to selected services. They are separate from package-owned `sdk.volumes` and dependency mounts.
 
 ## Declare support
 
@@ -10,7 +10,7 @@ Add this property to `setupManifest`:
 sharedVolumes: true,
 ```
 
-This enables the service's **Volumes** controls in StartOS; it requests no access. Users grant each volume independently as read-only or read/write. `buildManifest` requires StartOS 0.4.1 for this capability and rejects an explicit older compatibility override. Packaging it requires Start CLI 2.6.0 or later; the build wrapper checks before packing.
+This enables the service's **Volumes** controls in StartOS; it requests no access. Users grant each volume independently as read-only or read/write. `buildManifest` requires StartOS 0.4.2 for this capability and rejects an explicit older compatibility override. Packaging it requires Start CLI 2.7.0 or later; the build wrapper checks before packing.
 
 ## Read grants
 
@@ -18,7 +18,7 @@ This enables the service's **Volumes** controls in StartOS; it requests no acces
 const grants = await sdk.getSharedVolumes(effects).const()
 ```
 
-Each grant contains `id`, `name`, `readonly` and `availability`. Store the stable GUID `id` in service configuration and use the editable `name` in user-facing choices. Names are neither identities nor paths. The API returns neither host paths nor network credentials. Linux mount metadata can reveal the CIFS account name to a granted service; its password remains private.
+Each grant contains `id`, `name`, `readonly` and `availability`. Store the stable GUID `id` in service configuration and use the editable `name` in user-facing choices. Names are neither identities nor paths. The API returns neither host paths nor network credentials. Attached-drive mounts translate ownership through StartOS's existing service UID/GID mapping without changing on-disk owners. Linux mount metadata can reveal the CIFS account name to a granted service; its password remains private.
 
 The reader supports `.once()`, `.const()`, `.watch()` and the other [reactive reader methods](file-models.md). Grant additions, revocations, access-mode changes and renames invalidate reactive reads. An offline granted volume remains listed; revocation removes it. Availability is the host's last observation, not a mount preflight or a guarantee of continued connectivity.
 
@@ -82,4 +82,4 @@ System volumes are independent backup items. A service's backup must describe it
 
 For services declaring this capability, StartOS runs the backup procedure in a fresh runtime with shared mounts disabled. Initialization and uninitialization hooks do not run in that backup runtime. Read backup configuration from persistent state rather than variables populated by initialization hooks. Service restore also rejects shared mounts until restoration has finished.
 
-A restored volume is a new local copy with a new ID and no grants, including when its source was CIFS. Users grant and select the restored copy again. Uninstalling or rolling back a consuming service leaves shared contents untouched.
+A restored volume is a new local copy with a new ID and no grants, including when its source was an attached drive or CIFS. Users grant and select the restored copy again. Uninstalling or rolling back a consuming service leaves shared contents untouched.

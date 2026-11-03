@@ -8,7 +8,7 @@ const { manifest } = createRequire(import.meta.url)(
   resolve('javascript/index.js'),
 )
 if (manifest.sharedVolumes) {
-  const required = '2.6.0'
+  const required = '2.7.0'
   const installed = execFileSync('start-cli', ['--version'], {
     encoding: 'utf8',
   })
