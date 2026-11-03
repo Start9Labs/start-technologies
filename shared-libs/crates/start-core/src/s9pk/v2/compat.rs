@@ -16,7 +16,7 @@ use crate::s9pk::merkle_archive::{Entry, MerkleArchive};
 use crate::s9pk::v1::manifest::{Manifest as ManifestV1, PackageProcedure};
 use crate::s9pk::v1::reader::S9pkReader;
 use crate::s9pk::v2::pack::{
-    PackSource, SqfsDir, docker_platform, javascript_squashfs, write_image,
+    ImageSource, PackSource, SqfsDir, docker_platform, javascript_squashfs, write_image,
 };
 use crate::s9pk::v2::{S9pk, SIG_CONTEXT};
 use crate::util::io::{TmpDir, create_file};
@@ -30,9 +30,24 @@ const STUB_INSTRUCTIONS: &[u8] = b"# Instructions\n\nThis package was migrated f
 impl S9pk<TmpSource<PackSource>> {
     #[instrument(skip_all)]
     pub async fn from_v1<R: AsyncRead + AsyncSeek + Unpin + Send + Sync>(
+        reader: S9pkReader<R>,
+        tmp_dir: Arc<TmpDir>,
+        signer: ed25519_dalek::SigningKey,
+    ) -> Result<Self, Error> {
+        Self::from_v1_with_system_images(
+            reader,
+            tmp_dir,
+            signer,
+            Path::new("/usr/lib/startos/migration-images"),
+        )
+        .await
+    }
+
+    async fn from_v1_with_system_images<R: AsyncRead + AsyncSeek + Unpin + Send + Sync>(
         mut reader: S9pkReader<R>,
         tmp_dir: Arc<TmpDir>,
         signer: ed25519_dalek::SigningKey,
+        system_images: &Path,
     ) -> Result<Self, Error> {
         let mut archive = DirectoryContents::<TmpSource<PackSource>>::new();
 
@@ -96,15 +111,34 @@ impl S9pk<TmpSource<PackSource>> {
                 let mut image_config = new_manifest.images.remove(image).unwrap_or_default();
                 image_config.arch.insert(arch.into());
                 new_manifest.images.insert(image.clone(), image_config);
-                let image_name = if *system {
-                    format!("start9/{}:latest", image)
-                } else {
-                    format!("start9/{}/{}:{}", manifest.id, image, manifest.version)
-                };
-                let filesystem =
-                    super::image::from_archive(&saved, &docker_platform(&arch), Some(&image_name))
+                if *system {
+                    let path = system_images
+                        .join(arch)
+                        .join(format!("start9_{image}_latest.tar"));
+                    let source = match tokio::fs::metadata(&path).await {
+                        Ok(_) => ImageSource::OciLayout {
+                            path,
+                            reference: Some(format!("start9/{image}:latest")),
+                        },
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                            ImageSource::DockerTag(format!("start9/{image}:latest"))
+                        }
+                        Err(error) => return Err(error.into()),
+                    };
+                    source
+                        .load(tmp_dir.clone(), image, &arch, &mut archive)
                         .await?;
-                write_image(filesystem, tmp_dir.clone(), image, &arch, &mut archive).await?;
+                } else {
+                    let image_name =
+                        format!("start9/{}/{}:{}", manifest.id, image, manifest.version);
+                    let filesystem = super::image::from_archive(
+                        &saved,
+                        &docker_platform(&arch),
+                        Some(&image_name),
+                    )
+                    .await?;
+                    write_image(filesystem, tmp_dir.clone(), image, &arch, &mut archive).await?;
+                }
             }
         }
 

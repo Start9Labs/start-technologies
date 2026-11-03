@@ -15,14 +15,14 @@ The StartOS, StartTunnel, Packaging, and StartWRT books are NOT here — they mo
 - Packaging (book name `packaging`) → `../start-sdk/docs/`
 - StartWRT → `../start-wrt/docs/`
 
-`build.sh`'s `book_dir()` maps each book name to its source dir. If you're editing content for one of those products, edit it in the product dir, not here — but you can build/preview the whole site from here.
+`build.sh`'s `book_path()` maps each book name to its source dir. If you're editing content for one of those products, edit it in the product dir, not here — but you can build/preview the whole site from here.
 
 ## Build & test (run from `projects/start-docs/`)
 
 - `./build.sh` — builds every book in `versions.conf` into the gitignored `docs/` output dir. Run this to verify the books compile. Check link targets separately; mdBook does not reject missing Markdown pages or anchors.
 - `./serve.sh` — build + serve at http://localhost:3000.
 - Single book live-reload: `cd <book-src-dir> && mdbook serve -p 3001` (e.g. `cd bitcoin-guides`, or `cd ../start-os/docs`).
-- `cd scripts && npm run generate-llms-txt` — regenerate `llms.txt` / `llms-full.txt` (uses `tsx`).
+- `cd scripts && npm run generate-llms-txt` — regenerate `llms.txt` / `llms-full.txt` (uses `tsx`); run `./build.sh` first, which extracts the archived versions it reads.
 
 ## Gotchas
 
@@ -31,8 +31,17 @@ The StartOS, StartTunnel, Packaging, and StartWRT books are NOT here — they mo
 
 ## Adding or moving a book
 
-1. Add `book-name=version` to `versions.conf` (build and site routing derive from it; also add the source path to `.github/workflows/docs-deploy.yml`).
-2. If the book lives outside this project, add a `book_dir()` case in `build.sh` pointing at its source dir. Books with no mapping default to `<book-name>/` (relative to this project).
+1. Add the book to `versions.conf` — `book-name=version` for a product, bare `book-name` for an unversioned book (build and site routing derive from it; also add the source path to `.github/workflows/docs-deploy.yml`). A product's card on `landing/index.html` shows its version through a `<!--version:book-name-->` placeholder.
+2. If the book lives outside this project, add a `book_path()` case in `build.sh`, the matching `bookPath()` case in `scripts/generate-llms-txt.ts`, and its product to `PRODUCT_BOOKS` in `scripts/docs-versions.mjs` at the repo root. Books with no mapping default to `projects/start-docs/<book-name>`.
+
+## Releasing a product's minor version
+
+Product books are versioned per minor release (`0.4.1.x`, `1.5.x`); a patch release updates its minor's book in place. Before tagging a new minor, in `versions.conf` on master:
+
+1. Add `book=<old version>@<old minor's last release tag>` for the version it replaces (e.g. `start-os=0.4.0.x@start-os/v0.4.0.4`). Leave it out and that version leaves the site — the stubs and `404.html` then send its readers to the current book. The tag sync drops an archive line naming the version still published as current, so it can land ahead of the release.
+2. For StartTunnel, set the current line to the new version; the StartOS and StartWRT tags derive theirs.
+
+A later patch release of an archived minor needs its tag updated here to reach the site.
 
 ## Deployment
 
@@ -40,7 +49,7 @@ The StartOS, StartTunnel, Packaging, and StartWRT books are NOT here — they mo
 
 Content reaches `live-docs` two ways:
 
-- **On a tag.** `docs-sync-on-tag.yml` advances `live-docs` to the tagged tree for the released project, the shared libraries beneath it, and the repo root — **all of `projects/start-docs/`** included, whenever the released product ships a book — then dispatches the deploy. Every other `projects/*` stays on its own release, and a tag behind a release already synced leaves this project, `shared-libs/` and the root where the newer release put them. This is how a book — and any change you make in this project, including `versions.conf`, `build.sh`, and `theme/` — actually goes live. Work here therefore ships on someone else's release: if a site change needs to go out now, PR it to `live-docs` as below.
+- **On a tag.** `docs-sync-on-tag.yml` advances `live-docs` to the tagged tree for the released project, the shared libraries beneath it, and the repo root — **all of `projects/start-docs/`** included, whenever the released product ships a book — then dispatches the deploy. Every other `projects/*` stays on its own release, and a tag behind a release already synced leaves this project, `shared-libs/` and the root where the newer release put them. This is how a book — and any change you make in this project, including `build.sh` and `theme/` — actually goes live. In `versions.conf` a tag writes only its own book's current line, deriving it from the version for StartOS and StartWRT, plus the lines of books in this project and every archive line; other products' current lines stay as published. Work here therefore ships on someone else's release: if a site change needs to go out now, PR it to `live-docs` as below.
 - **By PR into `live-docs`.** For fixing what is already published. It deploys on merge and is then pushed back to master automatically (`docs-backport.yml`), so don't also write the fix in master.
 
 Because a tag sync overwrites this whole project from the tagged tree, never hand-edit `projects/start-docs/**` on `live-docs` expecting it to survive — land it in master too (the backport does this for you).

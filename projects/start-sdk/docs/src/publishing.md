@@ -14,6 +14,8 @@ When publishing or adding an already hosted package, the CLI submits verified en
 
 The fastest and most autonomous path is to run your own registry — install the `startos-registry` service on a StartOS device, point `start-cli` at it, and publish. See [Hosting a Registry](host-registry.md) for the full walkthrough (install, first-run setup, administration).
 
+When distributing outside Start9's pipeline, [publish your package-signing public keys](host-registry-setup.md#publish-signing-keys) through an independent source users already trust. For a self-hosted registry, [select which signers' keys it offers](host-registry-administration.md#offering-signing-keys-to-users) before users connect. Users manage package trust under **System → [Trusted Keys](/start-os/trusted-keys.html)**; permission to publish to a registry does not make a package trusted on their servers. Marketplace installs and updates without a trusted signing key warn and require risk confirmation.
+
 You can run a self-hosted registry in parallel with a Start9 Community submission: developers often keep an alpha/testing registry of their own while a more stable build is promoted through the community pipeline.
 
 ## Start9 Community Registry

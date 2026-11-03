@@ -25,7 +25,7 @@ The product books live in their product dirs so each book sits next to the code 
 projects/start-docs/
 ├── build.sh           ← builds every book into the docs/ output dir
 ├── serve.sh           ← build + local dev server
-├── versions.conf      ← book → version list (single source of truth)
+├── versions.conf      ← books, their current and archived versions (single source of truth)
 ├── theme/             ← shared mdBook theme (CSS/JS/favicon), symlinked by every book
 ├── landing/           ← static landing page served at docs.start9.com/
 ├── bitcoin-guides/    ← the Bitcoin Guides mdBook

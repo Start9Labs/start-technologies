@@ -1,0 +1,2 @@
+- El certificado de la interfaz web incluye el nombre o la dirección usados para abrirla: `router.lan`, `router.local`, la puerta de enlace de cualquier perfil, la dirección WAN o el nombre DDNS. Los dispositivos que confían en la CA raíz ya no reciben advertencias de nombre en ellos.
+- `router.lan` resuelve a la puerta de enlace IPv4 del perfil que consulta, en lugar de las de todos los perfiles.
