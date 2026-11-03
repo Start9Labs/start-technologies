@@ -1,5 +1,5 @@
 ---
-user-facing: true
+release-notes: true
 ---
 
 - An IPv4 reservation must now be in the subnet of the device's security profile; the router used to accept an address in another profile's subnet, which DHCP silently ignored.
