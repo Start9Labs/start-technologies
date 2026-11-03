@@ -6,11 +6,11 @@ Trusted Keys lists the individual public keys whose signatures your server accep
 
 Open **System → Trusted Keys**. Each row shows a key's label and first identity, its type (GPG or PEM), whether it is trusted for **Packages** and for **StartOS updates**, and its **Linked registries**, the connected registries that offer it. An identity is a GPG user ID, or for a PEM key the email address its registry publishes.
 
-Choose **View details** from a key's menu to see every identity, who added it and when, its linked registries, its fingerprint, and its full public key, which you can copy, with buttons to trust or distrust it for packages and for StartOS updates. The same details open from the **Signed by** list of a package or StartOS update, and from a key notification. GPG keys show their complete OpenPGP fingerprints; PEM keys show a SHA-256 fingerprint of their canonical public-key encoding. A registry's **Manage keys** action in **System → Registries** opens Trusted Keys filtered to the keys that registry offers.
+Choose **View details** from a key's menu to see every identity, who added it and when, its linked registries, its fingerprint, and its full public key, which you can copy, with separate **Enabled for service packages** and **Enabled for StartOS updates** toggle rows. The same details open from the **Signed by** list of a package or StartOS update, and from a key notification. GPG keys show their complete OpenPGP fingerprints; PEM keys show a SHA-256 fingerprint of their canonical public-key encoding. A registry's **Manage keys** action in **System → Registries** opens Trusted Keys filtered to the keys that registry offers.
 
 ## Changing Trust
 
-A key's menu also offers **Edit label**, trust or distrust for packages, trust or distrust for StartOS updates, and **Remove**. At least one key must stay trusted for StartOS updates. Keys offered by a connected registry cannot be removed; distrust them instead.
+Use the **Packages** and **StartOS updates** switches in the table to change a key's trust. The active switch shows a spinner while the request runs. On mobile, these actions move into the key's overflow menu. Each key's menu also offers **Edit label** and, when permitted, **Remove**. At least one key must stay trusted for StartOS updates. Keys offered by a connected registry cannot be removed; distrust them instead.
 
 New installations include the drbonez, matthill, and Start9 signing keys, trusted for packages and StartOS updates. The Alpha and community-registry build keys start untrusted. Upgrades preserve existing trust selections, including intentionally untrusted keys.
 

@@ -1,5 +1,6 @@
-import { Component, computed, inject } from '@angular/core'
+import { Component, computed, inject, signal } from '@angular/core'
 import {
+  FormsModule,
   NonNullableFormBuilder,
   ReactiveFormsModule,
   Validators,
@@ -8,18 +9,20 @@ import { TrustContext } from '@start9labs/marketplace'
 import { i18nPipe } from '@start9labs/shared'
 import { tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
 import {
-  TuiButton,
   TuiDialogContext,
   TuiError,
   TuiInput,
+  TuiLoader,
   TuiNotification,
   TuiTitle,
   tuiValidationErrorsProvider,
 } from '@taiga-ui/core'
+import { TuiSwitch } from '@taiga-ui/kit'
 import { TuiForm, TuiHeader } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
 import { TrustedKeyFacts } from './facts'
+import { TRUST_PERMISSIONS } from './permissions'
 
 @Component({
   template: `
@@ -49,52 +52,49 @@ import { TrustedKeyFacts } from './facts'
         </tui-textfield>
         <tui-error formControlName="name" />
       }
-      <footer>
-        <button
-          tuiButton
-          type="button"
-          [appearance]="key()?.marketplace ? 'secondary' : 'primary'"
-          [disabled]="trust.saving()"
-          (click)="toggle('marketplace')"
-        >
-          {{
-            (key()?.marketplace
-              ? 'Distrust for packages'
-              : 'Trust for packages'
-            ) | i18n
-          }}
-        </button>
-        <button
-          tuiButton
-          type="button"
-          [appearance]="key()?.os ? 'secondary' : 'primary'"
-          [disabled]="trust.saving()"
-          (click)="toggle('os')"
-        >
-          {{
-            (key()?.os
-              ? 'Distrust for StartOS updates'
-              : 'Trust for StartOS updates'
-            ) | i18n
-          }}
-        </button>
-      </footer>
+      @for (permission of permissions; track permission.context) {
+        <label class="g-toggle">
+          <span>{{ permission.label | i18n }}</span>
+          @if (changing() === permission.context) {
+            <tui-loader size="xs" />
+          }
+          <input
+            tuiSwitch
+            type="checkbox"
+            size="m"
+            [showIcons]="false"
+            [disabled]="trust.saving()"
+            [ngModel]="key()?.[permission.context] || false"
+            [ngModelOptions]="{ standalone: true }"
+            (click.prevent)="toggle(permission.context)"
+          />
+        </label>
+      }
     </form>
   `,
   styles: `
-    :host-context(tui-root._mobile) footer {
-      flex-direction: column;
+    .g-toggle {
+      height: auto;
+      min-height: var(--tui-height-l);
+      padding-block: 0.5rem;
+      gap: 0.75rem;
+    }
+
+    .g-toggle > span {
+      flex: 1;
     }
   `,
   imports: [
+    FormsModule,
     ReactiveFormsModule,
     TrustedKeyFacts,
-    TuiButton,
     TuiError,
     TuiForm,
     TuiHeader,
     TuiInput,
+    TuiLoader,
     TuiNotification,
+    TuiSwitch,
     TuiTitle,
     i18nPipe,
   ],
@@ -111,6 +111,8 @@ import { TrustedKeyFacts } from './facts'
 class TrustedKeyDetails {
   protected readonly context = injectContext<TuiDialogContext<void, string>>()
   protected readonly trust = inject(TrustedKeysService)
+  protected readonly permissions = TRUST_PERMISSIONS
+  protected readonly changing = signal<TrustContext | null>(null)
   protected readonly key = computed(
     () => this.trust.keys()?.[this.context.data],
   )
@@ -121,17 +123,24 @@ class TrustedKeyDetails {
   protected async toggle(context: TrustContext): Promise<void> {
     const key = this.key()
 
-    if (key) {
-      await this.trust.trust(this.context.data, key, context, !key[context])
-    } else {
+    if (!key) {
       tuiMarkControlAsTouchedAndValidate(this.form)
-      if (this.form.valid) {
+      if (!this.form.valid) return
+    }
+
+    this.changing.set(context)
+    try {
+      if (key) {
+        await this.trust.trust(this.context.data, key, context, !key[context])
+      } else {
         await this.trust.add(
           this.context.data,
           this.form.getRawValue().name,
           context,
         )
       }
+    } finally {
+      this.changing.set(null)
     }
   }
 }

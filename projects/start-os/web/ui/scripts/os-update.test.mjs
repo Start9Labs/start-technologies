@@ -57,7 +57,7 @@ boundary(
     'TuiTitle',
     'TuiLink',
   ],
-  'export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => [];',
+  'export const TUI_BREAKPOINT = Symbol("breakpoint"); export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => [];',
 )
 boundary(
   '@taiga-ui/kit',
@@ -67,6 +67,7 @@ boundary(
     'TuiBadgeNotification',
     'TuiButtonLoading',
     'TuiButtonSelect',
+    'TuiChip',
     'TuiDataListWrapper',
     'TuiFiles',
     'TuiFade',
@@ -1687,13 +1688,146 @@ const runTask = async work => {
   }
 }
 
+const { default: TrustedKeysPage } =
+  await import('src/app/routes/portal/routes/system/routes/trusted-keys')
+const { TRUSTED_KEY_DETAILS } =
+  await import('src/app/components/trusted-keys/details')
+
+for (const [context, expected] of [
+  ['marketplace', { marketplace: false, os: false }],
+  ['os', { marketplace: true, os: true }],
+]) {
+  for (const reject of [false, true]) {
+    test(`table ${context} switch tracks the active request and clears it on ${reject ? 'failure' : 'success'}`, async () => {
+      const response = deferred()
+      const calls = []
+      const key = { name: 'Publisher', marketplace: true, os: false }
+      const trust = {
+        saving: signal(false),
+        tasks: { runInline: runTask },
+        save: ProductionTrustedKeysService.prototype.save,
+        update: ProductionTrustedKeysService.prototype.update,
+        trust: ProductionTrustedKeysService.prototype.trust,
+        api: {
+          rpc: {
+            server: {
+              trustedKeys: {
+                update: async params => {
+                  calls.push(params)
+                  await response.promise
+                },
+              },
+            },
+          },
+        },
+      }
+      const page = { changing: signal(null), trust }
+      const operation = TrustedKeysPage.prototype.toggle.call(
+        page,
+        'publisher',
+        key,
+        context,
+      )
+      assert.deepEqual(page.changing(), { id: 'publisher', context })
+      assert.equal(trust.saving(), true)
+      assert.deepEqual(calls, [
+        { id: 'publisher', name: 'Publisher', ...expected },
+      ])
+      assert.deepEqual(key, { name: 'Publisher', marketplace: true, os: false })
+      if (reject) response.reject(new Error('Trust change refused'))
+      else response.resolve()
+      await operation
+      assert.equal(page.changing(), null)
+      assert.equal(trust.saving(), false)
+    })
+  }
+}
+
+function keyDetailsFixture(t, key) {
+  const id = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
+  const response = deferred()
+  const calls = []
+  const injector = createEnvironmentInjector(
+    [
+      {
+        provide: NonNullableFormBuilder,
+        useValue: new FormBuilder().nonNullable,
+      },
+      { provide: CONTEXT, useValue: { data: id } },
+      {
+        provide: TrustedKeysService,
+        useValue: {
+          keys: signal(key ? { [id]: key } : {}),
+          trust: async (...args) => {
+            calls.push(['update', ...args])
+            await response.promise
+          },
+          add: async (...args) => {
+            calls.push(['add', ...args])
+            await response.promise
+          },
+        },
+      },
+    ],
+    null,
+  )
+  t.after(() => injector.destroy())
+  return {
+    id,
+    calls,
+    response,
+    instance: runInInjectionContext(
+      injector,
+      () => new TRUSTED_KEY_DETAILS.component(),
+    ),
+  }
+}
+
+for (const [context, enabled] of [
+  ['marketplace', false],
+  ['os', true],
+]) {
+  test(`details ${context} switch changes only its selected permission`, async t => {
+    const key = { name: 'Publisher', marketplace: true, os: false }
+    const f = keyDetailsFixture(t, key)
+    const operation = f.instance.toggle(context)
+    assert.equal(f.instance.changing(), context)
+    assert.deepEqual(f.calls, [['update', f.id, key, context, enabled]])
+    f.response.resolve()
+    await operation
+    assert.equal(f.instance.changing(), null)
+    assert.deepEqual(key, { name: 'Publisher', marketplace: true, os: false })
+  })
+
+  test(`unknown-key ${context} switch retains the atomic import flow`, async t => {
+    const f = keyDetailsFixture(t)
+    f.instance.form.controls.name.setValue('Publisher')
+    const operation = f.instance.toggle(context)
+    assert.equal(f.instance.changing(), context)
+    assert.deepEqual(f.calls, [['add', f.id, 'Publisher', context]])
+    f.response.resolve()
+    await operation
+    assert.equal(f.instance.changing(), null)
+  })
+}
+
+test('unknown-key switches require a nonblank label before importing', async t => {
+  const f = keyDetailsFixture(t)
+  for (const name of ['', '  ']) {
+    f.instance.form.controls.name.setValue(name)
+    await f.instance.toggle('os')
+    assert.deepEqual(f.calls, [])
+    assert.equal(f.instance.changing(), null)
+  }
+})
+
 test('unknown-key trust uses one atomic import request and clears saving on failure', async () => {
   for (const context of ['marketplace', 'os']) {
     for (const reject of [false, true]) {
       const calls = []
       const instance = {
         saving: signal(false),
-        tasks: { run: runTask },
+        tasks: { runInline: runTask },
         save: ProductionTrustedKeysService.prototype.save,
         api: {
           rpc: {

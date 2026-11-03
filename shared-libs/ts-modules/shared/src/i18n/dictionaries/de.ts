@@ -954,4 +954,6 @@ export default {
   1102: 'Alle anzeigen',
   1103: 'Einige zusätzliche Signaturen konnten nicht verifiziert werden und wurden ignoriert.',
   1104: 'Paketsignaturen werden geprüft',
+  1105: 'Für Dienstpakete aktiviert',
+  1106: 'Für StartOS-Updates aktiviert',
 } satisfies i18n

@@ -954,4 +954,6 @@ export default {
   1102: 'Pokaż wszystko',
   1103: 'Niektórych dodatkowych podpisów nie udało się zweryfikować, więc zostały pominięte.',
   1104: 'Sprawdzanie podpisów pakietu',
+  1105: 'Włączony dla pakietów usług',
+  1106: 'Włączony dla aktualizacji StartOS',
 } satisfies i18n

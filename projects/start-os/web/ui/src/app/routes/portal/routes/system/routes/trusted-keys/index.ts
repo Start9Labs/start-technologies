@@ -1,6 +1,7 @@
-import { Component, computed, inject, input } from '@angular/core'
+import { Component, computed, inject, input, signal } from '@angular/core'
+import { FormsModule } from '@angular/forms'
 import { RouterLink } from '@angular/router'
-import { keyIdentities, keyType } from '@start9labs/marketplace'
+import { keyIdentities, keyType, TrustContext } from '@start9labs/marketplace'
 import {
   DialogService,
   DocsLinkDirective,
@@ -10,17 +11,18 @@ import {
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import {
+  TUI_BREAKPOINT,
   TuiButton,
   TuiDataList,
   TuiDropdown,
-  TuiIcon,
   TuiLoader,
   TuiTitle,
 } from '@taiga-ui/core'
-import { TuiChip } from '@taiga-ui/kit'
+import { TuiButtonLoading, TuiChip, TuiSwitch } from '@taiga-ui/kit'
 import { defaultIfEmpty, firstValueFrom } from 'rxjs'
 import { ADD_TRUSTED_KEY } from 'src/app/components/trusted-keys/form'
 import { TRUSTED_KEYS_NOTICE } from 'src/app/components/trusted-keys/notice'
+import { TRUST_PERMISSIONS } from 'src/app/components/trusted-keys/permissions'
 import { BackDirective } from 'src/app/routes/portal/components/back'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { TitleDirective } from 'src/app/services/title.service'
@@ -69,8 +71,9 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
         <table [appTable]="[]">
           <th>{{ 'Key' | i18n }}</th>
           <th>{{ 'Type' | i18n }}</th>
-          <th class="trust">{{ 'Packages' | i18n }}</th>
-          <th class="trust">{{ 'StartOS updates' | i18n }}</th>
+          @for (permission of permissions; track permission.context) {
+            <th class="trust">{{ permission.title | i18n }}</th>
+          }
           <th>{{ 'Linked registries' | i18n }}</th>
           <th></th>
           @for (row of rows; track row.id) {
@@ -91,24 +94,34 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
               <td class="extra" [attr.data-label]="'Type' | i18n">
                 {{ row.type }}
               </td>
-              <td class="trust" [attr.data-label]="'Packages' | i18n">
-                <tui-icon
-                  [icon]="row.key.marketplace ? '@tui.check' : '@tui.x'"
-                  [class]="row.key.marketplace ? 'g-positive' : 'g-negative'"
-                  [attr.aria-label]="
-                    (row.key.marketplace ? 'Trusted' : 'Not trusted') | i18n
-                  "
-                />
-              </td>
-              <td class="trust" [attr.data-label]="'StartOS updates' | i18n">
-                <tui-icon
-                  [icon]="row.key.os ? '@tui.check' : '@tui.x'"
-                  [class]="row.key.os ? 'g-positive' : 'g-negative'"
-                  [attr.aria-label]="
-                    (row.key.os ? 'Trusted' : 'Not trusted') | i18n
-                  "
-                />
-              </td>
+              @if (breakpoint() !== 'mobile') {
+                @for (permission of permissions; track permission.context) {
+                  <td class="trust">
+                    <tui-loader
+                      size="xs"
+                      [loading]="
+                        changing()?.id === row.id &&
+                        changing()?.context === permission.context
+                      "
+                    >
+                      <input
+                        tuiSwitch
+                        type="checkbox"
+                        size="s"
+                        [showIcons]="false"
+                        [disabled]="trust.saving()"
+                        [ngModel]="row.key[permission.context]"
+                        [attr.aria-label]="
+                          (permission.label | i18n) + ': ' + row.key.name
+                        "
+                        (click.prevent)="
+                          toggle(row.id, row.key, permission.context)
+                        "
+                      />
+                    </tui-loader>
+                  </td>
+                }
+              }
               <td class="extra" [attr.data-label]="'Linked registries' | i18n">
                 @for (offer of row.offers; track offer.url) {
                   <div>{{ offer.name }}</div>
@@ -126,6 +139,9 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"
                   [disabled]="trust.saving()"
+                  [loading]="
+                    breakpoint() === 'mobile' && changing()?.id === row.id
+                  "
                 >
                   {{ 'More' | i18n }} {{ row.key.name }}
                   <tui-data-list *tuiDropdown="let close" (click)="close()">
@@ -135,35 +151,29 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
                     <button tuiOption (click)="trust.rename(row.id, row.key)">
                       {{ 'Edit label' | i18n }}
                     </button>
-                    <button
-                      tuiOption
-                      (click)="
-                        trust.trust(
-                          row.id,
-                          row.key,
-                          'marketplace',
-                          !row.key.marketplace
-                        )
-                      "
-                    >
-                      {{
-                        (row.key.marketplace
-                          ? 'Distrust for packages'
-                          : 'Trust for packages'
-                        ) | i18n
-                      }}
-                    </button>
-                    <button
-                      tuiOption
-                      (click)="trust.trust(row.id, row.key, 'os', !row.key.os)"
-                    >
-                      {{
-                        (row.key.os
-                          ? 'Distrust for StartOS updates'
-                          : 'Trust for StartOS updates'
-                        ) | i18n
-                      }}
-                    </button>
+                    @if (breakpoint() === 'mobile') {
+                      @for (
+                        permission of permissions;
+                        track permission.context
+                      ) {
+                        <button
+                          tuiOption
+                          [iconStart]="
+                            row.key[permission.context]
+                              ? '@tui.toggle-right'
+                              : '@tui.toggle-left'
+                          "
+                          (click)="toggle(row.id, row.key, permission.context)"
+                        >
+                          {{
+                            (row.key[permission.context]
+                              ? permission.disable
+                              : permission.enable
+                            ) | i18n
+                          }}
+                        </button>
+                      }
+                    }
                     @if (row.key.removable) {
                       <button
                         tuiOption
@@ -201,34 +211,17 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
       text-align: center;
     }
 
-    tui-icon {
-      font-size: 1rem;
-    }
-
     td:last-child {
       text-align: end;
     }
 
     :host-context(tui-root._mobile) {
-      .trust {
-        text-align: start;
-      }
-
       .extra {
         display: none;
       }
 
-      td[data-label] {
-        grid-column: 1;
-
-        &::before {
-          content: attr(data-label) ': ';
-          color: var(--tui-text-secondary);
-        }
-      }
-
       td:last-child {
-        grid-area: 1 / 2 / 4;
+        grid-area: 1 / 2;
         align-content: center;
       }
     }
@@ -236,15 +229,17 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
   imports: [
     BackDirective,
     DocsLinkDirective,
+    FormsModule,
     RouterLink,
     TableComponent,
     TitleDirective,
     TuiButton,
+    TuiButtonLoading,
     TuiChip,
     TuiDataList,
     TuiDropdown,
-    TuiIcon,
     TuiLoader,
+    TuiSwitch,
     TuiTitle,
     i18nPipe,
   ],
@@ -253,6 +248,12 @@ export default class TrustedKeys {
   private readonly dialogs = inject(DialogService)
 
   protected readonly trust = inject(TrustedKeysService)
+  protected readonly breakpoint = inject(TUI_BREAKPOINT)
+  protected readonly permissions = TRUST_PERMISSIONS
+  protected readonly changing = signal<{
+    id: string
+    context: TrustContext
+  } | null>(null)
 
   public readonly registry = input<string>()
 
@@ -284,6 +285,19 @@ export default class TrustedKeys {
       )
       .sort((a, b) => a.key.name.localeCompare(b.key.name))
   })
+
+  protected async toggle(
+    id: string,
+    key: T.TrustedKey,
+    context: TrustContext,
+  ): Promise<void> {
+    this.changing.set({ id, context })
+    try {
+      await this.trust.trust(id, key, context, !key[context])
+    } finally {
+      this.changing.set(null)
+    }
+  }
 
   protected async add(): Promise<void> {
     const res = await firstValueFrom(

@@ -955,4 +955,6 @@ export const ENGLISH: Record<string, number> = {
   'View all': 1102,
   'Some supplemental signatures could not be verified and were ignored.': 1103,
   'Checking package signatures': 1104,
+  'Enabled for service packages': 1105,
+  'Enabled for StartOS updates': 1106,
 }

@@ -954,4 +954,6 @@ export default {
   1102: 'Ver todo',
   1103: 'Algunas firmas adicionales no se pudieron verificar y se ignoraron.',
   1104: 'Verificando las firmas del paquete',
+  1105: 'Habilitada para paquetes de servicios',
+  1106: 'Habilitada para actualizaciones de StartOS',
 } satisfies i18n

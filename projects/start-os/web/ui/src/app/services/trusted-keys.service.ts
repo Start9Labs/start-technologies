@@ -69,7 +69,11 @@ export class TrustedKeysService extends MarketplaceTrust {
         .pipe(defaultIfEmpty('')),
     )
 
-    if (name.trim()) await this.update(id, { ...key, name })
+    if (name.trim()) {
+      await this.save(() =>
+        this.tasks.run(() => this.update(id, { ...key, name }), 'Saving'),
+      )
+    }
   }
 
   async trust(
@@ -78,16 +82,22 @@ export class TrustedKeysService extends MarketplaceTrust {
     context: TrustContext,
     trusted: boolean,
   ): Promise<void> {
-    await this.update(id, { ...key, [context]: trusted })
+    await this.save(() =>
+      this.tasks.runInline(() =>
+        this.update(id, { ...key, [context]: trusted }),
+      ),
+    )
   }
 
   async add(id: string, name: string, context: TrustContext): Promise<void> {
     await this.save(() =>
-      this.api.rpc.server.trustedKeys.add({
-        name,
-        publicKeys: [parsePemPublicKey(id)],
-        trustFor: context,
-      }),
+      this.tasks.runInline(() =>
+        this.api.rpc.server.trustedKeys.add({
+          name,
+          publicKeys: [parsePemPublicKey(id)],
+          trustFor: context,
+        }),
+      ),
     )
   }
 
@@ -107,23 +117,29 @@ export class TrustedKeysService extends MarketplaceTrust {
         'Remove',
       )
     ) {
-      await this.save(() => this.api.rpc.server.trustedKeys.remove({ id }))
+      await this.save(() =>
+        this.tasks.run(
+          () => this.api.rpc.server.trustedKeys.remove({ id }),
+          'Saving',
+        ),
+      )
     }
   }
 
-  private async update(
+  private update(
     id: string,
     { name, marketplace, os }: T.TrustedKey,
-  ): Promise<void> {
-    await this.save(() =>
-      this.api.rpc.server.trustedKeys.update({ id, name, marketplace, os }),
-    )
+  ): Promise<unknown> {
+    return this.api.rpc.server.trustedKeys.update({ id, name, marketplace, os })
   }
 
   private async save(task: () => Promise<unknown>): Promise<void> {
     this.saving.set(true)
-    await this.tasks.run(task, 'Saving')
-    this.saving.set(false)
+    try {
+      await task()
+    } finally {
+      this.saving.set(false)
+    }
   }
 
   private confirm(
