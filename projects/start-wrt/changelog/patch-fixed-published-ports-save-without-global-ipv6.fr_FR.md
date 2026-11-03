@@ -1,0 +1,1 @@
+- **Les ports publiés s’enregistrent même sans adresse IPv6 globale sur le routeur.** Sa perte côté WAN bloquait toute modification, même uniquement IPv4, dès qu’une redirection IPv6 existait. Les redirections IPv6 existantes conservent leur règle et signalent l’absence d’adresse ; seul l’ajout d’une nouvelle redirection IPv6 nécessite encore une adresse IPv6 globale.
