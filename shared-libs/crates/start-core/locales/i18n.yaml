@@ -1,5 +1,11 @@
 _version: 2
 
+about.sign-s9pk:
+  en_US: "Add a supplemental package signature using the identity key"
+  de_DE: "Eine zusätzliche Paketsignatur mit dem Identitätsschlüssel hinzufügen"
+  es_ES: "Añadir una firma adicional al paquete con la clave de identidad"
+  fr_FR: "Ajouter une signature supplémentaire au paquet avec la clé d’identité"
+  pl_PL: "Dodaj dodatkowy podpis pakietu kluczem tożsamości"
 acme.invalid-contact:
   en_US: "Invalid ACME contact %{contact}: must be a 'mailto:' URI containing an email address (e.g. 'mailto:you@example.com')"
   de_DE: "Ungültiger ACME-Kontakt %{contact}: Muss eine „mailto:“-URI mit einer E-Mail-Adresse sein (z. B. „mailto:du@example.com“)"
@@ -310,7 +316,72 @@ s9pk.pack.image-unavailable:
   fr_FR: "L'image %{image} n'est pas disponible pour %{requested}"
   pl_PL: "Obraz %{image} nie jest dostępny dla %{requested}"
 
-# setup.rs
+s9pk.source.invalid-range:
+  en_US: "Archive range overflows or exceeds the source length"
+  de_DE: "Archivbereich läuft über oder überschreitet die Quelllänge"
+  es_ES: "El rango del archivo se desborda o supera la longitud del origen"
+  fr_FR: "La plage de l’archive déborde ou dépasse la taille de la source"
+  pl_PL: "Zakres archiwum przepełnia się lub przekracza długość źródła"
+s9pk.source.invalid-range-response:
+  en_US: "Invalid HTTP range response"
+  de_DE: "Ungültige HTTP-Bereichsantwort"
+  es_ES: "Respuesta de rango HTTP inválida"
+  fr_FR: "Réponse de plage HTTP invalide"
+  pl_PL: "Nieprawidłowa odpowiedź zakresu HTTP"
+s9pk.trailer.discarded:
+  en_US: "Archive rewrite discarded supplemental metadata; sign the resulting package again"
+  de_DE: "Beim Neuschreiben des Archivs wurden zusätzliche Metadaten verworfen; signieren Sie das entstandene Paket erneut"
+  es_ES: "La reescritura del archivo descartó los metadatos adicionales; vuelva a firmar el paquete resultante"
+  fr_FR: "La réécriture de l’archive a supprimé les métadonnées supplémentaires ; signez à nouveau le paquet obtenu"
+  pl_PL: "Przepisanie archiwum usunęło dodatkowe metadane; podpisz ponownie wynikowy pakiet"
+s9pk.trailer.edit-refused:
+  en_US: "Refusing to edit malformed or unsupported supplemental metadata"
+  de_DE: "Fehlerhafte oder nicht unterstützte zusätzliche Metadaten können nicht bearbeitet werden"
+  es_ES: "No se pueden editar metadatos adicionales incorrectos o no compatibles"
+  fr_FR: "Impossible de modifier des métadonnées supplémentaires malformées ou non prises en charge"
+  pl_PL: "Odmowa edycji uszkodzonych lub nieobsługiwanych dodatkowych metadanych"
+s9pk.trailer.invalid-framing:
+  en_US: "Ignoring malformed or overlapping supplemental trailer"
+  de_DE: "Fehlerhafter oder überlappender Zusatzanhang wird ignoriert"
+  es_ES: "Se ignora el bloque adicional incorrecto o solapado"
+  fr_FR: "Bloc supplémentaire malformé ou chevauchant ignoré"
+  pl_PL: "Pomijanie uszkodzonego lub nakładającego się dodatkowego bloku"
+s9pk.trailer.invalid-record:
+  en_US: "Ignoring malformed supplemental signature record"
+  de_DE: "Fehlerhafter zusätzlicher Signaturdatensatz wird ignoriert"
+  es_ES: "Se ignora el registro de firma adicional incorrecto"
+  fr_FR: "Enregistrement de signature supplémentaire malformé ignoré"
+  pl_PL: "Pomijanie uszkodzonego rekordu dodatkowego podpisu"
+s9pk.trailer.invalid-signature:
+  en_US: "Ignoring invalid or unsupported supplemental signature"
+  de_DE: "Ungültige oder nicht unterstützte zusätzliche Signatur wird ignoriert"
+  es_ES: "Se ignora la firma adicional inválida o no compatible"
+  fr_FR: "Signature supplémentaire invalide ou non prise en charge ignorée"
+  pl_PL: "Pomijanie nieprawidłowego lub nieobsługiwanego dodatkowego podpisu"
+s9pk.trailer.read-failed:
+  en_US: "Unable to read optional supplemental metadata"
+  de_DE: "Optionale zusätzliche Metadaten konnten nicht gelesen werden"
+  es_ES: "No se pudieron leer los metadatos adicionales opcionales"
+  fr_FR: "Impossible de lire les métadonnées supplémentaires facultatives"
+  pl_PL: "Nie można odczytać opcjonalnych dodatkowych metadanych"
+s9pk.trailer.too-large:
+  en_US: "Supplemental metadata exceeds the 1 MiB limit"
+  de_DE: "Zusätzliche Metadaten überschreiten die Grenze von 1 MiB"
+  es_ES: "Los metadatos adicionales superan el límite de 1 MiB"
+  fr_FR: "Les métadonnées supplémentaires dépassent la limite de 1 Mio"
+  pl_PL: "Dodatkowe metadane przekraczają limit 1 MiB"
+s9pk.trailer.unknown-size:
+  en_US: "Supplemental signatures cannot be discovered without a known source length"
+  de_DE: "Zusätzliche Signaturen können ohne bekannte Quelllänge nicht gefunden werden"
+  es_ES: "No se pueden descubrir firmas adicionales sin conocer la longitud del origen"
+  fr_FR: "Impossible de découvrir les signatures supplémentaires sans connaître la taille de la source"
+  pl_PL: "Nie można wykryć dodatkowych podpisów bez znanej długości źródła"
+s9pk.trailer.unsupported-version:
+  en_US: "Ignoring unsupported supplemental trailer version"
+  de_DE: "Nicht unterstützte Version des Zusatzanhangs wird ignoriert"
+  es_ES: "Se ignora la versión no compatible del bloque adicional"
+  fr_FR: "Version non prise en charge du bloc supplémentaire ignorée"
+  pl_PL: "Pomijanie nieobsługiwanej wersji dodatkowego bloku"
 setup.opening-data-drive:
   en_US: "Opening data drive"
   de_DE: "Datenlaufwerk wird geöffnet"

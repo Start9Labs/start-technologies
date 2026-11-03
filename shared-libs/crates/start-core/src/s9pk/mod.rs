@@ -68,7 +68,22 @@ where
         Ok(s9pk.into_dyn())
     } else {
         let s9pk = S9pk::deserialize(&Arc::new(source), None).await?;
-        validate_signer(s9pk.as_archive().signer(), accepted)?;
+        if let Some(accepted) = accepted {
+            use crate::registry::signer::AcceptSigners;
+
+            let mut policy = AcceptSigners::Any(
+                accepted
+                    .iter()
+                    .cloned()
+                    .map(AcceptSigners::Signer)
+                    .collect(),
+            );
+            let commitment = s9pk.as_archive().commitment().await?;
+            for (signer, signature) in s9pk.signatures().await? {
+                policy.process_signature(&signer, &commitment, v2::SIG_CONTEXT, &signature)?;
+            }
+            policy.try_accept()?;
+        }
         Ok(s9pk.into_dyn())
     }
 }

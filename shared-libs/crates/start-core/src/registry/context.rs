@@ -504,3 +504,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "package/ingestion_tests.rs"]
+mod ingestion_tests;

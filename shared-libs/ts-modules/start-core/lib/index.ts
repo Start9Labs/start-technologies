@@ -21,3 +21,6 @@ export * as z from './z'
 
 export * as utils from './util'
 export * as auth from './auth/signature'
+
+export { ed25519PublicKeyDer64, parseEd25519PublicKey } from './auth/signature'
+export type { S9pkDiagnostic } from './s9pk'

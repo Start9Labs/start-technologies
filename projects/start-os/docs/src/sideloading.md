@@ -10,6 +10,8 @@ Sideloading lets you install a service from a `.s9pk` file without using any reg
 
 1. Review the package details, including **Signed by**, and click **Install**, **Update**, or **Reinstall**. If no key trusted for packages in [Trusted Keys](trusted-keys.md) signs the package, a warning appears and you must confirm the risks before installation starts.
 
+**Signed by** includes the embedded signer and any valid supplemental signatures carried by a v2 package. **View all** opens any keys hidden by the preview, and selecting a key opens the same details and trust controls as the Marketplace. A key included in a file is not automatically trusted. Unverifiable supplemental signatures produce a warning and are ignored; the package's embedded signature and content must still be valid.
+
 Keep the browser tab open while the file uploads. Large files and slow connections can take several minutes; follow progress in **Services**. If the upload fails, StartOS shows an error message.
 
 When you sideload from the command line with `start-cli package install --sideload`, installation errors appear in the command's progress output. Very long messages are shortened safely to fit the progress stream. CLI sideloads require a key trusted for packages in Trusted Keys unless you explicitly supply `--trust`; signatures and file integrity are verified in either case.

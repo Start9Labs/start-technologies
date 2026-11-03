@@ -807,6 +807,10 @@ Build an s9pk package from source files.
 - `--no-assets` — Build without assets
 - `--arch <ARCH>` — Filter by CPU architecture
 
+### `start-cli s9pk sign <S9PK>`
+
+Add a supplemental signature to a v2 package using the configured identity key (including a GPG-agent identity). The base archive and its embedded signature remain unchanged. Existing valid supplemental metadata and unknown fields are preserved; malformed or unsupported trailer versions are refused. Content-changing edits discard supplemental metadata with a warning, requiring the resulting package to be signed again.
+
 ### `start-cli s9pk publish <S9PK>`
 
 Publish an s9pk to the configured S3 bucket and index it on the registry.

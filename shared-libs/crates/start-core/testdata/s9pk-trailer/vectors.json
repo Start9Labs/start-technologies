@@ -1,0 +1,39 @@
+{
+  "overlapCommitment": {
+    "type": "merkle-archive",
+    "rootSighash": "KyUn010c494DxGJyVP/jBOYF56vbfG7X88aijS6DbsA",
+    "rootMaxsize": 380
+  },
+  "smallR": "MFkwFQYTaa719bHniYqFyZya47uF+/KJWwRAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD1fgYTfFfsP4F4eYbOkdGGQaRs+menPIM1jl6O8P3BDg==",
+  "torsionR": "MFkwFQYTaa719bHniYqFyZya47uF+/KJWwRA5znZEDrBc9Pt7WbRqPm0EdBm5ft24VYJoCzSFysF3SW5g+fl/CSAaSwU+ESHHRrKedhZhUCJ3XMfvYCeacOtAw==",
+  "largeBound": {
+    "bound": "9007199254740993",
+    "signature": "MFkwFQYTaa719bHniYqFyZya47uF+/KJWwRApU/OJV40OOD8TRHb2iqljWEpx4o3RLt1TokBmVD4ViHJ+EnRgR8Y8mnLfOXCFZKmU2E9NHb1GKdavXCHPAf8Bw=="
+  },
+  "invalidPoint": {
+    "signer": "MCowBQYDK2VwAyEAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "signature": "MFkwFQYTaa719bHniYqFyZya47uF+/KJWwRAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+  },
+  "commitment": {
+    "type": "merkle-archive",
+    "rootSighash": "CEhWFKyWwTpG30snr5ZcatODIjlEDUuTrfA0uV0ZJ1g",
+    "rootMaxsize": 380
+  },
+  "messageHex": "08485614ac96c13a46df4b27af965c6ad3832239440d4b93adf034b95d192758000000000000017c",
+  "taggedMessageHex": "53746172742d436f6d6d69746d656e742d53696720763100047339706b0208485614ac96c13a46df4b27af965c6ad3832239440d4b93adf034b95d192758000000000000017c",
+  "embedded": "MCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+  "endorsements": [
+    {
+      "signer": "MCowBQYDK2VwAyEAE5j2LG0aRXxRumpLXz29L2n8qTIWIY3ImX5Ba9F9k8o=",
+      "signature": "MFkwFQYTaa719bHniYqFyZya47uF+/KJWwRA6U5hZya1AxxiHbZ9ltqi/flHtKAvcKZd/1O9Ht4F3cXbn3akhFvmkE7pnkqfAITCQuoe1zrEHyDxEP/IE7HzAA=="
+    },
+    {
+      "signer": "MCowBQYDK2VwAyEA/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=",
+      "signature": "MEkwBQYDK2VwBEAICUcAf/9cseTlis3B5L0bQsDbLcgKgrLL/buyy+2iiv16md+kcLs8BN+NNbCgefg6aMnW4OIhYOaJrogxI8kO"
+    },
+    {
+      "signer": "MCowBQYDK2VwAyEAQ6cucUQBdi32a2jCbfvfJoKq7J8kdOykYT5CSg+6/Tw=",
+      "signature": "MEkwBQYDK2VwBECJDSLe38q5wyFykHi+DMLfJqAitsqAEACjYDeGZQtjeB+2WiiCUdqd9/2tzAVBWrYN70iS+JporAD1AryrxfUH"
+    }
+  ]
+}

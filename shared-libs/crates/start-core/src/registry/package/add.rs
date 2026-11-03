@@ -6,6 +6,7 @@ use imbl_value::InternedString;
 use itertools::Itertools;
 use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
+use tracing::Instrument;
 use url::Url;
 
 use crate::PackageId;
@@ -66,23 +67,32 @@ pub async fn add_package(
         &Arc::new(HttpSource::new(ctx.client.clone(), url.clone()).await?),
         Some(&commitment),
     )
+    .instrument(tracing::info_span!("registry-package-source", %url))
     .await?;
 
+    let indexed_commitment = s9pk.as_archive().commitment().await?;
+    let mut secondary_signatures = Vec::new();
     for url in rest {
-        S9pk::deserialize(
+        let variant = S9pk::deserialize(
             &Arc::new(HttpSource::new(ctx.client.clone(), url.clone()).await?),
-            Some(&commitment),
+            Some(&indexed_commitment),
         )
+        .instrument(tracing::info_span!("registry-package-source", %url))
         .await?;
+        secondary_signatures.push((
+            variant.as_archive().commitment().await?,
+            variant.signatures().await?,
+        ));
     }
 
     let manifest = s9pk.as_manifest();
 
     let mut info = PackageVersionInfo::from_s9pk(&s9pk, urls, &icons_dir(&ctx.datadir)).await?;
-    for (_, s9pk) in &mut info.s9pks {
-        if !s9pk.signatures.contains_key(&uploader) && s9pk.commitment == commitment {
-            s9pk.signatures.insert(uploader.clone(), signature.clone());
+    for (_, asset) in &mut info.s9pks {
+        for (actual, signatures) in &secondary_signatures {
+            asset.merge_signatures(actual, signatures.clone());
         }
+        asset.merge_signatures(&commitment, [(uploader.clone(), signature.clone())]);
     }
 
     ctx.db
@@ -382,16 +392,15 @@ pub async fn add_mirror(
         &Arc::new(HttpSource::new(ctx.client.clone(), url.clone()).await?),
         Some(&commitment),
     )
+    .instrument(tracing::info_span!("registry-package-source", %url))
     .await?;
 
     let manifest = s9pk.as_manifest();
 
     let mut info =
         PackageVersionInfo::from_s9pk(&s9pk, vec![url], &icons_dir(&ctx.datadir)).await?;
-    for (_, s9pk) in &mut info.s9pks {
-        if !s9pk.signatures.contains_key(&uploader) && s9pk.commitment == commitment {
-            s9pk.signatures.insert(uploader.clone(), signature.clone());
-        }
+    for (_, asset) in &mut info.s9pks {
+        asset.merge_signatures(&commitment, [(uploader.clone(), signature.clone())]);
     }
 
     ctx.db

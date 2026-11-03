@@ -5,7 +5,7 @@ use std::task::Poll;
 
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
-use reqwest::header::{CONTENT_LENGTH, RANGE};
+use reqwest::header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, RANGE};
 use reqwest::{Client, Url};
 use tokio::io::{AsyncRead, AsyncReadExt, ReadBuf, Take};
 use tokio_util::io::StreamReader;
@@ -30,8 +30,13 @@ impl HttpSource {
             .with_kind(ErrorKind::Network)?
             .error_for_status()
             .with_kind(ErrorKind::Network)?;
-        // GitHub's release-asset CDN performs poorly under range requests.
-        let range_support = false;
+        let range_support = head
+            .headers()
+            .get(ACCEPT_RANGES)
+            .is_some_and(|value| value == "bytes");
+        if !range_support {
+            tracing::debug!(%url, "HTTP source does not advertise ranges; tail discovery may stream the full response");
+        }
         let size = head
             .headers()
             .get(CONTENT_LENGTH)
@@ -71,24 +76,65 @@ impl ArchiveSource for HttpSource {
     }
     async fn fetch(&self, position: u64, size: u64) -> Result<Self::FetchReader, Error> {
         match &self.range_support {
-            Ok(_) => Ok(HttpReader::Range(
-                StreamReader::new(if size > 0 {
-                    self.client
-                        .get(self.url.clone())
-                        .header(RANGE, format!("bytes={}-{}", position, position + size - 1))
-                        .send()
-                        .await
-                        .with_kind(ErrorKind::Network)?
-                        .error_for_status()
-                        .with_kind(ErrorKind::Network)?
-                        .bytes_stream()
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-                        .apply(boxed)
+            Ok(_) => {
+                if size == 0 {
+                    return Ok(HttpReader::Range(
+                        StreamReader::new(futures::stream::empty().apply(boxed)).take(0),
+                    ));
+                }
+                let end = position.checked_add(size - 1).ok_or_else(|| {
+                    Error::new(
+                        eyre!("{}", t!("s9pk.source.invalid-range")),
+                        ErrorKind::Network,
+                    )
+                })?;
+                let response = self
+                    .client
+                    .get(self.url.clone())
+                    .header(RANGE, format!("bytes={position}-{end}"))
+                    .send()
+                    .await
+                    .with_kind(ErrorKind::Network)?
+                    .error_for_status()
+                    .with_kind(ErrorKind::Network)?;
+                let partial = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+                if partial {
+                    let expected = format!("bytes {position}-{end}/");
+                    ensure_code!(
+                        response
+                            .headers()
+                            .get(CONTENT_RANGE)
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|v| v.strip_prefix(&expected))
+                            .and_then(|v| v.parse::<u64>().ok())
+                            .is_some_and(
+                                |total| total > end && self.size.is_none_or(|size| size == total)
+                            ),
+                        ErrorKind::Network,
+                        "{}",
+                        t!("s9pk.source.invalid-range-response")
+                    );
                 } else {
-                    futures::stream::empty().apply(boxed)
-                })
-                .take(size),
-            )),
+                    ensure_code!(
+                        response.status() == reqwest::StatusCode::OK,
+                        ErrorKind::Network,
+                        "{}",
+                        t!("s9pk.source.invalid-range-response")
+                    );
+                    tracing::debug!(url = %self.url, "HTTP source ignored range; streaming whole-response fallback");
+                }
+                let mut reader = StreamReader::new(
+                    response
+                        .bytes_stream()
+                        .map_err(|e| std::io::Error::other(e))
+                        .apply(boxed),
+                );
+                if !partial {
+                    tokio::io::copy(&mut (&mut reader).take(position), &mut tokio::io::sink())
+                        .await?;
+                }
+                Ok(HttpReader::Range(reader.take(size)))
+            }
             Err(pool) => {
                 fn get_reader_for(
                     pool: &Arc<Mutex<BTreeSet<TrackingIO<HttpBodyReader>>>>,
@@ -183,5 +229,3 @@ impl PinnedDrop for HttpReader {
         }
     }
 }
-
-// type RangelessReader = StreamReader<BoxStream<'static, Bytes>, Bytes>;

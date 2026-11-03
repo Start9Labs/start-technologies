@@ -952,4 +952,6 @@ export default {
   1100: 'Powiązany z',
   1101: 'Otrzymuj powiadomienia w tej przeglądarce, gdy interfejs StartOS jest zamknięty.',
   1102: 'Pokaż wszystko',
+  1103: 'Niektórych dodatkowych podpisów nie udało się zweryfikować, więc zostały pominięte.',
+  1104: 'Sprawdzanie podpisów pakietu',
 } satisfies i18n

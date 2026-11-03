@@ -23,6 +23,8 @@ boundary(
   '@start9labs/shared',
   [
     'TaskService',
+    'EmptyPipe',
+    'MARKDOWN',
     'CopyService',
     'DialogService',
     'DocsLinkDirective',
@@ -41,6 +43,7 @@ boundary(
   '@taiga-ui/core',
   [
     'TuiButton',
+    'TuiButtonX',
     'TuiLoader',
     'TuiScrollbar',
     'TuiAppearance',
@@ -56,20 +59,26 @@ boundary(
   ],
   'export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => [];',
 )
-boundary('@taiga-ui/kit', [
-  'TuiAvatar',
-  'TuiBadge',
-  'TuiBadgeNotification',
-  'TuiButtonLoading',
-  'TuiButtonSelect',
-  'TuiDataListWrapper',
-  'TuiSwitch',
-  'TuiTextarea',
-])
+boundary(
+  '@taiga-ui/kit',
+  [
+    'TuiAvatar',
+    'TuiBadge',
+    'TuiBadgeNotification',
+    'TuiButtonLoading',
+    'TuiButtonSelect',
+    'TuiDataListWrapper',
+    'TuiFiles',
+    'TuiFade',
+    'TuiSwitch',
+    'TuiTextarea',
+  ],
+  'export const tuiInputFilesOptionsProvider = () => [];',
+)
 boundary(
   '@taiga-ui/cdk',
   ['TuiAnimated', 'TuiMapperPipe', 'TuiValidator'],
-  'export const tuiMarkControlAsTouchedAndValidate = () => {}; export const tuiProvide = () => [];',
+  'export const tuiMarkControlAsTouchedAndValidate = () => {}; export const tuiProvide = () => []; export const tuiIsString = value => typeof value === "string";',
 )
 boundary('@taiga-ui/layout', ['TuiCardLarge', 'TuiHeader', 'TuiForm'])
 boundary('@taiga-ui/addon-table', ['TuiTable', 'TuiTableDirective'])
@@ -93,6 +102,15 @@ import { inject, InjectionToken } from '@angular/core';
 export const CONTEXT = new InjectionToken('dialog context');
 export const injectContext = () => inject(CONTEXT);
 export class PolymorpheusComponent { constructor(component) { this.component = component; } }
+`,
+)
+boundary('./package.component', ['SideloadPackageComponent'])
+boundary(
+  './sideload.utils',
+  [],
+  `
+export const requests = [];
+export const validateS9pk = file => new Promise(resolve => requests.push({ file, resolve }));
 `,
 )
 boundary('src/app/services/api/embassy-api.service', ['ApiService'])
@@ -128,7 +146,7 @@ boundaries.set(
         `export * from ${JSON.stringify(new URL(`../../../../../shared-libs/ts-modules/marketplace/src/${file}`, import.meta.url).href)};`,
     )
     .join('\n') +
-    '\nexport class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {} export class MarketplaceSignersComponent {}',
+    '\nexport class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {} export class MarketplaceSignersComponent {} export class MarketplaceAboutComponent {} export class MarketplaceDependenciesComponent {} export class MarketplaceLinksComponent {} export class MarketplaceReleaseNotesComponent {}',
 )
 loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
@@ -2117,4 +2135,58 @@ test('registry removal uses the authoritative endpoint, clears a matching select
     { url: 'https://registry.test' },
     ['selectedRegistry', null],
   ])
+})
+
+const { default: SideloadPage } =
+  await import('src/app/routes/portal/routes/sideload/sideload.component')
+const { requests: sideloadValidations } = await import('./sideload.utils')
+const { SideloadPackageComponent } =
+  await import('src/app/routes/portal/routes/sideload/package.component')
+
+test('sideload License opens the complete archive text instead of its manifest identifier', async () => {
+  let displayed
+  SideloadPackageComponent.prototype.onStatic.call({
+    pkg: () => ({ license: 'MIT', fullLicense: 'Complete license fixture text' }),
+    dialog: {
+      openComponent: (_component, options) => {
+        displayed = options.data
+        return of(undefined)
+      },
+    },
+  })
+  assert.equal(await firstValueFrom(displayed), 'Complete license fixture text')
+})
+
+test('sideload validation cannot replace a newer file with stale details or errors', async () => {
+  for (const stale of [{ ...pkg, title: 'First' }, 'Invalid package file']) {
+    const page = new SideloadPage()
+    const first = new File(['first'], 'first.s9pk')
+    const second = new File(['second'], 'second.s9pk')
+    const older = page.onFile(first)
+    const newer = page.onFile(second)
+    const firstValidation = sideloadValidations.shift()
+    const secondValidation = sideloadValidations.shift()
+    assert.equal(firstValidation.file, first)
+    assert.equal(secondValidation.file, second)
+    const selected = { ...pkg, title: 'Second' }
+    secondValidation.resolve(selected)
+    await newer
+    firstValidation.resolve(stale)
+    await older
+    assert.equal(page.file, second)
+    assert.equal(page.package(), selected)
+    assert.equal(page.error(), null)
+  }
+})
+
+test('clearing a pending sideload validation keeps its eventual result hidden', async () => {
+  const page = new SideloadPage()
+  const pending = page.onFile(new File(['first'], 'first.s9pk'))
+  const validation = sideloadValidations.shift()
+  page.clear()
+  validation.resolve({ ...pkg, title: 'First' })
+  await pending
+  assert.equal(page.file, null)
+  assert.equal(page.package(), null)
+  assert.equal(page.error(), null)
 })

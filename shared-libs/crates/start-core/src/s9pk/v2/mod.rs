@@ -30,31 +30,8 @@ mod image;
 pub mod manifest;
 pub mod pack;
 pub mod recipe;
+pub mod trailer;
 
-/**
-    /
-    ├── manifest.json
-    ├── icon.<ext>
-    ├── LICENSE.md
-    ├── instructions.md
-    ├── README.md (optional)
-    ├── dependencies
-    │   └── <id>
-    │       ├── metadata.json
-    │       └── icon.<ext>
-    ├── javascript.squashfs
-    ├── assets
-    │   └── <id>.squashfs (xN)
-    └── images
-        └── <arch>
-            ├── <id>.json (xN)
-            ├── <id>.env (xN)
-            └── <id>.squashfs (xN)
-*/
-
-// this sorts the s9pk to optimize such that the parts that are used first appear earlier in the s9pk
-// this is useful for manipulating an s9pk while partially downloaded on a source that does not support
-// random access
 fn priority(s: &str) -> Option<usize> {
     match s {
         "manifest.json" => Some(0),
@@ -76,12 +53,18 @@ pub struct S9pk<S = Section<MultiCursorFile>> {
     manifest_dirty: bool,
     archive: MerkleArchive<S>,
     size: Option<u64>,
+    trailer: trailer::Trailer,
 }
 impl<S> S9pk<S> {
+    /// Optional metadata issues encountered while reading or rewriting this package.
+    pub fn diagnostics(&self) -> &[trailer::Diagnostic] {
+        &self.trailer.diagnostics
+    }
     pub fn as_manifest(&self) -> &Manifest {
         &self.manifest
     }
     pub fn as_manifest_mut(&mut self) -> &mut Manifest {
+        self.trailer.signatures.clear();
         self.manifest_dirty = true;
         &mut self.manifest
     }
@@ -89,6 +72,7 @@ impl<S> S9pk<S> {
         &self.archive
     }
     pub fn as_archive_mut(&mut self) -> &mut MerkleArchive<S> {
+        self.trailer.signatures.clear();
         &mut self.archive
     }
     pub fn size(&self) -> Option<u64> {
@@ -97,6 +81,24 @@ impl<S> S9pk<S> {
 }
 
 impl<S: FileSource + Clone> S9pk<S> {
+    /// Verified endorsements keyed by canonical identity; the embedded signature wins collisions.
+    pub async fn signatures(
+        &self,
+    ) -> Result<
+        std::collections::HashMap<crate::sign::AnyVerifyingKey, crate::sign::AnySignature>,
+        Error,
+    > {
+        let mut signatures = std::collections::HashMap::from([(
+            crate::sign::AnyVerifyingKey::Ed25519(self.archive.signer()),
+            crate::sign::AnySignature::Ed25519ph(self.archive.signature().await?),
+        )]);
+        for (key, signature) in &self.trailer.signatures {
+            signatures
+                .entry(key.clone())
+                .or_insert_with(|| signature.clone());
+        }
+        Ok(signatures)
+    }
     pub async fn new(archive: MerkleArchive<S>, size: Option<u64>) -> Result<Self, Error> {
         let manifest = extract_manifest(&archive).await?;
         Ok(Self {
@@ -104,6 +106,7 @@ impl<S: FileSource + Clone> S9pk<S> {
             manifest_dirty: false,
             archive,
             size,
+            trailer: Default::default(),
         })
     }
 
@@ -117,6 +120,7 @@ impl<S: FileSource + Clone> S9pk<S> {
             manifest_dirty: true,
             archive,
             size,
+            trailer: Default::default(),
         }
     }
 
@@ -245,6 +249,16 @@ impl<S: FileSource + Clone> S9pk<S> {
     pub async fn serialize<W: Sink>(&mut self, w: &mut W, verify: bool) -> Result<(), Error> {
         use tokio::io::AsyncWriteExt;
 
+        if self.trailer.present() {
+            let diagnostic = trailer::Diagnostic {
+                kind: "discarded",
+                message: t!("s9pk.trailer.discarded").into_owned(),
+                offset: None,
+            };
+            tracing::warn!(kind = diagnostic.kind, "{}", diagnostic.message);
+            self.trailer = Default::default();
+            self.trailer.diagnostics.push(diagnostic);
+        }
         w.write_all(MAGIC_AND_VERSION).await?;
         if !self.manifest_dirty {
             self.archive.serialize(w, verify).await?;
@@ -268,6 +282,7 @@ impl<S: FileSource + Clone> S9pk<S> {
             manifest_dirty: self.manifest_dirty,
             archive: self.archive.into_dyn(),
             size: self.size,
+            trailer: self.trailer,
         }
     }
 }
@@ -327,7 +342,23 @@ impl<S: ArchiveSource + Clone> S9pk<Section<S>> {
             (None, None) => std::cmp::Ordering::Equal,
         });
 
-        Self::new(archive, source.size().await).await
+        let trailer = trailer::Trailer::read(
+            source,
+            &archive.commitment().await?,
+            archive.contents().source_end(),
+        )
+        .await;
+        for diagnostic in &trailer.diagnostics {
+            tracing::warn!(
+                kind = diagnostic.kind,
+                offset = diagnostic.offset,
+                "{}",
+                diagnostic.message
+            );
+        }
+        let mut package = Self::new(archive, source.size().await).await?;
+        package.trailer = trailer;
+        Ok(package)
     }
 }
 impl S9pk {

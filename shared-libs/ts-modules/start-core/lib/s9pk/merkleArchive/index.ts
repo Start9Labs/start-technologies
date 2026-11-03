@@ -1,8 +1,8 @@
 import { MerkleArchiveCommitment } from '../../osBindings'
 import { DirectoryContents } from './directoryContents'
 import { FileContents } from './fileContents'
-import { ed25519ph } from '@noble/curves/ed25519'
-import { sha512 } from '@noble/hashes/sha2'
+import { verifyEd25519phStrict } from '../../auth/ed25519'
+import { merkleCommitmentBytes } from '../../auth/commitment'
 import { VarIntProcessor } from './varint'
 import { compare } from '..'
 
@@ -18,6 +18,12 @@ export type Signer = {
 export class ArrayBufferReader {
   constructor(private buffer: ArrayBuffer) {}
   next(length: number): ArrayBuffer {
+    if (
+      !Number.isSafeInteger(length) ||
+      length < 0 ||
+      length > this.buffer.byteLength
+    )
+      throw new Error('Reached EOF')
     const res = this.buffer.slice(0, length)
     this.buffer = this.buffer.slice(length)
     return res
@@ -28,8 +34,7 @@ export class ArrayBufferReader {
   nextVarint(): number {
     const p = new VarIntProcessor()
     while (!p.finished()) {
-      p.push(new Uint8Array(this.buffer.slice(0, 1))[0])
-      this.buffer = this.buffer.slice(1)
+      p.push(new Uint8Array(this.next(1))[0])
     }
     const res = p.decode()
     if (res === null) {
@@ -38,7 +43,8 @@ export class ArrayBufferReader {
     return res
   }
   nextVarstring(): string {
-    const len = Math.min(this.nextVarint(), maxVarstringLen)
+    const len = this.nextVarint()
+    if (len > maxVarstringLen) throw new Error('Oversized archive name')
     return new TextDecoder().decode(this.next(len))
   }
 }
@@ -52,6 +58,7 @@ export class MerkleArchive {
     DirectoryContents.headerSize
   private constructor(
     readonly signer: Signer,
+    readonly root: Uint8Array,
     readonly contents: DirectoryContents,
   ) {}
   static async deserialize(
@@ -67,16 +74,11 @@ export class MerkleArchive {
     const maxSize = new DataView(rootMaxSizeBytes).getBigUint64(0)
 
     if (
-      !ed25519ph.verify(
+      !verifyEd25519phStrict(
         signature,
-        new Uint8Array(
-          await new Blob([sighash, rootMaxSizeBytes]).arrayBuffer(),
-        ),
+        merkleCommitmentBytes(sighash, maxSize),
         pubkey,
-        {
-          context: new TextEncoder().encode(context),
-          zip215: true,
-        },
+        new TextEncoder().encode(context),
       )
     ) {
       throw new Error('signature verification failed')
@@ -86,12 +88,12 @@ export class MerkleArchive {
       if (
         !compare(
           sighash,
-          new Uint8Array(Buffer.from(commitment.rootSighash, 'base64').buffer),
+          Uint8Array.from(Buffer.from(commitment.rootSighash, 'base64')),
         )
       ) {
         throw new Error('merkle root mismatch')
       }
-      if (maxSize > commitment.rootMaxsize) {
+      if (maxSize > BigInt(commitment.rootMaxsize)) {
         throw new Error('root directory max size too large')
       }
     } else if (maxSize > 1024 * 1024) {
@@ -114,6 +116,7 @@ export class MerkleArchive {
         maxSize,
         context,
       },
+      sighash,
       contents,
     )
   }

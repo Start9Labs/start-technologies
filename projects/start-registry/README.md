@@ -25,6 +25,12 @@ start-registry info set-trust-signers <SIGNER_ID> [SIGNER_ID...]
 
 Run `start-registry info set-trust-signers` without IDs to clear the selection. Registries start with no proposed signers. `registry.info` exposes the selected signer IDs and their complete signer records as `trustSigners`, including public keys and preserved GPG exports. Connecting a registry in StartOS trusts the offered keys it does not already have for packages. Keys added later are imported untrusted when StartOS next fetches packages or OS updates from the registry, with a notification for each that offers to trust it. Choosing the registry for StartOS updates trusts its offered keys for StartOS updates.
 
+## Package endorsements
+
+Package add and add-mirror import the embedded signature and independently verified supplemental signatures from the hosted v2 S9PK files. Promotion uses the same ingestion path. Multiple URL variants contribute endorsements only for the exact indexed Merkle root and signed bound. Invalid optional metadata is diagnosed without rejecting a valid base archive; source URLs and bytes remain unchanged.
+
+Supplemental keys enter the asset's signature map, not the registry signer directory or trust proposal. Publishing authorization still belongs to the registered uploader. Operators can prepare a sideloadable endorsed file with `start-cli s9pk sign <file.s9pk>` before hosting it.
+
 ## Binary layout
 
 `registrybox` is a multi-call binary (like BusyBox). It dispatches on the name it is invoked as:

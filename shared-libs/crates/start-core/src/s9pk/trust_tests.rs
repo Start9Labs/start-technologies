@@ -7,10 +7,8 @@ use crate::s9pk::merkle_archive::directory_contents::DirectoryContents;
 use crate::s9pk::merkle_archive::{Entry, MerkleArchive};
 use crate::s9pk::v2::SIG_CONTEXT;
 
-#[tokio::test]
-async fn sideload_enforces_trust_on_verified_archive_signatures() {
+pub(crate) async fn fixture_bytes(dormant: &[u8]) -> Vec<u8> {
     let signer = SigningKey::from_bytes(&[7; 32]);
-    let other = SigningKey::from_bytes(&[8; 32]);
     let manifest = serde_json::from_value(serde_json::json!({
         "id": "trust-fixture", "version": "1.0.0:0", "canMigrateTo": "*", "canMigrateFrom": "*",
         "title": "Trust fixture", "description": {"short": "Signer verification fixture", "long": "Signer verification fixture"},
@@ -26,6 +24,12 @@ async fn sideload_enforces_trust_on_verified_archive_signatures() {
     ] {
         contents.insert_path(path, Entry::file(Arc::<[u8]>::from(bytes))).unwrap();
     }
+    contents
+        .insert_path(
+            "images/unused/dormant.squashfs",
+            Entry::file(Arc::<[u8]>::from(dormant)),
+        )
+        .unwrap();
     let mut package = S9pk::new_with_manifest(
         MerkleArchive::new(contents, signer.clone(), SIG_CONTEXT),
         None,
@@ -33,7 +37,14 @@ async fn sideload_enforces_trust_on_verified_archive_signatures() {
     );
     let mut sink = Cursor::new(Vec::new());
     package.serialize(&mut sink, true).await.unwrap();
-    let bytes = sink.into_inner();
+    sink.into_inner()
+}
+
+#[tokio::test]
+async fn sideload_enforces_trust_on_verified_archive_signatures() {
+    let signer = SigningKey::from_bytes(&[7; 32]);
+    let other = SigningKey::from_bytes(&[8; 32]);
+    let bytes = fixture_bytes(&[42; 128]).await;
     if let Some(path) = std::env::var_os("STARTOS_TRUST_FIXTURE") {
         tokio::fs::write(path, &bytes).await.unwrap();
     }

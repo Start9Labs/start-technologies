@@ -6,7 +6,25 @@ S9PK is the package format for StartOS services. Version 2 uses a merkle archive
 
 S9PK files begin with a 3-byte header: `0x3b 0x3b 0x02` (magic bytes + version 2).
 
-The archive is cryptographically signed using Ed25519 with prehashed content (SHA-512 over blake3 merkle root hash).
+The embedded Ed25519ph signature uses context `s9pk` and signs the 32-byte BLAKE3 Merkle root followed by its exact unsigned 64-bit big-endian root TOC bound. Readers always verify the embedded signature, including when no external commitment is supplied.
+
+## Supplemental signatures (v2)
+
+An optional trailer leaves every base archive byte unchanged:
+
+```
+[base archive][TLV region][region length: u64 BE][ASCII S9PKEXT1]
+```
+
+The TLV region is at most 1 MiB, excluding the 16-byte footer. Each record is a type (u16 BE), value length (u64 BE), and that many bytes. Type 1 contains UTF-8 JSON with string fields `signer` (`AnyVerifyingKey`) and `signature` (`AnySignature`): padded Base64 DER, accepting existing PEM and Base64url aliases. Unknown types and JSON fields are ignored. Trailer-only editing preserves original records and unknown fields byte-for-byte.
+
+Signatures bind the archive-derived root and exact signed bound, with context `s9pk`. Both canonical Ed25519ph and pure Ed25519 commitments are supported, including legacy ph signatures labeled as pure Ed25519. Verification uses strict, uncofactored Ed25519 checks. Pure signing uses the existing `Start-Commitment-Sig v1\0` protocol tag, length-prefixed context, commitment type 2, and the same 40 commitment bytes. Keys in metadata express endorsements, not trust or publishing permission. Canonical identity deduplication retains the embedded entry on collision.
+
+The footer family reserves `S9PKEXT` followed by one version byte. An unsupported version is diagnosed and ignored. Structural TLV failure, oversized regions, overflow, or overlap with any referenced TOC or lazy file discards all trailer endorsements. With valid framing, malformed JSON (including duplicate decoded keys at any nesting level), invalid shapes, and unsupported or invalid signatures are diagnosed per record; valid siblings remain usable. JSON nesting is limited to 64 levels. Optional metadata damage never bypasses or replaces base archive validation.
+
+Discovery seeks directly to the footer. Known-size sources validate every referenced endpoint against file bounds; unknown-length sources report that supplemental signatures cannot be discovered. Optional metadata read failures produce diagnostics and leave verified base metadata usable. HTTP range-capable servers receive bounded requests; servers without range support may require streaming a whole response to reach the footer.
+
+`start-cli s9pk sign <file>` adds an identity-key endorsement through a synchronized temporary-file replacement. Writers validate all physical archive endpoints, prepare the complete capped region before writing, and refuse malformed known records, invalid framing, and unsupported trailer versions. Well-framed unknown or cryptographically unsupported records remain intact. Content-changing archive rewrites discard the old trailer with a diagnostic; endorse the resulting package again.
 
 ## Archive Structure
 

@@ -39,12 +39,12 @@ start-cli registry package signer add <PACKAGE_ID> <SIGNER_ID> \
 From the directory containing the `.s9pk`:
 
 ```sh
-start-cli s9pk publish \
-  --url https://my-registry.example.com \
-  myservice_1.2.0_x86_64.s9pk
+start-cli s9pk publish myservice_1.2.0_x86_64.s9pk
 ```
 
-`publish` signs the `.s9pk` with the local identity key, uploads it to the registry, and registers it in the index. If your registry already has the same `(package id, version, sighash)` indexed, the upload is a no-op except for any new signatures merging in.
+`publish` uploads the original file to the configured S3 bucket and adds its URL and identity-key endorsement to the configured registry index. Configure the S3 destination and registry before publishing. To index an already hosted file, use `start-cli registry package add <S9PK_FILE> --url <PACKAGE_URL>`.
+
+Package add, add-mirror, and promotion import verified supplemental signatures from the downloaded files into the existing asset signature map. Endorsements from different URLs combine when their actual signed commitments match exactly. The original hosted bytes are retained. Supplemental keys do not become registered signers, proposed trust keys, or authorized uploaders.
 
 ### Removing a package
 
@@ -82,7 +82,7 @@ start-cli registry package sign <S9PK_FILE>
 start-cli registry package sign --no-verify --id <PACKAGE_ID> --version <VERSION>
 ```
 
-The first form signs a local copy of the `.s9pk`. With `--no-verify`, it signs the commitments the registry lists for that version without checking them against a local file.
+The first form verifies a local copy of the `.s9pk` and adds its endorsement to the registry index. To embed an endorsement in a file for sideloading, use `start-cli s9pk sign <S9PK_FILE>`. With `--no-verify`, it signs the commitments the registry lists for that version without checking them against a local file.
 
 ## Categories
 

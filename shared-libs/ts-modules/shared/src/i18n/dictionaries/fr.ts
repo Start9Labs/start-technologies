@@ -952,4 +952,6 @@ export default {
   1100: 'Liée à',
   1101: 'Recevez des notifications dans ce navigateur lorsque l’interface de StartOS est fermée.',
   1102: 'Tout afficher',
+  1103: 'Certaines signatures supplémentaires n’ont pas pu être vérifiées et ont été ignorées.',
+  1104: 'Vérification des signatures du paquet',
 } satisfies i18n

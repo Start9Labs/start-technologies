@@ -6,6 +6,8 @@ release-notes: false
 - **System → Trusted Keys** shows each key's label, identities, type, package and StartOS-update trust, the registries offering it, and who added it and when. At least one key stays trusted for StartOS updates, and keys a connected registry offers cannot be removed. **Add key** takes one PEM key or GPG export, and a GPG key is labeled with its identity name.
 - Unlisted keys offer removal immediately after setup or upgrade. Unused-key cleanup removes all requested keys or none, and importing an unknown key grants its requested trust as one change.
 - Packages not signed by a trusted key can be installed or updated from the Marketplace and the Updates tab after confirming the risks. The dialog for a blocked StartOS update links to Trusted Keys.
+- Sideloading recognizes valid supplemental package signatures and shares the Marketplace's signer preview, full list, and trust controls. Unverifiable supplemental signatures are ignored with a warning without rejecting an otherwise-valid package.
+- Replacing or clearing a sideload selection ignores older validation results. The sideload license dialog shows the full license text.
 - Selecting an available update opens the same package details as the Marketplace.
 - The StartOS update dialog lists every key that signed the update and whether you trust it for StartOS updates.
 - Package details preview up to three trusted signing keys, falling back to known untrusted keys and then unknown keys. **View all** opens the complete signer list when keys are hidden. Selecting a key there, in the StartOS update dialog, in Trusted Keys, or in a notification shows its details, where you can trust or distrust it for packages and StartOS updates.

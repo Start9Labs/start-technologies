@@ -1,6 +1,12 @@
 # Publishing
 
-Every `.s9pk` needs a registry to live in before it can be installed on a StartOS device. StartOS is deliberately flexible about which registry that is — you can run your own forever, submit to the Start9 Community Registry, or do both in parallel. Nothing about the packaging workflow requires you to distribute through Start9.
+Registries distribute `.s9pk` packages for installation on StartOS devices; local files can also be sideloaded. StartOS is deliberately flexible about which registry that is — you can run your own forever, submit to the Start9 Community Registry, or do both in parallel. Nothing about the packaging workflow requires you to distribute through Start9.
+
+## Endorsing a package file
+
+Run `start-cli s9pk sign <file.s9pk>` to add a supplemental signature using your identity key, including a configured GPG-agent key. This preserves the original archive bytes and embedded signature. Recipients can verify each endorsement independently and choose which verified signer they trust. Signing a file does not register a registry signer or grant publishing permission.
+
+Sign the final package after editing its manifest or images: content-changing edits discard old supplemental metadata with a warning. Trailer-only signing preserves unknown records and fields and refuses malformed metadata or unsupported trailer versions.
 
 ## Self-Hosted Registry
 
