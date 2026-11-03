@@ -29,7 +29,6 @@ use crate::notifications::{NotificationLevel, Notifications, notify};
 use crate::prelude::*;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::s9pk::v2::compat::migrated_version;
-use crate::s9pk::v2::pack::CONTAINER_TOOL;
 use crate::ssh::{SshKeys, SshPubKey};
 use crate::util::Invoke;
 use crate::util::io::write_file_atomic;
@@ -420,25 +419,6 @@ impl VersionT for Version {
                 "/media/startos/data/package-data/volumes/fedimint-guardian",
             )
             .await?;
-        }
-
-        // Load bundled migration images (start9/compat, start9/utils,
-        // tonistiigi/binfmt) so the v1->v2 s9pk conversion doesn't need
-        // internet access.
-        let migration_images_dir = Path::new("/usr/lib/startos/migration-images");
-        if let Ok(mut entries) = tokio::fs::read_dir(migration_images_dir).await {
-            while let Some(entry) = entries.next_entry().await? {
-                let path = entry.path();
-                if path.extension() == Some(OsStr::new("tar")) {
-                    tracing::info!("Loading migration image: {}", path.display());
-                    Command::new(*CONTAINER_TOOL)
-                        .arg("load")
-                        .arg("-i")
-                        .arg(&path)
-                        .invoke(crate::ErrorKind::Docker)
-                        .await?;
-                }
-            }
         }
 
         // title, plus the error when nothing else has reported it
