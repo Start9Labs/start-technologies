@@ -722,7 +722,7 @@ fn compute_status(
 
     if port.ipv6 && !router_has_gua {
         let reason = Some("Router has no global IPv6 address".into());
-        if port.ipv4 && has_ipv4 {
+        if port.ipv4 && has_ipv4 && device.inactive_ipv4_reservation.is_none() {
             return (PublishedPortStatus::Partial, reason);
         }
         return (PublishedPortStatus::Error, reason);
@@ -2826,6 +2826,18 @@ config rule 'pp_a_v6'
         let (status, reason) = compute_status(&port, Some(&dev), true);
         assert!(matches!(status, PublishedPortStatus::Error), "{status:?}");
         assert!(reason.unwrap().contains("reservation"));
+    }
+
+    #[test]
+    fn status_error_when_reservation_is_inactive_and_router_has_no_gua() {
+        let mut dev = online_device(Some("192.168.101.20"), Some("2001:db8:abcd::99"));
+        dev.ipv4_static = true;
+        dev.inactive_ipv4_reservation = Some("192.168.1.50".into());
+        let port = raw_v6_port(true, Some("2001:db8:abcd::99"));
+
+        let (status, reason) = compute_status(&port, Some(&dev), false);
+        assert!(matches!(status, PublishedPortStatus::Error), "{status:?}");
+        assert!(reason.unwrap().contains("global IPv6"));
     }
 
     #[test]
