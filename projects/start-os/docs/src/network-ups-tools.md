@@ -37,13 +37,15 @@ The remote NUT deployment needs a primary monitor that can issue the forced-shut
 
 ## Check UPS status
 
-When NUT is enabled, StartOS loads the UPS status automatically. Select **Refresh** to query it again. The page displays the configured target and every variable reported by the UPS, such as `ups.status`, `battery.charge`, `battery.runtime`, and `input.voltage`.
+When NUT is enabled, StartOS checks status every 15 seconds while the page is open. Select **Refresh** to query it immediately. The page displays the configured target and every variable reported by the UPS, such as `ups.status`, `battery.charge`, `battery.runtime`, and `input.voltage`.
+
+StartOS also checks that the shutdown monitor is running and that its credentials have monitoring permission on the UPS server. A warning appears if this check fails, even when UPS readings remain available. Correct any monitoring warning before testing shutdown protection.
 
 If StartOS cannot read valid status data, check the UPS name, host, port, credentials, driver, and USB cable or network connection.
 
 ## Test safely
 
-Before testing a power outage, confirm that the status page reports normal data. Unplug the UPS from wall power—not the StartOS power cable—and verify that `ups.status` changes from online (`OL`) to on-battery (`OB`). Restore wall power before the battery becomes low.
+Before testing a power outage, confirm that the status page reports normal data without monitoring warnings. Unplug the UPS from wall power—not the StartOS power cable—and verify that `ups.status` changes from online (`OL`) to on-battery (`OB`). Restore wall power before the battery becomes low.
 
 > [!WARNING]
 > A real low-battery or forced-shutdown event can tell the UPS to cut power to its battery-backed outlets. It may turn off every device connected to that outlet group. Do not run `upsmon -c fsd` as a routine test.

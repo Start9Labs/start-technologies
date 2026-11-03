@@ -2402,6 +2402,27 @@ nut.enabled-without-settings:
   fr_FR: "Network UPS Tools ne peut pas être activé sans configuration"
   pl_PL: "Nie można włączyć Network UPS Tools bez konfiguracji"
 
+nut.monitor-auth-failed:
+  en_US: "NUT rejected the monitoring login. Check the monitor username, password, and permissions on the UPS server."
+  de_DE: "NUT hat die Monitor-Anmeldung abgelehnt. Prüfen Sie Benutzername, Passwort und Berechtigungen auf dem USV-Server."
+  es_ES: "NUT rechazó el inicio de sesión de monitorización. Compruebe el usuario, la contraseña y los permisos en el servidor del SAI."
+  fr_FR: "NUT a refusé la connexion de surveillance. Vérifiez le nom d’utilisateur, le mot de passe et les autorisations sur le serveur de l’onduleur."
+  pl_PL: "NUT odrzucił logowanie monitora. Sprawdź nazwę użytkownika, hasło i uprawnienia na serwerze UPS."
+
+nut.monitor-check-timeout:
+  en_US: "NUT monitoring verification timed out. Check the UPS server and network connection."
+  de_DE: "Die Überprüfung der NUT-Überwachung hat das Zeitlimit überschritten. Prüfen Sie den USV-Server und die Netzwerkverbindung."
+  es_ES: "La verificación de monitorización de NUT agotó el tiempo de espera. Compruebe el servidor del SAI y la conexión de red."
+  fr_FR: "La vérification de la surveillance NUT a expiré. Vérifiez le serveur de l’onduleur et la connexion réseau."
+  pl_PL: "Przekroczono czas weryfikacji monitorowania NUT. Sprawdź serwer UPS i połączenie sieciowe."
+
+nut.monitor-not-running:
+  en_US: "The NUT shutdown monitor is not running. Check the NUT configuration and restart monitoring."
+  de_DE: "Der NUT-Abschaltmonitor läuft nicht. Prüfen Sie die NUT-Konfiguration und starten Sie die Überwachung neu."
+  es_ES: "El monitor de apagado de NUT no está en ejecución. Compruebe la configuración de NUT y reinicie la monitorización."
+  fr_FR: "Le moniteur d’arrêt NUT ne fonctionne pas. Vérifiez la configuration NUT et redémarrez la surveillance."
+  pl_PL: "Monitor wyłączania NUT nie działa. Sprawdź konfigurację NUT i uruchom ponownie monitorowanie."
+
 nut.status-command-failed:
   en_US: "NUT status command failed for %{target}: %{error}"
   de_DE: "NUT-Statusbefehl für %{target} fehlgeschlagen: %{error}"

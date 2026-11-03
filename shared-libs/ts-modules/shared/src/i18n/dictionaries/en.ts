@@ -984,4 +984,5 @@ export const ENGLISH: Record<string, number> = {
   "StartOS could not read UPS status with the current NUT configuration.": 1131,
   "The UPS did not return status data. Check the UPS name, host, port, credentials, and driver.": 1132,
   "Network UPS Tools is disabled": 1133,
+  "Automatic shutdown monitoring is unavailable": 1134,
 }

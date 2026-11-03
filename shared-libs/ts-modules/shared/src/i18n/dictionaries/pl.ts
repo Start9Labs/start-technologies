@@ -983,4 +983,5 @@ export default {
   1131: 'StartOS nie mógł odczytać statusu UPS przy bieżącej konfiguracji NUT.',
   1132: 'UPS nie zwrócił danych statusu. Sprawdź nazwę UPS, host, port, dane logowania i sterownik.',
   1133: 'Network UPS Tools jest wyłączony',
+  1134: 'Monitorowanie automatycznego wyłączania jest niedostępne',
 } satisfies i18n

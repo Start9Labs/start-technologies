@@ -1171,9 +1171,17 @@ export const NutSettings: z.ZodUnion<
 export const NutStatus: z.ZodObject<{
   target: z.ZodString
   variables: z.ZodRecord<z.ZodString, z.ZodString>
+  monitoringError: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
 }> = /* @__PURE__ */ object({
   target: z.string(),
   variables: z.record(z.string(), z.string()),
+  monitoringError: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ),
 }).meta({
   id: 'NutStatus',
   description: 'Current variables reported by the configured UPS.',

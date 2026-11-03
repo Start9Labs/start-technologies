@@ -2707,6 +2707,7 @@ export class MockApiService extends ApiService {
     const port = settings?.mode === 'client' ? settings.port : 3493
     return {
       target: `${settings?.upsName ?? 'ups'}@${host.includes(':') && !host.startsWith('[') ? `[${host}]` : host}:${port}`,
+      monitoringError: null,
       variables: {
         'battery.charge': '96',
         'battery.runtime': '4280',

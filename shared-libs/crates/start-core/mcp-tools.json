@@ -11159,9 +11159,10 @@
               "type": "object",
               "propertyNames": { "type": "string" },
               "additionalProperties": { "type": "string" }
-            }
+            },
+            "monitoringError": { "type": ["string", "null"] }
           },
-          "required": ["target", "variables"],
+          "required": ["target", "variables", "monitoringError"],
           "additionalProperties": true,
           "description": "Current variables reported by the configured UPS."
         }
@@ -11173,9 +11174,10 @@
           "type": "object",
           "propertyNames": { "type": "string" },
           "additionalProperties": { "type": "string" }
-        }
+        },
+        "monitoringError": { "type": ["string", "null"] }
       },
-      "required": ["target", "variables"],
+      "required": ["target", "variables", "monitoringError"],
       "additionalProperties": true,
       "description": "Current variables reported by the configured UPS."
     }

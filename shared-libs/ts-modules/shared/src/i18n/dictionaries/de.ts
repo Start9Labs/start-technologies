@@ -983,4 +983,5 @@ export default {
   1131: 'StartOS konnte den USV-Status mit der aktuellen NUT-Konfiguration nicht lesen.',
   1132: 'Die USV hat keine Statusdaten zurückgegeben. Prüfen Sie USV-Name, Host, Port, Zugangsdaten und Treiber.',
   1133: 'Network UPS Tools ist deaktiviert',
+  1134: 'Die Überwachung für das automatische Herunterfahren ist nicht verfügbar',
 } satisfies i18n

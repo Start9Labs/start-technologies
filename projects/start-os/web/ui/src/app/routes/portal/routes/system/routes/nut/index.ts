@@ -1,15 +1,9 @@
 import { KeyValuePipe } from '@angular/common'
-import { Component, computed, effect, inject, signal } from '@angular/core'
+import { Component, computed, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { RouterLink } from '@angular/router'
 import { DocsLinkDirective, i18nPipe, TaskService } from '@start9labs/shared'
-import { T } from '@start9labs/start-core'
-import {
-  TuiButton,
-  TuiLoader,
-  TuiNotificationService,
-  TuiTitle,
-} from '@taiga-ui/core'
+import { TuiButton, TuiLoader, TuiNotification, TuiTitle } from '@taiga-ui/core'
 import { TuiButtonLoading } from '@taiga-ui/kit'
 import { TuiCardLarge, TuiHeader, TuiList } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
@@ -28,9 +22,12 @@ import {
   toNutConfig,
   toNutForm,
 } from './form'
+import { NutStatusService } from './service'
 
 @Component({
   template: `
+    @let state = statusService.state();
+
     <ng-container *title>
       <div>
         <a routerLink=".." tuiIconButton iconStart="@tui.arrow-left">
@@ -74,21 +71,37 @@ import {
             type="button"
             iconStart="@tui.refresh-cw"
             [disabled]="!data().enabled || !data().settings"
-            [loading]="refreshing()"
-            (click)="refreshStatus()"
+            [loading]="state.refreshing"
+            (click)="statusService.refresh()"
           >
             {{ 'Refresh' | i18n }}
           </button>
         </aside>
       </header>
 
-      @if (status()?.target || target(); as url) {
+      @if (state.error; as error) {
+        <div tuiNotification appearance="negative" role="alert">
+          <span tuiTitle>
+            {{ 'UPS status unavailable' | i18n }}
+            <span tuiSubtitle>{{ error }}</span>
+          </span>
+        </div>
+      } @else if (state.status?.monitoringError; as error) {
+        <div tuiNotification appearance="negative" role="alert">
+          <span tuiTitle>
+            {{ 'Automatic shutdown monitoring is unavailable' | i18n }}
+            <span tuiSubtitle>{{ error }}</span>
+          </span>
+        </div>
+      }
+
+      @if (state.status?.target || target(); as url) {
         <dl tuiList="s">
           <dt>{{ 'Configured target' | i18n }}</dt>
           <dd>
             <code>{{ url }}</code>
           </dd>
-          @if (status(); as current) {
+          @if (state.status; as current) {
             @for (row of current.variables | keyvalue; track row.key) {
               <dt>
                 <code>{{ row.key }}</code>
@@ -102,9 +115,9 @@ import {
         <app-placeholder icon="@tui.zap">
           {{ 'Network UPS Tools is disabled' | i18n }}
         </app-placeholder>
-      } @else if (refreshing()) {
+      } @else if (state.refreshing && !state.status) {
         <tui-loader [style.height.rem]="5" />
-      } @else if (!status()) {
+      } @else if (!state.status) {
         <app-placeholder icon="@tui.zap">
           {{ 'No UPS data available' | i18n }}
         </app-placeholder>
@@ -138,24 +151,19 @@ import {
     TuiHeader,
     TuiList,
     TuiLoader,
+    TuiNotification,
     TuiTitle,
     PlaceholderComponent,
   ],
+  providers: [NutStatusService],
 })
 export default class Nut {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly formDialog = inject(FormDialogService)
   private readonly tasks = inject(TaskService)
-  private readonly alerts = inject(TuiNotificationService)
   private readonly api = inject(ApiService)
   private readonly i18n = inject(i18nPipe)
-  private refreshGeneration = 0
-  private readonly refreshOnConfigChange = effect(() => {
-    void this.refreshStatus(this.data())
-  })
-
-  protected readonly status = signal<T.NutStatus | null>(null)
-  protected readonly refreshing = signal(false)
+  protected readonly statusService = inject(NutStatusService)
   protected readonly data = toSignal(
     this.patch
       .watch$('serverInfo', 'nut')
@@ -169,33 +177,12 @@ export default class Nut {
     switch (config.settings.mode) {
       case 'server':
         return `${config.settings.upsName}@localhost:3493`
-      case 'client':
-        return `${config.settings.upsName}@${config.settings.host}:${config.settings.port}`
+      case 'client': {
+        const { host, port, upsName } = config.settings
+        return `${upsName}@${host.includes(':') && !host.startsWith('[') ? `[${host}]` : host}:${port}`
+      }
     }
   })
-
-  protected async refreshStatus(config = this.data()): Promise<void> {
-    const generation = ++this.refreshGeneration
-    this.status.set(null)
-
-    if (!config.enabled || !config.settings) {
-      this.refreshing.set(false)
-      return
-    }
-
-    this.refreshing.set(true)
-
-    try {
-      const status = await this.api.rpc.server.nutStatus({})
-      if (generation === this.refreshGeneration) this.status.set(status)
-    } catch (error: unknown) {
-      if (generation === this.refreshGeneration) {
-        this.showStatusAlert(error)
-      }
-    } finally {
-      if (generation === this.refreshGeneration) this.refreshing.set(false)
-    }
-  }
 
   protected async configure(): Promise<void> {
     this.formDialog.open(FormComponent, {
@@ -216,31 +203,5 @@ export default class Nut {
         ],
       },
     })
-  }
-
-  private showStatusAlert(error: unknown): void {
-    const detail =
-      typeof error === 'string'
-        ? error
-        : error &&
-            typeof error === 'object' &&
-            'message' in error &&
-            typeof error.message === 'string'
-          ? error.message
-          : this.i18n.transform('Unknown error')
-
-    this.alerts
-      .open(
-        `${this.i18n.transform(
-          'StartOS could not read UPS status with the current NUT configuration.',
-        )}\n\n${this.i18n.transform(
-          'The UPS did not return status data. Check the UPS name, host, port, credentials, and driver.',
-        )}\n\n${detail}`,
-        {
-          label: this.i18n.transform('UPS status unavailable'),
-          appearance: 'negative',
-        },
-      )
-      .subscribe()
   }
 }

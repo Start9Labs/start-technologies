@@ -983,4 +983,5 @@ export default {
   1131: 'StartOS no pudo leer el estado del SAI con la configuración NUT actual.',
   1132: 'El SAI no devolvió datos de estado. Compruebe el nombre del SAI, host, puerto, credenciales y controlador.',
   1133: 'Network UPS Tools está desactivado',
+  1134: 'La monitorización de apagado automático no está disponible',
 } satisfies i18n

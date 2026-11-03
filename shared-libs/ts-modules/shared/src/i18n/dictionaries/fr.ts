@@ -983,4 +983,5 @@ export default {
   1131: 'StartOS n’a pas pu lire l’état de l’onduleur avec la configuration NUT actuelle.',
   1132: 'L’onduleur n’a renvoyé aucune donnée d’état. Vérifiez le nom de l’onduleur, l’hôte, le port, les identifiants et le pilote.',
   1133: 'Network UPS Tools est désactivé',
+  1134: 'La surveillance de l’arrêt automatique est indisponible',
 } satisfies i18n
