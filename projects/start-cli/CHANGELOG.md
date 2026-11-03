@@ -9,6 +9,37 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.6.0]
+
+### Added
+
+- Added `start-cli auth token create --name <name>`, which creates a StartOS bearer token for API clients and prints it once.
+
+- Publish and promote localized OS release notes by passing a JSON locale map to `registry os version add`.
+
+- Add `--trust` to package installation and OS-update commands to explicitly override signer trust. On StartOS 0.4.1 and later, these operations require an enabled trusted signer by default; signature and integrity verification remain mandatory with the override.
+- Diagnostic updates no longer require a registry argument that had no effect.
+
+- Add `disk format` to erase a drive and prepare it as a single Btrfs partition for StartOS backups.
+
+- OS registry publishing accepts a build Git hash and a security-update flag, and promotion preserves both. Release operations can reject a source image that changed while a release was being prepared.
+
+### Changed
+
+- **`start-cli auth session kill` takes `--pubkey <key>` and `--token <id>`** for the sessions to end, in place of positional session IDs.
+
+### Fixed
+
+- Preserve multiline image environment values in JSON metadata for packages using Start SDK 3.1.2 or later.
+
+- **WireGuard configs can use a separate endpoint on NAT'd StartTunnel hosts.**
+  `tunnel device show-config --endpoint` supplies an IPv4, IPv6, or DNS endpoint
+  independently of the local WAN assignment. Requires StartTunnel 1.5.0 or later.
+
+### Security
+
+- Backup mount, backup information, package restore, and CIFS target add/update commands read passwords from a hidden prompt instead of positional arguments. Update automation to supply `BACKUP_PASSWORD` or `CIFS_PASSWORD`; `PASSWORD` remains the separate CLI authentication credential.
+
 ## [2.5.2]
 
 ### Changed

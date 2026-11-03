@@ -82,7 +82,7 @@ Shut down the server.
 
 ### `start-cli server update`
 
-Check the supplied registry for OS updates and apply if available. See [Trusted Keyrings](trusted-keys.md) for signer requirements.
+Check the supplied registry for OS updates and apply if available. See [Trusted Keys](trusted-keys.md) for signer requirements.
 
 - `--trust` — Explicitly accept an untrusted signer while retaining signature and integrity checks
 
@@ -106,7 +106,7 @@ Display kernel logs. Same options as `server logs`.
 
 ### `start-cli server metrics`
 
-Display server metrics (CPU, RAM, disk, temperature).
+Display server metrics: CPU, RAM, disk, and temperature in °C.
 
 - `--format` — Output format
 
@@ -267,7 +267,7 @@ Install a package from the registry or sideload a local `.s9pk` file.
 - `-s, --sideload` — Install from local file
 - `--trust` — Explicitly accept an untrusted signer while retaining signature and integrity checks
 
-Registry installs and sideloads require a signer from an enabled [trusted keyring](trusted-keys.md) by default.
+Registry installs and sideloads require a signer [trusted](trusted-keys.md) for packages by default.
 
 ### `start-cli package start <ID>`
 
@@ -285,7 +285,10 @@ the same startup coalesce into one additional restart.
 
 ### `start-cli package uninstall <ID>`
 
-Remove a package and its data.
+Remove a package and its data. See [Uninstalling](uninstalling.md).
+
+- `--soft` — Keep the package's data
+- `--force` — Remove the package even when its own uninstall step fails or can't run
 
 ### `start-cli package logs <ID>`
 
@@ -804,6 +807,10 @@ Build an s9pk package from source files.
 - `--no-assets` — Build without assets
 - `--arch <ARCH>` — Filter by CPU architecture
 
+### `start-cli s9pk sign <S9PK>`
+
+Add a supplemental signature to a v2 package using the configured identity key (including a GPG-agent identity). The base archive and its embedded signature remain unchanged. Existing valid supplemental metadata and unknown fields are preserved; malformed or unsupported trailer versions are refused. Content-changing edits discard supplemental metadata with a warning, requiring the resulting package to be signed again.
+
 ### `start-cli s9pk publish <S9PK>`
 
 Publish an s9pk to the configured S3 bucket and index it on the registry.
@@ -895,6 +902,10 @@ Set the registry's description (markdown), shown above its services in the marke
 - `--clear` — Remove the registry's description
 
 Over RPC, pass `null` in the setter's `description` field to clear it; a value sets it.
+
+### `start-cli registry info set-trust-signers [SIGNER...]`
+
+Select which existing signers the registry offers to StartOS servers for package trust. Run it without signer IDs to clear the selection. See [Trusted Keys](trusted-keys.md#keys-from-registries) for how StartOS treats offered keys.
 
 ### Registry Admin Management
 
@@ -988,6 +999,14 @@ Add a download mirror for a package.
 Remove a package mirror.
 
 - `--url <URL>` — Mirror URL to remove (required)
+
+### `start-cli registry package sign [FILE]`
+
+Add your signature to a package in the registry index.
+
+- `--no-verify` — Sign the commitments the registry lists instead of a local s9pk
+- `--id <ID>` — Package identifier (with `--no-verify`)
+- `--version <VERSION>` — Package version (with `--no-verify`)
 
 ### Registry Package Categories
 

@@ -1,2 +1,0 @@
-- Die Oberfläche bietet Wiederherstellungsaktionen an, wenn ihre zwischengespeicherte Kopie beschädigt ist.
-- Nach einem StartOS-Update übernimmt die Oberfläche ihre eigene Aktualisierung schneller.

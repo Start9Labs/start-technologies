@@ -1,6 +1,6 @@
 # Updating StartOS
 
-StartOS notifies you when your selected OS registry announces a compatible security update for your hardware. These warnings also use [browser push](notifications.md) when enabled. Use the notification's **Software Update** link to open `System -> General`, then select **Software Update** to review it. Installation requires your approval.
+StartOS notifies you when your selected OS registry announces a compatible security update for your hardware. These warnings also use [browser push](notifications.md) when enabled. Use the notification's **Software Update** link to open `System -> General`, then click **View** beside **Software Update** to review it. Installation requires your approval.
 
 > [!NOTE]
 > There are _no_ automatic updates in StartOS. Updating the operating system and service always requires explicit action. That said, we highly recommend keeping StartOS up to date for the latest security and performance patches, as well as to take advantage of new features.
@@ -9,9 +9,9 @@ StartOS notifies you when your selected OS registry announces a compatible secur
 
 1. When a new version of StartOS is available, a rocket badge will appear on the "System" tab.
 
-1. Go to `System -> General -> Software Update`.
+1. Go to `System -> General` and click **View** beside **Software Update**.
 
-1. Read the release notes and click "Begin Update". The UI blocks the update if the registry lists no signer trusted by your server for its update image.
+1. Check **Signed by**, which lists every key that signed the update and whether you trust it for StartOS updates; select a key to see its details and change its trust. Then read the release notes and click "Begin Update". The UI blocks the update if the registry lists no signer trusted by your server for its update image.
 
    > [!WARNING]
    > Ensure you have a stable Internet connection before beginning an OS update, and do not unplug your server while StartOS is downloading.
@@ -29,7 +29,7 @@ A browser page left open during the update shows **Refresh Needed** while its us
 
 ## Trusted Update Signers
 
-Open **System → Trusted keyrings** and choose **Edit** from a row's overflow menu to select publishers for OS updates. Package and OS-update trust switches are independent. See [Trusted Keyrings](trusted-keys.md) for defaults, adding keys, migration behavior, and CLI management.
+Open **System → Trusted Keys** and choose **Trust for StartOS updates** or **Distrust for StartOS updates** from a key's menu, or select a key under **Signed by** in the update dialog. Package and StartOS-update trust are independent. Choosing a registry for StartOS updates in **System → Registries** trusts the keys it offers for StartOS updates. See [Trusted Keys](trusted-keys.md) for defaults, adding keys, migration behavior, and CLI management.
 
 CLI OS updates enforce the saved OS-update trust policy unless explicitly overridden with `--trust`. Signature and integrity verification remain mandatory.
 

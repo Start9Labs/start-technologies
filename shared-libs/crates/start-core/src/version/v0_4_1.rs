@@ -5,7 +5,7 @@ use super::v0_3_5::V0_3_0_COMPAT;
 use super::v0_4_0_2::for_each_host;
 use super::{VersionT, v0_4_0_5};
 use crate::prelude::*;
-use crate::trusted_keys::{migrate_signers, os_signers};
+use crate::trusted_keys::legacy::{migrate_signers, os_signers};
 
 lazy_static::lazy_static! {
     static ref V0_4_1: exver::Version = exver::Version::new([0, 4, 1], []);
@@ -47,7 +47,12 @@ impl VersionT for Version {
         }
         server.remove("trustedOsUpdateSigners");
         let private = db["private"].as_object_mut().or_not_found("private")?;
-        if !private.contains_key("sessions") {
+        // A database migrated straight from 0.3.x holds 0.3.6's cookie sessions here.
+        if private
+            .get("sessions")
+            .and_then(|sessions| sessions.get("pubkeys"))
+            .is_none()
+        {
             let pubkeys = private
                 .remove("sessionPubkeys")
                 .unwrap_or_else(|| json!({}));
@@ -137,6 +142,7 @@ mod tests {
     use crate::auth::Session;
     use crate::sign::AnyVerifyingKey;
     use crate::trusted_keys::TrustedKeys;
+    use crate::trusted_keys::legacy::{self, TrustedKeyrings};
     use crate::update::signers::{TrustedOsUpdateSigners, initial_signers};
     use crate::version::{Current, Upgrade, rollback_to_unchecked, v0_4_0_3, v0_4_0_4};
 
@@ -405,7 +411,7 @@ mod tests {
                 .unwrap()
                 .apply(&previous, &Version, &mut db)
                 .unwrap();
-            let keyrings: TrustedKeys =
+            let keyrings: TrustedKeyrings =
                 from_value(db["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
             let actual = os_signers(&keyrings);
             let expected: TrustedOsUpdateSigners = from_value(expected).unwrap();
@@ -469,7 +475,10 @@ mod tests {
         let mut fixture =
             to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
                 .unwrap();
+        fixture["public"]["serverInfo"]["trustedKeys"] =
+            to_value(&legacy::initial_keyrings()).unwrap();
         fixture["public"]["serverInfo"]["trustedKeys"]["start9"]["os"] = json!(false);
+        fixture["public"]["serverInfo"]["version"] = to_value(&Version.semver()).unwrap();
         fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(1);
         fixture["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
         fixture["private"]["sessions"]["tokens"] =
@@ -478,7 +487,8 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("osSecurityNotifications");
-        let saved_trust = fixture["public"]["serverInfo"]["trustedKeys"].clone();
+        let saved_trust: TrustedKeyrings =
+            from_value(fixture["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
         let saved_sessions = fixture["private"]["sessions"].clone();
         let db = PatchDb::in_memory();
         db.put(&ROOT, &fixture).await.unwrap();
@@ -486,11 +496,41 @@ mod tests {
         let migrated = db.dump(&ROOT).await.value;
         assert_eq!(migrated["private"]["osSecurityNotifications"], json!({}));
         assert_eq!(migrated["private"]["sessions"], saved_sessions);
-        assert_eq!(migrated["public"]["serverInfo"]["trustedKeys"], saved_trust);
+        let migrated_trust: TrustedKeys =
+            from_value(migrated["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
+        assert_eq!(
+            crate::trusted_keys::os_signers(&migrated_trust),
+            os_signers(&saved_trust)
+        );
+        assert_eq!(
+            crate::trusted_keys::enabled_keys(
+                &migrated_trust,
+                crate::trusted_keys::TrustContext::Marketplace
+            )
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>(),
+            crate::trusted_keys::enabled_keys(
+                &legacy::individual_keys(&saved_trust, chrono::Utc::now()).unwrap(),
+                crate::trusted_keys::TrustContext::Marketplace
+            )
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>(),
+        );
+        assert!(
+            migrated_trust
+                .iter()
+                .all(|(id, key)| *id == key.public_key.interned_der64())
+        );
         assert_eq!(
             migrated["public"]["serverInfo"]["latestMigrationRevision"],
-            json!(2)
+            json!(Current::default().migration_revision())
         );
+        let todos = migrated["public"]["serverInfo"]["postInitMigrationTodos"]
+            .as_object()
+            .unwrap();
+        assert!(todos.contains_key("0.4.1"));
+        assert!(todos.contains_key("0.4.1.1"));
+        assert!(todos.contains_key(Current::default().semver().to_string().as_str()));
         Current::default().pre_init(&db).await.unwrap();
         assert_eq!(db.dump(&ROOT).await.value, migrated);
     }
@@ -513,6 +553,7 @@ mod tests {
             let server = fixture["public"]["serverInfo"].as_object_mut().unwrap();
             server.remove("trustedKeys");
             server.insert("trustedOsUpdateSigners".into(), to_value(&legacy).unwrap());
+            server.insert("version".into(), to_value(&Version.semver()).unwrap());
             server.insert("latestMigrationRevision".into(), json!(0));
             server.insert("postInitMigrationTodos".into(), json!({}));
             fixture["private"]["sessions"]["tokens"] =
@@ -524,16 +565,18 @@ mod tests {
             let migrated = db.dump(&ROOT).await.value;
             let keyrings: TrustedKeys =
                 from_value(migrated["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
-            assert_eq!(os_signers(&keyrings), legacy);
+            assert_eq!(crate::trusted_keys::os_signers(&keyrings), legacy);
             assert_eq!(migrated["private"]["sessions"], sessions);
             assert_eq!(
                 migrated["public"]["serverInfo"]["latestMigrationRevision"],
-                json!(Version.migration_revision())
+                json!(Current::default().migration_revision())
             );
-            assert_eq!(
-                migrated["public"]["serverInfo"]["postInitMigrationTodos"],
-                json!({ "0.4.1": null })
-            );
+            let todos = migrated["public"]["serverInfo"]["postInitMigrationTodos"]
+                .as_object()
+                .unwrap();
+            assert!(todos.contains_key("0.4.1"));
+            assert!(todos.contains_key("0.4.1.1"));
+            assert!(todos.contains_key(Current::default().semver().to_string().as_str()));
             Current::default().pre_init(&db).await.unwrap();
             assert_eq!(db.dump(&ROOT).await.value, migrated);
         }

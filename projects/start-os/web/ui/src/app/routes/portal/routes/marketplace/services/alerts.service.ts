@@ -132,4 +132,20 @@ export class MarketplaceAlertsService {
         .subscribe(response => resolve(response))
     })
   }
+
+  async alertUntrusted(): Promise<boolean> {
+    return firstValueFrom(
+      this.dialog
+        .openConfirm({
+          label: 'Install untrusted software?',
+          data: {
+            content:
+              'This service package is not signed by anyone you trust. Malicious software could steal private keys and passwords, compromise your server, or permanently destroy your data. Only continue if you trust the source and understand these risks.',
+            yes: 'Install anyway',
+            no: 'Cancel',
+          },
+        })
+        .pipe(defaultIfEmpty(false)),
+    )
+  }
 }

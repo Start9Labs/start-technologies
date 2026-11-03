@@ -190,11 +190,11 @@ test('tag compiler workflow with local commit API', t => {
   )
   f.write(
     'projects/start-sdk/changelog/patch-fixed-released.md',
-    '---\nuser-facing: true\n---\n\n- Released fix.\n\n- Second released fix.\n',
+    '---\nrelease-notes: true\n---\n\n- Released fix.\n\n- Second released fix.\n',
   )
   f.write(
     'projects/start-sdk/changelog/patch-security-released.md',
-    '---\nuser-facing: true\n---\n\n- Released security fix.\n',
+    '---\nrelease-notes: true\n---\n\n- Released security fix.\n',
   )
   f.write(
     'projects/start-sdk/changelog/patch-security-released.pl_PL.md',
@@ -202,7 +202,7 @@ test('tag compiler workflow with local commit API', t => {
   )
   f.write(
     'projects/start-sdk/changelog/patch-fixed-second-released.md',
-    '---\nuser-facing: false\n---\n\n- Third released fix.\n',
+    '---\nrelease-notes: false\n---\n\n- Third released fix.\n',
   )
   f.write(
     'projects/start-sdk/changelog/patch-fixed-released.pl_PL.md',
@@ -245,7 +245,7 @@ if (race) {
   writeFileSync(marker, '')
   payload.fileChanges = { deletions: [], additions: [{
     path: 'projects/start-sdk/changelog/patch-fixed-after-tag.md',
-    contents: Buffer.from('---\nuser-facing: false\n---\n\n- New work after the tag.\n').toString('base64'),
+    contents: Buffer.from('---\nrelease-notes: false\n---\n\n- New work after the tag.\n').toString('base64'),
   }] }
 }
 function git(args, input) {
