@@ -95,6 +95,25 @@
         line-height: 1.5;
       }
 
+      .card .version {
+        font-size: 0.85rem;
+        margin: -0.25rem 0 0.5rem;
+      }
+
+      .archives {
+        margin-top: 2.5rem;
+        font-size: 0.95rem;
+      }
+
+      .archives a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      .archives a:hover {
+        color: var(--accent-hover);
+      }
+
       footer {
         margin-top: 4rem;
         color: var(--text-muted);
@@ -117,7 +136,8 @@
 
     <div class="cards">
       <a class="card" href="/start-os/">
-        <h2>StartOS v0.4.0</h2>
+        <h2>StartOS</h2>
+        <p class="version"><!--version:start-os--></p>
         <p>
           A server operating system optimized for self-hosting services on a
           personal server.
@@ -126,6 +146,7 @@
 
       <a class="card" href="/start-wrt/">
         <h2>StartWRT</h2>
+        <p class="version"><!--version:start-wrt--></p>
         <p>
           A router operating system for home-based self-hosting, built on
           OpenWrt.
@@ -134,6 +155,7 @@
 
       <a class="card" href="/start-tunnel/">
         <h2>StartTunnel</h2>
+        <p class="version"><!--version:start-tunnel--></p>
         <p>
           A self-hosted WireGuard VPN for private remote access and clearnet
           hosting.
@@ -157,12 +179,13 @@
         <h2>Start9 Support</h2>
         <p>Using Start9 Support: chats, notifications and your account.</p>
       </a>
-
-      <a class="card" href="/0.3.5.x/">
-        <h2>StartOS v0.3.5.1</h2>
-        <p>Documentation for StartOS version 0.3.5.1 and earlier.</p>
-      </a>
     </div>
+
+    <p class="archives">
+      <a href="/archives/">
+        Archives (older versions of StartOS, StartWRT, etc.)
+      </a>
+    </p>
 
     <footer>
       <a href="https://start9.com">start9.com</a>

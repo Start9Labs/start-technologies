@@ -48,6 +48,10 @@
         var book = path.split('/')[1]
         if (!book) return
         if (books[book]) {
+          var segs = path.split('/')
+          var built = [books[book].current].concat(books[book].archives)
+          if (/^\d+(\.\d+)*\.x$/.test(segs[2]) && built.indexOf(segs[2]) === -1)
+            return go('/' + book + '/' + segs.slice(3).join('/'))
           if (!/\.[A-Za-z0-9]+$/.test(path) && path.slice(-1) !== '/')
             return go(path + '.html')
           return
