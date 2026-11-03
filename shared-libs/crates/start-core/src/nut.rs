@@ -361,21 +361,21 @@ fn upsc_target(config: &NutConfig) -> Option<String> {
         return None;
     }
     match config.settings.as_ref()? {
-        NutSettings::Server { ups_name, .. } => Some(format!("{ups_name}@localhost:{NUT_PORT}")),
+        NutSettings::Server { ups_name, .. } => Some(nut_target(ups_name, "localhost", NUT_PORT)),
         NutSettings::Client {
             ups_name,
             host,
             port,
             ..
-        } => Some(format!("{ups_name}@{}:{port}", format_upsc_host(host))),
+        } => Some(nut_target(ups_name, host, *port)),
     }
 }
 
-fn format_upsc_host(host: &str) -> String {
+fn nut_target(ups_name: &str, host: &str, port: u16) -> String {
     if host.contains(':') && !host.starts_with('[') {
-        format!("[{host}]")
+        format!("{ups_name}@[{host}]:{port}")
     } else {
-        host.to_owned()
+        format!("{ups_name}@{host}:{port}")
     }
 }
 
@@ -401,9 +401,10 @@ fn upsmon_conf(
     role: &str,
     shutdown_delay: u16,
 ) -> String {
+    let target = nut_target(ups_name, host, port);
     format!(
         "\
-MONITOR {ups_name}@{host}:{port} 1 {username} {password} {role}
+MONITOR {target} 1 {username} {password} {role}
 MINSUPPLIES 1
 SHUTDOWNCMD \"/sbin/shutdown -h +0\"
 POLLFREQ 5
@@ -500,8 +501,9 @@ fn validate_required_identifier(field: &str, value: Option<&str>) -> Result<(), 
 
 fn validate_token(field: &str, value: &str) -> Result<(), Error> {
     if value.is_empty()
-        || !value.is_ascii()
-        || value.bytes().any(|b| b == 0 || b.is_ascii_whitespace())
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_graphic() && !matches!(b, b'#' | b'\\' | b'"'))
     {
         return Err(Error::new(
             eyre!("{}", t!("nut.invalid-token", field = field)),
@@ -549,28 +551,56 @@ mod tests {
     }
 
     #[test]
-    fn formats_ipv6_upsc_targets() {
-        let config = NutConfig {
-            enabled: true,
-            settings: Some(NutSettings::Client {
-                ups_name: "ups".to_owned(),
-                host: "2001:db8::1".to_owned(),
-                port: NUT_PORT,
-                monitor_username: "monitor".to_owned(),
-                monitor_password: "secret".to_owned(),
-                shutdown_delay: 5,
-            }),
-        };
+    fn status_and_monitor_use_the_same_nut_target() {
+        for (host, target) in [
+            ("2001:db8::1", "ups@[2001:db8::1]:3493"),
+            ("[2001:db8::1]", "ups@[2001:db8::1]:3493"),
+            ("192.0.2.1", "ups@192.0.2.1:3493"),
+            ("nut.example", "ups@nut.example:3493"),
+        ] {
+            let config = NutConfig {
+                enabled: true,
+                settings: Some(NutSettings::Client {
+                    ups_name: "ups".to_owned(),
+                    host: host.to_owned(),
+                    port: NUT_PORT,
+                    monitor_username: "monitor".to_owned(),
+                    monitor_password: "secret".to_owned(),
+                    shutdown_delay: 5,
+                }),
+            };
 
-        assert_eq!(
-            upsc_target(&config).as_deref(),
-            Some("ups@[2001:db8::1]:3493")
-        );
+            assert_eq!(upsc_target(&config).as_deref(), Some(target));
+            assert_eq!(
+                upsmon_conf("ups", host, NUT_PORT, "monitor", "secret", "secondary", 5)
+                    .lines()
+                    .next(),
+                Some(format!("MONITOR {target} 1 monitor secret secondary").as_str())
+            );
+        }
     }
 
     #[test]
-    fn rejects_config_tokens_with_whitespace() {
-        assert!(validate_token("field", "two words").is_err());
-        assert!(validate_token("field", "one-word").is_ok());
+    fn rejects_unsafe_config_tokens() {
+        for value in [
+            "",
+            "two words",
+            "abc#def",
+            r"abc\def",
+            "\"secret\"",
+            "abc\0def",
+            "abc\x7fdef",
+        ] {
+            assert!(validate_token("field", value).is_err(), "{value:?}");
+        }
+        for value in [
+            "one-word",
+            "auto",
+            "/dev/ttyUSB0",
+            "[2001:db8::1]",
+            "secret!$%&*()",
+        ] {
+            assert!(validate_token("field", value).is_ok(), "{value:?}");
+        }
     }
 }
