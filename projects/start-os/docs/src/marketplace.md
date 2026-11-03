@@ -29,7 +29,7 @@ Completed, verified BitTorrent downloads can be retained for seeding after insta
 
 ```yaml
 bittorrent-seed:
-  directory: /media/startos/data/registry-seeds
+  directory: /media/startos/data/package-data/registry-seeds
 ```
 
 StartOS keeps separate copies of these downloads and resumes seeding them after a restart. The cache grows as assets are retained. To reclaim it, remove the `bittorrent-seed` setting, restart StartOS, then delete the dedicated cache directory or selected entries inside it.

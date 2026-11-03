@@ -395,10 +395,10 @@ mod tests {
                 .bittorrent
                 .is_none()
         );
-        let server: ServerConfig = serde_json::from_value(serde_json::json!({"bittorrent-seed": {"directory": "/media/startos/data/registry-seeds"}})).unwrap();
+        let server: ServerConfig = serde_json::from_value(serde_json::json!({"bittorrent-seed": {"directory": "/media/startos/data/package-data/registry-seeds"}})).unwrap();
         assert_eq!(
             server.bittorrent_seed.unwrap().directory,
-            Path::new("/media/startos/data/registry-seeds")
+            Path::new("/media/startos/data/package-data/registry-seeds")
         );
         assert!(ServerConfig::default().bittorrent_seed.is_none());
     }
