@@ -48,7 +48,6 @@ nvme-cli
 nyx
 openssh-server
 pciutils
-podman
 psmisc
 qemu-guest-agent
 qemu-user-static
