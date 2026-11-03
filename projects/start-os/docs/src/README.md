@@ -6,6 +6,7 @@ StartOS is a sovereign computing platform that makes it easy to run a personal s
 
 - [Installing StartOS](installing-startos.md)
 - [Update to StartOS 0.4.0](update-040.md)
+- [Surge Protector and UPS](surge-and-ups.md)
 - [Initial Setup](initial-setup.md)
 - [Trusting Your Root CA](trust-ca.md)
 
@@ -16,9 +17,11 @@ StartOS is a sovereign computing platform that makes it easy to run a personal s
 - [Alternative Registries](alternative-registries.md)
 - [Installing](installing.md)
 - [Updating](updating.md)
+- [Uninstalling](uninstalling.md)
 - [Sideloading](sideloading.md)
 - [Flavors](flavors.md)
 - [Interfaces](interfaces.md)
+- [Instructions](instructions.md)
 - [Actions](actions.md)
 - [Health Checks](health-checks.md)
 - [Tasks](tasks.md)
@@ -31,6 +34,7 @@ StartOS is a sovereign computing platform that makes it easy to run a personal s
 - [Remote](remote-access.md)
 - [Private](private-access.md)
 - [Public](public-access.md)
+- [Networking Strategy](networking-strategy.md)
 
 ## Networking
 
@@ -53,6 +57,7 @@ StartOS is a sovereign computing platform that makes it easy to run a personal s
 
 ## System
 
+- [Notifications](notifications.md)
 - [Logs](logs.md)
 - [Server Name](server-name.md)
 - [SSH](ssh.md)
@@ -61,6 +66,7 @@ StartOS is a sovereign computing platform that makes it easy to run a personal s
 - [Internationalization](internationalization.md)
 - [Kiosk Mode](kiosk-mode.md)
 - [Updating StartOS](updating-startos.md)
+- [Trusted Keyrings](trusted-keys.md)
 - [Change Password](change-password.md)
 - [Forgot Password](forgot-password.md)
 
