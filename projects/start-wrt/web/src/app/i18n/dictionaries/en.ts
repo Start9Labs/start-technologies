@@ -573,4 +573,5 @@ export const ENGLISH: Record<string, number> = {
   'Change Security Profile?': 600,
   'Change Profile': 601,
   'Changing this password may briefly disconnect all Wi-Fi devices. Devices using the old password must reconnect with the new one.': 602,
+  'This Wi-Fi password was changed or deleted. Your changes were not saved.': 603,
 }

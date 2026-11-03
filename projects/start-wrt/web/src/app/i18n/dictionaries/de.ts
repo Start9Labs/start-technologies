@@ -568,4 +568,5 @@ export default {
   600: 'Sicherheitsprofil ändern?',
   601: 'Profil ändern',
   602: 'Eine Änderung dieses Passworts kann kurzzeitig alle Wi-Fi-Geräte trennen. Geräte, die das alte Passwort verwenden, müssen sich mit dem neuen erneut verbinden.',
+  603: 'Dieses Wi-Fi-Passwort wurde geändert oder gelöscht. Ihre Änderungen wurden nicht gespeichert.',
 } satisfies i18n

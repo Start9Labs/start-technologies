@@ -568,4 +568,5 @@ export default {
   600: '¿Cambiar el perfil de seguridad?',
   601: 'Cambiar perfil',
   602: 'Cambiar esta contraseña puede desconectar brevemente todos los dispositivos Wi-Fi. Los dispositivos que usan la contraseña anterior deben volver a conectarse con la nueva.',
+  603: 'Esta contraseña Wi-Fi se ha cambiado o eliminado. No se han guardado tus cambios.',
 } satisfies i18n

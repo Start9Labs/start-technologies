@@ -568,4 +568,5 @@ export default {
   600: 'Zmienić profil bezpieczeństwa?',
   601: 'Zmień profil',
   602: 'Zmiana tego hasła może na krótko rozłączyć wszystkie urządzenia Wi-Fi. Urządzenia używające starego hasła muszą połączyć się ponownie przy użyciu nowego.',
+  603: 'To hasło Wi-Fi zostało zmienione lub usunięte. Twoje zmiany nie zostały zapisane.',
 } satisfies i18n

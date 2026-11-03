@@ -568,4 +568,5 @@ export default {
   600: 'Changer le profil de sécurité ?',
   601: 'Changer de profil',
   602: 'Modifier ce mot de passe peut déconnecter brièvement tous les appareils Wi-Fi. Les appareils qui utilisent l’ancien mot de passe doivent se reconnecter avec le nouveau.',
+  603: 'Ce mot de passe Wi-Fi a été modifié ou supprimé. Vos modifications n’ont pas été enregistrées.',
 } satisfies i18n
