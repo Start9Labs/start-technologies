@@ -8,11 +8,13 @@ Sideloading lets you install a service from a `.s9pk` file without using any reg
 
 1. Click the drop area to select a `.s9pk` file from your file system, or simply drag and drop the file into the drop area.
 
-1. Review the package details and click **Install**, **Update**, or **Reinstall**. If no key from an enabled [trusted keyring](trusted-keys.md) signs the package, a warning appears and you must confirm the risks before installation starts.
+1. Review the package details, including **Signed by**, and click **Install**, **Update**, or **Reinstall**. If no key trusted for packages in [Trusted Keys](trusted-keys.md) signs the package, a warning appears and you must confirm the risks before installation starts.
+
+**Signed by** lists the signing keys declared by a v2 package, including its supplemental records. **View all** opens any keys hidden by the preview, and selecting a key opens the same details and trust controls as the Marketplace. A key included in a file is not automatically trusted. The preview matches keys without verifying signatures; StartOS verifies the uploaded file against the matching keys before installing it. Unreadable supplemental records produce a warning and are ignored. A false signing claim cannot bypass signature or file-integrity checks.
 
 Keep the browser tab open while the file uploads. Large files and slow connections can take several minutes; follow progress in **Services**. If the upload fails, StartOS shows an error message.
 
-When you sideload from the command line with `start-cli package install --sideload`, installation errors appear in the command's progress output. Very long messages are shortened safely to fit the progress stream. CLI sideloads require a signer from an enabled Marketplace keyring unless you explicitly supply `--trust`; signatures and file integrity are verified in either case.
+When you sideload from the command line with `start-cli package install --sideload`, installation errors appear in the command's progress output. Very long messages are shortened safely to fit the progress stream. CLI sideloads require a key trusted for packages in Trusted Keys unless you explicitly supply `--trust`; signatures and file integrity are verified in either case.
 
 ## Obtaining `.s9pk` Files
 

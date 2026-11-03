@@ -8,6 +8,7 @@ import {
 } from '@angular/router'
 import { titleResolver } from 'src/app/utils/title-resolver'
 import { SystemComponent } from './system.component'
+import { TRUSTED_KEYS_MENU_ITEM } from './system.const'
 
 export default [
   {
@@ -69,9 +70,15 @@ export default [
         loadComponent: () => import('./routes/ssh/ssh.component'),
       },
       {
-        path: 'trusted-keys',
+        path: 'registries',
         title: titleResolver,
-        data: { title: 'Trusted keyrings' },
+        data: { title: 'Registries' },
+        loadComponent: () => import('./routes/registries'),
+      },
+      {
+        path: TRUSTED_KEYS_MENU_ITEM.link,
+        title: titleResolver,
+        data: { title: TRUSTED_KEYS_MENU_ITEM.item },
         loadComponent: () => import('./routes/trusted-keys'),
       },
       {

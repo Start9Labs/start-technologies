@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -6,6 +7,7 @@ use imbl_value::InternedString;
 use itertools::Itertools;
 use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
+use tracing::Instrument;
 use url::Url;
 
 use crate::PackageId;
@@ -36,6 +38,8 @@ pub struct AddPackageParams {
     pub uploader: AnyVerifyingKey,
     pub commitment: MerkleArchiveCommitment,
     pub signature: AnySignature,
+    #[serde(default)]
+    pub signatures: HashMap<AnyVerifyingKey, AnySignature>,
 }
 
 rpc_toolkit::reflect_ts!(AddPackageParams);
@@ -48,6 +52,7 @@ pub async fn add_package(
         uploader,
         commitment,
         signature,
+        signatures,
     }: AddPackageParams,
 ) -> Result<(), Error> {
     let signature =
@@ -66,6 +71,7 @@ pub async fn add_package(
         &Arc::new(HttpSource::new(ctx.client.clone(), url.clone()).await?),
         Some(&commitment),
     )
+    .instrument(tracing::info_span!("registry-package-source", %url))
     .await?;
 
     for url in rest {
@@ -73,17 +79,14 @@ pub async fn add_package(
             &Arc::new(HttpSource::new(ctx.client.clone(), url.clone()).await?),
             Some(&commitment),
         )
+        .instrument(tracing::info_span!("registry-package-source", %url))
         .await?;
     }
 
     let manifest = s9pk.as_manifest();
 
     let mut info = PackageVersionInfo::from_s9pk(&s9pk, urls, &icons_dir(&ctx.datadir)).await?;
-    for (_, s9pk) in &mut info.s9pks {
-        if !s9pk.signatures.contains_key(&uploader) && s9pk.commitment == commitment {
-            s9pk.signatures.insert(uploader.clone(), signature.clone());
-        }
-    }
+    merge_submitted_signatures(&mut info, &uploader, &signature, signatures)?;
 
     ctx.db
         .mutate(|db| {
@@ -110,6 +113,34 @@ pub async fn add_package(
         })
         .await
         .result
+}
+
+fn merge_submitted_signatures(
+    info: &mut PackageVersionInfo,
+    uploader: &AnyVerifyingKey,
+    signature: &AnySignature,
+    signatures: HashMap<AnyVerifyingKey, AnySignature>,
+) -> Result<(), Error> {
+    for (_, asset) in &mut info.s9pks {
+        let verified = signatures
+            .iter()
+            .chain(std::iter::once((uploader, signature)))
+            .map(|(key, signature)| {
+                Ok((
+                    key.clone(),
+                    crate::sign::compat::verify_commitment(
+                        key,
+                        &asset.commitment,
+                        SIG_CONTEXT,
+                        signature,
+                    )?,
+                ))
+            })
+            .collect::<Result<HashMap<_, _>, Error>>()?;
+        let commitment = asset.commitment;
+        asset.merge_signatures(&commitment, verified);
+    }
+    Ok(())
 }
 
 pub fn can_publish(
@@ -217,6 +248,7 @@ pub async fn cli_add_package_impl(
         imbl_value::json!({
             "urls": &url,
             "signature": signature,
+            "signatures": s9pk.signatures().await?,
             "commitment": commitment,
         }),
     )
@@ -359,6 +391,8 @@ pub struct AddMirrorParams {
     pub uploader: AnyVerifyingKey,
     pub commitment: MerkleArchiveCommitment,
     pub signature: AnySignature,
+    #[serde(default)]
+    pub signatures: HashMap<AnyVerifyingKey, AnySignature>,
 }
 
 rpc_toolkit::reflect_ts!(AddMirrorParams);
@@ -371,6 +405,7 @@ pub async fn add_mirror(
         uploader,
         commitment,
         signature,
+        signatures,
     }: AddMirrorParams,
 ) -> Result<(), Error> {
     let signature =
@@ -382,17 +417,14 @@ pub async fn add_mirror(
         &Arc::new(HttpSource::new(ctx.client.clone(), url.clone()).await?),
         Some(&commitment),
     )
+    .instrument(tracing::info_span!("registry-package-source", %url))
     .await?;
 
     let manifest = s9pk.as_manifest();
 
     let mut info =
         PackageVersionInfo::from_s9pk(&s9pk, vec![url], &icons_dir(&ctx.datadir)).await?;
-    for (_, s9pk) in &mut info.s9pks {
-        if !s9pk.signatures.contains_key(&uploader) && s9pk.commitment == commitment {
-            s9pk.signatures.insert(uploader.clone(), signature.clone());
-        }
-    }
+    merge_submitted_signatures(&mut info, &uploader, &signature, signatures)?;
 
     ctx.db
         .mutate(|db| {
@@ -491,6 +523,7 @@ pub async fn cli_add_mirror(
         imbl_value::json!({
             "url": &url,
             "signature": signature,
+            "signatures": s9pk.signatures().await?,
             "commitment": commitment,
         }),
     )

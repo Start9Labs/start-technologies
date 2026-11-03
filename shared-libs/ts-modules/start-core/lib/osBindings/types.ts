@@ -14,6 +14,16 @@ export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
 export type ActionResultValueInput = z.input<typeof schemas.ActionResultValue>
 export type ActionVisibility = z.output<typeof schemas.ActionVisibility>
 export type ActionVisibilityInput = z.input<typeof schemas.ActionVisibility>
+
+/**
+ * Keys an import added, and keys it found already present.
+ */
+export type AddTrustedKeyRes = z.output<typeof schemas.AddTrustedKeyRes>
+
+/**
+ * Keys an import added, and keys it found already present.
+ */
+export type AddTrustedKeyResInput = z.input<typeof schemas.AddTrustedKeyRes>
 export type Algorithm = z.output<typeof schemas.Algorithm>
 export type AlgorithmInput = z.input<typeof schemas.Algorithm>
 export type AllowedStatuses = z.output<typeof schemas.AllowedStatuses>
@@ -356,6 +366,26 @@ export type RegistryAsset<Commitment> = z.output<
 export type RegistryAssetInput<Commitment> = z.input<
   ReturnType<typeof schemas.RegistryAsset<z.ZodType<Commitment, Commitment>>>
 >
+
+/**
+ * A key a connected registry newly offers, imported untrusted.
+ */
+export type RegistryKeyAdded = z.output<typeof schemas.RegistryKeyAdded>
+
+/**
+ * A key a connected registry newly offers, imported untrusted.
+ */
+export type RegistryKeyAddedInput = z.input<typeof schemas.RegistryKeyAdded>
+
+/**
+ * A key a connected registry stopped offering; its trust is unchanged.
+ */
+export type RegistryKeyDropped = z.output<typeof schemas.RegistryKeyDropped>
+
+/**
+ * A key a connected registry stopped offering; its trust is unchanged.
+ */
+export type RegistryKeyDroppedInput = z.input<typeof schemas.RegistryKeyDropped>
 export type RemoveAssetParams = z.output<typeof schemas.RemoveAssetParams>
 export type RemoveAssetParamsInput = z.input<typeof schemas.RemoveAssetParams>
 export type RemoveCategoryParams = z.output<typeof schemas.RemoveCategoryParams>
@@ -418,8 +448,6 @@ export type SetupInfo = z.output<typeof schemas.SetupInfo>
 export type SetupInfoInput = z.input<typeof schemas.SetupInfo>
 export type ShutdownParams = z.output<typeof schemas.ShutdownParams>
 export type ShutdownParamsInput = z.input<typeof schemas.ShutdownParams>
-export type SideloadParams = z.output<typeof schemas.SideloadParams>
-export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 
 /**
  * So a signal strength is a number between 0-100, I want the null option to be 0 since there is no signal
@@ -458,6 +486,8 @@ export type TaskSeverity = z.output<typeof schemas.TaskSeverity>
 export type TaskSeverityInput = z.input<typeof schemas.TaskSeverity>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TimeInfoInput = z.input<typeof schemas.TimeInfo>
+export type TrustContext = z.output<typeof schemas.TrustContext>
+export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedOsUpdateSigner = z.output<
   typeof schemas.TrustedOsUpdateSigner
 >
@@ -796,8 +826,6 @@ export type InfoParams = z.output<typeof schemas.InfoParams>
 export type InfoParamsInput = z.input<typeof schemas.InfoParams>
 export type InitAcmeParams = z.output<typeof schemas.InitAcmeParams>
 export type InitAcmeParamsInput = z.input<typeof schemas.InitAcmeParams>
-export type InstallParams = z.output<typeof schemas.InstallParams>
-export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type InstalledVersionParams = z.output<
   typeof schemas.InstalledVersionParams
 >
@@ -952,6 +980,8 @@ export type RangeServiceInterfaceInput = z.input<
 >
 export type RebuildParams = z.output<typeof schemas.RebuildParams>
 export type RebuildParamsInput = z.input<typeof schemas.RebuildParams>
+export type RegistryIdentity = z.output<typeof schemas.RegistryIdentity>
+export type RegistryIdentityInput = z.input<typeof schemas.RegistryIdentity>
 export type RemoveAcmeParams = z.output<typeof schemas.RemoveAcmeParams>
 export type RemoveAcmeParamsInput = z.input<typeof schemas.RemoveAcmeParams>
 export type RemoveAdminParams = z.output<typeof schemas.RemoveAdminParams>
@@ -1070,16 +1100,6 @@ export type TaskTrigger = z.output<typeof schemas.TaskTrigger>
 export type TaskTriggerInput = z.input<typeof schemas.TaskTrigger>
 export type TestSmtpParams = z.output<typeof schemas.TestSmtpParams>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
-
-/**
- * A named keyring with independent service-package and OS-update trust.
- */
-export type TrustedKeyring = z.output<typeof schemas.TrustedKeyring>
-
-/**
- * A named keyring with independent service-package and OS-update trust.
- */
-export type TrustedKeyringInput = z.input<typeof schemas.TrustedKeyring>
 export type UmountParams = z.output<typeof schemas.UmountParams>
 export type UmountParamsInput = z.input<typeof schemas.UmountParams>
 export type UninstallParams = z.output<typeof schemas.UninstallParams>
@@ -1164,6 +1184,8 @@ export type ImageConfigRepr = z.output<typeof schemas.ImageConfigRepr>
 export type ImageConfigReprInput = z.input<typeof schemas.ImageConfigRepr>
 export type InitProgressRes = z.output<typeof schemas.InitProgressRes>
 export type InitProgressResInput = z.input<typeof schemas.InitProgressRes>
+export type InstallParams = z.output<typeof schemas.InstallParams>
+export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type MetadataSrc = z.output<typeof schemas.MetadataSrc>
 export type MetadataSrcInput = z.input<typeof schemas.MetadataSrc>
 export type Metrics = z.output<typeof schemas.Metrics>
@@ -1230,8 +1252,20 @@ export type SetNutParams = z.output<typeof schemas.SetNutParams>
 export type SetNutParamsInput = z.input<typeof schemas.SetNutParams>
 export type SetupProgress = z.output<typeof schemas.SetupProgress>
 export type SetupProgressInput = z.input<typeof schemas.SetupProgress>
+export type SideloadParams = z.output<typeof schemas.SideloadParams>
+export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 export type Task = z.output<typeof schemas.Task>
 export type TaskParams = z.input<typeof schemas.Task>
+
+/**
+ * Signing-key material and independent package and OS-update trust.
+ */
+export type TrustedKey = z.output<typeof schemas.TrustedKey>
+
+/**
+ * Signing-key material and independent package and OS-update trust.
+ */
+export type TrustedKeyInput = z.input<typeof schemas.TrustedKey>
 export type UpdateSystemParams = z.output<typeof schemas.UpdateSystemParams>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type UrlPluginClearUrlsParams = z.output<

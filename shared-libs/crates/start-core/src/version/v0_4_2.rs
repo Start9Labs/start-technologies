@@ -1,7 +1,7 @@
 use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
-use super::{VersionT, v0_4_1_1};
+use super::{VersionT, v0_4_1_2};
 use crate::prelude::*;
 
 lazy_static::lazy_static! {
@@ -12,7 +12,7 @@ lazy_static::lazy_static! {
 pub struct Version;
 
 impl VersionT for Version {
-    type Previous = v0_4_1_1::Version;
+    type Previous = v0_4_1_2::Version;
     type PreUpRes = ();
 
     async fn pre_up(self) -> Result<Self::PreUpRes, Error> {
@@ -39,7 +39,8 @@ mod tests {
 
     use super::*;
     use crate::db::model::Database;
-    use crate::version::{Current, rollback_to_unchecked};
+    use crate::trusted_keys::{initial_trusted_keys, legacy};
+    use crate::version::{Current, rollback_to_unchecked, v0_4_1_1};
 
     #[tokio::test]
     async fn upgrade_preserves_nut_settings_sessions_and_trust() {
@@ -50,7 +51,11 @@ mod tests {
             "mode": "client", "upsName": "ups", "host": "192.0.2.1", "port": 3493,
             "monitorUsername": "monitor", "monitorPassword": "test-password", "shutdownDelay": 5,
         });
-        for from in ["0.4.1", "0.4.1.1"] {
+        let mut trust = initial_trusted_keys();
+        for key in trust.values_mut() {
+            key.os = false;
+        }
+        for from in ["0.4.1", "0.4.1.1", "0.4.1.2"] {
             for enabled in [false, true] {
                 let mut fixture =
                     to_value(&Database::init(&account, false, None, None).unwrap()).unwrap();
@@ -58,11 +63,15 @@ mod tests {
                 fixture["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
                 fixture["public"]["serverInfo"]["nut"] =
                     json!({ "enabled": enabled, "settings": settings.clone() });
-                fixture["public"]["serverInfo"]["trustedKeys"]["start9"]["os"] = json!(false);
+                fixture["public"]["serverInfo"]["trustedKeys"] = if from == "0.4.1.2" {
+                    to_value(&trust).unwrap()
+                } else {
+                    to_value(&legacy::grouped_keys(trust.clone())).unwrap()
+                };
                 fixture["private"]["sessions"]["tokens"] =
                     json!({ "a".repeat(64): crate::auth::Session::default() });
                 let saved_nut = fixture["public"]["serverInfo"]["nut"].clone();
-                let saved_trust = fixture["public"]["serverInfo"]["trustedKeys"].clone();
+                let saved_trust = to_value(&trust).unwrap();
                 let saved_sessions = fixture["private"]["sessions"].clone();
                 let db = PatchDb::in_memory();
                 db.put(&ROOT, &fixture).await.unwrap();
@@ -80,7 +89,14 @@ mod tests {
                     json!("0.4.1.1")
                 );
                 assert_eq!(migrated["public"]["serverInfo"]["nut"], saved_nut);
-                assert_eq!(migrated["public"]["serverInfo"]["trustedKeys"], saved_trust);
+                assert_eq!(
+                    legacy::decode_keys(
+                        migrated["public"]["serverInfo"]["trustedKeys"].clone(),
+                        chrono::Utc::now(),
+                    )
+                    .unwrap(),
+                    trust
+                );
                 assert_eq!(migrated["private"]["sessions"], saved_sessions);
             }
         }
