@@ -573,4 +573,7 @@ export const ENGLISH: Record<string, number> = {
   'Lets this device announce IPv6 routes to your other devices (needed by Thread border routers such as an Apple TV, HomePod, or Home Assistant). Off by default.': 596,
   'Allow IPv6 Router Advertisements?': 597,
   'This device will be able to give your other devices IPv6 addresses, routes, DNS servers, and a default gateway, and could route their IPv6 traffic around the router. Grant this only to a device you trust, such as a Thread border router.': 598,
+  'Devices on {port} will move to the {profile} profile. Most reconnect within a few seconds. If a device then has no Internet access or cannot reach other devices, which is common behind a switch, unplug and replug its cable, or restart the device or the switch. Otherwise it reconnects on its own within 12 hours.': 599,
+  'Change Security Profile?': 600,
+  'Change Profile': 601,
 }

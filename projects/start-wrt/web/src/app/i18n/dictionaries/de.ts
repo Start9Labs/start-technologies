@@ -568,4 +568,7 @@ export default {
   596: 'Erlaubt diesem Gerät, Ihren anderen Geräten IPv6-Routen anzukündigen (erforderlich für Thread-Border-Router wie Apple TV, HomePod oder Home Assistant). Standardmäßig aus.',
   597: 'IPv6-Router-Advertisements erlauben?',
   598: 'Dieses Gerät kann dann Ihren anderen Geräten IPv6-Adressen, Routen, DNS-Server und ein Standard-Gateway zuweisen und ihren IPv6-Verkehr am Router vorbeileiten. Gewähren Sie dies nur einem Gerät, dem Sie vertrauen, etwa einem Thread-Border-Router.',
+  599: 'Geräte an {port} wechseln in das Profil {profile}. Die meisten verbinden sich innerhalb weniger Sekunden neu. Hat ein Gerät danach keinen Internetzugang oder erreicht es keine anderen Geräte, was hinter einem Switch häufig vorkommt, ziehen Sie sein Kabel ab und stecken Sie es wieder ein, oder starten Sie das Gerät oder den Switch neu. Andernfalls verbindet es sich innerhalb von 12 Stunden von selbst neu.',
+  600: 'Sicherheitsprofil ändern?',
+  601: 'Profil ändern',
 } satisfies i18n
