@@ -92,12 +92,14 @@ Publish an external magnet link or HTTP(S) `.torrent` metadata URL with `--torre
 ```sh
 start-cli --registry https://registry.example.com registry package add service.s9pk \
   --url https://downloads.example.com/service.s9pk \
-  --torrent 'magnet:?xt=urn:btih:<infohash>&tr=<tracker-url>'
+  --torrent 'magnet:?xt=urn:btih:<v1-infohash>&xt=urn:btmh:1220<v2-infohash>&tr=<tracker-url>'
 ```
 
-`registry os asset add` accepts the same `--torrent` option for OS images. The RPC `package.add` and `os.asset.add.*` requests accept an optional `torrent` string. Package and OS promotion preserve it and the HTTP mirrors.
+`registry os asset add` accepts the same `--torrent` option for OS images. The RPC `package.add` and `os.asset.add.*` requests accept an optional `torrent` string. Both publish HTTP mirrors through `urls`; the OS RPC also accepts deprecated scalar `url` input from older publishers. When both appear, canonical mirrors come first, followed by distinct legacy mirrors. Package and OS promotion preserve torrent metadata and the complete HTTP mirror list.
 
-The torrent must contain a single file with the exact bytes of the HTTP asset. Registry operators arrange seeding through an external BitTorrent client, with reachable seed peers and tracker or DHT discovery. The registry stores the source metadata; asset storage and seeding belong to those external hosts.
+Upgrade registries to 1.4.0 before using start-cli 2.7.0 OS-asset publication or promotion, which sends the canonical `urls` field.
+
+Create a single-file v1/v2 hybrid torrent with the exact bytes of the HTTP asset. Advertise both hashes in a hybrid magnet; StartOS and start-cli use its v1-compatible swarm. Existing v1 torrent sources remain compatible. Registry operators arrange seeding through an external BitTorrent client, with reachable seed peers and tracker or DHT discovery. The registry stores the source metadata; asset storage and seeding belong to those external hosts.
 
 StartOS and local `start-cli` downloads prefer BitTorrent and fall back to HTTP when it is unavailable or fails commitment verification. Existing signature requirements apply to either transport. Older clients ignore the optional metadata and continue using HTTP.
 

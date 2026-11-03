@@ -332,17 +332,9 @@ export type RecoverySource<Password> = z.output<
 export type RecoverySourceInput<Password> = z.input<
   ReturnType<typeof schemas.RecoverySource<z.ZodType<Password, Password>>>
 >
-
-/**
- * A registry asset with a caller-selected commitment representation.
- */
 export type RegistryAsset<Commitment> = z.output<
   ReturnType<typeof schemas.RegistryAsset<z.ZodType<Commitment, Commitment>>>
 >
-
-/**
- * A registry asset with a caller-selected commitment representation.
- */
 export type RegistryAssetInput<Commitment> = z.input<
   ReturnType<typeof schemas.RegistryAsset<z.ZodType<Commitment, Commitment>>>
 >

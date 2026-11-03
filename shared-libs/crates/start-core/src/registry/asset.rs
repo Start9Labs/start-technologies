@@ -27,7 +27,15 @@ use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::TmpDir;
 use crate::util::io::{create_file, open_file};
 
-/// A registry asset with a caller-selected commitment representation.
+pub(crate) fn require_http_mirrors(urls: &[Url]) -> Result<(&Url, &[Url]), Error> {
+    urls.split_first().ok_or_else(|| {
+        Error::new(
+            eyre!("{}", t!("registry.asset.must-specify-url")),
+            ErrorKind::InvalidRequest,
+        )
+    })
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistryAsset<Commitment> {
@@ -42,6 +50,13 @@ pub struct RegistryAsset<Commitment> {
 rpc_toolkit::reflect_ts!(generic RegistryAsset<Commitment>);
 rpc_toolkit::ts_export!(generic RegistryAsset<Commitment>, namespaces = [""]);
 impl<Commitment> RegistryAsset<Commitment> {
+    /// Preserves the advertised torrent for `None`.
+    pub(crate) fn merge_torrent(&mut self, torrent: Option<Url>) {
+        if let Some(torrent) = torrent {
+            self.torrent = Some(torrent);
+        }
+    }
+
     pub fn merge_signatures(
         &mut self,
         commitment: &Commitment,

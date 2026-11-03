@@ -198,6 +198,7 @@ mod tests {
         .await?;
         let request = rx.await.with_kind(ErrorKind::Unknown)?;
         assert_eq!(request["params"]["urls"], serde_json::json!(mirrors));
+        assert!(request["params"].get("url").is_none());
         assert_eq!(request["params"]["torrent"], serde_json::json!(torrent));
         Ok(())
     }
@@ -214,6 +215,7 @@ async fn promote_assets(
     method: &str,
 ) -> Result<(), Error> {
     for (platform, asset) in assets {
+        crate::registry::asset::require_http_mirrors(&asset.urls)?;
         let commitment = &asset.commitment;
         let signature = ctx
             .id_key()?
@@ -227,7 +229,6 @@ async fn promote_assets(
             imbl_value::json!({
                 "version": version,
                 "platform": platform,
-                "url": asset.urls.first().or_not_found(t!("registry.asset.failed-to-load-http-url"))?,
                 "urls": &asset.urls,
                 "torrent": &asset.torrent,
                 "signature": signature,

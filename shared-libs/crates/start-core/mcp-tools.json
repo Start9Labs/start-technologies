@@ -7141,13 +7141,16 @@
           "properties": {
             "version": { "type": "string" },
             "platform": { "type": "string" },
-            "url": { "type": "string" },
+            "url": {
+              "description": "@deprecated Use `urls`.",
+              "type": ["string", "null"]
+            },
             "urls": { "type": "array", "items": { "type": "string" } },
             "torrent": { "type": ["string", "null"] },
             "signature": { "$ref": "#/$defs/AnySignature" },
             "commitment": { "$ref": "#/$defs/Blake3Commitment" }
           },
-          "required": ["version", "platform", "url", "signature", "commitment"],
+          "required": ["version", "platform", "signature", "commitment"],
           "additionalProperties": true
         },
         "AnySignature": { "type": "string" },
@@ -7189,13 +7192,16 @@
           "properties": {
             "version": { "type": "string" },
             "platform": { "type": "string" },
-            "url": { "type": "string" },
+            "url": {
+              "description": "@deprecated Use `urls`.",
+              "type": ["string", "null"]
+            },
             "urls": { "type": "array", "items": { "type": "string" } },
             "torrent": { "type": ["string", "null"] },
             "signature": { "$ref": "#/$defs/AnySignature" },
             "commitment": { "$ref": "#/$defs/Blake3Commitment" }
           },
-          "required": ["version", "platform", "url", "signature", "commitment"],
+          "required": ["version", "platform", "signature", "commitment"],
           "additionalProperties": true
         },
         "AnySignature": { "type": "string" },
@@ -7237,13 +7243,16 @@
           "properties": {
             "version": { "type": "string" },
             "platform": { "type": "string" },
-            "url": { "type": "string" },
+            "url": {
+              "description": "@deprecated Use `urls`.",
+              "type": ["string", "null"]
+            },
             "urls": { "type": "array", "items": { "type": "string" } },
             "torrent": { "type": ["string", "null"] },
             "signature": { "$ref": "#/$defs/AnySignature" },
             "commitment": { "$ref": "#/$defs/Blake3Commitment" }
           },
-          "required": ["version", "platform", "url", "signature", "commitment"],
+          "required": ["version", "platform", "signature", "commitment"],
           "additionalProperties": true
         },
         "AnySignature": { "type": "string" },

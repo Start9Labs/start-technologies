@@ -82,7 +82,9 @@ pub fn remove_api<C: Context>() -> ParentHandler<C> {
 pub struct AddAssetParams {
     pub version: Version,
     pub platform: InternedString,
-    pub url: Url,
+    /// @deprecated Use `urls`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<Url>,
     #[serde(default)]
     pub urls: Vec<Url>,
     #[serde(default)]
@@ -96,6 +98,12 @@ pub struct AddAssetParams {
 
 rpc_toolkit::reflect_ts!(AddAssetParams);
 rpc_toolkit::ts_export!(AddAssetParams, namespaces = [""]);
+
+fn publication_mirrors(urls: Vec<Url>, legacy: Option<Url>) -> Result<Vec<Url>, Error> {
+    let urls: Vec<_> = urls.into_iter().chain(legacy).unique().collect();
+    crate::registry::asset::require_http_mirrors(&urls)?;
+    Ok(urls)
+}
 
 async fn add_asset(
     ctx: RegistryContext,
@@ -115,6 +123,7 @@ async fn add_asset(
     + UnwindSafe
     + Send,
 ) -> Result<(), Error> {
+    let urls = publication_mirrors(urls, url)?;
     if let Some(torrent) = &torrent {
         crate::registry::bittorrent::validate_torrent_url(torrent)?;
     }
@@ -144,7 +153,7 @@ async fn add_asset(
                 .upsert(&platform, || {
                     Ok(RegistryAsset {
                         published_at: Utc::now(),
-                        urls: vec![url.clone()],
+                        urls: Vec::new(),
                         torrent: None,
                         commitment: commitment.clone(),
                         signatures: HashMap::new(),
@@ -158,10 +167,8 @@ async fn add_asset(
                         ))
                     } else {
                         s.signatures.insert(signer, signature);
-                        if let Some(torrent) = torrent {
-                            s.torrent = Some(torrent);
-                        }
-                        for url in std::iter::once(url).chain(urls) {
+                        s.merge_torrent(torrent);
+                        for url in urls {
                             if !s.urls.contains(&url) {
                                 s.urls.push(url);
                             }
@@ -296,7 +303,7 @@ pub async fn cli_add_asset(
         imbl_value::json!({
             "platform": platform,
             "version": version,
-            "url": &url,
+            "urls": [&url],
             "torrent": torrent,
             "signature": signature,
             "commitment": commitment,
@@ -410,4 +417,92 @@ pub async fn remove_squashfs(
     params: RemoveAssetParams,
 ) -> Result<bool, Error> {
     remove_asset(ctx, params, |m| m.as_squashfs_mut()).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(mirrors: serde_json::Value) -> AddAssetParams {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[42; 32]);
+        let mut value = serde_json::to_value(AddAssetParams {
+            version: "0.4.2".parse().unwrap(),
+            platform: "x86_64".into(),
+            url: None,
+            urls: Vec::new(),
+            torrent: None,
+            signer: AnyVerifyingKey::Ed25519(key.verifying_key()),
+            signature: AnySignature::Ed25519ph(ed25519_dalek::Signature::from_bytes(&[0; 64])),
+            commitment: Blake3Commitment {
+                hash: Base64([7; 32]),
+                size: 1,
+            },
+        })
+        .unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("urls");
+        object.remove("torrent");
+        object.extend(mirrors.as_object().unwrap().clone());
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn url_array_publication_needs_no_legacy_url() {
+        let params = request(
+            serde_json::json!({"urls": ["https://one.example/asset", "https://two.example/asset"]}),
+        );
+        assert!(params.url.is_none());
+        assert!(serde_json::to_value(&params).unwrap().get("url").is_none());
+        assert_eq!(
+            publication_mirrors(params.urls, params.url).unwrap(),
+            vec![
+                "https://one.example/asset".parse::<Url>().unwrap(),
+                "https://two.example/asset".parse().unwrap(),
+            ]
+        );
+    }
+
+    #[test]
+    fn legacy_url_publication_remains_accepted() {
+        let params = request(serde_json::json!({"url": "https://legacy.example/asset"}));
+        assert_eq!(
+            publication_mirrors(params.urls, params.url).unwrap(),
+            vec!["https://legacy.example/asset".parse::<Url>().unwrap()]
+        );
+    }
+
+    #[test]
+    fn canonical_mirrors_precede_distinct_legacy_mirrors() {
+        let params = request(serde_json::json!({
+            "urls": ["https://one.example/asset", "https://two.example/asset"],
+            "url": "https://legacy.example/asset"
+        }));
+        assert_eq!(
+            publication_mirrors(params.urls, params.url).unwrap(),
+            vec![
+                "https://one.example/asset".parse::<Url>().unwrap(),
+                "https://two.example/asset".parse().unwrap(),
+                "https://legacy.example/asset".parse().unwrap(),
+            ]
+        );
+    }
+
+    #[test]
+    fn duplicate_and_missing_mirrors_follow_publication_rules() {
+        let params = request(serde_json::json!({
+            "urls": ["https://one.example/asset", "https://one.example/asset"],
+            "url": "https://one.example/asset"
+        }));
+        assert_eq!(
+            publication_mirrors(params.urls, params.url).unwrap(),
+            vec!["https://one.example/asset".parse::<Url>().unwrap()]
+        );
+        let params = request(serde_json::json!({}));
+        assert!(matches!(
+            publication_mirrors(params.urls, params.url)
+                .unwrap_err()
+                .kind,
+            ErrorKind::InvalidRequest
+        ));
+    }
 }

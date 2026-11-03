@@ -2726,13 +2726,19 @@ registry.signer.not-accepted:
   fr_FR: "Signataire(s) non accepté(s)"
   pl_PL: "Sygnatariusz(e) nieakceptowany(i)"
 
-# registry/asset.rs
 registry.asset.failed-to-load-http-url:
   en_US: "Failed to load any HTTP URL"
   de_DE: "Fehler beim Laden einer HTTP-URL"
   es_ES: "Error al cargar cualquier URL HTTP"
   fr_FR: "Échec du chargement de toute URL HTTP"
   pl_PL: "Nie udało się załadować żadnego adresu HTTP"
+
+registry.asset.must-specify-url:
+  en_US: "Must specify at least 1 URL"
+  de_DE: "Mindestens 1 URL muss angegeben werden"
+  es_ES: "Debe especificar al menos 1 URL"
+  fr_FR: "Doit spécifier au moins 1 URL"
+  pl_PL: "Należy podać co najmniej 1 adres URL"
 
 registry.bittorrent.invalid-metadata:
   en_US: "Invalid registry torrent: expected a single asset file matching the commitment"
@@ -2881,13 +2887,6 @@ registry.package.remove-not-exist:
   pl_PL: "%{id}%{version}%{sighash} nie istnieje, więc nie usunięto"
 
 # registry/package/add.rs
-registry.package.add.must-specify-url:
-  en_US: "Must specify at least 1 URL"
-  de_DE: "Mindestens 1 URL muss angegeben werden"
-  es_ES: "Debe especificar al menos 1 URL"
-  fr_FR: "Doit spécifier au moins 1 URL"
-  pl_PL: "Należy podać co najmniej 1 adres URL"
-
 registry.package.add.unauthorized:
   en_US: "Unauthorized"
   de_DE: "Nicht autorisiert"

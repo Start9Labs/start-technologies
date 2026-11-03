@@ -128,10 +128,6 @@ export type PackageIdInput = z.input<typeof schemas.PackageId>
 export type PackageVersionCount = z.output<typeof schemas.PackageVersionCount>
 export type PluginId = z.output<typeof schemas.PluginId>
 export type PreDownloadAlertWhen = z.output<typeof schemas.PreDownloadAlertWhen>
-
-/**
- * A registry asset with a caller-selected commitment representation.
- */
 export type RegistryAsset<Commitment> = z.output<
   ReturnType<typeof schemas.RegistryAsset<z.ZodType<Commitment, Commitment>>>
 >

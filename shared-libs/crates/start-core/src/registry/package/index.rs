@@ -233,9 +233,7 @@ impl PackageVersionInfo {
                 .find(|(h, s)| s.commitment == asset.commitment && *h == hw_req)
             {
                 matching.merge_signatures(&asset.commitment, asset.signatures);
-                if asset.torrent.is_some() {
-                    matching.torrent = asset.torrent;
-                }
+                matching.merge_torrent(asset.torrent);
                 if replace_urls {
                     matching.urls = asset.urls;
                 } else {

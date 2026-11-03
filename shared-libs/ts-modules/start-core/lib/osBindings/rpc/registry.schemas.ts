@@ -383,10 +383,6 @@ export const PreDownloadAlertWhen: z.ZodObject<{ sourceVersion: z.ZodString }> =
   /* @__PURE__ */ object({ sourceVersion: z.string() }).meta({
     id: 'PreDownloadAlertWhen',
   })
-
-/**
- * A registry asset with a caller-selected commitment representation.
- */
 export const RegistryAsset = <Commitment extends z.ZodType>(
   Commitment: Commitment,
 ) => {
@@ -438,7 +434,10 @@ export const AddAdminParams: z.ZodObject<{ signer: typeof Guid }> =
 export const AddAssetParams: z.ZodObject<{
   version: z.ZodString
   platform: z.ZodString
-  url: z.ZodString
+  /**
+   * @deprecated Use `urls`.
+   */
+  url: z.ZodOptional<z.ZodNullable<z.ZodString>>
   urls: z.ZodCodec<
     z.ZodOptional<z.ZodArray<z.ZodString>>,
     z.ZodArray<z.ZodString>
@@ -452,7 +451,12 @@ export const AddAssetParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   version: z.string(),
   platform: z.string(),
-  url: z.string(),
+  /**
+   * @deprecated Use `urls`.
+   */
+  url: z.string().nullable().optional().meta({
+    description: '@deprecated Use `urls`.',
+  }),
   urls: wire(z.array(z.string()).optional(), z.array(z.string())),
   torrent: wire(z.string().nullable().optional(), z.string().nullable()),
   signature: AnySignature,
