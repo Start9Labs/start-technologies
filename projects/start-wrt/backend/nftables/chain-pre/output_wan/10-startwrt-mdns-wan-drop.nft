@@ -1,0 +1,2 @@
+# Keeps the router's mDNS announcements and queries off the WAN.
+udp dport 5353 counter drop comment "!startwrt: Keep mDNS off the WAN"

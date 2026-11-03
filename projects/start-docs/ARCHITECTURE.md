@@ -69,7 +69,9 @@ Each book's `book.toml` references these under `additional-css` / `additional-js
 
 ## Versioning
 
-`versions.conf` is the single source of truth — `build.sh` and the routing it writes into the tree (the redirect stubs and `404.html`) derive from it. Adding a book takes one line here (plus a `book_dir()` mapping if it lives outside this project).
+`versions.conf` is the source of truth for `build.sh` and its routing output (the redirect stubs and `404.html`). The copy on `live-docs` determines published labels. Tag sync derives the released StartOS or StartWRT book's label from its tag, takes StartTunnel and packaging labels from their tagged configuration, and preserves other products' published labels. Books owned by this site project follow the selected site tree.
+
+Adding a book requires its configuration line, a `book_dir()` mapping if its source lives outside this project, and a `PRODUCT_BOOKS` entry in `scripts/docs-versions.mjs` for a product-owned book.
 
 Build output goes to `docs/<book>/<version>/`. `MDBOOK_OUTPUT__HTML__SITE_URL` is set per-book at build time so mdBook generates correct search indexes and canonical URLs for the versioned path.
 
