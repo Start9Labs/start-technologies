@@ -54,5 +54,12 @@ test "$(find "$TMP/images" -type f | wc -l)" -eq 4
 : > "$CALLS"
 bash "$ROOT/projects/start-os/build/save-migration-images.sh" "$TMP/images"
 test ! -s "$CALLS"
-! grep -qx podman "$ROOT/projects/start-os/build/dpkg-deps/depends"
+if grep -qx podman "$ROOT/projects/start-os/build/dpkg-deps/depends"; then
+    echo "StartOS still depends on Podman" >&2
+    exit 1
+fi
+if grep -q '/etc/containers' "$ROOT/projects/start-os/debian/postinst"; then
+    echo "postinst still configures the removed container engine" >&2
+    exit 1
+fi
 echo "Migration image tests passed"
