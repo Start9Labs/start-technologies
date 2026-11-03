@@ -113,64 +113,35 @@ import { i18nKey } from 'src/app/i18n/i18n.providers'
             <input tuiInput [readonly]="true" [value]="data()?.ipv6 ?? ''" />
           </tui-textfield>
         </div>
-        <div class="g-secondary">
-          {{
-            'Chosen by the device — IPv6 addresses cannot be reserved' | i18n
-          }}
-        </div>
       </section>
       <fieldset>
         <legend>{{ 'Permissions' | i18n }}</legend>
-        <section>
-          <label tuiLabel>
-            <input
-              tuiSwitch
-              type="checkbox"
-              formControlName="allowAutoPortForward"
-            />
-            {{ 'Allow automatic port forwarding' | i18n }}
-          </label>
-          <div class="g-secondary">
-            {{
-              'Lets this device open and renew its own port forwards via UPnP/PCP (used by StartOS servers, game consoles, and similar). Off by default; active forwards appear on the Published Ports page.'
-                | i18n
-            }}
-          </div>
-        </section>
-        <section>
-          <label tuiLabel>
-            <input
-              tuiSwitch
-              type="checkbox"
-              formControlName="allowDnsInjection"
-              (click)="onDnsInjectionToggle($event)"
-            />
-            {{ 'Allow DNS record publishing' | i18n }}
-          </label>
-          <div class="g-secondary">
-            {{
-              'Lets this device publish DNS names for itself into the router, so every device on your network can resolve them (used by StartOS servers for private domains). Off by default; published names appear below.'
-                | i18n
-            }}
-          </div>
-        </section>
-        <section>
-          <label tuiLabel>
-            <input
-              tuiSwitch
-              type="checkbox"
-              formControlName="allowRouterAdvertisements"
-              (click)="onRouterAdvertisementsToggle($event)"
-            />
-            {{ 'Allow IPv6 router advertisements' | i18n }}
-          </label>
-          <div class="g-secondary">
-            {{
-              'Lets this device announce IPv6 routes to your other devices (needed by Thread border routers such as an Apple TV, HomePod, or Home Assistant). Off by default.'
-                | i18n
-            }}
-          </div>
-        </section>
+        <label tuiLabel>
+          <input
+            tuiSwitch
+            type="checkbox"
+            formControlName="allowAutoPortForward"
+          />
+          {{ 'Allow automatic port forwarding' | i18n }}
+        </label>
+        <label tuiLabel>
+          <input
+            tuiSwitch
+            type="checkbox"
+            formControlName="allowDnsInjection"
+            (click)="onDnsInjectionToggle($event)"
+          />
+          {{ 'Allow DNS record publishing' | i18n }}
+        </label>
+        <label tuiLabel>
+          <input
+            tuiSwitch
+            type="checkbox"
+            formControlName="allowRouterAdvertisements"
+            (click)="onRouterAdvertisementsToggle($event)"
+          />
+          {{ 'Allow IPv6 router advertisements' | i18n }}
+        </label>
       </fieldset>
       @if (data()) {
         <footer appFooter></footer>
@@ -197,6 +168,11 @@ import { i18nKey } from 'src/app/i18n/i18n.providers'
   styles: `
     header[tuiHeader='h6'] {
       align-items: center;
+    }
+
+    form fieldset {
+      grid-template-columns: none;
+      justify-items: start;
     }
 
     header[tuiHeader='h6'],
