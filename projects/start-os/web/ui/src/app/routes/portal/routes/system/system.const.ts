@@ -1,8 +1,10 @@
-export const TRUSTED_KEYRINGS_MENU_ITEM = {
+export const TRUSTED_KEYS_MENU_ITEM = {
   icon: '/assets/icons/key-chain.svg',
-  item: 'Trusted keyrings',
+  item: 'Trusted Keys',
   link: 'trusted-keys',
 } as const
+
+export const TRUSTED_KEYS_LINK = ['/system', TRUSTED_KEYS_MENU_ITEM.link]
 
 export const SYSTEM_MENU = [
   [
@@ -55,6 +57,14 @@ export const SYSTEM_MENU = [
   ],
   [
     {
+      icon: '@tui.store',
+      item: 'Registries',
+      link: 'registries',
+    },
+    TRUSTED_KEYS_MENU_ITEM,
+  ],
+  [
+    {
       icon: '@tui.clock',
       item: 'Active Sessions',
       link: 'sessions',
@@ -64,7 +74,6 @@ export const SYSTEM_MENU = [
       item: 'SSH Access',
       link: 'ssh',
     },
-    TRUSTED_KEYRINGS_MENU_ITEM,
     {
       icon: '@tui.key',
       item: 'Change Password',

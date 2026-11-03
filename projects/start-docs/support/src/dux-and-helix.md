@@ -1,6 +1,6 @@
 # Dux and Helix
 
-Every chat starts with Dux, Start9's AI support technician, and a person from Start9 joins when one is needed. This page covers who answers, answering Dux's questions, how to reach a person, and what you can see of the work on your case.
+Every chat starts with Dux, Start9's AI support agent, and a person from Start9 joins when one is needed. This page covers who answers, answering Dux's questions, how to reach a person, and what you can see of the work on your case.
 
 ## Dux
 

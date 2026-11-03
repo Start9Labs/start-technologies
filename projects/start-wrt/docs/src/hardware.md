@@ -1,6 +1,6 @@
 # Hardware
 
-Every router Start9 has sold, newest first. Each entry lists the specifications and how to tell that model apart. What is for sale now is at [store.start9.com](https://store.start9.com). For servers, see [Start9 Hardware](/start-os/start9-hardware.html) in the StartOS documentation.
+Every router Start9 has sold, newest first. Each entry lists the specifications and how to tell that model apart. What is for sale now is at [start9.com](https://start9.com). For servers, see [Start9 Hardware](/start-os/start9-hardware.html) in the StartOS documentation.
 
 ## Start9 Router
 

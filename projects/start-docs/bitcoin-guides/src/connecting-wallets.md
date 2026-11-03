@@ -85,17 +85,17 @@ The fix is to give Electrum the authority instead of the certificate. Electrum l
 
 2. **Delete any file already sitting at `<data-dir>/certs/<host>`.** A leftover from an earlier attempt stops everything below from working and reports nothing. An empty file is the worst case: to Electrum it means "this server is publicly signed", so it goes back to the public authority list and fails again.
 
-3. Save the certificate as `<data-dir>/certs/<host>`, **with no file extension**. `<host>` must match exactly what you type into Electrum — reaching the same server at `192.168.1.5` and at `my-server.local` needs one file under each name.
+3. Save the certificate as `<data-dir>/certs/<host>`, **with no file extension**. macOS and Windows can hide an extension the browser added, so check the file's full name in a terminal: `ls` on macOS, `dir` on Windows. `<host>` must match exactly what you type into Electrum — reaching the same server at `192.168.1.5` and at `my-server.local` needs one file under each name.
 
 4. In Electrum, go to **Tools → Network**. Set **Connection mode** to _Connect only to a single server_ so Electrum cannot fall back to a public one, and enter the server as `<host>:<port>:s`, taking the port from the interface address.
 
 `<data-dir>` is:
 
-| Platform | Path                                     |
-| -------- | ---------------------------------------- |
-| Linux    | `~/.electrum`                            |
-| macOS    | `~/Library/Application Support/Electrum` |
-| Windows  | `%APPDATA%\Electrum`                     |
+| Platform | Path                 |
+| -------- | -------------------- |
+| Linux    | `~/.electrum`        |
+| macOS    | `~/.electrum`        |
+| Windows  | `%APPDATA%\Electrum` |
 
 To connect over Tor as well, switch to the **Proxy** tab, enable the proxy, and point it at `127.0.0.1` port `9050` (or `9150` if you are using Tor Browser's).
 

@@ -23,6 +23,9 @@ boundary(
   '@start9labs/shared',
   [
     'TaskService',
+    'EmptyPipe',
+    'MARKDOWN',
+    'CopyService',
     'DialogService',
     'DocsLinkDirective',
     'i18nPipe',
@@ -40,6 +43,7 @@ boundary(
   '@taiga-ui/core',
   [
     'TuiButton',
+    'TuiButtonX',
     'TuiLoader',
     'TuiScrollbar',
     'TuiAppearance',
@@ -51,24 +55,33 @@ boundary(
     'TuiIcon',
     'TuiInput',
     'TuiTitle',
+    'TuiLink',
   ],
-  'export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => [];',
+  'export const TUI_BREAKPOINT = Symbol("breakpoint"); export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => [];',
 )
-boundary('@taiga-ui/kit', [
-  'TuiBadge',
-  'TuiBadgeNotification',
-  'TuiButtonLoading',
-  'TuiButtonSelect',
-  'TuiDataListWrapper',
-  'TuiSwitch',
-  'TuiTextarea',
-])
+boundary(
+  '@taiga-ui/kit',
+  [
+    'TuiAvatar',
+    'TuiBadge',
+    'TuiBadgeNotification',
+    'TuiButtonLoading',
+    'TuiButtonSelect',
+    'TuiChip',
+    'TuiDataListWrapper',
+    'TuiFiles',
+    'TuiFade',
+    'TuiSwitch',
+    'TuiTextarea',
+  ],
+  'export const tuiInputFilesOptionsProvider = () => [];',
+)
 boundary(
   '@taiga-ui/cdk',
-  ['TuiAnimated'],
-  'export const tuiMarkControlAsTouchedAndValidate = () => {}; export const tuiProvide = () => [];',
+  ['TuiAnimated', 'TuiMapperPipe', 'TuiValidator'],
+  'export const tuiMarkControlAsTouchedAndValidate = () => {}; export const tuiProvide = () => []; export const tuiIsString = value => typeof value === "string";',
 )
-boundary('@taiga-ui/layout', ['TuiHeader', 'TuiForm'])
+boundary('@taiga-ui/layout', ['TuiCardLarge', 'TuiHeader', 'TuiForm'])
 boundary('@taiga-ui/addon-table', ['TuiTable', 'TuiTableDirective'])
 boundary('@taiga-ui/addon-mobile', ['TuiResponsiveDialog'])
 boundary(
@@ -90,6 +103,15 @@ import { inject, InjectionToken } from '@angular/core';
 export const CONTEXT = new InjectionToken('dialog context');
 export const injectContext = () => inject(CONTEXT);
 export class PolymorpheusComponent { constructor(component) { this.component = component; } }
+`,
+)
+boundary('./package.component', ['SideloadPackageComponent'])
+boundary(
+  './sideload.utils',
+  [],
+  `
+export const requests = [];
+export const validateS9pk = file => new Promise(resolve => requests.push({ file, resolve }));
 `,
 )
 boundary('src/app/services/api/embassy-api.service', ['ApiService'])
@@ -114,15 +136,22 @@ for (const [file, name] of [
 }
 boundaries.set(
   '@start9labs/marketplace',
-  ['trust.ts', 'types.ts', 'services/abstract-marketplace.service.ts']
+  [
+    'trust.ts',
+    'key-identity.ts',
+    'types.ts',
+    'services/abstract-marketplace.service.ts',
+  ]
     .map(
       file =>
         `export * from ${JSON.stringify(new URL(`../../../../../shared-libs/ts-modules/marketplace/src/${file}`, import.meta.url).href)};`,
     )
-    .join('\n'),
+    .join('\n') +
+    '\nexport class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {} export class MarketplaceSignersComponent {} export class MarketplaceAboutComponent {} export class MarketplaceDependenciesComponent {} export class MarketplaceLinksComponent {} export class MarketplaceReleaseNotesComponent {}',
 )
 loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
+const { Router } = await import('@angular/router')
 const { RefreshAlertComponent } =
   await import('src/app/components/refresh-alert.component')
 const { PatchDB } = await import('patch-db-client')
@@ -135,14 +164,22 @@ const { LocalizePipe: ProductionLocalizePipe } =
 const { I18N } =
   await import('../../../../../shared-libs/ts-modules/shared/src/i18n/i18n.providers.ts')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
-const { TaskService, DialogService, i18nPipe, i18nService } =
-  await import('@start9labs/shared')
+const {
+  TaskService,
+  CopyService,
+  DialogService,
+  ErrorService,
+  i18nPipe,
+  i18nService,
+} = await import('@start9labs/shared')
 const { CONTEXT } = await import('@taiga-ui/polymorpheus')
 const { WA_WINDOW } = await import('@ng-web-apis/common')
 const { UiUpdateService } = await import('src/app/services/ui-update.service')
 const { ConfigService } = await import('src/app/services/config.service')
 const { TrustedKeysService } =
   await import('src/app/services/trusted-keys.service')
+const { TrustedKeysService: ProductionTrustedKeysService } =
+  await import('../src/app/services/trusted-keys.service.ts')
 const { trustedOsUpdateSigners } =
   await import('src/app/utils/os-update-signers')
 const { default: General } =
@@ -170,7 +207,7 @@ const trustedSigners = Object.fromEntries(
     key,
     {
       name: `Signer ${i}`,
-      publicKeys: [key],
+      publicKey: key,
       removable: true,
       marketplace: true,
       os: true,
@@ -218,6 +255,7 @@ function fixture(t, cachedVersion, providers = []) {
     alerts = [],
     tasks = [],
     confirmations = [],
+    navigations = [],
     updateErrors = []
   let completed = 0
   const api = {
@@ -291,6 +329,10 @@ function fixture(t, cachedVersion, providers = []) {
     { provide: ConfigService, useValue: {} },
     { provide: TrustedKeysService, useValue: {} },
     {
+      provide: Router,
+      useValue: { navigate: async path => navigations.push(path) },
+    },
+    {
       provide: CONTEXT,
       useValue: {
         $implicit: {
@@ -327,6 +369,7 @@ function fixture(t, cachedVersion, providers = []) {
     alerts,
     tasks,
     confirmations,
+    navigations,
     updateErrors,
     availability,
     shown,
@@ -1077,15 +1120,18 @@ test('live trust-list changes remove default trust and allow a custom signer', a
   f.trust({})
   await f.make(SystemUpdateModal).update()
   await tick()
-  assert.equal(f.alerts.length, 1)
-  assert.equal(f.confirmations.length, 0)
+  assert.deepEqual(
+    f.confirmations.map(c => c.options.label),
+    ['OS update blocked'],
+  )
+  assert.deepEqual(f.alerts, [])
   assert.deepEqual(f.submissions, [])
   await Promise.all(f.tasks)
 
   f.trust({
     custom: {
       name: 'My custom release signer',
-      publicKeys: [untrustedSigner],
+      publicKey: untrustedSigner,
       removable: true,
       marketplace: false,
       os: true,
@@ -1099,8 +1145,11 @@ test('live trust-list changes remove default trust and allow a custom signer', a
   })
   await f.make(SystemUpdateModal).update()
   await Promise.all(f.tasks)
-  assert.equal(f.alerts.length, 1)
-  assert.equal(f.confirmations.length, 0)
+  assert.deepEqual(
+    f.confirmations.map(c => c.options.label),
+    ['OS update blocked'],
+  )
+  assert.deepEqual(f.alerts, [])
   assert.deepEqual(f.submissions[0].acceptSigners, {
     any: [{ signer: untrustedSigner }],
   })
@@ -1119,7 +1168,7 @@ test('trusted signer matching ignores PEM whitespace but rejects unrelated keys 
   assert.deepEqual(trustedOsUpdateSigners([key], {}), [])
 })
 
-test('keyrings match PEM, Der64 and legacy base64url signers in both trust contexts', () => {
+test('individual keys match PEM, Der64 and legacy base64url signers in both trust contexts', () => {
   const pem =
     '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=\n-----END PUBLIC KEY-----\n'
   const der64 = 'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI='
@@ -1133,7 +1182,7 @@ test('keyrings match PEM, Der64 and legacy base64url signers in both trust conte
     const groups = {
       publisher: {
         name: 'Publisher',
-        publicKeys: [publicKey],
+        publicKey,
         marketplace: true,
         os: true,
       },
@@ -1145,7 +1194,7 @@ test('keyrings match PEM, Der64 and legacy base64url signers in both trust conte
     ]) {
       assert.deepEqual(
         matchingTrustedKeys(packageSigners(source), groups, 'marketplace'),
-        [{ id: 'publisher', name: 'Publisher', publicKeys: [publicKey] }],
+        [{ id: 'publisher', name: 'Publisher', publicKey }],
       )
     }
   }
@@ -1166,12 +1215,18 @@ test('an untrusted update is blocked even when another platform or asset lists a
   })
   await f.make(SystemUpdateModal).update()
   await tick()
-  assert.equal(f.alerts.length, 1)
-  assert.equal(f.confirmations.length, 0)
+  assert.deepEqual(
+    f.confirmations.map(c => c.options.label),
+    ['OS update blocked'],
+  )
+  assert.deepEqual(f.alerts, [])
   assert.deepEqual(f.submissions, [])
   assert.equal(f.completed, 0)
   await Promise.all(f.tasks)
   assert.deepEqual(f.submissions, [])
+  f.confirmations[0].response.next(true)
+  assert.equal(f.completed, 1)
+  assert.deepEqual(f.navigations, [['/system', 'trusted-keys']])
 })
 
 for (const assets of [{ x86_64: { signatures: {} } }, {}]) {
@@ -1180,8 +1235,11 @@ for (const assets of [{ x86_64: { signatures: {} } }, {}]) {
     await f.load({ '0.4.0.4': { releaseNotes: '', squashfs: assets } })
     await f.make(SystemUpdateModal).update()
     await tick()
-    assert.equal(f.alerts.length, 1)
-    assert.equal(f.confirmations.length, 0)
+    assert.deepEqual(
+      f.confirmations.map(c => c.options.label),
+      ['OS update blocked'],
+    )
+    assert.deepEqual(f.alerts, [])
     assert.deepEqual(f.submissions, [])
     await Promise.all(f.tasks)
   })
@@ -1196,7 +1254,10 @@ test('trust removed during device lookup blocks submission', async t => {
   f.trust({})
   device.resolve({ os: { platform: 'x86_64' } })
   await Promise.all(f.tasks)
-  assert.equal(f.alerts.length, 1)
+  assert.deepEqual(
+    f.confirmations.map(c => c.options.label),
+    ['OS update blocked'],
+  )
   assert.deepEqual(f.submissions, [])
   assert.equal(f.completed, 0)
 })
@@ -1244,8 +1305,15 @@ test('a candidate disappearing during the asynchronous UI registry lookup preven
   assert.equal(f.completed, 0)
 })
 
-const { matchingTrustedKeys, packageSigners } =
-  await import('@start9labs/marketplace')
+const {
+  matchingTrustedKeys,
+  packageSigners,
+  packageSignerPolicy,
+  SignerStatusesPipe,
+  signingKeyIdentity,
+  registrySigningKeys,
+  keyIdentities,
+} = await import('@start9labs/marketplace')
 const { parsePublicKeys, publicKeyPem } =
   await import('src/app/utils/public-keys')
 const { MarketplaceControlsComponent: Controls } =
@@ -1259,6 +1327,117 @@ const pkg = {
   flavor: null,
   s9pks: [['x86_64', { signatures: { [OS_UPDATE_SIGNERS[0]]: 'signature' } }]],
 }
+
+test('PEM and DER public keys share the complete SHA-256 SPKI fingerprint', () => {
+  const der = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
+  const expected = {
+    name: null,
+    emails: [],
+    fingerprints: ['SHA256:N8LBiYUGYmV8l4H5YRPwqgC4n6y9uMYO9IIGemPc1Bs'],
+  }
+  assert.deepEqual(signingKeyIdentity(der), expected)
+  assert.deepEqual(
+    signingKeyIdentity(
+      `-----BEGIN PUBLIC KEY-----\n${der}\n-----END PUBLIC KEY-----`,
+    ),
+    expected,
+  )
+})
+
+function signerStatusFixture() {
+  const first = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
+  const second = 'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40='
+  const unknown = 'MCowBQYDK2VwAyEAgkNzc04Bav9FbjK8hzF46OqjUL0bD9ZxuT7C1FgTDDE='
+  const key = (name, publicKey, marketplace) => ({
+    name,
+    publicKey,
+    marketplace,
+    os: true,
+    origin: 'manual',
+    originRegistry: null,
+    removable: true,
+    gpgExports: [],
+    contact: [],
+  })
+  return {
+    first,
+    second,
+    unknown,
+    signers: [unknown, second, first],
+    keys: {
+      [first]: key('First signer', first, true),
+      [second]: key('Second signer', second, false),
+    },
+    pipe: new SignerStatusesPipe(),
+  }
+}
+
+test('every package signer is listed: trusted, then untrusted, then unknown', () => {
+  const { first, second, unknown, signers, keys, pipe } = signerStatusFixture()
+  const shown = pipe.transform(signers, keys)
+  assert.deepEqual(
+    shown.map(signer => [signer.id, signer.status]),
+    [
+      [first, 'trusted'],
+      [second, 'untrusted'],
+      [unknown, 'unknown'],
+    ],
+  )
+  assert.deepEqual(
+    shown.map(signer => signer.name),
+    ['First signer', 'Second signer', null],
+  )
+  assert.match(shown[2].fingerprints[0], /^SHA256:/)
+})
+
+test('package signer status ignores OS trust and repeated signatures in other encodings', () => {
+  const { first, keys, pipe } = signerStatusFixture()
+  keys[first].marketplace = false
+  assert.deepEqual(
+    pipe
+      .transform(
+        [
+          first,
+          `-----BEGIN PUBLIC KEY-----\n${first}\n-----END PUBLIC KEY-----`,
+        ],
+        keys,
+      )
+      .map(signer => [signer.id, signer.status]),
+    [[first, 'untrusted']],
+  )
+})
+
+test('no signers list nothing, and without a trust list every signer is unknown', () => {
+  const { signers, keys, pipe } = signerStatusFixture()
+  assert.deepEqual(pipe.transform([], keys), [])
+  assert.deepEqual(
+    pipe.transform(signers, {}).map(signer => signer.status),
+    ['unknown', 'unknown', 'unknown'],
+  )
+})
+
+test('known GPG signers show their label and every email address', () => {
+  const { first, keys, pipe } = signerStatusFixture()
+  keys[first].gpgExports = [
+    {
+      identities: {
+        [first]: ['Alice <alice@example.test>', 'Alice <alice@other.test>'],
+      },
+      keyFingerprints: {
+        [first]: ['5456dbff1b9df905041fa7765259adfc2d63c217'],
+      },
+    },
+  ]
+  assert.deepEqual(pipe.transform([first], keys), [
+    {
+      id: first,
+      status: 'trusted',
+      name: 'First signer',
+      emails: ['alice@example.test', 'alice@other.test'],
+      fingerprints: ['5456 DBFF 1B9D F905 041F A776 5259 ADFC 2D63 C217'],
+    },
+  ])
+})
 
 test('PEM form parsing canonicalizes multiple keys and rejects empty, private, non-Ed25519, and mixed input', () => {
   const first = OS_UPDATE_SIGNERS[0]
@@ -1306,7 +1485,7 @@ test('GPG form input preserves armored exports for backend validation alongside 
   )
 })
 
-test('package signers select the install asset or the verified sideload signer, not other assets', () => {
+test('package signers select the install asset or claimed sideload keys, not other assets', () => {
   assert.deepEqual(
     packageSigners({
       ...pkg,
@@ -1323,59 +1502,81 @@ test('package signers select the install asset or the verified sideload signer, 
   assert.deepEqual(packageSigners({ s9pks: [] }), [])
 })
 
-test('named multi-key signer matching follows the selected trust context and deduplicates each identity', () => {
-  const groups = {
-    publisher: {
+test('individual keys match independently in each trust context and deduplicate repeated signatures', () => {
+  const [first, second] = OS_UPDATE_SIGNERS
+  const keys = {
+    first: {
       name: 'Publisher',
-      publicKeys: OS_UPDATE_SIGNERS,
-      os: false,
+      publicKey: first,
       marketplace: true,
+      os: false,
+    },
+    second: {
+      name: 'Publisher',
+      publicKey: second,
+      marketplace: true,
+      os: false,
     },
   }
   assert.deepEqual(
-    matchingTrustedKeys(
-      [OS_UPDATE_SIGNERS[0], OS_UPDATE_SIGNERS[1]],
-      groups,
-      'marketplace',
-    ),
+    matchingTrustedKeys([first, first, second], keys, 'marketplace'),
     [
-      {
-        id: 'publisher',
-        name: 'Publisher',
-        publicKeys: OS_UPDATE_SIGNERS.slice(0, 2),
-      },
+      { id: 'first', name: 'Publisher', publicKey: first },
+      { id: 'second', name: 'Publisher', publicKey: second },
     ],
   )
-  assert.deepEqual(matchingTrustedKeys(OS_UPDATE_SIGNERS, groups, 'os'), [])
-  groups.publisher.os = true
-  groups.publisher.marketplace = false
-  assert.deepEqual(
-    matchingTrustedKeys(OS_UPDATE_SIGNERS, groups, 'marketplace'),
-    [],
-  )
-  assert.equal(matchingTrustedKeys(OS_UPDATE_SIGNERS, groups, 'os').length, 1)
+  assert.deepEqual(matchingTrustedKeys([first, second], keys, 'os'), [])
+  keys.first.os = true
+  keys.first.marketplace = false
+  assert.deepEqual(matchingTrustedKeys([first, second], keys, 'marketplace'), [
+    { id: 'second', name: 'Publisher', publicKey: second },
+  ])
+  assert.deepEqual(matchingTrustedKeys([first, second], keys, 'os'), [
+    { id: 'first', name: 'Publisher', publicKey: first },
+  ])
+})
+
+test('package pins reuse the OS any-signer policy without granting OS-only or unknown keys', () => {
+  const [first, second] = OS_UPDATE_SIGNERS
+  const source = { s9pks: [], signers: [first, second, untrustedSigner] }
+  const keys = {
+    first: { name: 'Packages', publicKey: first, marketplace: true, os: false },
+    second: {
+      name: 'OS only',
+      publicKey: second,
+      marketplace: false,
+      os: true,
+    },
+  }
+  assert.deepEqual(packageSignerPolicy(source, keys, false), {
+    any: [{ signer: first }],
+  })
+  assert.deepEqual(packageSignerPolicy(source, keys, true), {
+    any: [{ signer: first }, { signer: second }, { signer: untrustedSigner }],
+  })
+  assert.deepEqual(packageSignerPolicy(source, {}, false), { any: [] })
+  assert.deepEqual(packageSignerPolicy({ s9pks: [] }, keys, true), { any: [] })
 })
 
 function controlsFixture({
   sideload = false,
   trusted = false,
-  confirmation = EMPTY,
+  confirmed = false,
 } = {}) {
   const calls = [],
     prompts = []
   const instance = {
     file: () => (sideload ? new File(['data'], 'test.s9pk') : undefined),
     trusted: () => (trusted ? [{ name: 'Publisher' }] : []),
-    blocked: () => !sideload && !trusted,
-    dialogs: {
-      openConfirm(options) {
-        prompts.push(options)
-        return confirmation
-      },
-    },
     localPkg: () => undefined,
     pkg: () => pkg,
-    alerts: { alertPreDownload: async () => true },
+    alerts: {
+      alertPreDownload: async () => true,
+      alertUntrusted: async () => {
+        prompts.push('untrusted')
+        return confirmed
+      },
+    },
     marketplace: { currentRegistryUrl$: of('https://registry.test') },
     installOrUpload: async (...params) => {
       calls.push(params)
@@ -1389,33 +1590,31 @@ function controlsFixture({
   }
 }
 
-test('untrusted marketplace installs cannot enter the install flow or ask for an override', async () => {
-  const f = controlsFixture()
-  await f.run()
-  assert.deepEqual(f.calls, [])
-  assert.deepEqual(f.prompts, [])
+test('an untrusted package installs only after confirmation, with the trust override', async () => {
+  for (const [sideload, url] of [
+    [true, null],
+    [false, 'https://registry.test'],
+  ]) {
+    const declined = controlsFixture({ sideload })
+    await declined.run()
+    assert.deepEqual(declined.prompts, ['untrusted'])
+    assert.deepEqual(declined.calls, [])
+    const confirmed = controlsFixture({ sideload, confirmed: true })
+    await confirmed.run()
+    assert.deepEqual(confirmed.calls, [[url, true]])
+  }
 })
 
-for (const confirmation of [EMPTY, of(false)]) {
-  test('dismissing or cancelling an untrusted sideload never starts an upload', async () => {
-    const f = controlsFixture({ sideload: true, confirmation })
+test('a trusted package installs without a prompt or override', async () => {
+  for (const [sideload, url] of [
+    [true, null],
+    [false, 'https://registry.test'],
+  ]) {
+    const f = controlsFixture({ sideload, trusted: true })
     await f.run()
-    assert.equal(f.prompts.length, 1)
-    assert.deepEqual(f.calls, [])
-  })
-}
-
-test('only a confirmed untrusted sideload receives the trust override', async () => {
-  const untrusted = controlsFixture({ sideload: true, confirmation: of(true) })
-  await untrusted.run()
-  assert.deepEqual(untrusted.calls, [[null, true]])
-  const trusted = controlsFixture({ sideload: true, trusted: true })
-  await trusted.run()
-  assert.deepEqual(trusted.calls, [[null, false]])
-  assert.deepEqual(trusted.prompts, [])
-  const marketplace = controlsFixture({ trusted: true })
-  await marketplace.run()
-  assert.deepEqual(marketplace.calls, [['https://registry.test', false]])
+    assert.deepEqual(f.prompts, [])
+    assert.deepEqual(f.calls, [[url, false]])
+  }
 })
 
 test('the upload RPC receives the confirmed override and failed setup does not navigate', async () => {
@@ -1423,6 +1622,8 @@ test('the upload RPC receives the confirmed override and failed setup does not n
   const file = new File(['data'], 'test.s9pk')
   const instance = {
     file: () => file,
+    pkg: () => ({ s9pks: [], signers: [untrustedSigner] }),
+    trust: { keys: () => ({}) },
     tasks: {
       run: async work => {
         await work()
@@ -1445,7 +1646,9 @@ test('the upload RPC receives the confirmed override and failed setup does not n
     },
   }
   assert.equal(await Controls.prototype.upload.call(instance, true), true)
-  assert.deepEqual(calls, [{ trust: true }])
+  assert.deepEqual(calls, [
+    { trust: true, acceptSigners: { any: [{ signer: untrustedSigner }] } },
+  ])
   let navigated = false
   await Controls.prototype.installOrUpload.call(
     {
@@ -1463,9 +1666,46 @@ test('the upload RPC receives the confirmed override and failed setup does not n
   assert.equal(navigated, false)
 })
 
-test('marketplace dispatch delegates trust enforcement to the server without an override', async () => {
+test('sideload pins only matching package-trusted keys without an override', async () => {
+  const calls = []
+  const instance = {
+    file: () => new File(['data'], 'test.s9pk'),
+    pkg: () => ({
+      s9pks: [],
+      signers: [OS_UPDATE_SIGNERS[0], untrustedSigner],
+    }),
+    trust: { keys: () => trustedSigners },
+    tasks: {
+      run: async work => {
+        await work()
+        return true
+      },
+    },
+    api: {
+      rpc: {
+        package: {
+          sideload: async params => {
+            calls.push(params)
+            return { upload: 'upload-guid' }
+          },
+        },
+      },
+      uploadFile: async () => {},
+    },
+  }
+  assert.equal(await Controls.prototype.upload.call(instance, false), true)
+  assert.deepEqual(calls, [
+    {
+      trust: false,
+      acceptSigners: { any: [{ signer: OS_UPDATE_SIGNERS[0] }] },
+    },
+  ])
+})
+
+test('marketplace installs send the matched signer pins with the explicit override intent', async () => {
   const submissions = []
   const instance = {
+    patch: { watch$: () => of(trustedSigners) },
     api: {
       rpc: {
         package: {
@@ -1476,91 +1716,123 @@ test('marketplace dispatch delegates trust enforcement to the server without an 
       },
     },
   }
-  await MarketplaceService.prototype.installPackage.call(
-    instance,
-    pkg,
-    'https://registry.test',
-  )
+  for (const trust of [undefined, true]) {
+    await MarketplaceService.prototype.installPackage.call(
+      instance,
+      pkg,
+      'https://registry.test',
+      trust,
+    )
+  }
   assert.deepEqual(submissions, [
-    { id: pkg.id, version: pkg.version, registry: 'https://registry.test' },
+    {
+      id: pkg.id,
+      version: pkg.version,
+      registry: 'https://registry.test',
+      trust: false,
+      acceptSigners: { any: [{ signer: OS_UPDATE_SIGNERS[0] }] },
+    },
+    {
+      id: pkg.id,
+      version: pkg.version,
+      registry: 'https://registry.test',
+      trust: true,
+      acceptSigners: { any: [{ signer: OS_UPDATE_SIGNERS[0] }] },
+    },
   ])
 })
 
-const { default: TrustedKeyrings } =
-  await import('src/app/routes/portal/routes/system/routes/trusted-keys')
-const { EditTrustedKeyDialog } =
-  await import('src/app/components/trusted-keys/edit')
 const { AddTrustedKeyDialog } =
   await import('src/app/components/trusted-keys/form')
-test('built-in keyrings precede custom entries regardless of labels and input order', () => {
-  const custom = Object.values(trustedSigners)[0]
-  const entries = [
-    { key: '00000000-0000-4000-8000-000000000000', value: custom },
-    {
-      key: 'start9-alpha',
-      value: {
-        ...custom,
-        name: 'A renamed Alpha',
-        removable: false,
-        marketplace: false,
-        os: false,
-      },
-    },
-    { key: 'ffffffff-ffff-4fff-8fff-ffffffffffff', value: custom },
-    {
-      key: 'start9',
-      value: { ...custom, name: 'Z renamed Start9', removable: false },
-    },
-  ]
-  for (const input of [entries, [...entries].reverse()]) {
-    assert.deepEqual(
-      [...input]
-        .sort(TrustedKeyrings.prototype.compareKeyrings)
-        .map(x => x.key),
-      [
-        'start9',
-        'start9-alpha',
-        '00000000-0000-4000-8000-000000000000',
-        'ffffffff-ffff-4fff-8fff-ffffffffffff',
-      ],
-    )
-  }
-})
+const { default: RegistriesPage } =
+  await import('src/app/routes/portal/routes/system/routes/registries')
 
-function keyringDialogFixture(t, component, keyring, reject = false) {
-  const mutations = []
-  const closed = []
-  const context = {
-    data: { id: 'publisher', keyring },
-    $implicit: { complete: () => closed.push(true) },
+const runTask = async work => {
+  try {
+    await work()
+    return true
+  } catch {
+    return false
   }
-  const mutate = async params => {
-    mutations.push(params)
-    if (reject) throw new Error('offline')
+}
+
+const { default: TrustedKeysPage } =
+  await import('src/app/routes/portal/routes/system/routes/trusted-keys')
+const { TRUSTED_KEY_DETAILS } =
+  await import('src/app/components/trusted-keys/details')
+
+for (const [context, expected] of [
+  ['marketplace', { marketplace: false, os: false }],
+  ['os', { marketplace: true, os: true }],
+]) {
+  for (const reject of [false, true]) {
+    test(`table ${context} switch tracks the active request and clears it on ${reject ? 'failure' : 'success'}`, async () => {
+      const response = deferred()
+      const calls = []
+      const key = { name: 'Publisher', marketplace: true, os: false }
+      const trust = {
+        saving: signal(false),
+        tasks: { runInline: runTask },
+        save: ProductionTrustedKeysService.prototype.save,
+        update: ProductionTrustedKeysService.prototype.update,
+        trust: ProductionTrustedKeysService.prototype.trust,
+        api: {
+          rpc: {
+            server: {
+              trustedKeys: {
+                update: async params => {
+                  calls.push(params)
+                  await response.promise
+                },
+              },
+            },
+          },
+        },
+      }
+      const page = { changing: signal(null), trust }
+      const operation = TrustedKeysPage.prototype.toggle.call(
+        page,
+        'publisher',
+        key,
+        context,
+      )
+      assert.deepEqual(page.changing(), { id: 'publisher', context })
+      assert.equal(trust.saving(), true)
+      assert.deepEqual(calls, [
+        { id: 'publisher', name: 'Publisher', ...expected },
+      ])
+      assert.deepEqual(key, { name: 'Publisher', marketplace: true, os: false })
+      if (reject) response.reject(new Error('Trust change refused'))
+      else response.resolve()
+      await operation
+      assert.equal(page.changing(), null)
+      assert.equal(trust.saving(), false)
+    })
   }
+}
+
+function keyDetailsFixture(t, key) {
+  const id = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
+  const response = deferred()
+  const calls = []
   const injector = createEnvironmentInjector(
     [
       {
         provide: NonNullableFormBuilder,
         useValue: new FormBuilder().nonNullable,
       },
-      { provide: CONTEXT, useValue: context },
+      { provide: CONTEXT, useValue: { data: id } },
       {
-        provide: ApiService,
+        provide: TrustedKeysService,
         useValue: {
-          rpc: { server: { trustedKeys: { update: mutate, add: mutate } } },
-        },
-      },
-      {
-        provide: TaskService,
-        useValue: {
-          run: async work => {
-            try {
-              await work()
-              return true
-            } catch {
-              return false
-            }
+          keys: signal(key ? { [id]: key } : {}),
+          trust: async (...args) => {
+            calls.push(['update', ...args])
+            await response.promise
+          },
+          add: async (...args) => {
+            calls.push(['add', ...args])
+            await response.promise
           },
         },
       },
@@ -1569,80 +1841,557 @@ function keyringDialogFixture(t, component, keyring, reject = false) {
   )
   t.after(() => injector.destroy())
   return {
-    instance: runInInjectionContext(injector, () => new component()),
-    mutations,
-    closed,
+    id,
+    calls,
+    response,
+    instance: runInInjectionContext(
+      injector,
+      () => new TRUSTED_KEY_DETAILS.component(),
+    ),
   }
 }
 
-test('keyring editing disables built-in names without disabling either trust selection', t => {
-  for (const name of ['Start9', 'Start9 Alpha']) {
-    const { instance } = keyringDialogFixture(t, EditTrustedKeyDialog, {
-      name,
-      removable: false,
-      marketplace: true,
-      os: false,
-    })
-    assert.equal(instance.form.controls.name.disabled, true)
-    assert.equal(instance.form.controls.marketplace.enabled, true)
-    assert.equal(instance.form.controls.os.enabled, true)
+for (const [context, enabled] of [
+  ['marketplace', false],
+  ['os', true],
+]) {
+  test(`details ${context} switch changes only its selected permission`, async t => {
+    const key = { name: 'Publisher', marketplace: true, os: false }
+    const f = keyDetailsFixture(t, key)
+    const operation = f.instance.toggle(context)
+    assert.equal(f.instance.changing(), context)
+    assert.deepEqual(f.calls, [['update', f.id, key, context, enabled]])
+    f.response.resolve()
+    await operation
+    assert.equal(f.instance.changing(), null)
+    assert.deepEqual(key, { name: 'Publisher', marketplace: true, os: false })
+  })
+
+  test(`unknown-key ${context} switch retains the atomic import flow`, async t => {
+    const f = keyDetailsFixture(t)
+    f.instance.form.controls.name.setValue('Publisher')
+    const operation = f.instance.toggle(context)
+    assert.equal(f.instance.changing(), context)
+    assert.deepEqual(f.calls, [['add', f.id, 'Publisher', context]])
+    f.response.resolve()
+    await operation
+    assert.equal(f.instance.changing(), null)
+  })
+}
+
+test('unknown-key switches require a nonblank label before importing', async t => {
+  const f = keyDetailsFixture(t)
+  for (const name of ['', '  ']) {
+    f.instance.form.controls.name.setValue(name)
+    await f.instance.toggle('os')
+    assert.deepEqual(f.calls, [])
+    assert.equal(f.instance.changing(), null)
   }
-  const { instance } = keyringDialogFixture(t, EditTrustedKeyDialog, {
-    name: 'Publisher',
-    removable: true,
-    marketplace: true,
-    os: false,
-  })
-  assert.equal(instance.form.controls.name.enabled, true)
 })
 
-test('keyring edit submits name and both trust selections in one operation', async t => {
-  const f = keyringDialogFixture(t, EditTrustedKeyDialog, {
-    name: 'Publisher',
-    removable: true,
-    marketplace: true,
-    os: false,
-  })
-  f.instance.form.setValue({ name: 'Renamed', marketplace: false, os: true })
-  await f.instance.save()
-  assert.deepEqual(f.mutations, [
-    { id: 'publisher', name: 'Renamed', marketplace: false, os: true },
-  ])
-  assert.deepEqual(f.closed, [true])
-  assert.equal(f.instance.saving(), false)
+test('unknown-key trust uses one atomic import request and clears saving on failure', async () => {
+  for (const context of ['marketplace', 'os']) {
+    for (const reject of [false, true]) {
+      const calls = []
+      const instance = {
+        saving: signal(false),
+        tasks: { runInline: runTask },
+        save: ProductionTrustedKeysService.prototype.save,
+        api: {
+          rpc: {
+            server: {
+              trustedKeys: {
+                add: async params => {
+                  calls.push(['add', params])
+                  if (reject) throw new Error('Import refused')
+                  return { added: ['publisher'], existing: [] }
+                },
+                update: async params => calls.push(['update', params]),
+              },
+            },
+          },
+        },
+      }
+      await ProductionTrustedKeysService.prototype.add.call(
+        instance,
+        OS_UPDATE_SIGNERS[0],
+        'Publisher',
+        context,
+      )
+      assert.deepEqual(calls, [
+        [
+          'add',
+          {
+            name: 'Publisher',
+            publicKeys: [OS_UPDATE_SIGNERS[0]],
+            trustFor: context,
+          },
+        ],
+      ])
+      assert.equal(instance.saving(), false)
+    }
+  }
 })
 
-test('failed keyring edits keep their form values and dialog open', async t => {
-  const f = keyringDialogFixture(
-    t,
-    EditTrustedKeyDialog,
-    { name: 'Publisher', removable: true, marketplace: true, os: false },
-    true,
+function addKeyFixture(t, reject = false) {
+  const mutations = []
+  const closed = []
+  const result = { added: ['publisher'], existing: [] }
+  const injector = createEnvironmentInjector(
+    [
+      {
+        provide: NonNullableFormBuilder,
+        useValue: new FormBuilder().nonNullable,
+      },
+      {
+        provide: CONTEXT,
+        useValue: {
+          completeWith: value => closed.push(value),
+          $implicit: { complete: () => closed.push(null) },
+        },
+      },
+      {
+        provide: ApiService,
+        useValue: {
+          rpc: {
+            server: {
+              trustedKeys: {
+                add: async params => {
+                  mutations.push(params)
+                  if (reject) throw new Error('offline')
+                  return result
+                },
+              },
+            },
+          },
+        },
+      },
+      { provide: TaskService, useValue: { run: runTask } },
+    ],
+    null,
   )
-  f.instance.form.setValue({ name: 'Renamed', marketplace: false, os: true })
-  await f.instance.save()
-  assert.deepEqual(f.instance.form.getRawValue(), {
-    name: 'Renamed',
-    marketplace: false,
-    os: true,
-  })
-  assert.deepEqual(f.closed, [])
-  assert.equal(f.instance.saving(), false)
-})
+  t.after(() => injector.destroy())
+  return {
+    instance: runInInjectionContext(injector, () => new AddTrustedKeyDialog()),
+    mutations,
+    closed,
+    result,
+  }
+}
 
-test('new System keyrings default to package trust only', async t => {
-  const f = keyringDialogFixture(t, AddTrustedKeyDialog)
+test('a manually added key submits its label and keys and closes with the server result', async t => {
+  const f = addKeyFixture(t)
   f.instance.form.setValue({
     name: 'Publisher',
     publicKeys: OS_UPDATE_SIGNERS[0],
   })
   await f.instance.save()
   assert.deepEqual(f.mutations, [
-    {
-      name: 'Publisher',
-      publicKeys: [OS_UPDATE_SIGNERS[0]],
-      context: 'marketplace',
-    },
+    { name: 'Publisher', publicKeys: [OS_UPDATE_SIGNERS[0]] },
   ])
-  assert.deepEqual(f.closed, [true])
+  assert.deepEqual(f.closed, [f.result])
+  assert.equal(f.instance.saving(), false)
+})
+
+test('a manual key asks for a label only when it is PEM', async t => {
+  const f = addKeyFixture(t)
+  const gpg =
+    '-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n-----END PGP PUBLIC KEY BLOCK-----'
+  assert.equal(f.instance.isPem(OS_UPDATE_SIGNERS[0]), true)
+  assert.equal(f.instance.isPem(gpg), false)
+  assert.deepEqual(f.instance.required({ value: ' ' }), { required: true })
+  assert.equal(f.instance.required({ value: 'Publisher' }), null)
+  f.instance.form.setValue({ name: 'Hidden', publicKeys: gpg })
+  await f.instance.save()
+  assert.deepEqual(f.mutations, [{ name: '', publicKeys: [gpg] }])
+})
+
+test('a manual key addition accepts exactly one key', async t => {
+  const f = addKeyFixture(t)
+  f.instance.form.setValue({
+    name: 'Publisher',
+    publicKeys: `${OS_UPDATE_SIGNERS[0]}\n${OS_UPDATE_SIGNERS[1]}`,
+  })
+  await f.instance.save()
+  assert.deepEqual(f.mutations, [])
+  assert.deepEqual(f.closed, [])
+  assert.equal(f.instance.form.controls.publicKeys.hasError('publicKeys'), true)
+})
+
+test('a failed manual key addition keeps the dialog open', async t => {
+  const f = addKeyFixture(t, true)
+  f.instance.form.setValue({
+    name: 'Publisher',
+    publicKeys: OS_UPDATE_SIGNERS[0],
+  })
+  await f.instance.save()
+  assert.deepEqual(f.closed, [])
+  assert.equal(f.instance.saving(), false)
+})
+
+test('registry signing-key identities keep GPG metadata under the key label', () => {
+  const id = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
+  const gpgExports = [
+    {
+      armored: 'original export',
+      fingerprints: ['5456dbff1b9df905041fa7765259adfc2d63c217'],
+      userIds: ['Start9 <security@start9.com>'],
+      identities: { [id]: ['Start9 <security@start9.com>'] },
+      keyFingerprints: { [id]: ['5456dbff1b9df905041fa7765259adfc2d63c217'] },
+    },
+  ]
+  const proposed = registrySigningKeys({
+    trustSigners: {
+      signer: { name: 'Label', contact: [], keys: [id], gpgExports },
+    },
+  })
+  assert.deepEqual(Object.keys(proposed), [id])
+  assert.equal(proposed[id].gpgExports, gpgExports)
+  assert.deepEqual(signingKeyIdentity(id, proposed[id]), {
+    name: 'Label',
+    emails: ['security@start9.com'],
+    fingerprints: ['5456 DBFF 1B9D F905 041F A776 5259 ADFC 2D63 C217'],
+  })
+})
+
+test('key identities are GPG user IDs, or the emails registries publish for a plain key', () => {
+  const id = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
+  const contact = [{ email: 'dev@example.com' }, { matrix: '@dev:example.com' }]
+  assert.deepEqual(
+    keyIdentities({
+      publicKey: id,
+      contact,
+      gpgExports: [
+        { identities: { [id]: ['A <a@example.com>', 'B <b@example.com>'] } },
+        { identities: { [id]: ['A <a@example.com>'], other: ['C'] } },
+      ],
+    }),
+    ['A <a@example.com>', 'B <b@example.com>'],
+  )
+  assert.deepEqual(keyIdentities({ publicKey: id, contact, gpgExports: [] }), [
+    'dev@example.com',
+  ])
+})
+
+function registriesFixture({
+  publishes = true,
+  confirm = true,
+  orphaned = [],
+  cleanup = true,
+} = {}) {
+  const calls = []
+  const instance = {
+    saving: signal(false),
+    tasks: { run: runTask },
+    os: {
+      publishesUpdates: async url => {
+        calls.push(['check', url])
+        return publishes
+      },
+    },
+    marketplace: {
+      setOsRegistry: async url => {
+        calls.push(['set', url])
+        return ['key']
+      },
+      removeRegistry: async url => {
+        calls.push(['remove', url])
+        return orphaned
+      },
+    },
+    api: {
+      rpc: {
+        server: {
+          trustedKeys: {
+            removeMany: async ({ ids }) => calls.push(['remove keys', ids]),
+          },
+        },
+      },
+    },
+    dialogs: {
+      openAlert: message => {
+        calls.push(['alert', message])
+        return of(null)
+      },
+      openConfirm: ({ label }) => {
+        calls.push(['confirm', label])
+        return of(confirm)
+      },
+      openComponent: (_, { label, data }) => {
+        calls.push(['notice', label, data.ids])
+        return of(cleanup)
+      },
+    },
+    save: RegistriesPage.prototype.save,
+    notify: RegistriesPage.prototype.notify,
+  }
+  return { instance, calls }
+}
+
+test('a registry that publishes no StartOS updates cannot provide them', async () => {
+  const { instance, calls } = registriesFixture({ publishes: false })
+  await RegistriesPage.prototype.useForUpdates.call(
+    instance,
+    'https://other.test',
+  )
+  assert.deepEqual(calls, [
+    ['check', 'https://other.test'],
+    ['alert', 'This registry does not publish StartOS updates.'],
+  ])
+})
+
+test('another registry provides StartOS updates only after a warning, and reports the keys it trusted', async () => {
+  for (const confirm of [false, true]) {
+    const { instance, calls } = registriesFixture({ confirm })
+    await RegistriesPage.prototype.useForUpdates.call(
+      instance,
+      'https://other.test',
+    )
+    assert.deepEqual(calls, [
+      ['check', 'https://other.test'],
+      ['confirm', 'Warning'],
+      ...(confirm
+        ? [
+            ['set', 'https://other.test'],
+            ['notice', 'StartOS updates', ['key']],
+          ]
+        : []),
+    ])
+  }
+  const { instance, calls } = registriesFixture()
+  await RegistriesPage.prototype.useForUpdates.call(
+    instance,
+    'https://registry.test',
+  )
+  assert.deepEqual(calls, [
+    ['check', 'https://registry.test'],
+    ['set', 'https://registry.test'],
+    ['notice', 'StartOS updates', ['key']],
+  ])
+})
+
+test('the update registry cannot be removed', async () => {
+  const { instance, calls } = registriesFixture()
+  await RegistriesPage.prototype.remove.call(instance, {
+    url: 'https://registry.test',
+    os: true,
+  })
+  assert.deepEqual(calls, [
+    [
+      'alert',
+      'This registry provides StartOS updates. Choose another registry for StartOS updates before removing it.',
+    ],
+  ])
+})
+
+test('removing a registry offers to remove only the keys it left unoffered', async () => {
+  for (const [orphaned, cleanup] of [
+    [[], true],
+    [['first', 'second'], false],
+    [['first', 'second'], true],
+  ]) {
+    const { instance, calls } = registriesFixture({ orphaned, cleanup })
+    await RegistriesPage.prototype.remove.call(instance, {
+      url: 'https://other.test',
+      os: false,
+    })
+    assert.deepEqual(calls, [
+      ['confirm', 'Remove registry?'],
+      ['remove', 'https://other.test'],
+      ...(orphaned.length ? [['notice', 'Remove unused keys?', orphaned]] : []),
+      ...(orphaned.length && cleanup ? [['remove keys', orphaned]] : []),
+    ])
+  }
+})
+
+test('failed registry-key cleanup submits one batch without per-key retries', async () => {
+  const { instance, calls } = registriesFixture({
+    orphaned: ['first', 'last-os'],
+  })
+  instance.api.rpc.server.trustedKeys.removeMany = async ({ ids }) => {
+    calls.push(['remove keys', ids])
+    throw new Error('Last OS key')
+  }
+  await RegistriesPage.prototype.remove.call(instance, {
+    url: 'https://other.test',
+    os: false,
+  })
+  assert.deepEqual(calls.at(-1), ['remove keys', ['first', 'last-os']])
+  assert.equal(
+    calls.filter(([operation]) => operation === 'remove keys').length,
+    1,
+  )
+  assert.equal(instance.saving(), false)
+})
+
+test('connecting a registry asks for no approvals and resolves to the keys it trusted', async () => {
+  const calls = []
+  const instance = {
+    api: {
+      rpc: {
+        server: {
+          trustedKeys: {
+            connectRegistry: async params => {
+              calls.push(params)
+              return ['added']
+            },
+          },
+        },
+      },
+    },
+  }
+  assert.deepEqual(
+    await MarketplaceService.prototype.connectRegistry.call(
+      instance,
+      'https://registry.test',
+    ),
+    ['added'],
+  )
+  assert.deepEqual(calls, [{ url: 'https://registry.test', name: null }])
+})
+
+test('a late registry metadata response cannot restore a removed registry', async t => {
+  const { Exver } = await import('@start9labs/shared')
+  const { StorageService } = await import('src/app/services/storage.service')
+  const { PackageIconService } =
+    await import('src/app/services/package-icon.service')
+  const metadata = deferred()
+  const registries = new BehaviorSubject({
+    'https://registry.test': 'Old name',
+  })
+  const writes = []
+  const injector = createEnvironmentInjector(
+    [
+      { provide: PatchDB, useValue: { watch$: () => registries } },
+      { provide: Exver, useValue: {} },
+      { provide: StorageService, useValue: { get: () => null } },
+      { provide: PackageIconService, useValue: {} },
+      { provide: ErrorService, useValue: { handleError: assert.fail } },
+      {
+        provide: ApiService,
+        useValue: {
+          rpc: {
+            registry: {
+              info: () => metadata.promise,
+              package: { get: async () => ({}) },
+            },
+            server: {
+              trustedKeys: { removeRegistry: async () => registries.next({}) },
+            },
+            db: {
+              put: {
+                ui: async params => {
+                  writes.push(params)
+                  registries.next({ 'https://registry.test': params.value })
+                },
+              },
+            },
+          },
+        },
+      },
+    ],
+    null,
+  )
+  t.after(() => injector.destroy())
+  const service = runInInjectionContext(
+    injector,
+    () => new MarketplaceService(),
+  )
+  const subscription = service.marketplace$.subscribe()
+  t.after(() => subscription.unsubscribe())
+  await service.delete('https://registry.test')
+  metadata.resolve({ name: 'New name', categories: {} })
+  await new Promise(setImmediate)
+  assert.deepEqual(await firstValueFrom(service.registries$), [])
+  assert.deepEqual(writes, [])
+})
+
+test('registry removal uses the authoritative endpoint, clears a matching selected registry, and reports unoffered keys', async () => {
+  const calls = []
+  const instance = {
+    api: {
+      rpc: {
+        server: {
+          trustedKeys: {
+            removeRegistry: async params => {
+              calls.push(params)
+              return ['orphaned']
+            },
+          },
+        },
+      },
+    },
+    storage: {
+      get: () => 'https://registry.test',
+      set: (...args) => calls.push(args),
+    },
+  }
+  assert.deepEqual(
+    await MarketplaceService.prototype.removeRegistry.call(
+      instance,
+      'https://registry.test',
+    ),
+    ['orphaned'],
+  )
+  assert.deepEqual(calls, [
+    { url: 'https://registry.test' },
+    ['selectedRegistry', null],
+  ])
+})
+
+const { default: SideloadPage } =
+  await import('src/app/routes/portal/routes/sideload/sideload.component')
+const { requests: sideloadValidations } = await import('./sideload.utils')
+const { SideloadPackageComponent } =
+  await import('src/app/routes/portal/routes/sideload/package.component')
+
+test('sideload License opens the complete archive text instead of its manifest identifier', async () => {
+  let displayed
+  SideloadPackageComponent.prototype.onStatic.call({
+    pkg: () => ({
+      license: 'MIT',
+      fullLicense: 'Complete license fixture text',
+    }),
+    dialog: {
+      openComponent: (_component, options) => {
+        displayed = options.data
+        return of(undefined)
+      },
+    },
+  })
+  assert.equal(await firstValueFrom(displayed), 'Complete license fixture text')
+})
+
+test('sideload validation cannot replace a newer file with stale details or errors', async () => {
+  for (const stale of [{ ...pkg, title: 'First' }, 'Invalid package file']) {
+    const page = new SideloadPage()
+    const first = new File(['first'], 'first.s9pk')
+    const second = new File(['second'], 'second.s9pk')
+    const older = page.onFile(first)
+    const newer = page.onFile(second)
+    const firstValidation = sideloadValidations.shift()
+    const secondValidation = sideloadValidations.shift()
+    assert.equal(firstValidation.file, first)
+    assert.equal(secondValidation.file, second)
+    const selected = { ...pkg, title: 'Second' }
+    secondValidation.resolve(selected)
+    await newer
+    firstValidation.resolve(stale)
+    await older
+    assert.equal(page.file, second)
+    assert.equal(page.package(), selected)
+    assert.equal(page.error(), null)
+  }
+})
+
+test('clearing a pending sideload validation keeps its eventual result hidden', async () => {
+  const page = new SideloadPage()
+  const pending = page.onFile(new File(['first'], 'first.s9pk'))
+  const validation = sideloadValidations.shift()
+  page.clear()
+  validation.resolve({ ...pkg, title: 'First' })
+  await pending
+  assert.equal(page.file, null)
+  assert.equal(page.package(), null)
+  assert.equal(page.error(), null)
 })

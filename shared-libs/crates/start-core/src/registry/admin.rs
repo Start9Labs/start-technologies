@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -15,6 +15,7 @@ use crate::registry::context::RegistryContext;
 use crate::registry::signer::{ContactInfo, SignerInfo};
 use crate::rpc_continuations::Guid;
 use crate::sign::AnyVerifyingKey;
+use crate::sign::gpg::{GpgPublicKeyExport, parse_public_keys};
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 
 pub fn admin_api<C: Context>() -> ParentHandler<C> {
@@ -219,7 +220,45 @@ pub fn display_package_signers<T>(
     Ok(())
 }
 
-pub async fn add_signer(ctx: RegistryContext, signer: SignerInfo) -> Result<Guid, Error> {
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct AddSignerParams {
+    pub name: String,
+    pub contact: Vec<ContactInfo>,
+    /// Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.
+    pub keys: Vec<String>,
+    /// Retained certificates; `keys` determines the selected signing keys.
+    #[serde(default)]
+    pub gpg_exports: BTreeSet<GpgPublicKeyExport>,
+}
+
+rpc_toolkit::reflect_ts!(AddSignerParams);
+
+impl AddSignerParams {
+    fn into_signer(self) -> Result<SignerInfo, Error> {
+        let mut signer = SignerInfo {
+            name: self.name,
+            contact: self.contact,
+            keys: Default::default(),
+            gpg_exports: Default::default(),
+        };
+        signer.import_keys(&self.keys)?;
+        signer.gpg_exports.extend(
+            parse_public_keys(
+                &self
+                    .gpg_exports
+                    .into_iter()
+                    .map(|export| export.armored)
+                    .collect::<Vec<_>>(),
+            )?
+            .gpg_exports,
+        );
+        Ok(signer)
+    }
+}
+
+pub async fn add_signer(ctx: RegistryContext, params: AddSignerParams) -> Result<Guid, Error> {
+    let signer = params.into_signer()?;
     ctx.db
         .mutate(|db| db.as_index_mut().as_signers_mut().add_signer(&signer))
         .await
@@ -237,8 +276,13 @@ pub struct EditSignerParams {
     pub set_name: Option<String>,
     #[arg(short = 'c', long, help = "help.arg.add-signer-contact")]
     pub add_contact: Vec<ContactInfo>,
-    #[arg(short = 'k', long, help = "help.arg.add-signer-key")]
-    pub add_key: Vec<AnyVerifyingKey>,
+    #[arg(
+        short = 'k',
+        long,
+        help = "help.arg.add-signer-key",
+        allow_hyphen_values = true
+    )]
+    pub add_key: Vec<String>,
     #[arg(short = 'C', long, help = "help.arg.remove-signer-contact")]
     pub remove_contact: Vec<ContactInfo>,
     #[arg(short = 'K', long, help = "help.arg.remove-signer-key")]
@@ -248,47 +292,37 @@ pub struct EditSignerParams {
 rpc_toolkit::reflect_ts!(EditSignerParams);
 rpc_toolkit::ts_export!(EditSignerParams, namespaces = [""]);
 
-pub async fn edit_signer(
-    ctx: RegistryContext,
-    EditSignerParams {
-        id,
-        set_name,
-        add_contact,
-        add_key,
-        remove_contact,
-        remove_key,
-    }: EditSignerParams,
-) -> Result<(), Error> {
+impl EditSignerParams {
+    fn apply(self, signer: &mut SignerInfo) -> Result<Vec<InternedString>, Error> {
+        signer.import_keys(&self.add_key)?;
+        if let Some(name) = self.set_name {
+            signer.name = name;
+        }
+        signer.contact.extend(self.add_contact);
+        for rm in self.remove_contact {
+            if let Some(idx) = signer.contact.iter().position(|contact| contact == &rm) {
+                signer.contact.remove(idx);
+            }
+        }
+        Ok(self
+            .remove_key
+            .into_iter()
+            .filter_map(|key| signer.keys.remove(&key).then(|| key.interned_der64()))
+            .collect())
+    }
+}
+
+pub async fn edit_signer(ctx: RegistryContext, params: EditSignerParams) -> Result<(), Error> {
     let continuations = ctx.open_authed_continuations();
     let ephemeral = ctx.ephemeral_auth_keys();
     ctx.db
         .mutate(|db| {
-            let mut removed = Vec::new();
-            db.as_index_mut()
+            let removed = db
+                .as_index_mut()
                 .as_signers_mut()
-                .as_idx_mut(&id)
-                .or_not_found(&id)?
-                .mutate(|s| {
-                    if let Some(name) = set_name {
-                        s.name = name;
-                    }
-                    s.contact.extend(add_contact);
-                    for rm in remove_contact {
-                        let Some((idx, _)) = s.contact.iter().enumerate().find(|(_, c)| *c == &rm)
-                        else {
-                            continue;
-                        };
-                        s.contact.remove(idx);
-                    }
-
-                    s.keys.extend(add_key);
-                    for rm in remove_key {
-                        if s.keys.remove(&rm) {
-                            removed.push(rm.interned_der64());
-                        }
-                    }
-                    Ok(())
-                })?;
+                .as_idx_mut(&params.id)
+                .or_not_found(&params.id)?
+                .mutate(|signer| params.apply(signer))?;
             HasUnenrolledKeys::unenroll::<RegistryContext>(continuations, ephemeral, db, removed)?;
             Ok(())
         })
@@ -364,8 +398,8 @@ pub struct CliAddSignerParams {
     pub name: String,
     #[arg(long = "contact", short = 'c', help = "help.arg.signer-contact")]
     pub contact: Vec<ContactInfo>,
-    #[arg(long = "key", help = "help.arg.signer-key")]
-    pub keys: Vec<AnyVerifyingKey>,
+    #[arg(long = "key", help = "help.arg.signer-key", allow_hyphen_values = true)]
+    pub keys: Vec<String>,
     #[arg(help = "help.arg.database-path")]
     pub database: Option<PathBuf>,
 }
@@ -385,12 +419,14 @@ pub async fn cli_add_signer(
         ..
     }: HandlerArgs<CliContext, CliAddSignerParams>,
 ) -> Result<Guid, Error> {
-    let signer = SignerInfo {
+    let params = AddSignerParams {
         name,
         contact,
-        keys: keys.into_iter().collect(),
+        keys,
+        gpg_exports: BTreeSet::new(),
     };
     if let Some(database) = database {
+        let signer = params.into_signer()?;
         TypedPatchDb::<RegistryDatabase>::load(PatchDb::open(database).await?)
             .await?
             .mutate(|db| db.as_index_mut().as_signers_mut().add_signer(&signer))
@@ -400,7 +436,7 @@ pub async fn cli_add_signer(
         from_value(
             ctx.call_remote::<RegistryContext>(
                 &parent_method.into_iter().chain(method).join("."),
-                to_value(&signer)?,
+                to_value(&params)?,
             )
             .await?,
         )
@@ -445,7 +481,6 @@ pub struct RemoveAdminParams {
 rpc_toolkit::reflect_ts!(RemoveAdminParams);
 rpc_toolkit::ts_export!(RemoveAdminParams, namespaces = [""]);
 
-// TODO: don't allow removing self?
 pub async fn remove_admin(
     ctx: RegistryContext,
     RemoveAdminParams { signer }: RemoveAdminParams,
@@ -513,4 +548,97 @@ pub async fn list_admins(ctx: RegistryContext) -> Result<BTreeMap<Guid, SignerIn
         .into_iter()
         .filter(|(id, _)| admins.contains(id))
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_and_rpc_signer_add_and_edit_retain_full_gpg_exports() {
+        let armor = include_str!("../sign/fixtures/ed25519-signers.asc");
+        let parsed = parse_public_keys(&[armor.into()]).unwrap();
+        let cli =
+            CliAddSignerParams::try_parse_from(["add", "--name", "Publisher", "--key", armor])
+                .unwrap();
+        let params = AddSignerParams {
+            name: cli.name,
+            contact: cli.contact,
+            keys: cli.keys,
+            gpg_exports: BTreeSet::new(),
+        };
+        let wire = to_value(&params).unwrap();
+        let mut signer = from_value::<AddSignerParams>(wire)
+            .unwrap()
+            .into_signer()
+            .unwrap();
+        assert_eq!(signer.keys, parsed.keys);
+        assert_eq!(signer.gpg_exports, parsed.gpg_exports);
+        assert!(
+            signer
+                .gpg_exports
+                .iter()
+                .all(|export| !export.identities.is_empty() && !export.key_fingerprints.is_empty())
+        );
+        let saved: SignerInfo = from_value(to_value(&signer).unwrap()).unwrap();
+        assert_eq!(saved, signer);
+
+        let removed_key = parsed.keys.first().unwrap();
+        let id = Guid::new();
+        let edit = EditSignerParams::try_parse_from([
+            "edit",
+            id.as_ref(),
+            "--add-key",
+            armor,
+            "--remove-key",
+            removed_key.interned_der64().as_ref(),
+        ])
+        .unwrap();
+        let wire = to_value(&edit).unwrap();
+        let removed = from_value::<EditSignerParams>(wire)
+            .unwrap()
+            .apply(&mut signer)
+            .unwrap();
+        assert_eq!(removed, vec![removed_key.interned_der64()]);
+        assert!(!signer.keys.contains(removed_key));
+        assert_eq!(signer.gpg_exports, parsed.gpg_exports);
+        let wire = to_value(&signer).unwrap();
+        let saved: SignerInfo = from_value(wire.clone()).unwrap();
+        assert_eq!(saved, signer);
+        let readded = from_value::<AddSignerParams>(wire)
+            .unwrap()
+            .into_signer()
+            .unwrap();
+        assert_eq!(readded, signer);
+    }
+
+    #[test]
+    fn historical_signers_default_to_no_exports_and_invalid_imports_are_atomic() {
+        let key = crate::sign::gpg::parse_public_keys(&[include_str!(
+            "../sign/fixtures/start9-public.asc"
+        )
+        .into()])
+        .unwrap()
+        .keys
+        .pop_first()
+        .unwrap();
+        let mut signer: SignerInfo =
+            from_value(imbl_value::json!({"name": "Historical", "contact": [], "keys": [key]}))
+                .unwrap();
+        assert!(signer.gpg_exports.is_empty());
+        let saved = signer.clone();
+        assert!(
+            signer
+                .import_keys(&[
+                    include_str!("../sign/fixtures/start9-public.asc").into(),
+                    "invalid".into()
+                ])
+                .is_err()
+        );
+        assert_eq!(signer, saved);
+        let params: AddSignerParams =
+            from_value(imbl_value::json!({"name": "Invalid", "contact": [], "keys": ["invalid"]}))
+                .unwrap();
+        assert!(params.into_signer().is_err());
+    }
 }

@@ -51,4 +51,4 @@ Both follow the same blockchain and expose the same RPC interface used by wallet
 ## Learn More
 
 - [StartOS Documentation](/start-os/) — Installing StartOS, user manual, networking, backups
-- [Contact Support](https://start9.com/contact) — Get help from the Start9 team
+- [Get Help](https://start9.com/help) — Help from the community and the Start9 team

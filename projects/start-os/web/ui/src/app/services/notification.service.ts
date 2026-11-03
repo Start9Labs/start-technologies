@@ -12,6 +12,7 @@ import { REPORT } from 'src/app/components/backup-report.component'
 import { ServerNotification } from 'src/app/services/api/api.types'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
+import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
 
 @Injectable({ providedIn: 'root' })
 export class NotificationService {
@@ -19,6 +20,7 @@ export class NotificationService {
   private readonly errorService = inject(ErrorService)
   private readonly api = inject(ApiService)
   private readonly dialogs = inject(DialogService)
+  private readonly trust = inject(TrustedKeysService)
   private readonly localUnreadCount$ = new Subject<number>()
 
   readonly unreadCount$ = merge(
@@ -93,6 +95,14 @@ export class NotificationService {
           .subscribe()
         break
 
+      case 4:
+        this.viewKey(schemas.RegistryKeyAdded.safeParse(data).data?.key)
+        break
+
+      case 5:
+        this.viewKey(schemas.RegistryKeyDropped.safeParse(data).data?.key)
+        break
+
       default:
         this.dialogs
           .openComponent(MARKDOWN, {
@@ -103,5 +113,9 @@ export class NotificationService {
           .subscribe()
         break
     }
+  }
+
+  private viewKey(key?: string) {
+    if (key) this.trust.viewKey(key)
   }
 }

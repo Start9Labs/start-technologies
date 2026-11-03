@@ -8,7 +8,10 @@ export class DirectoryContents {
   static readonly headerSize =
     8 + // position: u64 BE
     8 // size: u64 BE
-  private constructor(readonly contents: { [name: string]: Entry }) {}
+  private constructor(
+    readonly contents: { [name: string]: Entry },
+    readonly sourceEnd: bigint,
+  ) {}
   static async deserialize(
     source: Blob,
     header: ArrayBufferReader,
@@ -21,20 +24,26 @@ export class DirectoryContents {
       throw new Error('size is greater than signed')
     }
 
+    let sourceEnd = checkedEnd(source, position, size)
     const tocReader = new ArrayBufferReader(
       await source
         .slice(Number(position), Number(position + size))
         .arrayBuffer(),
     )
     const len = tocReader.nextVarint()
-    const entries: { [name: string]: Entry } = {}
+    const entries: { [name: string]: Entry } = Object.create(null)
     for (let i = 0; i < len; i++) {
       const name = tocReader.nextVarstring()
       const entry = await Entry.deserialize(source, tocReader)
+      if (entry.contents)
+        sourceEnd =
+          sourceEnd > entry.contents.sourceEnd
+            ? sourceEnd
+            : entry.contents.sourceEnd
       entries[name] = entry
     }
 
-    const res = new DirectoryContents(entries)
+    const res = new DirectoryContents(entries, sourceEnd)
 
     if (!compare(res.sighash(), sighash)) {
       throw new Error('hash sum does not match')
@@ -77,4 +86,15 @@ export class DirectoryContents {
     }
     return null
   }
+}
+
+export function checkedEnd(
+  source: Blob,
+  position: bigint,
+  size: bigint,
+): bigint {
+  const end = position + size
+  if (end > BigInt(source.size) || end > 0xffffffffffffffffn)
+    throw new Error('Archive range exceeds source')
+  return end
 }
