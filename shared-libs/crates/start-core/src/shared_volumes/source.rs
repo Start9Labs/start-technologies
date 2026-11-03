@@ -42,13 +42,7 @@ pub async fn open_source(
             let path = local_path(crate::DATA_DIR, id);
             open_local(&path, mount_type).await
         }
-        SharedVolumeSource::Disk { logicalname } => {
-            TmpMountGuard::mount(
-                &IdMapped::new(BlockDev::new(logicalname), vec![crate::lxc::BASE_IDMAP]),
-                mount_type,
-            )
-            .await
-        }
+        SharedVolumeSource::Disk { logicalname } => open_external(&logicalname, mount_type).await,
         SharedVolumeSource::Cifs { hostname, path } => {
             let credentials = db
                 .as_private()
@@ -110,6 +104,14 @@ pub(super) fn external_partition(
                 ErrorKind::InvalidRequest,
             )
         })
+}
+
+async fn open_external(path: &Path, mount_type: MountType) -> Result<TmpMountGuard, Error> {
+    TmpMountGuard::mount(
+        &IdMapped::new(BlockDev::new(path), vec![crate::lxc::BASE_IDMAP]),
+        mount_type,
+    )
+    .await
 }
 
 async fn open_local(path: &Path, mount_type: MountType) -> Result<TmpMountGuard, Error> {
