@@ -13,7 +13,7 @@ export const requiresSharedVolumes = !!manifest.sharedVolumes
 
 function checkCli() {
   if (!requiresSharedVolumes) return
-  const required = '2.7.0'
+  const required = '2.8.0'
   const installed = execFileSync('start-cli', ['--version'], {
     encoding: 'utf8',
   })

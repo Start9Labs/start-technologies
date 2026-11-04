@@ -14,11 +14,13 @@ import test from 'node:test'
 const checker = resolve('check-cli.mjs')
 for (const [sharedVolumes, version, succeeds, linked = false] of [
   [false, '2.4.2', true],
+  [false, '2.7.0', true],
   [true, '2.5.2', false],
   [true, '2.6.0', false],
-  [true, '2.7.0', true],
+  [true, '2.7.0', false],
+  [true, '2.8.0', true],
   [true, '3.0.0', true],
-  [true, '2.6.0', false, true],
+  [true, '2.7.0', false, true],
 ]) {
   test(`volume capability ${sharedVolumes} with CLI ${version}, linked ${linked}`, t => {
     const directory = mkdtempSync(join(tmpdir(), 'sdk-cli-'))
@@ -46,6 +48,6 @@ for (const [sharedVolumes, version, succeeds, linked = false] of [
     })
     assert.equal(result.status === 0, succeeds, result.stderr)
     if (!succeeds)
-      assert.match(result.stderr, /Volume packages require start-cli 2\.7\.0/)
+      assert.match(result.stderr, /Volume packages require start-cli 2\.8\.0/)
   })
 }
