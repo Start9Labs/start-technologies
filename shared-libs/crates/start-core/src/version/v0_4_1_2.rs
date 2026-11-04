@@ -5,7 +5,9 @@ use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_4_1_1};
 use crate::prelude::*;
 use crate::trusted_keys::legacy::{decode_keys, grouped_keys};
-use crate::trusted_keys::{protect_registry_keys, replace_stored_drbonez_certificates};
+use crate::trusted_keys::{
+    protect_registry_keys, remove_seeded_alpha_keys, replace_stored_drbonez_certificates,
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Version;
@@ -34,6 +36,7 @@ fn migrate(db: &mut Value, now: DateTime<Utc>) -> Result<(), Error> {
     let stored = stored_keys(db)?;
     let mut keys = decode_keys(stored.clone(), now)?;
     replace_stored_drbonez_certificates(&mut keys);
+    remove_seeded_alpha_keys(&mut keys);
     protect_registry_keys(&mut keys, &snapshots, &ui);
     *stored = to_value(&keys)?;
     Ok(())
@@ -53,7 +56,7 @@ impl VersionT for Version {
         &V0_3_0_COMPAT
     }
     fn migration_revision(self) -> usize {
-        1
+        2
     }
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
         migrate(db, Utc::now())?;
@@ -73,7 +76,7 @@ mod tests {
 
     #[test]
     fn grouped_trust_migration_preserves_both_policies_and_rolls_back_compatibly() {
-        let groups = legacy::initial_keyrings();
+        let groups = legacy::historical_keyrings();
         let mut historical = to_value(&groups).unwrap();
         for (_, group) in historical.as_object_mut().unwrap().iter_mut() {
             group.as_object_mut().unwrap().remove("origin");
@@ -90,6 +93,7 @@ mod tests {
         let migrated: TrustedKeys =
             from_value(db["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
         let mut expected = legacy::individual_keys(&groups, upgraded_at).unwrap();
+        remove_seeded_alpha_keys(&mut expected);
         for key in expected.values_mut() {
             key.removable = true;
         }
@@ -159,7 +163,8 @@ mod tests {
     fn migration_derives_protection_from_connected_observed_listings() {
         let now = Utc::now();
         let groups = legacy::initial_keyrings();
-        let keys = legacy::individual_keys(&groups, now).unwrap();
+        let mut keys = legacy::individual_keys(&groups, now).unwrap();
+        remove_seeded_alpha_keys(&mut keys);
         let listed = keys.values().next().unwrap().public_key.clone();
         for connected in [false, true] {
             let mut db = imbl_value::json!({ "public": {
@@ -185,6 +190,69 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn migration_removes_seeded_alpha_keys_from_grouped_and_individual_trust() {
+        let now = Utc::now();
+        let mut historical = legacy::historical_keyrings();
+        let alpha = historical.get_mut("start9-alpha").unwrap();
+        alpha.name = "Owner label".into();
+        alpha.marketplace = true;
+        alpha.os = true;
+        let individual = legacy::individual_keys(&historical, now).unwrap();
+        for stored in [
+            to_value(&historical).unwrap(),
+            to_value(&individual).unwrap(),
+        ] {
+            let snapshots = imbl_value::json!({"https://alpha-registry.start9.com": legacy::retired_alpha_keys()});
+            let mut db = imbl_value::json!({"public": {"serverInfo": {"trustedKeys": stored, "registryKeys": snapshots}, "ui": {"registries": {"https://alpha-registry.start9.com": "Alpha"}}}});
+            migrate(&mut db, now).unwrap();
+            let migrated: TrustedKeys =
+                from_value(db["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
+            for key in legacy::retired_alpha_keys() {
+                assert!(!migrated.contains_key(&key.interned_der64()));
+            }
+            assert_eq!(db["public"]["serverInfo"]["registryKeys"], snapshots);
+            assert_eq!(
+                migrated.len(),
+                individual.len() - legacy::retired_alpha_keys().len()
+            );
+            let first = db.clone();
+            migrate(&mut db, now).unwrap();
+            assert_eq!(db, first);
+        }
+    }
+
+    #[tokio::test]
+    async fn existing_0_4_1_2_installations_rerun_the_alpha_key_cleanup() {
+        let account =
+            crate::account::AccountInfo::new("password", std::time::SystemTime::now(), None)
+                .unwrap();
+        let mut fixture =
+            to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
+                .unwrap();
+        let historical =
+            legacy::individual_keys(&legacy::historical_keyrings(), Utc::now()).unwrap();
+        fixture["public"]["serverInfo"]["trustedKeys"] = to_value(&historical).unwrap();
+        fixture["public"]["serverInfo"]["latestMigrationRevision"] = imbl_value::json!(1);
+        let db = patch_db::PatchDb::in_memory();
+        db.put(&patch_db::json_ptr::ROOT, &fixture).await.unwrap();
+        super::super::Current::default()
+            .pre_init(&db)
+            .await
+            .unwrap();
+        let migrated = db.dump(&patch_db::json_ptr::ROOT).await.value;
+        let keys: TrustedKeys =
+            from_value(migrated["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
+        assert_eq!(keys.len(), 3);
+        for key in legacy::retired_alpha_keys() {
+            assert!(!keys.contains_key(&key.interned_der64()));
+        }
+        assert_eq!(
+            migrated["public"]["serverInfo"]["latestMigrationRevision"],
+            imbl_value::json!(Version.migration_revision())
+        );
     }
 
     #[test]

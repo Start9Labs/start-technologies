@@ -10,7 +10,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use url::Url;
 
-use crate::context::RpcContext;
+use crate::context::{DiagnosticContext, RpcContext};
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::{create_file_mod, read_file_to_string};
@@ -38,6 +38,11 @@ pub trait LocalAuthContext: Context {
 
 impl LocalAuthContext for RpcContext {
     const LOCAL_AUTH_COOKIE_PATH: &str = "/run/startos/rpc.authcookie";
+    const LOCAL_AUTH_COOKIE_OWNERSHIP: &str = "root:startos";
+}
+
+impl LocalAuthContext for DiagnosticContext {
+    const LOCAL_AUTH_COOKIE_PATH: &str = "/run/startos/diagnostic.authcookie";
     const LOCAL_AUTH_COOKIE_OWNERSHIP: &str = "root:startos";
 }
 
@@ -77,7 +82,17 @@ pub async fn local_auth_header<C: LocalAuthContext>() -> Option<HeaderValue> {
     Some(header)
 }
 
-fn unauthorized() -> Error {
+pub(crate) async fn local_auth_header_for_url<C: LocalAuthContext>(
+    url: &Url,
+) -> Option<HeaderValue> {
+    if is_loopback(url) {
+        local_auth_header::<C>().await
+    } else {
+        None
+    }
+}
+
+pub(crate) fn unauthorized() -> Error {
     Error::new(
         eyre!("{}", t!("middleware.auth.unauthorized")),
         crate::ErrorKind::Authorization,

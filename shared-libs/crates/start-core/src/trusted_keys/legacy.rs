@@ -36,14 +36,22 @@ pub(crate) fn start9_registry() -> RegistryIdentity {
     }
 }
 
+pub(crate) fn retired_alpha_keys() -> BTreeSet<AnyVerifyingKey> {
+    BTreeSet::from([
+        "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
+        "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
+    ])
+}
+
 pub(crate) fn initial_keyrings() -> TrustedKeyrings {
     let mut start9 = ImportedPublicKeys::default();
     for (_, imported) in initial_signer_certificates() {
         start9.keys.extend(imported.keys);
         start9.gpg_exports.extend(imported.gpg_exports);
     }
-    BTreeMap::from([
-        (START9.into(), TrustedKeyring {
+    BTreeMap::from([(
+        START9.into(),
+        TrustedKeyring {
             name: "Start9".into(),
             origin: START9_REGISTRY.into(),
             origin_registry: Some(start9_registry()),
@@ -54,23 +62,29 @@ pub(crate) fn initial_keyrings() -> TrustedKeyrings {
             added_at: None,
             marketplace: true,
             os: true,
-        }),
-        ("start9-alpha".into(), TrustedKeyring {
+        },
+    )])
+}
+
+#[cfg(test)]
+pub(crate) fn historical_keyrings() -> TrustedKeyrings {
+    let mut keys = initial_keyrings();
+    keys.insert(
+        "start9-alpha".into(),
+        TrustedKeyring {
             name: "Start9 Alpha".into(),
             origin: START9_REGISTRY.into(),
             origin_registry: Some(start9_registry()),
             removable: false,
             contact: BTreeSet::new(),
             added_at: None,
-            public_keys: BTreeSet::from([
-                "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
-                "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
-            ]),
+            public_keys: retired_alpha_keys(),
             gpg_exports: BTreeSet::new(),
             marketplace: false,
             os: false,
-        }),
-    ])
+        },
+    );
+    keys
 }
 
 pub(crate) fn os_signers(keys: &TrustedKeyrings) -> TrustedOsUpdateSigners {
@@ -226,7 +240,7 @@ mod tests {
 
     #[test]
     fn grouped_duplicates_preserve_effective_trust_system_protection_and_identity() {
-        let mut groups = initial_keyrings();
+        let mut groups = historical_keyrings();
         groups.get_mut(START9).unwrap().os = false;
         let public_key = groups[START9].public_keys.first().unwrap().clone();
         let mut overlap = groups[START9].clone();

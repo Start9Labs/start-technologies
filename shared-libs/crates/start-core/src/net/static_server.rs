@@ -179,7 +179,9 @@ impl UiContext for DiagnosticContext {
         main_api()
     }
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
-        server.middleware(RequireJson)
+        server
+            .middleware(RequireJson)
+            .middleware(crate::update::diagnostic_auth::DiagnosticUpdateAuth::new())
     }
     fn apply_outer_layers(self, router: Router) -> Router {
         local_hosts_only(router)
