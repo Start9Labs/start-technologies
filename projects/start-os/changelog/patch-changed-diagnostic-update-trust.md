@@ -1,5 +1,5 @@
 ---
-release-notes: true
+release-notes: false
 ---
 
 - Diagnostic updates honor your saved StartOS-update signing keys without needing the data drive. Accepting an untrusted signer requires an authenticated CLI running locally on the server.
