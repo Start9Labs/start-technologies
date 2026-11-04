@@ -10,8 +10,7 @@ use crate::registry::signer::{AcceptSigners, ContactInfo};
 use crate::sign::AnyVerifyingKey;
 use crate::sign::gpg::{GpgPublicKeyExport, ImportedPublicKeys, parse_public_keys};
 use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners};
-mod connection;
-pub use connection::check_registry;
+pub(crate) mod connection;
 pub(crate) mod legacy;
 
 pub type TrustedKeys = BTreeMap<InternedString, TrustedKey>;

@@ -8,7 +8,6 @@ import {
   registrySigningKeys,
 } from '@start9labs/marketplace'
 import {
-  defaultRegistries,
   FullKeyboard,
   pauseFor,
   registryUrl,
@@ -82,7 +81,11 @@ import {
   WebsocketConfig,
 } from './api.types'
 import { ApiService } from './embassy-api.service'
-import { mockPatchData } from './mock-patch'
+import {
+  mockPatchData,
+  mockRegistryCache,
+  mockOsUpdateCache,
+} from './mock-patch'
 
 import markdown from './md-sample.md'
 
@@ -153,6 +156,15 @@ export class MockApiService extends ApiService {
         mockPatchData.ui = { ...mockPatchData.ui, ...JSON.parse(stored) }
       }
 
+      mockPatchData.registryCache = Object.fromEntries(
+        Object.keys(mockPatchData.ui.registries).map(url => [
+          registryUrl(url),
+          mockRegistryCache(this.mockRegistryInfo(url)),
+        ]),
+      )
+      mockPatchData.osUpdateCache = mockOsUpdateCache(
+        mockPatchData.ui.startosRegistry,
+      )
       this.protectTrust()
       return {
         dump: { id: this.sequence, value: mockPatchData },
@@ -293,6 +305,7 @@ export class MockApiService extends ApiService {
       await pauseFor(2000)
       const normalized = registryUrl(url)
       const info = this.mockRegistryInfo(normalized)
+      mockPatchData.registryCache[normalized] = mockRegistryCache(info)
       const { added } = this.importRegistryKeys(normalized, info)
       for (const id of added)
         mockPatchData.serverInfo.trustedKeys[id]!.marketplace = true
@@ -311,6 +324,9 @@ export class MockApiService extends ApiService {
           'This registry provides StartOS updates. Choose another registry for StartOS updates before removing it.',
         )
       const offered = this.offeredKeys(url)
+      for (const saved of Object.keys(mockPatchData.registryCache)) {
+        if (sameUrl(saved, url)) delete mockPatchData.registryCache[saved]
+      }
       for (const saved of Object.keys(mockPatchData.ui.registries)) {
         if (sameUrl(saved, url)) delete mockPatchData.ui.registries[saved]
       }
@@ -338,6 +354,7 @@ export class MockApiService extends ApiService {
       for (const id of enabled)
         mockPatchData.serverInfo.trustedKeys[id]!.os = true
       mockPatchData.ui.startosRegistry = registryUrl(url)
+      mockPatchData.osUpdateCache = mockOsUpdateCache(url)
       await this.publishTrust()
       return enabled
     },
@@ -592,11 +609,7 @@ export class MockApiService extends ApiService {
     },
     'registry.os.version.get': async params => {
       await pauseFor(2000)
-      return (
-        sameUrl(params.registry, defaultRegistries.community)
-          ? {}
-          : Mock.RegistryOSUpdate
-      ) as Result<'registry.os.version.get'>
+      return mockOsUpdateCache(params.registry).versions
     },
     'registry.info': async params => {
       await pauseFor(2000)
@@ -2543,6 +2556,16 @@ export class MockApiService extends ApiService {
   private async publishTrust(): Promise<void> {
     this.protectTrust()
     await this.mockRevision<unknown>([
+      {
+        op: PatchOp.REPLACE,
+        path: '/registryCache',
+        value: structuredClone(mockPatchData.registryCache),
+      },
+      {
+        op: PatchOp.REPLACE,
+        path: '/osUpdateCache',
+        value: structuredClone(mockPatchData.osUpdateCache),
+      },
       {
         op: PatchOp.REPLACE,
         path: '/serverInfo/trustedKeys',

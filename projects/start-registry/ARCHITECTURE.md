@@ -37,7 +37,6 @@ Defined in `shared-libs/crates/start-core/src/registry/mod.rs`:
 
 - `POST /rpc/{*path}` — JSON-RPC, wrapped in `Cors`, `Auth` (local + signature auth), and `DeviceInfoMiddleware`.
 - `GET /ws/rpc/{*path}` — WebSocket RPC continuations, keyed by a `Guid`.
-- `GET /os/security` — public WebSocket sending a PatchDB dump of the security catalog followed by revisions.
 - `/rest/rpc/{*path}` — REST continuation channel (e.g. large asset streams), keyed by a `Guid`.
 - `GET /icons/{*path}` — a package or dependency icon from the content-addressed store, unauthenticated and immutable. Package versions refer to an icon by this path, `blake3/<hash>.<ext>`; `DeviceInfoMiddleware` inlines it as a data URL for StartOS before 0.4.0.3.
 
@@ -62,27 +61,19 @@ The public `db.subscribe` RPC accepts `{ "pointer": <JSON Pointer> }`. The point
 an initial `{ id, value }` dump and a continuation `guid`. Connecting to `/ws/rpc/<guid>` streams
 revisions whose JSON Patch paths are relative to the selected subtree.
 
-The `/os/security` WebSocket sends a JSON PatchDB `Dump` (`id`, `value`) followed by `Revision`
-messages (`id`, `patch`). The dump and subscription are captured atomically. The root is a
-`SecurityFeedState` with the registry's optional `name` and an `updates` catalog keyed by OS version.
-Each update contains `gitHash`, `sourceVersion`, and the available SquashFS `platforms` for a release
-marked `security`. The name comes from the same index field as `registry.info`; clients use a localized
-label for unnamed registries and retain the registry URL as their delivery-history key.
+StartOS owns one `/index` continuation for each connected registry and an additional `/index/os`
+continuation for its selected OS-update source. Package queries and registry information use the
+backend cache; browser sessions observe projected package and OS metadata through PatchDB.
+Subscriptions reconnect with jittered backoff and a fresh dump. Cached metadata remains available
+offline, with connection availability reported separately from registry configuration.
 
-When enabled, `RegistryContext` owns one `PatchDb::in_memory()` mirror and one task watching the
-persistent name and OS subtrees. Both subscriptions precede the initial atomic index snapshot; later
-events also rebuild from one snapshot. Unrelated package changes do not wake the task. Native `put`
-suppresses unchanged feed state. The bounded JSON subscription API
-serializes each scoped revision once and shares its bytes across listeners. Initial dumps share a
-per-pointer cache until the database changes. A 32-slot broadcast ring bounds pending revisions;
-a subscriber that falls behind closes instead of skipping patches. The endpoint uses 2 KiB read
-buffers, 1 KiB incoming message/frame limits, bounded sends, and the shared WebSocket Ping/Pong
-heartbeat. Clients apply revisions to the initial dump and start from a fresh dump on reconnect.
+Registry subscriptions use bounded JSON revision queues. Slow subscribers close rather than skip
+patches. Unauthenticated RPC WebSocket continuations share incoming buffer/message/frame limits
+and bounded sends; authenticated bulk-transfer continuations retain their transport settings.
 
-Security notifications are opt-in with `security-notifications: true`. Disabled registries create no
-mirror or sync task and refuse upgrades with HTTP 403; clients retry with backoff. Release metadata
-remains unchanged. The setting applies at daemon startup and does not affect promotion into another
-registry.
+StartOS derives security notifications from the selected source's OS metadata, filtering by source
+version, platform, and installed build. Delivery history remains keyed by registry URL, version, and
+build hash across reconnects and restarts.
 
 ## Data model
 
@@ -97,8 +88,8 @@ selecting a subset of the existing signer records. `registry.info` returns the
 selected IDs and complete records as `trustSigners: Record<Guid, SignerInfo>`.
 Signer records retain their original GPG exports and per-key identities and
 fingerprints. An empty selection proposes no keys. StartOS trusts newly offered
-keys for packages when connecting; keys discovered on later package or OS
-update requests start disabled, with a notification. StartOS trusts a registry's keys for OS updates automatically only when a user
+keys for packages when connecting; keys discovered by index synchronization start disabled,
+with notifications for newly offered or dropped keys. StartOS trusts a registry's keys for OS updates automatically only when a user
 chooses it for StartOS updates.
 
 Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hold versions, dependency `VersionRange`s, and `RegistryAsset`s. Assets carry **Blake3 commitments** (`sign/commitment/blake3`) for content addressing and integrity, and are signed by registered signers.

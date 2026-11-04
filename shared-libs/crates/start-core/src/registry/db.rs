@@ -1,11 +1,12 @@
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use axum::extract::ws;
+use axum::extract::ws::{self, Utf8Bytes};
 use clap::Parser;
 use itertools::Itertools;
-use patch_db::Dump;
 use patch_db::json_ptr::{JsonPointer, ROOT};
+use patch_db::{Dump, JsonSubscriber};
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
@@ -115,11 +116,27 @@ fn subscription_pointer(pointer: Option<JsonPointer>) -> Result<JsonPointer, Err
     Ok(pointer)
 }
 
+async fn subscription(
+    db: &PatchDb,
+    pointer: Option<JsonPointer>,
+) -> Result<(Dump, JsonSubscriber), Error> {
+    let (dump, sub) = db
+        .dump_and_sub_json(
+            subscription_pointer(pointer)?,
+            NonZeroUsize::new(32).unwrap(),
+        )
+        .await?;
+    Ok((
+        serde_json::from_slice(&dump).with_kind(ErrorKind::Deserialization)?,
+        sub,
+    ))
+}
+
 pub async fn subscribe(
     ctx: RegistryContext,
     SubscribeParams { pointer }: SubscribeParams,
 ) -> Result<SubscribeRes, Error> {
-    let (dump, mut sub) = ctx.db.dump_and_sub(subscription_pointer(pointer)?).await;
+    let (dump, mut sub) = subscription(&ctx.db, pointer).await?;
     let guid = Guid::new();
     ctx.rpc_continuations
         .add(
@@ -130,13 +147,12 @@ pub async fn subscribe(
                         loop {
                             tokio::select! {
                                 rev = sub.recv() => {
-                                    let Some(rev) = rev else {
+                                    let Some(rev) = rev? else {
                                         return ws.normal_close("complete").await;
                                     };
                                     ws.send(ws::Message::Text(
-                                        serde_json::to_string(&rev)
-                                            .with_kind(ErrorKind::Serialization)?
-                                            .into(),
+                                        Utf8Bytes::try_from(rev)
+                                            .with_kind(ErrorKind::Serialization)?,
                                     ))
                                     .await
                                     .with_kind(ErrorKind::Network)?;
@@ -168,6 +184,48 @@ pub async fn subscribe(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn subscription_preserves_dump_and_revision_wire_format() {
+        let db = PatchDb::in_memory();
+        db.put(&ROOT, &imbl_value::json!({"index": {"name": "registry"}}))
+            .await
+            .unwrap();
+        let (dump, mut sub) = subscription(&db, None).await.unwrap();
+        assert_eq!(dump.value, imbl_value::json!({"name": "registry"}));
+        db.put(&"/index/name".parse::<JsonPointer>().unwrap(), &"renamed")
+            .await
+            .unwrap();
+        let revision: patch_db::Revision =
+            serde_json::from_slice(&sub.recv().await.unwrap().unwrap()).unwrap();
+        assert_eq!(revision.id, dump.id + 1);
+        let mut value = dump.value;
+        patch_db::json_patch::patch(&mut value, &revision.patch).unwrap();
+        assert_eq!(value, imbl_value::json!({"name": "renamed"}));
+    }
+
+    #[tokio::test]
+    async fn subscription_closes_after_32_queued_revisions_and_reconnects() {
+        let db = PatchDb::in_memory();
+        db.put(&ROOT, &imbl_value::json!({"index": {"name": "registry"}}))
+            .await
+            .unwrap();
+        let (_, mut sub) = subscription(&db, None).await.unwrap();
+        for i in 0..32 {
+            db.put(&"/index/name".parse::<JsonPointer>().unwrap(), &i)
+                .await
+                .unwrap();
+        }
+        assert!(sub.recv().await.unwrap().is_some());
+        for i in 32..66 {
+            db.put(&"/index/name".parse::<JsonPointer>().unwrap(), &i)
+                .await
+                .unwrap();
+        }
+        assert!(sub.recv().await.unwrap().is_none());
+        let (dump, _) = subscription(&db, None).await.unwrap();
+        assert_eq!(dump.value, imbl_value::json!({"name": 65}));
+    }
 
     #[test]
     fn subscribe_params_allow_an_omitted_or_null_pointer() {

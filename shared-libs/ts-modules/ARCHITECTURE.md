@@ -49,7 +49,7 @@ The live API handles `x-patch-sequence` headers — after a mutating call, it wa
 The backend pushes state diffs to the frontend via WebSocket. This is the primary way components get data.
 
 - **`PatchDbSource`** (`ui/src/app/services/patch-db/patch-db-source.ts`) — Establishes a WebSocket subscription when authenticated. Buffers updates every 250ms.
-- **`DataModel`** (`ui/src/app/services/patch-db/data-model.ts`) — TypeScript type for the full database shape (`ui`, `serverInfo`, `packageData`).
+- **`DataModel`** (`ui/src/app/services/patch-db/data-model.ts`) — TypeScript type for the full database shape (`ui`, `serverInfo`, `packageData`, `registryCache`, `osUpdateCache`).
 - **`PatchDB<DataModel>`** — Injected service. Use `watch$()` to observe specific paths.
 
 **Watching data in a component:**

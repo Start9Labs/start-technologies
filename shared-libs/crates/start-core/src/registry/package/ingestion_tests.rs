@@ -73,7 +73,6 @@ async fn context(datadir: PathBuf, uploader: AnyVerifyingKey) -> RegistryContext
         client: Client::new(),
         shutdown: tokio::sync::broadcast::channel(1).0,
         metrics_db: SyncMutex::new(Connection::open_in_memory().unwrap()),
-        security_feed: None,
     }))
 }
 

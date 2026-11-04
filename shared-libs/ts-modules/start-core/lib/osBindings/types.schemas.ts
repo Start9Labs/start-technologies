@@ -4924,6 +4924,22 @@ export const NotificationWithId: z.ZodIntersection<
 > = /* @__PURE__ */ z.intersection(object({ id: z.int() }), Notification).meta({
   id: 'NotificationWithId',
 })
+
+/**
+ * Compatible releases from the selected StartOS update source.
+ */
+export const OsUpdateCache: z.ZodObject<{
+  registry: z.ZodString
+  versions: z.ZodRecord<z.ZodString, typeof OsVersionInfo>
+  connected: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  registry: z.string(),
+  versions: z.record(z.string(), OsVersionInfo),
+  connected: z.boolean(),
+}).meta({
+  id: 'OsUpdateCache',
+  description: 'Compatible releases from the selected StartOS update source.',
+})
 export const OsVersionInfoMap: z.ZodRecord<z.ZodString, typeof OsVersionInfo> =
   /* @__PURE__ */ z.record(z.string(), OsVersionInfo).meta({
     id: 'OsVersionInfoMap',
@@ -6200,6 +6216,23 @@ export const PackageIndex: z.ZodObject<{
 }).meta({
   id: 'PackageIndex',
 })
+
+/**
+ * Last synchronized package listings and registry trust proposals.
+ */
+export const RegistryCache: z.ZodObject<{
+  info: typeof RegistryInfo
+  packages: z.ZodRecord<z.ZodString, typeof GetPackageResponse>
+  connected: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  info: RegistryInfo,
+  packages: z.record(z.string(), GetPackageResponse),
+  connected: z.boolean(),
+}).meta({
+  id: 'RegistryCache',
+  description:
+    'Last synchronized package listings and registry trust proposals.',
+})
 export const BindOptions: z.ZodCodec<
   typeof CompatibleBindOptions,
   z.ZodObject<{
@@ -6618,10 +6651,26 @@ export const AllPackageData: z.ZodRecord<z.ZodString, typeof PackageDataEntry> =
 export const Public: z.ZodObject<{
   serverInfo: typeof ServerInfo
   packageData: typeof AllPackageData
+  registryCache: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof RegistryCache>>,
+    z.ZodRecord<z.ZodString, typeof RegistryCache>
+  >
+  osUpdateCache: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof OsUpdateCache>>,
+    z.ZodNullable<typeof OsUpdateCache>
+  >
   ui: z.ZodUnknown
 }> = /* @__PURE__ */ object({
   serverInfo: ServerInfo,
   packageData: AllPackageData,
+  registryCache: wire(
+    z.record(z.string(), RegistryCache).optional(),
+    z.record(z.string(), RegistryCache),
+  ),
+  osUpdateCache: wire(
+    OsUpdateCache.nullable().optional(),
+    OsUpdateCache.nullable(),
+  ),
   ui: z.unknown(),
 }).meta({
   id: 'Public',

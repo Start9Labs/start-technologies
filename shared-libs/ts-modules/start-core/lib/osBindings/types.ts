@@ -1174,6 +1174,16 @@ export type NetworkInterfaceInfoInput = z.input<
 >
 export type NotificationWithId = z.output<typeof schemas.NotificationWithId>
 export type NotificationWithIdInput = z.input<typeof schemas.NotificationWithId>
+
+/**
+ * Compatible releases from the selected StartOS update source.
+ */
+export type OsUpdateCache = z.output<typeof schemas.OsUpdateCache>
+
+/**
+ * Compatible releases from the selected StartOS update source.
+ */
+export type OsUpdateCacheInput = z.input<typeof schemas.OsUpdateCache>
 export type OsVersionInfoMap = z.output<typeof schemas.OsVersionInfoMap>
 export type OsVersionInfoMapInput = z.input<typeof schemas.OsVersionInfoMap>
 export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
@@ -1364,6 +1374,16 @@ export type Manifest = z.output<typeof schemas.Manifest>
 export type ManifestInput = z.input<typeof schemas.Manifest>
 export type PackageIndex = z.output<typeof schemas.PackageIndex>
 export type PackageIndexInput = z.input<typeof schemas.PackageIndex>
+
+/**
+ * Last synchronized package listings and registry trust proposals.
+ */
+export type RegistryCache = z.output<typeof schemas.RegistryCache>
+
+/**
+ * Last synchronized package listings and registry trust proposals.
+ */
+export type RegistryCacheInput = z.input<typeof schemas.RegistryCache>
 export type BindOptions = z.output<typeof schemas.BindOptions>
 export type BindOptionsInput = z.input<typeof schemas.BindOptions>
 export type FullIndex = z.output<typeof schemas.FullIndex>

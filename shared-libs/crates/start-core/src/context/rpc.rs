@@ -74,8 +74,6 @@ pub struct RpcContextSeed {
     pub s9pk_arch: Option<&'static str>,
     pub services: ServiceMap,
     pub cancellable_installs: SyncMutex<BTreeMap<PackageId, oneshot::Sender<()>>>,
-    /// When each registry was last checked for newly offered keys.
-    pub registry_key_checks: SyncMutex<BTreeMap<String, Instant>>,
     pub installing_s9pks: SyncMutex<BTreeMap<PackageId, S9pk<DynFileSource>>>,
     pub metrics_cache: Watch<Option<crate::system::Metrics>>,
     pub shutdown: broadcast::Sender<Option<Shutdown>>,
@@ -442,7 +440,6 @@ impl RpcContext {
             },
             services,
             cancellable_installs: SyncMutex::new(BTreeMap::new()),
-            registry_key_checks: SyncMutex::new(BTreeMap::new()),
             installing_s9pks: SyncMutex::new(BTreeMap::new()),
             metrics_cache,
             rpc_continuations: RpcContinuations::new(),
@@ -473,7 +470,7 @@ impl RpcContext {
         crate::version::post_init(&res, run_migrations).await?;
         let weak = Arc::downgrade(&seed);
         let db = res.db.clone();
-        res.add_cron(crate::update::security::watch_updates(db, move || {
+        res.add_cron(crate::registry::sync::watch_registries(db, move || {
             weak.upgrade().map(Self)
         }));
         tracing::info!("{}", t!("context.rpc.completed-migrations"));
@@ -783,7 +780,9 @@ mod tests {
         let mut socket = tokio::time::timeout(
             Duration::from_secs(5),
             client.websocket(
-                "ws://registry.invalid:5959/os/security".parse().unwrap(),
+                "ws://registry.invalid:5959/ws/rpc/test-continuation"
+                    .parse()
+                    .unwrap(),
                 WebSocketConfig::default().read_buffer_size(4096),
             ),
         )

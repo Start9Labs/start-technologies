@@ -4727,13 +4727,6 @@ help.arg.registry-name:
   fr_FR: "Nom du registre"
   pl_PL: "Nazwa rejestru"
 
-help.arg.registry-security-notifications:
-  en_US: "Enable OS security-update announcements from this registry"
-  de_DE: "Ankündigungen von OS-Sicherheitsupdates dieser Registry aktivieren"
-  es_ES: "Activar los avisos de actualizaciones de seguridad del SO de este registro"
-  fr_FR: "Activer les annonces de mises à jour de sécurité du système provenant de ce registre"
-  pl_PL: "Włącz powiadomienia o aktualizacjach bezpieczeństwa systemu z tego rejestru"
-
 help.arg.registry-startwrt:
   en_US: "Serve StartWRT clients"
   de_DE: "StartWRT-Clients bedienen"

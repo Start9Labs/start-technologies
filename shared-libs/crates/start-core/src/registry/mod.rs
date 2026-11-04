@@ -33,6 +33,7 @@ mod migrations;
 pub mod os;
 pub mod package;
 pub mod signer;
+pub mod sync;
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel)]
 #[serde(rename_all = "camelCase")]
@@ -117,15 +118,6 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
     use axum::extract as x;
     use axum::routing::{any, get};
     Router::new()
-        .route(
-            "/os/security",
-            get({
-                let db = ctx.security_feed.as_ref().map(|feed| feed.db.clone());
-                move |ws: axum::extract::ws::WebSocketUpgrade| async move {
-                    os::security::upgrade(ws, db.clone())
-                }
-            }),
-        )
         .route("/rpc/{*path}", {
             let ctx = ctx.clone();
             any(
@@ -156,7 +148,7 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
                             bad_request()
                         }
                         Some(guid) => match ctx.rpc_continuations.get_ws_handler(&guid).await {
-                            Some(cont) => ws.on_upgrade(cont),
+                            Some(cont) => cont.on_upgrade(ws),
                             _ => not_found(),
                         },
                     }

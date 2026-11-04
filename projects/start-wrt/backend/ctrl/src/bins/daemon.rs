@@ -63,7 +63,6 @@ fn ndjson_error(message: &str) -> Response<Body> {
         .unwrap()
 }
 
-/// GET /ws/rpc/{guid} — WebSocket continuation handler (e.g., update progress).
 async fn ws_continuation_handler(
     axum::extract::Path(guid): axum::extract::Path<String>,
     ws: axum::extract::ws::WebSocketUpgrade,
@@ -77,7 +76,7 @@ async fn ws_continuation_handler(
         None => None,
     };
     match handler {
-        Some(handler) => ws.on_upgrade(handler),
+        Some(handler) => handler.on_upgrade(ws),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }

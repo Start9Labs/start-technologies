@@ -1,11 +1,13 @@
 import { inject, Injectable } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { T, Version } from '@start9labs/start-core'
+import { sameUrl } from '@start9labs/shared'
+import { Version } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
   BehaviorSubject,
   combineLatest,
   distinctUntilChanged,
+  filter,
   firstValueFrom,
   map,
   shareReplay,
@@ -21,23 +23,37 @@ export class OSService {
   private readonly api = inject(ApiService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
 
-  private readonly catalog$ = new BehaviorSubject<{
-    versions: T.OsVersionInfoMap
-    gitHash: string | null
-  }>({ versions: {}, gitHash: null })
+  private readonly catalog$ = combineLatest([
+    this.patch.watch$('osUpdateCache'),
+    this.patch.watch$('ui', 'startosRegistry'),
+  ]).pipe(
+    map(([cache, registry]) =>
+      cache && sameUrl(cache.registry, registry) ? cache : null,
+    ),
+    distinctUntilChanged(),
+    shareReplay({ bufferSize: 1, refCount: true }),
+  )
+
+  private readonly gitHash$ = new BehaviorSubject<string | null>(null)
+
+  readonly connected$ = this.catalog$.pipe(
+    map(cache => cache?.connected ?? null),
+  )
 
   readonly updateCandidates$ = combineLatest([
     this.catalog$,
+    this.gitHash$,
     this.patch.watch$('serverInfo', 'version'),
   ]).pipe(
-    map(([{ versions, gitHash }, installed]) => {
+    map(([cache, gitHash, installed]) => {
       const current = Version.parse(installed)
-      return Object.entries(versions)
+      return Object.entries(cache?.versions ?? {})
         .filter(([version, info]) => {
           const comparison = Version.parse(version).compare(current)
           return (
             comparison === 'greater' ||
             (comparison === 'equal' &&
+              !!gitHash &&
               !!info.gitHash &&
               info.gitHash !== gitHash)
           )
@@ -95,16 +111,11 @@ export class OSService {
   }
 
   async loadOS(): Promise<void> {
-    const { id } = await getServerInfo(this.patch)
-    const { startosRegistry } = await firstValueFrom(this.patch.watch$('ui'))
-
-    const [versions, gitHash] = await Promise.all([
-      this.api.rpc.registry.os.version.get({
-        registry: startosRegistry,
-        serverId: id,
-      }),
-      this.api.rpc.gitInfo({}),
-    ])
-    this.catalog$.next({ versions, gitHash: gitHash.trim() })
+    const gitHash = await this.api.rpc.gitInfo({})
+    this.gitHash$.next(gitHash.trim())
+    const cache = await firstValueFrom(
+      this.catalog$.pipe(filter(cache => !!cache)),
+    )
+    if (!cache.connected) throw new Error('registry unavailable')
   }
 }
