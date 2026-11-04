@@ -4,7 +4,7 @@
 .SH NAME
 start\-registry\-admin\-signer\-edit \- Edit signer information
 .SH SYNOPSIS
-\fBstart\-registry admin signer edit\fR [\fB\-n\fR|\fB\-\-set\-name\fR] [\fB\-c\fR|\fB\-\-add\-contact\fR] [\fB\-k\fR|\fB\-\-add\-key\fR] [\fB\-C\fR|\fB\-\-remove\-contact\fR] [\fB\-K\fR|\fB\-\-remove\-key\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIID\fR> 
+\fBstart\-registry admin signer edit\fR [\fB\-n\fR|\fB\-\-set\-name\fR] [\fB\-c\fR|\fB\-\-add\-contact\fR] [\fB\-k\fR|\fB\-\-add\-key\fR] [\fB\-C\fR|\fB\-\-remove\-contact\fR] [\fB\-K\fR|\fB\-\-remove\-key\fR] [\fB\-\-remove\-gpg\-export\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIID\fR> 
 .SH DESCRIPTION
 Edit signer information
 .SH OPTIONS
@@ -23,6 +23,9 @@ Remove contact from signer
 .TP
 \fB\-K\fR, \fB\-\-remove\-key\fR \fI<REMOVE_KEY>\fR
 Remove public key from signer
+.TP
+\fB\-\-remove\-gpg\-export\fR \fI<PRIMARY_FINGERPRINT>\fR
+Remove whole GPG exports by primary\-key fingerprint, preserving signing keys
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

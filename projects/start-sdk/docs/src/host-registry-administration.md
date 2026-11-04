@@ -31,6 +31,8 @@ As an administrator, list your registered signers and use the [trust-signer sele
 
 For GPG identities and fingerprints, register the armored public-key export with `admin signer add --key` or reimport it with `admin signer edit --add-key`. A record containing only a DER public key needs the complete GPG export to supply those details.
 
+Remove a retained GPG export with `start-cli registry admin signer edit <SIGNER_ID> --remove-gpg-export <PRIMARY_FINGERPRINT>`. Find primary-key fingerprints under `gpgExports[].fingerprints` in `admin signer list --format json`. Matching is case-insensitive and removes each whole export containing that fingerprint, including exports containing multiple certificates. Repeat the flag to select more fingerprints. The signer's signing keys and publishing permissions remain unchanged; use `--remove-key` to revoke a signing key.
+
 When users connect the registry, StartOS trusts offered keys it does not already have for packages; existing keys keep their trust. Newly discovered keys are imported untrusted when StartOS next fetches packages or OS updates from the registry, with notifications for users to review. Dropping an offered key does not revoke users' trust. Choosing the registry for StartOS updates separately trusts its offered keys for that purpose. See [Keys From Registries](/start-os/trusted-keys.html#keys-from-registries) for the client behavior and trust controls.
 
 ## Packages
