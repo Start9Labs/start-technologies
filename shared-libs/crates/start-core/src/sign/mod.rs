@@ -29,7 +29,7 @@ pub fn canonicalize_verifying_keys<T>(
 }
 
 /// Protocol tag prefixed to pure-Ed25519 commitment signing messages.
-const COMMITMENT_SIG_TAG: &[u8] = b"Start-Commitment-Sig v1\0";
+pub(crate) const COMMITMENT_SIG_TAG: &[u8] = b"Start-Commitment-Sig v1\0";
 
 /// The tag, the context prefixed with its length as one byte, the commitment type, then the
 /// commitment.

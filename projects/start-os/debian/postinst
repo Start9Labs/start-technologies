@@ -190,7 +190,6 @@ set_config /etc/systemd/journald.conf Compress yes
 set_config /etc/systemd/journald.conf SystemMaxUse 1G
 set_config /etc/systemd/journald.conf ForwardToSyslog no
 set_config /etc/lvm/lvm.conf issue_discards 1
-set_config /etc/containers/registries.conf unqualified-search-registries '["docker.io"]'
 sed -i 's/\(#\|\^\)\s*\([^=]\+\)=\(suspend\|hibernate\)\s*$/\2=ignore/g' /etc/systemd/logind.conf
 cp /usr/lib/startos/resolved.conf /etc/systemd/resolved.conf
 set_config /etc/default/lxc-net LXC_DHCP_CONFILE /etc/dnsmasq.conf

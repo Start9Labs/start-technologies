@@ -1,5 +1,11 @@
 _version: 2
 
+about.sign-s9pk:
+  en_US: "Add a supplemental package signature using the identity key"
+  de_DE: "Eine zusätzliche Paketsignatur mit dem Identitätsschlüssel hinzufügen"
+  es_ES: "Añadir una firma adicional al paquete con la clave de identidad"
+  fr_FR: "Ajouter une signature supplémentaire au paquet avec la clé d’identité"
+  pl_PL: "Dodaj dodatkowy podpis pakietu kluczem tożsamości"
 acme.invalid-contact:
   en_US: "Invalid ACME contact %{contact}: must be a 'mailto:' URI containing an email address (e.g. 'mailto:you@example.com')"
   de_DE: "Ungültiger ACME-Kontakt %{contact}: Muss eine „mailto:“-URI mit einer E-Mail-Adresse sein (z. B. „mailto:du@example.com“)"
@@ -310,7 +316,66 @@ s9pk.pack.image-unavailable:
   fr_FR: "L'image %{image} n'est pas disponible pour %{requested}"
   pl_PL: "Obraz %{image} nie jest dostępny dla %{requested}"
 
-# setup.rs
+s9pk.source.invalid-range:
+  en_US: "Archive range overflows or exceeds the source length"
+  de_DE: "Archivbereich läuft über oder überschreitet die Quelllänge"
+  es_ES: "El rango del archivo se desborda o supera la longitud del origen"
+  fr_FR: "La plage de l’archive déborde ou dépasse la taille de la source"
+  pl_PL: "Zakres archiwum przepełnia się lub przekracza długość źródła"
+s9pk.trailer.discarded:
+  en_US: "Archive rewrite discarded supplemental metadata; sign the resulting package again"
+  de_DE: "Beim Neuschreiben des Archivs wurden zusätzliche Metadaten verworfen; signieren Sie das entstandene Paket erneut"
+  es_ES: "La reescritura del archivo descartó los metadatos adicionales; vuelva a firmar el paquete resultante"
+  fr_FR: "La réécriture de l’archive a supprimé les métadonnées supplémentaires ; signez à nouveau le paquet obtenu"
+  pl_PL: "Przepisanie archiwum usunęło dodatkowe metadane; podpisz ponownie wynikowy pakiet"
+s9pk.trailer.edit-refused:
+  en_US: "Refusing to edit malformed or unsupported supplemental metadata"
+  de_DE: "Fehlerhafte oder nicht unterstützte zusätzliche Metadaten können nicht bearbeitet werden"
+  es_ES: "No se pueden editar metadatos adicionales incorrectos o no compatibles"
+  fr_FR: "Impossible de modifier des métadonnées supplémentaires malformées ou non prises en charge"
+  pl_PL: "Odmowa edycji uszkodzonych lub nieobsługiwanych dodatkowych metadanych"
+s9pk.trailer.invalid-framing:
+  en_US: "Ignoring malformed or overlapping supplemental trailer"
+  de_DE: "Fehlerhafter oder überlappender Zusatzanhang wird ignoriert"
+  es_ES: "Se ignora el bloque adicional incorrecto o solapado"
+  fr_FR: "Bloc supplémentaire malformé ou chevauchant ignoré"
+  pl_PL: "Pomijanie uszkodzonego lub nakładającego się dodatkowego bloku"
+s9pk.trailer.invalid-record:
+  en_US: "Ignoring malformed supplemental signature record"
+  de_DE: "Fehlerhafter zusätzlicher Signaturdatensatz wird ignoriert"
+  es_ES: "Se ignora el registro de firma adicional incorrecto"
+  fr_FR: "Enregistrement de signature supplémentaire malformé ignoré"
+  pl_PL: "Pomijanie uszkodzonego rekordu dodatkowego podpisu"
+s9pk.trailer.invalid-signature:
+  en_US: "Ignoring invalid or unsupported supplemental signature"
+  de_DE: "Ungültige oder nicht unterstützte zusätzliche Signatur wird ignoriert"
+  es_ES: "Se ignora la firma adicional inválida o no compatible"
+  fr_FR: "Signature supplémentaire invalide ou non prise en charge ignorée"
+  pl_PL: "Pomijanie nieprawidłowego lub nieobsługiwanego dodatkowego podpisu"
+s9pk.trailer.read-failed:
+  en_US: "Unable to read optional supplemental metadata"
+  de_DE: "Optionale zusätzliche Metadaten konnten nicht gelesen werden"
+  es_ES: "No se pudieron leer los metadatos adicionales opcionales"
+  fr_FR: "Impossible de lire les métadonnées supplémentaires facultatives"
+  pl_PL: "Nie można odczytać opcjonalnych dodatkowych metadanych"
+s9pk.trailer.too-large:
+  en_US: "Supplemental metadata exceeds the 1 MiB limit"
+  de_DE: "Zusätzliche Metadaten überschreiten die Grenze von 1 MiB"
+  es_ES: "Los metadatos adicionales superan el límite de 1 MiB"
+  fr_FR: "Les métadonnées supplémentaires dépassent la limite de 1 Mio"
+  pl_PL: "Dodatkowe metadane przekraczają limit 1 MiB"
+s9pk.trailer.unknown-size:
+  en_US: "Supplemental signatures cannot be discovered without a known source length"
+  de_DE: "Zusätzliche Signaturen können ohne bekannte Quelllänge nicht gefunden werden"
+  es_ES: "No se pueden descubrir firmas adicionales sin conocer la longitud del origen"
+  fr_FR: "Impossible de découvrir les signatures supplémentaires sans connaître la taille de la source"
+  pl_PL: "Nie można wykryć dodatkowych podpisów bez znanej długości źródła"
+s9pk.trailer.unsupported-version:
+  en_US: "Ignoring unsupported supplemental trailer version"
+  de_DE: "Nicht unterstützte Version des Zusatzanhangs wird ignoriert"
+  es_ES: "Se ignora la versión no compatible del bloque adicional"
+  fr_FR: "Version non prise en charge du bloc supplémentaire ignorée"
+  pl_PL: "Pomijanie nieobsługiwanej wersji dodatkowego bloku"
 setup.opening-data-drive:
   en_US: "Opening data drive"
   de_DE: "Datenlaufwerk wird geöffnet"
@@ -4676,6 +4741,13 @@ help.arg.registry-startwrt:
   fr_FR: "Servir les clients StartWRT"
   pl_PL: "Obsługuj klientów StartWRT"
 
+help.arg.registry-trust-signers:
+  en_US: "Existing signer IDs to propose for package trust"
+  de_DE: "IDs vorhandener Signierer, die für Paketvertrauen vorgeschlagen werden"
+  es_ES: "Identificadores de firmantes existentes propuestos para confiar en paquetes"
+  fr_FR: "Identifiants des signataires existants à proposer pour la confiance des paquets"
+  pl_PL: "Identyfikatory istniejących podpisujących proponowanych do zaufania pakietom"
+
 help.arg.registry-url:
   en_US: "URL of the registry"
   de_DE: "URL des Registrys"
@@ -4689,6 +4761,13 @@ help.arg.remove-signer-contact:
   es_ES: "Eliminar contacto del firmante"
   fr_FR: "Supprimer le contact du signataire"
   pl_PL: "Usuń kontakt z sygnatariusza"
+
+help.arg.remove-signer-gpg-export:
+  en_US: "Remove whole GPG exports by primary-key fingerprint, preserving signing keys"
+  de_DE: "Vollständige GPG-Exporte anhand des Fingerabdrucks des Primärschlüssels entfernen; Signaturschlüssel bleiben erhalten"
+  es_ES: "Eliminar exportaciones GPG completas por la huella de la clave primaria, conservando las claves de firma"
+  fr_FR: "Supprimer les exports GPG complets par empreinte de clé primaire, en conservant les clés de signature"
+  pl_PL: "Usuń całe eksporty GPG według odcisku klucza głównego, zachowując klucze podpisujące"
 
 help.arg.remove-signer-key:
   en_US: "Remove public key from signer"
@@ -7411,6 +7490,13 @@ about.set-registry-name:
   fr_FR: "Définir le nom du registre"
   pl_PL: "Ustaw nazwę rejestru"
 
+about.set-registry-trust-signers:
+  en_US: "Select the signers proposed for package trust; no signers clears the selection"
+  de_DE: "Signierer für Paketvertrauen auswählen; ohne Signierer wird die Auswahl gelöscht"
+  es_ES: "Seleccionar los firmantes propuestos para confiar en paquetes; sin firmantes se borra la selección"
+  fr_FR: "Sélectionner les signataires proposés pour la confiance des paquets ; sans signataires, effacer la sélection"
+  pl_PL: "Wybierz podpisujących proponowanych do zaufania pakietom; brak podpisujących czyści wybór"
+
 about.set-smtp:
   en_US: "Set SMTP configuration"
   de_DE: "SMTP-Konfiguration festlegen"
@@ -7810,6 +7896,41 @@ trusted-keys.invalid:
   fr_FR: "Saisissez un nom et au moins une clé publique Ed25519"
   pl_PL: "Podaj nazwę i co najmniej jeden klucz publiczny Ed25519"
 
+trusted-keys.invalid-registry-url:
+  en_US: "Enter an HTTP or HTTPS registry URL without credentials, query, or fragment"
+  de_DE: "Geben Sie eine HTTP- oder HTTPS-Registry-URL ohne Zugangsdaten, Abfrage oder Fragment ein"
+  es_ES: "Introduzca una URL de registro HTTP o HTTPS sin credenciales, consulta ni fragmento"
+  fr_FR: "Saisissez une URL de registre HTTP ou HTTPS sans identifiants, requête ni fragment"
+  pl_PL: "Podaj adres HTTP lub HTTPS rejestru bez danych logowania, zapytania i fragmentu"
+
+trusted-keys.key-added-message:
+  en_US: "%{registry} added the signing key \"%{name}\". It is not trusted until you trust it."
+  de_DE: "%{registry} hat den Signaturschlüssel „%{name}“ hinzugefügt. Er ist nicht vertrauenswürdig, bis Sie ihm vertrauen."
+  es_ES: "%{registry} añadió la clave de firma «%{name}». No es de confianza hasta que usted confíe en ella."
+  fr_FR: "%{registry} a ajouté la clé de signature « %{name} ». Elle n'est pas approuvée tant que vous ne l'approuvez pas."
+  pl_PL: "%{registry} dodał klucz podpisujący „%{name}”. Nie jest zaufany, dopóki mu nie zaufasz."
+
+trusted-keys.key-added-title:
+  en_US: "New signing key"
+  de_DE: "Neuer Signaturschlüssel"
+  es_ES: "Nueva clave de firma"
+  fr_FR: "Nouvelle clé de signature"
+  pl_PL: "Nowy klucz podpisujący"
+
+trusted-keys.key-dropped-message:
+  en_US: "%{registry} no longer offers the signing key \"%{name}\". Its trust is unchanged."
+  de_DE: "%{registry} bietet den Signaturschlüssel „%{name}“ nicht mehr an. Sein Vertrauensstatus bleibt unverändert."
+  es_ES: "%{registry} ya no ofrece la clave de firma «%{name}». Su confianza no cambia."
+  fr_FR: "%{registry} ne propose plus la clé de signature « %{name} ». Son approbation est inchangée."
+  pl_PL: "%{registry} nie oferuje już klucza podpisującego „%{name}”. Jego zaufanie pozostaje bez zmian."
+
+trusted-keys.key-dropped-title:
+  en_US: "Signing key no longer offered"
+  de_DE: "Signaturschlüssel nicht mehr angeboten"
+  es_ES: "Clave de firma que ya no se ofrece"
+  fr_FR: "Clé de signature plus proposée"
+  pl_PL: "Klucz podpisujący nie jest już oferowany"
+
 trusted-keys.not-found:
   en_US: "Trusted keyring not found"
   de_DE: "Vertrauenswürdiger Schlüsselbund nicht gefunden"
@@ -7817,12 +7938,33 @@ trusted-keys.not-found:
   fr_FR: "Trousseau de confiance introuvable"
   pl_PL: "Nie znaleziono zaufanego pęku kluczy"
 
+trusted-keys.os-key-required:
+  en_US: "At least one key must stay trusted for StartOS updates"
+  de_DE: "Mindestens ein Schlüssel muss für StartOS-Updates vertrauenswürdig bleiben"
+  es_ES: "Al menos una clave debe seguir siendo de confianza para las actualizaciones de StartOS"
+  fr_FR: "Au moins une clé doit rester approuvée pour les mises à jour de StartOS"
+  pl_PL: "Co najmniej jeden klucz musi pozostać zaufany dla aktualizacji StartOS"
+
+trusted-keys.os-registry-in-use:
+  en_US: "This registry provides StartOS updates. Choose another registry for StartOS updates before removing it."
+  de_DE: "Diese Registry stellt StartOS-Updates bereit. Wählen Sie eine andere Registry für StartOS-Updates, bevor Sie sie entfernen."
+  es_ES: "Este registro proporciona las actualizaciones de StartOS. Elija otro registro para las actualizaciones de StartOS antes de eliminarlo."
+  fr_FR: "Ce registre fournit les mises à jour de StartOS. Choisissez un autre registre pour les mises à jour de StartOS avant de le supprimer."
+  pl_PL: "Ten rejestr dostarcza aktualizacje StartOS. Przed jego usunięciem wybierz inny rejestr dla aktualizacji StartOS."
+
 trusted-keys.protected:
-  en_US: "Built-in keyrings cannot be deleted; disable their trust instead"
-  de_DE: "Integrierte Schlüsselbunde können nicht gelöscht werden; deaktivieren Sie stattdessen deren Vertrauen"
-  es_ES: "Los llaveros integrados no se pueden eliminar; desactive su confianza"
-  fr_FR: "Les trousseaux intégrés ne peuvent pas être supprimés ; désactivez plutôt leur confiance"
-  pl_PL: "Nie można usunąć wbudowanych pęków kluczy; zamiast tego wyłącz zaufanie do nich"
+  en_US: "Keys offered by connected registries cannot be removed; distrust them instead"
+  de_DE: "Von verbundenen Registrys angebotene Schlüssel können nicht entfernt werden; entziehen Sie ihnen stattdessen das Vertrauen"
+  es_ES: "Las claves ofrecidas por registros conectados no se pueden eliminar; retíreles la confianza"
+  fr_FR: "Les clés proposées par des registres connectés ne peuvent pas être supprimées ; retirez-leur plutôt votre confiance"
+  pl_PL: "Kluczy oferowanych przez połączone rejestry nie można usunąć; zamiast tego cofnij zaufanie do nich"
+
+trusted-keys.registry-not-connected:
+  en_US: "Add this registry before using it for StartOS updates"
+  de_DE: "Fügen Sie diese Registry hinzu, bevor Sie sie für StartOS-Updates verwenden"
+  es_ES: "Añada este registro antes de usarlo para las actualizaciones de StartOS"
+  fr_FR: "Ajoutez ce registre avant de l’utiliser pour les mises à jour de StartOS"
+  pl_PL: "Dodaj ten rejestr, zanim użyjesz go dla aktualizacji StartOS"
 
 version.http-auth-downgrade-requires-tls:
   en_US: "Cannot downgrade: an HTTP authentication policy has no TLS wrapper. Add TLS to this binding before downgrading."

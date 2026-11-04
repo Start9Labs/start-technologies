@@ -1,0 +1,2 @@
+- Le certificat de l’interface web couvre le nom ou l’adresse utilisés pour l’ouvrir : `router.lan`, `router.local`, la passerelle de chaque profil, l’adresse WAN et le nom DDNS. Les appareils faisant confiance à l’autorité racine ne reçoivent plus d’avertissement de nom sur ces adresses.
+- `router.lan` renvoie la passerelle IPv4 du profil à l’origine de la requête plutôt que celles de tous les profils.

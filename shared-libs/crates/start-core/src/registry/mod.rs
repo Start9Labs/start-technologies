@@ -66,6 +66,8 @@ pub struct FullIndex {
     pub package: PackageIndex,
     pub os: OsIndex,
     pub signers: BTreeMap<Guid, SignerInfo>,
+    #[serde(default)]
+    pub trust_signers: BTreeSet<Guid>,
 }
 
 rpc_toolkit::reflect_ts!(FullIndex);

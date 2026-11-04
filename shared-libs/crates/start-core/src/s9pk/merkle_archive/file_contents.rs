@@ -30,6 +30,7 @@ impl<S: ArchiveSource> FileContents<Section<S>> {
         header.read_exact(&mut position).await?;
         let position = u64::from_be_bytes(position);
 
+        super::source::checked_end(&source, position, size).await?;
         Ok(Self(source.section(position, size)))
     }
 }

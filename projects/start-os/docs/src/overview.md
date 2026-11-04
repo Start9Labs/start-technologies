@@ -6,7 +6,7 @@ StartOS is a Linux distribution built for one purpose: running a personal server
 
 A service is a piece of software, usually an open-source project developed elsewhere (its upstream), wrapped in a package that teaches StartOS how to run it. The package turns the software's configuration files into validated forms and its commands into buttons, declares its health checks and its dependencies on other services, chooses what to back up, and offers every way to reach it.
 
-You install packages from the [Marketplace](marketplace.md), a network of registries. StartOS comes with two: the Start9 Registry, which carries the packages Start9 publishes, and the Community Registry, which carries packages other developers maintain. Anyone can run another registry, and you can also [sideload](sideloading.md) a package from a file.
+You install packages from the [Marketplace](marketplace.md), a network of registries. StartOS comes with two: the Start9 Registry, which carries the packages Start9 publishes, and the Community Registry, which carries packages other developers maintain. Anyone can run another registry, and you can also [sideload](sideloading.md) a package from a file. **System → Registries** manages the registries you browse and which one provides StartOS updates; [Trusted Keys](trusted-keys.md) independently controls which signing keys you accept for packages and StartOS updates. A registry's keys are trusted for packages when you add it; keys it offers later start untrusted, each with a notification that offers to trust it.
 
 Each service runs in its own isolated container. StartOS doesn't use Docker or Podman, so instructions written for them don't apply. A service's package sets its software's configuration, and can reset a setting that was changed by hand inside the container. Where a package gives you a way to change something, use it: instructions for installing and configuring the software elsewhere may not apply on StartOS.
 
@@ -28,7 +28,7 @@ A [gateway](gateways.md) carries your server's traffic. Your home router and a S
 
 ## Backups
 
-StartOS [backs up](backup-create.md) the whole server, or only the services you choose, to a drive plugged into the server or to a shared folder on another computer on your network. Backups are encrypted with your master password. Each new backup to a target updates the one already there. Keep backups on multiple targets to protect against losing a drive or network share; advanced users can also retain [read-only snapshots](backup-create.md#read-only-snapshots) on one target. You can [restore](backup-restore.md) a single service, or the whole server, including onto new hardware.
+StartOS [backs up](backup-create.md) the whole server, or only the services you choose, to a drive plugged into the server or to a shared folder on another computer on your network. Backups are encrypted with your master password; the server's own data drive is not encrypted with it, so anyone holding the server or its drive can read your services' data. Each new backup to a target updates the one already there. Keep backups on multiple targets to protect against losing a drive or network share; advanced users can also retain [read-only snapshots](backup-create.md#read-only-snapshots) on one target. You can [restore](backup-restore.md) a single service, or the whole server, including onto new hardware.
 
 ## The command line
 
