@@ -32,6 +32,7 @@ struct TestContext {
     started: Arc<Notify>,
     release: Arc<Notify>,
     saved: Arc<Mutex<Option<RpcStream>>>,
+    producer: Arc<Mutex<Option<tokio::sync::mpsc::Sender<Result<Revision, RpcError>>>>>,
     echo_calls: Arc<AtomicUsize>,
     deny: Arc<AtomicBool>,
     http_calls: Arc<AtomicUsize>,
@@ -50,7 +51,7 @@ struct WatchParams {
 struct Dump {
     snapshot: u64,
 }
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct Revision {
     patch: u64,
 }
@@ -125,6 +126,36 @@ async fn source_error(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dum
     Ok(Dump {
         snapshot: args.params.value,
     })
+}
+
+async fn push(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+    let sender = args.rpc_stream.unwrap().channel::<Revision>(1)?;
+    sender
+        .try_send(Ok(Revision {
+            patch: args.params.value + 1,
+        }))
+        .unwrap();
+    *args.context.producer.lock().unwrap() = Some(sender);
+    Ok(Dump {
+        snapshot: args.params.value,
+    })
+}
+
+async fn push_fail(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+    push(args).await?;
+    Err(RpcError {
+        code: 123,
+        message: "subscription failed".into(),
+        data: None,
+    })
+}
+
+async fn push_blocked(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+    let context = args.context.clone();
+    let dump = push(args).await?;
+    context.started.notify_one();
+    context.release.notified().await;
+    Ok(dump)
 }
 
 async fn blocked(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
@@ -223,6 +254,9 @@ fn tree() -> ParentHandler<TestContext> {
         .subcommand("fail", from_fn_async(fail).no_cli().no_ts())
         .subcommand("finite", from_fn_async(finite).no_cli().no_ts())
         .subcommand("source-error", from_fn_async(source_error).no_cli().no_ts())
+        .subcommand("push", from_fn_async(push).no_cli().no_ts())
+        .subcommand("push-fail", from_fn_async(push_fail).no_cli().no_ts())
+        .subcommand("push-blocked", from_fn_async(push_blocked).no_cli().no_ts())
         .subcommand("blocked", from_fn_async(blocked).no_cli().no_ts())
         .subcommand("remember", from_fn_async(remember).no_cli().no_ts())
         .subcommand(
@@ -314,6 +348,116 @@ async fn initiating_result_precedes_separately_typed_stream_items_on_the_same_id
         receive(&mut socket).await,
         wire!({"jsonrpc":"2.0","id":"other","result":{"answer":7}})
     );
+}
+
+#[tokio::test]
+async fn async_and_thread_producers_share_reply_ordering_and_finish_on_sender_drop() {
+    let (mut socket, context, _server) = connect(WebSocketOptions::default()).await;
+    send(&mut socket, request(wire!(42), "push", 100)).await;
+    assert_eq!(
+        receive(&mut socket).await,
+        wire!({"jsonrpc":"2.0","id":42,"result":{"snapshot":100}})
+    );
+    assert_eq!(
+        receive(&mut socket).await,
+        wire!({"rpcstream":"1.0","id":42,"result":{"patch":101},"end":false})
+    );
+    let sender = context.producer.lock().unwrap().take().unwrap();
+    sender.send(Ok(Revision { patch: 102 })).await.unwrap();
+    assert_eq!(receive(&mut socket).await["result"], wire!({"patch":102}));
+    let producer = std::thread::spawn(move || {
+        sender.blocking_send(Ok(Revision { patch: 103 })).unwrap();
+    });
+    assert_eq!(receive(&mut socket).await["result"], wire!({"patch":103}));
+    producer.join().unwrap();
+    assert_eq!(
+        receive(&mut socket).await,
+        wire!({"rpcstream":"1.0","id":42,"result":null,"end":true})
+    );
+}
+
+#[tokio::test]
+async fn pushed_error_terminates_the_stream_and_closes_the_producer() {
+    let (mut socket, context, _server) = connect(WebSocketOptions::default()).await;
+    send(&mut socket, request(wire!(42), "push", 100)).await;
+    receive(&mut socket).await;
+    receive(&mut socket).await;
+    let sender = context.producer.lock().unwrap().take().unwrap();
+    sender
+        .send(Err(RpcError {
+            code: 456,
+            message: "producer failed".into(),
+            data: None,
+        }))
+        .await
+        .unwrap();
+    assert_eq!(
+        receive(&mut socket).await,
+        wire!({"rpcstream":"1.0","id":42,"error":{"code":456,"message":"producer failed"},"end":true})
+    );
+    tokio::time::timeout(Duration::from_secs(3), sender.closed())
+        .await
+        .unwrap();
+    assert!(sender.send(Ok(Revision { patch: 999 })).await.is_err());
+}
+
+#[tokio::test]
+async fn initiating_failure_closes_the_push_producer_without_sending_queued_events() {
+    let (mut socket, context, _server) = connect(WebSocketOptions::default()).await;
+    send(&mut socket, request(wire!(42), "push-fail", 100)).await;
+    assert_eq!(receive(&mut socket).await["error"]["code"], 123);
+    let sender = context.producer.lock().unwrap().take().unwrap();
+    tokio::time::timeout(Duration::from_secs(3), sender.closed())
+        .await
+        .unwrap();
+    send(
+        &mut socket,
+        wire!({"jsonrpc":"2.0","id":43,"method":"echo"}),
+    )
+    .await;
+    assert_eq!(receive(&mut socket).await["id"], 43);
+}
+
+#[tokio::test]
+async fn client_close_and_disconnect_notify_push_producers() {
+    let (mut socket, context, _server) = connect(WebSocketOptions::default()).await;
+    send(&mut socket, request(wire!(42), "push", 100)).await;
+    receive(&mut socket).await;
+    receive(&mut socket).await;
+    let sender = context.producer.lock().unwrap().take().unwrap();
+    send(&mut socket, wire!({"rpcstream":"1.0","close":42})).await;
+    assert_eq!(receive(&mut socket).await["end"], true);
+    tokio::time::timeout(Duration::from_secs(3), sender.closed())
+        .await
+        .unwrap();
+    send(&mut socket, request(wire!(43), "push", 200)).await;
+    assert_eq!(
+        receive(&mut socket).await["result"],
+        wire!({"snapshot":200})
+    );
+    receive(&mut socket).await;
+    let sender = context.producer.lock().unwrap().take().unwrap();
+    drop(socket);
+    tokio::time::timeout(Duration::from_secs(3), sender.closed())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn cancelling_pending_initialization_unblocks_a_backpressured_push_producer() {
+    let (mut socket, context, _server) = connect(WebSocketOptions::default()).await;
+    send(&mut socket, request(wire!(42), "push-blocked", 100)).await;
+    context.started.notified().await;
+    let sender = context.producer.lock().unwrap().take().unwrap();
+    let pending = sender.send(Ok(Revision { patch: 102 }));
+    futures::pin_mut!(pending);
+    assert!(futures::poll!(pending.as_mut()).is_pending());
+    send(&mut socket, wire!({"rpcstream":"1.0","close":42})).await;
+    assert_eq!(receive(&mut socket).await["error"]["code"], -32800);
+    assert!(tokio::time::timeout(Duration::from_secs(3), pending)
+        .await
+        .unwrap()
+        .is_err());
 }
 
 #[tokio::test]

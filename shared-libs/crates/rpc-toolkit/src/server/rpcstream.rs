@@ -5,7 +5,8 @@ use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use imbl_value::Value;
 use serde::Serialize;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
+use tokio_stream::wrappers::ReceiverStream;
 #[cfg(feature = "websocket")]
 use yajrc::Id;
 use yajrc::RpcError;
@@ -37,7 +38,7 @@ impl fmt::Debug for RpcStream {
 
 impl RpcStream {
     #[cfg(feature = "websocket")]
-    pub(crate) fn channel() -> (Self, oneshot::Receiver<RpcValueStream>) {
+    pub(crate) fn registration() -> (Self, oneshot::Receiver<RpcValueStream>) {
         let (sender, receiver) = oneshot::channel();
         (
             Self {
@@ -45,6 +46,29 @@ impl RpcStream {
             },
             receiver,
         )
+    }
+
+    /// Attaches a bounded event channel and returns its producer.
+    ///
+    /// Send `Ok(item)` for an event or `Err(error)` to terminate the stream.
+    /// Dropping every sender ends the stream after queued items are delivered.
+    /// Cancellation, initial failure, or disconnection closes the receiver;
+    /// producers can await `Sender::closed` or observe a send error.
+    ///
+    /// Async tasks use `Sender::send`; ordinary threads use `Sender::blocking_send`.
+    /// The transport does not drain the channel before the initiating reply, so
+    /// filling it from the initiating handler can prevent that reply completing.
+    ///
+    /// # Panics
+    ///
+    /// Panics if capacity is zero or exceeds Tokio's semaphore limit.
+    pub fn channel<T>(&self, capacity: usize) -> Result<mpsc::Sender<Result<T, RpcError>>, RpcError>
+    where
+        T: Serialize + Send + 'static,
+    {
+        let (sender, receiver) = mpsc::channel(capacity);
+        self.attach(ReceiverStream::new(receiver))?;
+        Ok(sender)
     }
 
     /// Attaches one typed source; a source error terminates its response stream.
@@ -100,4 +124,41 @@ pub(crate) fn stream_events(
         yield (Ok(Value::Null), true);
     }
     .boxed()
+}
+
+#[cfg(all(test, feature = "websocket"))]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn event_channel_bounds_the_queue_and_notifies_producers_on_drop() {
+        let (registration, receiver) = RpcStream::registration();
+        let sender = registration.channel::<u64>(1).unwrap();
+        sender.try_send(Ok(1)).unwrap();
+        assert!(matches!(
+            sender.try_send(Ok(2)),
+            Err(mpsc::error::TrySendError::Full(_))
+        ));
+        let mut source = receiver.await.unwrap();
+        assert_eq!(source.next().await.unwrap().unwrap(), imbl_value::json!(1));
+        sender.try_send(Ok(2)).unwrap();
+        drop(source);
+        assert!(sender.is_closed());
+        assert!(sender.send(Ok(3)).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn channel_and_stream_registration_share_one_source_slot() {
+        let (registration, receiver) = RpcStream::registration();
+        let sender = registration.channel::<u64>(1).unwrap();
+        assert!(registration.clone().channel::<u64>(1).is_err());
+        assert!(registration
+            .attach(futures::stream::empty::<Result<u64, RpcError>>())
+            .is_err());
+        sender.try_send(Ok(7)).unwrap();
+        let mut source = receiver.await.unwrap();
+        assert_eq!(source.next().await.unwrap().unwrap(), imbl_value::json!(7));
+        drop(sender);
+        assert!(source.next().await.is_none());
+    }
 }

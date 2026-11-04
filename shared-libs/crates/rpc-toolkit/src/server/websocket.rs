@@ -395,7 +395,7 @@ impl<C: Context> Connection<C> {
                 .await;
         }
         let (registration, receiver) = if opted_in {
-            let (registration, receiver) = RpcStream::channel();
+            let (registration, receiver) = RpcStream::registration();
             (Some(registration), Some(receiver))
         } else {
             (None, None)

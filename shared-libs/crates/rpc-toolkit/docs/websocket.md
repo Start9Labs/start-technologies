@@ -43,7 +43,32 @@ Attach the source before the handler returns. Registering twice, or after the
 initiating call has finished, fails. Cloning the capability does not create
 another stream.
 
-The source is not polled until its successful initiating response has been sent.
+### Pushing from a task or thread
+
+`RpcStream::channel::<T>(capacity)` attaches a bounded channel instead and returns
+Tokio's `mpsc::Sender<Result<T, RpcError>>`. Async producers call
+`sender.send(Ok(event)).await`; ordinary threads call
+`sender.blocking_send(Ok(event))`. Cloned senders share the same channel. Sending
+`Err(error)` terminates the stream, and dropping every sender completes it after
+queued events have been delivered. The runnable [example](../examples/websocket.rs)
+exposes `watch` using a direct stream and `watch-push` using a producer thread.
+
+Capacity is explicit and counts items, not bytes; it must be positive and within
+Tokio's bounded-channel limit. A full channel backpressures the producer. The
+transport does not consume queued events until the initiating response is sent:
+awaiting more than the capacity from inside the initiating handler can prevent
+that response completing. Run a producing loop independently from that handler.
+
+Cancellation, initial failure, terminal error, and socket loss drop the receiver.
+A blocked send then fails; producers waiting on other work can select on
+`sender.closed()` to stop promptly. Applications own their producer tasks and
+threads and must act on closure. The helper adds one bounded channel only for
+push producers, reusing `attach` and Tokio's receiver-to-stream adapter; it adds
+no forwarding task or queue to direct-stream sources.
+
+### Shared source lifecycle
+
+The transport polls either source after its successful initiating response is sent.
 For a batch, that means the entire batch response precedes every associated
 stream event. An initiating error drops an attached source and creates no stream.
 An opted-in successful call without an attached source creates an empty stream.
@@ -89,10 +114,11 @@ the string `"1.0"`, including in close messages.
 ## Ownership and limits
 
 One connection task owns all initiating calls and stream sources. Closing or
-losing the socket drops pending handlers, buffered results, and sources; no
-per-stream task survives the connection. Sources are polled directly by the
-connection, without unbounded per-stream forwarding queues. Applications must
-also bound upstream queues, such as database revision subscriptions.
+losing the socket drops pending handlers, buffered results, and sources. The
+transport creates no per-stream task. Sources are polled directly by the
+connection, without unbounded per-stream forwarding queues. Applications own
+push producers and must also bound upstream queues, such as database revision
+subscriptions.
 
 `WebSocketOptions` bounds in-flight calls/buffered initiating responses, active
 streams, inbound message/frame size, and stalled sends. A batch larger than the
