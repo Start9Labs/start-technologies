@@ -19,14 +19,8 @@ Fix every `tsc` and pack error. A pre-existing error is still an error.
 ## 1 · Install
 
 ```bash
-make install
-```
-
-Or pack and install explicitly against a named host:
-
-```bash
-start-cli -H <host> s9pk pack --arch=x86_64 -o <id>_x86_64.s9pk
-start-cli -H <host> package install -s <id>_x86_64.s9pk
+make install                # the default host
+make install HOST=<host>    # a named host
 ```
 
 Then drive it with `start-cli -H <host>` — start, stop, actions, logs, health. Watch the

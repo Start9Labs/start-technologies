@@ -16,8 +16,8 @@ name: Sync a release onto live-docs
 # projects/start-docs/versions.conf rides along with the rest of that tree, but
 # a tag speaks only for its own book's line: scripts/docs-versions.mjs holds
 # other products' lines at what live-docs publishes, and derives the StartOS and
-# StartWRT labels from the tag. The other books' lines are set by hand in master
-# before tagging.
+# StartWRT labels from the tag. The other books' lines, and the archive lines
+# (`book=version@tag`), are set by hand in master before tagging.
 #
 # Two guards protect live-docs: the tagged commit must be an ancestor of master,
 # and nothing moves backwards. A product's own tree is judged against that

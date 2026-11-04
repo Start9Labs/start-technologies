@@ -117,6 +117,10 @@ Each service runs in its own LXC container with:
 
 All backups are encrypted using the user's master password. Backups can be stored on physical drives or network shares (SMB/CIFS). Each service's backup retains the password that was active when the backup was created.
 
+### Physical Access
+
+Physical access to the server is root access. Your master password does not encrypt the data drive, so anyone holding the server or its drive can read every service's data. Data a service encrypts itself is the exception — Vaultwarden, for example, stores entries encrypted under each user's own master password. A service's documentation says what it encrypts.
+
 ### Authentication
 
 The web UI is protected by password authentication, with each device enrolling a signing key at login. The API uses JSON-RPC authenticated by per-request signatures. SSH access is available for advanced users but is not required for normal operation.
