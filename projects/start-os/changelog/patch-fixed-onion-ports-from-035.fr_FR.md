@@ -1,1 +1,0 @@
-- La mise à jour depuis StartOS 0.3.5 conserve à chaque adresse `.onion` les ports qu'elle servait, y compris pour les services dont la migration se termine après celle de Tor. Une interface sans adresse Tor sous 0.3.5 n'en reçoit pas.

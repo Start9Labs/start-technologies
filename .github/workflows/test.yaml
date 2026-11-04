@@ -46,6 +46,8 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODEJS_VERSION }}
+      - name: Check each book's README index against its SUMMARY
+        run: node projects/start-docs/scripts/check-indexes.ts
       - name: Check formatting
         run: npx --yes --package="prettier@$(node -p "require('./package.json').devDependencies.prettier")" -- npm run format:check
 

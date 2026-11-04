@@ -413,6 +413,34 @@ pub struct OsUpdateAvailable {}
 rpc_toolkit::reflect_ts!(OsUpdateAvailable);
 rpc_toolkit::ts_export!(OsUpdateAvailable, namespaces = [""]);
 
+/// A key a connected registry newly offers, imported untrusted.
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
+#[serde(tag = "kind", rename = "registry-key-added", rename_all = "camelCase")]
+#[visit(ts(rename = "RegistryKeyAdded"))]
+pub struct RegistryKeyAdded {
+    pub registry: String,
+    pub key: InternedString,
+}
+
+rpc_toolkit::reflect_ts!(RegistryKeyAdded);
+rpc_toolkit::ts_export!(RegistryKeyAdded, namespaces = [""]);
+
+/// A key a connected registry stopped offering; its trust is unchanged.
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
+#[serde(
+    tag = "kind",
+    rename = "registry-key-dropped",
+    rename_all = "camelCase"
+)]
+#[visit(ts(rename = "RegistryKeyDropped"))]
+pub struct RegistryKeyDropped {
+    pub registry: String,
+    pub key: InternedString,
+}
+
+rpc_toolkit::reflect_ts!(RegistryKeyDropped);
+rpc_toolkit::ts_export!(RegistryKeyDropped, namespaces = [""]);
+
 pub trait NotificationType:
     serde::Serialize + for<'de> serde::Deserialize<'de> + std::fmt::Debug
 {
@@ -430,6 +458,12 @@ impl NotificationType for String {
 }
 impl NotificationType for OsUpdateAvailable {
     const CODE: u32 = 3;
+}
+impl NotificationType for RegistryKeyAdded {
+    const CODE: u32 = 4;
+}
+impl NotificationType for RegistryKeyDropped {
+    const CODE: u32 = 5;
 }
 
 #[instrument(skip(subtype, db))]

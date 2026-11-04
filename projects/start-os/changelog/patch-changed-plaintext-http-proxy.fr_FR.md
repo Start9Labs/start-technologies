@@ -1,1 +1,0 @@
-- Les connexions de services HTTP non chiffrées passent par StartOS lorsque le proxy HTTP est activé. Les applications voient StartOS comme pair TCP ; les adresses IP des clients sont disponibles dans `X-Forwarded-For` lorsque la génération des en-têtes de transfert est activée.

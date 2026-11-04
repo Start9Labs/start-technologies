@@ -1,1 +1,0 @@
-- L'ajout d'un tunnel signale une erreur après 30 secondes si son interface réseau reste indisponible, au lieu d'attendre indéfiniment.

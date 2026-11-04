@@ -1,5 +1,5 @@
 ---
-user-facing: true
+release-notes: true
 ---
 
 - Configure HTTP proxy authentication and forwarded headers under `bindPort`'s `proxy` option, independently of `addSsl`. Proxy authentication applies to both the original and TLS-wrapper legs.

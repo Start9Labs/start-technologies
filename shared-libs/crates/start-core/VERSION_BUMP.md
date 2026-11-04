@@ -99,7 +99,7 @@ A pre-release version instead takes prerelease segments: `exver::Version::new([0
 
 ### 5. Release notes
 
-**`projects/start-os/release-notes/X.Y.Z.N.md`** — optional `## Important` notices, not a release summary. Omit the file when no notice is needed. The shared compiler generates `## Highlights` and, when applicable, `## Security` from visible fragments, with localized section titles; follow the root `AGENTS.md` release rules. Put pre-update instructions in an optional sibling **`X.Y.Z.N.pre-update.md`**, headed `## ⚠️ Before You Update`. `manage-release.sh` prefixes the companion to the compiled notes for GitHub and the registry. The image packages the generated sections and post-update notices without the pre-update companion.
+**`projects/start-os/release-notes/X.Y.Z.N.md`** — optional `## Important` notices, not a release summary. Omit the file when no notice is needed. The shared compiler generates `## Highlights` and, when applicable, `## Security` from fragments explicitly selected with `release-notes: true`, with localized section titles; follow the root `AGENTS.md` release rules. Put pre-update instructions in an optional sibling **`X.Y.Z.N.pre-update.md`**, headed `## ⚠️ Before You Update`. `manage-release.sh` prefixes the companion to the compiled notes for GitHub and the registry. The image packages the generated sections and post-update notices without the pre-update companion.
 
 ### 6. Release-gated docs
 

@@ -1,1 +1,0 @@
-- La tarjeta «Dependencias» de un servicio muestra la versión instalada de cada dependencia. Una dependencia con una versión incompatible abre el Mercado en una versión compatible.

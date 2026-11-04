@@ -1,1 +1,0 @@
-- La suppression d'une passerelle efface aussi les choix d'adresses que les services y avaient faits.

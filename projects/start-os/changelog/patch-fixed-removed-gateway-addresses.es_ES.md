@@ -1,1 +1,0 @@
-- Al eliminar una puerta de enlace también se borran las selecciones de direcciones que los servicios hicieron en ella.
