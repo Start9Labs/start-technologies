@@ -289,7 +289,7 @@ start-cli -H https://my-box.local <command>  # a URL works too
 With no flag, the `default` entry is used. `start-cli` finds this config by walking up from the current directory, so it works anywhere inside the workspace.
 
 > [!NOTE]
-> `make install` and `make publish` resolve their targets through the workspace profiles used by `start-cli`. To override a profile for one command, invoke `start-cli` directly with `-H` or `-r`. See [Makefile](./makefile.md).
+> `make install` and `make publish` resolve their targets through the workspace profiles used by `start-cli`. To choose another device for one install, run `make install HOST=<profile-or-URL>`. For any other command, invoke `start-cli` directly with `-H` or `-r`. See [Makefile](./makefile.md).
 
 ### Keep it current
 

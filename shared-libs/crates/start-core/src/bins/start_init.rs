@@ -147,8 +147,7 @@ async fn setup_or_init(
 
         async {
             disk_phase.start();
-            let guid_string = tokio::fs::read_to_string("/media/startos/config/disk.guid") // unique identifier for volume group - keeps track of the disk that goes with your embassy
-                .await?;
+            let guid_string = tokio::fs::read_to_string("/media/startos/config/disk.guid").await?;
             let disk_guid = InternedString::intern(guid_string.trim());
             let requires_reboot = crate::disk::main::import(
                 &*disk_guid,
@@ -235,7 +234,7 @@ pub async fn main(
                         .is_ok()
                     {
                         Some(InternedString::intern(
-                            tokio::fs::read_to_string("/media/startos/config/disk.guid") // unique identifier for volume group - keeps track of the disk that goes with your embassy
+                            tokio::fs::read_to_string("/media/startos/config/disk.guid")
                                 .await?
                                 .trim(),
                         ))
@@ -244,7 +243,8 @@ pub async fn main(
                     },
                     e,
                     dns,
-                )?;
+                )
+                .await?;
 
                 server.serve_ui_for(ctx.clone());
 

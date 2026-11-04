@@ -18,6 +18,7 @@ use tracing::instrument;
 
 pub mod diagnostic;
 pub mod security;
+pub(crate) mod signer_files;
 pub mod signers;
 
 #[cfg(test)]

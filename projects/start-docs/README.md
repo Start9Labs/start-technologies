@@ -30,7 +30,7 @@ projects/start-docs/
 ├── landing/           ← static landing page served at docs.start9.com/
 ├── bitcoin-guides/    ← the Bitcoin Guides mdBook
 ├── support/           ← the Start9 Support mdBook
-└── scripts/           ← build-time tooling (llms.txt generator)
+└── scripts/           ← build-time tooling (index check, llms.txt generator)
 ```
 
 ## Product context

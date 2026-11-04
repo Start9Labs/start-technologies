@@ -542,7 +542,11 @@ mod tests {
         let account =
             crate::account::AccountInfo::new("password", std::time::SystemTime::now(), None)
                 .unwrap();
-        let key = "MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=";
+        let key = crate::sign::AnyVerifyingKey::Ed25519(
+            ed25519_dalek::SigningKey::from_bytes(&[73; 32]).verifying_key(),
+        )
+        .interned_der64()
+        .to_string();
         for legacy in [
             TrustedOsUpdateSigners::new(),
             from_value(json!({ key: { "label": "Owner-managed" } })).unwrap(),

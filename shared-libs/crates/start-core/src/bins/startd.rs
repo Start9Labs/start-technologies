@@ -215,7 +215,8 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
                             },
                             e,
                             dns.clone(),
-                        )?;
+                        )
+                        .await?;
 
                         server.serve_ui_for(ctx.clone());
 

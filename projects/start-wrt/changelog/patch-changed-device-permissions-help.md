@@ -1,5 +1,5 @@
 ---
-user-facing: true
+release-notes: false
 ---
 
 - **Device permission descriptions moved to the help panel.** The device page shows the permission switches alone; the help panel explains each one.

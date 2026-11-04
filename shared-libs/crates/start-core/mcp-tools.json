@@ -5398,6 +5398,11 @@
             "removeKey": {
               "type": "array",
               "items": { "$ref": "#/$defs/AnyVerifyingKey" }
+            },
+            "removeGpgExport": {
+              "description": "Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.",
+              "type": "array",
+              "items": { "type": "string" }
             }
           },
           "required": [

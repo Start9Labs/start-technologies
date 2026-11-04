@@ -24,7 +24,7 @@ start-technologies/ (monorepo root)
     ├── versions.conf     ← current and archived book entries consumed by build.sh
     ├── theme/            ← shared theme (CSS, JS, favicon); books symlink here
     ├── landing/          ← landing page, archives page and 404 router
-    ├── scripts/          ← build-time tooling (llms.txt generator)
+    ├── scripts/          ← build-time tooling (index check, llms.txt generator)
     ├── bitcoin-guides/   ← Bitcoin Guides book
     │   ├── book.toml
     │   ├── theme -> ../theme
@@ -89,11 +89,12 @@ The copy on `live-docs` determines published entries. Tag sync (`docs-sync-on-ta
 
 `build.sh`:
 
-1. Wipes and recreates the `docs/` output dir and the gitignored `.archive/` source dir
-2. Builds each book in `versions.conf` with `mdbook build` and the matching `SITE_URL`. For an archived version it first fetches the release tag if the checkout lacks it (CI's is shallow), extracts the book and `theme/` from that tag into `.archive/<book>/<version>/` with `git archive`, builds from there, and injects the archive banner into each page
-3. Writes the redirect stubs for each versioned book's unversioned URLs (see Routing)
-4. Writes `docs/index.html` from `landing/index.html` with each product's current version filled in, `docs/archives/index.html` from `landing/archives.html` with a section per product that has archives (StartOS's also links the `0.3.5.x` site), `docs/versions.json`, and `docs/404.html` from `landing/404.html` with the versions filled in. A static host serves that page for every path it has no file for, and its script applies the remaining routing rules: `/latest/*`, `/packaging-guide`, the one-off legacy redirects, unbuilt version paths, extensionless page URLs, and unknown paths onto the `0.3.5.x` site
-5. Runs the llms.txt generator (`scripts/generate-llms-txt.ts`, installing its deps on first use) to produce `llms.txt` (index) and `llms-full.txt` (full content) for each book — an archived version's under `docs/<book>/<version>/`, with versioned page URLs — and for the site, which covers the current books and lists the archives' indexes
+1. Fails if a book's `README.md` index does not list its `SUMMARY.md` pages in sidebar order (`scripts/check-indexes.ts`)
+2. Wipes and recreates the `docs/` output dir and the gitignored `.archive/` source dir
+3. Builds each book in `versions.conf` with `mdbook build` and the matching `SITE_URL`. For an archived version it first fetches the release tag if the checkout lacks it (CI's is shallow), extracts the book and `theme/` from that tag into `.archive/<book>/<version>/` with `git archive`, builds from there, and injects the archive banner into each page
+4. Writes the redirect stubs for each versioned book's unversioned URLs (see Routing)
+5. Writes `docs/index.html` from `landing/index.html` with each product's current version filled in, `docs/archives/index.html` from `landing/archives.html` with a section per product that has archives (StartOS's also links the `0.3.5.x` site), `docs/versions.json`, and `docs/404.html` from `landing/404.html` with the versions filled in. A static host serves that page for every path it has no file for, and its script applies the remaining routing rules: `/latest/*`, `/packaging-guide`, the one-off legacy redirects, unbuilt version paths, extensionless page URLs, and unknown paths onto the `0.3.5.x` site
+6. Runs the llms.txt generator (`scripts/generate-llms-txt.ts`, installing its deps on first use) to produce `llms.txt` (index) and `llms-full.txt` (full content) for each book — an archived version's under `docs/<book>/<version>/`, with versioned page URLs — and for the site, which covers the current books and lists the archives' indexes
 
 `docs/` is then the whole site: what the deploy publishes is what `./build.sh` leaves on disk.
 
@@ -113,9 +114,10 @@ Pages serves files and nothing else, which is why every redirect the site needs 
 
 | Script                         | Purpose                                                                            |
 | ------------------------------ | ---------------------------------------------------------------------------------- |
+| `scripts/check-indexes.ts`     | Fails when a book's `README.md` index differs from its `SUMMARY.md`                |
 | `scripts/generate-llms-txt.ts` | Produces `llms.txt` (index) and `llms-full.txt` (full content) for LLM consumption |
 
-Run via `cd scripts && npm run generate-llms-txt` (uses `tsx`) after `./build.sh`, which extracts the archived sources it reads.
+Run the check with `node scripts/check-indexes.ts` (CI runs it on every pull request), and the generator via `cd scripts && npm run generate-llms-txt` (uses `tsx`) after `./build.sh`, which extracts the archived sources it reads.
 
 ## Cross-Book Links
 

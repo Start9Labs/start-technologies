@@ -212,6 +212,22 @@ pub struct TunnelContextSeed {
     pub shutdown: Sender<Option<bool>>,
 }
 
+/// Also tightens the files an earlier release left world-readable.
+async fn restrict_datadir(datadir: &Path) -> Result<(), Error> {
+    use std::fs::Permissions;
+    use std::os::unix::fs::PermissionsExt;
+
+    tokio::fs::create_dir_all(datadir).await?;
+    tokio::fs::set_permissions(datadir, Permissions::from_mode(0o700)).await?;
+    for name in ["tunnel.db", "tunnel.bak", "tunnel.bak.tmp", "tunnel.failed"] {
+        match tokio::fs::set_permissions(datadir.join(name), Permissions::from_mode(0o600)).await {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => (),
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct TunnelContext(Arc<TunnelContextSeed>);
 impl TunnelContext {
@@ -224,9 +240,7 @@ impl TunnelContext {
             .as_deref()
             .unwrap_or_else(|| Path::new("/var/lib/start-tunnel"))
             .to_owned();
-        if tokio::fs::metadata(&datadir).await.is_err() {
-            tokio::fs::create_dir_all(&datadir).await?;
-        }
+        restrict_datadir(&datadir).await?;
         let db_path = datadir.join("tunnel.db");
         let db = TypedPatchDb::<TunnelDatabase>::load_unchecked(PatchDb::open(&db_path).await?);
         if db.dump(&ROOT).await.value.is_null() {
@@ -897,6 +911,44 @@ impl UiContext for TunnelContext {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn restrict_datadir_tightens_an_existing_install() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let temp = tempfile::tempdir().unwrap();
+        let datadir = temp.path().join("nested/start-tunnel");
+        std::fs::create_dir_all(&datadir).unwrap();
+        let db = datadir.join("tunnel.db");
+        let failed = datadir.join("tunnel.failed");
+        let unrelated = datadir.join("unrelated");
+        for file in [&db, &failed, &unrelated] {
+            std::fs::write(file, b"").unwrap();
+            std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        std::fs::set_permissions(&datadir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        super::restrict_datadir(&datadir).await.unwrap();
+
+        assert_eq!(mode(&datadir), 0o700);
+        assert_eq!(mode(&db), 0o600);
+        assert_eq!(mode(&failed), 0o600);
+        assert_eq!(mode(&unrelated), 0o644);
+    }
+
+    #[tokio::test]
+    async fn restrict_datadir_creates_a_missing_directory() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let datadir = temp.path().join("nested/start-tunnel");
+
+        super::restrict_datadir(&datadir).await.unwrap();
+
+        let mode = std::fs::metadata(&datadir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+    }
+
     use super::*;
     use crate::tunnel::wg::{WgClientKind, WgConfig, WgSubnetClients, WgSubnetConfig, WgSubnetMap};
 

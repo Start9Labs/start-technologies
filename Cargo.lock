@@ -8336,7 +8336,7 @@ dependencies = [
 
 [[package]]
 name = "start-cli"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "start-core",
  "tracing",
@@ -8507,7 +8507,7 @@ dependencies = [
 
 [[package]]
 name = "start-registry"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "start-core",
 ]

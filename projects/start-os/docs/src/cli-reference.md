@@ -954,6 +954,7 @@ Edit a signer's metadata.
 - `-k, --add-key <KEY>` — Add public key
 - `-C, --remove-contact <INFO>` — Remove contact
 - `-K, --remove-key <KEY>` — Remove public key
+- `--remove-gpg-export <PRIMARY_FINGERPRINT>` — Remove whole GPG exports containing this primary-key fingerprint, preserving signing keys (repeatable, case-insensitive)
 
 ### `start-cli registry admin signer list`
 
