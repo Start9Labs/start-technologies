@@ -86,7 +86,7 @@ Each book's pages are flat Markdown files directly under its `src/` (no subdirec
 
 ### Page Structure
 
-Every page should have introductory prose (1–2 sentences) between the H1 heading and the first H2. This text is auto-extracted for `llms.txt` to help AI decide which pages to fetch. When creating a new page, add it to the book's `src/SUMMARY.md` or it won't appear in the sidebar or build.
+Every page should have introductory prose (1–2 sentences) between the H1 heading and the first H2. This text is auto-extracted for `llms.txt` to help AI decide which pages to fetch. When creating a new page, add it to the book's `src/SUMMARY.md` or it won't appear in the sidebar or build, and to the index in its `src/README.md` at the same position. `node scripts/check-indexes.ts` fails when the two differ; the index omits only Overview.
 
 ### Adjacent Technologies
 

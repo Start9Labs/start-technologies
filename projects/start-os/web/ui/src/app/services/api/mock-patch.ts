@@ -117,8 +117,6 @@ export const mockPatchData: DataModel = {
           [
             'Aiden McClelland <aiden@start9.com>',
             'Aiden McClelland <me@drbonez.dev>',
-            'Aiden McClelland <aiden@mcclelland.family>',
-            'Aiden McClelland <aiden@tenletters.net>',
           ],
           true,
           'b416c0e67b9df3f1718480ae7cffda41ca66056a',
