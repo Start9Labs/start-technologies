@@ -85,6 +85,8 @@ mod v0_4_1;
 mod v0_4_1_1;
 mod v0_4_1_2;
 mod v0_4_2;
+#[cfg(test)]
+pub(crate) use v0_4_1_2::retired_alpha_keys;
 
 pub type Current = v0_4_2::Version; // VERSION_BUMP
 

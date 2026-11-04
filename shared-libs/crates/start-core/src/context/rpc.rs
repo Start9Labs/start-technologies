@@ -478,6 +478,7 @@ impl RpcContext {
         });
 
         let res = Self(seed.clone());
+        crate::update::signer_files::initialize(&res.db).await?;
         res.cleanup_and_initialize(cleanup_init).await?;
         tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
 
