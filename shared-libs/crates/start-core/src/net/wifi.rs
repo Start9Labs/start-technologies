@@ -1073,6 +1073,7 @@ impl TypedValueParser for CountryCodeParser {
 pub async fn synchronize_network_manager<P: AsRef<Path>>(
     main_datadir: P,
     wifi: &WifiInfo,
+    system_product_name: Option<&str>,
 ) -> Result<(), Error> {
     let persistent = main_datadir.as_ref().join("system-connections");
 
@@ -1118,9 +1119,10 @@ pub async fn synchronize_network_manager<P: AsRef<Path>>(
         }
     }
 
-    force_ipv6_addr_gen_eui64(
+    prepare_physical_profiles(
         Path::new("/run/NetworkManager/system-connections"),
         Path::new(SAVED_PROFILE_DIRECTORY),
+        system_product_name,
     )
     .await;
 
@@ -1232,7 +1234,11 @@ async fn remove_shadowing_wired_profiles(runtime: &Path, saved: &Path) -> Result
 }
 
 /// Connection defaults cannot override older profiles' explicit IPv6 privacy settings.
-async fn force_ipv6_addr_gen_eui64(runtime_profiles: &Path, saved_profiles: &Path) {
+async fn prepare_physical_profiles(
+    runtime_profiles: &Path,
+    saved_profiles: &Path,
+    system_product_name: Option<&str>,
+) {
     // Generated runtime profiles outrank saved profiles, even after reload.
     if remove_shadowing_wired_profiles(runtime_profiles, saved_profiles)
         .await
@@ -1262,23 +1268,40 @@ async fn force_ipv6_addr_gen_eui64(runtime_profiles: &Path, saved_profiles: &Pat
     else {
         return;
     };
+    let default_eee_off = system_product_name == Some(crate::firmware::LIBREM_MINI_V2);
     for line in String::from_utf8_lossy(&out).lines() {
         let mut fields = split_nmcli_terse_line(line).into_iter();
         let (Some(uuid), Some(kind)) = (fields.next(), fields.next()) else {
             continue;
         };
-        if kind == "802-3-ethernet" || kind == "802-11-wireless" {
-            Command::new("nmcli")
+        let ethernet = kind == "802-3-ethernet";
+        if ethernet || kind == "802-11-wireless" {
+            let mut command = Command::new("nmcli");
+            command
                 .arg("connection")
                 .arg("modify")
                 .arg(&uuid)
                 .arg("ipv6.addr-gen-mode")
                 .arg("eui64")
                 .arg("ipv6.ip6-privacy")
-                .arg("0")
-                .invoke(ErrorKind::Network)
-                .await
-                .log_err();
+                .arg("0");
+            if ethernet
+                && default_eee_off
+                && let Some(eee) = Command::new("nmcli")
+                    .arg("-g")
+                    .arg("ethtool.eee-enabled")
+                    .arg("connection")
+                    .arg("show")
+                    .arg("uuid")
+                    .arg(&uuid)
+                    .invoke(ErrorKind::Network)
+                    .await
+                    .log_err()
+                && eee.iter().all(u8::is_ascii_whitespace)
+            {
+                command.arg("ethtool.eee-enabled").arg("off");
+            }
+            command.invoke(ErrorKind::Network).await.log_err();
         }
     }
 }

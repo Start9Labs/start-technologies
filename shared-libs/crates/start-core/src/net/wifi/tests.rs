@@ -161,15 +161,17 @@ async fn missing_runtime_profile_directory_needs_no_cleanup() {
 async fn normalize_profiles_child() {
     if let Some(directory) = std::env::var_os("STARTOS_NM_PROFILE_FIXTURE") {
         let directory = std::path::Path::new(&directory);
-        super::force_ipv6_addr_gen_eui64(
+        let product = std::env::var("STARTOS_NM_PRODUCT").ok();
+        super::prepare_physical_profiles(
             &directory.join("runtime"),
             &directory.join("saved-profiles"),
+            product.as_deref(),
         )
         .await;
     }
 }
 
-fn normalize_profiles(failure: &str) -> tempfile::TempDir {
+fn normalize_profiles(failure: &str, product: Option<&str>, eee: &str) -> tempfile::TempDir {
     let directory = tempfile::tempdir().unwrap();
     let runtime = directory.path().join("runtime");
     let saved = directory.path().join("saved-profiles");
@@ -188,8 +190,14 @@ fn normalize_profiles(failure: &str) -> tempfile::TempDir {
     if failure == "cleanup" {
         std::fs::write(runtime.join("unreadable.nmconnection"), [0xff]).unwrap();
     }
+    let wired = if eee.is_empty() {
+        "mtu=1400\n".to_owned()
+    } else {
+        format!("eee-enabled={eee}\nmtu=1400\n")
+    };
+    std::fs::write(directory.path().join("eee-setting"), eee).unwrap();
     for (profile, saved) in [
-        ("wired", "eee-enabled=off\nmtu=1400\n"),
+        ("wired", wired.as_str()),
         ("wifi", "ssid=Saved network\n"),
         ("vpn", "private-key=fixture\n"),
     ] {
@@ -221,10 +229,18 @@ case "$*" in
         test "$STARTOS_NM_FAILURE" != show || exit 1
         printf 'wired:802-3-ethernet\nwifi:802-11-wireless\nvpn:wireguard\n'
         ;;
+    '-g ethtool.eee-enabled connection show uuid wired')
+        test "$STARTOS_NM_FAILURE" != eee || exit 1
+        cat eee-setting
+        ;;
     'connection modify '* )
         test "$4 $5 $6 $7" = 'ipv6.addr-gen-mode eui64 ipv6.ip6-privacy 0'
         cp "cached-$3" "saved-$3"
         printf 'ipv6.addr-gen-mode=eui64\nipv6.ip6-privacy=0\n' >> "saved-$3"
+        if test "$#" -gt 7; then
+            test "$3 $8 $9" = 'wired ethtool.eee-enabled off'
+            printf 'eee-enabled=off\n' >> "saved-$3"
+        fi
         ;;
     *) exit 2 ;;
 esac
@@ -246,6 +262,7 @@ esac
         .env("PATH", path)
         .env("STARTOS_NM_PROFILE_FIXTURE", directory.path())
         .env("STARTOS_NM_FAILURE", failure)
+        .env("STARTOS_NM_PRODUCT", product.unwrap_or_default())
         .output()
         .unwrap();
     assert!(
@@ -259,7 +276,7 @@ esac
 
 #[test]
 fn ipv6_normalization_preserves_saved_physical_profiles() {
-    let directory = normalize_profiles("");
+    let directory = normalize_profiles("", None, "off");
     for (profile, expected) in [
         (
             "wired",
@@ -280,7 +297,7 @@ fn ipv6_normalization_preserves_saved_physical_profiles() {
 
 #[test]
 fn failed_runtime_cleanup_prevents_profile_modification() {
-    let directory = normalize_profiles("cleanup");
+    let directory = normalize_profiles("cleanup", None, "off");
     assert!(!directory.path().join("commands").exists());
     assert_eq!(
         std::fs::read_to_string(directory.path().join("saved-wired")).unwrap(),
@@ -290,7 +307,7 @@ fn failed_runtime_cleanup_prevents_profile_modification() {
 
 #[test]
 fn failed_profile_reload_leaves_saved_settings_untouched() {
-    let directory = normalize_profiles("reload");
+    let directory = normalize_profiles("reload", None, "off");
     assert_eq!(
         std::fs::read_to_string(directory.path().join("commands")).unwrap(),
         "connection reload\n"
@@ -302,8 +319,66 @@ fn failed_profile_reload_leaves_saved_settings_untouched() {
 }
 
 #[test]
+fn server_pure_defaults_ethernet_eee_off_without_changing_wifi() {
+    let directory = normalize_profiles("", Some("librem_mini_v2"), "");
+    let wired = std::fs::read_to_string(directory.path().join("saved-wired")).unwrap();
+    assert_eq!(
+        wired,
+        "mtu=1400\nipv6.addr-gen-mode=eui64\nipv6.ip6-privacy=0\neee-enabled=off\n"
+    );
+    let wifi = std::fs::read_to_string(directory.path().join("saved-wifi")).unwrap();
+    assert_eq!(
+        wifi,
+        "ssid=Saved network\nipv6.addr-gen-mode=eui64\nipv6.ip6-privacy=0\n"
+    );
+    let commands = std::fs::read_to_string(directory.path().join("commands")).unwrap();
+    assert_eq!(
+        commands
+            .lines()
+            .filter(|line| line.starts_with("-g ethtool.eee-enabled"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn server_pure_preserves_explicit_eee_selections() {
+    for eee in ["on", "off"] {
+        let directory = normalize_profiles("", Some("librem_mini_v2"), eee);
+        let wired = std::fs::read_to_string(directory.path().join("saved-wired")).unwrap();
+        assert!(wired.starts_with(&format!("eee-enabled={eee}\n")));
+        assert_eq!(wired.matches("eee-enabled=").count(), 1);
+        let commands = std::fs::read_to_string(directory.path().join("commands")).unwrap();
+        assert!(!commands.contains(" ethtool.eee-enabled off"));
+    }
+}
+
+#[test]
+fn other_or_unknown_hardware_keeps_eee_unmanaged() {
+    for product in [Some("other"), None] {
+        let directory = normalize_profiles("", product, "");
+        let wired = std::fs::read_to_string(directory.path().join("saved-wired")).unwrap();
+        assert!(!wired.contains("eee-enabled"));
+        let commands = std::fs::read_to_string(directory.path().join("commands")).unwrap();
+        assert!(!commands.contains("ethtool.eee-enabled"));
+    }
+}
+
+#[test]
+fn failed_eee_query_is_not_treated_as_an_unset_preference() {
+    let directory = normalize_profiles("eee", Some("librem_mini_v2"), "");
+    let wired = std::fs::read_to_string(directory.path().join("saved-wired")).unwrap();
+    assert_eq!(
+        wired,
+        "mtu=1400\nipv6.addr-gen-mode=eui64\nipv6.ip6-privacy=0\n"
+    );
+    let commands = std::fs::read_to_string(directory.path().join("commands")).unwrap();
+    assert!(!commands.contains(" ethtool.eee-enabled off"));
+}
+
+#[test]
 fn failed_profile_listing_does_not_modify_saved_settings() {
-    let directory = normalize_profiles("show");
+    let directory = normalize_profiles("show", None, "off");
     assert_eq!(
         std::fs::read_to_string(directory.path().join("commands")).unwrap(),
         "connection reload\n-t -f UUID,TYPE connection show\n"
