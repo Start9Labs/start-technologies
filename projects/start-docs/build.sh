@@ -5,6 +5,8 @@ cd "$(dirname "$0")"
 ROOT="$(pwd)"
 REPO="$(cd ../.. && pwd)"
 
+node scripts/check-indexes.ts
+
 # Build output (gitignored). Deploy publishes docs/ whole.
 OUT="$ROOT/docs"
 # Archived versions' sources, extracted from their release tags (gitignored).
