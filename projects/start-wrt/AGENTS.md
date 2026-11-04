@@ -272,8 +272,8 @@ start-wrt's targets live in [`build.mk`](build.mk) (included by the root `Makefi
 `make start-wrt-rpc-bindings` regenerates the committed RPC and streaming bindings;
 `make start-wrt-rpc-bindings-check` regenerates them and rejects drift. Both run the
 host generator with Cargo's `bindings` profile (unoptimized, no debug info,
-nonincremental). Product builds consume the committed bindings and retain their
-selected `PROFILE`.
+nonincremental). CI derives its native Rust toolchain from the selected shared builder
+image. Product builds consume the committed bindings and retain their selected `PROFILE`.
 
 | Target                                          | Description                                                                        |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------- |
