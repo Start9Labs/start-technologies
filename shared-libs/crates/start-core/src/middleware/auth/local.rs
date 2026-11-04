@@ -13,7 +13,6 @@ use tokio::process::Command;
 use url::Url;
 
 use crate::context::{DiagnosticContext, RpcContext};
-use crate::net::request_origin::RequestOrigin;
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::{create_file_mod, read_file_to_string};
@@ -138,13 +137,11 @@ pub struct Metadata {
 #[derive(Clone)]
 pub struct LocalAuth {
     authorization: Option<HeaderValue>,
-    loopback: bool,
 }
 impl LocalAuth {
     pub fn new() -> Self {
         Self {
             authorization: None,
-            loopback: false,
         }
     }
 
@@ -154,11 +151,7 @@ impl LocalAuth {
         metadata: Metadata,
         request: &mut rpc_toolkit::RpcRequest,
     ) -> Result<(), rpc_toolkit::RpcResponse> {
-        let result = if self.loopback {
-            check_from_header(cookie_path, self.authorization.as_ref()).await
-        } else {
-            Err(unauthorized())
-        };
+        let result = check_from_header(cookie_path, self.authorization.as_ref()).await;
         if let Some(params) = request.params.as_object_mut() {
             params.remove("__Auth_local");
             if metadata.get_local_auth {
@@ -177,9 +170,6 @@ impl<C: LocalAuthContext> Middleware<C> for LocalAuth {
         request: &mut axum::extract::Request,
     ) -> Result<(), axum::response::Response> {
         self.authorization = request.headers().get(AUTHORIZATION).cloned();
-        self.loopback = RequestOrigin::from_extensions(request.extensions())
-            .peer_ip
-            .is_some_and(|ip| ip.is_loopback());
         Ok(())
     }
     async fn process_rpc_request(
@@ -217,23 +207,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_auth_overwrites_claims_and_requires_loopback_with_a_valid_cookie() {
+    async fn local_auth_overwrites_claims_and_preserves_specific_bind_support() {
         let temp = TmpDir::new().await.unwrap();
         let cookie = temp.join("cookie");
         let token = BASE64.encode([42; LOCAL_AUTH_TOKEN_BYTES]);
         write_file_atomic(&cookie, &token).await.unwrap();
-        for (peer, loopback) in [
-            ("127.0.0.1:1234", true),
-            ("[::1]:1234", true),
-            ("[::ffff:127.0.0.1]:1234", true),
-            ("203.0.113.8:1234", false),
-            ("[::ffff:203.0.113.8]:1234", false),
+        for peer in [
+            "127.0.0.1:1234",
+            "[::1]:1234",
+            "[::ffff:127.0.0.1]:1234",
+            "192.168.1.2:1234",
+            "[::ffff:192.168.1.2]:1234",
         ] {
             for valid_cookie in [false, true] {
                 let mut auth = LocalAuth::new();
                 let mut http = axum::extract::Request::builder()
-                    .header("Host", "localhost")
-                    .header("X-Forwarded-For", "127.0.0.1")
                     .header(
                         AUTHORIZATION,
                         format!(
@@ -247,9 +235,10 @@ mod tests {
                     )
                     .body(axum::body::Body::empty())
                     .unwrap();
+                let peer: SocketAddr = peer.parse().unwrap();
                 http.extensions_mut().insert(TcpMetadata {
-                    peer_addr: peer.parse().unwrap(),
-                    local_addr: "127.0.0.1:80".parse().unwrap(),
+                    peer_addr: peer,
+                    local_addr: SocketAddr::new(peer.ip(), 5959),
                 });
                 auth.process_http_request(&TestContext, &mut http)
                     .await
@@ -266,12 +255,9 @@ mod tests {
                         )
                         .await
                         .is_ok(),
-                        loopback && valid_cookie
+                        valid_cookie
                     );
-                    assert_eq!(
-                        rpc.params["__Auth_local"],
-                        Value::Bool(loopback && valid_cookie)
-                    );
+                    assert_eq!(rpc.params["__Auth_local"], Value::Bool(valid_cookie));
                     let mut unused = request(claimed);
                     assert_eq!(
                         auth.authenticate_request(
@@ -283,15 +269,28 @@ mod tests {
                         )
                         .await
                         .is_ok(),
-                        loopback && valid_cookie
+                        valid_cookie
                     );
                     assert!(unused.params.get("__Auth_local").is_none());
                 }
             }
         }
+        let mut unauthenticated = request(true);
+        assert!(
+            LocalAuth::new()
+                .authenticate_request(
+                    &cookie,
+                    Metadata {
+                        get_local_auth: true
+                    },
+                    &mut unauthenticated
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(unauthenticated.params["__Auth_local"], Value::Bool(false));
         let auth = LocalAuth {
             authorization: Some(HeaderValue::from_str(&format!("Bearer {token}")).unwrap()),
-            loopback: true,
         };
         for path in [temp.join("missing"), cookie] {
             if path.exists() {
@@ -311,32 +310,6 @@ mod tests {
             );
             assert_eq!(rpc.params["__Auth_local"], Value::Bool(false));
         }
-    }
-
-    #[tokio::test]
-    async fn local_proxy_retains_the_remote_origin() {
-        let mut auth = LocalAuth::new();
-        let mut http = axum::extract::Request::new(axum::body::Body::empty());
-        http.extensions_mut().insert(TcpMetadata {
-            peer_addr: "127.0.0.1:1234".parse().unwrap(),
-            local_addr: "127.0.0.1:80".parse().unwrap(),
-        });
-        http.extensions_mut().insert(RequestOrigin::from_connection(
-            Some(&TcpMetadata {
-                peer_addr: "203.0.113.8:4567".parse().unwrap(),
-                local_addr: "192.168.1.2:443".parse().unwrap(),
-            }),
-            None,
-        ));
-        auth.process_http_request(&TestContext, &mut http)
-            .await
-            .unwrap();
-        assert!(!auth.loopback);
-        http.extensions_mut().clear();
-        auth.process_http_request(&TestContext, &mut http)
-            .await
-            .unwrap();
-        assert!(!auth.loopback);
     }
 
     #[test]

@@ -45,7 +45,7 @@ start-cli server update https://registry.start9.com --trust
 > [!WARNING]
 > Untrusted software can steal private keys and passwords, compromise your server, or destroy data. The override bypasses signer trust, not signature or integrity verification.
 
-Diagnostic updates use PEM keys in `/etc/startos/os-signers`, seeded with the drbonez, matthill, and Start9 keys. Changes to StartOS-update trust save the selected keys in the config overlay, where diagnostic mode can read them without the data drive. The saved selection replaces the defaults. To accept an untrusted signer in diagnostic mode, run `start-cli diagnostic update --trust` locally on the server as root or a member of the `startos` group. The server requires loopback access and its local authentication cookie for that override; remote requests cannot use it.
+Diagnostic updates use PEM keys in `/etc/startos/os-signers`, seeded with the drbonez, matthill, and Start9 keys. Changes to StartOS-update trust save the selected keys in the config overlay, where diagnostic mode can read them without the data drive. The saved selection replaces the defaults. To accept an untrusted signer in diagnostic mode, run `start-cli diagnostic update --trust` locally on the server as root or a member of the `startos` group. The server authorizes that override through its protected local authentication cookie; ordinary remote login credentials do not authorize it.
 
 The existing OS-signer CLI commands continue to manage StartOS-update trust:
 
