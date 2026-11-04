@@ -249,6 +249,20 @@ impl<C: Context> Connection<C> {
             .map_err(|_| ())
     }
 
+    async fn send_replies(
+        &mut self,
+        mut responses: Vec<RpcResponse>,
+        batch: bool,
+    ) -> Result<(), ()> {
+        if responses.is_empty() {
+            Ok(())
+        } else if batch {
+            self.send(&responses).await
+        } else {
+            self.send(&responses.pop().unwrap()).await
+        }
+    }
+
     async fn receive_text(&mut self, text: &str) -> Result<(), ()> {
         let value: Value = match serde_json::from_str(text) {
             Ok(value) => value,
@@ -305,7 +319,7 @@ impl<C: Context> Connection<C> {
             .map(|group| group.remaining + group.responses.len())
             .sum();
         if requests.len() + in_flight.max(self.calls.len()) > self.options.max_in_flight.get() {
-            let mut responses: Vec<_> = requests
+            let responses: Vec<_> = requests
                 .into_iter()
                 .filter_map(|request| match request {
                     Ok((request, _)) => request.id.map(|id| RpcResponse {
@@ -315,14 +329,7 @@ impl<C: Context> Connection<C> {
                     Err(response) => Some(response),
                 })
                 .collect();
-            if responses.is_empty() {
-                return Ok(());
-            }
-            return if batch {
-                self.send(&responses).await
-            } else {
-                self.send(&responses.pop().unwrap()).await
-            };
+            return self.send_replies(responses, batch).await;
         }
         let group = self.next_group;
         self.next_group += 1;
@@ -460,14 +467,8 @@ impl<C: Context> Connection<C> {
         if response_group.remaining != 0 {
             return Ok(());
         }
-        let mut group = self.groups.remove(&group).unwrap();
-        if !group.responses.is_empty() {
-            if group.batch {
-                self.send(&group.responses).await?;
-            } else {
-                self.send(&group.responses.pop().unwrap()).await?;
-            }
-        }
+        let group = self.groups.remove(&group).unwrap();
+        self.send_replies(group.responses, group.batch).await?;
         for id in group.ids {
             let call = self.active.remove(&id).unwrap();
             if let CallState::Ready(Some(source)) = call.state {
