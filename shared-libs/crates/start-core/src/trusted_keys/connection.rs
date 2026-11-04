@@ -67,13 +67,13 @@ fn offered_keys(public: &Public, url: &str) -> BTreeSet<AnyVerifyingKey> {
         .collect()
 }
 
-async fn fetch_info(ctx: &RpcContext, url: &Url) -> Result<RegistryInfo, Error> {
+async fn fetch_info(client: reqwest::Client, url: &Url) -> Result<RegistryInfo, Error> {
     let value = call_remote_with_client(
         None,
-        ctx.client.get(),
+        client,
         registry_rpc_url(url)?,
         HeaderMap::new(),
-        "registry.info",
+        "info",
         imbl_value::json!({}),
     )
     .await?;
@@ -86,7 +86,7 @@ pub async fn connect(
     params: ConnectRegistryParams,
 ) -> Result<BTreeSet<InternedString>, Error> {
     let url = registry_url(&params.url)?;
-    let info = fetch_info(&ctx, &url).await?;
+    let info = fetch_info(ctx.client.get(), &url).await?;
     ctx.db
         .mutate(|db| {
             db.as_public_mut()
@@ -116,7 +116,7 @@ pub async fn check_registry(ctx: RpcContext, url: &Url) -> Result<(), Error> {
     {
         return Ok(());
     }
-    let info = fetch_info(&ctx, &url).await?;
+    let info = fetch_info(ctx.client.get(), &url).await?;
     let registry = info
         .name
         .clone()
@@ -217,13 +217,11 @@ pub async fn set_os_registry(
     params: TrustedRegistryParams,
 ) -> Result<BTreeSet<InternedString>, Error> {
     let url = registry_url(&params.url)?;
-    ctx.db
-        .mutate(|db| {
-            db.as_public_mut()
-                .mutate(|public| set_os_registry_public(public, &url))
-        })
-        .await
-        .result
+    crate::update::signer_files::mutate(ctx.db.clone(), move |db| {
+        db.as_public_mut()
+            .mutate(|public| set_os_registry_public(public, &url))
+    })
+    .await
 }
 
 fn forget_registry(
@@ -427,6 +425,7 @@ fn refresh_public(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::future::NonDetachingJoinHandle;
 
     fn public() -> Public {
         let account =
@@ -579,6 +578,15 @@ mod tests {
     #[test]
     fn batch_removal_preserves_unrequested_keys_and_accepts_empty_requests() {
         let mut public = public();
+        mutate_public_keys(&mut public, |keys| {
+            import_individual_keys(
+                keys,
+                "Publisher".into(),
+                vec![key(91), key(92)].into(),
+                None,
+            )
+        })
+        .unwrap();
         let requested: BTreeSet<_> = public
             .server_info
             .trusted_keys
@@ -595,6 +603,142 @@ mod tests {
         assert_eq!(public.server_info.trusted_keys, expected);
         mutate_public_keys(&mut public, |keys| remove_keys(keys, BTreeSet::new())).unwrap();
         assert_eq!(public.server_info.trusted_keys, expected);
+    }
+
+    #[test]
+    fn alpha_seeds_are_reimported_only_when_a_connected_registry_offers_them() {
+        let url = registry_url("https://alpha-registry.start9.com").unwrap();
+        let alpha = crate::version::retired_alpha_keys();
+        let info = RegistryInfo {
+            trust_signers: alpha
+                .iter()
+                .map(|key| {
+                    (
+                        crate::rpc_continuations::Guid::new(),
+                        crate::registry::signer::SignerInfo {
+                            name: "Start9 Alpha".into(),
+                            contact: vec![],
+                            keys: BTreeSet::from([key.clone()]),
+                            gpg_exports: BTreeSet::new(),
+                        },
+                    )
+                })
+                .collect(),
+            ..Default::default()
+        };
+        for connected in [false, true] {
+            let mut public = public();
+            public
+                .server_info
+                .registry_keys
+                .insert("https://alpha-registry.start9.com".into(), alpha.clone());
+            if connected {
+                public.ui["registries"]["https://alpha-registry.start9.com"] = Value::Null;
+            }
+            let changes = refresh_public(&mut public, &url, &info).unwrap();
+            assert_eq!(
+                changes.added,
+                if connected {
+                    ids(&alpha)
+                } else {
+                    BTreeSet::new()
+                }
+            );
+            for key in &alpha {
+                let entry = public.server_info.trusted_keys.get(&key.interned_der64());
+                assert_eq!(entry.is_some(), connected);
+                if let Some(entry) = entry {
+                    assert!(!entry.marketplace && !entry.os);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn fetched_registry_info_protects_keys_on_connection_and_refresh() {
+        let signing_key = key(91);
+        let id = signing_key.interned_der64();
+        let info = RegistryInfo {
+            trust_signers: signers([(signing_key.clone(), "Publisher")]),
+            ..Default::default()
+        };
+        let response = serde_json::to_value(&info).unwrap();
+        let router = axum::Router::new().route(
+            "/catalog/rpc/v0",
+            axum::routing::post(move |axum::Json(request): axum::Json<serde_json::Value>| {
+                let response = response.clone();
+                async move {
+                    assert_eq!(request["params"], serde_json::json!({}));
+                    axum::Json(if request["method"] == "info" {
+                        serde_json::json!({ "jsonrpc": "2.0", "id": request["id"], "result": response })
+                    } else {
+                        serde_json::json!({ "jsonrpc": "2.0", "id": request["id"], "error": { "code": -32601, "message": "Method not found" } })
+                    })
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = registry_url(&format!(
+            "http://{}/catalog/",
+            listener.local_addr().unwrap()
+        ))
+        .unwrap();
+        let _server: NonDetachingJoinHandle<()> = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        })
+        .into();
+        let fetched = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            fetch_info(reqwest::Client::new(), &url),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(fetched.trust_signers, info.trust_signers);
+
+        let mut connected = public();
+        assert_eq!(
+            connect_public(&mut connected, &url, None, &fetched).unwrap(),
+            BTreeSet::from([id.clone()])
+        );
+        assert!(!connected.server_info.trusted_keys[&id].removable);
+        assert!(mutate_public_keys(&mut connected, |keys| remove_key(keys, &id)).is_err());
+
+        let mut existing = public();
+        mutate_public_keys(&mut existing, |keys| {
+            import_individual_keys(
+                keys,
+                "Manual".into(),
+                vec![signing_key.clone()].into(),
+                None,
+            )
+        })
+        .unwrap();
+        existing.ui["registries"][url.as_str().trim_end_matches('/')] = Value::Null;
+        assert!(existing.server_info.trusted_keys[&id].removable);
+        assert!(
+            refresh_public(&mut existing, &url, &fetched)
+                .unwrap()
+                .added
+                .is_empty()
+        );
+        assert_eq!(
+            offered_keys(&existing, url.as_str()),
+            BTreeSet::from([signing_key])
+        );
+        assert!(!existing.server_info.trusted_keys[&id].removable);
+        let before = to_value(&existing).unwrap();
+        assert!(mutate_public_keys(&mut existing, |keys| remove_key(keys, &id)).is_err());
+        assert!(
+            mutate_public_keys(&mut existing, |keys| {
+                remove_keys(keys, BTreeSet::from([id.clone()]))
+            })
+            .is_err()
+        );
+        assert_eq!(to_value(&existing).unwrap(), before);
+
+        refresh_public(&mut existing, &url, &RegistryInfo::default()).unwrap();
+        mutate_public_keys(&mut existing, |keys| remove_key(keys, &id)).unwrap();
     }
 
     #[test]

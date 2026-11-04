@@ -1200,6 +1200,34 @@ pub async fn write_file_atomic(
 }
 
 #[instrument(skip_all)]
+pub async fn write_file_private_atomic(
+    path: impl AsRef<Path>,
+    contents: impl AsRef<[u8]>,
+) -> Result<(), Error> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = path.as_ref();
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mkdir -p {parent:?}")))?;
+    }
+    let mut file = AtomicFile::new(path, None::<&Path>)
+        .await
+        .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("create {path:?}")))?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+        .await
+        .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("chmod 600 {path:?}")))?;
+    file.write_all(contents.as_ref())
+        .await
+        .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("write {path:?}")))?;
+    file.save()
+        .await
+        .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("save {path:?}")))?;
+    Ok(())
+}
+
+#[instrument(skip_all)]
 pub async fn write_file_owned_atomic(
     path: impl AsRef<Path>,
     contents: impl AsRef<[u8]>,
@@ -1942,6 +1970,24 @@ impl Drop for AtomicFile {
 
 #[cfg(test)]
 mod test {
+    #[tokio::test]
+    async fn write_file_private_atomic_replaces_a_readable_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("secret.conf");
+        std::fs::write(&path, b"old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        super::write_file_private_atomic(&path, b"new")
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+
     use std::io::{ErrorKind as IoErrorKind, IoSlice};
     use std::sync::Mutex;
     use std::task::Context;

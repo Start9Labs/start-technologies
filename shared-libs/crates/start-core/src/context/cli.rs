@@ -24,7 +24,7 @@ use crate::context::{DiagnosticContext, InitContext, RpcContext, SetupContext};
 use crate::developer::{
     OS_ID_KEY_PATH, default_id_key_path, load_signing_key, migrate_legacy_key_file,
 };
-use crate::middleware::auth::local::{is_loopback, local_auth_header};
+use crate::middleware::auth::local::local_auth_header_for_url;
 use crate::net::mdns::pin_mdns_host;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
@@ -407,10 +407,8 @@ impl CallRemote<RpcContext> for CliContext {
     ) -> Result<Value, RpcError> {
         let rpc_url = self.rpc_url()?;
         let mut headers = HeaderMap::new();
-        if is_loopback(&rpc_url) {
-            if let Some(auth) = local_auth_header::<RpcContext>().await {
-                headers.insert(AUTHORIZATION, auth);
-            }
+        if let Some(auth) = local_auth_header_for_url::<RpcContext>(&rpc_url).await {
+            headers.insert(AUTHORIZATION, auth);
         }
         let call = || {
             crate::middleware::auth::signature::call_remote(
@@ -454,10 +452,15 @@ impl CallRemote<DiagnosticContext> for CliContext {
         params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
+        let rpc_url = self.rpc_url()?;
+        let mut headers = HeaderMap::new();
+        if let Some(auth) = local_auth_header_for_url::<DiagnosticContext>(&rpc_url).await {
+            headers.insert(AUTHORIZATION, auth);
+        }
         crate::middleware::auth::signature::call_remote(
             self,
-            self.rpc_url()?,
-            HeaderMap::new(),
+            rpc_url,
+            headers,
             self.host_identity.as_deref(),
             method,
             params,

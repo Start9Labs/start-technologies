@@ -64,7 +64,7 @@ fn package_commitment_requires_an_enabled_marketplace_signer() {
 }
 
 #[test]
-fn production_and_community_build_signers_require_explicit_alpha_opt_in() {
+fn production_and_community_build_signers_are_not_seeded_or_trusted() {
     for (fixture, signer) in [
         (
             include_str!("fixtures/production-bitcoind-31.1-26.json"),
@@ -81,7 +81,7 @@ fn production_and_community_build_signers_require_explicit_alpha_opt_in() {
         let signer: AnyVerifyingKey = signer.parse().unwrap();
         asset.signatures.retain(|key, _| key == &signer);
         assert_eq!(asset.signatures.len(), 1);
-        let mut keys = trusted_keys::initial_trusted_keys();
+        let keys = trusted_keys::initial_trusted_keys();
         assert!(
             asset
                 .validate_all(
@@ -93,14 +93,8 @@ fn production_and_community_build_signers_require_explicit_alpha_opt_in() {
                 )
                 .is_err()
         );
-        keys.get_mut(&signer.interned_der64()).unwrap().marketplace = true;
-        asset
-            .validate_all(
-                SIG_CONTEXT,
-                trusted_keys::signer_policy(Some(enabled_keys(&keys, TrustContext::Marketplace))),
-            )
-            .unwrap();
-        assert!(!keys[&signer.interned_der64()].os);
+        assert!(!keys.contains_key(&signer.interned_der64()));
+        asset.validate_all(SIG_CONTEXT, None).unwrap();
     }
 }
 

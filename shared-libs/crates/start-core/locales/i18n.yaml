@@ -4782,6 +4782,13 @@ help.arg.remove-signer-contact:
   fr_FR: "Supprimer le contact du signataire"
   pl_PL: "Usuń kontakt z sygnatariusza"
 
+help.arg.remove-signer-gpg-export:
+  en_US: "Remove whole GPG exports by primary-key fingerprint, preserving signing keys"
+  de_DE: "Vollständige GPG-Exporte anhand des Fingerabdrucks des Primärschlüssels entfernen; Signaturschlüssel bleiben erhalten"
+  es_ES: "Eliminar exportaciones GPG completas por la huella de la clave primaria, conservando las claves de firma"
+  fr_FR: "Supprimer les exports GPG complets par empreinte de clé primaire, en conservant les clés de signature"
+  pl_PL: "Usuń całe eksporty GPG według odcisku klucza głównego, zachowując klucze podpisujące"
+
 help.arg.remove-signer-key:
   en_US: "Remove public key from signer"
   de_DE: "Öffentlichen Schlüssel vom Unterzeichner entfernen"
