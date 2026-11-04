@@ -8,6 +8,8 @@ trap 'rm -rf "$scratch"' EXIT
 mkdir "$scratch/bin"
 export DOCKER_LOG="$scratch/docker.log"
 export OBJDUMP_LOG="$scratch/objdump.log"
+export RUSTUP_LOG="$scratch/rustup.log"
+export GITHUB_ENV="$scratch/github.env"
 export PATH="$scratch/bin:$PATH"
 export ENVIRONMENT=dev-unstable
 unset RUST_BUILDER_IMAGE FMT_NATIVE RISCV_OBJDUMP
@@ -18,13 +20,22 @@ printf '%s\n' '---' "$@" >> "$DOCKER_LOG"
 if [[ "$*" == *'/verify/binary'* ]]; then
     printf '00000000 <probe>:\n    0: addi a0, a0, 1\n'
 fi
+if [[ "$*" == *'printenv RUST_VERSION'* ]]; then
+    printf '%s\n' "$MOCK_RUST_VERSION"
+    exit "${MOCK_DOCKER_EXIT:-0}"
+fi
+MOCK
+cat > "$scratch/bin/rustup" <<'MOCK'
+#!/bin/bash
+printf '%s\n' "$@" >> "$RUSTUP_LOG"
+exit "${MOCK_RUSTUP_EXIT:-0}"
 MOCK
 cat > "$scratch/bin/objdump" <<'MOCK'
 #!/bin/bash
 printf '%s\n' "$@" >> "$OBJDUMP_LOG"
 printf '00000000 <probe>:\n    0: addi a0, a0, 1\n'
 MOCK
-chmod +x "$scratch/bin/docker" "$scratch/bin/objdump"
+chmod +x "$scratch/bin/docker" "$scratch/bin/objdump" "$scratch/bin/rustup"
 
 assert_log_contains() {
     if ! grep -Fxq -- "$1" "$DOCKER_LOG"; then
@@ -115,4 +126,42 @@ RISCV_OBJDUMP="$scratch/bin/objdump" bash projects/start-wrt/build/verify-isa.sh
 test ! -s "$DOCKER_LOG"
 grep -Fxq -- "$scratch/probe.o" "$OBJDUMP_LOG"
 
-printf 'Builder selection, overrides, derived images, and K1 disassembly checks passed.\n'
+native_step="$scratch/native-toolchain.sh"
+awk '
+    /^      - name: Use repository Rust toolchain$/ { selected = 1; next }
+    selected && /^        run: \|$/ { body = 1; next }
+    body && /^          / { sub(/^          /, ""); print; next }
+    body { exit }
+' .github/workflows/start-wrt.yaml > "$native_step"
+if ! test -s "$native_step"; then
+    printf 'Missing repository Rust toolchain CI step\n' >&2
+    exit 1
+fi
+for selected_image in "$image" "$custom"; do
+    for selected_version in 1.91.7 nightly-2026-11-01; do
+        : > "$DOCKER_LOG"
+        : > "$RUSTUP_LOG"
+        : > "$GITHUB_ENV"
+        RUST_BUILDER_IMAGE="$selected_image" MOCK_RUST_VERSION="$selected_version" bash -e "$native_step"
+        assert_log_contains "$selected_image"
+        assert_log_contains RUST_VERSION
+        grep -Fxq -- "$selected_version" "$RUSTUP_LOG"
+        grep -Fxq -- --no-self-update "$RUSTUP_LOG"
+        test "$(<"$GITHUB_ENV")" = "RUSTUP_TOOLCHAIN=$selected_version"
+    done
+done
+: > "$RUSTUP_LOG"
+: > "$GITHUB_ENV"
+if MOCK_RUST_VERSION=1.91.7 MOCK_DOCKER_EXIT=17 bash -e "$native_step"; then
+    printf 'A failed toolchain probe unexpectedly succeeds\n' >&2
+    exit 1
+fi
+test ! -s "$RUSTUP_LOG"
+test ! -s "$GITHUB_ENV"
+if MOCK_RUST_VERSION=1.91.7 MOCK_RUSTUP_EXIT=23 bash -e "$native_step"; then
+    printf 'A failed toolchain installation unexpectedly succeeds\n' >&2
+    exit 1
+fi
+test ! -s "$GITHUB_ENV"
+
+printf 'Builder selection, overrides, native toolchain, derived images, and K1 disassembly checks passed.\n'
