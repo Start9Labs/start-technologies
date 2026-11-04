@@ -400,11 +400,13 @@ pub fn make_root_cert(
     subject_name_builder.append_entry_by_text("CN", &branding.root_ca_cn)?;
     subject_name_builder.append_entry_by_text("O", &branding.organization)?;
     subject_name_builder.append_entry_by_text("OU", &branding.organizational_unit)?;
+    let not_before = Asn1Time::from_unix(unix_start_time - 86400)?;
+    let not_after = Asn1Time::from_unix(unix_start_time + (10 * 364 * 86400))?;
     build_root_cert(
         root_key,
         &subject_name_builder.build(),
-        &Asn1Time::from_unix(unix_start_time - 86400)?,
-        &Asn1Time::from_unix(unix_start_time + (10 * 364 * 86400))?,
+        &not_before,
+        &not_after,
     )
 }
 
@@ -439,7 +441,6 @@ fn build_root_cert(
     builder.set_issuer_name(subject_name)?;
     builder.set_pubkey(&root_key)?;
 
-    // Extensions
     let cfg = conf::Conf::new(conf::ConfMethod::default())?;
     append_self_signed_key_identifiers(&mut builder, &cfg)?;
     // basicConstraints = critical, CA:true
