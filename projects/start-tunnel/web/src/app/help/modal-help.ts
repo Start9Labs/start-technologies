@@ -40,7 +40,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
     :host {
       position: fixed;
       inset-block-start: 0.5rem;
-      inset-inline-end: 3rem;
+      inset-inline-end: 1rem;
       backdrop-filter: blur(1rem);
     }
 

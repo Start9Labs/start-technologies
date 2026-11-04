@@ -4,13 +4,16 @@
 .SH NAME
 start\-cli\-tunnel\-auth\-session\-kill \- Terminate auth sessions
 .SH SYNOPSIS
-\fBstart\-cli tunnel auth session kill\fR [\fB\-h\fR|\fB\-\-help\fR] [\fIIDS\fR]
+\fBstart\-cli tunnel auth session kill\fR [\fB\-\-pubkey\fR] [\fB\-\-token\fR] [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Terminate auth sessions
 .SH OPTIONS
 .TP
+\fB\-\-pubkey\fR \fI<PUBKEYS>\fR
+Enrolled key of a session to terminate
+.TP
+\fB\-\-token\fR \fI<TOKENS>\fR
+ID of a bearer token to revoke
+.TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help
-.TP
-[\fIIDS\fR]
-Session identifiers

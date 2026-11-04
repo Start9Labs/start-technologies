@@ -458,6 +458,24 @@ describe('ExVer', () => {
     })
   })
 
+  describe('disjunctions across flavors', () => {
+    const mixed = VersionRange.parse(
+      '(>=30.3:16 && <31) || >=#knotsprerdts:29.3:29',
+    )
+
+    test('never intersect their complement', () => {
+      expect(mixed.intersects(mixed.not())).toEqual(false)
+    })
+
+    test('keep both flavors satisfiable', () => {
+      expect(mixed.satisfiedBy(ExtendedVersion.parse('30.3:16'))).toEqual(true)
+      expect(
+        mixed.satisfiedBy(ExtendedVersion.parse('#knotsprerdts:29.3:29')),
+      ).toEqual(true)
+      expect(mixed.normalize().satisfiable()).toEqual(true)
+    })
+  })
+
   describe('lexicographic ordering across flavors', () => {
     const unflavored = ExtendedVersion.parse('1.0.0:0')
     const flavored = ExtendedVersion.parse('#quantum:1.0.0:0')

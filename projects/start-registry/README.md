@@ -9,8 +9,27 @@ This directory is a thin product wrapper inside the `start-technologies` monorep
 - Serves a **package index** (services, versions, dependency ranges, assets) and an **OS index** (StartOS versions and downloadable images).
 - Hosts `.s9pk` and OS image **assets** with content-addressed (Blake3) commitments.
 - Exposes a JSON-RPC API over HTTP, WebSocket, and a REST continuation channel.
-- Tracks **admins** and package **signers**, and verifies signatures on uploaded content.
+- Tracks **admins** and package **signers**, verifies signatures on uploaded content, and proposes administrator-selected signers for Marketplace trust when users connect.
 - Records anonymous **metrics** (downloads / users) for admin reporting.
+
+## Package trust proposals
+
+Pass an armored GPG public-key export to `admin signer add --key` or `admin signer edit --add-key` to retain its complete certificate, identities, and fingerprints. Signers stored with only DER keys need their public certificate reimported to supply this information.
+
+Choose which existing signers to propose when a user connects this registry:
+
+```bash
+start-registry admin signer list
+start-registry info set-trust-signers <SIGNER_ID> [SIGNER_ID...]
+```
+
+Run `start-registry info set-trust-signers` without IDs to clear the selection. Registries start with no proposed signers. `registry.info` exposes the selected signer IDs and their complete signer records as `trustSigners`, including public keys and preserved GPG exports. Connecting a registry in StartOS trusts the offered keys it does not already have for packages. Keys added later are imported untrusted when StartOS next fetches packages or OS updates from the registry, with a notification for each that offers to trust it. Choosing the registry for StartOS updates trusts its offered keys for StartOS updates.
+
+## Package endorsements
+
+Package add and add-mirror import the hosted archive's embedded signature and a submitted `signatures` map. The CLI reads verified endorsements from its local v2 S9PK and submits that map separately from the authenticated uploader's signature. Promotion forwards the existing indexed map. Every submitted endorsement must verify against the exact indexed Merkle root, signed bound, and `s9pk` context; an invalid entry rejects the request atomically. Hosted URLs can serve the base archive alone. Source URLs and bytes remain unchanged.
+
+Supplemental keys enter the asset's signature map, not the registry signer directory or trust proposal. Publishing authorization still belongs to the registered uploader. Operators can prepare an endorsed file with `start-cli s9pk sign <file.s9pk>` and pass it to `registry package add` or `add-mirror`.
 
 ## Binary layout
 
@@ -40,20 +59,30 @@ cargo build -p start-registry --bin registrybox
 
 Configuration is read from CLI flags and a config file (`-c <path>`; default search includes the standard StartOS config path). Key flags:
 
-| Flag                    | Purpose                                         |
-| ----------------------- | ----------------------------------------------- |
-| `-l, --listen <addr>`   | listen address (default `127.0.0.1:5959`)       |
-| `-H, --hostname <host>` | public hostname(s) used in generated asset URLs |
-| `-p, --tor-proxy <url>` | SOCKS proxy for outbound (e.g. Tor) requests    |
-| `-d, --datadir <path>`  | data directory (default `/var/lib/startos`)     |
-| `-c, --config <path>`   | config file                                     |
+| Flag                       | Purpose                                         |
+| -------------------------- | ----------------------------------------------- |
+| `-l, --listen <addr>`      | listen address (default `127.0.0.1:5959`)       |
+| `-H, --hostname <host>`    | public hostname(s) used in generated asset URLs |
+| `-p, --tor-proxy <url>`    | SOCKS proxy for outbound (e.g. Tor) requests    |
+| `-d, --datadir <path>`     | data directory (default `/var/lib/startos`)     |
+| `-c, --config <path>`      | config file                                     |
+| `--security-notifications` | enable the OS security feed (default: false)    |
+
+Security notifications are disabled by default. To opt in, set this in that registry's config file and restart the daemon:
+
+```yaml
+registry-hostname: [registry.example.com]
+security-notifications: true
+```
+
+Disabled registries refuse `/os/security` upgrades with HTTP 403 and create no security mirror or subscription task. Clients retry with backoff. Leave alpha at the default to suppress its announcements. Release metadata and promotion retain the security flag; previously issued OS notifications are not deleted.
 
 Server state lives in `<datadir>/registry.db` (PatchDB) plus a SQLite metrics database and hosted asset files.
 
 > [!NOTE]
 > **Non-StartOS deployments only:** A separately managed reverse proxy must forward `/rpc/`,
-> `/ws/rpc/`, `/rest/rpc/`, and `/icons/`. The WebSocket route also needs HTTP/1.1 upgrade forwarding and a
-> long-lived idle timeout. StartOS-hosted registries expose all four routes through their exported
+> `/ws/rpc/`, `/rest/rpc/`, `/icons/`, and `/os/security`. The WebSocket routes also need HTTP/1.1 upgrade forwarding and a
+> long-lived idle timeout. StartOS-hosted registries expose these routes through their exported
 > `protocol: 'http'` interface automatically.
 
 ## Where things are

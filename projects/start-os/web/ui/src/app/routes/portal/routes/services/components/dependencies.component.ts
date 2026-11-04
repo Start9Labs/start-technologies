@@ -1,7 +1,7 @@
 import { KeyValuePipe } from '@angular/common'
-import { Component, input } from '@angular/core'
+import { Component, inject, input } from '@angular/core'
 import { RouterLink } from '@angular/router'
-import { i18nKey, i18nPipe } from '@start9labs/shared'
+import { Exver, i18nKey, i18nPipe } from '@start9labs/shared'
 import { TuiIcon, TuiTitle, TuiCell } from '@taiga-ui/core'
 import { TuiAvatar, TuiSkeleton } from '@taiga-ui/kit'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
@@ -18,16 +18,21 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
     @let services = this.services();
 
     @for (d of pkg().currentDependencies | keyvalue; track $index) {
+      @let manifest = services[d.key] ? (services[d.key]! | toManifest) : null;
+      @let compatible =
+        manifest && errors()[d.key]?.type !== 'incorrectVersion';
       <a
         tuiCell
-        [routerLink]="services[d.key] ? ['..', d.key] : ['/marketplace']"
+        [routerLink]="compatible ? ['..', d.key] : ['/marketplace']"
         [queryParams]="
-          services[d.key]
+          compatible
             ? {}
             : {
                 search: d.key,
+                id: manifest ? d.key : null,
                 requirePkg: d.key,
                 requireRange: d.value.versionRange,
+                flavor: manifest && exver.getFlavor(manifest.version),
               }
         "
         [class.error]="getError(d.key)"
@@ -45,11 +50,7 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
           />
         </span>
         <span tuiTitle>
-          {{
-            services[d.key]
-              ? (services[d.key]! | toManifest).title
-              : d.value.title || d.key
-          }}
+          {{ manifest?.title || d.value.title || d.key }}
           @if (getError(d.key); as error) {
             <span tuiSubtitle class="g-warning">
               {{ error | i18n }}
@@ -60,7 +61,9 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
           } @else {
             <span tuiSubtitle class="g-positive">{{ 'Satisfied' | i18n }}</span>
           }
-          <span tuiSubtitle>{{ d.value.versionRange }}</span>
+          @if (services[d.key]?.stateInfo.manifest; as installedManifest) {
+            <span tuiSubtitle>{{ installedManifest.version }}</span>
+          }
         </span>
         <tui-icon icon="@tui.arrow-right" />
       </a>
@@ -96,6 +99,8 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
   ],
 })
 export class ServiceDependenciesComponent {
+  protected readonly exver = inject(Exver)
+
   pkg = input.required<PackageDataEntry>()
   services = input.required<Record<string, PackageDataEntry>>()
   errors = input.required<PkgDependencyErrors>()
@@ -111,7 +116,7 @@ export class ServiceDependenciesComponent {
       case 'notInstalled':
         return 'Not installed'
       case 'incorrectVersion':
-        return 'Incorrect version'
+        return 'Incompatible version'
       case 'notRunning':
         return 'Not running'
       case 'taskRequired':

@@ -65,6 +65,57 @@ Three things make this correct, and each matters:
 
 When a dependency [retires](interfaces.md#retiring-a-host-or-binding) the host or binding you resolve, it disappears from the database and `getBridgeAddress` resolves `null` — the same path as the dependency not being installed, so rule 3 above already covers it. With `fallbackPort` you get the fallback instead, as always.
 
+### Reaching a gated dependency
+
+A binding with [`addSsl.auth`](interfaces.md#authenticating-at-the-proxy) challenges its bridge address like any other, so dialing it without a credential gets `401`. A dependency that [admits dependents](interfaces.md#admitting-dependent-services) publishes a key at `credentials.json` → `apiKey` on its `public` volume and exports the id of the host that accepts it. Resolve **that** host, not the browser one:
+
+```typescript
+import { apiKeyHostId, apiPort } from 'llama-cpp-startos/startos/utils'
+
+const addr = await sdk.host
+  .getBridgeAddress(effects, {
+    packageId: 'llama-cpp',
+    hostId: apiKeyHostId,
+    internalPort: apiPort,
+    ssl: false,
+  })
+  .const()
+```
+
+When only your daemon needs the key and the app can read it from a file, [mount the volume into the subcontainer](recipe-mount-dependency.md) and point the app at it. When your package code needs the value — for an env var, a config file, an `Authorization` header — mount it into your own JS container and read it with a file model:
+
+```typescript
+const location = sdk.volumes.startos.subpath('llama-cpp-public')
+const credentials = FileHelper.json(`${location}/credentials.json`, z.looseObject({ apiKey: z.string().optional().catch(undefined) }))
+
+async function readApiKey(effects: T.Effects): Promise<string | null> {
+  try {
+    // Mounting again unmounts first, pulling the file out from under a .const() watcher.
+    const mounted = await fs.access(`${location}/credentials.json`).then(
+      () => true,
+      () => false,
+    )
+    if (!mounted) {
+      await fs.mkdir(location, { recursive: true })
+      await sdk.mount(effects, {
+        location,
+        target: { packageId: 'llama-cpp', volumeId: 'public', subpath: null, readonly: true, idmap: [] },
+      })
+    }
+    return (await credentials.read(c => c.apiKey).const(effects)) ?? null
+  } catch {
+    return null // not installed, or too old to publish a key
+  }
+}
+```
+
+**When the app's client can't send the header** — upstream software that takes only a URL — run a small reverse proxy in your own package, bound to `127.0.0.1`, that adds `Authorization` and forwards to the dependency's bridge address. Point the app at the loopback address. The proxy is one more daemon in `setupMain`, configured from the resolved address and key like any other.
+
+- **Mount onto a volume you don't back up**, or the dependency's key lands in your backup.
+- **`.const()` restarts you when the dependency rotates its key**; `.once()` in an action, as above.
+- **Raise the dependency's `versionRange`** to the first release that publishes the key, so StartOS flags an older one instead of leaving you to dial a gate you can't pass.
+- **A missing key is absent, like a missing address**: omit it and let the health check go red. Don't send a placeholder.
+
 ## The Tor exception: always-on flags
 
 Some flags should be passed **unconditionally**, even when the dependency is absent — most commonly Bitcoin's `-onion=<tor SOCKS>`. A dead bridge address there is harmless (connection refused), and passing the flag always means Tor works the moment it's installed with no reconfiguration.
@@ -150,3 +201,4 @@ Three patterns that older packages used are being removed. Do not introduce them
 - **`bitcoin-core`** — `startos/main.ts` (`torSocks` with the `fallbackPort` case).
 - **`lnd`** — `startos/utils.ts` resolves bitcoind's RPC and ZMQ hosts; a conditional (unlock-gated) binding handled by the same `.const()` pattern.
 - **`mempool`** — `startos/utils.ts` + `startos/file-models/store.json.ts`: the backend-selection choice in `store.json`, the resolved address written to the upstream config's real keys.
+- **`llama-cpp`** and **`deepseek-harness`** — a gated dependency and its dependent: llama-cpp's `startos/interfaces.ts` + `startos/init/initializeService.ts` publish the key and bind the Bearer host; DeepSeek Harness's `startos/backends.ts` resolves that host and reads the key.

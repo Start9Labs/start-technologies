@@ -817,10 +817,7 @@ describe('runUntilSuccess timeout diagnostics', () => {
   })
 
   it('surfaces the exit cause of a crash-looping daemon', async () => {
-    // The Nextcloud shape: the process dies on every start, but the ready
-    // check reports `loading` on a failed probe and so keeps overwriting the
-    // crash back to `loading`. Current health alone therefore says nothing —
-    // only the retained exit error identifies the fault.
+    // Loading probes can overwrite the crash result before it is observed.
     const chain = Daemons.of<Manifest>({
       effects: fakeEffects(),
     }).addDaemon('crasher', {
@@ -829,7 +826,7 @@ describe('runUntilSuccess timeout diagnostics', () => {
       ready: {
         display: null,
         trigger: cooldownTrigger(5),
-        fn: () => ({ result: 'loading' as const, message: null }),
+        fn: () => ({ result: 'loading' as const, message: '' }),
       },
       requires: [],
     })

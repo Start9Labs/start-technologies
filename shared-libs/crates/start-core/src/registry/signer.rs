@@ -1,29 +1,40 @@
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::str::FromStr;
 
 use clap::builder::ValueParserFactory;
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::prelude::*;
 use crate::sign::commitment::SignedCommitment;
+use crate::sign::gpg::{GpgPublicKeyExport, parse_public_keys};
 use crate::sign::{AnySignature, AnyVerifyingKey};
 use crate::util::FromStrParser;
 
-#[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
+#[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct SignerInfo {
     pub name: String,
     pub contact: Vec<ContactInfo>,
-    pub keys: HashSet<AnyVerifyingKey>,
+    pub keys: BTreeSet<AnyVerifyingKey>,
+    #[serde(default)]
+    pub gpg_exports: BTreeSet<GpgPublicKeyExport>,
+}
+
+impl SignerInfo {
+    pub fn import_keys(&mut self, values: &[String]) -> Result<(), Error> {
+        let imported = parse_public_keys(values)?;
+        self.keys.extend(imported.keys);
+        self.gpg_exports.extend(imported.gpg_exports);
+        Ok(())
+    }
 }
 
 rpc_toolkit::reflect_ts!(SignerInfo);
 rpc_toolkit::ts_export!(SignerInfo, namespaces = [""]);
 
-#[derive(Clone, Debug, Deserialize, Serialize, VisitVariants, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitVariants, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
 pub enum ContactInfo {
     Email(String),
@@ -107,51 +118,41 @@ impl AcceptSigners {
         context: &str,
         signature: &AnySignature,
     ) -> Result<(), Error> {
-        let mut res = Ok(());
-        let new = match std::mem::replace(self, Self::null()) {
+        crate::sign::compat::verify_commitment(signer, commitment, context, signature)?;
+        self.process_verified_signer(signer);
+        Ok(())
+    }
+
+    pub(crate) fn process_verified_signer(&mut self, signer: &AnyVerifyingKey) {
+        *self = match std::mem::replace(self, Self::null()) {
             Self::Accepted => Self::Accepted,
             Self::Signer(s) => {
                 if &s == signer {
-                    res = crate::sign::compat::verify_commitment(
-                        signer, commitment, context, signature,
-                    )
-                    .map(|_| ());
                     Self::Accepted
                 } else {
                     Self::Signer(s)
                 }
             }
-            Self::All(mut s) => {
-                res = s
-                    .iter_mut()
-                    .map(|s| s.process_signature(signer, commitment, context, signature))
-                    .collect();
-                if s.iter().all(|s| s.accepted()) {
+            Self::All(mut policies) => {
+                for policy in &mut policies {
+                    policy.process_verified_signer(signer);
+                }
+                if policies.iter().all(Self::accepted) {
                     Self::Accepted
                 } else {
-                    Self::All(s)
+                    Self::All(policies)
                 }
             }
-            Self::Any(mut s) => {
-                match s
-                    .iter_mut()
-                    .map(|s| {
-                        s.process_signature(signer, commitment, context, signature)?;
-                        Ok(s)
-                    })
-                    .filter_ok(|s| s.accepted())
-                    .next()
-                {
-                    Some(Ok(s)) => std::mem::replace(s, Self::null()),
-                    Some(Err(e)) => {
-                        res = Err(e);
-                        Self::Any(s)
-                    }
-                    None => Self::Any(s),
+            Self::Any(mut policies) => {
+                for policy in &mut policies {
+                    policy.process_verified_signer(signer);
+                }
+                if policies.iter().any(Self::accepted) {
+                    Self::Accepted
+                } else {
+                    Self::Any(policies)
                 }
             }
         };
-        *self = new;
-        res
     }
 }

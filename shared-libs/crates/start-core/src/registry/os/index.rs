@@ -8,6 +8,7 @@ use crate::prelude::*;
 use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
 use crate::rpc_continuations::Guid;
+use crate::s9pk::git_hash::GitHash;
 use crate::s9pk::manifest::LocaleString;
 use crate::sign::commitment::blake3::Blake3Commitment;
 
@@ -43,10 +44,28 @@ pub struct OsVersionInfo {
     pub headline: String,
     pub release_notes: LocaleString,
     pub source_version: VersionRange,
+    /// Commit that produced the OS image, if recorded at publication.
+    #[serde(default)]
+    pub git_hash: Option<GitHash>,
+    /// Whether the release includes security fixes.
+    #[serde(default)]
+    pub security: bool,
     pub authorized: BTreeSet<Guid>,
-    pub iso: BTreeMap<InternedString, RegistryAsset<Blake3Commitment>>, // platform (i.e. x86_64-nonfree) -> asset
-    pub squashfs: BTreeMap<InternedString, RegistryAsset<Blake3Commitment>>, // platform (i.e. x86_64-nonfree) -> asset
-    pub img: BTreeMap<InternedString, RegistryAsset<Blake3Commitment>>, // platform (i.e. raspberrypi) -> asset
+    pub iso: BTreeMap<InternedString, RegistryAsset<Blake3Commitment>>,
+    pub squashfs: BTreeMap<InternedString, RegistryAsset<Blake3Commitment>>,
+    pub img: BTreeMap<InternedString, RegistryAsset<Blake3Commitment>>,
+}
+
+impl OsVersionInfo {
+    pub(crate) fn require_git_hash(&self, expected: &GitHash) -> Result<(), Error> {
+        ensure_code!(
+            self.git_hash.as_ref() == Some(expected),
+            ErrorKind::InvalidRequest,
+            "{}",
+            t!("registry.os.commit-changed")
+        );
+        Ok(())
+    }
 }
 
 rpc_toolkit::reflect_ts!(OsVersionInfo);
@@ -64,6 +83,17 @@ mod tests {
     use crate::registry::os::version::AddVersionParams;
 
     #[test]
+    fn release_metadata_updates_require_the_expected_image_commit() {
+        let expected = "expected-build".parse().unwrap();
+        let mut info = OsVersionInfo::default();
+        assert!(info.require_git_hash(&expected).is_err());
+        info.git_hash = Some("other-build".parse().unwrap());
+        assert!(info.require_git_hash(&expected).is_err());
+        info.git_hash = Some(expected.clone());
+        info.require_git_hash(&expected).unwrap();
+    }
+
+    #[test]
     fn notes_round_trip_and_promote_without_rewriting_legacy_records() {
         for notes in [
             json!("English notes"),
@@ -79,7 +109,12 @@ mod tests {
                 "img": {},
             });
             let info: OsVersionInfo = from_value(wire.clone()).unwrap();
-            assert_eq!(to_value(&info).unwrap(), wire);
+            assert!(info.git_hash.is_none());
+            assert!(!info.security);
+            let mut expected = wire.clone();
+            expected["gitHash"] = Value::Null;
+            expected["security"] = false.into();
+            assert_eq!(to_value(&info).unwrap(), expected);
             let promotion = AddVersionParams::from_info("0.4.0.5".parse().unwrap(), &info);
             assert_eq!(promotion.release_notes, info.release_notes);
             assert_eq!(

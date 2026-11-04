@@ -47,6 +47,16 @@ pub struct ForwardRequirements {
     pub secure: bool,
 }
 
+impl ForwardRequirements {
+    pub fn allows_gateway(&self, gateway: &NetworkInterfaceInfo) -> bool {
+        self.secure || gateway.secure()
+    }
+
+    pub fn public_on(&self, gateway: &GatewayId) -> bool {
+        self.secure && self.public_gateways.contains(gateway)
+    }
+}
+
 impl std::fmt::Display for ForwardRequirements {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -756,8 +766,8 @@ impl InterfaceForwardEntry {
 
                             // The WAN is never secure: an insecure exposure is never public,
                             // so it still serves the LAN but never the public internet.
-                            let public = reqs.public_gateways.contains(gw_id) && reqs.secure;
-                            if !reqs.secure && !info.secure() {
+                            let public = reqs.public_on(gw_id);
+                            if !reqs.allows_gateway(info) {
                                 continue;
                             }
                             let src_filter = if public {

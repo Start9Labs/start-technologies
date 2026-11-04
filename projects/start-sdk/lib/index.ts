@@ -58,3 +58,9 @@ export * as startSdk from './StartSdk'
 export * as YAML from 'yaml'
 export * as TOML from '@iarna/toml'
 export * from './version'
+
+export {
+  ed25519PublicKeyDer64,
+  parseEd25519PublicKey,
+} from '@start9labs/start-core'
+export type { S9pkDiagnostic } from '@start9labs/start-core'

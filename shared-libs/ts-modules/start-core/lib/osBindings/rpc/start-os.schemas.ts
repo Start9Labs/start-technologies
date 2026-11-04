@@ -251,6 +251,37 @@ export const ActionResultValue: z.ZodUnion<
   .meta({
     id: 'ActionResultValue',
   })
+
+/**
+ * Keys an import added, and keys it found already present.
+ */
+export const AddTrustedKeyRes: z.ZodObject<{
+  /**
+   * Trusted for packages.
+   */
+  added: z.ZodArray<z.ZodString>
+  /**
+   * GPG identities merged; explicit `trustFor` grants the requested permission.
+   */
+  existing: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({
+  /**
+   * Trusted for packages.
+   */
+  added: z.array(z.string()).meta({
+    description: 'Trusted for packages.',
+  }),
+  /**
+   * GPG identities merged; explicit `trustFor` grants the requested permission.
+   */
+  existing: z.array(z.string()).meta({
+    description:
+      'GPG identities merged; explicit `trustFor` grants the requested permission.',
+  }),
+}).meta({
+  id: 'AddTrustedKeyRes',
+  description: 'Keys an import added, and keys it found already present.',
+})
 export const AnySignature: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'AnySignature',
 })
@@ -377,6 +408,18 @@ export const CifsAddParams: z.ZodObject<{
 }).meta({
   id: 'CifsAddParams',
 })
+export const ConnectRegistryParams: z.ZodObject<{
+  url: z.ZodString
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  url: z.string(),
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'ConnectRegistryParams',
+})
 export const ContactInfo: z.ZodUnion<
   readonly [
     z.ZodObject<{ email: z.ZodString }>,
@@ -399,6 +442,37 @@ export const CountEntry: z.ZodObject<{ label: z.ZodString; count: z.ZodInt }> =
   /* @__PURE__ */ object({ label: z.string(), count: z.int() }).meta({
     id: 'CountEntry',
   })
+export const CreateTokenParams: z.ZodObject<{ name: z.ZodString }> =
+  /* @__PURE__ */ object({ name: z.string() }).meta({
+    id: 'CreateTokenParams',
+  })
+export const CreatedToken: z.ZodObject<{
+  /**
+   * The session id the token authenticates as, for `auth.session.kill`.
+   */
+  id: z.ZodString
+  /**
+   * The bearer secret. It is not stored and cannot be retrieved again.
+   */
+  token: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * The session id the token authenticates as, for `auth.session.kill`.
+   */
+  id: z.string().meta({
+    description:
+      'The session id the token authenticates as, for `auth.session.kill`.',
+  }),
+  /**
+   * The bearer secret. It is not stored and cannot be retrieved again.
+   */
+  token: z.string().meta({
+    description:
+      'The bearer secret. It is not stored and cannot be retrieved again.',
+  }),
+}).meta({
+  id: 'CreatedToken',
+})
 export const DataUrl: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'DataUrl',
 })
@@ -463,6 +537,10 @@ export const EncryptedWire: z.ZodObject<{ encrypted: z.ZodUnknown }> =
   /* @__PURE__ */ object({ encrypted: z.unknown() }).meta({
     id: 'EncryptedWire',
   })
+export const EndpointParams: z.ZodObject<{ endpoint: z.ZodString }> =
+  /* @__PURE__ */ object({ endpoint: z.string() }).meta({
+    id: 'EndpointParams',
+  })
 
 /**
  * Selects how aggressively an EPP-capable CPU pursues performance.
@@ -471,6 +549,29 @@ export const Epp: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Epp',
   description:
     'Selects how aggressively an EPP-capable CPU pursues performance.',
+})
+export const ExecResult: z.ZodObject<{
+  stdout: z.ZodString
+  stderr: z.ZodString
+  exitCode: z.ZodInt
+  timedOut: z.ZodBoolean
+  /**
+   * Whether either output kept only its final 64 KiB.
+   */
+  truncated: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  stdout: z.string(),
+  stderr: z.string(),
+  exitCode: z.int(),
+  timedOut: z.boolean(),
+  /**
+   * Whether either output kept only its final 64 KiB.
+   */
+  truncated: z.boolean().meta({
+    description: 'Whether either output kept only its final 64 KiB.',
+  }),
+}).meta({
+  id: 'ExecResult',
 })
 export const FormatDiskParams: z.ZodObject<{
   disk: z.ZodString
@@ -484,6 +585,22 @@ export const FormatDiskParams: z.ZodObject<{
 }).meta({
   id: 'FormatDiskParams',
 })
+
+/**
+ * Unauthenticated discovery hints; opening the store validates its actual state.
+ */
+export const FormatStatus: z.ZodEnum<{
+  legacy: 'legacy'
+  current: 'current'
+  interrupted: 'interrupted'
+  unknown: 'unknown'
+}> = /* @__PURE__ */ z
+  .enum(['legacy', 'current', 'interrupted', 'unknown'])
+  .meta({
+    id: 'FormatStatus',
+    description:
+      'Unauthenticated discovery hints; opening the store validates its actual state.',
+  })
 export const ForwardTarget: z.ZodObject<{
   target: z.ZodString
   target_prefix: z.ZodInt
@@ -648,6 +765,83 @@ export const GitHash: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 })
 export const Governor: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Governor',
+})
+
+/**
+ * An original public-key export and its self-certified identity claims.
+ */
+export const GpgPublicKeyExport: z.ZodObject<{
+  /**
+   * Original armor, preserving all certificate packets and headers.
+   */
+  armored: z.ZodString
+  /**
+   * Primary-key fingerprints of the certificates in this export.
+   */
+  fingerprints: z.ZodArray<z.ZodString>
+  /**
+   * Self-certified user IDs containing names, comments, and email addresses.
+   */
+  userIds: z.ZodArray<z.ZodString>
+  /**
+   * Self-certified claims indexed by the signing key's canonical DER encoding.
+   */
+  identities: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
+  >
+  /**
+   * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
+   */
+  keyFingerprints: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Original armor, preserving all certificate packets and headers.
+   */
+  armored: z.string().meta({
+    description:
+      'Original armor, preserving all certificate packets and headers.',
+  }),
+  /**
+   * Primary-key fingerprints of the certificates in this export.
+   */
+  fingerprints: z.array(z.string()).meta({
+    description: 'Primary-key fingerprints of the certificates in this export.',
+  }),
+  /**
+   * Self-certified user IDs containing names, comments, and email addresses.
+   */
+  userIds: z.array(z.string()).meta({
+    description:
+      'Self-certified user IDs containing names, comments, and email addresses.',
+  }),
+  /**
+   * Self-certified claims indexed by the signing key's canonical DER encoding.
+   */
+  identities: wire(
+    z.record(z.string(), z.array(z.string())).optional(),
+    z.record(z.string(), z.array(z.string())),
+  ).meta({
+    description:
+      "Self-certified claims indexed by the signing key's canonical DER encoding.",
+  }),
+  /**
+   * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
+   */
+  keyFingerprints: wire(
+    z.record(z.string(), z.array(z.string())).optional(),
+    z.record(z.string(), z.array(z.string())),
+  ).meta({
+    description:
+      "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+  }),
+}).meta({
+  id: 'GpgPublicKeyExport',
+  description:
+    'An original public-key export and its self-certified identity claims.',
 })
 export const Guid: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Guid',
@@ -924,6 +1118,31 @@ export const PreDownloadAlertWhen: z.ZodObject<{ sourceVersion: z.ZodString }> =
   /* @__PURE__ */ object({ sourceVersion: z.string() }).meta({
     id: 'PreDownloadAlertWhen',
   })
+export const PushKeys: z.ZodObject<{
+  /**
+   * Base64url-encoded uncompressed P-256 public key.
+   */
+  p256dh: z.ZodString
+  /**
+   * Base64url-encoded 16-byte authentication secret.
+   */
+  auth: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * Base64url-encoded uncompressed P-256 public key.
+   */
+  p256dh: z.string().meta({
+    description: 'Base64url-encoded uncompressed P-256 public key.',
+  }),
+  /**
+   * Base64url-encoded 16-byte authentication secret.
+   */
+  auth: z.string().meta({
+    description: 'Base64url-encoded 16-byte authentication secret.',
+  }),
+}).meta({
+  id: 'PushKeys',
+})
 export const QueryDnsParams: z.ZodObject<{ fqdn: z.ZodString }> =
   /* @__PURE__ */ object({ fqdn: z.string() }).meta({
     id: 'QueryDnsParams',
@@ -994,6 +1213,15 @@ export const RemovePassthroughParams: z.ZodObject<{
   'listen-port': z.int(),
 }).meta({
   id: 'RemovePassthroughParams',
+})
+export const RemoveTrustedKeyParams: z.ZodObject<{ id: z.ZodString }> =
+  /* @__PURE__ */ object({ id: z.string() }).meta({
+    id: 'RemoveTrustedKeyParams',
+  })
+export const RemoveTrustedKeysParams: z.ZodObject<{
+  ids: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({ ids: z.array(z.string()) }).meta({
+  id: 'RemoveTrustedKeysParams',
 })
 export const RemoveVersionParams: z.ZodObject<{ version: z.ZodString }> =
   /* @__PURE__ */ object({ version: z.string() }).meta({
@@ -1114,9 +1342,6 @@ export const ShutdownParams: z.ZodObject<{
 }).meta({
   id: 'ShutdownParams',
 })
-export const SideloadParams: typeof empty = /* @__PURE__ */ empty.meta({
-  id: 'SideloadParams',
-})
 
 /**
  * So a signal strength is a number between 0-100, I want the null option to be 0 since there is no signal
@@ -1193,6 +1418,10 @@ export const TrustCaParams: z.ZodObject<{ cert: typeof literal_0 }> =
   /* @__PURE__ */ object({ cert: literal_0 }).meta({
     id: 'TrustCaParams',
   })
+export const TrustContext: z.ZodEnum<{ marketplace: 'marketplace'; os: 'os' }> =
+  /* @__PURE__ */ z.enum(['marketplace', 'os']).meta({
+    id: 'TrustContext',
+  })
 export const TrustedCa: z.ZodObject<{
   subject: z.ZodString
   fingerprint: z.ZodString
@@ -1206,11 +1435,33 @@ export const TrustedOsUpdateSigner: z.ZodObject<{ label: z.ZodString }> =
   /* @__PURE__ */ object({ label: z.string() }).meta({
     id: 'TrustedOsUpdateSigner',
   })
+export const TrustedRegistryParams: z.ZodObject<{ url: z.ZodString }> =
+  /* @__PURE__ */ object({ url: z.string() }).meta({
+    id: 'TrustedRegistryParams',
+  })
 export const UiParams: z.ZodObject<{
   pointer: z.ZodString
   value: z.ZodUnknown
 }> = /* @__PURE__ */ object({ pointer: z.string(), value: z.unknown() }).meta({
   id: 'UiParams',
+})
+
+/**
+ * Changes a key's name and both trust selections atomically.
+ */
+export const UpdateTrustedKeyParams: z.ZodObject<{
+  id: z.ZodString
+  name: z.ZodString
+  marketplace: z.ZodBoolean
+  os: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  id: z.string(),
+  name: z.string(),
+  marketplace: z.boolean(),
+  os: z.boolean(),
+}).meta({
+  id: 'UpdateTrustedKeyParams',
+  description: "Changes a key's name and both trust selections atomically.",
 })
 
 /**
@@ -1431,10 +1682,18 @@ export const AddMirrorParams: z.ZodObject<{
   url: z.ZodString
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
 }> = /* @__PURE__ */ object({
   url: z.string(),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
 }).meta({
   id: 'AddMirrorParams',
 })
@@ -1442,10 +1701,18 @@ export const AddPackageParams: z.ZodObject<{
   urls: z.ZodArray<z.ZodString>
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
 }> = /* @__PURE__ */ object({
   urls: z.array(z.string()),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
 }).meta({
   id: 'AddPackageParams',
 })
@@ -1508,6 +1775,85 @@ export const AddPublicDomainParams: z.ZodObject<{
 }).meta({
   id: 'AddPublicDomainParams',
 })
+export const AddSignerParams: z.ZodObject<{
+  name: z.ZodString
+  contact: z.ZodArray<typeof ContactInfo>
+  /**
+   * Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.
+   */
+  keys: z.ZodArray<z.ZodString>
+  /**
+   * Retained certificates; `keys` determines the selected signing keys.
+   */
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  contact: z.array(ContactInfo),
+  /**
+   * Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.
+   */
+  keys: z.array(z.string()).meta({
+    description:
+      'Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.',
+  }),
+  /**
+   * Retained certificates; `keys` determines the selected signing keys.
+   */
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ).meta({
+    description:
+      'Retained certificates; `keys` determines the selected signing keys.',
+  }),
+}).meta({
+  id: 'AddSignerParams',
+})
+export const AddTrustedKeyParams: z.ZodObject<{
+  /**
+   * Blank names each GPG key after its identity.
+   */
+  name: z.ZodString
+  /**
+   * Ed25519 public keys in PEM or armored GPG format.
+   */
+  publicKeys: z.ZodArray<z.ZodString>
+  /**
+   * Grants this permission to every imported key, including existing keys.
+   */
+  trustFor: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof TrustContext>>,
+    z.ZodNullable<typeof TrustContext>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Blank names each GPG key after its identity.
+   */
+  name: z.string().meta({
+    description: 'Blank names each GPG key after its identity.',
+  }),
+  /**
+   * Ed25519 public keys in PEM or armored GPG format.
+   */
+  publicKeys: z.array(z.string()).meta({
+    description: 'Ed25519 public keys in PEM or armored GPG format.',
+  }),
+  /**
+   * Grants this permission to every imported key, including existing keys.
+   */
+  trustFor: wire(
+    TrustContext.nullable().optional(),
+    TrustContext.nullable(),
+  ).meta({
+    description:
+      'Grants this permission to every imported key, including existing keys.',
+  }),
+}).meta({
+  id: 'AddTrustedKeyParams',
+})
 export const AddTunnelParams: z.ZodObject<{
   name: z.ZodString
   config: z.ZodString
@@ -1529,11 +1875,23 @@ export const AddVersionParams: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  expectedGitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   version: z.string(),
   headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  expectedGitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  security: wire(z.boolean().optional(), z.boolean()),
 }).meta({
   id: 'AddVersionParams',
 })
@@ -1848,16 +2206,33 @@ export const EditSignerParams: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   addContact: z.ZodArray<typeof ContactInfo>
-  addKey: z.ZodArray<typeof AnyVerifyingKey>
+  addKey: z.ZodArray<z.ZodString>
   removeContact: z.ZodArray<typeof ContactInfo>
   removeKey: z.ZodArray<typeof AnyVerifyingKey>
+  /**
+   * Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.
+   */
+  removeGpgExport: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
 }> = /* @__PURE__ */ object({
   id: Guid,
   setName: wire(z.string().nullable().optional(), z.string().nullable()),
   addContact: z.array(ContactInfo),
-  addKey: z.array(AnyVerifyingKey),
+  addKey: z.array(z.string()),
   removeContact: z.array(ContactInfo),
   removeKey: z.array(AnyVerifyingKey),
+  /**
+   * Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.
+   */
+  removeGpgExport: wire(
+    z.array(z.string()).optional(),
+    z.array(z.string()),
+  ).meta({
+    description:
+      'Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.',
+  }),
 }).meta({
   id: 'EditSignerParams',
 })
@@ -1882,6 +2257,105 @@ export const EppParams: z.ZodObject<{
   set: wire(Epp.nullable().optional(), Epp.nullable()),
 }).meta({
   id: 'EppParams',
+})
+export const ExecParams: z.ZodObject<{
+  id: typeof PackageId
+  /**
+   * Program and arguments, run without a shell. Empty runs the user's login shell.
+   */
+  command: z.ZodArray<z.ZodString>
+  /**
+   * Written to the command's standard input, which is otherwise empty.
+   */
+  stdin: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * Seconds before the command is terminated. Defaults to 120.
+   */
+  timeoutSecs: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  /**
+   * Part of the subcontainer's ID. Overrides `name` and `imageId`.
+   */
+  subcontainer: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
+  /**
+   * Part of the subcontainer's name, case-insensitive. Overrides `imageId`.
+   */
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * Part of the subcontainer's image ID, case-insensitive.
+   */
+  imageId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof ImageId>>,
+    z.ZodNullable<typeof ImageId>
+  >
+  /**
+   * Defaults to the image's user, else root.
+   */
+  user: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  id: PackageId,
+  /**
+   * Program and arguments, run without a shell. Empty runs the user's login shell.
+   */
+  command: z.array(z.string()).meta({
+    description:
+      "Program and arguments, run without a shell. Empty runs the user's login shell.",
+  }),
+  /**
+   * Written to the command's standard input, which is otherwise empty.
+   */
+  stdin: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      "Written to the command's standard input, which is otherwise empty.",
+  }),
+  /**
+   * Seconds before the command is terminated. Defaults to 120.
+   */
+  timeoutSecs: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description: 'Seconds before the command is terminated. Defaults to 120.',
+  }),
+  /**
+   * Part of the subcontainer's ID. Overrides `name` and `imageId`.
+   */
+  subcontainer: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      "Part of the subcontainer's ID. Overrides `name` and `imageId`.",
+  }),
+  /**
+   * Part of the subcontainer's name, case-insensitive. Overrides `imageId`.
+   */
+  name: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      "Part of the subcontainer's name, case-insensitive. Overrides `imageId`.",
+  }),
+  /**
+   * Part of the subcontainer's image ID, case-insensitive.
+   */
+  imageId: wire(ImageId.nullable().optional(), ImageId.nullable()).meta({
+    description: "Part of the subcontainer's image ID, case-insensitive.",
+  }),
+  /**
+   * Defaults to the image's user, else root.
+   */
+  user: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description: "Defaults to the image's user, else root.",
+  }),
+}).meta({
+  id: 'ExecParams',
 })
 export const ForgetGatewayParams: z.ZodObject<{ gateway: typeof GatewayId }> =
   /* @__PURE__ */ object({ gateway: GatewayId }).meta({
@@ -2101,17 +2575,6 @@ export const InitAcmeParams: z.ZodObject<{
 }).meta({
   id: 'InitAcmeParams',
 })
-export const InstallParams: z.ZodObject<{
-  registry: z.ZodString
-  id: typeof PackageId
-  version: typeof Version
-}> = /* @__PURE__ */ object({
-  registry: z.string(),
-  id: PackageId,
-  version: Version,
-}).meta({
-  id: 'InstallParams',
-})
 export const InstalledVersionParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'InstalledVersionParams',
@@ -2175,8 +2638,18 @@ export const IpInfo: z.ZodObject<{
   id: 'IpInfo',
 })
 export const KillParams: z.ZodObject<{
-  ids: z.ZodArray<typeof AnyVerifyingKey>
-}> = /* @__PURE__ */ object({ ids: z.array(AnyVerifyingKey) }).meta({
+  pubkeys: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof AnyVerifyingKey>>,
+    z.ZodArray<typeof AnyVerifyingKey>
+  >
+  tokens: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  pubkeys: wire(z.array(AnyVerifyingKey).optional(), z.array(AnyVerifyingKey)),
+  tokens: wire(z.array(z.string()).optional(), z.array(z.string())),
+}).meta({
   id: 'KillParams',
 })
 export const LegacyAlpnInfo: z.ZodUnion<
@@ -2416,6 +2889,17 @@ export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
+  /**
+   * Commit that produced the OS image, if recorded at publication.
+   */
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   authorized: z.ZodArray<typeof Guid>
   iso: z.ZodRecord<
     z.ZodString,
@@ -2433,6 +2917,19 @@ export const OsVersionInfo: z.ZodObject<{
   headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
+  /**
+   * Commit that produced the OS image, if recorded at publication.
+   */
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()).meta({
+    description:
+      'Commit that produced the OS image, if recorded at publication.',
+  }),
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Whether the release includes security fixes.',
+  }),
   authorized: z.array(Guid),
   iso: z.record(z.string(), RegistryAsset(Blake3Commitment)),
   squashfs: z.record(z.string(), RegistryAsset(Blake3Commitment)),
@@ -2580,6 +3077,24 @@ export const PublicDomainConfig: z.ZodObject<{
   acme: wire(AcmeProvider.nullable().optional(), AcmeProvider.nullable()),
 }).meta({
   id: 'PublicDomainConfig',
+})
+export const PushSubscription: z.ZodObject<{
+  /**
+   * HTTP(S) push resource selected by the browser, including LAN endpoints.
+   */
+  endpoint: z.ZodString
+  keys: typeof PushKeys
+}> = /* @__PURE__ */ object({
+  /**
+   * HTTP(S) push resource selected by the browser, including LAN endpoints.
+   */
+  endpoint: z.string().meta({
+    description:
+      'HTTP(S) push resource selected by the browser, including LAN endpoints.',
+  }),
+  keys: PushKeys,
+}).meta({
+  id: 'PushSubscription',
 })
 export const RebuildParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
@@ -2784,6 +3299,11 @@ export const SetStaticDnsParams: z.ZodObject<{
 }).meta({
   id: 'SetStaticDnsParams',
 })
+export const SetTrustSignersParams: z.ZodObject<{
+  signers: z.ZodArray<typeof Guid>
+}> = /* @__PURE__ */ object({ signers: z.array(Guid) }).meta({
+  id: 'SetTrustSignersParams',
+})
 export const SideloadResponse: z.ZodObject<{
   upload: typeof Guid
   progress: typeof Guid
@@ -2801,14 +3321,35 @@ export const SignAssetParams: z.ZodObject<{
 }).meta({
   id: 'SignAssetParams',
 })
+export const SignPackageParams: z.ZodObject<{
+  id: typeof PackageId
+  version: typeof Version
+  commitment: typeof MerkleArchiveCommitment
+  signature: typeof AnySignature
+}> = /* @__PURE__ */ object({
+  id: PackageId,
+  version: Version,
+  commitment: MerkleArchiveCommitment,
+  signature: AnySignature,
+}).meta({
+  id: 'SignPackageParams',
+})
 export const SignerInfo: z.ZodObject<{
   name: z.ZodString
   contact: z.ZodArray<typeof ContactInfo>
   keys: z.ZodArray<typeof AnyVerifyingKey>
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
 }> = /* @__PURE__ */ object({
   name: z.string(),
   contact: z.array(ContactInfo),
   keys: z.array(AnyVerifyingKey),
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ),
 }).meta({
   id: 'SignerInfo',
 })
@@ -2888,10 +3429,15 @@ export const StartOsRecoveryInfo: z.ZodObject<{
   hostname: typeof ServerHostname
   version: z.ZodString
   timestamp: z.ZodString
+  formatStatus: z.ZodCodec<
+    z.ZodOptional<typeof FormatStatus>,
+    typeof FormatStatus
+  >
 }> = /* @__PURE__ */ object({
   hostname: ServerHostname,
   version: z.string(),
   timestamp: z.string(),
+  formatStatus: wire(FormatStatus.optional(), FormatStatus),
 }).meta({
   id: 'StartOsRecoveryInfo',
   description:
@@ -3105,6 +3651,23 @@ export const CompatibleAlpnInfo: z.ZodUnion<
 > = /* @__PURE__ */ z.union([z.array(MaybeUtf8String), LegacyAlpnInfo]).meta({
   id: 'CompatibleAlpnInfo',
 })
+
+/**
+ * Selects an existing server backup and its unlocking credential.
+ */
+export const ConvertParams: z.ZodObject<{
+  targetId: typeof BackupTargetId
+  serverId: z.ZodString
+  password: typeof PasswordType
+}> = /* @__PURE__ */ object({
+  targetId: BackupTargetId,
+  serverId: z.string(),
+  password: PasswordType,
+}).meta({
+  id: 'ConvertParams',
+  description:
+    'Selects an existing server backup and its unlocking credential.',
+})
 export const DependencyMetadata: z.ZodIntersection<
   z.ZodObject<{
     title: z.ZodCodec<
@@ -3202,6 +3765,36 @@ export const HostnameInfo: z.ZodObject<{
   metadata: HostnameMetadata,
 }).meta({
   id: 'HostnameInfo',
+})
+export const InstallParams: z.ZodObject<{
+  acceptSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
+    z.ZodNullable<typeof AcceptSigners>
+  >
+  registry: z.ZodString
+  id: typeof PackageId
+  version: typeof Version
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  acceptSigners: wire(
+    AcceptSigners.nullable().optional(),
+    AcceptSigners.nullable(),
+  ),
+  registry: z.string(),
+  id: PackageId,
+  version: Version,
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
+}).meta({
+  id: 'InstallParams',
 })
 export const Metrics: z.ZodObject<{
   general: typeof MetricsGeneral
@@ -3443,6 +4036,46 @@ export const PartitionInfo: z.ZodObject<{
 }).meta({
   id: 'PartitionInfo',
 })
+export const ProxyOptions: z.ZodIntersection<
+  z.ZodObject<{ type: z.ZodLiteral<'http'> }>,
+  z.ZodObject<{
+    /**
+     * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+     * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+     */
+    addXForwardedHeaders: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+    /**
+     * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+     */
+    auth: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
+      z.ZodNullable<typeof ProxyAuth>
+    >
+  }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({ type: z.literal('http') }),
+    object({
+      /**
+       * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+       * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+       */
+      addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()).meta({
+        description:
+          'Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.',
+      }),
+      /**
+       * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+       */
+      auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()).meta({
+        description:
+          'Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.',
+      }),
+    }),
+  )
+  .meta({
+    id: 'ProxyOptions',
+  })
 export const RegistryInfo: z.ZodObject<{
   name: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -3460,6 +4093,13 @@ export const RegistryInfo: z.ZodObject<{
     z.ZodNullable<typeof LocaleString>
   >
   categories: z.ZodRecord<z.ZodString, typeof Category>
+  /**
+   * Registry-selected signers, not an assertion of trust.
+   */
+  trustSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof SignerInfo>>,
+    z.ZodRecord<z.ZodString, typeof SignerInfo>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -3473,6 +4113,15 @@ export const RegistryInfo: z.ZodObject<{
     description: "Markdown, shown above the registry's services.",
   }),
   categories: z.record(z.string(), Category),
+  /**
+   * Registry-selected signers, not an assertion of trust.
+   */
+  trustSigners: wire(
+    z.record(z.string(), SignerInfo).optional(),
+    z.record(z.string(), SignerInfo),
+  ).meta({
+    description: 'Registry-selected signers, not an assertion of trust.',
+  }),
 }).meta({
   id: 'RegistryInfo',
 })
@@ -3522,17 +4171,43 @@ export const ServiceInterface: z.ZodObject<{
 }).meta({
   id: 'ServiceInterface',
 })
-export const SessionList: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  sessions: typeof AuthKeys
+
+/**
+ * The server's sessions, by credential type.
+ */
+export const Sessions: z.ZodObject<{
+  pubkeys: typeof AuthKeys
+  tokens: z.ZodRecord<z.ZodString, typeof Session>
 }> = /* @__PURE__ */ object({
-  current: wire(z.string().nullable().optional(), z.string().nullable()),
-  sessions: AuthKeys,
+  pubkeys: AuthKeys,
+  tokens: z.record(z.string(), Session),
 }).meta({
-  id: 'SessionList',
+  id: 'Sessions',
+  description: "The server's sessions, by credential type.",
+})
+export const SideloadParams: z.ZodObject<{
+  acceptSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
+    z.ZodNullable<typeof AcceptSigners>
+  >
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  acceptSigners: wire(
+    AcceptSigners.nullable().optional(),
+    AcceptSigners.nullable(),
+  ),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
+}).meta({
+  id: 'SideloadParams',
 })
 export const UpdateSystemParams: z.ZodObject<{
   registry: z.ZodString
@@ -3543,6 +4218,10 @@ export const UpdateSystemParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
     z.ZodNullable<typeof AcceptSigners>
   >
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   targetVersion: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
@@ -3559,6 +4238,13 @@ export const UpdateSystemParams: z.ZodObject<{
   ).meta({
     description:
       'Additional signer requirements checked before starting the update.',
+  }),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
   }),
   targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
   progress: wire(z.boolean().optional(), z.boolean()),
@@ -3590,12 +4276,6 @@ export const AddSslOptions: z.ZodCodec<
   z.ZodObject<{
     preferredExternalPort: z.ZodInt
     /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.ZodOptional<z.ZodBoolean>
-    /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
      */
@@ -3607,25 +4287,9 @@ export const AddSslOptions: z.ZodCodec<
     upstreamCertValidation: z.ZodOptional<
       z.ZodNullable<typeof UpstreamCertValidation>
     >
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>
   }>,
   z.ZodObject<{
     preferredExternalPort: z.ZodInt
-    /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.ZodBoolean
     /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
@@ -3636,29 +4300,10 @@ export const AddSslOptions: z.ZodCodec<
      * `None` (the default) validates against the StartOS root CA.
      */
     upstreamCertValidation: z.ZodNullable<typeof UpstreamCertValidation>
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: z.ZodNullable<typeof ProxyAuth>
   }>
 > = /* @__PURE__ */ wire(
   object({
     preferredExternalPort: z.int(),
-    /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.boolean().optional().meta({
-      description:
-        'When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`\nand `X-Forwarded-For: <client-ip>` to incoming HTTP requests before\nforwarding them upstream. Setting this implies HTTP-aware proxying.',
-    }),
     /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
@@ -3675,31 +4320,9 @@ export const AddSslOptions: z.ZodCodec<
       description:
         'Certificate validation for the OS→container TLS leg when rewrapping.\n`None` (the default) validates against the StartOS root CA.',
     }),
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: ProxyAuth.nullable().optional().meta({
-      description:
-        'Optional reverse-proxy auth gate. When set, the OS reverse proxy\nwill validate the `Authorization` header on incoming HTTP requests\nagainst this configuration before forwarding them upstream.\nUnauthenticated requests get `401 Unauthorized` with an appropriate\n`WWW-Authenticate` challenge. For `Basic`, the authenticated\nusername is forwarded to the upstream service as `X-Forwarded-User`.\nSetting this implies HTTP-aware proxying.',
-    }),
   }),
   object({
     preferredExternalPort: z.int(),
-    /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.boolean().meta({
-      description:
-        'When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`\nand `X-Forwarded-For: <client-ip>` to incoming HTTP requests before\nforwarding them upstream. Setting this implies HTTP-aware proxying.',
-    }),
     /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
@@ -3715,19 +4338,6 @@ export const AddSslOptions: z.ZodCodec<
     upstreamCertValidation: UpstreamCertValidation.nullable().meta({
       description:
         'Certificate validation for the OS→container TLS leg when rewrapping.\n`None` (the default) validates against the StartOS root CA.',
-    }),
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: ProxyAuth.nullable().meta({
-      description:
-        'Optional reverse-proxy auth gate. When set, the OS reverse proxy\nwill validate the `Authorization` header on incoming HTTP requests\nagainst this configuration before forwarding them upstream.\nUnauthenticated requests get `401 Unauthorized` with an appropriate\n`WWW-Authenticate` challenge. For `Basic`, the authenticated\nusername is forwarded to the upstream service as `X-Forwarded-User`.\nSetting this implies HTTP-aware proxying.',
     }),
   }),
 ).meta({
@@ -3981,22 +4591,17 @@ export const PackageVersionInfo: z.ZodIntersection<
   .meta({
     id: 'PackageVersionInfo',
   })
-export const BindOptions: z.ZodObject<{
-  preferredExternalPort: z.ZodInt
-  addSsl: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof AddSslOptions>>,
-    z.ZodNullable<typeof AddSslOptions>
+export const SessionList: z.ZodObject<{
+  current: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
   >
-  secure: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Security>>,
-    z.ZodNullable<typeof Security>
-  >
+  sessions: typeof Sessions
 }> = /* @__PURE__ */ object({
-  preferredExternalPort: z.int(),
-  addSsl: wire(AddSslOptions.nullable().optional(), AddSslOptions.nullable()),
-  secure: wire(Security.nullable().optional(), Security.nullable()),
+  current: wire(z.string().nullable().optional(), z.string().nullable()),
+  sessions: Sessions,
 }).meta({
-  id: 'BindOptions',
+  id: 'SessionList',
 })
 
 /**
@@ -4058,6 +4663,26 @@ export const GetPackageResponseFull: z.ZodObject<{
 }).meta({
   id: 'GetPackageResponseFull',
 })
+export const LegacyProxySslOptions: z.ZodIntersection<
+  z.ZodObject<{
+    addXForwardedHeaders: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+    auth: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
+      z.ZodNullable<typeof ProxyAuth>
+    >
+  }>,
+  typeof AddSslOptions
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()),
+      auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()),
+    }),
+    AddSslOptions,
+  )
+  .meta({
+    id: 'LegacyProxySslOptions',
+  })
 export const PackageInfo: z.ZodObject<{
   authorized: z.ZodRecord<z.ZodString, z.ZodString>
   versions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
@@ -4068,6 +4693,119 @@ export const PackageInfo: z.ZodObject<{
   categories: z.array(z.string()),
 }).meta({
   id: 'PackageInfo',
+})
+export const CompatibleBindOptions: z.ZodObject<{
+  preferredExternalPort: z.ZodInt
+  addSsl: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>,
+    z.ZodNullable<typeof LegacyProxySslOptions>
+  >
+  secure: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Security>>,
+    z.ZodNullable<typeof Security>
+  >
+  proxy: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof ProxyOptions>>,
+    z.ZodNullable<typeof ProxyOptions>
+  >
+}> = /* @__PURE__ */ object({
+  preferredExternalPort: z.int(),
+  addSsl: wire(
+    LegacyProxySslOptions.nullable().optional(),
+    LegacyProxySslOptions.nullable(),
+  ),
+  secure: wire(Security.nullable().optional(), Security.nullable()),
+  proxy: wire(ProxyOptions.nullable().optional(), ProxyOptions.nullable()),
+}).meta({
+  id: 'CompatibleBindOptions',
+})
+export const GetPackageResult: z.ZodUnion<
+  readonly [
+    typeof GetPackageResponseFull,
+    typeof GetPackageResponse,
+    z.ZodRecord<z.ZodString, typeof GetPackageResponseFull>,
+    z.ZodRecord<z.ZodString, typeof GetPackageResponse>,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    GetPackageResponseFull,
+    GetPackageResponse,
+    z.record(z.string(), GetPackageResponseFull),
+    z.record(z.string(), GetPackageResponse),
+  ])
+  .meta({
+    id: 'GetPackageResult',
+  })
+export const PackageIndex: z.ZodObject<{
+  categories: z.ZodRecord<z.ZodString, typeof Category>
+  packages: z.ZodRecord<z.ZodString, typeof PackageInfo>
+}> = /* @__PURE__ */ object({
+  categories: z.record(z.string(), Category),
+  packages: z.record(z.string(), PackageInfo),
+}).meta({
+  id: 'PackageIndex',
+})
+export const BindOptions: z.ZodCodec<
+  typeof CompatibleBindOptions,
+  z.ZodObject<{
+    preferredExternalPort: z.ZodInt
+    addSsl: z.ZodNullable<typeof AddSslOptions>
+    secure: z.ZodNullable<typeof Security>
+    /**
+     * HTTP request policy shared by every exposed leg of this binding.
+     */
+    proxy: z.ZodNullable<typeof ProxyOptions>
+  }>
+> = /* @__PURE__ */ wire(
+  CompatibleBindOptions,
+  object({
+    preferredExternalPort: z.int(),
+    addSsl: AddSslOptions.nullable(),
+    secure: Security.nullable(),
+    /**
+     * HTTP request policy shared by every exposed leg of this binding.
+     */
+    proxy: ProxyOptions.nullable().meta({
+      description:
+        'HTTP request policy shared by every exposed leg of this binding.',
+    }),
+  }),
+).meta({
+  id: 'BindOptions',
+})
+export const FullIndex: z.ZodObject<{
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  icon: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof DataUrl>>,
+    z.ZodNullable<typeof DataUrl>
+  >
+  description: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
+    z.ZodNullable<typeof LocaleString>
+  >
+  package: typeof PackageIndex
+  os: typeof OsIndex
+  signers: z.ZodRecord<z.ZodString, typeof SignerInfo>
+  trustSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof Guid>>,
+    z.ZodArray<typeof Guid>
+  >
+}> = /* @__PURE__ */ object({
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
+  description: wire(
+    LocaleString.nullable().optional(),
+    LocaleString.nullable(),
+  ),
+  package: PackageIndex,
+  os: OsIndex,
+  signers: z.record(z.string(), SignerInfo),
+  trustSigners: wire(z.array(Guid).optional(), z.array(Guid)),
+}).meta({
+  id: 'FullIndex',
 })
 export const BindInfo: z.ZodObject<{
   enabled: z.ZodBoolean
@@ -4103,65 +4841,10 @@ export const BindInfo: z.ZodObject<{
 }).meta({
   id: 'BindInfo',
 })
-export const GetPackageResult: z.ZodUnion<
-  readonly [
-    typeof GetPackageResponseFull,
-    typeof GetPackageResponse,
-    z.ZodRecord<z.ZodString, typeof GetPackageResponseFull>,
-    z.ZodRecord<z.ZodString, typeof GetPackageResponse>,
-  ]
-> = /* @__PURE__ */ z
-  .union([
-    GetPackageResponseFull,
-    GetPackageResponse,
-    z.record(z.string(), GetPackageResponseFull),
-    z.record(z.string(), GetPackageResponse),
-  ])
-  .meta({
-    id: 'GetPackageResult',
-  })
-export const PackageIndex: z.ZodObject<{
-  categories: z.ZodRecord<z.ZodString, typeof Category>
-  packages: z.ZodRecord<z.ZodString, typeof PackageInfo>
-}> = /* @__PURE__ */ object({
-  categories: z.record(z.string(), Category),
-  packages: z.record(z.string(), PackageInfo),
-}).meta({
-  id: 'PackageIndex',
-})
 export const Bindings: z.ZodRecord<z.ZodString, typeof BindInfo> =
   /* @__PURE__ */ z.record(z.string(), BindInfo).meta({
     id: 'Bindings',
   })
-export const FullIndex: z.ZodObject<{
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  icon: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof DataUrl>>,
-    z.ZodNullable<typeof DataUrl>
-  >
-  description: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
-    z.ZodNullable<typeof LocaleString>
-  >
-  package: typeof PackageIndex
-  os: typeof OsIndex
-  signers: z.ZodRecord<z.ZodString, typeof SignerInfo>
-}> = /* @__PURE__ */ object({
-  name: wire(z.string().nullable().optional(), z.string().nullable()),
-  icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
-  description: wire(
-    LocaleString.nullable().optional(),
-    LocaleString.nullable(),
-  ),
-  package: PackageIndex,
-  os: OsIndex,
-  signers: z.record(z.string(), SignerInfo),
-}).meta({
-  id: 'FullIndex',
-})
 export const Api = {
   _PARAMS: /* @__PURE__ */ empty,
   _CHILDREN: {
@@ -4208,6 +4891,26 @@ export const Api = {
             },
           },
         },
+        token: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            create: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                CreateTokenParams,
+              ),
+              _RETURN: /* @__PURE__ */ CreatedToken,
+            },
+          },
+        },
       },
     },
     backup: {
@@ -4236,6 +4939,10 @@ export const Api = {
                   _RETURN: /* @__PURE__ */ z.record(z.string(), BackupTarget),
                 },
               },
+            },
+            convert: {
+              _PARAMS: /* @__PURE__ */ ConvertParams,
+              _RETURN: /* @__PURE__ */ z.null(),
             },
             'delete-legacy': {
               _PARAMS: /* @__PURE__ */ DeleteLegacyParams,
@@ -4707,6 +5414,31 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ ModifyNotificationParams,
           _RETURN: /* @__PURE__ */ z.null(),
         },
+        push: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            key: {
+              _PARAMS: /* @__PURE__ */ empty,
+              _RETURN: /* @__PURE__ */ z.string(),
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ empty,
+              _RETURN: /* @__PURE__ */ z.array(PushSubscription),
+            },
+            subscribe: {
+              _PARAMS: /* @__PURE__ */ PushSubscription,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            test: {
+              _PARAMS: /* @__PURE__ */ EndpointParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            unsubscribe: {
+              _PARAMS: /* @__PURE__ */ EndpointParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+          },
+        },
         remove: {
           _PARAMS: /* @__PURE__ */ ModifyNotificationParams,
           _RETURN: /* @__PURE__ */ z.null(),
@@ -4775,6 +5507,10 @@ export const Api = {
         'cancel-install': {
           _PARAMS: /* @__PURE__ */ CancelInstallParams,
           _RETURN: /* @__PURE__ */ z.null(),
+        },
+        exec: {
+          _PARAMS: /* @__PURE__ */ ExecParams,
+          _RETURN: /* @__PURE__ */ ExecResult,
         },
         host: {
           _PARAMS: /* @__PURE__ */ RequiresPackageId,
@@ -5077,7 +5813,7 @@ export const Api = {
                 add: {
                   _PARAMS: /* @__PURE__ */ z.intersection(
                     z.intersection(empty, RegistryUrlParams),
-                    SignerInfo,
+                    AddSignerParams,
                   ),
                   _RETURN: /* @__PURE__ */ Guid,
                 },
@@ -5227,6 +5963,24 @@ export const Api = {
                   ),
                 ),
                 SetNameParams,
+              ),
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            'set-trust-signers': {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  z.intersection(empty, RegistryUrlParams),
+                  z.intersection(
+                    object({
+                      format: wire(
+                        IoFormat.nullable().optional(),
+                        IoFormat.nullable(),
+                      ),
+                    }),
+                    empty,
+                  ),
+                ),
+                SetTrustSignersParams,
               ),
               _RETURN: /* @__PURE__ */ z.null(),
             },
@@ -5630,6 +6384,13 @@ export const Api = {
               ),
               _RETURN: /* @__PURE__ */ z.null(),
             },
+            sign: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(empty, RegistryUrlParams),
+                SignPackageParams,
+              ),
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
             signer: {
               _PARAMS: /* @__PURE__ */ z.intersection(empty, RegistryUrlParams),
               _CHILDREN: {
@@ -5992,6 +6753,39 @@ export const Api = {
           ),
           _RETURN: /* @__PURE__ */ TrustedCa,
         },
+        'trusted-keys': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            add: {
+              _PARAMS: /* @__PURE__ */ AddTrustedKeyParams,
+              _RETURN: /* @__PURE__ */ AddTrustedKeyRes,
+            },
+            'connect-registry': {
+              _PARAMS: /* @__PURE__ */ ConnectRegistryParams,
+              _RETURN: /* @__PURE__ */ z.array(z.string()),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ RemoveTrustedKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            'remove-many': {
+              _PARAMS: /* @__PURE__ */ RemoveTrustedKeysParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            'remove-registry': {
+              _PARAMS: /* @__PURE__ */ TrustedRegistryParams,
+              _RETURN: /* @__PURE__ */ z.array(z.string()),
+            },
+            'set-os-registry': {
+              _PARAMS: /* @__PURE__ */ TrustedRegistryParams,
+              _RETURN: /* @__PURE__ */ z.array(z.string()),
+            },
+            update: {
+              _PARAMS: /* @__PURE__ */ UpdateTrustedKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+          },
+        },
         update: {
           _PARAMS: /* @__PURE__ */ UpdateSystemParams,
           _RETURN: /* @__PURE__ */ UpdateSystemRes,
@@ -6158,4 +6952,62 @@ export const Api = {
       },
     },
   },
+}
+/**
+ * MCP tool descriptions of a schema tree's callable methods, the catalog
+ * `rpc_toolkit::mcp::McpServer` serves. Methods without bindings are omitted;
+ * an `outputSchema` describes object results only, as MCP requires.
+ */
+export function toolCatalog(tree: unknown): object[] {
+  type JsonSchema = {
+    type?: unknown
+    allOf?: unknown
+    $ref?: unknown
+    $defs?: { [name: string]: JsonSchema }
+    [keyword: string]: unknown
+  }
+  type Node = {
+    _PARAMS: z.ZodType
+    _RETURN?: z.ZodType
+    _CHILDREN?: { [name: string]: Node }
+    _OPAQUE?: true
+  }
+  const render = (schema: z.ZodType, io: 'input' | 'output'): JsonSchema => {
+    const rendered = z.toJSONSchema(schema, {
+      io,
+      unrepresentable: 'any',
+    }) as JsonSchema
+    const ref = rendered.$ref
+    const root =
+      typeof ref === 'string' && ref.startsWith('#/$defs/')
+        ? rendered.$defs?.[ref.slice('#/$defs/'.length)]
+        : undefined
+    if (!root) return rendered
+    const { $ref, ...rest } = rendered
+    return { ...rest, ...root }
+  }
+  const isObject = (schema: JsonSchema) =>
+    schema.type === 'object' ||
+    (schema.type === undefined && Array.isArray(schema.allOf))
+  const tools: object[] = []
+  const walk = (node: Node, path: string[]) => {
+    if (path.length && node._RETURN && !node._OPAQUE) {
+      const input = render(node._PARAMS, 'input')
+      if (input.type === undefined || input.type === 'object') {
+        const output = render(node._RETURN, 'output')
+        tools.push({
+          name: path.join('.'),
+          inputSchema: { ...input, type: 'object' },
+          ...(isObject(output)
+            ? { outputSchema: { ...output, type: 'object' } }
+            : {}),
+        })
+      }
+    }
+    for (const [name, child] of Object.entries(node._CHILDREN ?? {})) {
+      walk(child, [...path, name])
+    }
+  }
+  walk(tree as Node, [])
+  return tools
 }

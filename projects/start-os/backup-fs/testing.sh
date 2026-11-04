@@ -22,7 +22,7 @@ TEST_DATA_DIR=$(mktemp --directory)
 TEST_DIR=$(mktemp --directory)
 
 cd /code/libfuse/build/test
-RUST_LOG=debug /code/backupfs/target/release/startos-backup-fs mount "$TEST_DATA_DIR" "$TEST_DIR" --password ohea
+printf %s ohea | RUST_LOG=debug /code/backupfs/target/release/startos-backup-fs mount "$TEST_DATA_DIR" "$TEST_DIR"
 ./test_syscalls "$TEST_DIR"
 TEST_FAILED=$(( $? | $TEST_FAILED ))
 umount "$TEST_DIR"

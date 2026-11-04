@@ -4,7 +4,7 @@
 .SH NAME
 start\-registry\-os\-promote \- Promote an OS version from one registry to another
 .SH SYNOPSIS
-\fBstart\-registry os promote\fR [\fB\-\-from\fR] [\fB\-\-to\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIVERSION\fR> 
+\fBstart\-registry os promote\fR [\fB\-\-from\fR] [\fB\-\-to\fR] [\fB\-\-expected\-git\-hash\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIVERSION\fR> 
 .SH DESCRIPTION
 Promote an OS version from one registry to another
 .SH OPTIONS
@@ -14,6 +14,9 @@ Source registry URL to promote from
 .TP
 \fB\-\-to\fR \fI<TO>\fR
 Destination registry URL to promote to
+.TP
+\fB\-\-expected\-git\-hash\fR \fI<EXPECTED_GIT_HASH>\fR
+Reject the operation if the indexed OS commit has changed
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

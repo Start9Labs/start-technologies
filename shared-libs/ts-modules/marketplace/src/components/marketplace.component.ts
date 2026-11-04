@@ -213,10 +213,6 @@ const ICONS: Record<string, string> = {
       margin: 1rem 2rem 0;
     }
 
-    .scroll {
-      min-inline-size: calc(var(--card-min) + 2 * 2rem);
-    }
-
     [tuiHeader] {
       position: sticky;
       top: 0;
@@ -230,14 +226,13 @@ const ICONS: Record<string, string> = {
       padding: 0 2rem 1rem;
       display: grid;
       gap: 1rem;
-      grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+      grid-template-columns: repeat(
+        auto-fill,
+        minmax(min(100%, var(--card-min)), 1fr)
+      );
     }
 
     :host-context(tui-root._mobile) {
-      .scroll {
-        min-inline-size: calc(var(--card-min) + 2 * 1rem);
-      }
-
       :is([tuiHeader], section) {
         padding-inline: 1rem;
       }
@@ -307,8 +302,6 @@ export class MarketplaceComponent {
     return url ? registryWarning(url) : null
   })
 
-  // Only categories that have at least one package are shown; 'all' is the
-  // always-present pseudo-category injected by each app's service.
   protected readonly categories = computed(() => {
     const info = this.current()?.info?.categories
     if (!info) return undefined
@@ -322,8 +315,7 @@ export class MarketplaceComponent {
     )
   })
 
-  // The selected category may be absent from the current registry (e.g. after
-  // switching registries); fall back to 'all' so the grid is never stuck empty.
+  // Registry switches can leave the selected category unavailable.
   protected readonly effectiveCategory = computed(() => {
     const cats = this.categories()
     const cat = this.category()

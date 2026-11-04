@@ -1,0 +1,1 @@
+- Beim Wechsel des Sicherheitsprofils eines Ethernet-Ports erscheint eine Bestätigung mit Hinweisen zum erneuten Verbinden von Geräten, die dadurch die Verbindung verlieren, etwa Geräte hinter einem Switch.

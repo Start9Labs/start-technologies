@@ -1,0 +1,25 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-registry-package-sign 1  "sign "
+.SH NAME
+start\-cli\-registry\-package\-sign \- Add your signature to a package in the registry index
+.SH SYNOPSIS
+\fBstart\-cli registry package sign\fR [\fB\-\-no\-verify\fR] [\fB\-\-id\fR] [\fB\-\-version\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIFILE\fR]
+.SH DESCRIPTION
+Add your signature to a package in the registry index
+.SH OPTIONS
+.TP
+\fB\-\-no\-verify\fR
+Sign the commitments the registry lists instead of a local s9pk
+.TP
+\fB\-\-id\fR \fI<ID>\fR
+Package identifier
+.TP
+\fB\-\-version\fR \fI<VERSION>\fR
+Package version
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+[\fIFILE\fR]
+Path to s9pk package file

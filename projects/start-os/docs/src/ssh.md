@@ -38,7 +38,7 @@ At the password prompt, enter the StartOS master password you use to sign in to 
 
 Once connected, the command prompt typically begins with `start9@` followed by your server's hostname.
 
-If `Connection closed` appears before this prompt, you are not connected. Check the server hostname, confirm that its StartOS web interface is reachable from the same computer, and try again. If it continues, copy the complete command and output and [contact Start9 support](https://start9.com/contact).
+If `Connection closed` appears before this prompt, you are not connected. Check the server hostname, confirm that its StartOS web interface is reachable from the same computer, and try again. If it continues, copy the complete command and its output, and [get help](https://start9.com/help).
 
 ## Connect with an SSH key
 

@@ -29,7 +29,6 @@ use crate::notifications::{NotificationLevel, Notifications, notify};
 use crate::prelude::*;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::s9pk::v2::compat::migrated_version;
-use crate::s9pk::v2::pack::CONTAINER_TOOL;
 use crate::ssh::{SshKeys, SshPubKey};
 use crate::util::Invoke;
 use crate::util::io::write_file_atomic;
@@ -306,12 +305,16 @@ impl VersionT for Version {
                         onion_addr.as_str().into(),
                         Value::String(encoded_key.clone().into()),
                     );
-                    tor_migration.push_back(json!({
+                    let mut entry = json!({
                         "hostname": &onion_addr,
                         "packageId": migrated_id_str(package_id),
                         "hostId": host_id,
                         "key": &encoded_key,
-                    }));
+                    });
+                    if let Some(ports) = onion_ports(&prev_package_data, package_id, host_id) {
+                        entry["ports"] = ports;
+                    }
+                    tor_migration.push_back(entry);
                 }
                 value["keyStore"]["onion"] = onion_map;
             }
@@ -416,25 +419,6 @@ impl VersionT for Version {
                 "/media/startos/data/package-data/volumes/fedimint-guardian",
             )
             .await?;
-        }
-
-        // Load bundled migration images (start9/compat, start9/utils,
-        // tonistiigi/binfmt) so the v1->v2 s9pk conversion doesn't need
-        // internet access.
-        let migration_images_dir = Path::new("/usr/lib/startos/migration-images");
-        if let Ok(mut entries) = tokio::fs::read_dir(migration_images_dir).await {
-            while let Some(entry) = entries.next_entry().await? {
-                let path = entry.path();
-                if path.extension() == Some(OsStr::new("tar")) {
-                    tracing::info!("Loading migration image: {}", path.display());
-                    Command::new(*CONTAINER_TOOL)
-                        .arg("load")
-                        .arg("-i")
-                        .arg(&path)
-                        .invoke(crate::ErrorKind::Docker)
-                        .await?;
-                }
-            }
         }
 
         // title, plus the error when nothing else has reported it
@@ -795,6 +779,26 @@ async fn previous_ssh_keys(pg: &sqlx::Pool<sqlx::Postgres>) -> Result<SshKeys, E
     Ok(ssh_keys)
 }
 
+/// The onion-to-container port pairs an interface's Tor address served on
+/// 0.3.5. `None` when the package's manifest is absent.
+fn onion_ports(package_data: &Value, package_id: &str, interface_id: &str) -> Option<Value> {
+    let interfaces = package_data[package_id]["installed"]["manifest"]["interfaces"].as_object()?;
+    Some(Value::Array(
+        interfaces
+            .get(interface_id)
+            .and_then(|i| i["tor-config"]["port-mapping"].as_object())
+            .into_iter()
+            .flatten()
+            .filter_map(|(external, internal)| {
+                Some(json!({
+                    "externalPort": external.parse::<u16>().ok()?,
+                    "internalPort": internal.as_str()?.parse::<u16>().ok()?,
+                }))
+            })
+            .collect(),
+    ))
+}
+
 /// Returns deduplicated map of `(package_id, host_id) -> expanded_key`.
 /// Server key uses `("start-os", "admin")` — the StartOS UI's service-model
 /// identity (see `PackageId::start_os` / `HostId::admin`).
@@ -903,4 +907,163 @@ fn onion_address_from_key(expanded_key: &[u8; 64]) -> String {
     raw[34] = 0x03; // version
 
     base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &raw).to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod test {
+    use imbl_value::json;
+
+    use super::*;
+
+    fn package_data() -> Value {
+        json!({
+            "gitea": { "installed": { "manifest": { "interfaces": {
+                "main": {
+                    "tor-config": { "port-mapping": { "22": "22", "80": "3000" } },
+                    "lan-config": { "443": { "ssl": true, "internal": 3000 } },
+                },
+                "lan-only": { "lan-config": { "443": { "ssl": true, "internal": 8080 } } },
+            } } } },
+        })
+    }
+
+    #[test]
+    fn an_interface_hands_over_the_ports_its_onion_served() {
+        assert_eq!(
+            onion_ports(&package_data(), "gitea", "main"),
+            Some(json!([
+                { "externalPort": 22, "internalPort": 22 },
+                { "externalPort": 80, "internalPort": 3000 },
+            ])),
+        );
+    }
+
+    #[test]
+    fn an_interface_without_tor_hands_over_no_ports() {
+        assert_eq!(
+            onion_ports(&package_data(), "gitea", "lan-only"),
+            Some(json!([])),
+        );
+    }
+
+    #[test]
+    fn an_address_without_a_manifest_hands_over_nothing() {
+        assert_eq!(onion_ports(&package_data(), "start-os", "admin"), None);
+    }
+
+    #[tokio::test]
+    async fn a_0_3_5_1_database_migrates_to_current() {
+        use openssl::hash::MessageDigest;
+        use patch_db::json_ptr::ROOT;
+
+        use crate::util::crypto::ed25519_expand_key;
+        use crate::version::Current;
+
+        let account = AccountInfo::new("password", std::time::SystemTime::now(), None).unwrap();
+        let server_key = ed25519_expand_key(&[1; 32]);
+        let tor_address = format!("https://{}.onion/", onion_address_from_key(&server_key));
+        let ca_fingerprint = account
+            .root_ca_cert
+            .digest(MessageDigest::sha256())
+            .unwrap()
+            .iter()
+            .map(|x| format!("{x:X}"))
+            .join(":");
+        let pubkey = account.ssh_key.public_key().to_openssh().unwrap();
+        let mut db: Value = serde_json::from_str(
+            r#"{
+                "server-info": {
+                    "arch": "x86_64",
+                    "platform": "x86_64-nonfree",
+                    "id": null,
+                    "hostname": "adjective-noun",
+                    "version": "0.3.5.1",
+                    "last-backup": null,
+                    "last-wifi-region": null,
+                    "eos-version-compat": ">=0.3.0 <=0.3.5.1",
+                    "lan-address": "https://adjective-noun.local/",
+                    "tor-address": null,
+                    "ip-info": { "eth0": {
+                        "ipv4-range": "192.168.1.0/24",
+                        "ipv4": "192.168.1.10",
+                        "ipv6-range": null,
+                        "ipv6": null
+                    } },
+                    "status-info": {
+                        "backup-progress": null,
+                        "updated": false,
+                        "update-progress": null,
+                        "shutting-down": false,
+                        "restarting": false
+                    },
+                    "wifi": { "ssids": [], "selected": null, "connected": null },
+                    "unread-notification-count": 0,
+                    "connection-addresses": { "tor": [], "clearnet": [] },
+                    "password-hash": null,
+                    "pubkey": null,
+                    "ca-fingerprint": null,
+                    "ntp-synced": true,
+                    "zram": true,
+                    "governor": null
+                },
+                "package-data": null,
+                "ui": {
+                    "name": null,
+                    "ack-welcome": "0.3.5.1",
+                    "marketplace": {
+                        "selected-url": "https://registry.start9.com/",
+                        "known-hosts": {
+                            "https://registry.start9.com/": {},
+                            "https://community-registry.start9.com/": {}
+                        }
+                    },
+                    "dev": {},
+                    "gaming": { "snake": { "high-score": 0 } },
+                    "ack-instructions": {},
+                    "theme": "Dark",
+                    "widgets": []
+                }
+            }"#,
+        )
+        .unwrap();
+        let server_info = &mut db["server-info"];
+        server_info["id"] = json!(account.server_id);
+        server_info["tor-address"] = json!(tor_address);
+        server_info["password-hash"] = json!(account.password);
+        server_info["pubkey"] = json!(pubkey);
+        server_info["ca-fingerprint"] = json!(ca_fingerprint);
+        db["package-data"] = package_data();
+        let tor_keys = BTreeMap::from([
+            (("start-os".to_owned(), "admin".to_owned()), server_key),
+            (
+                ("gitea".to_owned(), "main".to_owned()),
+                ed25519_expand_key(&[2; 32]),
+            ),
+        ]);
+
+        let res = v0_3_5_2::Version.up(&mut db, ()).unwrap();
+        v0_3_5_2::Version.commit(&mut db, res).unwrap();
+        let res = Version
+            .up(
+                &mut db,
+                (account, SshKeys::new(), CifsTargets::default(), tor_keys),
+            )
+            .unwrap();
+        Version.commit(&mut db, res).unwrap();
+        let store = PatchDb::in_memory();
+        store.put(&ROOT, &db).await.unwrap();
+        Current::default().pre_init(&store).await.unwrap();
+
+        let migrated = store.dump(&ROOT).await.value;
+        assert_eq!(
+            migrated["public"]["serverInfo"]["version"],
+            to_value(&Current::default().semver()).unwrap()
+        );
+        assert_eq!(
+            migrated["private"]["sessions"],
+            json!({ "pubkeys": {}, "tokens": {} })
+        );
+        Current::default().pre_init(&store).await.unwrap();
+        assert_eq!(store.dump(&ROOT).await.value, migrated);
+    }
 }
