@@ -267,6 +267,7 @@ mod tests {
                 .unwrap();
         let historical =
             legacy::individual_keys(&legacy::historical_keyrings(), Utc::now()).unwrap();
+        fixture["public"]["serverInfo"]["version"] = imbl_value::json!("0.4.1.2");
         fixture["public"]["serverInfo"]["trustedKeys"] = to_value(&historical).unwrap();
         fixture["public"]["serverInfo"]["latestMigrationRevision"] = imbl_value::json!(1);
         let db = patch_db::PatchDb::in_memory();
@@ -284,7 +285,7 @@ mod tests {
         }
         assert_eq!(
             migrated["public"]["serverInfo"]["latestMigrationRevision"],
-            imbl_value::json!(Version.migration_revision())
+            imbl_value::json!(super::super::Current::default().migration_revision())
         );
     }
 

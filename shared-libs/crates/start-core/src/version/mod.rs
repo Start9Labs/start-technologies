@@ -942,6 +942,18 @@ mod tests {
             (
                 "0.4.1.2",
                 0,
+                json!({ "0.4.1.2": null, "0.4.2": null }),
+                to_value(&crate::trusted_keys::initial_trusted_keys()).unwrap(),
+            ),
+            (
+                "0.4.1.2",
+                1,
+                json!({ "0.4.1.2": null, "0.4.2": null }),
+                to_value(&crate::trusted_keys::initial_trusted_keys()).unwrap(),
+            ),
+            (
+                "0.4.1.2",
+                2,
                 json!({ "0.4.2": null }),
                 to_value(&crate::trusted_keys::initial_trusted_keys()).unwrap(),
             ),
@@ -973,7 +985,10 @@ mod tests {
             assert_eq!(db["public"]["packageData"], packages);
             rollback_to_unchecked(&current, &previous, &mut db).unwrap();
             assert_eq!(db["public"]["serverInfo"]["version"], json!(from));
-            assert_eq!(applied_migration_revision(&mut db).unwrap(), revision);
+            assert_eq!(
+                applied_migration_revision(&mut db).unwrap(),
+                previous.migration_revision()
+            );
             assert_eq!(db["private"], private);
             assert_eq!(db["public"]["packageData"], packages);
         }
