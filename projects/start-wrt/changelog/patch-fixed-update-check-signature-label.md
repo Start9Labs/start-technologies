@@ -1,5 +1,5 @@
 ---
-user-facing: true
+release-notes: true
 ---
 
 - The router finds updates from registries running start-registry 1.2.0 or later.

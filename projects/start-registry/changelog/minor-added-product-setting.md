@@ -1,5 +1,5 @@
 ---
-user-facing: true
+release-notes: true
 ---
 
 - A registry's `product` setting (`startos` or `startwrt`) names the operating system whose releases it serves. `startwrt: true` still selects StartWRT.
