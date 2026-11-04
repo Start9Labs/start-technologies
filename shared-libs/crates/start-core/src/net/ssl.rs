@@ -19,7 +19,7 @@ use openssl::x509::extension::{
     AuthorityKeyIdentifier, BasicConstraints, KeyUsage, SubjectAlternativeName,
     SubjectKeyIdentifier,
 };
-use openssl::x509::{X509, X509Builder, X509NameBuilder, X509Ref};
+use openssl::x509::{X509, X509Builder, X509NameBuilder, X509NameRef, X509Ref};
 use openssl::*;
 use patch_db::HasModel;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
@@ -34,8 +34,8 @@ use visit_rs::Visit;
 use crate::SOURCE_DATE;
 use crate::account::AccountInfo;
 use crate::context::{CliContext, RpcContext};
-use crate::db::model::Database;
 use crate::db::model::public::IpInfo;
+use crate::db::model::{Database, DatabaseModel};
 use crate::db::{DbAccess, DbAccessMut};
 use crate::init::check_time_is_synchronized;
 use crate::net::gateway::GatewayInfo;
@@ -135,6 +135,21 @@ impl CertStore {
     }
 }
 impl Model<CertStore> {
+    /// Replaces the root, issuing a fresh intermediate and discarding every leaf.
+    pub fn install_root(
+        &mut self,
+        root_key: &PKey<Private>,
+        root_cert: &X509,
+        branding: &CertBranding,
+    ) -> Result<(), Error> {
+        let int_key = gen_nistp256()?;
+        let int_cert = make_int_cert((root_key, root_cert), &int_key, branding)?;
+        self.as_root_key_mut().ser(Der64::new_ref(root_key))?;
+        self.as_root_cert_mut().ser(Pem::new_ref(root_cert))?;
+        self.as_int_key_mut().ser(&Der64(int_key))?;
+        self.as_int_cert_mut().ser(&Pem(int_cert))?;
+        self.as_leaves_mut().ser(&BTreeMap::new())
+    }
     /// The caller must establish entitlement to every requested name.
     pub fn cert_for(
         &mut self,
@@ -357,34 +372,71 @@ fn append_self_signed_key_identifiers(
     builder.append_extension(authority_key_identifier)
 }
 
+pub fn repair_root_cert(db: &mut DatabaseModel) -> Result<(), Error> {
+    let store = db.as_private().as_key_store().as_local_certs();
+    let root_key = store.as_root_key().de()?.0;
+    let Some(root_cert) = reissue_root_cert(&root_key, &store.as_root_cert().de()?.0)? else {
+        return Ok(());
+    };
+    let hostname = db.as_public().as_server_info().as_hostname().de()?;
+    db.as_private_mut()
+        .as_key_store_mut()
+        .as_local_certs_mut()
+        .install_root(&root_key, &root_cert, &CertBranding::start_os(&hostname))?;
+    db.as_public_mut()
+        .as_server_info_mut()
+        .as_ca_fingerprint_mut()
+        .ser(&x509_sha256_fingerprint(&root_cert)?)
+}
+
 #[instrument(skip_all)]
 pub fn make_root_cert(
     root_key: &PKey<Private>,
     branding: &CertBranding,
     start_time: SystemTime,
 ) -> Result<X509, Error> {
-    let mut builder = X509Builder::new()?;
-    builder.set_version(CERTIFICATE_VERSION)?;
-
     let unix_start_time = unix_time(start_time);
-
-    let embargo = Asn1Time::from_unix(unix_start_time - 86400)?;
-    builder.set_not_before(&embargo)?;
-
-    let expiration = Asn1Time::from_unix(unix_start_time + (10 * 364 * 86400))?;
-    builder.set_not_after(&expiration)?;
-
-    builder.set_serial_number(&*rand_serial()?)?;
-
     let mut subject_name_builder = X509NameBuilder::new()?;
     subject_name_builder.append_entry_by_text("CN", &branding.root_ca_cn)?;
     subject_name_builder.append_entry_by_text("O", &branding.organization)?;
     subject_name_builder.append_entry_by_text("OU", &branding.organizational_unit)?;
-    let subject_name = subject_name_builder.build();
-    builder.set_subject_name(&subject_name)?;
+    build_root_cert(
+        root_key,
+        &subject_name_builder.build(),
+        &Asn1Time::from_unix(unix_start_time - 86400)?,
+        &Asn1Time::from_unix(unix_start_time + (10 * 364 * 86400))?,
+    )
+}
 
-    builder.set_issuer_name(&subject_name)?;
+/// Keeps the key, subject and validity; `None` unless the authority key identifier lacks a key ID.
+fn reissue_root_cert(root_key: &PKey<Private>, root: &X509Ref) -> Result<Option<X509>, Error> {
+    if root.authority_key_id().is_some()
+        || (root.authority_issuer().is_none() && root.authority_serial().is_none())
+    {
+        return Ok(None);
+    }
+    build_root_cert(
+        root_key,
+        root.subject_name(),
+        root.not_before(),
+        root.not_after(),
+    )
+    .map(Some)
+}
 
+fn build_root_cert(
+    root_key: &PKey<Private>,
+    subject_name: &X509NameRef,
+    not_before: &Asn1TimeRef,
+    not_after: &Asn1TimeRef,
+) -> Result<X509, Error> {
+    let mut builder = X509Builder::new()?;
+    builder.set_version(CERTIFICATE_VERSION)?;
+    builder.set_not_before(not_before)?;
+    builder.set_not_after(not_after)?;
+    builder.set_serial_number(&*rand_serial()?)?;
+    builder.set_subject_name(subject_name)?;
+    builder.set_issuer_name(subject_name)?;
     builder.set_pubkey(&root_key)?;
 
     // Extensions
@@ -436,11 +488,8 @@ pub fn make_int_cert(
 
     // subjectKeyIdentifier = hash
     let subject_key_identifier = SubjectKeyIdentifier::new().build(&ctx)?;
-    // authorityKeyIdentifier = keyid:always,issuer:always
-    let authority_key_identifier = AuthorityKeyIdentifier::new()
-        .keyid(true)
-        .issuer(true)
-        .build(&ctx)?;
+    // authorityKeyIdentifier = keyid:always
+    let authority_key_identifier = AuthorityKeyIdentifier::new().keyid(true).build(&ctx)?;
     // basicConstraints = critical, CA:true
     let basic_constraints = BasicConstraints::new().critical().ca().pathlen(0).build()?;
     // keyUsage = critical, digitalSignature, cRLSign, keyCertSign
@@ -896,7 +945,112 @@ mod self_signed_cert_tests {
             intermediate.authority_key_id().unwrap().as_slice(),
             root.subject_key_id().unwrap().as_slice()
         );
+        assert!(intermediate.authority_issuer().is_none());
         assert!(intermediate.verify(&key).unwrap());
+    }
+
+    fn root_with_issuer_only_authority_key_identifier(key: &PKey<Private>) -> X509 {
+        let mut builder = X509Builder::new().unwrap();
+        builder.set_version(CERTIFICATE_VERSION).unwrap();
+        builder
+            .set_not_before(&Asn1Time::days_from_now(0).unwrap())
+            .unwrap();
+        builder
+            .set_not_after(&Asn1Time::days_from_now(3640).unwrap())
+            .unwrap();
+        builder.set_serial_number(&*rand_serial().unwrap()).unwrap();
+        let mut name = X509NameBuilder::new().unwrap();
+        name.append_entry_by_text("CN", "test Local Root CA")
+            .unwrap();
+        let name = name.build();
+        builder.set_subject_name(&name).unwrap();
+        builder.set_issuer_name(&name).unwrap();
+        builder.set_pubkey(key).unwrap();
+        let cfg = conf::Conf::new(conf::ConfMethod::default()).unwrap();
+        let aki = AuthorityKeyIdentifier::new()
+            .keyid(false)
+            .issuer(true)
+            .build(&builder.x509v3_context(None, Some(&cfg)))
+            .unwrap();
+        let ski = SubjectKeyIdentifier::new()
+            .build(&builder.x509v3_context(None, Some(&cfg)))
+            .unwrap();
+        builder.append_extension(ski).unwrap();
+        builder.append_extension(aki).unwrap();
+        builder
+            .append_extension(BasicConstraints::new().critical().ca().build().unwrap())
+            .unwrap();
+        builder.sign(key, MessageDigest::sha256()).unwrap();
+        builder.build()
+    }
+
+    fn verifies_under(anchor: &X509, chain: &[&X509], leaf: &X509) -> bool {
+        let mut store = openssl::x509::store::X509StoreBuilder::new().unwrap();
+        store.add_cert(anchor.clone()).unwrap();
+        let store = store.build();
+        let mut untrusted = openssl::stack::Stack::new().unwrap();
+        for cert in chain {
+            untrusted.push((*cert).clone()).unwrap();
+        }
+        openssl::x509::X509StoreContext::new()
+            .unwrap()
+            .init(&store, leaf, &untrusted, |ctx| ctx.verify_cert())
+            .unwrap()
+    }
+
+    #[test]
+    fn reissued_root_is_anchored_by_the_root_it_replaces() {
+        let key = gen_nistp256().unwrap();
+        let old = root_with_issuer_only_authority_key_identifier(&key);
+        assert!(old.authority_key_id().is_none());
+
+        let root = reissue_root_cert(&key, &old).unwrap().unwrap();
+        assert_self_signed_identifiers(&root, &key);
+        assert_eq!(
+            root.subject_name().to_der().unwrap(),
+            old.subject_name().to_der().unwrap()
+        );
+        assert_eq!(root.not_before(), old.not_before());
+        assert_eq!(root.not_after(), old.not_after());
+        assert_ne!(
+            root.serial_number().to_bn().unwrap(),
+            old.serial_number().to_bn().unwrap()
+        );
+
+        let branding = CertBranding::start_os("test");
+        let int_key = gen_nistp256().unwrap();
+        let int = make_int_cert((&key, &root), &int_key, &branding).unwrap();
+        let leaf = make_leaf_cert(
+            (&int_key, &int),
+            (
+                &gen_nistp256().unwrap(),
+                &SANInfo::new(&BTreeSet::from([InternedString::intern("test.local")])),
+            ),
+            &branding,
+        )
+        .unwrap();
+        assert!(verifies_under(&old, &[&int, &root], &leaf));
+        assert!(verifies_under(&root, &[&int], &leaf));
+    }
+
+    #[test]
+    fn roots_with_a_key_id_or_no_authority_key_identifier_are_kept() {
+        let key = gen_nistp256().unwrap();
+        let conforming =
+            make_root_cert(&key, &CertBranding::start_os("test"), SystemTime::now()).unwrap();
+        assert!(reissue_root_cert(&key, &conforming).unwrap().is_none());
+
+        let mut builder = X509Builder::new().unwrap();
+        builder.set_version(CERTIFICATE_VERSION).unwrap();
+        builder
+            .set_not_before(&Asn1Time::days_from_now(0).unwrap())
+            .unwrap();
+        builder
+            .set_not_after(&Asn1Time::days_from_now(3640).unwrap())
+            .unwrap();
+        builder.set_pubkey(&key).unwrap();
+        builder.sign(&key, MessageDigest::sha256()).unwrap();
+        assert!(reissue_root_cert(&key, &builder.build()).unwrap().is_none());
     }
 
     #[test]
