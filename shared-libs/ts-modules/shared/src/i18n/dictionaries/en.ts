@@ -957,4 +957,12 @@ export const ENGLISH: Record<string, number> = {
   'Checking package signatures': 1104,
   'Enabled for service packages': 1105,
   'Enabled for StartOS updates': 1106,
+  'Download sharing': 1107,
+  'Continue seeding': 1108,
+  'Retain verified BitTorrent downloads to share after installation and updates.': 1109,
+  "Peers can see your server's IP address and the torrents it shares.": 1110,
+  'Retained copies use additional disk space and remain until removed. Disabling continued seeding keeps those copies.': 1111,
+  'BitTorrent is disabled in the server configuration. Your sharing preference applies when BitTorrent is enabled.': 1112,
+  'Download settings could not be loaded.': 1113,
+  'Active BitTorrent downloads can already upload. This setting controls sharing after downloads finish.': 1114,
 }

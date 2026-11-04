@@ -956,4 +956,12 @@ export default {
   1104: 'Paketsignaturen werden geprüft',
   1105: 'Für Dienstpakete aktiviert',
   1106: 'Für StartOS-Updates aktiviert',
+  1107: 'Downloads teilen',
+  1108: 'Weiter seeden',
+  1109: 'Verifizierte BitTorrent-Downloads nach Installationen und Aktualisierungen zum Teilen aufbewahren.',
+  1110: 'Andere Teilnehmer können die IP-Adresse Ihres Servers und die geteilten Torrents sehen.',
+  1111: 'Aufbewahrte Kopien benötigen zusätzlichen Speicherplatz und bleiben bis zur Löschung erhalten. Das Deaktivieren des fortgesetzten Seedings behält diese Kopien bei.',
+  1112: 'BitTorrent ist in der Serverkonfiguration deaktiviert. Ihre Freigabeeinstellung gilt, sobald BitTorrent aktiviert ist.',
+  1113: 'Download-Einstellungen konnten nicht geladen werden.',
+  1114: 'Aktive BitTorrent-Downloads können bereits Daten hochladen. Diese Einstellung steuert das Teilen nach Abschluss der Downloads.',
 } satisfies i18n

@@ -956,4 +956,12 @@ export default {
   1104: 'Verificando las firmas del paquete',
   1105: 'Habilitada para paquetes de servicios',
   1106: 'Habilitada para actualizaciones de StartOS',
+  1107: 'Compartir descargas',
+  1108: 'Continuar compartiendo',
+  1109: 'Conservar las descargas verificadas de BitTorrent para compartirlas después de instalaciones y actualizaciones.',
+  1110: 'Otros participantes pueden ver la dirección IP de tu servidor y los torrents que comparte.',
+  1111: 'Las copias conservadas ocupan espacio adicional en disco y permanecen hasta que se eliminan. Desactivar la siembra continua conserva esas copias.',
+  1112: 'BitTorrent está deshabilitado en la configuración del servidor. Tu preferencia para compartir se aplicará cuando BitTorrent esté habilitado.',
+  1113: 'No se pudieron cargar los ajustes de descarga.',
+  1114: 'Las descargas activas de BitTorrent ya pueden subir datos. Este ajuste controla el uso compartido después de finalizar las descargas.',
 } satisfies i18n

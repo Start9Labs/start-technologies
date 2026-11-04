@@ -956,4 +956,12 @@ export default {
   1104: 'Vérification des signatures du paquet',
   1105: 'Activée pour les paquets de services',
   1106: 'Activée pour les mises à jour de StartOS',
+  1107: 'Partage des téléchargements',
+  1108: 'Continuer le partage',
+  1109: 'Conserver les téléchargements BitTorrent vérifiés pour les partager après les installations et les mises à jour.',
+  1110: 'Les autres participants peuvent voir l’adresse IP de votre serveur et les torrents qu’il partage.',
+  1111: 'Les copies conservées occupent de l’espace disque supplémentaire jusqu’à leur suppression. Désactiver le partage continu conserve ces copies.',
+  1112: 'BitTorrent est désactivé dans la configuration du serveur. Votre préférence de partage s’appliquera lorsque BitTorrent sera activé.',
+  1113: 'Impossible de charger les paramètres de téléchargement.',
+  1114: 'Les téléchargements BitTorrent actifs peuvent déjà envoyer des données. Ce réglage contrôle le partage après la fin des téléchargements.',
 } satisfies i18n

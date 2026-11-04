@@ -956,4 +956,12 @@ export default {
   1104: 'Sprawdzanie podpisów pakietu',
   1105: 'Włączony dla pakietów usług',
   1106: 'Włączony dla aktualizacji StartOS',
+  1107: 'Udostępnianie pobranych plików',
+  1108: 'Kontynuuj udostępnianie',
+  1109: 'Zachowuj zweryfikowane pliki pobrane przez BitTorrent, aby udostępniać je po instalacjach i aktualizacjach.',
+  1110: 'Inni uczestnicy mogą zobaczyć adres IP serwera oraz udostępniane przez niego torrenty.',
+  1111: 'Zachowane kopie zajmują dodatkowe miejsce na dysku i pozostają do czasu usunięcia. Wyłączenie dalszego udostępniania zachowuje te kopie.',
+  1112: 'BitTorrent jest wyłączony w konfiguracji serwera. Preferencja udostępniania zacznie obowiązywać po włączeniu BitTorrent.',
+  1113: 'Nie udało się wczytać ustawień pobierania.',
+  1114: 'Aktywne pobieranie przez BitTorrent może już wysyłać dane. To ustawienie steruje udostępnianiem po zakończeniu pobierania.',
 } satisfies i18n

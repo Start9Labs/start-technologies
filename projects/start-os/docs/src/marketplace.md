@@ -33,7 +33,7 @@ To use HTTP exclusively, set `bittorrent: false` in `/media/startos/config/confi
 
 ### Optional Seeding
 
-Continued seeding of completed, verified BitTorrent downloads is disabled by default. Enable it with:
+Continued seeding of completed, verified BitTorrent downloads is disabled by default. Enable **Continue seeding** under **System → Download sharing**, or use:
 
 ```sh
 start-cli server bittorrent set-seeding --enabled true
