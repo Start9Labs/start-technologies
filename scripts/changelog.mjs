@@ -90,16 +90,17 @@ function fragmentBody(path, body) {
 function parseFragment(path, data, requireMetadata = true) {
   const match = fragmentFilename(path)
   let body = decodeUtf8(data).trim()
-  let userFacing = null
-  const metadata = /^---\r?\nuser-facing: (true|false)\r?\n---(?:\r?\n|$)/.exec(
-    body,
-  )
-  if (metadata) {
-    userFacing = metadata[1] === 'true'
+  let releaseNotes = null
+  const metadata =
+    /^---\r?\n(release-notes|user-facing): (true|false)\r?\n---(?:\r?\n|$)/.exec(
+      body,
+    )
+  if (metadata && (!requireMetadata || metadata[1] === 'release-notes')) {
+    releaseNotes = metadata[2] === 'true'
     body = body.slice(metadata[0].length).trim()
   } else if (requireMetadata || body.startsWith('---')) {
     throw new Error(
-      `${path}: expected frontmatter with user-facing: true or false`,
+      `${path}: expected frontmatter with release-notes: true or false`,
     )
   }
   return {
@@ -108,7 +109,7 @@ function parseFragment(path, data, requireMetadata = true) {
     kind: match[2],
     data,
     body: fragmentBody(path, body),
-    userFacing,
+    releaseNotes,
     translations: new Map(),
   }
 }
@@ -502,7 +503,7 @@ function notesPath(product, version, locale = ENGLISH) {
 function noteLocales(product, version, fragments, ref) {
   const locales = new Set(
     fragments
-      .filter(fragment => fragment.userFacing)
+      .filter(fragment => fragment.releaseNotes)
       .flatMap(fragment => [...fragment.translations.keys()]),
   )
   for (const path of notePaths(product, ref)) {
@@ -559,8 +560,8 @@ function archivedNotePaths(product, ref = 'HEAD') {
   return [...paths].sort(compareText)
 }
 
-function hasAudienceMetadata(fragments) {
-  return fragments.some(fragment => fragment.userFacing !== null)
+function hasReleaseNotesMetadata(fragments) {
+  return fragments.some(fragment => fragment.releaseNotes !== null)
 }
 
 function localizedNotesSource(path, fallback, ref) {
@@ -581,10 +582,10 @@ function noteFraming(product, version, locale, ref) {
 function compileNotes(path, notes, fragments, locale = ENGLISH, ref) {
   const text = decodeUtf8(notes)
   const parts = text.split(HIGHLIGHTS_MARKER)
-  if (!hasAudienceMetadata(fragments) && parts.length === 1 && notes.length)
+  if (!hasReleaseNotesMetadata(fragments) && parts.length === 1 && notes.length)
     return notes
   const labels = releaseNoteLabels(ref)
-  const visible = fragments.filter(fragment => fragment.userFacing)
+  const visible = fragments.filter(fragment => fragment.releaseNotes)
   const security = visible.filter(fragment => fragment.kind === 'security')
   const securityHeading = `## ${releaseNoteLabel(labels, 'security-title', locale)}`
   const englishSecurityHeading = `## ${releaseNoteLabel(labels, 'security-title', ENGLISH)}`
@@ -879,7 +880,7 @@ function sync() {
     for (const [index, release] of releases.entries()) {
       if (release.product !== product) continue
       const fragments = ownedFragments(release, releases.slice(0, index))
-      if (!hasAudienceMetadata(fragments)) continue
+      if (!hasReleaseNotesMetadata(fragments)) continue
       for (const locale of [
         ENGLISH,
         ...noteLocales(product, release.version, fragments, release.commit),

@@ -287,6 +287,37 @@ export const ActionVisibility: z.ZodUnion<
   .meta({
     id: 'ActionVisibility',
   })
+
+/**
+ * Keys an import added, and keys it found already present.
+ */
+export const AddTrustedKeyRes: z.ZodObject<{
+  /**
+   * Trusted for packages.
+   */
+  added: z.ZodArray<z.ZodString>
+  /**
+   * GPG identities merged; explicit `trustFor` grants the requested permission.
+   */
+  existing: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({
+  /**
+   * Trusted for packages.
+   */
+  added: z.array(z.string()).meta({
+    description: 'Trusted for packages.',
+  }),
+  /**
+   * GPG identities merged; explicit `trustFor` grants the requested permission.
+   */
+  existing: z.array(z.string()).meta({
+    description:
+      'GPG identities merged; explicit `trustFor` grants the requested permission.',
+  }),
+}).meta({
+  id: 'AddTrustedKeyRes',
+  description: 'Keys an import added, and keys it found already present.',
+})
 export const Algorithm: z.ZodEnum<{ ecdsa: 'ecdsa'; ed25519: 'ed25519' }> =
   /* @__PURE__ */ z.enum(['ecdsa', 'ed25519']).meta({
     id: 'Algorithm',
@@ -489,6 +520,18 @@ export const ContactInfo: z.ZodUnion<
   .meta({
     id: 'ContactInfo',
   })
+
+/**
+ * Lifecycle of a daemon-owned conversion attempt.
+ */
+export const ConversionState: z.ZodEnum<{
+  running: 'running'
+  complete: 'complete'
+  failed: 'failed'
+}> = /* @__PURE__ */ z.enum(['running', 'complete', 'failed']).meta({
+  id: 'ConversionState',
+  description: 'Lifecycle of a daemon-owned conversion attempt.',
+})
 export const CountEntry: z.ZodObject<{ label: z.ZodString; count: z.ZodInt }> =
   /* @__PURE__ */ object({ label: z.string(), count: z.int() }).meta({
     id: 'CountEntry',
@@ -604,6 +647,22 @@ export const FileType: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['file', 'directory', 'infer']).meta({
   id: 'FileType',
 })
+
+/**
+ * Unauthenticated discovery hints; opening the store validates its actual state.
+ */
+export const FormatStatus: z.ZodEnum<{
+  legacy: 'legacy'
+  current: 'current'
+  interrupted: 'interrupted'
+  unknown: 'unknown'
+}> = /* @__PURE__ */ z
+  .enum(['legacy', 'current', 'interrupted', 'unknown'])
+  .meta({
+    id: 'FormatStatus',
+    description:
+      'Unauthenticated discovery hints; opening the store validates its actual state.',
+  })
 export const GatewayId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'GatewayId',
 })
@@ -775,6 +834,20 @@ export const GpgPublicKeyExport: z.ZodObject<{
    * Self-certified user IDs containing names, comments, and email addresses.
    */
   userIds: z.ZodArray<z.ZodString>
+  /**
+   * Self-certified claims indexed by the signing key's canonical DER encoding.
+   */
+  identities: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
+  >
+  /**
+   * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
+   */
+  keyFingerprints: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
+  >
 }> = /* @__PURE__ */ object({
   /**
    * Original armor, preserving all certificate packets and headers.
@@ -795,6 +868,26 @@ export const GpgPublicKeyExport: z.ZodObject<{
   userIds: z.array(z.string()).meta({
     description:
       'Self-certified user IDs containing names, comments, and email addresses.',
+  }),
+  /**
+   * Self-certified claims indexed by the signing key's canonical DER encoding.
+   */
+  identities: wire(
+    z.record(z.string(), z.array(z.string())).optional(),
+    z.record(z.string(), z.array(z.string())),
+  ).meta({
+    description:
+      "Self-certified claims indexed by the signing key's canonical DER encoding.",
+  }),
+  /**
+   * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
+   */
+  keyFingerprints: wire(
+    z.record(z.string(), z.array(z.string())).optional(),
+    z.record(z.string(), z.array(z.string())),
+  ).meta({
+    description:
+      "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
   }),
 }).meta({
   id: 'GpgPublicKeyExport',
@@ -1340,6 +1433,59 @@ export const RegistryAsset = <Commitment extends z.ZodType>(
   })
   return self
 }
+
+/**
+ * A key a connected registry newly offers, imported untrusted.
+ */
+export const RegistryKeyAdded: z.ZodIntersection<
+  z.ZodObject<{
+    kind: z.ZodCodec<
+      z.ZodOptional<z.ZodLiteral<'registry-key-added'>>,
+      z.ZodLiteral<'registry-key-added'>
+    >
+  }>,
+  z.ZodObject<{ registry: z.ZodString; key: z.ZodString }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      kind: wire(
+        z.literal('registry-key-added').optional(),
+        z.literal('registry-key-added'),
+      ),
+    }),
+    object({ registry: z.string(), key: z.string() }),
+  )
+  .meta({
+    id: 'RegistryKeyAdded',
+    description: 'A key a connected registry newly offers, imported untrusted.',
+  })
+
+/**
+ * A key a connected registry stopped offering; its trust is unchanged.
+ */
+export const RegistryKeyDropped: z.ZodIntersection<
+  z.ZodObject<{
+    kind: z.ZodCodec<
+      z.ZodOptional<z.ZodLiteral<'registry-key-dropped'>>,
+      z.ZodLiteral<'registry-key-dropped'>
+    >
+  }>,
+  z.ZodObject<{ registry: z.ZodString; key: z.ZodString }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      kind: wire(
+        z.literal('registry-key-dropped').optional(),
+        z.literal('registry-key-dropped'),
+      ),
+    }),
+    object({ registry: z.string(), key: z.string() }),
+  )
+  .meta({
+    id: 'RegistryKeyDropped',
+    description:
+      'A key a connected registry stopped offering; its trust is unchanged.',
+  })
 export const RemoveAssetParams: z.ZodObject<{
   version: z.ZodString
   platform: z.ZodString
@@ -1576,22 +1722,6 @@ export const ShutdownParams: z.ZodObject<{
 }).meta({
   id: 'ShutdownParams',
 })
-export const SideloadParams: z.ZodObject<{
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-}> = /* @__PURE__ */ object({
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Accepts an untrusted signer without skipping signature or integrity verification.',
-  }),
-}).meta({
-  id: 'SideloadParams',
-})
 
 /**
  * So a signal strength is a number between 0-100, I want the null option to be 0 since there is no signal
@@ -1683,6 +1813,10 @@ export const TaskSeverity: z.ZodEnum<{
 export const TimeInfo: z.ZodObject<{ now: z.ZodString; uptime: z.ZodInt }> =
   /* @__PURE__ */ object({ now: z.string(), uptime: z.int() }).meta({
     id: 'TimeInfo',
+  })
+export const TrustContext: z.ZodEnum<{ marketplace: 'marketplace'; os: 'os' }> =
+  /* @__PURE__ */ z.enum(['marketplace', 'os']).meta({
+    id: 'TrustContext',
   })
 export const TrustedOsUpdateSigner: z.ZodObject<{ label: z.ZodString }> =
   /* @__PURE__ */ object({ label: z.string() }).meta({
@@ -2023,10 +2157,18 @@ export const AddMirrorParams: z.ZodObject<{
   url: z.ZodString
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
 }> = /* @__PURE__ */ object({
   url: z.string(),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
 }).meta({
   id: 'AddMirrorParams',
 })
@@ -2034,10 +2176,18 @@ export const AddPackageParams: z.ZodObject<{
   urls: z.ZodArray<z.ZodString>
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
 }> = /* @__PURE__ */ object({
   urls: z.array(z.string()),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
 }).meta({
   id: 'AddPackageParams',
 })
@@ -2597,16 +2747,33 @@ export const EditSignerParams: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   addContact: z.ZodArray<typeof ContactInfo>
-  addKey: z.ZodArray<typeof AnyVerifyingKey>
+  addKey: z.ZodArray<z.ZodString>
   removeContact: z.ZodArray<typeof ContactInfo>
   removeKey: z.ZodArray<typeof AnyVerifyingKey>
+  /**
+   * Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.
+   */
+  removeGpgExport: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
 }> = /* @__PURE__ */ object({
   id: Guid,
   setName: wire(z.string().nullable().optional(), z.string().nullable()),
   addContact: z.array(ContactInfo),
-  addKey: z.array(AnyVerifyingKey),
+  addKey: z.array(z.string()),
   removeContact: z.array(ContactInfo),
   removeKey: z.array(AnyVerifyingKey),
+  /**
+   * Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.
+   */
+  removeGpgExport: wire(
+    z.array(z.string()).optional(),
+    z.array(z.string()),
+  ).meta({
+    description:
+      'Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.',
+  }),
 }).meta({
   id: 'EditSignerParams',
 })
@@ -3070,28 +3237,6 @@ export const InitAcmeParams: z.ZodObject<{
   contact: z.array(z.string()),
 }).meta({
   id: 'InitAcmeParams',
-})
-export const InstallParams: z.ZodObject<{
-  registry: z.ZodString
-  id: typeof PackageId
-  version: typeof Version
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-}> = /* @__PURE__ */ object({
-  registry: z.string(),
-  id: PackageId,
-  version: Version,
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Accepts an untrusted signer without skipping signature or integrity verification.',
-  }),
-}).meta({
-  id: 'InstallParams',
 })
 export const InstalledVersionParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
@@ -3751,6 +3896,21 @@ export const RebuildParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'RebuildParams',
   })
+export const RegistryIdentity: z.ZodObject<{
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  icon: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof DataUrl>>,
+    z.ZodNullable<typeof DataUrl>
+  >
+}> = /* @__PURE__ */ object({
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
+}).meta({
+  id: 'RegistryIdentity',
+})
 export const RemoveAcmeParams: z.ZodObject<{ provider: typeof AcmeProvider }> =
   /* @__PURE__ */ object({ provider: AcmeProvider }).meta({
     id: 'RemoveAcmeParams',
@@ -4008,14 +4168,35 @@ export const SignAssetParams: z.ZodObject<{
 }).meta({
   id: 'SignAssetParams',
 })
+export const SignPackageParams: z.ZodObject<{
+  id: typeof PackageId
+  version: typeof Version
+  commitment: typeof MerkleArchiveCommitment
+  signature: typeof AnySignature
+}> = /* @__PURE__ */ object({
+  id: PackageId,
+  version: Version,
+  commitment: MerkleArchiveCommitment,
+  signature: AnySignature,
+}).meta({
+  id: 'SignPackageParams',
+})
 export const SignerInfo: z.ZodObject<{
   name: z.ZodString
   contact: z.ZodArray<typeof ContactInfo>
   keys: z.ZodArray<typeof AnyVerifyingKey>
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
 }> = /* @__PURE__ */ object({
   name: z.string(),
   contact: z.array(ContactInfo),
   keys: z.array(AnyVerifyingKey),
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ),
 }).meta({
   id: 'SignerInfo',
 })
@@ -4095,10 +4276,15 @@ export const StartOsRecoveryInfo: z.ZodObject<{
   hostname: typeof ServerHostname
   version: z.ZodString
   timestamp: z.ZodString
+  formatStatus: z.ZodCodec<
+    z.ZodOptional<typeof FormatStatus>,
+    typeof FormatStatus
+  >
 }> = /* @__PURE__ */ object({
   hostname: ServerHostname,
   version: z.string(),
   timestamp: z.string(),
+  formatStatus: wire(FormatStatus.optional(), FormatStatus),
 }).meta({
   id: 'StartOsRecoveryInfo',
   description:
@@ -4146,61 +4332,6 @@ export const TestSmtpParams: z.ZodObject<{
   security: wire(SmtpSecurity.optional(), SmtpSecurity),
 }).meta({
   id: 'TestSmtpParams',
-})
-
-/**
- * A named keyring with independent service-package and OS-update trust.
- */
-export const TrustedKeyring: z.ZodObject<{
-  name: z.ZodString
-  /**
-   * Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
-   */
-  publicKeys: z.ZodArray<typeof AnyVerifyingKey>
-  /**
-   * Original GPG exports; signing trust is determined by `public_keys`.
-   */
-  gpgExports: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
-    z.ZodArray<typeof GpgPublicKeyExport>
-  >
-  /**
-   * False for built-in keyrings.
-   */
-  removable: z.ZodBoolean
-  marketplace: z.ZodBoolean
-  os: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  name: z.string(),
-  /**
-   * Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
-   */
-  publicKeys: z.array(AnyVerifyingKey).meta({
-    description:
-      'Ed25519 public keys encoded as padded standard Base64 DER in canonical order.',
-  }),
-  /**
-   * Original GPG exports; signing trust is determined by `public_keys`.
-   */
-  gpgExports: wire(
-    z.array(GpgPublicKeyExport).optional(),
-    z.array(GpgPublicKeyExport),
-  ).meta({
-    description:
-      'Original GPG exports; signing trust is determined by `public_keys`.',
-  }),
-  /**
-   * False for built-in keyrings.
-   */
-  removable: z.boolean().meta({
-    description: 'False for built-in keyrings.',
-  }),
-  marketplace: z.boolean(),
-  os: z.boolean(),
-}).meta({
-  id: 'TrustedKeyring',
-  description:
-    'A named keyring with independent service-package and OS-update trust.',
 })
 export const UmountParams: z.ZodObject<{
   targetId: z.ZodCodec<
@@ -4445,6 +4576,26 @@ export const CompatibleAlpnInfo: z.ZodUnion<
 > = /* @__PURE__ */ z.union([z.array(MaybeUtf8String), LegacyAlpnInfo]).meta({
   id: 'CompatibleAlpnInfo',
 })
+
+/**
+ * Latest observed conversion attempt for one target/server backup.
+ */
+export const ConversionJob: z.ZodObject<{
+  state: typeof ConversionState
+  progress: typeof FullProgress
+  error: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  state: ConversionState,
+  progress: FullProgress,
+  error: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'ConversionJob',
+  description:
+    'Latest observed conversion attempt for one target/server backup.',
+})
 export const CurrentDependencyInfo: z.ZodIntersection<
   z.ZodObject<{
     title: z.ZodCodec<
@@ -4594,6 +4745,36 @@ export const InitProgressRes: z.ZodObject<{
   guid: typeof Guid
 }> = /* @__PURE__ */ object({ progress: FullProgress, guid: Guid }).meta({
   id: 'InitProgressRes',
+})
+export const InstallParams: z.ZodObject<{
+  acceptSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
+    z.ZodNullable<typeof AcceptSigners>
+  >
+  registry: z.ZodString
+  id: typeof PackageId
+  version: typeof Version
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  acceptSigners: wire(
+    AcceptSigners.nullable().optional(),
+    AcceptSigners.nullable(),
+  ),
+  registry: z.string(),
+  id: PackageId,
+  version: Version,
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
+}).meta({
+  id: 'InstallParams',
 })
 export const MetadataSrc: z.ZodUnion<
   readonly [
@@ -4978,6 +5159,13 @@ export const RegistryInfo: z.ZodObject<{
     z.ZodNullable<typeof LocaleString>
   >
   categories: z.ZodRecord<z.ZodString, typeof Category>
+  /**
+   * Registry-selected signers, not an assertion of trust.
+   */
+  trustSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof SignerInfo>>,
+    z.ZodRecord<z.ZodString, typeof SignerInfo>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -4991,6 +5179,15 @@ export const RegistryInfo: z.ZodObject<{
     description: "Markdown, shown above the registry's services.",
   }),
   categories: z.record(z.string(), Category),
+  /**
+   * Registry-selected signers, not an assertion of trust.
+   */
+  trustSigners: wire(
+    z.record(z.string(), SignerInfo).optional(),
+    z.record(z.string(), SignerInfo),
+  ).meta({
+    description: 'Registry-selected signers, not an assertion of trust.',
+  }),
 }).meta({
   id: 'RegistryInfo',
 })
@@ -5006,36 +5203,6 @@ export const ResetPasswordParams: z.ZodObject<{
   ),
 }).meta({
   id: 'ResetPasswordParams',
-})
-export const ServerStatus: z.ZodObject<{
-  backupProgress: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof FullProgress>>,
-    z.ZodNullable<typeof FullProgress>
-  >
-  updateProgress: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof FullProgress>>,
-    z.ZodNullable<typeof FullProgress>
-  >
-  shuttingDown: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  restarting: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  restart: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof RestartReason>>,
-    z.ZodNullable<typeof RestartReason>
-  >
-}> = /* @__PURE__ */ object({
-  backupProgress: wire(
-    FullProgress.nullable().optional(),
-    FullProgress.nullable(),
-  ),
-  updateProgress: wire(
-    FullProgress.nullable().optional(),
-    FullProgress.nullable(),
-  ),
-  shuttingDown: wire(z.boolean().optional(), z.boolean()),
-  restarting: wire(z.boolean().optional(), z.boolean()),
-  restart: wire(RestartReason.nullable().optional(), RestartReason.nullable()),
-}).meta({
-  id: 'ServerStatus',
 })
 export const ServiceInterface: z.ZodObject<{
   id: typeof ServiceInterfaceId
@@ -5097,6 +5264,30 @@ export const SetupProgress: z.ZodObject<{
 }> = /* @__PURE__ */ object({ progress: FullProgress, guid: Guid }).meta({
   id: 'SetupProgress',
 })
+export const SideloadParams: z.ZodObject<{
+  acceptSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
+    z.ZodNullable<typeof AcceptSigners>
+  >
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  acceptSigners: wire(
+    AcceptSigners.nullable().optional(),
+    AcceptSigners.nullable(),
+  ),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
+}).meta({
+  id: 'SideloadParams',
+})
 export const Task: z.ZodObject<{
   packageId: typeof PackageId
   actionId: typeof ActionId
@@ -5122,6 +5313,94 @@ export const Task: z.ZodObject<{
   input: wire(TaskInput.nullable().optional(), TaskInput.nullable()),
 }).meta({
   id: 'Task',
+})
+
+/**
+ * Signing-key material and independent package and OS-update trust.
+ */
+export const TrustedKey: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * `manual`, or the base URL of the registry that first offered the key.
+   */
+  origin: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+  /**
+   * Registry identity recorded when this key was first imported.
+   */
+  originRegistry: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof RegistryIdentity>>,
+    z.ZodNullable<typeof RegistryIdentity>
+  >
+  publicKey: typeof AnyVerifyingKey
+  /**
+   * Original GPG exports; signing trust is determined by `public_key`.
+   */
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
+  /**
+   * Contact details registries publish for the key's signer.
+   */
+  contact: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof ContactInfo>>,
+    z.ZodArray<typeof ContactInfo>
+  >
+  addedAt: z.ZodString
+  /**
+   * False while a connected registry offers the key.
+   */
+  removable: z.ZodBoolean
+  marketplace: z.ZodBoolean
+  os: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * `manual`, or the base URL of the registry that first offered the key.
+   */
+  origin: wire(z.string().optional(), z.string()).meta({
+    description:
+      '`manual`, or the base URL of the registry that first offered the key.',
+  }),
+  /**
+   * Registry identity recorded when this key was first imported.
+   */
+  originRegistry: wire(
+    RegistryIdentity.nullable().optional(),
+    RegistryIdentity.nullable(),
+  ).meta({
+    description: 'Registry identity recorded when this key was first imported.',
+  }),
+  publicKey: AnyVerifyingKey,
+  /**
+   * Original GPG exports; signing trust is determined by `public_key`.
+   */
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ).meta({
+    description:
+      'Original GPG exports; signing trust is determined by `public_key`.',
+  }),
+  /**
+   * Contact details registries publish for the key's signer.
+   */
+  contact: wire(z.array(ContactInfo).optional(), z.array(ContactInfo)).meta({
+    description: "Contact details registries publish for the key's signer.",
+  }),
+  addedAt: z.string(),
+  /**
+   * False while a connected registry offers the key.
+   */
+  removable: z.boolean().meta({
+    description: 'False while a connected registry offers the key.',
+  }),
+  marketplace: z.boolean(),
+  os: z.boolean(),
+}).meta({
+  id: 'TrustedKey',
+  description:
+    'Signing-key material and independent package and OS-update trust.',
 })
 export const UpdateSystemParams: z.ZodObject<{
   registry: z.ZodString
@@ -5541,6 +5820,46 @@ export const PackageVersionInfo: z.ZodIntersection<
   .meta({
     id: 'PackageVersionInfo',
   })
+export const ServerStatus: z.ZodObject<{
+  backupProgress: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof FullProgress>>,
+    z.ZodNullable<typeof FullProgress>
+  >
+  backupConversions: z.ZodCodec<
+    z.ZodOptional<
+      z.ZodRecord<z.ZodString, z.ZodRecord<z.ZodString, typeof ConversionJob>>
+    >,
+    z.ZodRecord<z.ZodString, z.ZodRecord<z.ZodString, typeof ConversionJob>>
+  >
+  updateProgress: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof FullProgress>>,
+    z.ZodNullable<typeof FullProgress>
+  >
+  shuttingDown: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  restarting: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  restart: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof RestartReason>>,
+    z.ZodNullable<typeof RestartReason>
+  >
+}> = /* @__PURE__ */ object({
+  backupProgress: wire(
+    FullProgress.nullable().optional(),
+    FullProgress.nullable(),
+  ),
+  backupConversions: wire(
+    z.record(z.string(), z.record(z.string(), ConversionJob)).optional(),
+    z.record(z.string(), z.record(z.string(), ConversionJob)),
+  ),
+  updateProgress: wire(
+    FullProgress.nullable().optional(),
+    FullProgress.nullable(),
+  ),
+  shuttingDown: wire(z.boolean().optional(), z.boolean()),
+  restarting: wire(z.boolean().optional(), z.boolean()),
+  restart: wire(RestartReason.nullable().optional(), RestartReason.nullable()),
+}).meta({
+  id: 'ServerStatus',
+})
 export const SessionList: z.ZodObject<{
   current: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -5925,6 +6244,10 @@ export const FullIndex: z.ZodObject<{
   package: typeof PackageIndex
   os: typeof OsIndex
   signers: z.ZodRecord<z.ZodString, typeof SignerInfo>
+  trustSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof Guid>>,
+    z.ZodArray<typeof Guid>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -5935,6 +6258,7 @@ export const FullIndex: z.ZodObject<{
   package: PackageIndex,
   os: OsIndex,
   signers: z.record(z.string(), SignerInfo),
+  trustSigners: wire(z.array(Guid).optional(), z.array(Guid)),
 }).meta({
   id: 'FullIndex',
 })
@@ -6200,8 +6524,15 @@ export const ServerInfo: z.ZodObject<{
   >
   unreadNotificationCount: z.ZodInt
   trustedKeys: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof TrustedKeyring>>,
-    z.ZodRecord<z.ZodString, typeof TrustedKeyring>
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof TrustedKey>>,
+    z.ZodRecord<z.ZodString, typeof TrustedKey>
+  >
+  /**
+   * Last observed trust proposals from connected registries.
+   */
+  registryKeys: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<typeof AnyVerifyingKey>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<typeof AnyVerifyingKey>>
   >
   pubkey: z.ZodString
   caFingerprint: z.ZodString
@@ -6249,9 +6580,18 @@ export const ServerInfo: z.ZodObject<{
   statusInfo: wire(ServerStatus.optional(), ServerStatus),
   unreadNotificationCount: z.int(),
   trustedKeys: wire(
-    z.record(z.string(), TrustedKeyring).optional(),
-    z.record(z.string(), TrustedKeyring),
+    z.record(z.string(), TrustedKey).optional(),
+    z.record(z.string(), TrustedKey),
   ),
+  /**
+   * Last observed trust proposals from connected registries.
+   */
+  registryKeys: wire(
+    z.record(z.string(), z.array(AnyVerifyingKey)).optional(),
+    z.record(z.string(), z.array(AnyVerifyingKey)),
+  ).meta({
+    description: 'Last observed trust proposals from connected registries.',
+  }),
   pubkey: z.string(),
   caFingerprint: z.string(),
   ntpSynced: wire(z.boolean().optional(), z.boolean()),

@@ -4,10 +4,11 @@ import {
   computed,
   inject,
   input,
+  linkedSignal,
   signal,
   TemplateRef,
 } from '@angular/core'
-import { toSignal } from '@angular/core/rxjs-interop'
+import { toObservable, toSignal } from '@angular/core/rxjs-interop'
 import { Router } from '@angular/router'
 import {
   DialogService,
@@ -24,10 +25,10 @@ import {
   tuiHeaderOptionsProvider,
 } from '@taiga-ui/layout'
 import {
-  BehaviorSubject,
   combineLatest,
   filter,
   map,
+  of,
   shareReplay,
   startWith,
   switchMap,
@@ -69,7 +70,7 @@ import { MarketplaceReleaseNotesComponent } from './release-notes.component'
         [pkg]="pkg"
         [versions]="versions$ | async"
         (static)="onStatic()"
-        (onVersion)="selectedVersion$.next($event)"
+        (onVersion)="selectedVersion.set($event)"
       />
       <marketplace-release-notes [pkg]="pkg" />
       @if (flavors$ | async; as flavors) {
@@ -127,6 +128,9 @@ export class MarketplacePreviewComponent {
 
   readonly pkgId = input.required<string>()
 
+  /** A package already in hand, shown without fetching; defaults to the newest. */
+  readonly pkg = input<MarketplacePkg | null>(null)
+
   /** Action buttons for the resolved package (install/update), rendered with
    * the resolved `MarketplacePkg` as `$implicit`. The brochure omits it. */
   readonly controls = input<TemplateRef<{ $implicit: MarketplacePkg }>>()
@@ -145,13 +149,16 @@ export class MarketplacePreviewComponent {
       : null,
   )
 
-  readonly selectedVersion$ = new BehaviorSubject<string | null>(null)
+  readonly selectedVersion = linkedSignal(() => this.pkg()?.version ?? null)
 
   readonly noMatch = signal(false)
 
-  readonly pkg$ = combineLatest([this.selectedVersion$, this.flavor$]).pipe(
+  readonly pkg$ = combineLatest([
+    toObservable(this.selectedVersion),
+    this.flavor$,
+  ]).pipe(
     switchMap(([version, flavor]) =>
-      this.marketplaceService.getPackage$(this.pkgId(), version, flavor).pipe(
+      this.package$(version, flavor).pipe(
         tap(pkg => {
           if (!pkg || version) return
           const range = this.targetRange()
@@ -165,7 +172,7 @@ export class MarketplacePreviewComponent {
             )
             .sort((a, b) => -1 * (this.exver.compareExver(a, b) || 0))[0]
           if (candidate) {
-            this.selectedVersion$.next(candidate)
+            this.selectedVersion.set(candidate)
           } else {
             this.noMatch.set(true)
           }
@@ -183,6 +190,14 @@ export class MarketplacePreviewComponent {
     ),
     shareReplay({ bufferSize: 1, refCount: false }),
   )
+
+  private package$(version: string | null, flavor: string | null) {
+    const pkg = this.pkg()
+
+    return pkg?.version === version
+      ? of(pkg)
+      : this.marketplaceService.getPackage$(this.pkgId(), version, flavor)
+  }
 
   private satisfiesWithAliases(pkg: MarketplacePkg, range: string): boolean {
     return this.exver.releaseSatisfies(pkg.version, pkg.satisfies || [], range)

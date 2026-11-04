@@ -6,9 +6,9 @@ import {
   MarketplacePkg,
   matchingTrustedKeys,
   packageSigners,
+  packageSignerPolicy,
 } from '@start9labs/marketplace'
 import {
-  DialogService,
   ErrorService,
   Exver,
   ExverComparesPipe,
@@ -18,7 +18,7 @@ import {
 } from '@start9labs/shared'
 import { TuiButton, TuiNotification } from '@taiga-ui/core'
 import { PatchDB } from 'patch-db-client'
-import { defaultIfEmpty, firstValueFrom, switchMap } from 'rxjs'
+import { firstValueFrom, switchMap } from 'rxjs'
 import { ToManifestPipe } from 'src/app/routes/portal/pipes/to-manifest'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
@@ -43,7 +43,7 @@ type KEYS =
   template: `
     @if (!trusted().length) {
       <div tuiNotification appearance="warning">
-        {{ "This service package isn't signed by anyone you trust" | i18n }}
+        {{ "This service package isn't signed by anyone you trust." | i18n }}
       </div>
     }
     <div class="g-buttons">
@@ -55,7 +55,6 @@ type KEYS =
                 tuiButton
                 type="button"
                 appearance="warning"
-                [disabled]="blocked()"
                 (click)="tryInstall()"
               >
                 {{ 'Downgrade' | i18n }}
@@ -66,7 +65,6 @@ type KEYS =
                 tuiButton
                 type="button"
                 appearance="primary"
-                [disabled]="blocked()"
                 (click)="tryInstall()"
               >
                 {{ 'Update' | i18n }}
@@ -77,7 +75,6 @@ type KEYS =
                 tuiButton
                 type="button"
                 appearance="secondary-grayscale"
-                [disabled]="blocked()"
                 (click)="tryInstall()"
               >
                 {{ 'Reinstall' | i18n }}
@@ -99,7 +96,6 @@ type KEYS =
           tuiButton
           type="button"
           appearance="primary"
-          [disabled]="blocked()"
           (click)="tryInstall()"
         >
           {{ (sameFlavor() ? 'Install' : 'Switch') | i18n }}
@@ -125,7 +121,6 @@ type KEYS =
 })
 export class MarketplaceControlsComponent {
   private readonly alerts = inject(MarketplaceAlertsService)
-  private readonly dialogs = inject(DialogService)
   private readonly trust = inject(TrustedKeysService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly tasks = inject(TaskService)
@@ -155,30 +150,9 @@ export class MarketplaceControlsComponent {
       'marketplace',
     ),
   )
-  protected readonly blocked = computed(
-    () => !this.file() && !this.trusted().length,
-  )
-
   async tryInstall() {
-    if (this.blocked()) return
-    const trustOverride = !!this.file() && !this.trusted().length
-    if (
-      trustOverride &&
-      !(await firstValueFrom(
-        this.dialogs
-          .openConfirm({
-            label: 'Install untrusted software?',
-            data: {
-              content:
-                'This service package is not signed by anyone you trust. Malicious software could steal private keys and passwords, compromise your server, or permanently destroy your data. Only continue if you trust the source and understand these risks.',
-              yes: 'Install anyway',
-              no: 'Cancel',
-            },
-          })
-          .pipe(defaultIfEmpty(false)),
-      ))
-    )
-      return
+    const trustOverride = !this.trusted().length
+    if (trustOverride && !(await this.alerts.alertUntrusted())) return
 
     const localPkg = this.localPkg()
     if (
@@ -240,7 +214,8 @@ export class MarketplaceControlsComponent {
     } else if (url) {
       const pkg = this.pkg()
       await this.tasks.run(
-        async () => await this.marketplace.installPackage(pkg, url),
+        async () =>
+          await this.marketplace.installPackage(pkg, url, trustOverride),
         'Beginning install',
       )
     }
@@ -250,7 +225,14 @@ export class MarketplaceControlsComponent {
     const file = this.file()
     if (!file) throw new Error('no file detected')
     return this.tasks.run(async () => {
-      const res = await this.api.rpc.package.sideload({ trust })
+      const res = await this.api.rpc.package.sideload({
+        trust,
+        acceptSigners: packageSignerPolicy(
+          this.pkg(),
+          this.trust.keys() ?? {},
+          trust,
+        ),
+      })
       this.api
         .uploadFile(res.upload, file)
         .catch(e => this.error.handleError(e))

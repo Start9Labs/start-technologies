@@ -126,12 +126,14 @@ impl Public {
                 },
                 status_info: ServerStatus {
                     backup_progress: None,
+                    backup_conversions: Default::default(),
                     update_progress: None,
                     shutting_down: false,
                     restarting: false,
                     restart: None,
                 },
                 trusted_keys: initial_trusted_keys(),
+                registry_keys: BTreeMap::new(),
                 unread_notification_count: 0,
                 pubkey: ssh_key::PublicKey::from(&account.ssh_key)
                     .to_openssh()
@@ -182,6 +184,9 @@ pub struct ServerInfo {
     pub unread_notification_count: u64,
     #[serde(default = "initial_trusted_keys")]
     pub trusted_keys: TrustedKeys,
+    /// Last observed trust proposals from connected registries.
+    #[serde(default)]
+    pub registry_keys: BTreeMap<InternedString, BTreeSet<crate::sign::AnyVerifyingKey>>,
     pub pubkey: String,
     pub ca_fingerprint: String,
     #[serde(default)]
@@ -483,6 +488,8 @@ rpc_toolkit::ts_export!(DomainSettings, namespaces = [""]);
 #[model = "Model<Self>"]
 pub struct ServerStatus {
     pub backup_progress: Option<FullProgress>,
+    #[serde(default)]
+    pub backup_conversions: crate::backup::target::conversion::ConversionJobs,
     pub update_progress: Option<FullProgress>,
     #[serde(default)]
     pub shutting_down: bool,

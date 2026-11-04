@@ -1,8 +1,8 @@
 import { Component, inject } from '@angular/core'
 import { FormsModule, NgModel } from '@angular/forms'
 import { i18nPipe, TaskService } from '@start9labs/shared'
-import { TuiCell, TuiDialogContext, TuiTitle } from '@taiga-ui/core'
-import { TuiSwitch } from '@taiga-ui/kit'
+import { TuiDialogContext, TuiIcon, TuiTitle } from '@taiga-ui/core'
+import { TuiSwitch, TuiTooltip } from '@taiga-ui/kit'
 import { TuiHeader } from '@taiga-ui/layout'
 import { injectContext } from '@taiga-ui/polymorpheus'
 
@@ -15,17 +15,25 @@ import { PushService } from 'src/app/services/push.service'
         {{ 'Notification settings' | i18n }}
       </h2>
     </header>
-    <label tuiCell>
-      <span tuiTitle>
-        {{ 'Push' | i18n }}
+    <label class="g-toggle">
+      {{ 'Web Push' | i18n }}
+      <tui-icon [tuiTooltip]="hint" />
+      <ng-template #hint>
+        {{
+          'Receive notifications in this browser while the StartOS UI is closed.'
+            | i18n
+        }}
         @if (!push.available) {
-          <span tuiSubtitle>{{ 'Browser push unavailable' | i18n }}</span>
+          <br />
+          <br />
+          {{ 'Disabled' | i18n }}: {{ 'Browser push unavailable' | i18n }}
         }
-      </span>
+      </ng-template>
       <input
         #control="ngModel"
         tuiSwitch
         type="checkbox"
+        size="m"
         [showIcons]="false"
         [disabled]="!push.available || !push.ready()"
         [ngModel]="push.enabled()"
@@ -33,7 +41,15 @@ import { PushService } from 'src/app/services/push.service'
       />
     </label>
   `,
-  imports: [FormsModule, i18nPipe, TuiCell, TuiHeader, TuiSwitch, TuiTitle],
+  imports: [
+    FormsModule,
+    i18nPipe,
+    TuiHeader,
+    TuiIcon,
+    TuiSwitch,
+    TuiTitle,
+    TuiTooltip,
+  ],
 })
 export class NotificationSettings {
   private readonly tasks = inject(TaskService)

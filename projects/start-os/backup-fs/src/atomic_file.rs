@@ -28,23 +28,6 @@ impl AtomicFile {
         })
     }
 
-    pub fn create(path: PathBuf) -> BkfsResult<Self> {
-        Self::new(
-            path,
-            OpenOptions::new()
-                .read(true)
-                .write(true)
-                .truncate(true)
-                .create(true)
-                .custom_flags(libc::O_DIRECT),
-        )
-    }
-
-    /// Create a plain (non-O_DIRECT) atomic file. Intended for small
-    /// metadata files — inodes are usually well under 4 KiB, and the
-    /// O_DIRECT alignment dance + per-write device round-trips are pure
-    /// overhead at that size. Content goes through the page cache and
-    /// becomes durable on the next fsync/syncfs.
     pub fn create_buffered(path: PathBuf) -> BkfsResult<Self> {
         Self::new(
             path,
@@ -52,7 +35,8 @@ impl AtomicFile {
                 .read(true)
                 .write(true)
                 .truncate(true)
-                .create(true),
+                .create(true)
+                .custom_flags(libc::O_NOFOLLOW),
         )
     }
 
@@ -73,17 +57,26 @@ impl AtomicFile {
         Ok(())
     }
 
-    /// Rename without sync_all. Data lives in the page cache (or was
-    /// pushed to the block layer via O_DIRECT) and is not guaranteed
-    /// durable until the caller issues a syncfs. Use this when a batch
-    /// of saves will be group-committed together — trades per-file
-    /// durability for throughput.
+    /// Renames without synchronizing; a later filesystem barrier makes it durable.
     pub fn save_fast(mut self) -> BkfsResult<()> {
         if let Some(file) = self.file.as_mut() {
             file.flush()?;
         }
         drop(self.file.take());
         std::fs::rename(&self.tmp_path, &self.path)?;
+        Ok(())
+    }
+
+    /// Synchronizes file content and the containing directory.
+    pub fn save_durable(self) -> BkfsResult<()> {
+        let directory = File::open(self.path.parent().unwrap())?;
+        self.save_with_directory_sync(&directory)
+    }
+
+    /// The directory must contain the destination.
+    pub(crate) fn save_with_directory_sync(self, directory: &File) -> BkfsResult<()> {
+        self.save()?;
+        directory.sync_all()?;
         Ok(())
     }
 }
@@ -116,12 +109,6 @@ impl Read for AtomicFile {
     fn read_vectored(&mut self, bufs: &mut [io::IoSliceMut<'_>]) -> io::Result<usize> {
         self.deref_mut().read_vectored(bufs)
     }
-    // fn read_buf(&mut self, buf: io::BorrowedCursor<'_>) -> IoResult<()> {
-    //     self.deref_mut().read_buf(buf)
-    // }
-    // fn is_read_vectored(&self) -> bool {
-    //     self.deref_mut().is_read_vectored()
-    // }
     fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
         self.deref_mut().read_to_end(buf)
     }
@@ -136,9 +123,6 @@ impl Write for AtomicFile {
     fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
         self.deref_mut().write_vectored(bufs)
     }
-    // fn is_write_vectored(&self) -> bool {
-    //     self.deref_mut().is_write_vectored()
-    // }
     fn flush(&mut self) -> io::Result<()> {
         self.deref_mut().flush()
     }
@@ -148,6 +132,22 @@ impl Seek for AtomicFile {
         self.deref_mut().seek(pos)
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temporary_symlinks_cannot_truncate_their_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        let destination = dir.path().join("destination");
+        std::fs::write(&target, b"untouched").unwrap();
+        std::os::unix::fs::symlink(&target, destination.with_extension("tmp")).unwrap();
+        assert!(AtomicFile::create_buffered(destination.clone()).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"untouched");
+    }
+}
+
 impl AsRawFd for AtomicFile {
     fn as_raw_fd(&self) -> RawFd {
         self.deref().as_raw_fd()
@@ -157,13 +157,7 @@ impl FileExt for AtomicFile {
     fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
         self.deref().read_at(buf, offset)
     }
-    // fn read_vectored_at(&self, bufs: &mut [io::IoSliceMut<'_>], offset: u64) -> io::Result<usize> {
-    //     self.deref_mut().read_vectored_at(bufs, offset)
-    // }
     fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
         self.deref().write_at(buf, offset)
     }
-    // fn write_vectored_at(&self, bufs: &[io::IoSlice<'_>], offset: u64) -> io::Result<usize> {
-    //     self.deref_mut().write_vectored_at(bufs, offset)
-    // }
 }

@@ -1,1 +1,0 @@
-- `start-cli auth token create --name <name>` crée un jeton bearer StartOS pour les clients API et ne l’affiche qu’une fois.

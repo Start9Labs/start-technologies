@@ -1,3 +1,5 @@
 docs/
 node_modules/
-.DS_Storebook/
+.DS_Store
+book/
+.archive/

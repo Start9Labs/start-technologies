@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 
 use ed25519_dalek::VerifyingKey;
@@ -24,8 +24,13 @@ pub struct GpgPublicKeyExport {
     pub fingerprints: BTreeSet<String>,
     /// Self-certified user IDs containing names, comments, and email addresses.
     pub user_ids: BTreeSet<String>,
+    /// Self-certified claims indexed by the signing key's canonical DER encoding.
+    #[serde(default)]
+    pub identities: BTreeMap<InternedString, BTreeSet<String>>,
+    /// OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
+    #[serde(default)]
+    pub key_fingerprints: BTreeMap<InternedString, BTreeSet<String>>,
 }
-
 rpc_toolkit::reflect_ts!(GpgPublicKeyExport);
 rpc_toolkit::ts_export!(GpgPublicKeyExport, namespaces = [""]);
 
@@ -85,6 +90,8 @@ fn parse_gpg_keys(value: &str) -> Result<ImportedPublicKeys, Error> {
         armored: value.to_owned(),
         fingerprints: BTreeSet::new(),
         user_ids: BTreeSet::new(),
+        identities: BTreeMap::new(),
+        key_fingerprints: BTreeMap::new(),
     };
     for certificate in public_certificates(value)? {
         let revoked = primary_revoked(&certificate)?;
@@ -97,8 +104,12 @@ fn parse_gpg_keys(value: &str) -> Result<ImportedPublicKeys, Error> {
         if revoked {
             continue;
         }
+        let mut certificate_keys = BTreeMap::<AnyVerifyingKey, BTreeSet<String>>::new();
         if let Some(key) = ed25519_public_key(certificate.primary_key.public_params())? {
-            imported.keys.insert(key);
+            certificate_keys
+                .entry(key)
+                .or_default()
+                .insert(certificate.primary_key.fingerprint().to_string());
         }
         for subkey in &certificate.public_subkeys {
             if !subkey
@@ -117,10 +128,23 @@ fn parse_gpg_keys(value: &str) -> Result<ImportedPublicKeys, Error> {
                     .iter()
                     .any(|signature| signature.typ() == Some(SignatureType::SubkeyRevocation))
                 {
-                    imported.keys.insert(key);
+                    certificate_keys
+                        .entry(key)
+                        .or_default()
+                        .insert(subkey.fingerprint().to_string());
                 }
             }
         }
+        for (key, fingerprints) in &certificate_keys {
+            let identity = export.identities.entry(key.interned_der64()).or_default();
+            identity.extend(self_certified_user_ids(&certificate));
+            export
+                .key_fingerprints
+                .entry(key.interned_der64())
+                .or_default()
+                .extend(fingerprints.iter().cloned());
+        }
+        imported.keys.extend(certificate_keys.into_keys());
     }
     if imported.keys.is_empty() {
         return Err(invalid_key());
@@ -265,6 +289,35 @@ mod tests {
     }
 
     #[test]
+    fn combined_exports_attribute_self_certified_claims_to_each_certificate_key() {
+        let sources = [
+            include_str!("fixtures/start9-public.asc"),
+            include_str!("../trusted_keys/initial/matthill.asc"),
+        ];
+        let certificates = sources
+            .iter()
+            .map(|source| {
+                SignedPublicKey::from_armor_single(source.as_bytes())
+                    .unwrap()
+                    .0
+            })
+            .collect::<Vec<_>>();
+        let source = armored(&certificates.as_slice());
+        let imported = parse_public_keys(&[source.clone()]).unwrap();
+        let export = imported.gpg_exports.first().unwrap();
+        assert_eq!(export.armored, source);
+        assert_eq!(export.identities.len(), 2);
+        for certificate in certificates {
+            let key = ed25519_public_key(certificate.primary_key.public_params())
+                .unwrap()
+                .unwrap();
+            let identity = &export.identities[&key.interned_der64()];
+            assert_eq!(*identity, self_certified_user_ids(&certificate));
+            assert!(identity.len() < export.user_ids.len());
+        }
+    }
+
+    #[test]
     fn retains_unsupported_public_metadata_without_changing_signing_trust() {
         use base64::Engine as _;
         use pgp::packet::PacketHeader;
@@ -380,6 +433,30 @@ mod tests {
             .parse::<AnyVerifyingKey>()
             .unwrap();
         assert_eq!(keys, BTreeSet::from([expected]));
+    }
+
+    #[test]
+    fn fingerprints_identify_signing_packets_not_their_shared_certificate() {
+        let imported =
+            parse_public_keys(&[include_str!("fixtures/ed25519-signers.asc").into()]).unwrap();
+        let export = imported.gpg_exports.first().unwrap();
+        assert_eq!(export.key_fingerprints.len(), 2);
+        assert_eq!(
+            export
+                .key_fingerprints
+                .values()
+                .flatten()
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "704ff8363672abc5ecb6cf7b3328837f7fcc1cc9".into(),
+                "57ceb99c0dafd621211c448c842d719f3b2aa930".into(),
+            ])
+        );
+        assert_eq!(
+            export.fingerprints,
+            BTreeSet::from(["704ff8363672abc5ecb6cf7b3328837f7fcc1cc9".into()])
+        );
     }
 
     #[test]

@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 
-use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
+use itertools::Itertools;
+use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
 use crate::PackageId;
-use crate::context::CliContext;
+use crate::context::{CliContext, RpcContext};
 #[allow(unused_imports)]
 use crate::prelude::*;
 
@@ -41,7 +42,19 @@ pub struct PackageBackupReport {
 rpc_toolkit::reflect_ts!(PackageBackupReport);
 rpc_toolkit::ts_export!(PackageBackupReport, namespaces = [""]);
 
-// #[command(subcommands(backup_bulk::backup_all, target::target))]
+async fn call_remote<P: Serialize + Send + Sync>(
+    args: HandlerArgs<CliContext, P>,
+) -> Result<Value, Error> {
+    let method = args.parent_method.into_iter().chain(args.method).join(".");
+    args.context
+        .call_remote::<RpcContext>(&method, to_value(&args.params)?)
+        .await
+}
+
+fn read_password() -> Result<String, Error> {
+    crate::util::tui::read_password("BACKUP_PASSWORD", &t!("help.arg.backup-password"))
+}
+
 pub fn backup<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand(
@@ -58,11 +71,16 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
 }
 
 pub fn package_backup<C: Context>() -> ParentHandler<C> {
-    ParentHandler::new().subcommand(
-        "restore",
-        from_fn_async(restore::restore_packages_rpc)
-            .no_display()
-            .with_about("about.restore-packages-from-backup")
-            .with_call_remote::<CliContext>(),
-    )
+    ParentHandler::new()
+        .subcommand(
+            "restore",
+            from_fn_async(restore::restore_packages_rpc).no_cli(),
+        )
+        .subcommand(
+            "restore",
+            from_fn_async(restore::cli_restore_packages)
+                .no_ts()
+                .no_display()
+                .with_about("about.restore-packages-from-backup"),
+        )
 }

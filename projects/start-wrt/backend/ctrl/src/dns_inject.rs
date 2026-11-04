@@ -41,7 +41,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use uciedit::openwrt::{DhcpHost, FirewallForwarding, FirewallZone, NetworkInterface};
-use uciedit::{dump_all, parse_all, Arena, Configs, Line, LineComment, Section, Token};
+use uciedit::{parse_all, Arena, Configs, Line, LineComment, Section, Token};
 
 use crate::error::ErrorKind;
 use crate::invoke::Invoke;
@@ -66,6 +66,8 @@ const TCP_MAX_CLIENTS: usize = 16;
 /// Refusal log lines per second, box-wide.
 const REFUSAL_LOG_RATE: u32 = 20;
 const INJECT_FILE_PREFIX: &str = "startwrt-dns-inject.dns_";
+/// The domain every profile instance serves its devices under.
+const LAN_DOMAIN: &str = "lan";
 
 /// The daemon's DNS-injection service; unset in CLI / `--configs-only` mode.
 pub static DNS_INJECT: OnceLock<Arc<DnsInject>> = OnceLock::new();
@@ -158,6 +160,29 @@ struct Directory {
     /// `(viewer zone, source zone)` pairs the firewall forwards. A record is
     /// served only to zones that can reach its source.
     reach: BTreeSet<(String, String)>,
+    hosts: HostNames,
+}
+
+/// A device's name under `lan.`, placed in the profile whose subnet holds its
+/// address.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct HostName {
+    /// Lowercase.
+    name: String,
+    ip: Ipv4Addr,
+    profile: String,
+    /// Orders devices claiming one name: a name set on the device, then the
+    /// later lease expiry.
+    rank: (bool, u64),
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct HostNames {
+    entries: Vec<HostName>,
+    /// Profile → lowercase names its own leases carry. That profile's
+    /// instance serves them itself and refuses a lease a name it already has
+    /// at another address.
+    leased: BTreeMap<String, BTreeSet<String>>,
 }
 
 /// What the refresher learns from one UCI pass, before live lease/neighbor
@@ -170,6 +195,8 @@ struct NetSnapshot {
     allowed_macs: BTreeSet<String>,
     /// Uppercase MAC → static reservation IP.
     reserved: HashMap<String, Ipv4Addr>,
+    /// Uppercase MAC → the name set on the device.
+    named: BTreeMap<String, String>,
     /// Permitted inbound-WG peer tunnel IP → (public key, derived TSIG key,
     /// profile).
     wg_peers: BTreeMap<Ipv4Addr, (String, [u8; 32], String)>,
@@ -275,9 +302,9 @@ async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
     })
     .await?;
 
-    let leases = crate::devices::current_lease_ips()
-        .await
-        .unwrap_or_default();
+    let all_leases = crate::devices::current_leases().await.unwrap_or_default();
+    let hosts = host_names(&snapshot, &all_leases);
+    let leases: HashMap<String, String> = all_leases.into_iter().map(|l| (l.mac, l.ip)).collect();
     let neigh = tokio::process::Command::new("ip")
         .args(["neigh", "show"])
         .invoke(ErrorKind::Network.into())
@@ -294,6 +321,7 @@ async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
         d.wg_keys = wg_keys;
         d.profiles = snapshot.profiles.clone();
         d.reach = snapshot.reach.clone();
+        d.hosts = hosts;
         sweep_owners(d, &snapshot, &leases, &neighbors, &di.injector.list())
     });
     // The daemon's default filter is `warn`.
@@ -410,6 +438,79 @@ fn sweep_owners(
     stale
 }
 
+/// Whether dnsmasq serves a lease under `name`: a letter or digit, then up to
+/// 62 letters, digits, hyphens or underscores.
+fn servable_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    name.len() <= 63
+        && bytes.next().is_some_and(|b| b.is_ascii_alphanumeric())
+        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// Every device's name: the one set on the device, else its lease hostname, at
+/// its lease address, else its reservation.
+fn host_names(snapshot: &NetSnapshot, leases: &[crate::devices::DhcpLease]) -> HostNames {
+    let expiry = |l: &crate::devices::DhcpLease| match l.expires {
+        0 => u64::MAX,
+        e => e,
+    };
+    let valid = servable_name;
+    let mut hosts = HostNames::default();
+    let mut newest: BTreeMap<&str, (&crate::devices::DhcpLease, Ipv4Addr)> = BTreeMap::new();
+    for lease in leases {
+        let Ok(ip) = lease.ip.parse::<Ipv4Addr>() else {
+            continue;
+        };
+        if let Some(p) = profile_for(&snapshot.profiles, ip) {
+            if lease.instance.as_deref() == Some(format!("dns_{}", p.interface).as_str())
+                && valid(&lease.hostname)
+            {
+                hosts
+                    .leased
+                    .entry(p.interface.clone())
+                    .or_default()
+                    .insert(lease.hostname.to_ascii_lowercase());
+            }
+        }
+        let held = newest.entry(lease.mac.as_str()).or_insert((lease, ip));
+        if expiry(lease) > expiry(held.0) {
+            *held = (lease, ip);
+        }
+    }
+    let macs: BTreeSet<&str> = newest
+        .keys()
+        .copied()
+        .chain(snapshot.named.keys().map(String::as_str))
+        .collect();
+    for mac in macs {
+        let lease = newest.get(mac);
+        let configured = snapshot.named.get(mac);
+        let Some(name) = configured
+            .map(String::as_str)
+            .or_else(|| lease.map(|(l, _)| l.hostname.as_str()))
+            .filter(|n| valid(n))
+        else {
+            continue;
+        };
+        let Some(ip) = lease
+            .map(|(_, ip)| *ip)
+            .or_else(|| snapshot.reserved.get(mac).copied())
+        else {
+            continue;
+        };
+        let Some(p) = profile_for(&snapshot.profiles, ip) else {
+            continue;
+        };
+        hosts.entries.push(HostName {
+            name: name.to_ascii_lowercase(),
+            ip,
+            profile: p.interface.clone(),
+            rank: (configured.is_some(), lease.map_or(0, |(l, _)| expiry(l))),
+        });
+    }
+    hosts
+}
+
 /// Which profile's /24 contains `ip`. Every profile subnet is a /24, and
 /// inbound-VPN peers are allocated inside their profile's.
 fn profile_for(profiles: &[ProfileNet], ip: Ipv4Addr) -> Option<&ProfileNet> {
@@ -472,6 +573,9 @@ fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
         }
         if let Some(ip) = host.ip.as_deref().and_then(|ip| ip.parse().ok()) {
             snapshot.reserved.insert(host.mac.to_uppercase(), ip);
+        }
+        if let Some(name) = host.name.filter(|n| !n.is_empty()) {
+            snapshot.named.insert(host.mac.to_uppercase(), name);
         }
     })?;
 
@@ -891,7 +995,7 @@ async fn render_all(
     records: &[InjectedRecord],
     last: &mut HashMap<String, String>,
 ) -> Result<(), Error> {
-    let (profiles, reach, by_ip) = di.directory.peek(|d| {
+    let (profiles, reach, by_ip, hosts) = di.directory.peek(|d| {
         (
             d.profiles.clone(),
             d.reach.clone(),
@@ -899,10 +1003,11 @@ async fn render_all(
                 .iter()
                 .map(|(ip, i)| (*ip, i.profile.clone()))
                 .collect::<BTreeMap<IpAddr, String>>(),
+            d.hosts.clone(),
         )
     });
     for p in &profiles {
-        let content = profile_hosts_content(p, &profiles, &reach, &by_ip, records);
+        let content = profile_hosts_content(p, &profiles, &reach, &by_ip, records, &hosts);
         if last.get(&p.interface).map(String::as_str) == Some(content.as_str()) {
             continue;
         }
@@ -929,15 +1034,23 @@ async fn render_all(
     Ok(())
 }
 
-/// The addn-hosts content profile `p` may see: A/AAAA records whose source
-/// profile `p`'s zone can reach. Sorted and deduped.
+/// The addn-hosts content profile `p` may see: A/AAAA records and device
+/// names from profiles `p`'s zone can reach. Sorted and deduped.
 fn profile_hosts_content(
     p: &ProfileNet,
     profiles: &[ProfileNet],
     reach: &BTreeSet<(String, String)>,
     by_ip: &BTreeMap<IpAddr, String>,
     records: &[InjectedRecord],
+    hosts: &HostNames,
 ) -> String {
+    let reaches = |source: &str| {
+        source == p.interface
+            || profiles
+                .iter()
+                .find(|sp| sp.interface == source)
+                .is_some_and(|sp| reach.contains(&(p.zone.clone(), sp.zone.clone())))
+    };
     // By the source's subnet, else by the directory.
     let source_profile = |r: &InjectedRecord| -> Option<String> {
         match r.source {
@@ -950,21 +1063,44 @@ fn profile_hosts_content(
     let mut lines: Vec<String> = records
         .iter()
         .filter(|r| matches!(r.rdata, RData::A(_) | RData::AAAA(_)))
-        .filter(|r| {
-            let Some(source) = source_profile(r) else {
-                return false;
-            };
-            source == p.interface
-                || profiles
-                    .iter()
-                    .find(|sp| sp.interface == source)
-                    .is_some_and(|sp| reach.contains(&(p.zone.clone(), sp.zone.clone())))
-        })
+        .filter(|r| source_profile(r).is_some_and(|source| reaches(&source)))
         .map(|r| format!("{} {}\n", r.rdata, r.name.to_utf8().trim_end_matches('.')))
         .collect();
+    // dnsmasq takes a bare hosts-file name's address as the reservation of a
+    // name-only DHCP host.
+    lines.extend(
+        profile_host_names(p, hosts, reaches)
+            .map(|h| format!("{} {}.{LAN_DOMAIN}\n", h.ip, h.name)),
+    );
     lines.sort();
     lines.dedup();
     lines.concat()
+}
+
+/// The device names profile `p` serves from its addn-hosts file, one device
+/// per name and its own devices first. A name its own leases carry is left to
+/// them.
+fn profile_host_names<'a>(
+    p: &ProfileNet,
+    hosts: &'a HostNames,
+    reaches: impl Fn(&str) -> bool,
+) -> impl Iterator<Item = &'a HostName> {
+    let leased = hosts.leased.get(&p.interface);
+    let mut best: BTreeMap<&str, &HostName> = BTreeMap::new();
+    for h in &hosts.entries {
+        if leased.is_some_and(|names| names.contains(&h.name)) || !reaches(&h.profile) {
+            continue;
+        }
+        let key = |h: &HostName| (h.profile == p.interface, h.rank, h.ip);
+        best.entry(&h.name)
+            .and_modify(|b| {
+                if key(h) > key(b) {
+                    *b = h;
+                }
+            })
+            .or_insert(h);
+    }
+    best.into_values()
 }
 
 /// SIGHUPs one dnsmasq instance through procd. dnsmasq runs in its own PID
@@ -1119,9 +1255,7 @@ pub async fn set_dns_injection<C: CtrlContext>(
         .await
         .inspect_err(|err| log_failure(err))?;
     if written {
-        apply_permission_change(&ctx)
-            .await
-            .inspect_err(log_failure)?;
+        permission_changed();
         crate::activity::log(
             "device",
             "dns-injection",
@@ -1136,54 +1270,11 @@ pub async fn set_dns_injection<C: CtrlContext>(
     Ok(())
 }
 
-/// Brings dnsmasq and the directory in line with a changed permission. A
-/// revocation drops the owner's records on this pass.
-pub(crate) async fn apply_permission_change<C: CtrlContext>(ctx: &C) -> Result<(), Error> {
-    rewrite_instances(ctx).await?;
-    // A reload, not a SIGHUP: instances may have been created or removed.
-    if ctx.effectful() {
-        crate::devices::reload_dnsmasq();
-    }
+/// Wakes the refresher after a permission change. A revocation drops the
+/// owner's records on this pass.
+pub(crate) fn permission_changed() {
     if let Some(di) = DNS_INJECT.get() {
         di.invalidate();
-    }
-    Ok(())
-}
-
-/// Rewrites the per-profile dnsmasq sections to match the inject-permitted
-/// set.
-async fn rewrite_instances<C: CtrlContext>(ctx: &C) -> Result<(), Error> {
-    let uci_root = ctx.uci_root();
-    let mut retries = 4;
-    loop {
-        let uci_root = uci_root.clone();
-        // `true` = a concurrent-write conflict worth retrying.
-        let conflicted = uci_task(move || async move {
-            let arena = Arena::new();
-            let mut cfgs = parse_all(
-                &uci_root,
-                &arena,
-                &["startwrt", "network", "dhcp", "firewall"],
-            )
-            .await?;
-            crate::profiles::rewrite_all_dns_forwarding(&mut cfgs)?;
-            match dump_all(&uci_root, cfgs).await {
-                Ok(()) => Ok(false),
-                Err(uciedit::Error::Conflict { .. }) => Ok(true),
-                Err(e) => Err(e.into()),
-            }
-        })
-        .await?;
-        if !conflicted {
-            return Ok(());
-        }
-        if retries == 0 {
-            return Err(Error::new(
-                eyre!("persistent UCI write conflict rewriting dnsmasq instances"),
-                ErrorKind::UciEdit,
-            ));
-        }
-        retries -= 1;
     }
 }
 
@@ -1978,8 +2069,16 @@ mod tests {
                 source: IpAddr::V4(lan_ip(50)),
             },
         ];
-        let content =
-            |p: &ProfileNet| profile_hosts_content(p, &profiles, &reach, &by_ip, &records);
+        let content = |p: &ProfileNet| {
+            profile_hosts_content(
+                p,
+                &profiles,
+                &reach,
+                &by_ip,
+                &records,
+                &HostNames::default(),
+            )
+        };
         assert_eq!(
             content(&profiles[0]),
             "192.168.1.50 nas.example.com\n",
@@ -1994,6 +2093,264 @@ mod tests {
             content(&profiles[2]),
             "",
             "iot is firewalled away from lan: resolving the name would only leak it"
+        );
+    }
+
+    fn lease(
+        instance: &str,
+        mac: &str,
+        ip: Ipv4Addr,
+        hostname: &str,
+        expires: u64,
+    ) -> crate::devices::DhcpLease {
+        crate::devices::DhcpLease {
+            mac: mac.into(),
+            ip: ip.to_string(),
+            hostname: hostname.into(),
+            expires,
+            instance: Some(instance.into()),
+        }
+    }
+
+    /// lan, guest and iot; guest may reach lan, iot reaches nobody.
+    fn name_fixture() -> (NetSnapshot, BTreeSet<(String, String)>) {
+        let snapshot = NetSnapshot {
+            profiles: vec![
+                profile("lan", 1, "lan"),
+                profile("guest", 101, "vlan_guest"),
+                profile("iot", 102, "vlan_iot"),
+            ],
+            ..Default::default()
+        };
+        (
+            snapshot,
+            BTreeSet::from([("vlan_guest".into(), "lan".into())]),
+        )
+    }
+
+    fn rendered_names(
+        snapshot: &NetSnapshot,
+        reach: &BTreeSet<(String, String)>,
+        leases: &[crate::devices::DhcpLease],
+    ) -> Vec<String> {
+        let hosts = host_names(snapshot, leases);
+        snapshot
+            .profiles
+            .iter()
+            .map(|p| {
+                profile_hosts_content(p, &snapshot.profiles, reach, &BTreeMap::new(), &[], &hosts)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn lease_names_follow_lan_access() {
+        let (snapshot, reach) = name_fixture();
+        let leases = [
+            lease(
+                "dns_lan",
+                "AA:00:00:00:00:01",
+                Ipv4Addr::new(192, 168, 1, 110),
+                "Debian",
+                0,
+            ),
+            lease(
+                "dns_guest",
+                "AA:00:00:00:00:02",
+                Ipv4Addr::new(192, 168, 101, 20),
+                "phone",
+                0,
+            ),
+            lease(
+                "dns_lan",
+                "AA:00:00:00:00:03",
+                Ipv4Addr::new(192, 168, 1, 111),
+                "*",
+                0,
+            ),
+            lease(
+                "dns_lan",
+                "AA:00:00:00:00:04",
+                Ipv4Addr::new(192, 168, 1, 112),
+                "-bad",
+                0,
+            ),
+            lease(
+                "dns_lan",
+                "AA:00:00:00:00:05",
+                Ipv4Addr::new(192, 168, 1, 113),
+                "DESKTOP_1",
+                0,
+            ),
+        ];
+        assert_eq!(
+            rendered_names(&snapshot, &reach, &leases),
+            vec![
+                String::new(),
+                "192.168.1.110 debian.lan\n192.168.1.113 desktop_1.lan\n".into(),
+                String::new(),
+            ],
+            "lan serves its own leases and cannot reach guest; guest reaches lan; iot reaches \
+             nobody; a name dnsmasq would not serve is never served"
+        );
+    }
+
+    #[test]
+    fn former_main_instance_leases_are_rendered_for_their_own_profile() {
+        let (snapshot, reach) = name_fixture();
+        let leases = [lease(
+            "cfg_main",
+            "AA:00:00:00:00:01",
+            Ipv4Addr::new(192, 168, 1, 110),
+            "debian",
+            0,
+        )];
+        let rendered = rendered_names(&snapshot, &reach, &leases);
+        assert_eq!(rendered[0], "192.168.1.110 debian.lan\n");
+        assert_eq!(rendered[1], rendered[0]);
+        assert_eq!(rendered[2], "");
+    }
+
+    #[test]
+    fn a_profiles_own_device_keeps_a_shared_name() {
+        let (mut snapshot, reach) = name_fixture();
+        snapshot
+            .reserved
+            .insert("BB:00:00:00:00:02".into(), Ipv4Addr::new(192, 168, 101, 40));
+        snapshot
+            .named
+            .insert("BB:00:00:00:00:02".into(), "nas".into());
+        let leases = [
+            lease(
+                "dns_lan",
+                "BB:00:00:00:00:01",
+                Ipv4Addr::new(192, 168, 1, 110),
+                "debian",
+                0,
+            ),
+            lease(
+                "dns_guest",
+                "BB:00:00:00:00:03",
+                Ipv4Addr::new(192, 168, 101, 30),
+                "debian",
+                0,
+            ),
+            lease(
+                "dns_lan",
+                "BB:00:00:00:00:04",
+                Ipv4Addr::new(192, 168, 1, 50),
+                "nas",
+                0,
+            ),
+        ];
+        assert_eq!(
+            rendered_names(&snapshot, &reach, &leases)[1],
+            "192.168.101.40 nas.lan
+",
+            "guest's own leased debian and reserved nas win over lan's"
+        );
+    }
+
+    #[test]
+    fn assigned_names_win_and_reach_their_own_profile() {
+        let (mut snapshot, reach) = name_fixture();
+        // Reserved and offline: no lease serves the name.
+        snapshot
+            .reserved
+            .insert("CC:00:00:00:00:01".into(), Ipv4Addr::new(192, 168, 1, 60));
+        snapshot
+            .named
+            .insert("CC:00:00:00:00:01".into(), "printer".into());
+        // Assigned over the hostname the device sends.
+        snapshot
+            .named
+            .insert("CC:00:00:00:00:02".into(), "tablet".into());
+        // Assigned but neither leased nor reserved: no address to serve.
+        snapshot
+            .named
+            .insert("CC:00:00:00:00:03".into(), "ghost".into());
+        let leases = [lease(
+            "dns_lan",
+            "CC:00:00:00:00:02",
+            Ipv4Addr::new(192, 168, 1, 70),
+            "android-1234",
+            0,
+        )];
+        let rendered = rendered_names(&snapshot, &reach, &leases);
+        assert_eq!(
+            rendered[0],
+            "192.168.1.60 printer.lan
+192.168.1.70 tablet.lan
+",
+            "lan's own instance serves neither from a lease carrying that name"
+        );
+        assert_eq!(rendered[1], rendered[0]);
+        assert_eq!(rendered[2], "");
+    }
+
+    #[test]
+    fn one_device_per_name_from_other_profiles() {
+        let (mut snapshot, _) = name_fixture();
+        // iot may reach both lan and guest.
+        let reach = BTreeSet::from([
+            ("vlan_iot".into(), "lan".into()),
+            ("vlan_iot".into(), "vlan_guest".into()),
+        ]);
+        snapshot
+            .named
+            .insert("DD:00:00:00:00:02".into(), "cam".into());
+        let leases = [
+            lease(
+                "dns_lan",
+                "DD:00:00:00:00:01",
+                Ipv4Addr::new(192, 168, 1, 80),
+                "cam",
+                2_000_000_000,
+            ),
+            lease(
+                "dns_guest",
+                "DD:00:00:00:00:02",
+                Ipv4Addr::new(192, 168, 101, 80),
+                "cam",
+                1_000_000_000,
+            ),
+            lease(
+                "dns_lan",
+                "DD:00:00:00:00:03",
+                Ipv4Addr::new(192, 168, 1, 90),
+                "box",
+                1_000_000_000,
+            ),
+            lease(
+                "dns_guest",
+                "DD:00:00:00:00:04",
+                Ipv4Addr::new(192, 168, 101, 90),
+                "box",
+                2_000_000_000,
+            ),
+            // A device seen on two profiles is served at its later lease.
+            lease(
+                "dns_lan",
+                "DD:00:00:00:00:05",
+                Ipv4Addr::new(192, 168, 1, 100),
+                "roamer",
+                1_000_000_000,
+            ),
+            lease(
+                "dns_guest",
+                "DD:00:00:00:00:05",
+                Ipv4Addr::new(192, 168, 101, 100),
+                "roamer",
+                2_000_000_000,
+            ),
+        ];
+        assert_eq!(
+            rendered_names(&snapshot, &reach, &leases)[2],
+            "192.168.101.100 roamer.lan
+192.168.101.80 cam.lan
+192.168.101.90 box.lan
+",
+            "an assigned name beats a sent one; then the later lease"
         );
     }
 

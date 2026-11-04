@@ -612,16 +612,6 @@ async fn cli_install_os(
     print_remote_result(res)
 }
 
-/// Read a password for an existing data drive: `PASSWORD` env first,
-/// otherwise prompt once on the TTY.
-fn read_password_env_or_prompt(prompt: &str) -> Result<String, RpcError> {
-    if let Ok(p) = std::env::var("PASSWORD") {
-        Ok(p)
-    } else {
-        Ok(rpassword::prompt_password(prompt)?)
-    }
-}
-
 /// Read a *new* password (for fresh setup): `PASSWORD` env if set,
 /// otherwise prompt twice on the TTY and confirm. Mirrors
 /// `cli_reset_password` in `auth.rs`.
@@ -688,7 +678,7 @@ async fn cli_attach(
     let password = if no_password && std::env::var_os("PASSWORD").is_none() {
         None
     } else {
-        let plaintext = read_password_env_or_prompt("Data drive password: ")?;
+        let plaintext = crate::util::tui::read_password("PASSWORD", "Data drive password: ")?;
         Some(encrypt_for_setup(&ctx, &plaintext).await?)
     };
 

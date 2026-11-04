@@ -44,7 +44,7 @@ If your package only ever tracks one upstream line — most do — ignore all of
 
 ## Chasing upstream
 
-`UPDATING.md` at the package root is the package-specific recipe: where its version string lives, which registry and tag format to look for, and exactly which field to edit. Follow it. It is also **not automatically correct** — if its command contradicts what you can actually observe, trust the observation, fix the file in the same change, and say so in the pull request.
+`UPDATING.md` at the package root is the package-specific recipe: where its version string lives, which registry and tag format to look for, and exactly which field to edit. Follow it. It is also **not automatically correct** — if its command contradicts what you can actually observe, trust the observation, fix the file in the same change, and say so in the pull request. Its scope is this package's upstream. How a package version is bumped, migrated, and given release notes belongs to [Versions](./versions.md); where `UPDATING.md` disagrees with that page, follow the page and leave the file alone — never copy the guide's rule into it.
 
 Five disciplines apply on top of it.
 

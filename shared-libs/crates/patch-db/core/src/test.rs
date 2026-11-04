@@ -223,6 +223,20 @@ async fn file_storage_reopens_after_compaction() {
     cleanup_db(&path).await;
 }
 
+#[tokio::test]
+async fn store_file_is_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = unique_db_path("private");
+    cleanup_db(&path).await;
+    let db = PatchDb::open(&path).await.unwrap();
+    write_past_compaction_boundary(&db).await;
+    let mode = fs::metadata(&path).await.unwrap().permissions().mode();
+    db.close().await;
+    cleanup_db(&path).await;
+    assert_eq!(mode & 0o777, 0o600);
+}
+
 fn run_future<S: Into<String>, Fut: Future<Output = ()>>(name: S, fut: Fut) {
     Builder::new_multi_thread()
         .thread_name(name)
