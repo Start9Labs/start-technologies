@@ -39,7 +39,7 @@ impl DiagnosticContext {
         );
         tracing::debug!("{:?}", error);
 
-        Self::init_auth_cookie().await?;
+        Self::init_auth_cookie().await.log_err();
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
 
         Ok(Self(Arc::new(DiagnosticContextSeed {

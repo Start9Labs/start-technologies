@@ -16,14 +16,20 @@ use crate::util::Invoke;
 use crate::util::io::{create_file_mod, read_file_to_string};
 use crate::util::serde::BASE64;
 
+const LOCAL_AUTH_TOKEN_BYTES: usize = 32;
+
 pub trait LocalAuthContext: Context {
     const LOCAL_AUTH_COOKIE_PATH: &str;
     const LOCAL_AUTH_COOKIE_OWNERSHIP: &str;
     fn init_auth_cookie() -> impl Future<Output = Result<(), Error>> + Send {
         async {
             let mut file = create_file_mod(Self::LOCAL_AUTH_COOKIE_PATH, 0o640).await?;
-            file.write_all(BASE64.encode(random::<[u8; 32]>()).as_bytes())
-                .await?;
+            file.write_all(
+                BASE64
+                    .encode(random::<[u8; LOCAL_AUTH_TOKEN_BYTES]>())
+                    .as_bytes(),
+            )
+            .await?;
             file.sync_all().await?;
             drop(file);
             Command::new("chown")
@@ -99,13 +105,20 @@ pub(crate) fn unauthorized() -> Error {
     )
 }
 
+fn matches_cookie(bearer: &str, token: &str) -> bool {
+    BASE64
+        .decode(token)
+        .is_ok_and(|bytes| bytes.len() == LOCAL_AUTH_TOKEN_BYTES)
+        && bearer == token
+}
+
 async fn check_from_header<C: LocalAuthContext>(header: Option<&HeaderValue>) -> Result<(), Error> {
     if let Some(bearer) = header
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
     {
         if let Ok(token) = read_file_to_string(C::LOCAL_AUTH_COOKIE_PATH).await {
-            if bearer == &*token {
+            if matches_cookie(bearer, &token) {
                 return Ok(());
             }
         }
@@ -150,6 +163,24 @@ impl<C: LocalAuthContext> Middleware<C> for LocalAuth {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cookie_authentication_rejects_incomplete_initialization() {
+        let token = BASE64.encode([42; LOCAL_AUTH_TOKEN_BYTES]);
+        assert!(matches_cookie(&token, &token));
+        assert!(!matches_cookie(
+            &BASE64.encode([43; LOCAL_AUTH_TOKEN_BYTES]),
+            &token
+        ));
+        for incomplete in [
+            "",
+            "not base64",
+            &token[..8],
+            &BASE64.encode([42; LOCAL_AUTH_TOKEN_BYTES - 1]),
+        ] {
+            assert!(!matches_cookie(incomplete, incomplete));
+        }
+    }
 
     #[test]
     fn wildcard_listen_dials_loopback() {

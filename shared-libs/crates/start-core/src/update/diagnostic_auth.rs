@@ -4,7 +4,7 @@ use rpc_toolkit::{Context, DynMiddleware, Middleware, RpcRequest, RpcResponse};
 use serde::Deserialize;
 
 use crate::middleware::auth::local::{LocalAuth, LocalAuthContext, unauthorized};
-use crate::net::web_server::TcpMetadata;
+use crate::net::request_origin::RequestOrigin;
 use crate::prelude::*;
 
 #[derive(Clone)]
@@ -36,10 +36,9 @@ impl<C: Context + Clone> Middleware<C> for DiagnosticUpdateAuth<C> {
         context: &C,
         request: &mut Request,
     ) -> Result<(), Response> {
-        self.loopback = request
-            .extensions()
-            .get::<TcpMetadata>()
-            .is_some_and(|tcp| tcp.peer_addr.ip().is_loopback());
+        self.loopback = RequestOrigin::from_extensions(request.extensions())
+            .peer_ip
+            .is_some_and(|ip| ip.is_loopback());
         self.local.process_http_request(context, request).await
     }
 
@@ -66,9 +65,11 @@ impl<C: Context + Clone> Middleware<C> for DiagnosticUpdateAuth<C> {
 #[cfg(test)]
 mod tests {
     use imbl_value::json;
-    use rpc_toolkit::Empty;
+    use rpc_toolkit::{Empty, HandlerFor};
 
     use super::*;
+    use crate::context::DiagnosticContext;
+    use crate::net::web_server::TcpMetadata;
 
     #[derive(Clone)]
     struct TestContext;
@@ -90,6 +91,13 @@ mod tests {
                 Err(RpcResponse::from_result(Err(unauthorized())))
             }
         }
+    }
+
+    #[test]
+    fn diagnostic_update_handler_selects_the_override_check() {
+        let metadata = crate::diagnostic::diagnostic::<DiagnosticContext>()
+            .metadata(["update"].into_iter().collect());
+        assert_eq!(metadata.get("diagnostic_update"), Some(&Value::Bool(true)));
     }
 
     #[tokio::test]
@@ -124,6 +132,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_proxy_retains_the_remote_origin_for_the_override_gate() {
+        let mut auth = DiagnosticUpdateAuth {
+            local: DynMiddleware::new(Credential(true)),
+            loopback: false,
+        };
+        let mut http_request = Request::new(axum::body::Body::empty());
+        http_request.extensions_mut().insert(TcpMetadata {
+            peer_addr: "127.0.0.1:1234".parse().unwrap(),
+            local_addr: "127.0.0.1:80".parse().unwrap(),
+        });
+        http_request
+            .extensions_mut()
+            .insert(RequestOrigin::from_connection(
+                Some(&TcpMetadata {
+                    peer_addr: "203.0.113.8:4567".parse().unwrap(),
+                    local_addr: "192.168.1.2:443".parse().unwrap(),
+                }),
+                None,
+            ));
+        auth.process_http_request(&TestContext, &mut http_request)
+            .await
+            .unwrap();
+        let mut rpc_request = RpcRequest {
+            id: None,
+            method: rpc_toolkit::yajrc::GenericRpcMethod::new("diagnostic.update".into()),
+            params: json!({"trust": true}),
+        };
+        assert!(
+            auth.process_rpc_request(
+                &TestContext,
+                Metadata {
+                    diagnostic_update: true
+                },
+                &mut rpc_request
+            )
+            .await
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
     async fn loopback_comes_from_the_accepted_connection_not_host_headers() {
         let mut auth = DiagnosticUpdateAuth {
             local: DynMiddleware::new(Credential(true)),
@@ -133,6 +182,8 @@ mod tests {
             ("203.0.113.8:1234", false),
             ("127.0.0.1:1234", true),
             ("[::1]:1234", true),
+            ("[::ffff:127.0.0.1]:1234", true),
+            ("[::ffff:203.0.113.8]:1234", false),
         ] {
             let mut request = Request::builder()
                 .header("Host", "localhost")
