@@ -202,6 +202,7 @@ pub async fn init(
     let db = cfg.db().await?;
     crate::version::Current::default().pre_init(&db).await?;
     let db = TypedPatchDb::<Database>::load_unchecked(db);
+    db.mutate(crate::net::ssl::repair_root_cert).await.result?;
     let peek = db.peek().await;
     load_database.complete();
 
