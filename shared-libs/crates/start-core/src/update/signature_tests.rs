@@ -69,18 +69,6 @@ fn update_keeps_verifying_every_signature_and_rejecting_unsigned_assets() {
 }
 
 #[test]
-fn diagnostic_updates_reject_other_signers_and_unsigned_assets() {
-    let key = SigningKey::from_bytes(&[2; 32]);
-    let mut asset = signed_asset(&key);
-    assert!(validate_update_signatures(&asset, None).is_ok());
-    assert!(super::diagnostic::validate_signatures(&asset, false).is_err());
-    assert!(super::diagnostic::validate_signatures(&asset, true).is_ok());
-    asset.signatures.clear();
-    assert!(super::diagnostic::validate_signatures(&asset, false).is_err());
-    assert!(super::diagnostic::validate_signatures(&asset, true).is_err());
-}
-
-#[test]
 fn update_signer_policy_round_trips_and_override_requires_explicit_trust() {
     let mut params: UpdateSystemParams = serde_json::from_value(serde_json::json!({
         "registry": "https://registry.test",

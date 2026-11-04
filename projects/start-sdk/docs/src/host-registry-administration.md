@@ -8,18 +8,32 @@ All commands below assume your `start-cli` is pointed at your registry — eithe
 
 A **signer** is a public key authorized to publish a specific package, OS version, or asset. Admins are themselves signers — when you added the first admin, you registered a signer identity with admin privileges.
 
+Publishing authorization does not configure users' package trust. When adding or changing a package-signing key, [publish its public key](host-registry-setup.md#publish-signing-keys) so users can verify it and configure package trust. Put registry ownership and support contacts in the registry description; registering an administrator's contact details is not a substitute.
+
 Register a new signer (without admin rights):
 
 ```sh
 start-cli registry admin signer add \
   --name "Alice" \
-  --contact "alice@example.com" \
+  --contact "mailto:alice@example.com" \
   --key "$(cat alice.pub.pem)"
 ```
 
 The registry returns the signer's ID. Use that ID with `start-cli registry admin signer edit` to update contact info or keys, or `start-cli registry admin signer list` to see everyone registered.
 
 To grant a signer admin privileges (or revoke them), use `start-cli registry admin add <SIGNER_ID>` / `... admin remove <SIGNER_ID>`.
+
+## Offering signing keys to users
+
+Registry 1.4.0 and start-cli 2.7.0 support selecting registered signers whose keys the registry offers to StartOS 0.4.1.2 and later. New and upgraded registries start with no selection; registering an administrator or authorizing a package publisher does not select them.
+
+As an administrator, list your registered signers and use the [trust-signer selection command](/start-os/cli-reference.html#start-cli-registry-info-set-trust-signers-signer) to select their IDs. Each call replaces the entire selection; passing no IDs clears it. The registry offers all keys belonging to the selected signers, along with their names and contact details. Select the signers whose signatures users should accept, not every identity allowed to upload.
+
+For GPG identities and fingerprints, register the armored public-key export with `admin signer add --key` or reimport it with `admin signer edit --add-key`. A record containing only a DER public key needs the complete GPG export to supply those details.
+
+Remove a retained GPG export with `start-cli registry admin signer edit <SIGNER_ID> --remove-gpg-export <PRIMARY_FINGERPRINT>`. Find primary-key fingerprints under `gpgExports[].fingerprints` in `admin signer list --format json`. Matching is case-insensitive and removes each whole export containing that fingerprint, including exports containing multiple certificates. Repeat the flag to select more fingerprints. The signer's signing keys and publishing permissions remain unchanged; use `--remove-key` to revoke a signing key.
+
+When users connect the registry, StartOS trusts offered keys it does not already have for packages; existing keys keep their trust. Newly discovered keys are imported untrusted when StartOS next fetches packages or OS updates from the registry, with notifications for users to review. Dropping an offered key does not revoke users' trust. Choosing the registry for StartOS updates separately trusts its offered keys for that purpose. See [Keys From Registries](/start-os/trusted-keys.html#keys-from-registries) for the client behavior and trust controls.
 
 ## Packages
 

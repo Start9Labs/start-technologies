@@ -287,6 +287,14 @@ pub struct EditSignerParams {
     pub remove_contact: Vec<ContactInfo>,
     #[arg(short = 'K', long, help = "help.arg.remove-signer-key")]
     pub remove_key: Vec<AnyVerifyingKey>,
+    /// Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.
+    #[serde(default)]
+    #[arg(
+        long,
+        value_name = "PRIMARY_FINGERPRINT",
+        help = "help.arg.remove-signer-gpg-export"
+    )]
+    pub remove_gpg_export: Vec<String>,
 }
 
 rpc_toolkit::reflect_ts!(EditSignerParams);
@@ -304,6 +312,13 @@ impl EditSignerParams {
                 signer.contact.remove(idx);
             }
         }
+        signer.gpg_exports.retain(|export| {
+            !export.fingerprints.iter().any(|fingerprint| {
+                self.remove_gpg_export
+                    .iter()
+                    .any(|remove| fingerprint.eq_ignore_ascii_case(remove))
+            })
+        });
         Ok(self
             .remove_key
             .into_iter()
@@ -610,6 +625,79 @@ mod tests {
             .into_signer()
             .unwrap();
         assert_eq!(readded, signer);
+    }
+
+    #[test]
+    fn cli_and_rpc_signer_edit_remove_selected_gpg_exports_without_removing_keys() {
+        let armor = include_str!("../sign/fixtures/ed25519-signers.asc");
+        let other_armor = include_str!("../sign/fixtures/start9-public.asc");
+        let mut signer = AddSignerParams {
+            name: "Publisher".into(),
+            contact: vec![],
+            keys: vec![armor.into(), other_armor.into()],
+            gpg_exports: BTreeSet::new(),
+        }
+        .into_signer()
+        .unwrap();
+        let original_keys = signer.keys.clone();
+        let selected = parse_public_keys(&[armor.into()])
+            .unwrap()
+            .gpg_exports
+            .pop_first()
+            .unwrap();
+        let retained = parse_public_keys(&[other_armor.into()])
+            .unwrap()
+            .gpg_exports;
+        let fingerprint = selected.fingerprints.last().unwrap().to_ascii_uppercase();
+        let id = Guid::new();
+        let edit = EditSignerParams::try_parse_from([
+            "edit",
+            id.as_ref(),
+            "--add-key",
+            armor,
+            "--remove-gpg-export",
+            &fingerprint,
+            "--remove-gpg-export",
+            "unknown",
+        ])
+        .unwrap();
+        let wire = to_value(&edit).unwrap();
+        assert_eq!(
+            wire["removeGpgExport"],
+            imbl_value::json!([fingerprint, "unknown"])
+        );
+        let removed = from_value::<EditSignerParams>(wire)
+            .unwrap()
+            .apply(&mut signer)
+            .unwrap();
+        assert!(removed.is_empty());
+        assert_eq!(signer.keys, original_keys);
+        assert_eq!(signer.gpg_exports, retained);
+        let saved: SignerInfo = from_value(to_value(&signer).unwrap()).unwrap();
+        assert_eq!(saved, signer);
+    }
+
+    #[test]
+    fn signer_edit_without_export_removal_preserves_exports() {
+        let mut signer = AddSignerParams {
+            name: "Publisher".into(),
+            contact: vec![],
+            keys: vec![include_str!("../sign/fixtures/ed25519-signers.asc").into()],
+            gpg_exports: BTreeSet::new(),
+        }
+        .into_signer()
+        .unwrap();
+        let original = signer.clone();
+        let edit: EditSignerParams = from_value(imbl_value::json!({
+            "id": Guid::new(),
+            "addContact": [],
+            "addKey": [],
+            "removeContact": [],
+            "removeKey": []
+        }))
+        .unwrap();
+        assert!(edit.apply(&mut signer).unwrap().is_empty());
+        assert_eq!(signer, original);
     }
 
     #[test]
