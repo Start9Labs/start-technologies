@@ -98,6 +98,16 @@ export type GetOsVersionParamsInput = z.input<typeof schemas.GetOsVersionParams>
 export type GetUsersParamsInput = z.input<typeof schemas.GetUsersParams>
 export type GitHash = z.output<typeof schemas.GitHash>
 export type GitHashInput = z.input<typeof schemas.GitHash>
+
+/**
+ * An original public-key export and its self-certified identity claims.
+ */
+export type GpgPublicKeyExport = z.output<typeof schemas.GpgPublicKeyExport>
+
+/**
+ * An original public-key export and its self-certified identity claims.
+ */
+export type GpgPublicKeyExportInput = z.input<typeof schemas.GpgPublicKeyExport>
 export type Guid = z.output<typeof schemas.Guid>
 export type GuidInput = z.input<typeof schemas.Guid>
 export type HealthCheckId = z.output<typeof schemas.HealthCheckId>
@@ -147,6 +157,7 @@ export type AddPackageSignerParamsInput = z.input<
 export type AddPackageToCategoryParamsInput = z.input<
   typeof schemas.AddPackageToCategoryParams
 >
+export type AddSignerParamsInput = z.input<typeof schemas.AddSignerParams>
 export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type ApplyWithPathParamsInput = z.input<
   typeof schemas.ApplyWithPathParams
@@ -188,10 +199,12 @@ export type SetDescriptionParamsInput = z.input<
   typeof schemas.SetDescriptionParams
 >
 export type SetIconParamsInput = z.input<typeof schemas.SetIconParams>
+export type SetTrustSignersParamsInput = z.input<
+  typeof schemas.SetTrustSignersParams
+>
 export type SignAssetParamsInput = z.input<typeof schemas.SignAssetParams>
 export type SignPackageParamsInput = z.input<typeof schemas.SignPackageParams>
 export type SignerInfo = z.output<typeof schemas.SignerInfo>
-export type SignerInfoInput = z.input<typeof schemas.SignerInfo>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type VersionSignerParamsInput = z.input<
   typeof schemas.VersionSignerParams
