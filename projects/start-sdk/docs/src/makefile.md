@@ -15,27 +15,29 @@ The `s9pk.mk` file contains all the common build logic shared across StartOS pac
 
 ### Targets
 
-| Target               | Description                                         |
-| -------------------- | --------------------------------------------------- |
-| `make` or `make all` | Build for all architectures (default)               |
-| `make x86`           | Build for x86_64 only                               |
-| `make arm`           | Build for aarch64 only                              |
-| `make riscv`         | Build for riscv64 only                              |
-| `make universal`     | Build a single package containing all architectures |
-| `make format`        | Format `startos/` with the SDK's Prettier config    |
-| `make install`       | Build for your server's architecture and install    |
-| `make clean`         | Remove build artifacts                              |
+| Target               | Description                                                                      |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `make` or `make all` | Build for all architectures (default)                                            |
+| `make x86`           | Build for x86_64 only                                                            |
+| `make arm`           | Build for aarch64 only                                                           |
+| `make riscv`         | Build for riscv64 only                                                           |
+| `make universal`     | Build a single package containing all architectures                              |
+| `make format`        | Format `startos/` with the SDK's Prettier config                                 |
+| `make install`       | Build for your server's architecture and install with `--trust`                  |
+| `make sign`          | Build default targets and endorse all local `.s9pk` files with your identity key |
+| `make clean`         | Remove build artifacts                                                           |
 
 ### Variables
 
-| Variable    | Default                        | Description                                 |
-| ----------- | ------------------------------ | ------------------------------------------- |
-| `ARCHES`    | `x86 arm riscv`                | Architectures to build by default           |
-| `TARGETS`   | `$(ARCHES)`                    | Default build targets                       |
-| `VARIANT`   | (unset)                        | Optional variant suffix for package name    |
-| `TS_CHECK`  | `npx tsc --noEmit`             | Type-check step of the build gate           |
-| `FORMAT`    | `npx prettier --write startos` | Formatting step of the build                |
-| `JS_BUNDLE` | `npx ncc build …`              | Bundle step producing `javascript/index.js` |
+| Variable    | Default                        | Description                                            |
+| ----------- | ------------------------------ | ------------------------------------------------------ |
+| `ARCHES`    | `x86 arm riscv`                | Architectures to build by default                      |
+| `TARGETS`   | `$(ARCHES)`                    | Default build targets                                  |
+| `VARIANT`   | (unset)                        | Optional variant suffix for package name               |
+| `HOST`      | (unset)                        | Install destination: a `start-cli` host profile or URL |
+| `TS_CHECK`  | `npx tsc --noEmit`             | Type-check step of the build gate                      |
+| `FORMAT`    | `npx prettier --write startos` | Formatting step of the build                           |
+| `JS_BUNDLE` | `npx ncc build …`              | Bundle step producing `javascript/index.js`            |
 
 ## Makefile
 
@@ -93,6 +95,13 @@ make arm
 # Install to StartOS server (requires a workspace whose .startos/config.yaml points at your device)
 make install
 
+# Install to a specific host profile or URL
+make install HOST=prod
+make install HOST=https://your-device.local
+
+# Endorse packages with your identity key
+make sign
+
 # Format startos/ before committing
 make format
 
@@ -118,7 +127,9 @@ The build also needs the tools from [Environment Setup](./environment-setup.md) 
 
 ## Installation
 
-`make install` queries your StartOS device's architecture, builds the current variant for that architecture when its inputs have changed or the artifact is missing, and installs that exact `.s9pk`. It resolves the device from your workspace `.startos/config.yaml` (the `host.default` profile).
+`make install` queries your StartOS device's architecture, builds the current variant for that architecture when its inputs have changed or the artifact is missing, and installs that exact `.s9pk`. By default, it resolves the device from your workspace `.startos/config.yaml` (the `host.default` profile). Set `HOST` to a profile name or URL to pass `-H` to both the architecture query and installation.
+
+Installation uses `--trust` to override signer trust for local development packages. Signature and integrity verification remain mandatory; this flag does not change TLS certificate verification.
 
 1. Point your workspace at the device. Edit `.startos/config.yaml` (at the workspace root, **not** `~/.startos/config.yaml`) so `host.default` is your device's address:
 
@@ -148,7 +159,7 @@ The build also needs the tools from [Environment Setup](./environment-setup.md) 
 > [!NOTE]
 > `make install` talks to the device over HTTPS, so your computer must trust the device's certificate — the same trust you set up to open its web interface in a browser. If it isn't trusted yet, import the device's root CA into your system trust store; or, for a one-off, sideload the `.s9pk` through the web interface instead (see [Sideloading](/start-os/sideloading.html)), which needs no certificate setup.
 >
-> To install to a device other than `host.default`, run `start-cli` directly with `-H` (a profile name or URL): `start-cli -H prod package install -s <your-package>.s9pk`.
+> To install to a device other than `host.default`, log in with `start-cli -H prod auth login`, then run `make install HOST=prod`.
 
 ### Example Output
 
@@ -182,3 +193,7 @@ Sideloading 100%
   Validating Headers...
   Unpacking...
 ```
+
+## Signing
+
+`make sign` builds the configured `TARGETS`, then runs `start-cli s9pk sign` on every `.s9pk` file in the package directory, including existing variants. It uses your configured identity key (including a GPG-agent key), adding an endorsement while preserving the embedded workspace signature. See [Publishing](./publishing.md) for signature details. Use `TARGETS` and `VARIANT` to select what gets built, for example `make sign TARGETS=universal VARIANT=gpu`.
