@@ -1154,11 +1154,18 @@ pub async fn synchronize_network_manager<P: AsRef<Path>>(
     Ok(())
 }
 
-/// Force EUI-64 IPv6 addressing (privacy extensions off) onto existing physical
-/// NetworkManager connections. Connection defaults in NetworkManager.conf only
-/// fill in unset properties, so a profile created before those defaults existed
-/// keeps its stable-privacy addressing and draws a new address every boot.
 async fn force_ipv6_addr_gen_eui64() {
+    // Startup profiles remain cached after mounting the saved profile directory.
+    if Command::new("nmcli")
+        .arg("connection")
+        .arg("reload")
+        .invoke(ErrorKind::Network)
+        .await
+        .log_err()
+        .is_none()
+    {
+        return;
+    }
     let Ok(out) = Command::new("nmcli")
         .arg("-t")
         .arg("-f")
@@ -1192,29 +1199,4 @@ async fn force_ipv6_addr_gen_eui64() {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::split_nmcli_terse_line;
-
-    #[test]
-    fn terse_line_unescapes_colon_and_backslash() {
-        // nmcli `-t` escapes `:` as `\:` and `\` as `\\` within a field.
-        let line = r"my\:wifi\\x:61f7f9e2:802-11-wireless:";
-        assert_eq!(
-            split_nmcli_terse_line(line),
-            vec![
-                "my:wifi\\x".to_owned(),
-                "61f7f9e2".to_owned(),
-                "802-11-wireless".to_owned(),
-                String::new(),
-            ],
-        );
-    }
-
-    #[test]
-    fn terse_line_plain_fields() {
-        assert_eq!(
-            split_nmcli_terse_line("café:90:WPA2 WPA3"),
-            vec!["café".to_owned(), "90".to_owned(), "WPA2 WPA3".to_owned()],
-        );
-    }
-}
+mod tests;
