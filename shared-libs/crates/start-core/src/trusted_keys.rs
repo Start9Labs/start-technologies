@@ -142,7 +142,8 @@ pub async fn required(
     ))
 }
 
-fn initial_signer_certificates() -> impl Iterator<Item = (&'static str, ImportedPublicKeys)> {
+pub(crate) fn initial_signer_certificates()
+-> impl Iterator<Item = (&'static str, ImportedPublicKeys)> {
     [
         ("drbonez", include_str!("trusted_keys/initial/aiden.asc")),
         (
@@ -174,25 +175,6 @@ pub fn initial_trusted_keys() -> TrustedKeys {
     let mut keys = legacy::individual_keys(&legacy::initial_keyrings(), Utc::now()).unwrap();
     protect_registry_keys(&mut keys, &BTreeMap::new(), &Value::Null);
     keys
-}
-
-/// Replaces every stored copy of the `drbonez` certificate with the seeded one.
-pub(crate) fn replace_stored_drbonez_certificates(keys: &mut TrustedKeys) {
-    let seeded = initial_signer_certificates()
-        .find(|(label, _)| *label == "drbonez")
-        .map(|(_, imported)| imported.gpg_exports)
-        .unwrap_or_default();
-    for key in keys.values_mut() {
-        let stored = key.gpg_exports.len();
-        key.gpg_exports.retain(|export| {
-            !seeded
-                .iter()
-                .any(|seed| seed.fingerprints == export.fingerprints)
-        });
-        if key.gpg_exports.len() != stored {
-            key.gpg_exports.extend(seeded.iter().cloned());
-        }
-    }
 }
 
 pub fn os_signers(keys: &TrustedKeys) -> TrustedOsUpdateSigners {
@@ -487,46 +469,38 @@ fn remove_keys(keys: &mut TrustedKeys, ids: BTreeSet<InternedString>) -> Result<
 
 async fn add(ctx: RpcContext, params: AddTrustedKeyParams) -> Result<AddTrustedKeyRes, Error> {
     let public_keys = parse_public_keys(&params.public_keys)?;
-    ctx.db
-        .mutate(|db| {
-            db.as_public_mut().mutate(|public| {
-                mutate_public_keys(public, |keys| {
-                    import_individual_keys(keys, params.name, public_keys, params.trust_for)
-                })
+    crate::update::signer_files::mutate(ctx.db.clone(), move |db| {
+        db.as_public_mut().mutate(|public| {
+            mutate_public_keys(public, |keys| {
+                import_individual_keys(keys, params.name, public_keys, params.trust_for)
             })
         })
-        .await
-        .result
+    })
+    .await
 }
 
 async fn update(ctx: RpcContext, params: UpdateTrustedKeyParams) -> Result<(), Error> {
-    ctx.db
-        .mutate(|db| {
-            db.as_public_mut()
-                .mutate(|public| mutate_public_keys(public, |keys| update_key(keys, params)))
-        })
-        .await
-        .result
+    crate::update::signer_files::mutate(ctx.db.clone(), move |db| {
+        db.as_public_mut()
+            .mutate(|public| mutate_public_keys(public, |keys| update_key(keys, params)))
+    })
+    .await
 }
 
 async fn remove(ctx: RpcContext, params: RemoveTrustedKeyParams) -> Result<(), Error> {
-    ctx.db
-        .mutate(|db| {
-            db.as_public_mut()
-                .mutate(|public| mutate_public_keys(public, |keys| remove_key(keys, &params.id)))
-        })
-        .await
-        .result
+    crate::update::signer_files::mutate(ctx.db.clone(), move |db| {
+        db.as_public_mut()
+            .mutate(|public| mutate_public_keys(public, |keys| remove_key(keys, &params.id)))
+    })
+    .await
 }
 
 async fn remove_many(ctx: RpcContext, params: RemoveTrustedKeysParams) -> Result<(), Error> {
-    ctx.db
-        .mutate(|db| {
-            db.as_public_mut()
-                .mutate(|public| mutate_public_keys(public, |keys| remove_keys(keys, params.ids)))
-        })
-        .await
-        .result
+    crate::update::signer_files::mutate(ctx.db.clone(), move |db| {
+        db.as_public_mut()
+            .mutate(|public| mutate_public_keys(public, |keys| remove_keys(keys, params.ids)))
+    })
+    .await
 }
 
 pub fn legacy_add(
@@ -584,9 +558,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_are_five_independent_start9_registry_keys() {
+    fn defaults_are_three_independent_start9_registry_keys() {
         let keys = initial_trusted_keys();
-        assert_eq!(keys.len(), 5);
+        assert_eq!(keys.len(), 3);
         assert_eq!(enabled_keys(&keys, TrustContext::Marketplace).len(), 3);
         assert_eq!(enabled_keys(&keys, TrustContext::Os).len(), 3);
         assert_eq!(

@@ -62,7 +62,12 @@ pub fn diagnostic<C: Context>() -> ParentHandler<C> {
                 .with_about("about.teardown-rebuild-containers")
                 .with_call_remote::<CliContext>(),
         )
-        .subcommand("update", from_fn_async(update::update_system).no_cli())
+        .subcommand(
+            "update",
+            from_fn_async(update::update_system)
+                .with_metadata("get_local_auth", Value::Bool(true))
+                .no_cli(),
+        )
         .subcommand(
             "update",
             from_fn_async(update::cli_update_system)
@@ -71,7 +76,6 @@ pub fn diagnostic<C: Context>() -> ParentHandler<C> {
         )
 }
 
-// #[command]
 pub fn error(ctx: DiagnosticContext) -> Result<Arc<RpcError>, Error> {
     Ok(ctx.error.clone())
 }

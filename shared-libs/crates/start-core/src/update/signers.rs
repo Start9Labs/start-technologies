@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::context::{CliContext, RpcContext};
 use crate::prelude::*;
-use crate::registry::signer::AcceptSigners;
 use crate::sign::AnyVerifyingKey;
 pub use crate::trusted_keys::initial_signers;
 use crate::trusted_keys::{legacy_add, legacy_remove, legacy_update, os_signers};
@@ -23,15 +22,6 @@ pub struct TrustedOsUpdateSigner {
 
 rpc_toolkit::reflect_ts!(TrustedOsUpdateSigner);
 rpc_toolkit::ts_export!(TrustedOsUpdateSigner, namespaces = [""]);
-
-pub fn initial_signer_policy() -> AcceptSigners {
-    AcceptSigners::Any(
-        initial_signers()
-            .into_keys()
-            .map(|key| AcceptSigners::Signer(key.parse().unwrap()))
-            .collect(),
-    )
-}
 
 pub fn api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
@@ -119,16 +109,14 @@ fn get_signer(
 }
 
 pub async fn add(ctx: RpcContext, params: SetOsUpdateSignerParams) -> Result<(), Error> {
-    ctx.db
-        .mutate(|db| {
-            db.as_public_mut().mutate(|public| {
-                crate::trusted_keys::mutate_public_keys(public, |keys| {
-                    legacy_add(keys, params.key, params.label)
-                })
+    super::signer_files::mutate(ctx.db.clone(), move |db| {
+        db.as_public_mut().mutate(|public| {
+            crate::trusted_keys::mutate_public_keys(public, |keys| {
+                legacy_add(keys, params.key, params.label)
             })
         })
-        .await
-        .result
+    })
+    .await
 }
 
 pub async fn get(
@@ -151,29 +139,23 @@ pub async fn list(ctx: RpcContext) -> Result<TrustedOsUpdateSigners, Error> {
 }
 
 pub async fn update(ctx: RpcContext, params: SetOsUpdateSignerParams) -> Result<(), Error> {
-    ctx.db
-        .mutate(|db| {
-            db.as_public_mut().mutate(|public| {
-                crate::trusted_keys::mutate_public_keys(public, |keys| {
-                    legacy_update(keys, &params.key, params.label)
-                })
+    super::signer_files::mutate(ctx.db.clone(), move |db| {
+        db.as_public_mut().mutate(|public| {
+            crate::trusted_keys::mutate_public_keys(public, |keys| {
+                legacy_update(keys, &params.key, params.label)
             })
         })
-        .await
-        .result
+    })
+    .await
 }
 
 pub async fn remove(ctx: RpcContext, params: OsUpdateSignerKeyParams) -> Result<(), Error> {
-    ctx.db
-        .mutate(|db| {
-            db.as_public_mut().mutate(|public| {
-                crate::trusted_keys::mutate_public_keys(public, |keys| {
-                    legacy_remove(keys, &params.key)
-                })
-            })
+    super::signer_files::mutate(ctx.db.clone(), move |db| {
+        db.as_public_mut().mutate(|public| {
+            crate::trusted_keys::mutate_public_keys(public, |keys| legacy_remove(keys, &params.key))
         })
-        .await
-        .result
+    })
+    .await
 }
 
 #[cfg(test)]
