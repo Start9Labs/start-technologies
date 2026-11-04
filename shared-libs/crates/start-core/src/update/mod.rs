@@ -17,7 +17,6 @@ use tokio::process::Command;
 use tracing::instrument;
 
 pub mod diagnostic;
-pub(crate) mod diagnostic_auth;
 pub mod security;
 pub(crate) mod signer_files;
 pub mod signers;

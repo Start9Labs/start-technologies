@@ -1,16 +1,49 @@
+use std::collections::BTreeSet;
+
 use chrono::{DateTime, Utc};
 use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_4_1_1};
+use crate::context::RpcContext;
 use crate::prelude::*;
+use crate::sign::AnyVerifyingKey;
 use crate::trusted_keys::legacy::{decode_keys, grouped_keys};
-use crate::trusted_keys::{
-    protect_registry_keys, remove_seeded_alpha_keys, replace_stored_drbonez_certificates,
-};
+use crate::trusted_keys::{TrustedKeys, initial_signer_certificates, protect_registry_keys};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Version;
+
+pub(crate) fn retired_alpha_keys() -> BTreeSet<AnyVerifyingKey> {
+    BTreeSet::from([
+        "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
+        "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
+    ])
+}
+
+fn remove_seeded_alpha_keys(keys: &mut TrustedKeys) {
+    for key in retired_alpha_keys() {
+        keys.remove(&key.interned_der64());
+    }
+}
+
+fn replace_stored_drbonez_certificates(keys: &mut TrustedKeys) {
+    let seeded = initial_signer_certificates()
+        .find(|(label, _)| *label == "drbonez")
+        .map(|(_, imported)| imported.gpg_exports)
+        .unwrap_or_default();
+    for key in keys.values_mut() {
+        let stored = key.gpg_exports.len();
+        key.gpg_exports.retain(|export| {
+            !seeded
+                .iter()
+                .any(|seed| seed.fingerprints == export.fingerprints)
+        });
+        if key.gpg_exports.len() != stored {
+            key.gpg_exports.extend(seeded.iter().cloned());
+        }
+    }
+}
 
 fn stored_keys(db: &mut Value) -> Result<&mut Value, Error> {
     db.get_mut("public")
@@ -61,6 +94,9 @@ impl VersionT for Version {
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
         migrate(db, Utc::now())?;
         Ok(Value::Null)
+    }
+    async fn post_up(self, ctx: &RpcContext, _: Value) -> Result<(), Error> {
+        crate::update::signer_files::initialize(&ctx.db).await
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
         let stored = stored_keys(db)?;
@@ -205,18 +241,19 @@ mod tests {
             to_value(&historical).unwrap(),
             to_value(&individual).unwrap(),
         ] {
-            let snapshots = imbl_value::json!({"https://alpha-registry.start9.com": legacy::retired_alpha_keys()});
+            let snapshots =
+                imbl_value::json!({"https://alpha-registry.start9.com": retired_alpha_keys()});
             let mut db = imbl_value::json!({"public": {"serverInfo": {"trustedKeys": stored, "registryKeys": snapshots}, "ui": {"registries": {"https://alpha-registry.start9.com": "Alpha"}}}});
             migrate(&mut db, now).unwrap();
             let migrated: TrustedKeys =
                 from_value(db["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
-            for key in legacy::retired_alpha_keys() {
+            for key in retired_alpha_keys() {
                 assert!(!migrated.contains_key(&key.interned_der64()));
             }
             assert_eq!(db["public"]["serverInfo"]["registryKeys"], snapshots);
             assert_eq!(
                 migrated.len(),
-                individual.len() - legacy::retired_alpha_keys().len()
+                individual.len() - retired_alpha_keys().len()
             );
             let first = db.clone();
             migrate(&mut db, now).unwrap();
@@ -246,7 +283,7 @@ mod tests {
         let keys: TrustedKeys =
             from_value(migrated["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
         assert_eq!(keys.len(), 3);
-        for key in legacy::retired_alpha_keys() {
+        for key in retired_alpha_keys() {
             assert!(!keys.contains_key(&key.interned_der64()));
         }
         assert_eq!(

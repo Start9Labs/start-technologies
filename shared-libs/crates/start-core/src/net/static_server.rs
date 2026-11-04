@@ -176,12 +176,12 @@ impl UiContext for DiagnosticContext {
         UI_CELL.get().unwrap_or(&EMPTY_DIR)
     }
     fn api() -> ParentHandler<Self> {
-        main_api()
+        main_api().with_metadata("authenticated", Value::Bool(false))
     }
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
         server
             .middleware(RequireJson)
-            .middleware(crate::update::diagnostic_auth::DiagnosticUpdateAuth::new())
+            .middleware(Auth::new().with_local_auth())
     }
     fn apply_outer_layers(self, router: Router) -> Router {
         local_hosts_only(router)

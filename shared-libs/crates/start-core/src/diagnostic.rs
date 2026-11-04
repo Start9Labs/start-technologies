@@ -65,7 +65,7 @@ pub fn diagnostic<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "update",
             from_fn_async(update::update_system)
-                .with_metadata("diagnostic_update", Value::Bool(true))
+                .with_metadata("get_local_auth", Value::Bool(true))
                 .no_cli(),
         )
         .subcommand(

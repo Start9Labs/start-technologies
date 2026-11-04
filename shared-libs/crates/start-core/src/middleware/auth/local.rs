@@ -1,16 +1,19 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::path::Path;
 
 use base64::Engine;
 use http::HeaderValue;
 use http::header::AUTHORIZATION;
 use rand::random;
 use rpc_toolkit::yajrc::{RpcError, RpcResponse};
-use rpc_toolkit::{Context, Empty, Middleware};
+use rpc_toolkit::{Context, Middleware};
+use serde::Deserialize;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use url::Url;
 
 use crate::context::{DiagnosticContext, RpcContext};
+use crate::net::request_origin::RequestOrigin;
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::{create_file_mod, read_file_to_string};
@@ -112,12 +115,12 @@ fn matches_cookie(bearer: &str, token: &str) -> bool {
         && bearer == token
 }
 
-async fn check_from_header<C: LocalAuthContext>(header: Option<&HeaderValue>) -> Result<(), Error> {
+async fn check_from_header(cookie_path: &Path, header: Option<&HeaderValue>) -> Result<(), Error> {
     if let Some(bearer) = header
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
     {
-        if let Ok(token) = read_file_to_string(C::LOCAL_AUTH_COOKIE_PATH).await {
+        if let Ok(token) = read_file_to_string(cookie_path).await {
             if matches_cookie(bearer, &token) {
                 return Ok(());
             }
@@ -126,43 +129,215 @@ async fn check_from_header<C: LocalAuthContext>(header: Option<&HeaderValue>) ->
     Err(unauthorized())
 }
 
+#[derive(Deserialize)]
+pub struct Metadata {
+    #[serde(default)]
+    get_local_auth: bool,
+}
+
 #[derive(Clone)]
 pub struct LocalAuth {
     authorization: Option<HeaderValue>,
+    loopback: bool,
 }
 impl LocalAuth {
     pub fn new() -> Self {
         Self {
             authorization: None,
+            loopback: false,
         }
+    }
+
+    async fn authenticate_request(
+        &self,
+        cookie_path: &Path,
+        metadata: Metadata,
+        request: &mut rpc_toolkit::RpcRequest,
+    ) -> Result<(), rpc_toolkit::RpcResponse> {
+        let result = if self.loopback {
+            check_from_header(cookie_path, self.authorization.as_ref()).await
+        } else {
+            Err(unauthorized())
+        };
+        if let Some(params) = request.params.as_object_mut() {
+            params.remove("__Auth_local");
+            if metadata.get_local_auth {
+                params.insert("__Auth_local".into(), Value::Bool(result.is_ok()));
+            }
+        }
+        result.map_err(|error| RpcResponse::from(RpcError::from(error)))
     }
 }
 
 impl<C: LocalAuthContext> Middleware<C> for LocalAuth {
-    type Metadata = Empty;
+    type Metadata = Metadata;
     async fn process_http_request(
         &mut self,
         _: &C,
         request: &mut axum::extract::Request,
     ) -> Result<(), axum::response::Response> {
         self.authorization = request.headers().get(AUTHORIZATION).cloned();
+        self.loopback = RequestOrigin::from_extensions(request.extensions())
+            .peer_ip
+            .is_some_and(|ip| ip.is_loopback());
         Ok(())
     }
     async fn process_rpc_request(
         &mut self,
         _: &C,
-        _: Self::Metadata,
-        _: &mut rpc_toolkit::RpcRequest,
+        metadata: Self::Metadata,
+        request: &mut rpc_toolkit::RpcRequest,
     ) -> Result<(), rpc_toolkit::RpcResponse> {
-        check_from_header::<C>(self.authorization.as_ref())
+        self.authenticate_request(Path::new(C::LOCAL_AUTH_COOKIE_PATH), metadata, request)
             .await
-            .map_err(|e| RpcResponse::from(RpcError::from(e)))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use imbl_value::json;
+
     use super::*;
+    use crate::net::web_server::TcpMetadata;
+    use crate::util::io::{TmpDir, write_file_atomic};
+
+    struct TestContext;
+    impl Context for TestContext {}
+    impl LocalAuthContext for TestContext {
+        const LOCAL_AUTH_COOKIE_PATH: &str = "/unused";
+        const LOCAL_AUTH_COOKIE_OWNERSHIP: &str = "root:startos";
+    }
+
+    fn request(claimed_local: bool) -> rpc_toolkit::RpcRequest {
+        rpc_toolkit::RpcRequest {
+            id: None,
+            method: rpc_toolkit::yajrc::GenericRpcMethod::new("diagnostic.update".into()),
+            params: json!({"trust": true, "__Auth_local": claimed_local}),
+        }
+    }
+
+    #[tokio::test]
+    async fn local_auth_overwrites_claims_and_requires_loopback_with_a_valid_cookie() {
+        let temp = TmpDir::new().await.unwrap();
+        let cookie = temp.join("cookie");
+        let token = BASE64.encode([42; LOCAL_AUTH_TOKEN_BYTES]);
+        write_file_atomic(&cookie, &token).await.unwrap();
+        for (peer, loopback) in [
+            ("127.0.0.1:1234", true),
+            ("[::1]:1234", true),
+            ("[::ffff:127.0.0.1]:1234", true),
+            ("203.0.113.8:1234", false),
+            ("[::ffff:203.0.113.8]:1234", false),
+        ] {
+            for valid_cookie in [false, true] {
+                let mut auth = LocalAuth::new();
+                let mut http = axum::extract::Request::builder()
+                    .header("Host", "localhost")
+                    .header("X-Forwarded-For", "127.0.0.1")
+                    .header(
+                        AUTHORIZATION,
+                        format!(
+                            "Bearer {}",
+                            if valid_cookie {
+                                token.clone()
+                            } else {
+                                BASE64.encode([43; LOCAL_AUTH_TOKEN_BYTES])
+                            }
+                        ),
+                    )
+                    .body(axum::body::Body::empty())
+                    .unwrap();
+                http.extensions_mut().insert(TcpMetadata {
+                    peer_addr: peer.parse().unwrap(),
+                    local_addr: "127.0.0.1:80".parse().unwrap(),
+                });
+                auth.process_http_request(&TestContext, &mut http)
+                    .await
+                    .unwrap();
+                for claimed in [false, true] {
+                    let mut rpc = request(claimed);
+                    assert_eq!(
+                        auth.authenticate_request(
+                            &cookie,
+                            Metadata {
+                                get_local_auth: true
+                            },
+                            &mut rpc
+                        )
+                        .await
+                        .is_ok(),
+                        loopback && valid_cookie
+                    );
+                    assert_eq!(
+                        rpc.params["__Auth_local"],
+                        Value::Bool(loopback && valid_cookie)
+                    );
+                    let mut unused = request(claimed);
+                    assert_eq!(
+                        auth.authenticate_request(
+                            &cookie,
+                            Metadata {
+                                get_local_auth: false
+                            },
+                            &mut unused
+                        )
+                        .await
+                        .is_ok(),
+                        loopback && valid_cookie
+                    );
+                    assert!(unused.params.get("__Auth_local").is_none());
+                }
+            }
+        }
+        let auth = LocalAuth {
+            authorization: Some(HeaderValue::from_str(&format!("Bearer {token}")).unwrap()),
+            loopback: true,
+        };
+        for path in [temp.join("missing"), cookie] {
+            if path.exists() {
+                write_file_atomic(&path, "").await.unwrap();
+            }
+            let mut rpc = request(true);
+            assert!(
+                auth.authenticate_request(
+                    &path,
+                    Metadata {
+                        get_local_auth: true
+                    },
+                    &mut rpc
+                )
+                .await
+                .is_err()
+            );
+            assert_eq!(rpc.params["__Auth_local"], Value::Bool(false));
+        }
+    }
+
+    #[tokio::test]
+    async fn local_proxy_retains_the_remote_origin() {
+        let mut auth = LocalAuth::new();
+        let mut http = axum::extract::Request::new(axum::body::Body::empty());
+        http.extensions_mut().insert(TcpMetadata {
+            peer_addr: "127.0.0.1:1234".parse().unwrap(),
+            local_addr: "127.0.0.1:80".parse().unwrap(),
+        });
+        http.extensions_mut().insert(RequestOrigin::from_connection(
+            Some(&TcpMetadata {
+                peer_addr: "203.0.113.8:4567".parse().unwrap(),
+                local_addr: "192.168.1.2:443".parse().unwrap(),
+            }),
+            None,
+        ));
+        auth.process_http_request(&TestContext, &mut http)
+            .await
+            .unwrap();
+        assert!(!auth.loopback);
+        http.extensions_mut().clear();
+        auth.process_http_request(&TestContext, &mut http)
+            .await
+            .unwrap();
+        assert!(!auth.loopback);
+    }
 
     #[test]
     fn cookie_authentication_rejects_incomplete_initialization() {

@@ -142,7 +142,8 @@ pub async fn required(
     ))
 }
 
-fn initial_signer_certificates() -> impl Iterator<Item = (&'static str, ImportedPublicKeys)> {
+pub(crate) fn initial_signer_certificates()
+-> impl Iterator<Item = (&'static str, ImportedPublicKeys)> {
     [
         ("drbonez", include_str!("trusted_keys/initial/aiden.asc")),
         (
@@ -174,31 +175,6 @@ pub fn initial_trusted_keys() -> TrustedKeys {
     let mut keys = legacy::individual_keys(&legacy::initial_keyrings(), Utc::now()).unwrap();
     protect_registry_keys(&mut keys, &BTreeMap::new(), &Value::Null);
     keys
-}
-
-pub(crate) fn remove_seeded_alpha_keys(keys: &mut TrustedKeys) {
-    for key in legacy::retired_alpha_keys() {
-        keys.remove(&key.interned_der64());
-    }
-}
-
-/// Replaces every stored copy of the `drbonez` certificate with the seeded one.
-pub(crate) fn replace_stored_drbonez_certificates(keys: &mut TrustedKeys) {
-    let seeded = initial_signer_certificates()
-        .find(|(label, _)| *label == "drbonez")
-        .map(|(_, imported)| imported.gpg_exports)
-        .unwrap_or_default();
-    for key in keys.values_mut() {
-        let stored = key.gpg_exports.len();
-        key.gpg_exports.retain(|export| {
-            !seeded
-                .iter()
-                .any(|seed| seed.fingerprints == export.fingerprints)
-        });
-        if key.gpg_exports.len() != stored {
-            key.gpg_exports.extend(seeded.iter().cloned());
-        }
-    }
 }
 
 pub fn os_signers(keys: &TrustedKeys) -> TrustedOsUpdateSigners {

@@ -34,6 +34,10 @@ pub struct DiagnosticUpdateSystemParams {
     #[arg(long, help = "help.arg.trust")]
     #[serde(default)]
     trust: bool,
+    #[arg(skip)]
+    #[visit(ts(skip))]
+    #[serde(rename = "__Auth_local", default, skip_serializing)]
+    local_auth: bool,
     #[arg(
         long = "to",
         value_name = "TARGET",
@@ -46,15 +50,27 @@ pub struct DiagnosticUpdateSystemParams {
 }
 rpc_toolkit::reflect_ts!(DiagnosticUpdateSystemParams);
 
+impl DiagnosticUpdateSystemParams {
+    fn authorize(&self) -> Result<(), Error> {
+        if self.trust && !self.local_auth {
+            return Err(crate::middleware::auth::local::unauthorized());
+        }
+        Ok(())
+    }
+}
+
 #[instrument(skip_all)]
 pub async fn update_system(
     ctx: DiagnosticContext,
-    DiagnosticUpdateSystemParams {
+    params: DiagnosticUpdateSystemParams,
+) -> Result<UpdateSystemRes, Error> {
+    params.authorize()?;
+    let DiagnosticUpdateSystemParams {
         target_version: target,
         progress: report_progress,
         trust,
-    }: DiagnosticUpdateSystemParams,
-) -> Result<UpdateSystemRes, Error> {
+        ..
+    } = params;
     let guard = ctx.update_in_progress.mutate(|slot| {
         if Arc::strong_count(slot) > 1 {
             None
@@ -311,4 +327,42 @@ pub async fn cli_update_system(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use rpc_toolkit::HandlerFor;
+
+    use super::*;
+    use crate::net::static_server::UiContext;
+
+    #[test]
+    fn trust_override_requires_injected_local_authentication() {
+        for trust in [false, true] {
+            for local_auth in [false, true] {
+                let params: DiagnosticUpdateSystemParams = serde_json::from_value(
+                    serde_json::json!({"trust": trust, "__Auth_local": local_auth}),
+                )
+                .unwrap();
+                assert_eq!(params.authorize().is_ok(), !trust || local_auth);
+                assert!(
+                    serde_json::to_value(&params)
+                        .unwrap()
+                        .get("__Auth_local")
+                        .is_none()
+                );
+            }
+        }
+        let params: DiagnosticUpdateSystemParams =
+            serde_json::from_value(serde_json::json!({"trust": true})).unwrap();
+        assert!(params.authorize().is_err());
+    }
+
+    #[test]
+    fn diagnostic_ui_keeps_signed_updates_public() {
+        let metadata =
+            DiagnosticContext::api().metadata(["diagnostic", "update"].into_iter().collect());
+        assert_eq!(metadata.get("authenticated"), Some(&Value::Bool(false)));
+        assert_eq!(metadata.get("get_local_auth"), Some(&Value::Bool(true)));
+    }
 }

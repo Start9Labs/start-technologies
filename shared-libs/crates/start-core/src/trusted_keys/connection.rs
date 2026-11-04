@@ -608,7 +608,7 @@ mod tests {
     #[test]
     fn alpha_seeds_are_reimported_only_when_a_connected_registry_offers_them() {
         let url = registry_url("https://alpha-registry.start9.com").unwrap();
-        let alpha = legacy::retired_alpha_keys();
+        let alpha = crate::version::retired_alpha_keys();
         let info = RegistryInfo {
             trust_signers: alpha
                 .iter()

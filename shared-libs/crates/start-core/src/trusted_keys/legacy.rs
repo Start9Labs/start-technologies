@@ -36,13 +36,6 @@ pub(crate) fn start9_registry() -> RegistryIdentity {
     }
 }
 
-pub(crate) fn retired_alpha_keys() -> BTreeSet<AnyVerifyingKey> {
-    BTreeSet::from([
-        "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
-        "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
-    ])
-}
-
 pub(crate) fn initial_keyrings() -> TrustedKeyrings {
     let mut start9 = ImportedPublicKeys::default();
     for (_, imported) in initial_signer_certificates() {
@@ -78,7 +71,7 @@ pub(crate) fn historical_keyrings() -> TrustedKeyrings {
             removable: false,
             contact: BTreeSet::new(),
             added_at: None,
-            public_keys: retired_alpha_keys(),
+            public_keys: crate::version::retired_alpha_keys(),
             gpg_exports: BTreeSet::new(),
             marketplace: false,
             os: false,
