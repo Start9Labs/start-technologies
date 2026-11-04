@@ -2,6 +2,8 @@
 
 StartOS is a sovereign computing platform that makes it easy to run a personal server. It handles service installation, networking, backups, and system administration — all from a simple browser-based interface.
 
+- [Overview](overview.md)
+
 ## Getting Started
 
 - [Installing StartOS](installing-startos.md)
@@ -62,6 +64,7 @@ StartOS is a sovereign computing platform that makes it easy to run a personal s
 - [Server Name](server-name.md)
 - [SSH](ssh.md)
 - [SMTP](smtp.md)
+- [Volumes](volumes.md)
 - [WiFi](wifi.md)
 - [Internationalization](internationalization.md)
 - [Kiosk Mode](kiosk-mode.md)
