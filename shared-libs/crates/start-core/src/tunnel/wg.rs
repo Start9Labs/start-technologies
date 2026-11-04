@@ -10,7 +10,7 @@ use x25519_dalek::{PublicKey, StaticSecret};
 use crate::prelude::*;
 use crate::tunnel::wg6;
 use crate::util::Invoke;
-use crate::util::io::write_file_atomic;
+use crate::util::io::write_file_private_atomic;
 use crate::util::serde::Base64;
 
 pub const WIREGUARD_INTERFACE_NAME: &str = "wg-start-tunnel";
@@ -61,7 +61,7 @@ impl WgServer {
                     Err(e)
                 }
             })?;
-        write_file_atomic(
+        write_file_private_atomic(
             const_format::formatcp!("/etc/wireguard/{WIREGUARD_INTERFACE_NAME}.conf"),
             self.server_config().to_string().as_bytes(),
         )

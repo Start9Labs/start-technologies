@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { parseVersion } from './changelog-version.mjs'
 
-// Mirrors the product entries of book_dir() in projects/start-docs/build.sh.
+// Mirrors the product entries of book_path() in projects/start-docs/build.sh.
 const PRODUCT_BOOKS = Object.freeze({
   'start-os': 'start-os',
   'start-tunnel': 'start-tunnel',
@@ -12,7 +12,9 @@ const PRODUCT_BOOKS = Object.freeze({
 const LABELLED_BY_RELEASE = new Set(['start-os', 'start-wrt'])
 
 function bookOf(line) {
-  return line === '' || line.startsWith('#') ? null : line.split('=')[0]
+  return line === '' || line.startsWith('#') || line.includes('@')
+    ? null
+    : line.split('=')[0]
 }
 
 function bookLines(conf) {
@@ -31,7 +33,7 @@ export function releaseLabel(project, version) {
     : `${major}.${minor}.x`
 }
 
-// Comments and books outside PRODUCT_BOOKS follow the selected site tree.
+// Archives and non-product books follow the selected site tree.
 export function reconcile(tagged, published, project, version, site = tagged) {
   const own = PRODUCT_BOOKS[project]
   const ownLine = LABELLED_BY_RELEASE.has(project)
@@ -53,7 +55,12 @@ export function reconcile(tagged, published, project, version, site = tagged) {
     const line = book === own ? ownLine : held.get(book)
     if (line !== undefined && !present.has(book)) lines.push(line)
   }
-  return `${lines.join('\n')}\n`
+  const current = bookLines(lines.join('\n'))
+  const reconciled = lines.filter(line => {
+    const [entry, tag] = line.split('@')
+    return !tag || current.get(bookOf(entry)) !== entry
+  })
+  return `${reconciled.join('\n')}\n`
 }
 
 if (process.argv[1]?.endsWith('docs-versions.mjs')) {

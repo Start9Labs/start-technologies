@@ -4,18 +4,21 @@ export {}
  * Generate llms.txt from multiple mdBook instances
  *
  * Discovers books from versions.conf and resolves each to its source dir
- * (mirroring build.sh's book_dir()), parses each book's SUMMARY.md to get page
+ * (mirroring build.sh's book_path()), parses each book's SUMMARY.md to get page
  * hierarchy, reads each page's H1 title and intro prose, and outputs per-book
- * files (docs/<book>/llms.txt, docs/<book>/llms-full.txt) plus global combined
- * files (docs/llms.txt, docs/llms-full.txt).
+ * files (docs/<book>/llms.txt, docs/<book>/llms-full.txt; an archived version's
+ * under docs/<book>/<version>/) plus global combined files of the current books
+ * (docs/llms.txt, docs/llms-full.txt).
  *
- * Usage: npx tsx generate-llms-txt.ts
+ * Usage: npx tsx generate-llms-txt.ts (after build.sh, which extracts archives)
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
 
 const ROOT_DIR = join(import.meta.dirname, '..')
+const REPO_DIR = join(ROOT_DIR, '..', '..')
+const ARCHIVE_DIR = join(ROOT_DIR, '.archive')
 const OUT_DIR = join(ROOT_DIR, 'docs')
 const BASE_URL = 'https://docs.start9.com'
 const VERSIONS_CONF = join(ROOT_DIR, 'versions.conf')
@@ -26,6 +29,10 @@ type Book = {
   description: string
   srcDir: string
   summaryPath: string
+  /** Set on an archived version, which is published under /<book>/<version>/. */
+  archived: string | null
+  /** The book's URL prefix, without a trailing slash. */
+  url: string
 }
 
 type SummaryItem =
@@ -66,22 +73,19 @@ const bookInfo: Record<string, { label: string; description: string }> = {
   },
 }
 
-/**
- * Map a book name to its source dir, mirroring build.sh's book_dir().
- * The per-product books live next to their code, not under this project.
- */
-function bookDir(name: string): string {
+/** A book's source dir relative to the repo root, mirroring build.sh's book_path(). */
+function bookPath(name: string): string {
   switch (name) {
     case 'start-os':
-      return join(ROOT_DIR, '..', 'start-os', 'docs')
+      return 'projects/start-os/docs'
     case 'start-tunnel':
-      return join(ROOT_DIR, '..', 'start-tunnel', 'docs')
+      return 'projects/start-tunnel/docs'
     case 'packaging':
-      return join(ROOT_DIR, '..', 'start-sdk', 'docs')
+      return 'projects/start-sdk/docs'
     case 'start-wrt':
-      return join(ROOT_DIR, '..', 'start-wrt', 'docs')
+      return 'projects/start-wrt/docs'
     default:
-      return join(ROOT_DIR, name)
+      return `projects/start-docs/${name}`
   }
 }
 
@@ -97,10 +101,16 @@ function discoverBooks(): Book[] {
   for (const line of readFileSync(VERSIONS_CONF, 'utf-8').split('\n')) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith('#')) continue
-    const name = trimmed.split('=')[0].trim()
+    const [name, spec = ''] = trimmed.split('=').map(s => s.trim())
     if (!name) continue
+    const [version, tag] = spec.split('@')
+    const archived = tag ? version : null
 
-    const srcDir = join(bookDir(name), 'src')
+    const srcDir = join(
+      archived ? join(ARCHIVE_DIR, name, archived) : REPO_DIR,
+      bookPath(name),
+      'src',
+    )
     const summaryPath = join(srcDir, 'SUMMARY.md')
     if (!existsSync(summaryPath)) {
       throw new Error(
@@ -111,10 +121,12 @@ function discoverBooks(): Book[] {
     const info = bookInfo[name] || { label: name, description: '' }
     books.push({
       name,
-      label: info.label,
+      label: archived ? `${info.label} ${archived}` : info.label,
       description: info.description,
       srcDir,
       summaryPath,
+      archived,
+      url: `${BASE_URL}/${name}${archived ? `/${archived}` : ''}`,
     })
   }
   return books
@@ -235,12 +247,12 @@ function extractIntro(content: string): string {
 }
 
 // Convert a markdown path to a URL for a specific book
-function pathToUrl(bookName: string, relPath: string): string {
+function pathToUrl(book: Book, relPath: string): string {
   // README.md -> index.html, foo.md -> foo.html
   const htmlPath = relPath
     .replace(/README\.md$/, 'index.html')
     .replace(/\.md$/, '.html')
-  return `${BASE_URL}/${bookName}/${htmlPath}`
+  return `${book.url}/${htmlPath}`
 }
 
 // Render a page entry for llms.txt: title link, intro prose, sections
@@ -251,7 +263,7 @@ function renderPageEntry(
 ): string[] {
   const page = readPage(book.srcDir, entry.path)
   const title = page?.title || entry.title
-  const url = pathToUrl(book.name, entry.path)
+  const url = pathToUrl(book, entry.path)
   const headings = page ? extractHeadings(page.content) : []
   const intro = page ? extractIntro(page.content) : ''
 
@@ -279,7 +291,7 @@ function generateBookLlmsTxt(book: Book): string {
     lines.push('')
   }
 
-  lines.push(`Full content: ${BASE_URL}/${book.name}/llms-full.txt`)
+  lines.push(`Full content: ${book.url}/llms-full.txt`)
   lines.push('')
 
   for (const item of entries) {
@@ -330,9 +342,9 @@ function generateBookLlmsFullTxt(book: Book): string {
   return parts.join('\n')
 }
 
-// Generate combined llms.txt across all books
+// Generate combined llms.txt across the current books
 // Uses the same detailed format as per-book llms.txt, grouped by book.
-function generateGlobalLlmsTxt(books: Book[]): string {
+function generateGlobalLlmsTxt(books: Book[], archives: Book[]): string {
   const lines: string[] = [
     '# Start9 Documentation',
     '',
@@ -342,7 +354,15 @@ function generateGlobalLlmsTxt(books: Book[]): string {
   ]
 
   for (const book of books) {
-    lines.push(`- [${book.label}](${BASE_URL}/${book.name}/llms.txt)`)
+    lines.push(`- [${book.label}](${book.url}/llms.txt)`)
+  }
+
+  if (archives.length > 0) {
+    lines.push('')
+    lines.push('Archived versions:')
+    for (const book of archives) {
+      lines.push(`- [${book.label}](${book.url}/llms.txt)`)
+    }
   }
 
   lines.push('')
@@ -369,7 +389,7 @@ function generateGlobalLlmsTxt(books: Book[]): string {
   return lines.join('\n')
 }
 
-// Generate combined llms-full.txt across all books
+// Generate combined llms-full.txt across the current books
 function generateGlobalLlmsFullTxt(books: Book[]): string {
   const parts: string[] = [
     '# Start9 Documentation — Full Content',
@@ -430,7 +450,7 @@ function main() {
   for (const book of books) {
     if (!existsSync(book.summaryPath)) continue
 
-    const bookOutDir = join(OUT_DIR, book.name)
+    const bookOutDir = join(OUT_DIR, book.name, book.archived ?? '')
     if (!existsSync(bookOutDir)) {
       mkdirSync(bookOutDir, { recursive: true })
     }
@@ -449,12 +469,16 @@ function main() {
   }
 
   // Global combined llms.txt and llms-full.txt
-  const llmsTxt = generateGlobalLlmsTxt(books)
+  const current = books.filter(b => !b.archived)
+  const llmsTxt = generateGlobalLlmsTxt(
+    current,
+    books.filter(b => b.archived),
+  )
   const llmsTxtPath = join(OUT_DIR, 'llms.txt')
   writeFileSync(llmsTxtPath, llmsTxt)
   console.log(`  Wrote ${llmsTxtPath}`)
 
-  const llmsFullTxt = generateGlobalLlmsFullTxt(books)
+  const llmsFullTxt = generateGlobalLlmsFullTxt(current)
   const llmsFullPath = join(OUT_DIR, 'llms-full.txt')
   writeFileSync(llmsFullPath, llmsFullTxt)
   console.log(

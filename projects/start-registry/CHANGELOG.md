@@ -2,6 +2,21 @@
 
 All notable changes to `start-registry` (the Start Registry server) are documented here. This project is versioned **independently** (starting at `1.0.0`); its version lives in `Cargo.toml`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.0]
+
+### Added
+
+- Known signers can add their signature to a package version already in the index with `start-cli registry package sign`.
+
+- Accept verified package endorsements submitted by the CLI when adding packages, mirrors, and promoted packages, including when hosted files contain only the base archive. Signer registration and publishing authorization remain unchanged.
+- Reject submitted endorsements that do not match the indexed package's exact commitment.
+
+### Fixed
+
+- Re-adding an already indexed package with a different key now adds that key's signature instead of discarding it.
+
+- Registry trust proposals reference selected signer IDs and retain their complete GPG public-key information.
+
 ## [1.3.0]
 
 ### Added
