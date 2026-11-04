@@ -1,5 +1,5 @@
 ---
-user-facing: true
+release-notes: false
 ---
 
 - Package release workflows warn and continue after a failed registry lookup instead of exiting before the publish attempt; failed reference-registry checks report their error before stopping.
