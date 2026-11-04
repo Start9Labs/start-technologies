@@ -5,7 +5,6 @@ use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_4_1_1};
-use crate::context::RpcContext;
 use crate::prelude::*;
 use crate::sign::AnyVerifyingKey;
 use crate::trusted_keys::legacy::{decode_keys, grouped_keys};
@@ -94,9 +93,6 @@ impl VersionT for Version {
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
         migrate(db, Utc::now())?;
         Ok(Value::Null)
-    }
-    async fn post_up(self, ctx: &RpcContext, _: Value) -> Result<(), Error> {
-        crate::update::signer_files::initialize(&ctx.db).await
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
         let stored = stored_keys(db)?;

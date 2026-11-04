@@ -225,6 +225,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn startup_sync_repairs_missing_and_stale_recovery_signers() {
+        let temp = TmpDir::new().await.unwrap();
+        let db = TypedPatchDb::<Database>::load_unchecked(patch_db::PatchDb::in_memory());
+        let keys = crate::trusted_keys::initial_trusted_keys();
+        db.put(
+            &patch_db::json_ptr::ROOT,
+            &imbl_value::json!({"public": {"serverInfo": {"trustedKeys": keys}}}),
+        )
+        .await
+        .unwrap();
+        let directory = temp.join("saved");
+        sync(&db, &directory).await.unwrap();
+        assert_eq!(read_signers(&directory).await.unwrap().len(), 3);
+        let selected = keys.values().next().unwrap().public_key.clone();
+        let expected = BTreeSet::from([selected.clone()]);
+        db.mutate(move |db| {
+            let mut keys = db.as_public().as_server_info().as_trusted_keys().de()?;
+            for key in keys.values_mut() {
+                key.os = key.public_key == selected;
+            }
+            db.as_public_mut()
+                .as_server_info_mut()
+                .as_trusted_keys_mut()
+                .ser(&keys)
+        })
+        .await
+        .result
+        .unwrap();
+        assert_eq!(read_signers(&directory).await.unwrap().len(), 3);
+        sync(&db, &directory).await.unwrap();
+        assert_eq!(read_signers(&directory).await.unwrap(), expected);
+        crate::util::io::delete_dir(&directory).await.unwrap();
+        sync(&db, &directory).await.unwrap();
+        assert_eq!(read_signers(&directory).await.unwrap(), expected);
+    }
+
+    #[tokio::test]
     async fn malformed_signer_files_fail_closed() {
         let temp = TmpDir::new().await.unwrap();
         write_file_atomic(temp.join("invalid.pem"), "not a key")
