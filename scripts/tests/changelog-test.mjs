@@ -59,14 +59,14 @@ function compilerFixture(t) {
   function fragment(
     name = 'patch-fixed-example.md',
     body = '- Fixed example.\n',
-    userFacing = true,
+    releaseNotes = true,
   ) {
     return write(
       `${PRODUCT}/changelog/${name}`,
-      userFacing === null
+      releaseNotes === null
         ? body
         : Buffer.concat([
-            Buffer.from(`---\nuser-facing: ${userFacing}\n---\n\n`),
+            Buffer.from(`---\nrelease-notes: ${releaseNotes}\n---\n\n`),
             Buffer.from(body),
           ]),
     )
@@ -582,7 +582,7 @@ test('changed unrelated PR after ancestor CLI release', t => {
   const releaseCommit = commit()
   const path = write(
     `${product}/changelog/patch-fixed-pending.md`,
-    '---\nuser-facing: false\n---\n\n- Pending CLI fix.\n',
+    '---\nrelease-notes: false\n---\n\n- Pending CLI fix.\n',
   )
   const base = commit()
   git('tag', 'start-cli/v2.3.0', releaseCommit)
@@ -592,7 +592,7 @@ test('changed unrelated PR after ancestor CLI release', t => {
   contains(cli(['check-version', product], false).stderr, "expected '2.3.1'")
   writeFileSync(
     path,
-    '---\nuser-facing: false\n---\n\n- Revised pending CLI fix.\n',
+    '---\nrelease-notes: false\n---\n\n- Revised pending CLI fix.\n',
   )
   commit()
   assert.deepEqual(
@@ -888,31 +888,96 @@ test('check version semver product', t => {
   git('tag', 'start-sdk/v2.0.9')
   write(
     `${product}/changelog/minor-added-feature.md`,
-    '---\nuser-facing: false\n---\n\n- Feature.\n',
+    '---\nrelease-notes: false\n---\n\n- Feature.\n',
   )
   manifest('2.1.0', product)
   cli(['check-version', product])
   cli(['check-version', product, '2.0.10'], false)
 })
 
-test('fragment audience is mandatory and boolean', t => {
+test('release-note selection is mandatory and boolean', t => {
   const { fragment, cli } = compilerFixture(t)
   for (const body of [
     '- Missing metadata.\n',
-    '---\nuser-facing: yes\n---\n\n- Invalid.\n',
-    '---\nuser-facing: "false"\n---\n\n- Invalid.\n',
-    '---\nuser-facing: true\nextra: value\n---\n\n- Invalid.\n',
+    '---\nrelease-notes: yes\n---\n\n- Invalid.\n',
+    '---\nrelease-notes: "false"\n---\n\n- Invalid.\n',
+    '---\nrelease-notes: true\nextra: value\n---\n\n- Invalid.\n',
+    '---\nuser-facing: true\n---\n\n- Visible, not selected.\n',
+    '---\nuser-facing: false\n---\n\n- Legacy metadata.\n',
   ]) {
     fragment(undefined, body, null)
     contains(
       cli(['validate', PRODUCT], false).stderr,
-      'user-facing: true or false',
+      'release-notes: true or false',
     )
   }
-  for (const facing of [true, false]) {
-    fragment(undefined, '- Valid.\n', facing)
+  for (const selected of [true, false]) {
+    fragment(undefined, '- Valid.\n', selected)
     cli(['validate', PRODUCT])
   }
+})
+
+test('routine user-visible changes stay in the changelog without generating locales', t => {
+  const { fragment, write, cli, render } = compilerFixture(t)
+  fragment('patch-fixed-routine.md', '- Correct a button label.\n', false)
+  write(
+    `${PRODUCT}/changelog/patch-fixed-routine.pl_PL.md`,
+    '- Poprawiono etykietę przycisku.\n',
+  )
+  fragment('minor-added-feature.md', '- Notable capability.\n')
+  const notes = cli(['notes', PRODUCT, '0.4.0.1']).stdout.toString()
+  assert.equal(notes, '## Highlights\n\n- Notable capability.\n')
+  contains(render(), 'Correct a button label.')
+  contains(render(), 'Notable capability.')
+  assert.equal(cli(['locales', PRODUCT, '0.4.0.1']).stdout.toString(), '\n')
+  assert.deepEqual(
+    JSON.parse(cli(['notes-bundle', PRODUCT, '0.4.0.1']).stdout),
+    { en_US: notes },
+  )
+})
+
+test('legacy audience metadata retains tagged notes but cannot select pending highlights', t => {
+  const { root, fragment, write, cli, commit, tag, git } = compilerFixture(t)
+  const legacy = '---\nuser-facing: true\n---\n\n'
+  fragment('minor-added-legacy.md', legacy + '- Legacy feature.\n', null)
+  fragment('patch-security-legacy.md', legacy + '- Legacy security.\n', null)
+  fragment(
+    'patch-fixed-legacy.md',
+    '---\nuser-facing: false\n---\n\n- Legacy routine change.\n',
+    null,
+  )
+  write(
+    `${PRODUCT}/changelog/minor-added-legacy.pl_PL.md`,
+    '- Dawna funkcja.\n',
+  )
+  commit()
+  const release = tag('0.4.0.1')
+  const args = ['notes', PRODUCT, '0.4.0.1', '--ref', release]
+  const expected = cli(args).stdout
+  assert.equal(
+    expected.toString(),
+    '## Highlights\n\n- Legacy feature.\n\n## Security\n\n- Legacy security.\n',
+  )
+  contains(
+    cli(['validate', PRODUCT], false).stderr,
+    'release-notes: true or false',
+  )
+  git('rm', '-r', `${PRODUCT}/changelog`)
+  fragment('patch-fixed-pending.md', '- Routine pending change.\n', false)
+  commit()
+  cli(['sync'])
+  assert.deepEqual(
+    readFileSync(join(root, PRODUCT, 'release-notes/0.4.0.1.md')),
+    expected,
+  )
+  contains(
+    readFileSync(join(root, PRODUCT, 'release-notes/0.4.0.1.pl_PL.md')),
+    'Dawna funkcja.',
+  )
+  commit()
+  cli(['sync'])
+  assert.deepEqual(cli(args).stdout, expected)
+  excludes(cli(['notes', PRODUCT, '0.4.0.2']).stdout, 'Legacy feature.')
 })
 
 test('highlights share fragment bodies and preserve release framing', t => {
@@ -934,8 +999,8 @@ test('highlights share fragment bodies and preserve release framing', t => {
   )
   contains(render(), 'Internal change.')
   excludes(notes, 'Internal change.')
-  excludes(notes, 'user-facing:')
-  excludes(render(), 'user-facing:')
+  excludes(notes, 'release-notes:')
+  excludes(render(), 'release-notes:')
 })
 
 test('notes compile without framing or an origin connection', t => {
@@ -1026,7 +1091,7 @@ test('notes ownership excludes lingering ancestor fragments and preserves legacy
   )
 })
 
-test('audience-only tag changes cannot rewrite archived highlights', t => {
+test('selection-only tag changes cannot rewrite archived highlights', t => {
   const { root, fragment, cli, commit, tag, git } = compilerFixture(t)
   fragment(undefined, '- Released highlight.\n')
   commit()
@@ -1160,7 +1225,7 @@ test('authored Security sections are rejected before replacing generated notes',
   }
 })
 
-test('translated Highlights inherit audience, ordering, and English fallback', t => {
+test('translated Highlights inherit selection, ordering, and English fallback', t => {
   const { fragment, write, cli, render } = compilerFixture(t)
   fragment('minor-added-a.md', '- English feature.\n')
   write(`${PRODUCT}/changelog/minor-added-a.pl_PL.md`, '- Polska funkcja.\n')
@@ -1218,7 +1283,7 @@ test('translation companions require canonical bodies and valid bullet Markdown'
   unlinkSync(malformedName)
   writeFileSync(path, '## Nowości\n')
   contains(cli(['validate', PRODUCT], false).stderr, 'headings are not allowed')
-  writeFileSync(path, '---\nuser-facing: false\n---\n\n- Wewnętrzne.\n')
+  writeFileSync(path, '---\nrelease-notes: false\n---\n\n- Wewnętrzne.\n')
   cli(['validate', PRODUCT], false)
   unlinkSync(path)
   write(

@@ -1,2 +1,0 @@
-- La interfaz ofrece acciones de recuperación si su copia en caché está dañada.
-- La interfaz detecta antes su propia actualización después de actualizar StartOS.

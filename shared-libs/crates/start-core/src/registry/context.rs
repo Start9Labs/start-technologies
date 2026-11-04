@@ -311,6 +311,7 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
         params: Value,
         RegistryUrlParams { registry }: RegistryUrlParams,
     ) -> Result<Value, RpcError> {
+        let base = registry.clone();
         let device_info = if metadata
             .get("get_device_info")
             .and_then(|m| m.as_bool())
@@ -341,6 +342,16 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
 
         if let Some(device_info) = device_info {
             device_info.filter_for_hardware(method, params, &mut res)?;
+        }
+
+        if matches!(method, "package.get" | "os.version.get") {
+            let ctx = self.clone();
+            tokio::spawn(async move {
+                if let Err(e) = crate::trusted_keys::check_registry(ctx, &base).await {
+                    tracing::warn!("{e}");
+                    tracing::debug!("{e:?}");
+                }
+            });
         }
 
         Ok(res)
@@ -574,3 +585,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "package/ingestion_tests.rs"]
+mod ingestion_tests;

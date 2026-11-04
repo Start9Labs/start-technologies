@@ -1,6 +1,6 @@
 //! Running commands in a service's subcontainers.
 
-use std::ffi::OsString;
+use std::ffi::OsStr;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{ExitStatus, Stdio};
@@ -167,7 +167,7 @@ impl SubcontainerTarget {
     pub(super) fn command(
         &self,
         exec_options: &[String],
-        command: &[OsString],
+        command: &[impl AsRef<OsStr>],
     ) -> Result<Command, Error> {
         let mut cmd = Command::new("lxc-attach");
         cmd.kill_on_drop(true)
@@ -205,8 +205,7 @@ pub(crate) fn exit_code(status: ExitStatus) -> i32 {
 pub struct ExecParams {
     pub id: PackageId,
     /// Program and arguments, run without a shell. Empty runs the user's login shell.
-    #[visit(opaque, wire = "Vec<String>", type_attributes(visit::wire))]
-    pub command: Vec<OsString>,
+    pub command: Vec<String>,
     /// Written to the command's standard input, which is otherwise empty.
     stdin: Option<String>,
     /// Seconds before the command is terminated. Defaults to 120.
@@ -469,6 +468,16 @@ mod test {
         assert!(res.timed_out);
         assert!(!running, "the command survives the timeout");
         assert!(started.elapsed() < TERMINATION_GRACE + Duration::from_secs(3));
+    }
+
+    #[test]
+    fn params_accept_the_command_as_strings() {
+        let params: ExecParams = from_value(imbl_value::json!({
+            "id": "hello-world",
+            "command": ["sh", "-c", "echo hi"],
+        }))
+        .unwrap();
+        assert_eq!(params.command, ["sh", "-c", "echo hi"]);
     }
 
     #[test]

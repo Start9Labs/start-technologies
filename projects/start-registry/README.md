@@ -9,8 +9,27 @@ This directory is a thin product wrapper inside the `start-technologies` monorep
 - Serves a **package index** (services, versions, dependency ranges, assets) and an **OS index** (StartOS versions and downloadable images).
 - Hosts `.s9pk` and OS image **assets** with content-addressed (Blake3) commitments.
 - Exposes a JSON-RPC API over HTTP, WebSocket, and a REST continuation channel.
-- Tracks **admins** and package **signers**, and verifies signatures on uploaded content.
+- Tracks **admins** and package **signers**, verifies signatures on uploaded content, and proposes administrator-selected signers for Marketplace trust when users connect.
 - Records anonymous **metrics** (downloads / users) for admin reporting.
+
+## Package trust proposals
+
+Pass an armored GPG public-key export to `admin signer add --key` or `admin signer edit --add-key` to retain its complete certificate, identities, and fingerprints. Signers stored with only DER keys need their public certificate reimported to supply this information.
+
+Choose which existing signers to propose when a user connects this registry:
+
+```bash
+start-registry admin signer list
+start-registry info set-trust-signers <SIGNER_ID> [SIGNER_ID...]
+```
+
+Run `start-registry info set-trust-signers` without IDs to clear the selection. Registries start with no proposed signers. `registry.info` exposes the selected signer IDs and their complete signer records as `trustSigners`, including public keys and preserved GPG exports. Connecting a registry in StartOS trusts the offered keys it does not already have for packages. Keys added later are imported untrusted when StartOS next fetches packages or OS updates from the registry, with a notification for each that offers to trust it. Choosing the registry for StartOS updates trusts its offered keys for StartOS updates.
+
+## Package endorsements
+
+Package add and add-mirror import the hosted archive's embedded signature and a submitted `signatures` map. The CLI reads verified endorsements from its local v2 S9PK and submits that map separately from the authenticated uploader's signature. Promotion forwards the existing indexed map. Every submitted endorsement must verify against the exact indexed Merkle root, signed bound, and `s9pk` context; an invalid entry rejects the request atomically. Hosted URLs can serve the base archive alone. Source URLs and bytes remain unchanged.
+
+Supplemental keys enter the asset's signature map, not the registry signer directory or trust proposal. Publishing authorization still belongs to the registered uploader. Operators can prepare an endorsed file with `start-cli s9pk sign <file.s9pk>` and pass it to `registry package add` or `add-mirror`.
 
 ## Binary layout
 

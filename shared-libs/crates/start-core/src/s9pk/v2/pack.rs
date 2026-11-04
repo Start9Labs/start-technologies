@@ -54,13 +54,6 @@ pub static CONTAINER_TOOL: LazyLock<&'static str> = LazyLock::new(|| {
         "podman"
     }
 });
-pub static CONTAINER_DATADIR: LazyLock<&'static str> = LazyLock::new(|| {
-    if *CONTAINER_TOOL == "docker" {
-        "/var/lib/docker"
-    } else {
-        "/var/lib/containers"
-    }
-});
 
 pub struct SqfsDir {
     filesystem: Squashfs<DynFileSource>,

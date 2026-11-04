@@ -1,1 +1,0 @@
-- Lorsqu’une politique d’authentification du proxy HTTP est configurée, elle s’applique aux connexions de services non chiffrées comme aux connexions TLS.

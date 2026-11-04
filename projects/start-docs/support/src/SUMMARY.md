@@ -4,6 +4,7 @@
 
 ---
 
+- [Overview](overview.md)
 - [Your Account](account.md)
 - [Installing the App](installing-the-app.md)
 - [Chats](chats.md)

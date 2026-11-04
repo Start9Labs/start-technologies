@@ -1,0 +1,13 @@
+# Overview
+
+StartWRT is a router operating system built on OpenWrt, with Start9's own backend and web interface, and you administer it from your browser. Its central idea is the [security profile](security-profiles.md). Every device on your network belongs to one profile, and the profile decides what the device can reach (devices on your local network, the internet, DNS servers, VPN tunnels) and when. StartWRT comes with profiles such as Admin, Children, Guest and Smart Devices, and you can create others. Each profile is its own isolated network, so a device can reach devices in another profile only as its own profile allows.
+
+A device gets its profile from its [point of entry](points-of-entry.md), the way it connects: the Wi-Fi password it joins with (every profile shares one network name, and the password decides the profile), the router's Ethernet port it plugs into, or the inbound VPN it connects through.
+
+- [Inbound VPNs](inbound-vpn.md) are WireGuard servers on your router for reaching your home network from anywhere. Each one belongs to a profile, and a device connected through it gets that profile.
+- [Outbound VPNs](outbound-vpn.md) send a profile's internet traffic out through one or more WireGuard VPN providers, chained. When a tunnel goes down, its traffic stops rather than leaving over your home connection.
+- [Published ports](published-ports.md) forward ports from your router's public address to a device on your network. You can also allow a device to open its own ports. That permission is off by default and granted per device, and each port the device opens expires unless the device renews it. A StartOS server you give port-forwarding permission opens the ports its public addresses need. A separate [DNS record publishing permission](devices.md#device-detail-page) lets it publish the names of its private domains to your network.
+- [Dynamic DNS](ddns.md) keeps a domain name pointed at your home connection when its address changes.
+- [Wi-Fi blackout schedules](wifi-schedules.md) turn the Wi-Fi radio off on a weekly timetable, and a profile's [Internet access](security-profiles.md#wan-blackout) can be blocked on a schedule of its own while its permitted LAN access stays available. Wired devices stay connected through a Wi-Fi blackout.
+- StartWRT [never updates on its own](updating.md). A new signed release appears in its interface, and you choose when to install it. Reflashing from a microSD card is the fallback when an update fails.
+- A [factory reset](factory-reset.md) erases every configuration change you've made, and keeps the Wi-Fi password, which the router reads from its hardware.

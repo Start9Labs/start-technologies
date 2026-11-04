@@ -28,7 +28,6 @@ use crate::progress::{
     FullProgress, FullProgressTracker, PhaseProgressTrackerHandle, PhasedProgressBar, ProgressUnits,
 };
 use crate::rpc_continuations::{Guid, RpcContinuation};
-use crate::s9pk::v2::pack::{CONTAINER_DATADIR, CONTAINER_TOOL};
 use crate::ssh::SSH_DIR;
 use crate::system::{get_mem_info, sync_kiosk};
 use crate::util::io::{IOHook, dir_copy, open_file};
@@ -328,8 +327,6 @@ pub async fn init(
     crate::disk::mount::util::bind(&tmp_var, "/var/tmp", false).await?;
     let downloading = Path::new(PACKAGE_DATA).join("archive/downloading");
     crate::util::io::delete_dir(&downloading).await?;
-    let tmp_docker = Path::new(PACKAGE_DATA).join("tmp").join(*CONTAINER_TOOL);
-    crate::disk::mount::util::bind(&tmp_docker, *CONTAINER_DATADIR, false).await?;
     init_tmp.complete();
 
     let server_info = db.peek().await.into_public().into_server_info();
@@ -433,6 +430,7 @@ pub async fn init(
     let status_info = ServerStatus {
         update_progress: None,
         backup_progress: None,
+        backup_conversions: Default::default(),
         shutting_down: false,
         restarting: false,
         restart: None,
