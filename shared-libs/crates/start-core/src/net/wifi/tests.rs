@@ -24,15 +24,170 @@ fn terse_line_plain_fields() {
     );
 }
 
+const WIRED_UUID: &str = "11111111-2222-3333-4444-555555555555";
+const OTHER_UUID: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+
+fn keyfile(uuid: &str, kind: &str, metadata: &str) -> String {
+    format!("[connection]\nid=fixture\nuuid={uuid}\ntype={kind}\n\n[.nmmeta]\n{metadata}")
+}
+
+#[test]
+fn wired_profile_metadata_distinguishes_auto_defaults() {
+    for (kind, metadata, expected) in [
+        ("ethernet", "nm-generated=true\n", Some(true)),
+        ("ethernet", "", Some(false)),
+        ("ethernet", "nm-generated=false\n", Some(false)),
+        (
+            "ethernet",
+            "nm-generated=true\nexternal=true\n",
+            Some(false),
+        ),
+        (
+            "ethernet",
+            "nm-generated=true\nvolatile=true\n",
+            Some(false),
+        ),
+        ("bridge", "nm-generated=true\n", None),
+        ("loopback", "nm-generated=true\n", None),
+        ("wifi", "nm-generated=true\n", None),
+    ] {
+        let contents = keyfile(WIRED_UUID, kind, metadata);
+        let actual = super::parse_wired_profile(&contents)
+            .map(|profile| (profile.uuid.to_string(), profile.auto_default));
+        assert_eq!(
+            actual,
+            expected.map(|generated| (WIRED_UUID.to_owned(), generated)),
+            "{contents}"
+        );
+    }
+    assert!(super::parse_wired_profile(&keyfile("invalid", "ethernet", "")).is_none());
+    let contents = format!("[connection]\nuuid={WIRED_UUID}\ntype=ethernet\nnm-generated=true\n");
+    assert!(!super::parse_wired_profile(&contents).unwrap().auto_default);
+}
+
+#[tokio::test]
+async fn runtime_cleanup_removes_only_defaults_shadowing_saved_wired_profiles() {
+    let directory = tempfile::tempdir().unwrap();
+    let runtime = directory.path().join("runtime");
+    let saved = directory.path().join("saved");
+    std::fs::create_dir(&runtime).unwrap();
+    std::fs::create_dir(&saved).unwrap();
+    std::fs::write(
+        saved.join("wired.nmconnection"),
+        keyfile(WIRED_UUID, "ethernet", ""),
+    )
+    .unwrap();
+    std::fs::write(
+        saved.join("wifi.nmconnection"),
+        keyfile(OTHER_UUID, "wifi", ""),
+    )
+    .unwrap();
+    std::fs::write(
+        saved.join("backup.nmconnection.bak"),
+        keyfile(OTHER_UUID, "ethernet", ""),
+    )
+    .unwrap();
+    for (name, uuid, kind, metadata) in [
+        ("shadow", WIRED_UUID, "ethernet", "nm-generated=true\n"),
+        ("unmatched", OTHER_UUID, "ethernet", "nm-generated=true\n"),
+        ("user", WIRED_UUID, "ethernet", ""),
+        (
+            "external",
+            WIRED_UUID,
+            "ethernet",
+            "nm-generated=true\nexternal=true\n",
+        ),
+        (
+            "volatile",
+            WIRED_UUID,
+            "ethernet",
+            "nm-generated=true\nvolatile=true\n",
+        ),
+        ("bridge", WIRED_UUID, "bridge", "nm-generated=true\n"),
+        ("loopback", WIRED_UUID, "loopback", "nm-generated=true\n"),
+    ] {
+        std::fs::write(
+            runtime.join(format!("{name}.nmconnection")),
+            keyfile(uuid, kind, metadata),
+        )
+        .unwrap();
+    }
+    super::remove_shadowing_wired_profiles(&runtime, &saved)
+        .await
+        .unwrap();
+    for (name, exists) in [
+        ("shadow", false),
+        ("unmatched", true),
+        ("user", true),
+        ("external", true),
+        ("volatile", true),
+        ("bridge", true),
+        ("loopback", true),
+    ] {
+        assert_eq!(
+            runtime.join(format!("{name}.nmconnection")).exists(),
+            exists,
+            "{name}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn no_saved_profiles_leave_generated_wired_profile_untouched() {
+    let directory = tempfile::tempdir().unwrap();
+    let saved = directory.path().join("saved");
+    std::fs::create_dir(&saved).unwrap();
+    let generated = directory.path().join("default.nmconnection");
+    std::fs::write(
+        &generated,
+        keyfile(WIRED_UUID, "ethernet", "nm-generated=true\n"),
+    )
+    .unwrap();
+    super::remove_shadowing_wired_profiles(directory.path(), &saved)
+        .await
+        .unwrap();
+    assert!(generated.exists());
+}
+
+#[tokio::test]
+async fn missing_runtime_profile_directory_needs_no_cleanup() {
+    let directory = tempfile::tempdir().unwrap();
+    super::remove_shadowing_wired_profiles(&directory.path().join("missing"), directory.path())
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
 async fn normalize_profiles_child() {
-    if std::env::var_os("STARTOS_NM_PROFILE_FIXTURE").is_some() {
-        super::force_ipv6_addr_gen_eui64().await;
+    if let Some(directory) = std::env::var_os("STARTOS_NM_PROFILE_FIXTURE") {
+        let directory = std::path::Path::new(&directory);
+        super::force_ipv6_addr_gen_eui64(
+            &directory.join("runtime"),
+            &directory.join("saved-profiles"),
+        )
+        .await;
     }
 }
 
 fn normalize_profiles(failure: &str) -> tempfile::TempDir {
     let directory = tempfile::tempdir().unwrap();
+    let runtime = directory.path().join("runtime");
+    let saved = directory.path().join("saved-profiles");
+    std::fs::create_dir(&runtime).unwrap();
+    std::fs::create_dir(&saved).unwrap();
+    std::fs::write(
+        saved.join("wired.nmconnection"),
+        keyfile(WIRED_UUID, "ethernet", ""),
+    )
+    .unwrap();
+    std::fs::write(
+        runtime.join("generated.nmconnection"),
+        keyfile(WIRED_UUID, "ethernet", "nm-generated=true\n"),
+    )
+    .unwrap();
+    if failure == "cleanup" {
+        std::fs::write(runtime.join("unreadable.nmconnection"), [0xff]).unwrap();
+    }
     for (profile, saved) in [
         ("wired", "eee-enabled=off\nmtu=1400\n"),
         ("wifi", "ssid=Saved network\n"),
@@ -56,6 +211,9 @@ case "$*" in
     'connection reload')
         test "$STARTOS_NM_FAILURE" != reload || exit 1
         for profile in wired wifi vpn; do
+            if test "$profile" = wired && test -f runtime/generated.nmconnection; then
+                continue
+            fi
             cp "saved-$profile" "cached-$profile"
         done
         ;;
@@ -118,6 +276,16 @@ fn ipv6_normalization_preserves_saved_physical_profiles() {
             expected
         );
     }
+}
+
+#[test]
+fn failed_runtime_cleanup_prevents_profile_modification() {
+    let directory = normalize_profiles("cleanup");
+    assert!(!directory.path().join("commands").exists());
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("saved-wired")).unwrap(),
+        "eee-enabled=off\nmtu=1400\n"
+    );
 }
 
 #[test]

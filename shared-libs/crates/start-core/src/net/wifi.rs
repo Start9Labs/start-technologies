@@ -22,6 +22,8 @@ use crate::util::Invoke;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 use crate::{Error, ErrorKind, GatewayId};
 
+const SAVED_PROFILE_DIRECTORY: &str = "/etc/NetworkManager/system-connections";
+
 impl RpcContext {
     async fn read_wifi_manager(&self) -> Result<RwLockReadGuard<'_, WpaCli>, Error> {
         let err = || {
@@ -887,7 +889,7 @@ impl WpaCli {
         Ok(())
     }
     pub async fn remove_all_connections(&mut self) -> Result<(), Error> {
-        let location_connections = Path::new("/etc/NetworkManager/system-connections");
+        let location_connections = Path::new(SAVED_PROFILE_DIRECTORY);
         let mut connections = tokio::fs::read_dir(&location_connections).await?;
         while let Some(connection) = connections.next_entry().await? {
             let path = connection.path();
@@ -1077,8 +1079,7 @@ pub async fn synchronize_network_manager<P: AsRef<Path>>(
     if tokio::fs::metadata(&persistent).await.is_err() {
         tokio::fs::create_dir_all(&persistent).await?;
     }
-    crate::disk::mount::util::bind(&persistent, "/etc/NetworkManager/system-connections", false)
-        .await?;
+    crate::disk::mount::util::bind(&persistent, SAVED_PROFILE_DIRECTORY, false).await?;
 
     if !wifi.enabled {
         Command::new("rfkill")
@@ -1117,7 +1118,11 @@ pub async fn synchronize_network_manager<P: AsRef<Path>>(
         }
     }
 
-    force_ipv6_addr_gen_eui64().await;
+    force_ipv6_addr_gen_eui64(
+        Path::new("/run/NetworkManager/system-connections"),
+        Path::new(SAVED_PROFILE_DIRECTORY),
+    )
+    .await;
 
     Command::new("systemctl")
         .arg("restart")
@@ -1154,8 +1159,88 @@ pub async fn synchronize_network_manager<P: AsRef<Path>>(
     Ok(())
 }
 
-async fn force_ipv6_addr_gen_eui64() {
-    // Startup profiles remain cached after mounting the saved profile directory.
+struct WiredProfile {
+    uuid: uuid::Uuid,
+    auto_default: bool,
+}
+
+fn parse_wired_profile(contents: &str) -> Option<WiredProfile> {
+    let mut section = "";
+    let mut wired = false;
+    let mut uuid = None;
+    let mut generated = false;
+    let mut external = false;
+    let mut volatile = false;
+    for line in contents.lines().map(str::trim) {
+        if line.starts_with('[') {
+            section = line;
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match (section, key.trim()) {
+            ("[connection]", "type") => wired = value.trim() == "ethernet",
+            ("[connection]", "uuid") => uuid = value.trim().parse().ok(),
+            ("[.nmmeta]", "nm-generated") => generated = value.trim() == "true",
+            ("[.nmmeta]", "external") => external = value.trim() == "true",
+            ("[.nmmeta]", "volatile") => volatile = value.trim() == "true",
+            _ => {}
+        }
+    }
+    wired.then_some(WiredProfile {
+        uuid: uuid?,
+        auto_default: generated && !external && !volatile,
+    })
+}
+
+async fn read_wired_profile(entry: &tokio::fs::DirEntry) -> Result<Option<WiredProfile>, Error> {
+    if entry
+        .path()
+        .extension()
+        .is_none_or(|extension| extension != "nmconnection")
+        || !entry.file_type().await?.is_file()
+    {
+        return Ok(None);
+    }
+    let contents = crate::util::io::read_file_to_string(entry.path()).await?;
+    Ok(parse_wired_profile(&contents))
+}
+
+async fn remove_shadowing_wired_profiles(runtime: &Path, saved: &Path) -> Result<(), Error> {
+    let mut entries = match tokio::fs::read_dir(runtime).await {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut saved_entries = tokio::fs::read_dir(saved).await?;
+    let mut saved_uuids = BTreeSet::new();
+    while let Some(entry) = saved_entries.next_entry().await? {
+        if let Some(profile) = read_wired_profile(&entry).await? {
+            saved_uuids.insert(profile.uuid);
+        }
+    }
+    while let Some(entry) = entries.next_entry().await? {
+        if let Some(profile) = read_wired_profile(&entry).await?
+            && profile.auto_default
+            && saved_uuids.contains(&profile.uuid)
+        {
+            crate::util::io::delete_file(entry.path()).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Connection defaults cannot override older profiles' explicit IPv6 privacy settings.
+async fn force_ipv6_addr_gen_eui64(runtime_profiles: &Path, saved_profiles: &Path) {
+    // Generated runtime profiles outrank saved profiles, even after reload.
+    if remove_shadowing_wired_profiles(runtime_profiles, saved_profiles)
+        .await
+        .log_err()
+        .is_none()
+    {
+        return;
+    }
     if Command::new("nmcli")
         .arg("connection")
         .arg("reload")
