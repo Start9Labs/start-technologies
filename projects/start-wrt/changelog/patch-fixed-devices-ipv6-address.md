@@ -1,5 +1,5 @@
 ---
-user-facing: true
+release-notes: true
 ---
 
 - The Devices page shows each device's IPv6 address consistently. It could disappear and return between refreshes, or never appear for a device that forwards traffic, such as a server running containers or virtual machines, or one that stayed connected while the router restarted.
