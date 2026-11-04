@@ -217,13 +217,11 @@ pub async fn set_os_registry(
     params: TrustedRegistryParams,
 ) -> Result<BTreeSet<InternedString>, Error> {
     let url = registry_url(&params.url)?;
-    ctx.db
-        .mutate(|db| {
-            db.as_public_mut()
-                .mutate(|public| set_os_registry_public(public, &url))
-        })
-        .await
-        .result
+    crate::update::signer_files::mutate(ctx.db.clone(), move |db| {
+        db.as_public_mut()
+            .mutate(|public| set_os_registry_public(public, &url))
+    })
+    .await
 }
 
 fn forget_registry(
@@ -580,6 +578,15 @@ mod tests {
     #[test]
     fn batch_removal_preserves_unrequested_keys_and_accepts_empty_requests() {
         let mut public = public();
+        mutate_public_keys(&mut public, |keys| {
+            import_individual_keys(
+                keys,
+                "Publisher".into(),
+                vec![key(91), key(92)].into(),
+                None,
+            )
+        })
+        .unwrap();
         let requested: BTreeSet<_> = public
             .server_info
             .trusted_keys
@@ -596,6 +603,55 @@ mod tests {
         assert_eq!(public.server_info.trusted_keys, expected);
         mutate_public_keys(&mut public, |keys| remove_keys(keys, BTreeSet::new())).unwrap();
         assert_eq!(public.server_info.trusted_keys, expected);
+    }
+
+    #[test]
+    fn alpha_seeds_are_reimported_only_when_a_connected_registry_offers_them() {
+        let url = registry_url("https://alpha-registry.start9.com").unwrap();
+        let alpha = crate::version::retired_alpha_keys();
+        let info = RegistryInfo {
+            trust_signers: alpha
+                .iter()
+                .map(|key| {
+                    (
+                        crate::rpc_continuations::Guid::new(),
+                        crate::registry::signer::SignerInfo {
+                            name: "Start9 Alpha".into(),
+                            contact: vec![],
+                            keys: BTreeSet::from([key.clone()]),
+                            gpg_exports: BTreeSet::new(),
+                        },
+                    )
+                })
+                .collect(),
+            ..Default::default()
+        };
+        for connected in [false, true] {
+            let mut public = public();
+            public
+                .server_info
+                .registry_keys
+                .insert("https://alpha-registry.start9.com".into(), alpha.clone());
+            if connected {
+                public.ui["registries"]["https://alpha-registry.start9.com"] = Value::Null;
+            }
+            let changes = refresh_public(&mut public, &url, &info).unwrap();
+            assert_eq!(
+                changes.added,
+                if connected {
+                    ids(&alpha)
+                } else {
+                    BTreeSet::new()
+                }
+            );
+            for key in &alpha {
+                let entry = public.server_info.trusted_keys.get(&key.interned_der64());
+                assert_eq!(entry.is_some(), connected);
+                if let Some(entry) = entry {
+                    assert!(!entry.marketplace && !entry.os);
+                }
+            }
+        }
     }
 
     #[tokio::test]
