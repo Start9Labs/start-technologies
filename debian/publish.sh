@@ -139,11 +139,7 @@ if [ ${#DEB_FILES[@]} -eq 0 ]; then
 fi
 
 sha256_of() {
-    if command -v sha256sum > /dev/null 2>&1; then
-        sha256sum "$1" | cut -d' ' -f1
-    else
-        shasum -a 256 "$1" | cut -d' ' -f1
-    fi
+    sha256sum "$1" | cut -d' ' -f1
 }
 
 # Print "<sha256>  <path>" for every file already in the pool.
@@ -171,8 +167,7 @@ verify_mirror() {
         return 0
     fi
 
-    if ! gpg --no-default-keyring --keyring "$KEYRING" --batch --yes \
-        --output "$work/Release" --decrypt "$dist/InRelease" 2> "$work/gpg.err"; then
+    if ! "$REPO_ROOT/debian/verify-release.sh" "$KEYRING" "$dist/InRelease" "$work/Release" 2> "$work/gpg.err"; then
         echo "Refusing to publish: the ${SUITE} InRelease is not signed by ${KEYRING}" >&2
         sed 's/^/  /' "$work/gpg.err" >&2
         rm -rf "$work"

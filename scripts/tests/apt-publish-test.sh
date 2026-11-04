@@ -121,6 +121,34 @@ sed -i 's/^Suite: .*/Suite: tampered/' "$BUCKET/dists/stable/InRelease"
 expect_refused 'modified InRelease' "$A2"
 restore
 
+STORED="$TMP/stored.pgp"
+gpg --batch --yes --store --output "$STORED" "$BUCKET/dists/stable/Release"
+
+cp "$STORED" "$BUCKET/dists/stable/InRelease"
+expect_refused 'unsigned OpenPGP InRelease' "$A2"
+restore
+
+cat "$STORED" "$TMP/good/bucket/dists/stable/InRelease" > "$BUCKET/dists/stable/InRelease"
+expect_refused 'unsigned OpenPGP before a signed InRelease' "$A2"
+restore
+
+verify_alpha_release_on() {
+    local source=$1
+    (
+        source <(awk '/^SUBCOMMAND=/{exit} {print}' "$ROOT/scripts/manage-release.sh")
+        REPO_ROOT="$ROOT"
+        curl() { cp "$source" "$TMP/alpha/InRelease"; }
+        rm -rf "$TMP/alpha"
+        mkdir "$TMP/alpha"
+        verify_alpha_release "$APT_KEYRING" "$TMP/alpha"
+    )
+}
+
+verify_alpha_release_on "$BUCKET/dists/stable/InRelease" > /dev/null 2>&1 || fail 'alpha release check refused a signed InRelease'
+if verify_alpha_release_on "$STORED" > /dev/null 2>&1; then
+    fail 'alpha release check accepted an unsigned InRelease'
+fi
+
 rm "$BUCKET/dists/stable/InRelease"
 expect_refused 'pool without an InRelease' "$A2"
 restore
