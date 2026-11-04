@@ -594,9 +594,7 @@ mod tests {
             BTreeSet::from([
                 "Matt Hill <matthill@start9.com>",
                 "Aiden McClelland <me@drbonez.dev>",
-                "Aiden McClelland <aiden@mcclelland.family>",
                 "Aiden McClelland <aiden@start9.com>",
-                "Aiden McClelland <aiden@tenletters.net>",
                 "Start9 <security@start9.com>",
                 "Start9 <dev@start9.com>",
             ])
