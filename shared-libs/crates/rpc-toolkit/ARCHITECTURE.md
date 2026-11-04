@@ -1,7 +1,7 @@
 # rpc-toolkit Architecture
 
 `rpc-toolkit` turns a single set of typed Rust handlers into both a JSON-RPC 2.0 server and a
-CLI. The same handler tree is registered once and then either served (HTTP / Unix socket / TCP)
+CLI. The same handler tree is registered once and then either served (HTTP / WebSocket / Unix socket / TCP)
 or driven from the command line through `clap`. Type information flows end to end, optionally
 emitting zod schemas and TypeScript types for clients.
 
@@ -53,6 +53,15 @@ Transports wrap a `Server`:
 - **HTTP** (`server/http.rs`): `HttpServer` on `axum`, with content-negotiated CBOR/JSON encoding
   and a `Middleware` pipeline (`process_http_request`, `process_rpc_request`, `process_rpc_response`,
   `process_http_response`, all defaulting to no-ops) erased through `DynMiddleware`.
+- **WebSocket** (`server/websocket.rs`, opt-in `websocket` feature): `WebSocketServer` accepts JSON
+  text requests and batches through the existing RPC middleware pipeline. HTTP middleware prepares
+  the upgrade; each call clones that prepared middleware state. The connection owns pending call
+  futures, buffered initiating replies, and directly polled stream sources, with resource limits
+  and send deadlines. `server/rpcstream.rs` owns `RpcStream` registration and event encoding.
+  `HandlerArgs::rpc_stream` carries the request-owned capability through normal handler adapters;
+  non-opted-in calls and other transports receive `None`. The initiating result is sent before any
+  stream polling. Cancellation or socket loss drops the corresponding futures/sources. See
+  [the WebSocket guide](docs/websocket.md) for wire and lifecycle semantics.
 - **MCP** (`server/mcp.rs`, opt-in `mcp` feature): `McpServer` offers methods of an `HttpServer`'s
   tree as [MCP](https://modelcontextprotocol.io) tools over streamable HTTP via `rmcp`, served
   statelessly with JSON responses. The transport overrides session and response-mode

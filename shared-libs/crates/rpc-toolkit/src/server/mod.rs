@@ -17,10 +17,16 @@ pub type SingleOrBatchRpcRequest = yajrc::SingleOrBatchRpcRequest<GenericRpcMeth
 pub mod http;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+mod rpcstream;
 pub mod socket;
+#[cfg(feature = "websocket")]
+pub mod websocket;
 
 pub use http::*;
+pub use rpcstream::{RpcStream, RPCSTREAM_VERSION};
 pub use socket::*;
+#[cfg(feature = "websocket")]
+pub use websocket::*;
 
 pub struct Server<Context: crate::Context> {
     pub(crate) make_ctx:
@@ -54,6 +60,15 @@ impl<Context: crate::Context> Server<Context> {
         method: &str,
         params: Value,
     ) -> impl Future<Output = Result<Value, RpcError>> + Send + 'static + use<Context> {
+        self.handle_command_with_stream(method, params, None)
+    }
+
+    fn handle_command_with_stream(
+        &self,
+        method: &str,
+        params: Value,
+        rpc_stream: Option<RpcStream>,
+    ) -> impl Future<Output = Result<Value, RpcError>> + Send + 'static + use<Context> {
         let (make_ctx, root_handler, method) = (
             self.make_ctx.clone(),
             self.root_handler.clone(),
@@ -68,6 +83,7 @@ impl<Context: crate::Context> Server<Context> {
                     method: method.ok_or_else(|| yajrc::METHOD_NOT_FOUND_ERROR)?,
                     params,
                     inherited: crate::Empty {},
+                    rpc_stream,
                 })
                 .await
         }
@@ -75,9 +91,17 @@ impl<Context: crate::Context> Server<Context> {
 
     fn handle_single_request(
         &self,
-        RpcRequest { id, method, params }: RpcRequest,
+        req: RpcRequest,
     ) -> impl Future<Output = RpcResponse> + Send + 'static {
-        let handle = self.handle_command(method.as_str(), params);
+        self.handle_single_request_with_stream(req, None)
+    }
+
+    fn handle_single_request_with_stream(
+        &self,
+        RpcRequest { id, method, params }: RpcRequest,
+        rpc_stream: Option<RpcStream>,
+    ) -> impl Future<Output = RpcResponse> + Send + 'static {
+        let handle = self.handle_command_with_stream(method.as_str(), params, rpc_stream);
         async move {
             RpcResponse {
                 id,

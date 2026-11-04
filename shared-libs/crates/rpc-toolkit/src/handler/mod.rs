@@ -32,6 +32,7 @@ pub(crate) struct HandleAnyArgs<Context, Inherited> {
     pub(crate) method: VecDeque<&'static str>,
     pub(crate) params: Value,
     pub(crate) inherited: Inherited,
+    pub(crate) rpc_stream: Option<crate::RpcStream>,
 }
 impl<Context: crate::Context, Inherited: Send + Sync> HandleAnyArgs<Context, Inherited> {
     fn downcast<H>(self) -> Result<HandlerArgsFor<Context, H>, imbl_value::Error>
@@ -46,6 +47,7 @@ impl<Context: crate::Context, Inherited: Send + Sync> HandleAnyArgs<Context, Inh
             method,
             params,
             inherited,
+            rpc_stream,
         } = self;
         Ok(HandlerArgs {
             context,
@@ -54,6 +56,7 @@ impl<Context: crate::Context, Inherited: Send + Sync> HandleAnyArgs<Context, Inh
             params: imbl_value::from_value(params.clone())?,
             inherited_params: OrEmpty::from_t(inherited),
             raw_params: params,
+            rpc_stream,
         })
     }
 }
@@ -205,6 +208,8 @@ pub struct HandlerArgs<
     pub params: Params,
     pub inherited_params: InheritedParams,
     pub raw_params: Value,
+    /// Attaches one response stream before the handler returns, when supported by the transport.
+    pub rpc_stream: Option<crate::RpcStream>,
 }
 
 pub trait HandlerTypes {

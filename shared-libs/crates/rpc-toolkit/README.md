@@ -3,7 +3,7 @@
 A toolkit for creating JSON-RPC 2.0 servers with automatic CLI bindings.
 
 `rpc-toolkit` lets you write typed, composable RPC handlers once and use them two ways: served as a
-JSON-RPC 2.0 endpoint (over HTTP, a Unix socket, or TCP) and/or bound to a `clap` command-line
+JSON-RPC 2.0 endpoint (over HTTP, an opt-in WebSocket transport, a Unix socket, or TCP) and/or bound to a `clap` command-line
 application. Params and results flow through `imbl-value`; sync and async handlers are both
 supported; and an optional `ts` feature emits zod schemas and TypeScript types for the
 handler tree, with serde's input and output shapes selected by `z.input` and `z.output`.
@@ -52,6 +52,10 @@ CLI subcommands, or served over HTTP via `HttpServer` / over a socket via `Serve
 ## Features
 
 - `cbor` _(default)_ — enables CBOR request/response encoding alongside JSON over HTTP.
+- `websocket` — enables `Server::for_websocket()` and `HttpServer::for_websocket()`, multiplexing
+  ordinary JSON-RPC calls and explicitly opted-in `rpcstream` responses. An initiating result and
+  subsequent stream items have independent types; events use the initiating request's ID.
+  See [the WebSocket guide](docs/websocket.md).
 - `ts` — enables `rpc_toolkit::ts::handler_bindings()` and the typed method tree,
   generated as a runtime zod schema module plus a type-only module.
   Struct DTOs derive generic `visit_rs::VisitFields`; enums derive
@@ -69,6 +73,12 @@ Generate the example module pair from the monorepo root:
 
 ```sh
 cargo run -p rpc-toolkit --example generate_ts --features ts -- /tmp/rpc-example
+```
+
+Run the HTTP/WebSocket example from the monorepo root:
+
+```sh
+cargo run -p rpc-toolkit --example websocket --features websocket
 ```
 
 ## License
