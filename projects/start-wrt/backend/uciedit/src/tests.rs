@@ -216,7 +216,6 @@ config retain
 config retain
     option foo bar
     # comment 4
-
 config retain
 ";
 
@@ -229,6 +228,84 @@ config retain
         "===Original===\n{original}\n===Edited===\n{edited}\n===Expected===\n{expected}\n====="
     );
     assert_eq!(normalize(edited), normalize(expected.to_string()));
+}
+
+#[derive(TypedSection)]
+#[uci(ty = "replace")]
+struct ReplaceSection {
+    value: String,
+}
+
+#[test]
+fn test_remove_append_does_not_accumulate_separators() {
+    for count in [1, 2] {
+        let arena = Arena::new();
+        let mut config = Config::parse_str(
+            &arena,
+            "# retained header\nconfig retain\n\toption value 'original'\n\t# retained body\n",
+        )
+        .unwrap();
+        for _ in 0..count {
+            config
+                .append(
+                    &ReplaceSection {
+                        value: "test".into(),
+                    },
+                    None,
+                )
+                .unwrap();
+        }
+        let expected = config.dump_str();
+        for cycle in 0..16 {
+            let text = arena.alloc(config.dump_str());
+            config = Config::parse_str(&arena, text).unwrap();
+            config.sections.retain(|section| section.ty() != "replace");
+            for _ in 0..count {
+                config
+                    .append(
+                        &ReplaceSection {
+                            value: "test".into(),
+                        },
+                        None,
+                    )
+                    .unwrap();
+            }
+            assert_eq!(config.dump_str(), expected, "count {count}, cycle {cycle}");
+        }
+    }
+}
+
+#[test]
+fn test_remove_section_keeps_retained_body_and_header_comments() {
+    let arena = Arena::new();
+    let original = "# first header\nconfig retain first\n\toption value 'first'\n\t# first body\n\n# removed header\n\nconfig remove\n\toption value 'removed'\n\t# removed body\n\n# last header\n\nconfig retain last\n\toption value 'last'\n\t# last body\n";
+    let expected = "# first header\nconfig retain first\n\toption value 'first'\n\t# first body\n\n# last header\n\nconfig retain last\n\toption value 'last'\n\t# last body\n";
+    let mut config = Config::parse_str(&arena, original).unwrap();
+    config.sections.retain(|section| section.ty() == "retain");
+    assert_eq!(config.dump_str(), expected);
+
+    let mut config =
+        Config::parse_str(&arena, "config retain\n\t# retained body\nconfig remove\n").unwrap();
+    config.sections.retain(|section| section.ty() == "retain");
+    assert_eq!(config.dump_str(), "config retain\n\t# retained body\n");
+}
+
+#[test]
+fn test_parse_dump_preserves_separators_and_comments() {
+    let arena = Arena::new();
+    for original in [
+        "",
+        "\n\n# file comment\n\n",
+        "\n# header\nconfig retain\n\toption value 'test'\n\n",
+        "# first\nconfig retain first\n\t# body\n\n\n# second\n\nconfig retain second\n\tlist values 'one' #inline\n\t# final body\n\n",
+        "config retain\n\t# body without separator\nconfig retain\n",
+    ] {
+        let config = Config::parse_str(&arena, original).unwrap();
+        assert_eq!(config.dump_str(), original);
+        let mut bytes = Vec::new();
+        config.dump_io(&mut bytes).unwrap();
+        assert_eq!(bytes, original.as_bytes());
+    }
 }
 
 #[test]
