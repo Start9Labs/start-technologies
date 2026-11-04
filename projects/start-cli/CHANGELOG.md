@@ -9,6 +9,20 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.7.0]
+
+### Added
+
+- Added `start-cli registry package sign` to cosign a package already in a registry, from a local s9pk or, with `--no-verify`, from the commitments the registry lists.
+
+- Add identity-key endorsements to local v2 packages with `start-cli s9pk sign`, preserving the embedded signature and original archive bytes. Signing again with an existing valid signer leaves the file unchanged.
+- Submit local package endorsements when adding registry packages and mirrors, and retain indexed endorsements during promotion.
+- Pin v2 sideload requests to the local file's verified signing identities while preserving the server's trust checks.
+
+### Fixed
+
+- Select which registry signers to propose for package trust with `registry info set-trust-signers`. Passing no signer IDs clears the proposal.
+
 ## [2.6.0]
 
 ### Added

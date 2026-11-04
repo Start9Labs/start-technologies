@@ -5,7 +5,7 @@ use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_4_1_1};
 use crate::prelude::*;
 use crate::trusted_keys::legacy::{decode_keys, grouped_keys};
-use crate::trusted_keys::protect_registry_keys;
+use crate::trusted_keys::{protect_registry_keys, replace_stored_drbonez_certificates};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Version;
@@ -33,6 +33,7 @@ fn migrate(db: &mut Value, now: DateTime<Utc>) -> Result<(), Error> {
         .unwrap_or_default();
     let stored = stored_keys(db)?;
     let mut keys = decode_keys(stored.clone(), now)?;
+    replace_stored_drbonez_certificates(&mut keys);
     protect_registry_keys(&mut keys, &snapshots, &ui);
     *stored = to_value(&keys)?;
     Ok(())
@@ -50,6 +51,9 @@ impl VersionT for Version {
     }
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
+    }
+    fn migration_revision(self) -> usize {
+        1
     }
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
         migrate(db, Utc::now())?;
@@ -121,6 +125,33 @@ mod tests {
                 enabled_keys(&migrated, context),
                 enabled_keys(&expected, context)
             );
+        }
+    }
+
+    #[test]
+    fn stored_drbonez_certificates_collapse_to_the_seed() {
+        let seeded = crate::trusted_keys::initial_trusted_keys();
+        let (id, _) = crate::update::signers::initial_signers()
+            .into_iter()
+            .find(|(_, signer)| signer.label == "drbonez")
+            .unwrap();
+        let mut stale = seeded.clone();
+        let key = stale.get_mut(&id).unwrap();
+        let mut certificate = key.gpg_exports.pop_first().unwrap();
+        certificate.armored = certificate.armored.replacen('\n', "\nComment: stale\n", 1);
+        key.gpg_exports.insert(certificate);
+        for trusted_keys in [
+            to_value(&stale).unwrap(),
+            to_value(&legacy::grouped_keys(stale.clone())).unwrap(),
+        ] {
+            let mut db =
+                imbl_value::json!({ "public": { "serverInfo": { "trustedKeys": trusted_keys } } });
+            Version.up(&mut db, ()).unwrap();
+            let migrated: TrustedKeys =
+                from_value(db["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
+            for (id, key) in &seeded {
+                assert_eq!(migrated[id].gpg_exports, key.gpg_exports);
+            }
         }
     }
 
