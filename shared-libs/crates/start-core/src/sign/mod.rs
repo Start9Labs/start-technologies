@@ -21,8 +21,7 @@ pub(crate) mod gpg;
 pub mod gpg_agent;
 
 /// Signatures serialized in signer order.
-pub type SignatureMap<Key = AnyVerifyingKey, Signature = AnySignature> =
-    std::collections::BTreeMap<Key, Signature>;
+pub type SignatureMap = std::collections::BTreeMap<AnyVerifyingKey, AnySignature>;
 
 pub fn canonicalize_verifying_keys<T>(
     keys: std::collections::BTreeMap<InternedString, T>,

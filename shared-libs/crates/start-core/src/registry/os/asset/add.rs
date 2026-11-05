@@ -18,7 +18,6 @@ use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
 use crate::registry::os::SIG_CONTEXT;
 use crate::registry::os::index::OsVersionInfo;
-use crate::s9pk::merkle_archive::hash::VerifyingWriter;
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
@@ -259,10 +258,7 @@ pub async fn cli_add_asset(
         verify_phase.set_total(size);
     }
     verify_phase.set_units(Some(ProgressUnits::Bytes));
-    let mut writer = verify_phase.writer(VerifyingWriter::new(
-        tokio::io::sink(),
-        Some((blake3::Hash::from_bytes(*commitment.hash), commitment.size)),
-    ));
+    let mut writer = verify_phase.writer(commitment.verifying_writer(tokio::io::sink()));
     src.copy_all_to(&mut writer).await?;
     let (verifier, mut verify_phase) = writer.into_inner();
     verifier.verify().await?;

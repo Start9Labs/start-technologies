@@ -1,7 +1,7 @@
-pub mod asset;
+pub use startos::registry::{asset, signer};
+
 pub mod device_info;
 pub mod os;
-pub mod signer;
 
 use http::HeaderValue;
 use reqwest::Client;
