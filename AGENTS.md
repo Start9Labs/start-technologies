@@ -136,11 +136,14 @@ make start-os-scripts-test   # StartOS shell scripts (projects/start-os/build/te
 make bash-completion-test    # completion staging and lazy loading (requires bash-completion)
 make start-wrt-test          # StartWRT Rust crates
 make release-notes-test      # changelog fragments, versions, release notes, signed commits, apt publish
-make package-ci-test         # shared GitHub/Forgejo service-package CI (root npm dependencies)
+make package-ci-test         # shared GitHub/Forgejo service-package CI and generated-artifact orchestration (root npm dependencies)
+make -k generated-artifacts-check # regenerate and check man pages, TS bindings, and MCP catalog
 
 # Run a specific Rust test
 cd shared-libs/crates/start-core && cargo test <test_name> --features=test
 ```
+
+Preserve level-3 optimization in development and test profiles. Unoptimized builds have hit binary-size limits and async stack overflows; lowering optimization requires verification of both constraints.
 
 Each product's `AGENTS.md` covers its own scoped tests.
 

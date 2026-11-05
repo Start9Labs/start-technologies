@@ -1,1 +1,0 @@
-- Zachowuje opcje należące do wywołującego przy ponownym użyciu opcji `spawn` lub `launch` podkontenerów.
