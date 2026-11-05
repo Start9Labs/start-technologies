@@ -131,6 +131,38 @@ pub(crate) async fn remote_asset(
         .map(|(_, asset)| asset.clone()))
 }
 
+/// Omits `targetVersion`, which the registry counts as a package request.
+pub(crate) async fn advertised_asset(
+    ctx: &RpcContext,
+    registry: &reqwest::Url,
+    id: &PackageId,
+    version: &VersionString,
+) -> Result<Option<RegistryAsset<MerkleArchiveCommitment>>, Error> {
+    let package: GetPackageResponseFull = from_value(
+        ctx.call_remote_with::<RegistryContext, _>(
+            "package.get",
+            [("get_device_info", Value::Bool(true))]
+                .into_iter()
+                .collect(),
+            json!({
+                "id": id,
+                "otherVersions": "full",
+                "allRevisions": true,
+            }),
+            RegistryUrlParams {
+                registry: registry.clone(),
+            },
+        )
+        .await?,
+    )?;
+    Ok(package
+        .best
+        .get(version)
+        .or_else(|| package.other_versions.get(version))
+        .and_then(|info| info.s9pks.first())
+        .map(|(_, asset)| asset.clone()))
+}
+
 rpc_toolkit::reflect_ts!(GetPackageResponse);
 rpc_toolkit::ts_export!(GetPackageResponse, namespaces = [""]);
 impl GetPackageResponse {

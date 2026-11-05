@@ -46,7 +46,12 @@ pub(crate) async fn register_existing(ctx: &RpcContext) -> Result<(), Error> {
             let local = package.as_archive().commitment().await?;
             let asset = tokio::time::timeout(
                 METADATA_TIMEOUT,
-                crate::registry::package::get::remote_asset(ctx, registry, &id, &manifest.version),
+                crate::registry::package::get::advertised_asset(
+                    ctx,
+                    registry,
+                    &id,
+                    &manifest.version,
+                ),
             )
             .await
             .with_kind(ErrorKind::Timeout)??;
