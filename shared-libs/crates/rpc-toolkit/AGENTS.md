@@ -15,7 +15,8 @@ root and `shared-libs/` guidance first. `CLAUDE.md` imports this file.
   not apply that policy to network or filesystem errors. `server/mcp.rs` (`mcp` feature) owns the MCP tool surface and
   reuses `HttpServer`'s middleware steps rather than reimplementing them.
   `server/websocket.rs` (`websocket` feature) owns the shared WebSocket connection;
-  `server/rpcstream.rs` owns request-scoped stream registration and event encoding.
+  `server/rpcstream.rs` owns single-owner producers, bounded event queues, terminal
+  results, drop cancellation, and event encoding.
   Forward `HandlerArgs::rpc_stream` through adapters; initialize it to `None` for
   non-WebSocket dispatch. Read [docs/websocket.md](docs/websocket.md) before changing
   streaming, cancellation, connection limits, or upgrade middleware.

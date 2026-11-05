@@ -17,7 +17,7 @@ use tokio::time::Instant;
 use tokio_stream::StreamMap;
 use yajrc::{Id, RpcError};
 
-use super::rpcstream::{stream_event, stream_events, RpcValueStream};
+use super::rpcstream::{stream_event, ResponseEvents, RPCSTREAM_CANCELLED_ERROR};
 use crate::util::{invalid_request, parse_error};
 use crate::{
     Context, DynMiddleware, HttpServer, RpcRequest, RpcResponse, RpcStream, Server,
@@ -31,6 +31,9 @@ pub struct WebSocketOptions {
     pub max_in_flight: NonZeroUsize,
     /// Concurrent opted-in calls and established response streams.
     pub max_streams: NonZeroUsize,
+    /// Queued non-terminal events per stream; must fit Tokio's bounded-channel capacity.
+    /// Terminal results have a separate reserved slot.
+    pub stream_buffer_capacity: NonZeroUsize,
     /// Maximum inbound message and frame size in bytes.
     pub max_message_size: NonZeroUsize,
     /// Deadline for each socket write or flush.
@@ -42,6 +45,7 @@ impl Default for WebSocketOptions {
         Self {
             max_in_flight: NonZeroUsize::new(64).unwrap(),
             max_streams: NonZeroUsize::new(64).unwrap(),
+            stream_buffer_capacity: NonZeroUsize::new(16).unwrap(),
             max_message_size: NonZeroUsize::new(1024 * 1024).unwrap(),
             send_timeout: Duration::from_secs(15),
         }
@@ -137,14 +141,12 @@ impl<C: Context> Handler<(), ()> for WebSocketServer<C> {
     }
 }
 
-type ResponseEvents = futures::stream::BoxStream<'static, (Result<Value, RpcError>, bool)>;
-
 struct CompletedCall {
     group: usize,
     id: Option<Id>,
     response: RpcResponse,
     respond: bool,
-    source: Option<RpcValueStream>,
+    source: Option<ResponseEvents>,
 }
 
 struct ResponseGroup {
@@ -156,7 +158,7 @@ struct ResponseGroup {
 
 enum CallState {
     Pending(AbortHandle),
-    Ready(Option<RpcValueStream>),
+    Ready(Option<ResponseEvents>),
 }
 
 struct TrackedCall {
@@ -395,7 +397,7 @@ impl<C: Context> Connection<C> {
                 .await;
         }
         let (registration, receiver) = if opted_in {
-            let (registration, receiver) = RpcStream::registration();
+            let (registration, receiver) = RpcStream::new(self.options.stream_buffer_capacity);
             (Some(registration), Some(receiver))
         } else {
             (None, None)
@@ -410,11 +412,7 @@ impl<C: Context> Connection<C> {
                 .await;
             response.id = call_id.clone();
             let source = if response.result.is_ok() {
-                receiver.map(|mut receiver| {
-                    receiver
-                        .try_recv()
-                        .unwrap_or_else(|_| futures::stream::empty().boxed())
-                })
+                receiver
             } else {
                 None
             };
@@ -472,7 +470,7 @@ impl<C: Context> Connection<C> {
         for id in group.ids {
             let call = self.active.remove(&id).unwrap();
             if let CallState::Ready(Some(source)) = call.state {
-                self.streams.insert(id, stream_events(source));
+                self.streams.insert(id, source);
             }
         }
         Ok(())
@@ -503,11 +501,7 @@ impl<C: Context> Connection<C> {
                 id: Some(id.clone()),
                 response: RpcResponse {
                     id: Some(id),
-                    result: Err(RpcError {
-                        code: -32800,
-                        message: "Stream request canceled".into(),
-                        data: None,
-                    }),
+                    result: Err(RPCSTREAM_CANCELLED_ERROR),
                 },
                 respond: true,
                 source: None,

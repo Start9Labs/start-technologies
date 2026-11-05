@@ -56,11 +56,13 @@ Transports wrap a `Server`:
 - **WebSocket** (`server/websocket.rs`, opt-in `websocket` feature): `WebSocketServer` accepts JSON
   text requests and batches through the existing RPC middleware pipeline. HTTP middleware prepares
   the upgrade; each call clones that prepared middleware state. The connection owns pending call
-  futures, buffered initiating replies, and directly polled stream sources, with resource limits
-  and send deadlines. `server/rpcstream.rs` owns `RpcStream` registration and event encoding.
-  `HandlerArgs::rpc_stream` carries the request-owned capability through normal handler adapters;
-  non-opted-in calls and other transports receive `None`. The initiating result is sent before any
-  stream polling. Cancellation or socket loss drops the corresponding futures/sources. See
+  futures, buffered initiating replies, and directly polled event receivers, with resource limits
+  and send deadlines. `server/rpcstream.rs` owns the single-owner `RpcStream` producer: a bounded
+  event channel and a reserved terminal slot. Explicit close carries a result; dropping without
+  close yields a fixed cancellation error after queued events. `HandlerArgs::rpc_stream` carries
+  the producer through normal handler adapters; non-opted-in calls and other transports receive
+  `None`. `HandlerArgs` is not cloneable. The initiating result is sent before draining events.
+  Cancellation or socket loss drops the corresponding futures and receivers. See
   [the WebSocket guide](docs/websocket.md) for wire and lifecycle semantics.
 - **MCP** (`server/mcp.rs`, opt-in `mcp` feature): `McpServer` offers methods of an `HttpServer`'s
   tree as [MCP](https://modelcontextprotocol.io) tools over streamable HTTP via `rmcp`, served

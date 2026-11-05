@@ -54,8 +54,9 @@ CLI subcommands, or served over HTTP via `HttpServer` / over a socket via `Serve
 - `cbor` _(default)_ — enables CBOR request/response encoding alongside JSON over HTTP.
 - `websocket` — enables `Server::for_websocket()` and `HttpServer::for_websocket()`, multiplexing
   ordinary JSON-RPC calls and explicitly opted-in `rpcstream` responses. An initiating result and
-  subsequent stream items have independent types; events use the initiating request's ID.
-  See [the WebSocket guide](docs/websocket.md).
+  subsequent events and terminal results have independent types; events use the initiating
+  request's ID. A single-owner handle sends events and closes with a result; dropping it without
+  closing reports cancellation. See [the WebSocket guide](docs/websocket.md).
 - `ts` — enables `rpc_toolkit::ts::handler_bindings()` and the typed method tree,
   generated as a runtime zod schema module plus a type-only module.
   Struct DTOs derive generic `visit_rs::VisitFields`; enums derive

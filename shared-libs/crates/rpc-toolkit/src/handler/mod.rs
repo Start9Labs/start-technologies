@@ -196,7 +196,10 @@ impl<Context: crate::Context, Inherited: Send> HandleAny<Context>
 pub type HandlerArgsFor<Context: crate::Context, H: HandlerTypes + ?Sized> =
     HandlerArgs<Context, H::Params, H::InheritedParams>;
 
-#[derive(Debug, Clone)]
+/// Per-call arguments with an optional single-owner response producer.
+///
+/// Move the producer into its task; clone context and parameters separately.
+#[derive(Debug)]
 pub struct HandlerArgs<
     Context: crate::Context,
     Params: Send + Sync = Empty,
@@ -208,7 +211,7 @@ pub struct HandlerArgs<
     pub params: Params,
     pub inherited_params: InheritedParams,
     pub raw_params: Value,
-    /// Attaches one response stream before the handler returns, when supported by the transport.
+    /// Event producer, present when the transport and client opt into response streaming.
     pub rpc_stream: Option<crate::RpcStream>,
 }
 
