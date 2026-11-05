@@ -3,10 +3,14 @@ import {
   AbstractControl,
   NonNullableFormBuilder,
   ReactiveFormsModule,
-  Validators,
+  ValidatorFn,
 } from '@angular/forms'
 import { i18nPipe, TaskService } from '@start9labs/shared'
-import { tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
+import {
+  tuiMarkControlAsTouchedAndValidate,
+  TuiMapperPipe,
+  TuiValidator,
+} from '@taiga-ui/cdk'
 import {
   TuiButton,
   TuiDialogContext,
@@ -18,25 +22,26 @@ import {
 import { TuiButtonLoading, TuiTextarea } from '@taiga-ui/kit'
 import { TuiForm, TuiHeader } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
+import { T } from '@start9labs/start-core'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { parsePublicKeys } from 'src/app/utils/public-keys'
+
+const PEM_KEY = /-----BEGIN PUBLIC KEY-----/
 
 @Component({
   template: `
     <form tuiForm="m" [formGroup]="form" (submit.prevent)="save()">
       <header tuiHeader>
-        <h2 tuiTitle [id]="context.id">{{ 'Add trusted keyring' | i18n }}</h2>
+        <h2 tuiTitle [id]="context.id">{{ 'Add key' | i18n }}</h2>
       </header>
       <tui-textfield>
-        <label tuiLabel>{{ 'Name' | i18n }}</label>
-        <input tuiInput formControlName="name" />
-      </tui-textfield>
-      <tui-error formControlName="name" />
-      <tui-textfield>
-        <label tuiLabel>{{ 'Public keys' | i18n }}</label>
+        <label tuiLabel>{{ 'Public key' | i18n }}</label>
         <textarea
           tuiTextarea
           formControlName="publicKeys"
+          [placeholder]="
+            'Enter an Ed25519 public key in PEM or GPG format.' | i18n
+          "
           [min]="5"
           [max]="12"
           spellcheck="false"
@@ -44,11 +49,13 @@ import { parsePublicKeys } from 'src/app/utils/public-keys'
         ></textarea>
       </tui-textfield>
       <tui-error formControlName="publicKeys" />
-      <p>
-        {{
-          'Enter one or more Ed25519 public keys in PEM or GPG format.' | i18n
-        }}
-      </p>
+      @if (form.controls.publicKeys.value | tuiMapper: isPem) {
+        <tui-textfield>
+          <label tuiLabel>{{ 'Label' | i18n }}</label>
+          <input tuiInput formControlName="name" [tuiValidator]="required" />
+        </tui-textfield>
+        <tui-error formControlName="name" />
+      }
       <footer>
         <button
           tuiButton
@@ -70,8 +77,10 @@ import { parsePublicKeys } from 'src/app/utils/public-keys'
     TuiForm,
     TuiHeader,
     TuiInput,
+    TuiMapperPipe,
     TuiTextarea,
     TuiTitle,
+    TuiValidator,
     i18nPipe,
   ],
   providers: [
@@ -79,9 +88,8 @@ import { parsePublicKeys } from 'src/app/utils/public-keys'
       const i18n = inject(i18nPipe)
       return {
         required: i18n.transform('Required'),
-        pattern: i18n.transform('Required'),
         publicKeys: i18n.transform(
-          'Enter one or more Ed25519 public keys in PEM or GPG format.',
+          'Enter an Ed25519 public key in PEM or GPG format.',
         ),
       }
     }),
@@ -91,16 +99,18 @@ export class AddTrustedKeyDialog {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
 
-  protected readonly context = injectContext<TuiDialogContext<void>>()
+  protected readonly context =
+    injectContext<TuiDialogContext<T.AddTrustedKeyRes>>()
   protected readonly saving = signal(false)
   protected readonly form = inject(NonNullableFormBuilder).group({
-    name: ['', [Validators.required, Validators.pattern(/\S/)]],
+    name: [''],
     publicKeys: [
       '',
       (control: AbstractControl<string>) => {
         try {
-          parsePublicKeys(control.value)
-          return null
+          return parsePublicKeys(control.value).length === 1
+            ? null
+            : { publicKeys: true }
         } catch {
           return { publicKeys: true }
         }
@@ -108,20 +118,24 @@ export class AddTrustedKeyDialog {
     ],
   })
 
+  protected readonly isPem = (publicKeys: string) => PEM_KEY.test(publicKeys)
+  protected readonly required: ValidatorFn = ({ value }) =>
+    value.trim() ? null : { required: true }
+
   protected async save(): Promise<void> {
     tuiMarkControlAsTouchedAndValidate(this.form)
     if (this.form.invalid || this.saving()) return
     this.saving.set(true)
     const { name, publicKeys } = this.form.getRawValue()
-    const saved = await this.tasks.run(async () => {
-      await this.api.rpc.server.trustedKeys.add({
-        name,
-        publicKeys: parsePublicKeys(publicKeys),
-        context: 'marketplace',
-      })
+    await this.tasks.run(async () => {
+      this.context.completeWith(
+        await this.api.rpc.server.trustedKeys.add({
+          name: this.isPem(publicKeys) ? name : '',
+          publicKeys: parsePublicKeys(publicKeys),
+        }),
+      )
     }, 'Saving')
     this.saving.set(false)
-    if (saved) this.context.$implicit.complete()
   }
 }
 

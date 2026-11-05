@@ -16,6 +16,9 @@ const mockMerkleArchiveCommitment: T.MerkleArchiveCommitment = {
   rootMaxsize: 0,
 }
 
+const unknownSigner =
+  'MCowBQYDK2VwAyEAgkNzc04Bav9FbjK8hzF46OqjUL0bD9ZxuT7C1FgTDDE='
+
 const mockDescription = {
   short: 'Lorem ipsum dolor sit amet',
   long: 'Lorem ipsum dolor sit amet, <p>consectetur adipiscing elit</p>, sed do eiusmod <i>tempor</i> incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.',
@@ -34,10 +37,10 @@ export namespace Mock {
   }
 
   export const RegistryOSUpdate: T.OsVersionInfoMap = {
-    '0.4.1': {
+    '0.4.2': {
       gitHash: null,
       security: false,
-      headline: 'v0.4.1',
+      headline: 'v0.4.2',
       releaseNotes: 'Testing some release notes',
       sourceVersion: '>=0.3.5:0 <=0.4.0-alpha.17:0',
       authorized: ['G24CSA5HNYEPIXJNMK7ZM4KD5SX5N6X4'],
@@ -211,6 +214,30 @@ export namespace Mock {
   }
 
   export const RegistryInfo: T.RegistryInfo = {
+    trustSigners: {
+      'start9-signer': {
+        name: 'Start9',
+        contact: [{ email: 'security@start9.com' }],
+        keys: [
+          'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
+          'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
+          'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=',
+        ],
+        gpgExports: [],
+      },
+      'alpha-signer': {
+        name: 'Start9 Alpha',
+        contact: [],
+        keys: ['MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y='],
+        gpgExports: [],
+      },
+      'package-signer': {
+        name: 'Package publisher',
+        contact: [{ email: 'packages@example.com' }],
+        keys: ['MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A='],
+        gpgExports: [],
+      },
+    },
     name: 'Start9 Registry',
     icon: REGISTRY_ICON,
     description:
@@ -486,7 +513,7 @@ export namespace Mock {
                     'https://github.com/Start9Labs/bitcoind-startos/releases/download/v26.1.0/bitcoind.s9pk',
                   ],
                   commitment: mockMerkleArchiveCommitment,
-                  signatures: {},
+                  signatures: { [unknownSigner]: 'mock-signature' },
                   publishedAt: Date.now().toString(),
                 },
               ],
@@ -524,7 +551,7 @@ export namespace Mock {
                     'https://github.com/Start9Labs/bitcoinknots-startos/releases/download/v26.1.20240513/bitcoind.s9pk',
                   ],
                   commitment: mockMerkleArchiveCommitment,
-                  signatures: {},
+                  signatures: { [unknownSigner]: 'mock-signature' },
                   publishedAt: Date.now().toString(),
                 },
               ],
@@ -572,7 +599,7 @@ export namespace Mock {
                     'https://github.com/Start9Labs/bitcoind-startos/releases/download/v26.1.0/bitcoind.s9pk',
                   ],
                   commitment: mockMerkleArchiveCommitment,
-                  signatures: {},
+                  signatures: { [unknownSigner]: 'mock-signature' },
                   publishedAt: Date.now().toString(),
                 },
               ],
@@ -610,7 +637,7 @@ export namespace Mock {
                     'https://github.com/Start9Labs/bitcoinknots-startos/releases/download/v26.1.20240513/bitcoind.s9pk',
                   ],
                   commitment: mockMerkleArchiveCommitment,
-                  signatures: {},
+                  signatures: { [unknownSigner]: 'mock-signature' },
                   publishedAt: Date.now().toString(),
                 },
               ],
@@ -663,7 +690,7 @@ export namespace Mock {
                     'https://github.com/Start9Labs/lnd-startos/releases/download/v0.17.5/lnd.s9pk',
                   ],
                   commitment: mockMerkleArchiveCommitment,
-                  signatures: {},
+                  signatures: { [unknownSigner]: 'mock-signature' },
                   publishedAt: Date.now().toString(),
                 },
               ],
@@ -714,7 +741,7 @@ export namespace Mock {
                     'https://github.com/Start9Labs/lnd-startos/releases/download/v0.17.4/lnd.s9pk',
                   ],
                   commitment: mockMerkleArchiveCommitment,
-                  signatures: {},
+                  signatures: { [unknownSigner]: 'mock-signature' },
                   publishedAt: Date.now().toString(),
                 },
               ],
@@ -766,7 +793,7 @@ export namespace Mock {
                     'https://github.com/Start9Labs/btc-rpc-proxy-startos/releases/download/v0.3.2.7/btc-rpc-proxy.s9pk',
                   ],
                   commitment: mockMerkleArchiveCommitment,
-                  signatures: {},
+                  signatures: { [unknownSigner]: 'mock-signature' },
                   publishedAt: Date.now().toString(),
                 },
               ],
@@ -884,7 +911,13 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
                   'https://github.com/Start9Labs/bitcoind-startos/releases/download/v27.0.0/bitcoind.s9pk',
                 ],
                 commitment: mockMerkleArchiveCommitment,
-                signatures: {},
+                signatures: {
+                  'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=':
+                    'mock-signature',
+                  'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=':
+                    'mock-signature',
+                  [unknownSigner]: 'mock-signature',
+                },
                 publishedAt: Date.now().toString(),
               },
             ],
@@ -922,7 +955,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
                   'https://github.com/Start9Labs/bitcoinknots-startos/releases/download/v26.1.20240513/bitcoind.s9pk',
                 ],
                 commitment: mockMerkleArchiveCommitment,
-                signatures: {},
+                signatures: { [unknownSigner]: 'mock-signature' },
                 publishedAt: Date.now().toString(),
               },
             ],
@@ -973,7 +1006,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
                   'https://github.com/Start9Labs/lnd-startos/releases/download/v0.18.0.1/lnd.s9pk',
                 ],
                 commitment: mockMerkleArchiveCommitment,
-                signatures: {},
+                signatures: { [unknownSigner]: 'mock-signature' },
                 publishedAt: Date.now().toString(),
               },
             ],
@@ -1030,7 +1063,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
                   'https://github.com/Start9Labs/btc-rpc-proxy-startos/releases/download/v0.4.0/btc-rpc-proxy.s9pk',
                 ],
                 commitment: mockMerkleArchiveCommitment,
-                signatures: {},
+                signatures: { [unknownSigner]: 'mock-signature' },
                 publishedAt: Date.now().toString(),
               },
             ],
@@ -1067,7 +1100,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
                   'https://github.com/Start9Labs/btc-rpc-proxy-startos/releases/download/v0.5.0-test/btc-rpc-proxy.s9pk',
                 ],
                 commitment: mockMerkleArchiveCommitment,
-                signatures: {},
+                signatures: { [unknownSigner]: 'mock-signature' },
                 publishedAt: Date.now().toString(),
               },
             ],
@@ -1148,6 +1181,38 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
         )
         .join(''),
       data: null,
+      seen: false,
+    },
+    {
+      id: 6,
+      packageId: null,
+      createdAt: '2019-12-27T09:12:00.000Z',
+      code: 4,
+      level: 'info',
+      title: 'New signing key',
+      message:
+        'Start9 Registry added the signing key "Package publisher". It is not trusted until you trust it.',
+      data: {
+        kind: 'registry-key-added',
+        registry: 'https://registry.start9.com/',
+        key: 'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=',
+      },
+      seen: false,
+    },
+    {
+      id: 7,
+      packageId: null,
+      createdAt: '2019-12-28T10:00:00.000Z',
+      code: 5,
+      level: 'warning',
+      title: 'Signing key no longer offered',
+      message:
+        'Start9 Registry no longer offers the signing key "matthill". Its trust is unchanged.',
+      data: {
+        kind: 'registry-key-dropped',
+        registry: 'https://registry.start9.com/',
+        key: 'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
+      },
       seen: false,
     },
     {

@@ -66,7 +66,7 @@ StartOS is a sovereign computing platform that makes it easy to run a personal s
 - [Internationalization](internationalization.md)
 - [Kiosk Mode](kiosk-mode.md)
 - [Updating StartOS](updating-startos.md)
-- [Trusted Keyrings](trusted-keys.md)
+- [Trusted Keys](trusted-keys.md)
 - [Change Password](change-password.md)
 - [Forgot Password](forgot-password.md)
 
