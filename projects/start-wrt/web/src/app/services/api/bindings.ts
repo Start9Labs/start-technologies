@@ -100,6 +100,12 @@ export type DdnsProviderInput = z.input<typeof schemas.DdnsProvider>
 export type DeleteArgsInput = z.input<typeof schemas.DeleteArgs>
 
 /**
+ * A published port deleted with the profile it forwards into.
+ */
+export type DeletedPublishedPort = z.output<typeof schemas.DeletedPublishedPort>
+export type DeletedReservation = z.output<typeof schemas.DeletedReservation>
+
+/**
  * A device that keeps a reservation or published port for the profile it is
  * leaving. They apply again when it returns.
  */
@@ -270,6 +276,18 @@ export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 export type LogsResponse = z.output<typeof schemas.LogsResponse>
 export type OutboundVpn = z.output<typeof schemas.OutboundVpn>
 export type PeerAddArgsInput = z.input<typeof schemas.PeerAddArgs>
+
+/**
+ * `profiles.delete` request. With `preview`, nothing is deleted.
+ */
+export type ProfileDeleteRequestInput = z.input<
+  typeof schemas.ProfileDeleteRequest
+>
+
+/**
+ * The reservations and published ports deleted with the profile.
+ */
+export type ProfileDeleteResult = z.output<typeof schemas.ProfileDeleteResult>
 export type ProfileSetRequestInput = z.input<typeof schemas.ProfileSetRequest>
 export type PublishedPort = z.output<typeof schemas.PublishedPort>
 export type PublishedPortInputInput = z.input<typeof schemas.PublishedPortInput>

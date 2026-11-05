@@ -265,6 +265,41 @@ export const DeleteArgs: z.ZodObject<{
 })
 
 /**
+ * A published port deleted with the profile it forwards into.
+ */
+export const DeletedPublishedPort: z.ZodObject<{
+  id: z.ZodString
+  label: z.ZodString
+  mac: z.ZodString
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  id: z.string(),
+  label: z.string(),
+  mac: z.string(),
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'DeletedPublishedPort',
+  description: 'A published port deleted with the profile it forwards into.',
+})
+export const DeletedReservation: z.ZodObject<{
+  mac: z.ZodString
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  ipv4: z.ZodString
+}> = /* @__PURE__ */ object({
+  mac: z.string(),
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  ipv4: z.string(),
+}).meta({
+  id: 'DeletedReservation',
+})
+
+/**
  * A device that keeps a reservation or published port for the profile it is
  * leaving. They apply again when it returns.
  */
@@ -2028,6 +2063,39 @@ export const PeerAddArgs: z.ZodObject<{
 }).meta({
   id: 'PeerAddArgs',
 })
+
+/**
+ * `profiles.delete` request. With `preview`, nothing is deleted.
+ */
+export const ProfileDeleteRequest: z.ZodIntersection<
+  z.ZodObject<{
+    preview: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  }>,
+  typeof ProfileIdOpt
+> = /* @__PURE__ */ z
+  .intersection(
+    object({ preview: wire(z.boolean().optional(), z.boolean()) }),
+    ProfileIdOpt,
+  )
+  .meta({
+    id: 'ProfileDeleteRequest',
+    description:
+      '`profiles.delete` request. With `preview`, nothing is deleted.',
+  })
+
+/**
+ * The reservations and published ports deleted with the profile.
+ */
+export const ProfileDeleteResult: z.ZodObject<{
+  reservations: z.ZodArray<typeof DeletedReservation>
+  published_ports: z.ZodArray<typeof DeletedPublishedPort>
+}> = /* @__PURE__ */ object({
+  reservations: z.array(DeletedReservation),
+  published_ports: z.array(DeletedPublishedPort),
+}).meta({
+  id: 'ProfileDeleteResult',
+  description: 'The reservations and published ports deleted with the profile.',
+})
 export const ProfileSetRequest: z.ZodIntersection<
   z.ZodObject<{ force: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean> }>,
   z.ZodIntersection<
@@ -3308,8 +3376,19 @@ export const Api = {
           _RETURN: /* @__PURE__ */ ProfileId,
         },
         delete: {
-          _PARAMS: /* @__PURE__ */ ProfileIdOpt,
-          _RETURN: /* @__PURE__ */ z.null(),
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            ProfileDeleteRequest,
+          ),
+          _RETURN: /* @__PURE__ */ ProfileDeleteResult,
         },
         edit: {
           _PARAMS: /* @__PURE__ */ z.intersection(
