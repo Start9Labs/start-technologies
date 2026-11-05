@@ -473,9 +473,10 @@ pub(crate) async fn do_update(
     download_phase.start();
     let path = Path::new("/media/startos/images/next.squashfs");
     let mut dst = AtomicFile::new(&path, None::<&Path>).await?;
-    let mut download_phase = asset
+    let download = asset
         .download(client, torrents, &mut *dst, download_phase)
         .await?;
+    let mut download_phase = download.progress;
     dst.sync_all().await?;
     download_phase.complete();
 
@@ -507,6 +508,16 @@ pub(crate) async fn do_update(
         .await?;
     finalize_phase.complete();
 
+    if let (Some(torrents), Some(metadata)) = (torrents, download.sharing) {
+        let registered = async {
+            let stored = tokio::fs::canonicalize("/media/startos/config/current.rootfs").await?;
+            torrents.register_stored(&stored, &metadata).await
+        }
+        .await;
+        if let Err(error) = registered {
+            tracing::warn!(%error, "Cannot register stored OS image for sharing");
+        }
+    }
     progress.complete();
 
     Ok(())

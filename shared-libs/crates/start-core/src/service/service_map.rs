@@ -38,7 +38,8 @@ use crate::util::sync::SyncMutex;
 const SERVICE_INIT_CONCURRENCY: usize = 4;
 
 pub type DownloadInstallFuture = BoxFuture<'static, Result<InstallFuture, Error>>;
-pub type InstallFuture = BoxFuture<'static, Result<(), Error>>;
+/// Resolves to the installed archive path without extending its lifetime.
+pub type InstallFuture = BoxFuture<'static, Result<PathBuf, Error>>;
 
 pub struct InstallProgressHandles {
     pub finalization_progress: PhaseProgressTrackerHandle,
@@ -102,7 +103,6 @@ fn uninit_target(data_ver: &str, prev: &Manifest, next: &Manifest) -> Result<Exi
     }
 }
 
-/// This is the structure to contain all the services
 #[derive(Default)]
 pub struct ServiceMap(SyncMutex<OrdMap<PackageId, Arc<RwLock<Option<ServiceRef>>>>>);
 impl ServiceMap {
@@ -235,7 +235,7 @@ impl ServiceMap {
                 ErrorKind::InvalidRequest,
             ));
         }
-        // Fail before the download and before the service is quiesced.
+        // Reject incompatible migrations before quiescing the service.
         if recovery_source.is_none() {
             if let Some(prev) = &*service {
                 if let Some(data_ver) = get_data_version(&id).await? {
@@ -455,14 +455,13 @@ impl ServiceMap {
                     sync_progress_task.await.map_err(|_| {
                         Error::new(eyre!("progress sync task panicked"), ErrorKind::Unknown)
                     })??;
-                    Ok(())
+                    Ok(installed_path)
                 })
                 .boxed())
         }
         .boxed())
     }
 
-    /// This is ran during the cleanup, so when we are uninstalling the service
     #[instrument(skip_all)]
     pub async fn uninstall(
         &self,

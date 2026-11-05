@@ -100,6 +100,17 @@ impl ContentCommitment {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct SharingMetadata {
+    pub(crate) torrent: crate::util::serde::Base64<Vec<u8>>,
+    pub(crate) commitment: ContentCommitment,
+}
+
+pub(crate) struct TorrentAttempt {
+    pub(crate) metadata: SharingMetadata,
+    pub(crate) source: Option<(Arc<TmpDir>, PathBuf)>,
+}
+
 struct TorrentSession(Arc<Session>);
 impl TorrentSession {
     async fn new(directory: PathBuf, mut options: SessionOptions) -> Result<Self, Error> {
@@ -133,12 +144,12 @@ fn session_options() -> SessionOptions {
     }
 }
 
-/// Registry downloads and optional retained seeding.
+/// Registry downloads and optional sharing of stored artifacts.
 pub struct TorrentClient {
     enabled: bool,
     disable_upload: bool,
     seed: Option<TorrentSeedConfig>,
-    cache: OnceCell<Arc<seeds::SeedCache>>,
+    catalog: OnceCell<Arc<seeds::SeedCatalog>>,
     seeds: RwLock<Option<Arc<seeds::SeedService>>>,
 }
 
@@ -159,19 +170,19 @@ impl TorrentClient {
             enabled: config.enabled() && !proxy,
             disable_upload: true,
             seed: None,
-            cache: OnceCell::new(),
+            catalog: OnceCell::new(),
             seeds: RwLock::new(None),
         }
     }
 
-    /// Allows uploads during downloads; retained seeding starts disabled.
+    /// Allows uploads during downloads; stored-artifact sharing starts disabled.
     pub fn for_server(config: TorrentDownloadConfig, seed: Option<TorrentSeedConfig>) -> Self {
         let enabled = config.enabled();
         Self {
             enabled,
             disable_upload: false,
             seed: enabled.then(|| seed.unwrap_or_default()),
-            cache: OnceCell::new(),
+            catalog: OnceCell::new(),
             seeds: RwLock::new(None),
         }
     }
@@ -200,8 +211,16 @@ impl TorrentClient {
                 result = enabled.changed() => result,
                 result = async {
                     if should_seed {
-                        if let Err(error) = self.resume_seeding().await {
-                            tracing::warn!(%error, "Cannot resume registry asset seeding");
+                        loop {
+                            let service = self.seeds.read().await.clone();
+                            let result = match service {
+                                Some(service) => service.refresh().await,
+                                None => self.resume_seeding().await,
+                            };
+                            if let Err(error) = result {
+                                tracing::warn!(%error, "Cannot refresh stored-artifact sharing");
+                            }
+                            tokio::time::sleep(Duration::from_secs(30)).await;
                         }
                     }
                     std::future::pending::<Result<(), patch_db::Error>>().await
@@ -212,24 +231,42 @@ impl TorrentClient {
         }
     }
 
+    async fn catalog(&self) -> Result<Option<&Arc<seeds::SeedCatalog>>, Error> {
+        let Some(config) = &self.seed else {
+            return Ok(None);
+        };
+        self.catalog
+            .get_or_try_init(|| async {
+                seeds::SeedCatalog::open(config.directory.clone())
+                    .await
+                    .map(Arc::new)
+            })
+            .await
+            .map(Some)
+    }
+
+    pub(crate) async fn register_stored(
+        &self,
+        source: &Path,
+        metadata: &SharingMetadata,
+    ) -> Result<(), Error> {
+        if let Some(catalog) = self.catalog().await? {
+            catalog.register(source, metadata).await?;
+        }
+        Ok(())
+    }
+
     async fn resume_seeding(&self) -> Result<(), Error> {
-        if let Some(config) = &self.seed {
-            let cache = self
-                .cache
-                .get_or_try_init(|| async {
-                    seeds::SeedCache::open(config.directory.clone())
-                        .await
-                        .map(Arc::new)
-                })
-                .await?;
-            let service = Arc::new(seeds::SeedService::start(cache.clone(), config.listen).await?);
+        if let (Some(config), Some(catalog)) = (&self.seed, self.catalog().await?) {
+            let service =
+                Arc::new(seeds::SeedService::start(catalog.clone(), config.listen).await?);
             *self.seeds.write().await = Some(service.clone());
             service.refresh().await?;
         }
         Ok(())
     }
 
-    /// Stops retained seeding without deleting the cache.
+    /// Stops sharing without deleting stored artifacts or their metadata.
     pub async fn shutdown(&self) {
         let service = self.seeds.write().await.take();
         if let Some(service) = service {
@@ -243,7 +280,7 @@ impl TorrentClient {
         commitment: ContentCommitment,
         client: Client,
         progress: &mut PhaseProgressTrackerHandle,
-    ) -> Result<Option<(Arc<TmpDir>, PathBuf)>, Error> {
+    ) -> Result<Option<TorrentAttempt>, Error> {
         if self.for_source(url).is_none() {
             return Ok(None);
         }
@@ -287,6 +324,32 @@ impl TorrentClient {
         };
         let meta = validate_metadata(&bytes, &commitment)?;
         let path = output.join(file_name(&meta)?);
+        let result =
+            Self::download_payload(&session, &bytes, &path, &meta, &commitment, progress).await;
+        let source = match result {
+            Ok(()) => Some((tmp, path)),
+            Err(error) => {
+                tracing::warn!(%error, "BitTorrent payload failed; falling back to HTTP mirrors");
+                None
+            }
+        };
+        Ok(Some(TorrentAttempt {
+            metadata: SharingMetadata {
+                torrent: crate::util::serde::Base64(bytes.to_vec()),
+                commitment,
+            },
+            source,
+        }))
+    }
+
+    async fn download_payload(
+        session: &TorrentSession,
+        bytes: &bytes::Bytes,
+        path: &Path,
+        meta: &TorrentMetaV1Owned,
+        commitment: &ContentCommitment,
+        progress: &mut PhaseProgressTrackerHandle,
+    ) -> Result<(), Error> {
         let torrent = session
             .0
             .add_torrent(AddTorrent::from_bytes(bytes.clone()), None)
@@ -321,15 +384,9 @@ impl TorrentClient {
             tokio::time::sleep(POLL_INTERVAL).await;
         }
         session.0.stop().await;
-        commitment.verify(&path).await?;
-        let seed = self.seeds.read().await.clone();
-        if let Some(seed) = seed {
-            if let Err(error) = seed.retain(&path, &bytes, &commitment).await {
-                tracing::warn!(%error, "Cannot retain registry asset for seeding");
-            }
-        }
+        commitment.verify(path).await?;
         progress.complete();
-        Ok(Some((tmp, path)))
+        Ok(())
     }
 }
 

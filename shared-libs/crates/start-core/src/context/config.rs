@@ -398,23 +398,24 @@ mod tests {
     }
 
     #[test]
-    fn seed_storage_defaults_to_the_package_data_mount_and_accepts_listener_only_configuration() {
+    fn sharing_metadata_defaults_to_the_package_data_mount_and_accepts_listener_only_configuration()
+    {
         let listener_only: ServerConfig =
             serde_json::from_value(serde_json::json!({"bittorrent-seed": {"listen": "[::]:6882"}}))
                 .unwrap();
         let seed = listener_only.bittorrent_seed.unwrap();
         assert_eq!(
             seed.directory,
-            Path::new("/media/startos/data/package-data/registry-seeds")
+            Path::new("/media/startos/data/package-data/registry-torrents")
         );
         assert_eq!(seed.listen, Some("[::]:6882".parse().unwrap()));
         let server: ServerConfig = serde_json::from_value(
-            serde_json::json!({"bittorrent-seed": {"directory": "/custom-cache"}}),
+            serde_json::json!({"bittorrent-seed": {"directory": "/custom-metadata"}}),
         )
         .unwrap();
         assert_eq!(
             server.bittorrent_seed.unwrap().directory,
-            Path::new("/custom-cache")
+            Path::new("/custom-metadata")
         );
         assert!(ServerConfig::default().bittorrent_seed.is_none());
     }

@@ -197,7 +197,8 @@ async fn cli_get_os_asset(
             &mut *file,
             download_phase,
         )
-        .await?;
+        .await?
+        .progress;
     file.save().await?;
     download_phase.complete();
 
