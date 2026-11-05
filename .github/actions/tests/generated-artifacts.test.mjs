@@ -42,6 +42,7 @@ appendFileSync(process.env.DOCKER_LOG, JSON.stringify(process.argv.slice(2)) + '
     ['dev', 'dev', 'dev-console-unstable'],
     ['release', 'release', 'dev-unstable'],
     ['generated', 'generated', 'dev-unstable'],
+    ['bindings', 'bindings', 'dev-unstable'],
     ['unknown', 'dev', 'dev-unstable'],
   ]) {
     for (const script of scripts) {
