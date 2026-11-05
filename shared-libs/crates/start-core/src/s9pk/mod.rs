@@ -5,7 +5,6 @@ pub mod rpc;
 pub mod v1;
 pub mod v2;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncSeek};
@@ -17,7 +16,7 @@ use crate::registry::signer::AcceptSigners;
 use crate::s9pk::merkle_archive::source::{ArchiveSource, DynFileSource};
 use crate::s9pk::v1::reader::S9pkReader;
 use crate::s9pk::v2::compat::MAGIC_AND_VERSION;
-use crate::sign::{AnySignature, AnyVerifyingKey};
+use crate::sign::{AnyVerifyingKey, SignatureMap};
 use crate::util::io::TmpDir;
 
 pub async fn load<S, K>(
@@ -43,7 +42,7 @@ pub async fn load_for_sideload<S, K>(
     source: S,
     key: K,
     progress: Option<&FullProgressTracker>,
-    signatures: &HashMap<AnyVerifyingKey, AnySignature>,
+    signatures: &SignatureMap,
     accepted: Option<AcceptSigners>,
 ) -> Result<S9pk<DynFileSource>, Error>
 where

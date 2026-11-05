@@ -1,8 +1,8 @@
-use std::collections::HashMap;
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use startos::sign::SignatureMap;
 use url::Url;
 
 use super::signer::AcceptSigners;
@@ -18,12 +18,11 @@ pub struct RegistryAsset<Commitment> {
     pub published_at: DateTime<Utc>,
     pub urls: Vec<Url>,
     pub commitment: Commitment,
-    pub signatures: HashMap<AnyVerifyingKey, AnySignature>,
+    pub signatures: SignatureMap<AnyVerifyingKey, AnySignature>,
 }
 rpc_toolkit::reflect_ts!(impl [Commitment] for RegistryAsset<Commitment> where [Commitment: rpc_toolkit::ts::TS]);
 
 impl<C> RegistryAsset<C> {
-    /// Build an `AcceptSigners::All` requiring every signer on this asset.
     pub fn all_signers(&self) -> AcceptSigners {
         AcceptSigners::All(
             self.signatures
@@ -36,7 +35,6 @@ impl<C> RegistryAsset<C> {
 }
 
 impl RegistryAsset<Blake3Commitment> {
-    /// Validate all signatures on this asset.
     pub fn validate(
         &self,
         context: &str,

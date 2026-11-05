@@ -223,7 +223,7 @@ async fn s9pk_trailer_local_load_requires_a_valid_embedded_signature() {
 async fn sideload_request_signatures_are_verified_against_the_uploaded_archive() {
     let source = Arc::<[u8]>::from(bytes("base.s9pk"));
     for index in 0..3 {
-        let signatures = std::collections::HashMap::from([(
+        let signatures = crate::sign::SignatureMap::from([(
             key(index),
             serde_json::from_value(vectors()["endorsements"][index]["signature"].clone()).unwrap(),
         )]);
@@ -266,7 +266,7 @@ async fn sideload_request_signatures_are_verified_against_the_uploaded_archive()
             assert_eq!(result.err().unwrap().kind, ErrorKind::InvalidSignature);
         }
     }
-    let signatures = std::collections::HashMap::from([(key(0), valid)]);
+    let signatures = crate::sign::SignatureMap::from([(key(0), valid)]);
     let mut corrupt = source.to_vec();
     corrupt[35] ^= 1;
     for policy in [None, crate::trusted_keys::signer_policy(Some(vec![key(0)]))] {
@@ -316,7 +316,7 @@ async fn sideload_request_signatures_allow_loading_and_progress_before_the_trail
     send.send(Ok(Bytes::copy_from_slice(&full[..split])))
         .await
         .unwrap();
-    let signatures = std::collections::HashMap::from([(
+    let signatures = crate::sign::SignatureMap::from([(
         key(0),
         serde_json::from_value(vectors()["endorsements"][0]["signature"].clone()).unwrap(),
     )]);

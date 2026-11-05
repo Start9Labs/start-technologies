@@ -13,8 +13,6 @@ use self::commitment::Digestable;
 use self::ed25519::Ed25519;
 use crate::Error;
 
-// ── SignatureScheme trait ─────────────────────────────────────────────
-
 pub trait SignatureScheme {
     type VerifyingKey;
     type Signature;
@@ -42,8 +40,6 @@ pub trait SignatureScheme {
         self.verify(key, digest, context, signature)
     }
 }
-
-// ── AnyScheme ────────────────────────────────────────────────────────
 
 #[non_exhaustive]
 pub enum AnyScheme {
@@ -75,12 +71,9 @@ impl SignatureScheme for AnyScheme {
                 AnyDigest::Sha512(digest),
                 AnySignature::Ed25519(signature),
             ) => s.verify(key, digest, context, signature),
-            _ => Err(Error::other("mismatched signature algorithm")),
         }
     }
 }
-
-// ── AnyDigest ────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -95,8 +88,6 @@ impl digest::Update for AnyDigest {
         }
     }
 }
-
-// ── AnyVerifyingKey ──────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq, Eq, visit_rs::VisitVariants)]
 #[visit(opaque, ts(type = "z.string()"))]
@@ -114,11 +105,25 @@ impl AnyVerifyingKey {
     }
 }
 
+impl Ord for AnyVerifyingKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (Self::Ed25519(a), Self::Ed25519(b)) => a.as_bytes().cmp(b.as_bytes()),
+        }
+    }
+}
+
+impl PartialOrd for AnyVerifyingKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl Hash for AnyVerifyingKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
             Self::Ed25519(k) => {
-                state.write_u8(0); // discriminant
+                state.write_u8(0);
                 k.as_bytes().hash(state);
             }
         }
@@ -167,8 +172,6 @@ impl Serialize for AnyVerifyingKey {
         serializer.serialize_str(&self.to_string())
     }
 }
-
-// ── AnySignature ─────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq, Eq, visit_rs::VisitVariants)]
 #[visit(opaque, ts(type = "z.string()"))]
@@ -253,18 +256,42 @@ impl Serialize for AnySignature {
     }
 }
 
-// ── Tests ────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Derive an `AnyVerifyingKey` for tests without depending on the
-    /// (now-removed) `AnySigningKey` wrapper. We still need to generate
-    /// a private key to extract a public key from it.
     fn test_verifying_key() -> AnyVerifyingKey {
         let dalek = ed25519_dalek::SigningKey::generate(&mut rand_core_06::OsRng);
         AnyVerifyingKey::Ed25519(dalek.verifying_key())
+    }
+
+    #[test]
+    fn signature_maps_preserve_legacy_encoding_in_signer_order() {
+        use startos::sign::SignatureMap;
+
+        let a: AnyVerifyingKey = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n".parse().unwrap();
+        let b: AnyVerifyingKey = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=\n-----END PUBLIC KEY-----\n".parse().unwrap();
+        let signature = AnySignature::Ed25519(ed25519_dalek::Signature::from_bytes(&[4; 64]));
+        let asset = crate::registry::asset::RegistryAsset {
+            published_at: chrono::Utc::now(),
+            urls: vec![],
+            commitment: (),
+            signatures: SignatureMap::from([
+                (b.clone(), signature.clone()),
+                (a.clone(), signature),
+            ]),
+        };
+        assert_eq!(a.partial_cmp(&b), Some(std::cmp::Ordering::Less));
+        assert_eq!(a.cmp(&a), std::cmp::Ordering::Equal);
+        assert_eq!(asset.signatures.keys().collect::<Vec<_>>(), [&a, &b]);
+        let wire = serde_json::to_string(&asset).unwrap();
+        assert!(
+            wire.find(&serde_json::to_string(&a).unwrap()).unwrap()
+                < wire.find(&serde_json::to_string(&b).unwrap()).unwrap()
+        );
+        let decoded: crate::registry::asset::RegistryAsset<()> =
+            serde_json::from_str(&wire).unwrap();
+        assert_eq!(decoded.signatures, asset.signatures);
     }
 
     #[test]

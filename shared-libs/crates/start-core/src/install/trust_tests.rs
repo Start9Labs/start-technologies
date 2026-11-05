@@ -1,12 +1,10 @@
-use std::collections::HashMap;
-
 use ed25519_dalek::SigningKey;
 
 use super::*;
 use crate::registry::asset::RegistryAsset;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::sign::ed25519::Ed25519ph;
-use crate::sign::{AnySignature, AnyVerifyingKey, SignatureScheme};
+use crate::sign::{AnySignature, AnyVerifyingKey, SignatureMap, SignatureScheme};
 use crate::trusted_keys::{TrustedKey, TrustedKeys, enabled_keys};
 use crate::util::serde::Base64;
 
@@ -25,7 +23,7 @@ fn package_commitment_requires_an_enabled_marketplace_signer() {
         published_at: chrono::Utc::now(),
         urls: vec![],
         commitment,
-        signatures: HashMap::from([(public.clone(), AnySignature::Ed25519ph(signature))]),
+        signatures: SignatureMap::from([(public.clone(), AnySignature::Ed25519ph(signature))]),
     };
     let id = public.interned_der64();
     let mut keys = TrustedKeys::from([(

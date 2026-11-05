@@ -20,6 +20,10 @@ pub mod ed25519;
 pub(crate) mod gpg;
 pub mod gpg_agent;
 
+/// Signatures serialized in signer order.
+pub type SignatureMap<Key = AnyVerifyingKey, Signature = AnySignature> =
+    std::collections::BTreeMap<Key, Signature>;
+
 pub fn canonicalize_verifying_keys<T>(
     keys: std::collections::BTreeMap<InternedString, T>,
 ) -> Result<std::collections::BTreeMap<InternedString, T>, Error> {
@@ -484,6 +488,24 @@ mod tests {
         assert_eq!(a, alias);
         assert_eq!(a.cmp(&alias), Equal);
         assert_eq!(a.partial_cmp(&alias), Some(Equal));
+        let signature = AnySignature::Ed25519ph(ed25519_dalek::Signature::from_bytes(&[4; 64]));
+        let signatures = SignatureMap::from([
+            (c.clone(), signature.clone()),
+            (a.clone(), signature.clone()),
+            (b.clone(), signature),
+        ]);
+        assert_eq!(signatures.keys().collect::<Vec<_>>(), [&a, &b, &c]);
+        let wire = serde_json::to_string(&signatures).unwrap();
+        assert!(
+            wire.find(&*a.interned_der64()).unwrap() < wire.find(&*b.interned_der64()).unwrap()
+        );
+        assert!(
+            wire.find(&*b.interned_der64()).unwrap() < wire.find(&*c.interned_der64()).unwrap()
+        );
+        assert_eq!(
+            serde_json::from_str::<SignatureMap>(&wire).unwrap(),
+            signatures
+        );
         let keys = BTreeSet::from([c.clone(), alias, b.clone(), a.clone()]);
         assert_eq!(keys.into_iter().collect::<Vec<_>>(), [a, b, c]);
     }

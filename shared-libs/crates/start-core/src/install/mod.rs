@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -30,7 +29,7 @@ use crate::registry::package::get::GetPackageResponse;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::s9pk::manifest::PackageId;
 use crate::s9pk::v2::SIG_CONTEXT;
-use crate::sign::{AnySignature, AnyVerifyingKey};
+use crate::sign::SignatureMap;
 use crate::trusted_keys::{self, TrustContext};
 use crate::upload::upload;
 use crate::util::io::open_file;
@@ -202,7 +201,7 @@ pub struct SideloadParams {
     pub accept_signers: Option<crate::registry::signer::AcceptSigners>,
     /// DER64 supplemental signatures for the uploaded archive.
     #[serde(default)]
-    pub signatures: HashMap<AnyVerifyingKey, AnySignature>,
+    pub signatures: SignatureMap,
     /// Accepts an untrusted signer without skipping signature or integrity verification.
     #[serde(default)]
     trust: bool,
@@ -638,7 +637,7 @@ async fn local_sideload_params(path: &PathBuf, trust: bool) -> Result<SideloadPa
 
     let mut params = SideloadParams {
         accept_signers: None,
-        signatures: HashMap::new(),
+        signatures: SignatureMap::new(),
         trust,
         signer: None,
     };

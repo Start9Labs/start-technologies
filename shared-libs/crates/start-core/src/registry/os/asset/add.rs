@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::panic::UnwindSafe;
 use std::path::PathBuf;
 
@@ -23,7 +23,7 @@ use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::sign::commitment::blake3::Blake3Commitment;
-use crate::sign::{AnySignature, AnyVerifyingKey};
+use crate::sign::{AnySignature, AnyVerifyingKey, SignatureMap};
 use crate::util::io::open_file;
 use crate::util::serde::Base64;
 
@@ -137,7 +137,7 @@ async fn add_asset(
                         published_at: Utc::now(),
                         urls: vec![url.clone()],
                         commitment: commitment.clone(),
-                        signatures: HashMap::new(),
+                        signatures: SignatureMap::new(),
                     })
                 })?
                 .mutate(|s| {
