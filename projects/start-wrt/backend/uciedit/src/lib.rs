@@ -81,6 +81,8 @@ pub enum Error {
     BadOption { src: Source, desc: String },
     #[error("bad list at {src}: {desc}")]
     BadList { src: Source, desc: String },
+    #[error("bad package at {src}: {desc}")]
+    BadPackage { src: Source, desc: String },
     #[error("unknown uci keyword {found:?} at {src}")]
     UnknownKeyword { src: Source, found: String },
     #[error("expected uci section at {src}")]
@@ -117,6 +119,10 @@ impl Error {
                 src: with(src),
             },
             BadSection { src, desc } => BadSection {
+                src: with(src),
+                desc,
+            },
+            BadPackage { src, desc } => BadPackage {
                 src: with(src),
                 desc,
             },
