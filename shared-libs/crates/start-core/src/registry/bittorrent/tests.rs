@@ -457,6 +457,34 @@ async fn install_payload_cancellation_also_closes_metadata_readers() -> Result<(
 }
 
 #[tokio::test]
+async fn install_unpolled_payload_drop_also_closes_metadata_readers() -> Result<(), Error> {
+    let swarm = Swarm::with_content(package_bytes().await?.0).await?;
+    swarm._seed.0.stop().await;
+    let asset = package_asset(&swarm).await?;
+    let client = cli_client();
+    let pending = client
+        .begin(
+            asset.torrent.as_ref().unwrap(),
+            asset.commitment.into(),
+            Client::new(),
+        )
+        .await?
+        .unwrap();
+    let source = pending.source.as_ref().unwrap().clone();
+    let token = source.workspace.session.0.cancellation_token().clone();
+    let _metadata_reader = source.fetch(0, 1).await?;
+    let completion = async move {
+        let mut phase = FullProgressTracker::new().add_phase("Downloading".into(), Some(100));
+        pending.complete(&mut phase).await
+    };
+    assert!(!token.is_cancelled());
+    drop(completion);
+    assert!(token.is_cancelled());
+    assert!(source.torrent.stats().progress_bytes < source.length);
+    Ok(())
+}
+
+#[tokio::test]
 async fn torrent_metadata_download_is_preferred_to_http() -> Result<(), Error> {
     let swarm = Swarm::new().await?;
     let client = cli_client();

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt};
 use tokio::sync::{OnceCell, RwLock};
 use tokio::time::{Instant, timeout};
+use tokio_util::sync::DropGuard;
 use url::Url;
 
 use crate::prelude::*;
@@ -113,6 +114,7 @@ pub(crate) struct SharingMetadata {
 pub(crate) struct TorrentAttempt<T = (Arc<TmpDir>, PathBuf)> {
     pub(crate) metadata: SharingMetadata,
     pub(crate) source: Option<T>,
+    _cancel: Option<DropGuard>,
 }
 
 pub(crate) struct TorrentTransfer {
@@ -141,22 +143,26 @@ impl TorrentAttempt<Arc<TorrentTransfer>> {
         TorrentAttempt {
             metadata: self.metadata.clone(),
             source,
+            _cancel: None,
         }
     }
 }
 
 impl TorrentTransfer {
-    async fn complete(
-        &self,
-        progress: &mut PhaseProgressTrackerHandle,
-    ) -> Result<(Arc<TmpDir>, PathBuf), Error> {
-        let _cancel = self
-            .workspace
+    fn cancellation_guard(&self) -> DropGuard {
+        self.workspace
             .session
             .0
             .cancellation_token()
             .clone()
-            .drop_guard();
+            .drop_guard()
+    }
+
+    async fn complete(
+        &self,
+        progress: &mut PhaseProgressTrackerHandle,
+    ) -> Result<(Arc<TmpDir>, PathBuf), Error> {
+        let _cancel = self.cancellation_guard();
         progress.start();
         progress.set_units(Some(ProgressUnits::Bytes));
         progress.set_total(self.length);
@@ -509,7 +515,14 @@ impl TorrentClient {
                 None
             }
         };
-        Ok(Some(TorrentAttempt { metadata, source }))
+        let cancel = source
+            .as_ref()
+            .map(|transfer| transfer.cancellation_guard());
+        Ok(Some(TorrentAttempt {
+            metadata,
+            source,
+            _cancel: cancel,
+        }))
     }
 
     async fn workspace(&self) -> Result<TorrentWorkspace, Error> {
