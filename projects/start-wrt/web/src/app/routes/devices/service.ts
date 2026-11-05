@@ -71,6 +71,7 @@ export class DevicesApiService {
       ipv4Static: d.ipv4_static,
       allowAutoPortForward: d.allow_auto_port_forward,
       allowDnsInjection: d.allow_dns_injection,
+      dnsInjectionRequested: d.dns_injection_requested,
       allowRouterAdvertisements: d.allow_router_advertisements,
       securityProfile: d.security_profile || undefined,
       speed: d.speed || undefined,

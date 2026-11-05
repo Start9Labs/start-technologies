@@ -572,4 +572,5 @@ export const ENGLISH: Record<string, number> = {
   'Devices on {port} will move to the {profile} profile. Most reconnect within a few seconds. If a device then has no Internet access or cannot reach other devices, which is common behind a switch, unplug and replug its cable, or restart the device or the switch. Otherwise it reconnects on its own within 12 hours.': 599,
   'Change Security Profile?': 600,
   'Change Profile': 601,
+  'This device is trying to publish DNS records. Allow DNS record publishing for them to resolve on your network.': 602,
 }

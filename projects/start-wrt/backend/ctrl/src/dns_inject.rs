@@ -18,7 +18,7 @@
 //! recreated. Records, ownership and the directory live in memory;
 //! clients re-assert within 180 s of a restart.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -65,6 +65,9 @@ const TCP_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
 const TCP_MAX_CLIENTS: usize = 16;
 /// Refusal log lines per second, box-wide.
 const REFUSAL_LOG_RATE: u32 = 20;
+/// How long a source refused for lacking the permission counts as asking.
+const REQUEST_MEMORY: Duration = Duration::from_secs(30 * 60);
+const MAX_REFUSED_SOURCES: usize = 256;
 const INJECT_FILE_PREFIX: &str = "startwrt-dns-inject.dns_";
 /// The domain every profile instance serves its devices under.
 const LAN_DOMAIN: &str = "lan";
@@ -161,6 +164,7 @@ struct Directory {
     /// served only to zones that can reach its source.
     reach: BTreeSet<(String, String)>,
     hosts: HostNames,
+    refusals: Refusals,
 }
 
 /// A device's name under `lan.`, placed in the profile whose subnet holds its
@@ -261,6 +265,11 @@ impl DnsInject {
     /// this pass.
     pub fn invalidate(&self) {
         self.poke.notify_one();
+    }
+
+    /// Addresses recently refused for lacking the permission.
+    pub fn asking_sources(&self) -> HashSet<IpAddr> {
+        self.directory.peek(|d| d.refusals.asking(Instant::now()))
     }
 }
 
@@ -637,17 +646,88 @@ fn policy(
     auth: UpdateAuth,
 ) -> ResponseCode {
     // The client sees only a generic failure.
-    let refuse = |why: String| {
-        log_refusal(src, &why);
-        ResponseCode::Refused
-    };
     directory.mutate(|d| match check(d, src, updates, auth) {
         Ok(owner) => {
             claim(d, &owner, updates);
+            d.refusals.admit(src);
             ResponseCode::NoError
         }
-        Err(why) => refuse(why),
+        Err(why) => {
+            if d.refusals.record(src, &why, Instant::now()) {
+                log_refusal(src, &why);
+            }
+            ResponseCode::Refused
+        }
     })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Refusal {
+    NotPermitted,
+    NeedsTcp,
+    LanZone(LowerName),
+    NotInjectable(RecordType),
+    NeedsSignature(RecordType),
+    OwnedByOther(LowerName),
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Refusal::NotPermitted => f.write_str(
+                "source holds no known address assignment with the DNS-injection permission",
+            ),
+            Refusal::NeedsTcp => f.write_str("an unsigned update must arrive over TCP"),
+            Refusal::LanZone(name) => write!(f, "{name} is inside the reserved `lan.` zone"),
+            Refusal::NotInjectable(rtype) => write!(f, "record type {rtype} is not injectable"),
+            Refusal::NeedsSignature(rtype) => {
+                write!(f, "record type {rtype} needs a signed update")
+            }
+            Refusal::OwnedByOther(name) => write!(f, "{name} is owned by another device"),
+        }
+    }
+}
+
+/// The latest refusal of each source since it was last admitted.
+#[derive(Default)]
+struct Refusals(HashMap<IpAddr, (Refusal, Instant)>);
+
+impl Refusals {
+    /// Whether the reason is new for the source. Past the cap, the stalest
+    /// source is forgotten.
+    fn record(&mut self, src: IpAddr, why: &Refusal, now: Instant) -> bool {
+        if let Some((reason, last)) = self.0.get_mut(&src) {
+            *last = now;
+            if reason == why {
+                return false;
+            }
+            *reason = why.clone();
+            return true;
+        }
+        if self.0.len() >= MAX_REFUSED_SOURCES {
+            if let Some(stalest) = self.0.iter().min_by_key(|(_, (_, last))| *last) {
+                let stalest = *stalest.0;
+                self.0.remove(&stalest);
+            }
+        }
+        self.0.insert(src, (why.clone(), now));
+        true
+    }
+
+    fn admit(&mut self, src: IpAddr) {
+        self.0.remove(&src);
+    }
+
+    /// Sources refused for lacking the permission within [`REQUEST_MEMORY`].
+    fn asking(&self, now: Instant) -> HashSet<IpAddr> {
+        self.0
+            .iter()
+            .filter(|(_, (reason, last))| {
+                *reason == Refusal::NotPermitted && now.duration_since(*last) < REQUEST_MEMORY
+            })
+            .map(|(src, _)| *src)
+            .collect()
+    }
 }
 
 /// The update's owner, when the directory admits every record.
@@ -656,12 +736,14 @@ fn check(
     src: IpAddr,
     updates: &[Record],
     auth: UpdateAuth,
-) -> Result<Owner, String> {
-    let owner = d.by_ip.get(&src).map(|i| i.owner.clone()).ok_or_else(|| {
-        "source holds no known address assignment with the DNS-injection permission".to_string()
-    })?;
+) -> Result<Owner, Refusal> {
+    let owner = d
+        .by_ip
+        .get(&src)
+        .map(|i| i.owner.clone())
+        .ok_or(Refusal::NotPermitted)?;
     if !auth.tsig && !auth.tcp {
-        return Err("an unsigned update must arrive over TCP".into());
+        return Err(Refusal::NeedsTcp);
     }
     let held_by_other = |name: &LowerName, rtype: RecordType| {
         d.owners
@@ -672,7 +754,7 @@ fn check(
         let name = LowerName::from(&rec.name);
         // dnsmasq is authoritative for `lan.`.
         if lan_zone().zone_of(&name) {
-            return Err(format!("{name} is inside the reserved `lan.` zone"));
+            return Err(Refusal::LanZone(name));
         }
         let rtype = rec.record_type();
         let held = match rec.dns_class {
@@ -681,10 +763,10 @@ fn check(
                     rtype,
                     RecordType::A | RecordType::AAAA | RecordType::CNAME | RecordType::TXT
                 ) {
-                    return Err(format!("record type {rtype} is not injectable"));
+                    return Err(Refusal::NotInjectable(rtype));
                 }
                 if !auth.tsig && !matches!(rtype, RecordType::A | RecordType::AAAA) {
-                    return Err(format!("record type {rtype} needs a signed update"));
+                    return Err(Refusal::NeedsSignature(rtype));
                 }
                 held_by_other(&name, rtype)
             }
@@ -696,7 +778,7 @@ fn check(
             _ => false,
         };
         if held {
-            return Err(format!("{name} is owned by another device"));
+            return Err(Refusal::OwnedByOther(name));
         }
     }
     Ok(owner)
@@ -728,7 +810,7 @@ fn lan_zone() -> LowerName {
     LowerName::from(Name::from_ascii("lan.").expect("static valid name"))
 }
 
-fn log_refusal(src: IpAddr, why: &str) {
+fn log_refusal(src: IpAddr, why: &Refusal) {
     static WINDOW: Mutex<Option<(Instant, u32)>> = Mutex::new(None);
     let mut window = WINDOW.lock().unwrap_or_else(|e| e.into_inner());
     let now = Instant::now();
@@ -1376,6 +1458,71 @@ mod tests {
             },
         );
         SyncMutex::new(d)
+    }
+
+    #[tokio::test]
+    async fn an_unpermitted_source_is_asking_until_admitted() {
+        let dir = directory();
+        let stranger = IpAddr::V4(lan_ip(77));
+        let permitted = IpAddr::V4(lan_ip(50));
+        let update = |host| [a_record("nas.example.com", lan_ip(host))];
+        assert_eq!(
+            admit(&dir, stranger, &update(77), TCP).await,
+            ResponseCode::Refused
+        );
+        assert_eq!(
+            admit(&dir, permitted, &update(50), UpdateAuth::default()).await,
+            ResponseCode::Refused,
+            "refused for another reason"
+        );
+        let asking = dir.peek(|d| d.refusals.asking(Instant::now()));
+        assert_eq!(asking, HashSet::from([stranger]));
+
+        dir.mutate(|d| {
+            d.by_ip.insert(
+                stranger,
+                Injector {
+                    owner: Owner::Mac("AA:00:00:00:00:77".into()),
+                    profile: "lan".into(),
+                },
+            )
+        });
+        assert_eq!(
+            admit(&dir, stranger, &update(77), TCP).await,
+            ResponseCode::NoError
+        );
+        assert!(dir.peek(|d| d.refusals.asking(Instant::now()).is_empty()));
+    }
+
+    #[test]
+    fn a_refusal_is_new_only_when_its_reason_changes() {
+        let mut refusals = Refusals::default();
+        let src = IpAddr::V4(lan_ip(77));
+        let now = Instant::now();
+        assert!(refusals.record(src, &Refusal::NotPermitted, now));
+        assert!(!refusals.record(src, &Refusal::NotPermitted, now));
+        assert!(refusals.record(src, &Refusal::NeedsTcp, now));
+        assert!(refusals.record(src, &Refusal::NotPermitted, now));
+        refusals.admit(src);
+        assert!(refusals.record(src, &Refusal::NotPermitted, now));
+
+        let later = now + REQUEST_MEMORY;
+        assert!(refusals.asking(later).is_empty(), "forgotten after a while");
+    }
+
+    #[test]
+    fn refusals_forget_the_stalest_source_past_the_cap() {
+        let mut refusals = Refusals::default();
+        let start = Instant::now();
+        for n in 0..=MAX_REFUSED_SOURCES {
+            let src = IpAddr::V6(std::net::Ipv6Addr::from(n as u128 + 1));
+            let at = start + Duration::from_millis(n as u64);
+            refusals.record(src, &Refusal::NotPermitted, at);
+        }
+        assert_eq!(refusals.0.len(), MAX_REFUSED_SOURCES);
+        assert!(!refusals
+            .0
+            .contains_key(&IpAddr::V6(std::net::Ipv6Addr::from(1))));
     }
 
     async fn publish_public_name_offline(signed: bool) {

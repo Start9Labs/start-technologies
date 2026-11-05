@@ -239,6 +239,12 @@ fn clear_pending_marker() {
     let _ = std::fs::remove_file(PENDING_UPDATE_MARKER);
 }
 
+/// Whether this boot follows an update [`check_pending_update_marker`] has
+/// yet to confirm.
+pub fn update_pending() -> bool {
+    Path::new(PENDING_UPDATE_MARKER).exists()
+}
+
 /// On boot, confirm the outcome of a pending update in the Activity log.
 /// Called once from the daemon's normal-mode startup.
 pub fn check_pending_update_marker() {

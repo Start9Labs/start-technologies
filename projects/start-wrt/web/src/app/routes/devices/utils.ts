@@ -29,6 +29,8 @@ export interface Device extends DeviceTableItem {
   allowAutoPortForward: boolean
   /** May publish DNS records into the router's resolver (default off). */
   allowDnsInjection: boolean
+  /** Was recently refused DNS records for lacking that permission. */
+  dnsInjectionRequested: boolean
   /** Its IPv6 router advertisements reach the rest of the LAN (default off). */
   allowRouterAdvertisements: boolean
 }
