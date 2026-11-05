@@ -1128,6 +1128,16 @@ export class MockApiService extends ApiService {
     return { setupMode: false, disk: { emmcFound: true, hasFirmware: true } }
   }
 
+  async getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>> {
+    await pauseFor(250)
+    return {
+      kty: 'EC',
+      crv: 'P-256',
+      x: 'yHTDYSfjU809fkSv9MmN4wuojf5c3cnD7ZDN13n-jz4',
+      y: '8Mpkn744A5KDag0DmX2YivB63srjbugYZzWc3JOpQXI',
+    }
+  }
+
   async systemFactoryReset(): Promise<null> {
     await pauseFor(2000)
     return null

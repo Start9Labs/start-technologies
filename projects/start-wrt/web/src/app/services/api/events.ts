@@ -1,5 +1,7 @@
 import type { z } from 'zod'
 import type * as schemas from './events.schemas'
+export type EncryptedWire = z.output<typeof schemas.EncryptedWire>
+export type EncryptedWireInput = z.input<typeof schemas.EncryptedWire>
 export type FlashMode = z.output<typeof schemas.FlashMode>
 export type FlashModeInput = z.input<typeof schemas.FlashMode>
 export type ProgressUnits = z.output<typeof schemas.ProgressUnits>

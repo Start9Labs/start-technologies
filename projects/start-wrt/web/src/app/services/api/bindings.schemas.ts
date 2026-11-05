@@ -371,6 +371,10 @@ export const DnsServer: z.ZodObject<{
   description:
     'A single DNS server entry with protocol info.\n`ssl: false` = plain UDP on port 53.\n`ssl: true`  = DNS-over-HTTPS via SmartDNS (`server-https`).',
 })
+export const EncryptedWire: z.ZodObject<{ encrypted: z.ZodUnknown }> =
+  /* @__PURE__ */ object({ encrypted: z.unknown() }).meta({
+    id: 'EncryptedWire',
+  })
 export const ExecReq: z.ZodObject<{
   command: z.ZodString
   args: z.ZodArray<z.ZodString>
@@ -1075,27 +1079,6 @@ export const SetFileArgs: z.ZodObject<{
   modified: wire(z.string().nullable().optional(), z.string().nullable()),
 }).meta({
   id: 'SetFileArgs',
-})
-export const SetInitialPasswordParams: z.ZodObject<{
-  password: z.ZodString
-  /**
-   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
-   */
-  timezone: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  password: z.string(),
-  /**
-   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
-   */
-  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'IANA timezone name, e.g. "America/New_York". An unknown name is skipped.',
-  }),
-}).meta({
-  id: 'SetInitialPasswordParams',
 })
 export const SetPreferencesReq: z.ZodObject<{
   language: z.ZodCodec<
@@ -2128,6 +2111,35 @@ export const SetArgs: z.ZodObject<{
   }),
 }).meta({
   id: 'SetArgs',
+})
+export const SetInitialPasswordParams: z.ZodObject<{
+  /**
+   * Encrypted to the key from `setup.get-pubkey`.
+   */
+  password: typeof EncryptedWire
+  /**
+   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
+   */
+  timezone: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Encrypted to the key from `setup.get-pubkey`.
+   */
+  password: EncryptedWire.meta({
+    description: 'Encrypted to the key from `setup.get-pubkey`.',
+  }),
+  /**
+   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
+   */
+  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'IANA timezone name, e.g. "America/New_York". An unknown name is skipped.',
+  }),
+}).meta({
+  id: 'SetInitialPasswordParams',
 })
 export const SetupStatusRes: z.ZodObject<{
   setupMode: z.ZodBoolean
@@ -3404,6 +3416,10 @@ export const Api = {
     setup: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
+        'get-pubkey': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _RETURN: /* @__PURE__ */ z.record(z.string(), z.unknown()),
+        },
         status: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ SetupStatusRes,

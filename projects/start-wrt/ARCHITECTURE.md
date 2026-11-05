@@ -70,7 +70,7 @@ Additional HTTP routes:
 - `GET|POST /rest/rpc/{guid}` — Continuation endpoint for backup/restore/diagnostics
 - `GET /ws/rpc/{guid}` — WebSocket continuation for update progress and live logs
 - `GET /static/local-root-ca.crt`, `GET /static/local-root-ca.mobileconfig` — Root CA download, as a certificate or an Apple configuration profile (no auth)
-- `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` — LuCI reverse proxy (localhost:8080); `/luci` redirects to `/cgi-bin/luci`
+- `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` — LuCI reverse proxy (localhost:8080), HTTPS only (plain HTTP redirects); `/luci` redirects to `/cgi-bin/luci`
 - Fallback — Serves embedded web UI
 
 The daemon also runs **port-control servers** (`ctrl/src/port_control.rs`) for
