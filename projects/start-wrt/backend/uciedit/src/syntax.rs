@@ -778,7 +778,15 @@ impl PartialEq<str> for Token<'_> {
 
 impl fmt::Display for Token<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.raw {
+        let trailing_backslashes = self
+            .raw
+            .bytes()
+            .rev()
+            .take_while(|&b| b == b'\\')
+            .count();
+        // A dangling escape would consume the emitted statement's newline.
+        let raw = &self.raw[..self.raw.len() - trailing_backslashes % 2];
+        match raw {
             "" => f.write_str("''"),
             raw => f.write_str(raw),
         }
