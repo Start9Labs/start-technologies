@@ -420,7 +420,9 @@ export default class DeviceDetail {
       {
         name: formValue.name,
         ipv4Static: formValue.ip.ipv4Static,
-        ipv4: formValue.ip.ipv4,
+        ipv4: formValue.ip.ipv4Static
+          ? formValue.ip.ipv4
+          : (this.data()?.ipv4 ?? ''),
         removeIpv4Reservations: this.removing(),
       },
       {
