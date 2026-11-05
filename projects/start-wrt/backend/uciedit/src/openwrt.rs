@@ -161,6 +161,68 @@ pub enum InterfaceProto {
     UNKNOWN(String),
 }
 
+/// An IPv4 address as `ipaddr` holds it: bare, or with a prefix length that
+/// overrides `netmask`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ipv4Address {
+    pub addr: Ipv4Addr,
+    pub prefix: Option<u8>,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct Ipv4AddressError(String);
+
+impl std::str::FromStr for Ipv4Address {
+    type Err = Ipv4AddressError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (addr, prefix) = match s.split_once('/') {
+            Some((addr, prefix)) => (addr, Some(prefix)),
+            None => (s, None),
+        };
+        let addr = addr
+            .parse()
+            .map_err(|e: std::net::AddrParseError| Ipv4AddressError(e.to_string()))?;
+        let prefix = prefix
+            .map(|p| match p.parse::<u8>() {
+                Ok(p) if p <= 32 => Ok(p),
+                _ => Err(Ipv4AddressError(format!("invalid prefix length {p:?}"))),
+            })
+            .transpose()?;
+        Ok(Ipv4Address { addr, prefix })
+    }
+}
+
+impl fmt::Display for Ipv4Address {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.prefix {
+            Some(prefix) => write!(f, "{}/{prefix}", self.addr),
+            None => self.addr.fmt(f),
+        }
+    }
+}
+
+impl From<Ipv4Addr> for Ipv4Address {
+    fn from(addr: Ipv4Addr) -> Self {
+        Ipv4Address { addr, prefix: None }
+    }
+}
+
+impl From<Ipv4Address> for Ipv4Addr {
+    fn from(address: Ipv4Address) -> Self {
+        address.addr
+    }
+}
+
+impl std::ops::Deref for Ipv4Address {
+    type Target = Ipv4Addr;
+
+    fn deref(&self) -> &Ipv4Addr {
+        &self.addr
+    }
+}
+
 #[derive(Debug, Default, TypedSection)]
 #[uci(ty = "interface")]
 pub struct NetworkInterface {
@@ -168,7 +230,9 @@ pub struct NetworkInterface {
     pub device: String,
     #[uci(default)]
     pub proto: InterfaceProto,
-    pub ipaddr: Option<Ipv4Addr>,
+    /// The first of a `list ipaddr`; the rest stay as written.
+    #[uci(accept_list)]
+    pub ipaddr: Option<Ipv4Address>,
     pub netmask: Option<Ipv4Addr>,
     #[uci(default)]
     pub gateway: Option<String>,
@@ -190,7 +254,8 @@ pub struct NetworkInterface {
     // IPv6 fields
     #[uci(default)]
     pub ip6assign: Option<String>,
-    #[uci(default)]
+    /// The first of a `list ip6addr`; the rest stay as written.
+    #[uci(default, accept_list)]
     pub ip6addr: Option<String>,
     #[uci(default)]
     pub ip6gw: Option<String>,
@@ -209,6 +274,22 @@ pub struct NetworkInterface {
     pub ip4prefixlen: Option<String>,
     #[uci(default)]
     pub proxy_arp: Option<String>,
+}
+
+impl NetworkInterface {
+    pub fn ipv4(&self) -> Option<Ipv4Addr> {
+        self.ipaddr.map(|a| a.addr)
+    }
+
+    /// The address's own prefix length wins over `netmask`.
+    pub fn ipv4_netmask(&self) -> Option<Ipv4Addr> {
+        match self.ipaddr.and_then(|a| a.prefix) {
+            Some(prefix) => Some(Ipv4Addr::from(
+                u32::MAX.checked_shl(32 - u32::from(prefix)).unwrap_or(0),
+            )),
+            None => self.netmask,
+        }
+    }
 }
 
 #[derive(strum::EnumString, strum::Display, PartialEq, Eq, Debug)]
@@ -527,7 +608,8 @@ pub struct ProfileDnsmasq {
 #[derive(Debug, TypedSection, Default)]
 #[uci(ty = "host")]
 pub struct DhcpHost {
-    #[uci(default)]
+    /// LuCI writes a static lease's address as a `list`.
+    #[uci(default, accept_list)]
     pub mac: String,
     #[uci(default)]
     pub name: Option<String>,

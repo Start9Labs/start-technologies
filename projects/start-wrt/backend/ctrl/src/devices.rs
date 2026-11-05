@@ -1490,9 +1490,12 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                         .get::<NetworkInterface>()
                         .ok()?;
                     let subnet = if iface.proto == InterfaceProto::STATIC {
-                        iface.ipaddr.zip(iface.netmask).and_then(|(ip, mask)| {
-                            Ipv4Net::with_netmask(ip, mask).ok().map(|net| net.trunc())
-                        })
+                        iface
+                            .ipv4()
+                            .zip(iface.ipv4_netmask())
+                            .and_then(|(ip, mask)| {
+                                Ipv4Net::with_netmask(ip, mask).ok().map(|net| net.trunc())
+                            })
                     } else {
                         None
                     };

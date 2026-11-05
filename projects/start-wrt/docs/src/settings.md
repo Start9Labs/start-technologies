@@ -90,7 +90,7 @@ Download a backup of your router's configuration, or restore from a previously d
 
 The Advanced tab contains power-user tools:
 
-- **Launch LuCI Interface** — Opens the underlying OpenWrt LuCI admin panel in a new tab for direct access to low-level configuration.
+- **Launch LuCI Interface** — Opens the underlying OpenWrt LuCI admin panel in a new tab for direct access to low-level configuration. If a change made in LuCI or by hand is one StartWRT cannot show or keep, each page it affects lists the change, with a link to LuCI, in place of its settings. A change StartWRT reads but does not manage, such as a second address on the LAN, is noted above the page's settings.
 - **Download Support Diagnostics** — Generates and downloads a diagnostic bundle for troubleshooting with Start9 support.
 - **Factory Reset** — Erases all settings (excluding the sticker Wi-Fi password) and reboots the router. See [Factory Reset](factory-reset.md) for details.
 

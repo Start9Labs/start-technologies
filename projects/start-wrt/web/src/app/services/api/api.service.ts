@@ -15,6 +15,7 @@ export abstract class ApiService {
   abstract getUci(params: GetUciReq): Promise<GetUciRes>
   abstract setUci(params: SetUciReq): Promise<SetUciRes>
   abstract systemInfo(timeout?: number): Promise<SystemInfoRes>
+  abstract configCheck(): Promise<ConfigCheck>
   abstract systemNewerVersions(): Promise<VersionInfo[]>
   abstract systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes>
   abstract systemRestart(): Promise<null>
@@ -180,6 +181,12 @@ export type SetUciReq = RpcParamType<Api, 'uci.set'>
 export type SetUciRes = RpcReturnType<Api, 'uci.set'>
 
 export type SystemInfoRes = RpcReturnType<Api, 'system.info'>
+
+export type ConfigCheck = RpcReturnType<Api, 'config.check'>
+
+export type ConfigFinding = ConfigCheck['findings'][number]
+
+export type ConfigView = ConfigFinding['views'][number]
 
 export type VersionInfo = RpcReturnType<Api, 'system.newer-versions'>[number]
 

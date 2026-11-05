@@ -265,7 +265,7 @@ pub async fn affected_wifi_ports_for_vacated_profiles<C: CtrlContext>(
             if name != profile.interface || iface.proto != InterfaceProto::STATIC {
                 continue;
             }
-            if let (Some(ip), Some(mask)) = (iface.ipaddr, iface.netmask) {
+            if let (Some(ip), Some(mask)) = (iface.ipv4(), iface.ipv4_netmask()) {
                 let mask = u32::from(mask);
                 vacated_subnets.push((u32::from(ip) & mask, mask));
             }
@@ -1831,8 +1831,12 @@ pub(crate) fn zone_for_ipv4(cfgs: &uciedit::Configs, ip: Ipv4Addr) -> Option<Str
         if iface.proto != InterfaceProto::STATIC {
             continue;
         }
-        let Some(addr) = iface.ipaddr else { continue };
-        let mask = u32::from(iface.netmask.unwrap_or(Ipv4Addr::new(255, 255, 255, 0)));
+        let Some(addr) = iface.ipv4() else { continue };
+        let mask = u32::from(
+            iface
+                .ipv4_netmask()
+                .unwrap_or(Ipv4Addr::new(255, 255, 255, 0)),
+        );
         if u32::from(ip) & mask != u32::from(addr) & mask {
             continue;
         }

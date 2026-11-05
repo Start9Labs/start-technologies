@@ -124,6 +124,8 @@ Macro attributes:
 - `#[uci(default)]` — use `Default::default()` if option missing
 - `#[uci(default_value = expr)]` — custom default value
 - `#[uci(inpt)]` — use `inpt` parser instead of `FromStr`
+- `#[uci(accept_list)]` — a single-valued field also reads the first item of a `list` line of that name, and a write replaces that item and keeps the rest
+- A `Vec` field also reads an `option` line of that name as its whitespace-separated words, the way OpenWrt's own scripts do
 
 2. **Use it** in handler code:
 
