@@ -2,8 +2,8 @@ import { inject, Injectable, signal } from '@angular/core'
 import { FormService } from 'src/app/services/form.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import {
-  AffectedPublishedPort,
   ApiService,
+  DeviceLeavingProfile,
   EthernetConfig,
   EthernetSetConfig,
   ProfileId,
@@ -48,25 +48,20 @@ export class EthernetService extends FormService<EthernetPortView[]> {
   }
 
   async store(items: EthernetPortView[]): Promise<void> {
-    // store() is the real apply (via save()'s restart flow) — confirm the
-    // published-port cleanup the preview already surfaced to the user.
-    await this.api.ethernetSet(this.buildConfig(items, true))
+    await this.api.ethernetSet(this.buildConfig(items, false))
   }
 
-  /**
-   * Dry-run: returns the published ports that would be deleted if these port
-   * assignments were applied. Applies nothing (confirm = false).
-   */
+  /** The devices that keep settings for the profile a port leaves. */
   async previewPorts(
     items: EthernetPortView[],
-  ): Promise<AffectedPublishedPort[]> {
-    const result = await this.api.ethernetSet(this.buildConfig(items, false))
-    return result.pending_published_port_deletions
+  ): Promise<DeviceLeavingProfile[]> {
+    const result = await this.api.ethernetSet(this.buildConfig(items, true))
+    return result.leaving_profile
   }
 
   private buildConfig(
     items: EthernetPortView[],
-    confirm: boolean,
+    preview: boolean,
   ): EthernetSetConfig {
     const wanPort = items.find(p => p.wan)?.name ?? null
     return {
@@ -75,7 +70,7 @@ export class EthernetService extends FormService<EthernetPortView[]> {
       ports: Object.fromEntries(
         items.map(p => [p.name, { profile: p.wan ? null : p.profile }]),
       ),
-      confirm_published_port_deletion: confirm,
+      preview,
     }
   }
 
