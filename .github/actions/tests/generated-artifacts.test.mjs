@@ -16,7 +16,7 @@ function executable(f, path, source) {
   chmodSync(f.write(path, `#!/bin/bash\nset -eu\n${source}`), 0o755)
 }
 
-test('both generators share the optimized profile and preserve explicit build settings', t => {
+test('both generators share the generated profile and preserve explicit build settings', t => {
   const f = fixture(t)
   for (const path of [
     'build/builder-alias.sh',
@@ -82,7 +82,7 @@ appendFileSync(process.env.DOCKER_LOG, JSON.stringify(process.argv.slice(2)) + '
   }
 })
 
-test('the generated Cargo profile retains level-3 optimization without debug data', t => {
+test('the generated Cargo profile uses level-1 optimization without debug data', t => {
   const f = fixture(t)
   const manifest = readFileSync(join(REPO, 'Cargo.toml'), 'utf8')
   const start = manifest.indexOf('\n[profile.')
@@ -113,7 +113,7 @@ test('the generated Cargo profile retains level-3 optimization without debug dat
     .split('\n')
     .find(line => line.includes('--crate-name generated_profile_probe'))
   assert.ok(command, result.stderr)
-  assert.match(command, /-C opt-level=3\b/)
+  assert.match(command, /-C opt-level=1\b/)
   assert.doesNotMatch(command, /-C debuginfo=/)
 })
 

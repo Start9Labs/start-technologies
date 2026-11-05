@@ -39,6 +39,7 @@ opt-level = 3
 [profile.generated]
 debug = 0
 inherits = "dev"
+opt-level = 1
 
 [profile.bindings]
 debug = 0
