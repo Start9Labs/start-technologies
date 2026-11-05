@@ -137,7 +137,7 @@ export type EthernetSetPort = RpcParamType<Api, 'ethernet.set'>['ports'][string]
 
 export type EthernetSetConfig = RpcParamType<Api, 'ethernet.set'>
 
-export type AffectedPublishedPort = Bindings.AffectedPublishedPort
+export type DeviceLeavingProfile = Bindings.DeviceLeavingProfile
 
 export type EthernetSetResult = RpcReturnType<Api, 'ethernet.set'>
 
@@ -243,7 +243,7 @@ export type WifiPassword = RpcReturnType<Api, 'wifi.get'>['passwords'][number]
 export type WifiProfileId = Bindings.ProfileId
 
 export type WifiConfig = RpcReturnType<Api, 'wifi.get'> &
-  Pick<RpcParamType<Api, 'wifi.set'>, 'confirmPublishedPortDeletion'>
+  Pick<RpcParamType<Api, 'wifi.set'>, 'preview'>
 
 export type WifiSetResult = RpcReturnType<Api, 'wifi.set'>
 
@@ -342,6 +342,7 @@ export type PublishedPortStatusValue =
   | 'active'
   | 'partial'
   | 'paused'
+  | 'inactive'
   | 'error'
   | 'disabled'
 

@@ -227,6 +227,8 @@ export class PublishedPortsTable {
         return '🟡'
       case 'paused':
         return '🟠'
+      case 'inactive':
+        return '🔵'
     }
   }
 
@@ -305,10 +307,6 @@ export class PublishedPortsTable {
       enabled: enabling,
       ipv6,
       status: enabling ? 'active' : 'disabled',
-    }
-
-    if (enabling && updated.ipv4) {
-      this.service.reserveDeviceIpv4(updated.deviceMac)
     }
 
     this.service.save(list.map(p => (p.id === item.id ? updated : p)))

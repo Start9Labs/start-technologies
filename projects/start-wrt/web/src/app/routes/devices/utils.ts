@@ -15,16 +15,24 @@ export interface DeviceTableItem {
   securityProfile?: string // e.g., 'Default', 'Kids', 'Guest'
   ipv4?: string
   ipv6?: string
+  /** `ipv4` is a reservation DHCP applies. */
   ipv4Static?: boolean
-  /** A reservation outside the subnet of the device's profile; DHCP ignores it. */
-  inactiveIpv4Reservation?: string
   dataUsage?: number // GB
   speed?: { up: number | null; down: number | null }
+}
+
+export interface DeviceReservation {
+  ipv4: string
+  /** Unset when no profile's subnet holds it. */
+  profile?: string
+  /** DHCP gives it to the device on the profile it is on. */
+  active: boolean
 }
 
 // Full device data for detail view
 export interface Device extends DeviceTableItem {
   ipv4Static: boolean
+  ipv4Reservations: DeviceReservation[]
   /** The name assigned in the router; `name` is resolved from elsewhere when unset. */
   customName?: string
   /** May auto-create port forwards via PCP/UPnP (default off). */
@@ -35,11 +43,6 @@ export interface Device extends DeviceTableItem {
   allowRouterAdvertisements: boolean
   /** The router's address on the device's profile, as in `192.168.2.1/24`. */
   profileNetwork?: string
-}
-
-/** The stored reservation, whether or not DHCP applies it. */
-export function reservedIpv4(device: Device): string {
-  return device.inactiveIpv4Reservation ?? device.ipv4 ?? ''
 }
 
 // Form for editing a device. IPv6 has no controls: the device chooses its own
@@ -65,6 +68,8 @@ export interface DeviceUpdateData {
   name?: string
   ipv4Static: boolean
   ipv4: string
+  /** Reservations to delete, by address. */
+  removeIpv4Reservations?: string[]
 }
 
 /** A permission is undefined when it didn't change. */
@@ -75,21 +80,31 @@ export type DevicePermissionChanges = Partial<
   >
 >
 
-/** An unchanged reservation stays valid, so other edits still save. */
+/**
+ * An unchanged reservation stays valid, so other edits still save. `taken`
+ * holds the addresses other devices have reserved.
+ */
 export function updateDeviceValidators(
   form: ReturnType<typeof getDeviceForm>,
   ipv4Static: boolean,
   device: Device | null,
+  taken: readonly string[],
 ): void {
   const { ipv4 } = form.controls.ip.controls
 
   ipv4.clearValidators()
   ipv4.addValidators([CustomValidators.ipv4()])
   if (ipv4Static) {
-    ipv4.addValidators([Validators.required])
+    const unchanged = device?.ipv4Static ? device.ipv4 : null
+    ipv4.addValidators([
+      Validators.required,
+      control =>
+        control.value !== unchanged && taken.includes(control.value)
+          ? { reservedElsewhere: true }
+          : null,
+    ])
     if (device?.profileNetwork) {
       const inNetwork = CustomValidators.ipv4HostIn(device.profileNetwork)
-      const unchanged = device.ipv4Static ? reservedIpv4(device) : null
       ipv4.addValidators(control =>
         control.value === unchanged ? null : inNetwork(control),
       )
@@ -104,6 +119,7 @@ export const DEVICE_VALIDATION_ERRORS = {
   ipv4: 'Invalid IPv4 address',
   outsideProfile: "Outside the subnet of this device's profile",
   notHost: 'Not a usable host address',
+  reservedElsewhere: 'Reserved for another device',
 }
 
 export const DEVICE_LABELS = {

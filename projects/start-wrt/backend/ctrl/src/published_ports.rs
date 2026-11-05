@@ -16,6 +16,7 @@ use crate::error::ErrorKind;
 use crate::invoke::Invoke;
 use crate::prelude::*;
 use crate::profiles::Lookup;
+use crate::reservations::{self, ProfileNetwork};
 use crate::utils::{DeserializeStdin, HandlerExtSerde};
 use crate::{CliContext, CtrlContext, Error, ServerContext};
 
@@ -98,6 +99,8 @@ pub enum PublishedPortStatus {
     Active,
     Partial,
     Paused,
+    /// Forwards into a profile the device is not on.
+    Inactive,
     Error,
     Disabled,
 }
@@ -175,222 +178,87 @@ pub struct PublishedPortsSetResult {
 }
 rpc_toolkit::reflect_ts!(PublishedPortsSetResult);
 
-/// A published port that will be removed because the device it forwards to can
-/// no longer be reached at its current address — its security profile is changing
-/// (ethernet-port or WiFi-password reassignment) or its WiFi password is being
-/// deleted (disconnecting it) — so its DNAT rule, bound to the device's old
-/// subnet, would otherwise break. Surfaced to the UI to confirm the deletion.
+/// A device that keeps a reservation or published port for the profile it is
+/// leaving. They apply again when it returns.
 #[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
-pub struct AffectedPublishedPort {
-    pub id: String,
-    pub label: String,
-    pub device_mac: String,
-    pub device_name: Option<String>,
+pub struct DeviceLeavingProfile {
+    pub mac: String,
+    pub name: Option<String>,
+    pub profile: String,
 }
-rpc_toolkit::reflect_ts!(AffectedPublishedPort);
+rpc_toolkit::reflect_ts!(DeviceLeavingProfile);
 
-/// List the published ports whose target device MAC is in `macs` (compared
-/// case-insensitively), enriched with the device name from `device_names`
-/// (best-effort). Reads firewall config from `uci_root`.
-pub async fn affected_ports_for_macs(
-    uci_root: &std::path::Path,
-    macs: &HashSet<String>,
-    device_names: &HashMap<String, String>,
-) -> Result<Vec<AffectedPublishedPort>, Error> {
-    if macs.is_empty() {
-        return Ok(Vec::new());
-    }
-    let macs: HashSet<String> = macs.iter().map(|m| m.to_uppercase()).collect();
-    let arena = Arena::new();
-    let raw = extract_ports(&arena, uci_root).await?;
-    Ok(raw
-        .into_iter()
-        .filter(|p| macs.contains(&p.device_mac.to_uppercase()))
-        .map(|p| {
-            let device_name = device_names.get(&p.device_mac.to_uppercase()).cloned();
-            AffectedPublishedPort {
-                id: p.id,
-                label: p.label,
-                device_mac: p.device_mac,
-                device_name,
-            }
-        })
-        .collect())
-}
-
-/// Published ports that will break when a profile is "vacated" (loses its last
-/// WiFi password): the target device is currently WiFi-connected (`wifi_macs`)
-/// **and** its static DHCP reservation IP falls inside a vacated profile's
-/// subnet.
-///
-/// Profile attribution for a port with an IPv4 reservation comes from the
-/// reservation subnet (config-derived, so it doesn't depend on transient
-/// neighbour state). An IPv6-only port has no IPv4 reservation to consult, so it
-/// is attributed instead by the device's live security profile (`device_profiles`,
-/// MAC → profile fullname, as resolved by `devices::list`) — the only signal
-/// available for it. This depends on live neighbour state, but is scoped to the
-/// IPv6-only case so it can't weaken the robust IPv4 path.
-///
-/// Returns the affected device MACs (uppercased, for `remove_ports_for_macs`)
-/// and the `AffectedPublishedPort` list (for the confirmation dialog).
-pub async fn affected_wifi_ports_for_vacated_profiles<C: CtrlContext>(
-    ctx: &C,
-    vacated_fullnames: &HashSet<String>,
-    wifi_macs: &HashSet<String>,
-    device_names: &HashMap<String, String>,
-    device_profiles: &HashMap<String, String>,
-) -> Result<(HashSet<String>, Vec<AffectedPublishedPort>), Error> {
-    if vacated_fullnames.is_empty() || wifi_macs.is_empty() {
-        return Ok((HashSet::new(), Vec::new()));
-    }
-    let wifi_macs: HashSet<String> = wifi_macs.iter().map(|m| m.to_uppercase()).collect();
-    let uci_root = ctx.uci_root();
-
-    let arena = Arena::new();
-    let cfgs = parse_all(&uci_root, &arena, &["network", "startwrt", "dhcp"]).await?;
-    let lookup = Lookup::parse(ctx.clone(), &cfgs)?;
-
-    // Vacated profile subnets as (network, mask) u32 pairs, read from each
-    // profile's STATIC bridge interface in the network config.
-    let mut vacated_subnets: Vec<(u32, u32)> = Vec::new();
-    for profile in lookup.list() {
-        if !vacated_fullnames.contains(&profile.fullname) {
-            continue;
-        }
-        for section in &cfgs["network"].sections {
-            let Ok(iface) = section.get::<NetworkInterface>() else {
-                continue;
-            };
-            let Some(name) = section.name() else { continue };
-            if name != profile.interface || iface.proto != InterfaceProto::STATIC {
-                continue;
-            }
-            if let (Some(ip), Some(mask)) = (iface.ipaddr, iface.netmask) {
-                let mask = u32::from(mask);
-                vacated_subnets.push((u32::from(ip) & mask, mask));
-            }
-            break;
-        }
-    }
-
-    // MAC → reservation IP, for reservations that pin an IPv4 address.
-    let mut reservation_ip: HashMap<String, Ipv4Addr> = HashMap::new();
-    cfgs["dhcp"].each::<DhcpHost, Error>(|_, host| {
-        if let Some(ip) = host.ip.as_ref().and_then(|s| s.parse::<Ipv4Addr>().ok()) {
-            reservation_ip.insert(host.mac.to_uppercase(), ip);
-        }
-    })?;
-
-    let raw = extract_ports(&arena, uci_root.as_path()).await?;
-    let mut macs = HashSet::new();
-    let mut ports = Vec::new();
-    for p in raw {
-        let mac_upper = p.device_mac.to_uppercase();
-        if !wifi_macs.contains(&mac_upper) {
-            continue;
-        }
-        // A port with an IPv4 reservation is attributed by its (config-derived,
-        // robust) reservation subnet. A port without one — an IPv6-only forward —
-        // is attributed by the device's live security profile, the only signal
-        // available for it.
-        let affected = if let Some(ip) = reservation_ip.get(&mac_upper) {
-            let ip_u32 = u32::from(*ip);
-            vacated_subnets
-                .iter()
-                .any(|(net, mask)| ip_u32 & mask == *net)
-        } else {
-            device_profiles
-                .get(&mac_upper)
-                .is_some_and(|prof| vacated_fullnames.contains(prof))
-        };
-        if affected {
-            macs.insert(mac_upper.clone());
-            ports.push(AffectedPublishedPort {
-                id: p.id,
-                label: p.label,
-                device_name: device_names.get(&mac_upper).cloned(),
-                device_mac: p.device_mac,
-            });
-        }
-    }
-    Ok((macs, ports))
-}
-
-/// Remove, in place, the published-port firewall sections (IPv4 DNAT redirects
-/// and IPv6 ACCEPT rules) for the given MACs, plus each device's now-stale static
-/// DHCP **IPv4** reservation. `cfgs` must already include the "firewall" and
-/// "dhcp" configs. Returns the number of firewall sections removed. The caller
-/// is responsible for `dump_all` and reloading services.
-///
-/// DHCP cleanup is surgical: a user-named host (created via `devices.update`) is
-/// kept and only its stale `ip` is cleared — its `name` and any legacy IPv6
-/// `hostid` (written by older releases; still read by `reconcile` as a
-/// last-resort fallback) survive. An *unnamed* host is a published-port
-/// auto-reservation with no user data, so it's removed outright.
-pub fn remove_ports_for_macs(cfgs: &mut Configs, macs: &HashSet<String>) -> usize {
-    let macs: HashSet<String> = macs.iter().map(|m| m.to_uppercase()).collect();
-    let mut removed = 0usize;
-    cfgs["firewall"].sections.retain(|section| {
-        let pp_mac = section
-            .get::<FirewallRedirect>()
-            .ok()
-            .filter(|r| r._pp_id.is_some() && r.target == "DNAT")
-            .and_then(|r| r._pp_mac.clone())
-            .or_else(|| {
-                section
-                    .get::<FirewallRule>()
-                    .ok()
-                    .filter(is_pp_v6_rule)
-                    .and_then(|r| r._pp_mac.clone())
+/// Of `leaving` (uppercase MAC → the profile it leaves), the devices with a
+/// reservation or published port in that profile. `cfgs` must contain "dhcp",
+/// "firewall", "network", and "startwrt".
+pub(crate) fn devices_leaving_profile(
+    cfgs: &Configs,
+    lookup: &Lookup,
+    leaving: &HashMap<String, String>,
+    names: &HashMap<String, String>,
+) -> Vec<DeviceLeavingProfile> {
+    let networks = reservations::profile_networks(cfgs, lookup);
+    let zones = zone_profiles(cfgs, lookup);
+    let reserved = reservations::reservations_by_mac(&cfgs["dhcp"]);
+    let ports = raw_ports(cfgs);
+    let mut out: Vec<DeviceLeavingProfile> = leaving
+        .iter()
+        .filter(|(mac, profile)| {
+            let in_profile = |p: Option<&str>| p.is_some_and(|p| p == profile.as_str());
+            reserved.get(*mac).is_some_and(|ips| {
+                ips.iter().any(|ip| {
+                    in_profile(reservations::profile_of(&networks, *ip).map(|p| p.name.as_str()))
+                })
+            }) || ports.iter().any(|port| {
+                port.device_mac.eq_ignore_ascii_case(mac)
+                    && in_profile(port_profile(port, &networks, &zones))
             })
-            .or_else(|| {
-                // Automatic (PCP/UPnP) forwards pin the device's address and
-                // zone the same way, so a profile move strands them too. The
-                // device re-requests on its next renewal, against its new zone.
-                section
-                    .get::<FirewallRedirect>()
-                    .ok()
-                    .filter(|r| r._apf_label.is_some() && r.target == "DNAT")
-                    .and_then(|r| r._apf_mac.clone())
-            });
-        if let Some(mac) = pp_mac {
-            if !mac.is_empty() && macs.contains(&mac.to_uppercase()) {
-                removed += 1;
-                return false;
-            }
+        })
+        .map(|(mac, profile)| DeviceLeavingProfile {
+            mac: mac.clone(),
+            name: names.get(mac).cloned(),
+            profile: profile.clone(),
+        })
+        .collect();
+    out.sort_by(|a, b| a.mac.cmp(&b.mac));
+    out
+}
+
+/// Firewall zone → the profile whose interface it holds. `cfgs` must contain
+/// "firewall".
+fn zone_profiles(cfgs: &Configs, lookup: &Lookup) -> HashMap<String, String> {
+    let mut zones = HashMap::new();
+    for zone in cfgs["firewall"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get_typed::<FirewallZone>().ok().flatten())
+    {
+        if let Some(profile) = lookup
+            .list()
+            .iter()
+            .find(|p| zone.network.contains(&p.interface))
+        {
+            zones
+                .entry(zone.name.clone())
+                .or_insert_with(|| profile.fullname.clone());
         }
-        true
-    });
-    // Clean up each device's now-stale static DHCP reservation. The pinned IPv4
-    // is on the old subnet and unusable, so the device should fall back to a
-    // fresh lease — but don't destroy user-owned data: keep a named host (just
-    // clear its `ip`) and only remove anonymous published-port auto-reservations.
-    cfgs["dhcp"].sections.retain_mut(|section| {
-        let Ok(host) = section.get::<DhcpHost>() else {
-            return true;
-        };
-        if !macs.contains(&host.mac.to_uppercase()) {
-            return true;
-        }
-        let named = host.name.as_deref().is_some_and(|n| !n.is_empty());
-        // The automatic-port-forwarding permission also lives on the host
-        // section, and may be the only thing on it. It's a user decision, so a
-        // profile move must not silently revoke it along with the stale pin.
-        let keep = named || host._allow_pcp.is_some();
-        if keep {
-            // User-owned: keep the section, drop only the stale IPv4 pin.
-            if host.ip.is_some() {
-                let mut host = host;
-                host.ip = None;
-                let _ = section.set(&host);
-            }
-            true
-        } else {
-            // Anonymous pp auto-reservation: nothing worth keeping.
-            false
-        }
-    });
-    removed
+    }
+    zones
+}
+
+/// The profile a published port forwards into: its IPv4 target's subnet, else
+/// its zone's.
+fn port_profile<'a>(
+    port: &RawPort,
+    networks: &'a [ProfileNetwork],
+    zones: &'a HashMap<String, String>,
+) -> Option<&'a str> {
+    port.dest_ipv4
+        .as_deref()
+        .and_then(|ip| ip.parse::<Ipv4Addr>().ok())
+        .and_then(|ip| reservations::profile_of(networks, ip))
+        .map(|p| p.name.as_str())
+        .or_else(|| zones.get(port.dest_zone.as_deref()?).map(String::as_str))
 }
 
 // ── Helpers ──────────────────────────────────────────────
@@ -553,9 +421,14 @@ struct RawPort {
     /// The IPv6 rule's stored `dest_ip` (the full GUA it forwards to), if any.
     /// Used by `compute_status` to detect a rule stranded on an old prefix.
     dest_ipv6: Option<String>,
+    /// The IPv4 redirect's stored `dest_ip`.
+    dest_ipv4: Option<String>,
+    /// The firewall zone it forwards into.
+    dest_zone: Option<String>,
 }
 
 /// Extract raw published ports from firewall config sections.
+#[cfg(test)]
 async fn extract_ports(arena: &Arena, uci_root: &std::path::Path) -> Result<Vec<RawPort>, Error> {
     let cfgs = parse_all(uci_root, arena, &["firewall"]).await?;
     Ok(raw_ports(&cfgs))
@@ -688,13 +561,19 @@ fn sections_to_raw_port(
         override_wan_ports: enabled
             && redirect.is_some_and(|redirect| redirect._pp_wan_override.as_deref() == Some("1")),
         dest_ipv6: rule.and_then(|r| r.dest_ip.clone()),
+        dest_ipv4: redirect.and_then(|r| r.dest_ip.clone()),
+        dest_zone: redirect
+            .and_then(|r| r.dest.clone())
+            .or_else(|| rule.and_then(|r| r.dest.clone())),
     }
 }
 
+/// `port_profile` is the profile the port forwards into.
 fn compute_status(
     port: &RawPort,
     device: Option<&Device>,
     router_has_gua: bool,
+    port_profile: Option<&str>,
 ) -> (PublishedPortStatus, Option<String>) {
     if !port.enabled {
         return (PublishedPortStatus::Disabled, None);
@@ -707,6 +586,18 @@ fn compute_status(
 
     if matches!(device.status, DeviceStatus::Offline) {
         return (PublishedPortStatus::Paused, Some("Device offline".into()));
+    }
+    if let Some(port_profile) = port_profile {
+        if device.profile_network.is_some()
+            && device.security_profile.as_deref() != Some(port_profile)
+        {
+            return (
+                PublishedPortStatus::Inactive,
+                Some(format!(
+                    "Applies when the device is on the {port_profile} profile"
+                )),
+            );
+        }
     }
     let has_ipv4 = device.ipv4.is_some();
     let has_ipv6 = device.ipv6.is_some();
@@ -722,7 +613,7 @@ fn compute_status(
 
     if port.ipv6 && !router_has_gua {
         let reason = Some("Router has no global IPv6 address".into());
-        if port.ipv4 && has_ipv4 && device.inactive_ipv4_reservation.is_none() {
+        if port.ipv4 && has_ipv4 {
             return (PublishedPortStatus::Partial, reason);
         }
         return (PublishedPortStatus::Error, reason);
@@ -739,14 +630,6 @@ fn compute_status(
             PublishedPortStatus::Error,
             Some("No addresses available".into()),
         );
-    }
-
-    if port.ipv4 && device.inactive_ipv4_reservation.is_some() {
-        let reason = Some("IPv4 reservation outside the device's profile".into());
-        if working_ipv6 {
-            return (PublishedPortStatus::Partial, reason);
-        }
-        return (PublishedPortStatus::Error, reason);
     }
 
     if port.ipv6 && !has_ipv6 {
@@ -814,7 +697,23 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
     let (ports_result, devices_result) = tokio::join!(
         async {
             let arena = Arena::new();
-            extract_ports(&arena, std::path::Path::new("/etc/config")).await
+            let cfgs = parse_all(
+                std::path::Path::new("/etc/config"),
+                &arena,
+                &["firewall", "network", "startwrt"],
+            )
+            .await?;
+            let lookup = Lookup::parse(ServerContext::default(), &cfgs)?;
+            let networks = reservations::profile_networks(&cfgs, &lookup);
+            let zones = zone_profiles(&cfgs, &lookup);
+            let ports: Vec<(RawPort, Option<String>)> = raw_ports(&cfgs)
+                .into_iter()
+                .map(|port| {
+                    let profile = port_profile(&port, &networks, &zones).map(str::to_string);
+                    (port, profile)
+                })
+                .collect();
+            Ok::<_, Error>(ports)
         },
         devices::list(ServerContext::default()),
     );
@@ -837,7 +736,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
     let prefixes: Vec<(Ipv6Addr, u8)> = assignments.iter().map(|&(_, p, l)| (p, l)).collect();
     let mut ports: Vec<PublishedPort> = raw_ports
         .iter()
-        .map(|raw| {
+        .map(|(raw, port_profile)| {
             let mac = raw.device_mac.to_uppercase();
             // Report the tracker-elected stable GUA — the same address
             // `reconcile` writes into the `pp_*_v6` rule — rather than the
@@ -861,7 +760,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
                 d
             });
             let device = device_owned.as_ref();
-            let (status, status_reason) = compute_status(raw, device, router_has_gua);
+            let (status, status_reason) =
+                compute_status(raw, device, router_has_gua, port_profile.as_deref());
 
             PublishedPort {
                 id: raw.id.clone(),
@@ -878,13 +778,16 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
                 status,
                 status_reason,
                 device_name: device.map(|d| d.name.clone()),
-                device_ipv4: device.and_then(|d| d.ipv4.clone()),
+                device_ipv4: raw
+                    .dest_ipv4
+                    .clone()
+                    .or_else(|| device.and_then(|d| d.ipv4.clone())),
                 device_ipv6: device.and_then(|d| d.ipv6.clone()),
             }
         })
         .collect();
 
-    // Stable order for the UI and CLI: `extract_ports` builds the list from
+    // Stable order for the UI and CLI: `raw_ports` builds the list from
     // `HashMap`s (randomized iteration), so without this the rows reshuffle on
     // every poll. Sort by label (the user-meaningful column), tie-broken by the
     // stable id.
@@ -943,11 +846,24 @@ pub async fn set<C: CtrlContext>(
         let now = chrono::Utc::now().timestamp();
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["firewall", "dhcp", "network"]).await?;
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["firewall", "dhcp", "network", "startwrt"],
+        )
+        .await?;
         let v6_dests = v6_rule_dests(&cfgs["firewall"]);
+        let networks = reservations::profile_networks(&cfgs, &Lookup::parse(ctx.clone(), &cfgs)?);
+        let targets = ipv4_targets(&cfgs, &networks, &req.ports, &device_info);
 
         if ctx.effectful() {
-            validate_device_addresses(&req.ports, &device_info, router_has_gua, &v6_dests)?;
+            validate_device_addresses(
+                &req.ports,
+                &targets,
+                &device_info,
+                router_has_gua,
+                &v6_dests,
+            )?;
         }
 
         // Effectful saves require explicit confirmation for occupied WAN ports.
@@ -968,57 +884,32 @@ pub async fn set<C: CtrlContext>(
             }
         }
 
-        // Auto-reserve a static DHCP IPv4 lease for enabled ports that lack
-        // one (the dest_ip of the DNAT redirect must stay put). There is no
-        // IPv6 counterpart: the device chooses its own IPv6 address (SLAAC),
-        // so the rule tracks it via `ipv6_tracker` + `reconcile` instead of a
+        // Auto-reserve each enabled IPv4 port's target in its profile (the
+        // dest_ip of the DNAT redirect must stay put). There is no IPv6
+        // counterpart: the device chooses its own IPv6 address (SLAAC), so the
+        // rule tracks it via `ipv6_tracker` + `reconcile` instead of a
         // reservation. (Older releases pinned a `hostid` here; existing
         // entries are left alone and still serve as a last-resort reconcile
         // fallback.)
         let mut dhcp_modified = false;
         if ctx.effectful() {
-            let mut host_indices: HashMap<String, usize> = HashMap::new();
-            for (i, section) in cfgs["dhcp"].sections.iter().enumerate() {
-                if let Ok(host) = section.get::<DhcpHost>() {
-                    host_indices.insert(host.mac.to_uppercase(), i);
-                }
-            }
-
-            for port in &req.ports {
-                if !port.enabled || !port.ipv4 {
-                    continue;
-                }
+            let stored_ports = raw_ports(&cfgs);
+            for port in req.ports.iter().filter(|p| p.enabled && p.ipv4) {
                 let mac = port.device_mac.to_uppercase();
-                let Some(info) = device_info.get(&mac) else {
+                let Some(target) = targets.get(&port.id).copied().flatten() else {
                     continue;
                 };
-                // Only when the device has a dynamic address and no existing
-                // static reservation.
-                if info.has_static_ipv4 {
+                let stored_dest = stored_ports
+                    .iter()
+                    .find(|s| s.id == port.id && s.device_mac.eq_ignore_ascii_case(&mac))
+                    .and_then(|s| s.dest_ipv4.as_deref()?.parse().ok());
+                if !reserves_target(&cfgs["dhcp"], &networks, port, target, stored_dest)? {
                     continue;
                 }
-                let Some(want_ip) = info.ipv4.clone() else {
-                    continue;
-                };
-
-                if let Some(&idx) = host_indices.get(&mac) {
-                    // Existing host entry — fill in the missing IP only.
-                    if let Ok(mut host) = cfgs["dhcp"].sections[idx].get::<DhcpHost>() {
-                        host.ip = Some(want_ip);
-                        cfgs["dhcp"].sections[idx].set(&host)?;
-                        dhcp_modified = true;
-                    }
-                } else {
-                    // No host entry at all — create one.
-                    let host = DhcpHost {
-                        mac: mac.clone(),
-                        ip: Some(want_ip),
-                        ..Default::default()
-                    };
-                    let section_name = format!("host_{}", mac.replace(':', "").to_lowercase());
-                    cfgs["dhcp"].append(&host, Some(&section_name))?;
-                    dhcp_modified = true;
-                }
+                let mut want = reservations::reservations_of(&cfgs["dhcp"], &mac);
+                want.push(target);
+                reservations::write_reservations(&mut cfgs["dhcp"], &mac, &want)?;
+                dhcp_modified = true;
             }
         }
 
@@ -1028,7 +919,6 @@ pub async fn set<C: CtrlContext>(
         } else {
             HashMap::new()
         };
-        validate_reservation_zones(&cfgs, &req.ports, &device_info, &mac_zones)?;
 
         // Remove all existing published-port sections (name starts with "pp_")
         cfgs["firewall"].sections.retain(|section| {
@@ -1093,25 +983,25 @@ pub async fn set<C: CtrlContext>(
                 .collect();
             let mac_upper = port.device_mac.to_uppercase();
             let info = device_info.get(&mac_upper);
-            let ipv4_addr = info.and_then(|i| i.ipv4.clone());
+            let target = targets.get(&port.id).copied().flatten();
+            let ipv4_addr = target.map(|ip| ip.to_string());
             let ipv6_addr = info.and_then(|i| i.ipv6.clone());
-            let reserved_ipv4 = cfgs["dhcp"].sections.iter().find_map(|s| {
-                let host = s.get::<DhcpHost>().ok()?;
-                if host.mac.eq_ignore_ascii_case(&mac_upper) {
-                    host.ip
-                } else {
-                    None
-                }
-            });
             let kept_v6 = kept_v6_rule(&v6_dests, port);
-            let resolved_zone = device_zone(
-                &cfgs,
-                &mac_upper,
-                ipv4_addr.as_deref().or(reserved_ipv4.as_deref()),
-                mac_zones.get(&mac_upper).map(String::as_str),
-            )
-            .or_else(|| kept_v6.and_then(|rule| rule.dest.clone()));
+            let device_zone = mac_zones.get(&mac_upper);
+            let resolved_zone = target
+                .and_then(|ip| zone_for_ipv4(&cfgs, ip))
+                .or_else(|| kept_v6.and_then(|rule| rule.dest.clone()))
+                .or_else(|| device_zone.cloned())
+                .or_else(|| {
+                    let ip = info?.ipv4.as_deref()?.parse().ok()?;
+                    zone_for_ipv4(&cfgs, ip)
+                });
             let dest_zone = resolved_zone.clone().unwrap_or_else(|| "lan".into());
+            // The port forwards into a profile the device is not on.
+            let away = resolved_zone
+                .as_ref()
+                .zip(device_zone)
+                .is_some_and(|(port_zone, device_zone)| port_zone != device_zone);
 
             // IPv4 redirect (DNAT)
             if port.ipv4 {
@@ -1155,14 +1045,17 @@ pub async fn set<C: CtrlContext>(
                 cfgs["firewall"].append(&redirect, Some(&section_name))?;
             }
 
-            let dest_v6 = if port.ipv6 {
+            let kept_v6_dest = kept_v6.map(|rule| rule.dest_ip.clone());
+            let dest_v6 = if !port.ipv6 {
+                None
+            } else if away && kept_v6_dest.is_some() {
+                kept_v6_dest
+            } else {
                 v6_dest(
                     crate::ipv6_tracker::elected_live_in_prefixes(&mac_upper, now, &prefixes),
                     ipv6_addr.as_deref(),
-                    kept_v6.map(|rule| rule.dest_ip.as_str()),
+                    kept_v6_dest.as_deref(),
                 )
-            } else {
-                None
             };
             if let Some(dest_v6) = dest_v6 {
                 let rule = FirewallRule {
@@ -1305,9 +1198,73 @@ fn v6_dest(
         .or_else(|| kept.map(str::to_string))
 }
 
+/// Whether an enabled IPv4 port reserves its target for its device: not when
+/// the device already holds a reservation in that profile. A target another
+/// device has reserved is refused, unless the port already forwarded there.
+fn reserves_target(
+    dhcp: &uciedit::Config<'_>,
+    networks: &[ProfileNetwork],
+    port: &PublishedPortInput,
+    target: Ipv4Addr,
+    stored_dest: Option<Ipv4Addr>,
+) -> Result<bool, Error> {
+    let mac = port.device_mac.to_uppercase();
+    if reservations::reservations_of(dhcp, &mac)
+        .iter()
+        .any(|r| reservations::same_profile(networks, *r, target))
+    {
+        return Ok(false);
+    }
+    match reservations::validate_unclaimed(dhcp, &mac, target) {
+        Ok(()) => Ok(true),
+        Err(_) if stored_dest == Some(target) => Ok(false),
+        Err(err) => Err(Error::new(
+            eyre!("published port '{}': {:#}", port.label, err.source),
+            ErrorKind::InvalidValue,
+        )),
+    }
+}
+
+/// Each IPv4 port's target, by port id. A stored port keeps the profile of the
+/// address it forwards to and follows the device's reservation there; a new
+/// one forwards to the device's address on the profile it is on, or without
+/// live state, to its only reservation.
+fn ipv4_targets(
+    cfgs: &Configs,
+    networks: &[ProfileNetwork],
+    ports: &[PublishedPortInput],
+    device_info: &HashMap<String, DeviceNetInfo>,
+) -> HashMap<String, Option<Ipv4Addr>> {
+    let stored = raw_ports(cfgs);
+    ports
+        .iter()
+        .filter(|port| port.ipv4)
+        .map(|port| {
+            let mac = port.device_mac.to_uppercase();
+            let reserved = reservations::reservations_of(&cfgs["dhcp"], &mac);
+            let kept = stored
+                .iter()
+                .find(|s| s.id == port.id && s.device_mac.eq_ignore_ascii_case(&port.device_mac))
+                .and_then(|s| s.dest_ipv4.as_deref()?.parse::<Ipv4Addr>().ok());
+            let target = match (kept, device_info.get(&mac)) {
+                (Some(dest), _) => Some(
+                    reserved
+                        .into_iter()
+                        .find(|r| reservations::same_profile(networks, *r, dest))
+                        .unwrap_or(dest),
+                ),
+                (None, Some(info)) => info.ipv4.as_deref().and_then(|ip| ip.parse().ok()),
+                (None, None) => reservations::active_reservation(&reserved, None),
+            };
+            (port.id.clone(), target)
+        })
+        .collect()
+}
+
 /// Rejects an enabled port whose device lacks an address the port publishes.
 fn validate_device_addresses(
     ports: &[PublishedPortInput],
+    targets: &HashMap<String, Option<Ipv4Addr>>,
     device_info: &HashMap<String, DeviceNetInfo>,
     router_has_gua: bool,
     v6_dests: &HashMap<String, KeptV6Rule>,
@@ -1317,10 +1274,8 @@ fn validate_device_addresses(
             continue;
         }
         let info = device_info.get(&port.device_mac.to_uppercase());
-        let (ipv4_addr, ipv6_addr) = info
-            .map(|i| (i.ipv4.as_ref(), i.ipv6.as_ref()))
-            .unwrap_or((None, None));
-        if port.ipv4 && ipv4_addr.is_none() {
+        let ipv6_addr = info.and_then(|i| i.ipv6.as_ref());
+        if port.ipv4 && targets.get(&port.id).copied().flatten().is_none() {
             return Err(Error::new(
                 eyre!(
                     "missing IPv4 address for device {} (port forward '{}')",
@@ -1351,59 +1306,6 @@ fn validate_device_addresses(
         }
     }
     Ok(())
-}
-
-/// Refuses an enabled IPv4 port on a device whose reservation lies in another
-/// zone than the neighbor table places it in.
-fn validate_reservation_zones(
-    cfgs: &Configs,
-    ports: &[PublishedPortInput],
-    device_info: &HashMap<String, DeviceNetInfo>,
-    mac_zones: &HashMap<String, String>,
-) -> Result<(), Error> {
-    let stored = raw_ports(cfgs);
-    for port in ports.iter().filter(|p| p.enabled && p.ipv4) {
-        if stored.iter().any(|s| same_ipv4_forward(s, port)) {
-            continue;
-        }
-        let mac = port.device_mac.to_uppercase();
-        let Some(info) = device_info.get(&mac).filter(|i| i.has_static_ipv4) else {
-            continue;
-        };
-        let Some(reserved) = info.ipv4.as_deref() else {
-            continue;
-        };
-        let by_address = reserved
-            .parse::<Ipv4Addr>()
-            .ok()
-            .and_then(|ip| zone_for_ipv4(cfgs, ip));
-        if let (Some(by_address), Some(by_neighbor)) = (by_address, mac_zones.get(&mac)) {
-            if by_address != *by_neighbor {
-                return Err(Error::new(
-                    eyre!(
-                        "port forward '{}': device {} is reserved {reserved}, outside the subnet of the profile it is on; change its reservation or disable the port",
-                        port.label,
-                        port.device_mac
-                    ),
-                    ErrorKind::InvalidValue,
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn same_ipv4_forward(stored: &RawPort, port: &PublishedPortInput) -> bool {
-    let public_port = |p: &Option<String>, ports: &str| p.clone().unwrap_or_else(|| ports.into());
-    stored.id == port.id
-        && stored.enabled
-        && stored.ipv4
-        && stored.device_mac.eq_ignore_ascii_case(&port.device_mac)
-        && stored.ports == port.ports
-        && stored.protocol == port.protocol
-        && stored.source == port.source
-        && public_port(&stored.ipv4_public_port, &stored.ports)
-            == public_port(&port.ipv4_public_port, &port.ports)
 }
 
 fn active_ipv4_ranges(ports: &[PublishedPortInput]) -> Vec<(u16, u16)> {
@@ -1696,6 +1598,7 @@ fn rewrite_v6_dest_ips(
 }
 
 struct DeviceNetInfo {
+    /// The reservation in the profile the device is on, else its live address.
     ipv4: Option<String>,
     /// Best usable IPv6 (GUA preferred, ULA fallback). `None` when the device
     /// has no GUA/ULA — either it's genuinely offline, or it's online but only
@@ -1705,8 +1608,6 @@ struct DeviceNetInfo {
     ipv6_link_local_only: bool,
     /// ARP interface name (e.g. "br-lan.101") for zone resolution
     arp_interface: Option<String>,
-    /// Whether the device already has a static DHCP IPv4 reservation
-    has_static_ipv4: bool,
 }
 
 /// Resolve IPv4/IPv6 addresses and ARP interface for devices referenced by published ports.
@@ -1725,18 +1626,20 @@ async fn resolve_device_info_for_macs(macs: HashSet<String>) -> HashMap<String, 
         return result;
     }
 
-    // Read DHCP hosts for static IPs
     let arena = Arena::new();
-    let mut static_ips: HashMap<String, Option<String>> = HashMap::new();
-    if let Ok(cfgs) = parse_all(std::path::Path::new("/etc/config"), &arena, &["dhcp"]).await {
-        cfgs["dhcp"]
-            .each::<DhcpHost, Error>(|_, host| {
-                let mac = host.mac.to_uppercase();
-                if macs.contains(&mac) {
-                    static_ips.insert(mac, host.ip.clone());
-                }
-            })
-            .ok();
+    let mut reserved: HashMap<String, Vec<Ipv4Addr>> = HashMap::new();
+    let mut networks: Vec<ProfileNetwork> = Vec::new();
+    if let Ok(cfgs) = parse_all(
+        std::path::Path::new("/etc/config"),
+        &arena,
+        &["dhcp", "network", "startwrt"],
+    )
+    .await
+    {
+        reserved = reservations::reservations_by_mac(&cfgs["dhcp"]);
+        if let Ok(lookup) = Lookup::parse(ServerContext::default(), &cfgs) {
+            networks = reservations::profile_networks(&cfgs, &lookup);
+        }
     }
 
     // Read ARP/neighbor table for dynamic IPs and interface names
@@ -1756,11 +1659,23 @@ async fn resolve_device_info_for_macs(macs: HashSet<String>) -> HashMap<String, 
         .into_iter()
         .filter(|entry| macs.contains(&entry.mac))
         .collect();
-    let live_ipv4s = devices::verified_ipv4_neighbors(&neighbors).await;
+    // The newest lease across the base file and every per-profile
+    // `/tmp/dhcp.leases.dns_*` instance is the IPv4 fallback.
+    let (live_ipv4s, lease_ipv4, fdb) = tokio::join!(
+        devices::verified_ipv4_neighbors(&neighbors),
+        devices::current_lease_ips(),
+        devices::get_bridge_fdb(),
+    );
+    let lease_ipv4 = lease_ipv4.unwrap_or_default();
     for mac in &macs {
         let entries: Vec<&devices::ArpEntry> =
             neighbors.iter().filter(|entry| &entry.mac == mac).collect();
-        let (ipv4, interface) = neighbor_ipv4_and_interface(&entries, &live_ipv4s);
+        let learned_on = devices::learned_bridge(
+            fdb.get(mac),
+            lease_ipv4.get(mac).map(String::as_str),
+            &networks,
+        );
+        let (ipv4, interface) = neighbor_ipv4_and_interface(&entries, &live_ipv4s, learned_on);
         if let Some(ipv4) = ipv4 {
             arp_ipv4.insert(mac.clone(), ipv4);
         }
@@ -1785,31 +1700,24 @@ async fn resolve_device_info_for_macs(macs: HashSet<String>) -> HashMap<String, 
         })
         .collect();
 
-    // Read DHCP leases as fallback for IPv4 — merge the base file and every
-    // per-profile `/tmp/dhcp.leases.dns_*` instance.
-    let leases = devices::read_all_dhcp_leases().await;
-    let mut lease_ipv4: HashMap<String, String> = HashMap::new();
-    for line in leases.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 3 {
-            let mac = parts[1].to_uppercase();
-            if macs.contains(&mac) {
-                lease_ipv4
-                    .entry(mac)
-                    .or_insert_with(|| parts[2].to_string());
-            }
-        }
-    }
-
-    // Merge: prefer static > ARP > lease
+    // Merge: reservation on the device's profile > ARP > lease
     let now = chrono::Utc::now().timestamp();
     for mac in &macs {
-        let has_static_ipv4 = static_ips.get(mac).and_then(|ip| ip.as_ref()).is_some();
-        let ipv4 = static_ips
+        let live = arp_ipv4.get(mac).or_else(|| lease_ipv4.get(mac)).cloned();
+        let subnet = arp_iface
             .get(mac)
-            .and_then(|ip| ip.clone())
-            .or_else(|| arp_ipv4.get(mac).cloned())
-            .or_else(|| lease_ipv4.get(mac).cloned());
+            .and_then(|iface| networks.iter().find(|p| p.device == *iface))
+            .or_else(|| {
+                let ip = live.as_deref()?.parse().ok()?;
+                reservations::profile_of(&networks, ip)
+            })
+            .and_then(|p| p.address);
+        let ipv4 = reservations::active_reservation(
+            reserved.get(mac).map(Vec::as_slice).unwrap_or_default(),
+            subnet,
+        )
+        .map(|ip| ip.to_string())
+        .or(live);
         // The tracker-elected stable GUA beats raw neighbor-table order: the
         // table can surface a rotating RFC 4941 temporary address first, and a
         // rule pinned to one breaks silently when it expires. Fall back to the
@@ -1830,7 +1738,6 @@ async fn resolve_device_info_for_macs(macs: HashSet<String>) -> HashMap<String, 
                 ipv6,
                 ipv6_link_local_only,
                 arp_interface,
-                has_static_ipv4,
             },
         );
     }
@@ -1838,17 +1745,21 @@ async fn resolve_device_info_for_macs(macs: HashSet<String>) -> HashMap<String, 
     result
 }
 
+/// `learned_on` breaks a tie between equally ranked entries, as in
+/// [`devices::choose_ipv4_entry`].
 fn neighbor_ipv4_and_interface(
     entries: &[&devices::ArpEntry],
     live_ipv4s: &HashSet<String>,
+    learned_on: Option<&str>,
 ) -> (Option<String>, Option<String>) {
-    let ipv4 = devices::choose_ipv4_entry(entries, live_ipv4s).map(|entry| entry.ip.clone());
+    let ipv4 =
+        devices::choose_ipv4_entry(entries, live_ipv4s, learned_on).map(|entry| entry.ip.clone());
     let lan_entries: Vec<&devices::ArpEntry> = entries
         .iter()
         .copied()
         .filter(|entry| entry.interface.starts_with("br-lan"))
         .collect();
-    let interface = devices::choose_ipv4_entry(&lan_entries, live_ipv4s)
+    let interface = devices::choose_ipv4_entry(&lan_entries, live_ipv4s, learned_on)
         .or_else(|| lan_entries.first().copied())
         .map(|entry| entry.interface.clone());
     (ipv4, interface)
@@ -1917,31 +1828,6 @@ pub(crate) fn zone_for_ipv4(cfgs: &uciedit::Configs, ip: Ipv4Addr) -> Option<Str
         }
     }
     None
-}
-
-/// The zone a published device sits in: by its IPv4 against the profile
-/// subnets, falling back to the neighbor table. The address needs no live
-/// entry, so an offline device with a static reservation still resolves and a
-/// `set` while one target is offline no longer rewrites that target's rule
-/// around a guessed zone; the neighbor table covers a device with no IPv4 at
-/// all. `None` is a device that cannot be placed.
-fn device_zone(
-    cfgs: &uciedit::Configs,
-    mac: &str,
-    ipv4: Option<&str>,
-    neighbor_zone: Option<&str>,
-) -> Option<String> {
-    let by_address = ipv4
-        .and_then(|ip| ip.parse::<Ipv4Addr>().ok())
-        .and_then(|ip| zone_for_ipv4(cfgs, ip));
-    if let (Some(by_addr), Some(by_neigh)) = (by_address.as_deref(), neighbor_zone) {
-        if by_addr != by_neigh {
-            tracing::warn!(
-                "published-ports: device {mac} sits in zone {by_addr} by address but {by_neigh} by neighbor table; using {by_addr}"
-            );
-        }
-    }
-    by_address.or_else(|| neighbor_zone.map(str::to_string))
 }
 
 /// Resolve MAC addresses to firewall zone names via ARP interface → VLAN tag → profile → zone.
@@ -2495,17 +2381,6 @@ pub(crate) fn reload_dnsmasq() {
     crate::devices::reload_dnsmasq();
 }
 
-pub(crate) fn reload_odhcpd() {
-    tokio::spawn(async {
-        if let Err(e) =
-            crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/odhcpd").arg("reload"))
-                .await
-        {
-            tracing::error!("failed to reload odhcpd: {e}");
-        }
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -2772,6 +2647,8 @@ config rule 'pp_a_v6'
             source: "any".into(),
             override_wan_ports: false,
             dest_ipv6: dest_ipv6.map(str::to_string),
+            dest_ipv4: None,
+            dest_zone: None,
         }
     }
 
@@ -2786,7 +2663,7 @@ config rule 'pp_a_v6'
             ipv4: ipv4.map(str::to_string),
             ipv6: ipv6.map(str::to_string),
             ipv4_static: false,
-            inactive_ipv4_reservation: None,
+            ipv4_reservations: Vec::new(),
             profile_network: None,
             allow_auto_port_forward: false,
             allow_dns_injection: false,
@@ -2797,47 +2674,52 @@ config rule 'pp_a_v6'
         }
     }
 
-    #[test]
-    fn status_flags_an_inactive_reservation() {
-        let mut dev = online_device(Some("192.168.101.20"), Some("2001:db8:abcd::99"));
-        dev.ipv4_static = true;
-        dev.inactive_ipv4_reservation = Some("192.168.1.50".into());
+    fn on_guest(mut dev: Device) -> Device {
+        dev.security_profile = Some("Guest".into());
+        dev.profile_network = Some("192.168.101.1/24".into());
+        dev
+    }
 
-        let ipv4_only = RawPort {
+    #[test]
+    fn status_inactive_for_a_port_of_another_profile() {
+        let dev = on_guest(online_device(
+            Some("192.168.101.20"),
+            Some("2001:db8:abcd::99"),
+        ));
+        let both = raw_v6_port(true, Some("2001:db8:abcd::99"));
+        let (status, reason) = compute_status(&both, Some(&dev), true, Some("Admin"));
+        assert!(
+            matches!(status, PublishedPortStatus::Inactive),
+            "{status:?}"
+        );
+        assert_eq!(
+            reason.as_deref(),
+            Some("Applies when the device is on the Admin profile")
+        );
+        let (status, _) = compute_status(&both, Some(&dev), false, Some("Admin"));
+        assert!(
+            matches!(status, PublishedPortStatus::Inactive),
+            "{status:?}"
+        );
+
+        let (status, _) = compute_status(&both, Some(&dev), true, Some("Guest"));
+        assert!(matches!(status, PublishedPortStatus::Active), "{status:?}");
+    }
+
+    #[test]
+    fn status_of_an_unplaced_or_offline_device_is_not_inactive() {
+        let port = RawPort {
             ipv6: false,
             ..raw_v6_port(true, None)
         };
-        let (status, reason) = compute_status(&ipv4_only, Some(&dev), true);
-        assert!(matches!(status, PublishedPortStatus::Error), "{status:?}");
-        assert!(reason.unwrap().contains("reservation"));
+        let unplaced = online_device(Some("192.168.1.50"), None);
+        let (status, _) = compute_status(&port, Some(&unplaced), true, Some("Admin"));
+        assert!(matches!(status, PublishedPortStatus::Active), "{status:?}");
 
-        let both = raw_v6_port(true, Some("2001:db8:abcd::99"));
-        let (status, _) = compute_status(&both, Some(&dev), true);
-        assert!(matches!(status, PublishedPortStatus::Partial), "{status:?}");
-    }
-
-    #[test]
-    fn status_error_when_both_reservation_and_v6_prefix_are_stale() {
-        let mut dev = online_device(Some("192.168.101.20"), Some("2001:db8:9999::99"));
-        dev.ipv4_static = true;
-        dev.inactive_ipv4_reservation = Some("192.168.1.50".into());
-        let port = raw_v6_port(true, Some("2001:db8:abcd::99"));
-
-        let (status, reason) = compute_status(&port, Some(&dev), true);
-        assert!(matches!(status, PublishedPortStatus::Error), "{status:?}");
-        assert!(reason.unwrap().contains("reservation"));
-    }
-
-    #[test]
-    fn status_error_when_reservation_is_inactive_and_router_has_no_gua() {
-        let mut dev = online_device(Some("192.168.101.20"), Some("2001:db8:abcd::99"));
-        dev.ipv4_static = true;
-        dev.inactive_ipv4_reservation = Some("192.168.1.50".into());
-        let port = raw_v6_port(true, Some("2001:db8:abcd::99"));
-
-        let (status, reason) = compute_status(&port, Some(&dev), false);
-        assert!(matches!(status, PublishedPortStatus::Error), "{status:?}");
-        assert!(reason.unwrap().contains("global IPv6"));
+        let mut offline = on_guest(online_device(Some("192.168.101.20"), None));
+        offline.status = DeviceStatus::Offline;
+        let (status, _) = compute_status(&port, Some(&offline), true, Some("Admin"));
+        assert!(matches!(status, PublishedPortStatus::Paused), "{status:?}");
     }
 
     #[test]
@@ -2845,7 +2727,7 @@ config rule 'pp_a_v6'
         let dev = online_device(None, Some("2001:db8:9999::99"));
         let port = raw_v6_port(true, Some("2001:db8:abcd::99"));
 
-        let (status, _) = compute_status(&port, Some(&dev), true);
+        let (status, _) = compute_status(&port, Some(&dev), true, None);
         assert!(matches!(status, PublishedPortStatus::Error), "{status:?}");
     }
 
@@ -2854,7 +2736,7 @@ config rule 'pp_a_v6'
         // Same /64, different suffix → still in the live prefix, not stale.
         let port = raw_v6_port(false, Some("2001:db8:abcd::50"));
         let dev = online_device(None, Some("2001:db8:abcd::99"));
-        let (status, _) = compute_status(&port, Some(&dev), true);
+        let (status, _) = compute_status(&port, Some(&dev), true, None);
         assert!(matches!(status, PublishedPortStatus::Active));
     }
 
@@ -2863,7 +2745,7 @@ config rule 'pp_a_v6'
         // Rule on the old /64, device on a new /64 → stranded, v6-only → Error.
         let port = raw_v6_port(false, Some("2001:db8:abcd::50"));
         let dev = online_device(None, Some("2001:db8:9999::50"));
-        let (status, reason) = compute_status(&port, Some(&dev), true);
+        let (status, reason) = compute_status(&port, Some(&dev), true, None);
         assert!(matches!(status, PublishedPortStatus::Error));
         assert_eq!(reason.as_deref(), Some("IPv6 address out of date"));
     }
@@ -2873,7 +2755,7 @@ config rule 'pp_a_v6'
         // Dual-stack: v4 still works, only v6 stranded → Partial.
         let port = raw_v6_port(true, Some("2001:db8:abcd::50"));
         let dev = online_device(Some("192.168.1.50"), Some("2001:db8:9999::50"));
-        let (status, reason) = compute_status(&port, Some(&dev), true);
+        let (status, reason) = compute_status(&port, Some(&dev), true, None);
         assert!(matches!(status, PublishedPortStatus::Partial));
         assert_eq!(reason.as_deref(), Some("IPv6 address out of date"));
     }
@@ -2884,7 +2766,7 @@ config rule 'pp_a_v6'
         // ULA-availability situation, not a rotated prefix).
         let port = raw_v6_port(false, Some("2001:db8:abcd::50"));
         let dev = online_device(None, Some("fd00:abcd::50"));
-        let (status, _) = compute_status(&port, Some(&dev), true);
+        let (status, _) = compute_status(&port, Some(&dev), true, None);
         // has_ipv6 is true (ULA present), GUA stale check skipped → Active.
         assert!(matches!(status, PublishedPortStatus::Active));
     }
@@ -2896,6 +2778,7 @@ config rule 'pp_a_v6'
             &raw_v6_port(true, Some("2001:db8:abcd::50")),
             Some(&dev),
             false,
+            None,
         );
         assert!(matches!(status, PublishedPortStatus::Partial));
         assert_eq!(reason.as_deref(), Some("Router has no global IPv6 address"));
@@ -2903,6 +2786,7 @@ config rule 'pp_a_v6'
             &raw_v6_port(false, Some("2001:db8:abcd::50")),
             Some(&dev),
             false,
+            None,
         );
         assert!(matches!(status, PublishedPortStatus::Error));
         assert_eq!(reason.as_deref(), Some("Router has no global IPv6 address"));
@@ -3585,7 +3469,7 @@ config rule 'pp_v6only_v6'
         );
         let entries: Vec<&devices::ArpEntry> = neighbors.iter().collect();
         let live = HashSet::from(["192.168.101.20".to_string()]);
-        let (ipv4, interface) = neighbor_ipv4_and_interface(&entries, &live);
+        let (ipv4, interface) = neighbor_ipv4_and_interface(&entries, &live, None);
         assert_eq!(ipv4.as_deref(), Some("192.168.101.20"));
         assert_eq!(interface.as_deref(), Some("br-lan.101"));
     }
@@ -3597,103 +3481,159 @@ config rule 'pp_v6only_v6'
              192.168.101.20 dev br-lan.101 lladdr aa:bb:cc:dd:ee:ff REACHABLE\n",
         );
         let entries: Vec<&devices::ArpEntry> = neighbors.iter().collect();
-        let (ipv4, interface) = neighbor_ipv4_and_interface(&entries, &HashSet::new());
+        let (ipv4, interface) = neighbor_ipv4_and_interface(&entries, &HashSet::new(), None);
         assert_eq!(ipv4.as_deref(), Some("192.168.101.20"));
         assert_eq!(interface.as_deref(), Some("br-lan.101"));
     }
 
-    #[tokio::test]
-    async fn reservation_in_another_zone_refuses_the_port() {
-        let dir = tempfile::tempdir().unwrap();
-        setup_firewall(dir.path(), FORWARDINGS);
-        std::fs::write(dir.path().join("network"), NETWORK).unwrap();
+    #[test]
+    fn neighbor_placement_breaks_a_tie_with_the_learned_bridge() {
+        // A device that answers no ping leaves both entries STALE after a move.
+        let neighbors = devices::parse_neigh_output(
+            "192.168.1.50 dev br-lan.1 lladdr aa:bb:cc:dd:ee:ff STALE\n\
+             192.168.101.20 dev br-lan.101 lladdr aa:bb:cc:dd:ee:ff STALE\n",
+        );
+        let entries: Vec<&devices::ArpEntry> = neighbors.iter().collect();
+        let (ipv4, interface) =
+            neighbor_ipv4_and_interface(&entries, &HashSet::new(), Some("br-lan.101"));
+        assert_eq!(ipv4.as_deref(), Some("192.168.101.20"));
+        assert_eq!(interface.as_deref(), Some("br-lan.101"));
+    }
+
+    #[test]
+    fn a_fresh_target_another_device_reserved_is_refused() {
         let arena = Arena::new();
-        let cfgs = parse_all(dir.path(), &arena, &["firewall", "network"])
-            .await
-            .unwrap();
-        let info = offline_device();
-        let ports = [make_port("p", true, false)];
-        let zones = |zone: &str| HashMap::from([("AA:BB:CC:DD:EE:FF".to_string(), zone.into())]);
-
-        let err = validate_reservation_zones(&cfgs, &ports, &info, &zones("lan_guest"))
-            .expect_err("reservation in lan, device in lan_guest");
-        assert!(err.to_string().contains("192.168.1.50"), "{err}");
-        validate_reservation_zones(&cfgs, &ports, &info, &zones("lan")).unwrap();
-        validate_reservation_zones(&cfgs, &ports, &info, &HashMap::new()).unwrap();
-
-        let disabled = [PublishedPortInput {
-            enabled: false,
-            ..make_port("p", true, false)
+        let dhcp = uciedit::Config::parse_str(
+            &arena,
+            "config host\n\toption mac '11:22:33:44:55:66'\n\toption name 'tv'\n\toption ip '192.168.1.50'\n",
+        )
+        .unwrap();
+        let networks = vec![ProfileNetwork {
+            vlan: 1,
+            device: "br-lan.1".into(),
+            name: "Admin".into(),
+            address: Some("192.168.1.1/24".parse().unwrap()),
         }];
-        validate_reservation_zones(&cfgs, &disabled, &info, &zones("lan_guest")).unwrap();
+        let port = make_port("p", true, false);
+        let taken: Ipv4Addr = "192.168.1.50".parse().unwrap();
+        let err = reserves_target(&dhcp, &networks, &port, taken, None).expect_err("refused");
+        assert!(err.to_string().contains("tv"), "{err}");
+        assert!(!reserves_target(&dhcp, &networks, &port, taken, Some(taken)).unwrap());
+        let free: Ipv4Addr = "192.168.1.51".parse().unwrap();
+        assert!(reserves_target(&dhcp, &networks, &port, free, None).unwrap());
+    }
+
+    /// Targets each IPv4 port at its device's address.
+    fn validate_device_addresses(
+        ports: &[PublishedPortInput],
+        device_info: &HashMap<String, DeviceNetInfo>,
+        router_has_gua: bool,
+        v6_dests: &HashMap<String, KeptV6Rule>,
+    ) -> Result<(), Error> {
+        let targets = ports
+            .iter()
+            .filter(|p| p.ipv4)
+            .map(|p| {
+                let target = device_info
+                    .get(&p.device_mac.to_uppercase())
+                    .and_then(|i| i.ipv4.as_deref()?.parse().ok());
+                (p.id.clone(), target)
+            })
+            .collect();
+        super::validate_device_addresses(ports, &targets, device_info, router_has_gua, v6_dests)
+    }
+
+    const PROFILE_FILES: [(&str, &str); 3] = [
+        (
+            "startwrt",
+            "config profile lan\n\toption fullname 'Admin'\n\toption interface 'lan'\n\toption vlan_tag '1'\n\nconfig profile guest\n\toption fullname 'Guest'\n\toption interface 'guest'\n\toption vlan_tag '101'\n",
+        ),
+        (
+            "network",
+            "config interface 'lan'\n\toption device 'br-lan.1'\n\toption proto 'static'\n\toption ipaddr '192.168.1.1'\n\toption netmask '255.255.255.0'\n\nconfig interface 'guest'\n\toption device 'br-lan.101'\n\toption proto 'static'\n\toption ipaddr '192.168.101.1'\n\toption netmask '255.255.255.0'\n",
+        ),
+        (
+            "dhcp",
+            "config host 'host_aabbccddeeff'\n\toption mac 'AA:BB:CC:DD:EE:FF'\n\toption ip '192.168.1.50'\n\nconfig host 'host_aabbccddeeff_2'\n\toption mac 'AA:BB:CC:DD:EE:FF'\n\toption ip '192.168.101.60'\n",
+        ),
+    ];
+
+    fn port_profile_dir(firewall: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, content) in PROFILE_FILES {
+            std::fs::write(dir.path().join(name), content).unwrap();
+        }
+        setup_firewall(dir.path(), firewall);
+        dir
+    }
+
+    const ADMIN_PORT: &str = "config zone\n\toption name 'lan'\n\tlist network 'lan'\n\nconfig zone\n\toption name 'guest'\n\tlist network 'guest'\n\nconfig redirect 'pp_p'\n\toption name 'Port p'\n\toption src 'wan'\n\toption dest 'lan'\n\toption target 'DNAT'\n\tlist proto 'tcp'\n\toption src_dport '80'\n\toption dest_port '80'\n\toption dest_ip '192.168.1.50'\n\toption enabled '1'\n\toption _pp_id 'p'\n\toption _pp_mac 'AA:BB:CC:DD:EE:FF'\n";
+
+    #[tokio::test]
+    async fn an_edited_port_keeps_its_profile() {
+        let dir = port_profile_dir(ADMIN_PORT);
+        let edited = PublishedPortInput {
+            ports: "81".into(),
+            ..make_port("p", true, false)
+        };
+        let ports = set_ports(dir.path(), vec![edited, make_port("q", true, false)]).await;
+        let p = ports.iter().find(|p| p.id == "p").unwrap();
+        assert_eq!(p.dest_ipv4.as_deref(), Some("192.168.1.50"));
+        assert_eq!(p.dest_zone.as_deref(), Some("lan"));
+        assert_eq!(p.ports, "81");
     }
 
     #[tokio::test]
-    async fn reservation_in_another_zone_keeps_an_unchanged_port() {
-        let stored = |enabled: &str| {
-            format!(
-                "{FORWARDINGS}
-config redirect 'pp_p'
-\toption name 'Port p'
-\toption src 'wan'
-\toption dest 'lan'
-\toption target 'DNAT'
-\tlist proto 'tcp'
-\toption src_dport '80'
-\toption dest_port '80'
-\toption dest_ip '192.168.1.50'
-\toption enabled '{enabled}'
-\toption _pp_id 'p'
-\toption _pp_mac 'AA:BB:CC:DD:EE:FF'
-"
-            )
-        };
-        async fn check(firewall: String, port: PublishedPortInput) -> Result<(), Error> {
-            let dir = tempfile::tempdir().unwrap();
-            setup_firewall(dir.path(), &firewall);
-            std::fs::write(dir.path().join("network"), NETWORK).unwrap();
-            let arena = Arena::new();
-            let cfgs = parse_all(dir.path(), &arena, &["firewall", "network"])
-                .await
-                .unwrap();
-            let zones = HashMap::from([("AA:BB:CC:DD:EE:FF".to_string(), "lan_guest".to_string())]);
-            validate_reservation_zones(&cfgs, &[port], &offline_device(), &zones)
-        }
+    async fn a_kept_port_follows_its_profiles_reservation() {
+        let dir = port_profile_dir(&ADMIN_PORT.replace("192.168.1.50", "192.168.1.49"));
+        let ports = set_ports(dir.path(), vec![make_port("p", true, false)]).await;
+        assert_eq!(ports[0].dest_ipv4.as_deref(), Some("192.168.1.50"));
+    }
 
-        let renamed = PublishedPortInput {
-            label: "Renamed".into(),
-            ..make_port("p", true, false)
-        };
-        check(stored("1"), renamed).await.unwrap();
+    #[tokio::test]
+    async fn leaving_devices_are_those_with_settings_in_the_profile() {
+        let dir = port_profile_dir(ADMIN_PORT);
+        let arena = Arena::new();
+        let cfgs = parse_all(
+            dir.path(),
+            &arena,
+            &["dhcp", "firewall", "network", "startwrt"],
+        )
+        .await
+        .unwrap();
+        let lookup = Lookup::parse(TestContext(dir.path().to_path_buf()), &cfgs).unwrap();
+        let leaving = HashMap::from([
+            ("AA:BB:CC:DD:EE:FF".to_string(), "Admin".to_string()),
+            ("11:22:33:44:55:66".to_string(), "Admin".to_string()),
+        ]);
+        let names = HashMap::from([("AA:BB:CC:DD:EE:FF".to_string(), "nas".to_string())]);
+        let found = devices_leaving_profile(&cfgs, &lookup, &leaving, &names);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].mac, "AA:BB:CC:DD:EE:FF");
+        assert_eq!(found[0].name.as_deref(), Some("nas"));
+        assert_eq!(found[0].profile, "Admin");
 
-        let changed = [
-            PublishedPortInput {
-                ports: "81".into(),
-                ..make_port("p", true, false)
-            },
-            PublishedPortInput {
-                ipv4_public_port: Some("8080".into()),
-                ..make_port("p", true, false)
-            },
-            PublishedPortInput {
-                protocol: Protocol::Udp,
-                ..make_port("p", true, false)
-            },
-            PublishedPortInput {
-                source: "10.0.0.0/8".into(),
-                ..make_port("p", true, false)
-            },
-            make_port("q", true, false),
-        ];
-        for port in changed {
-            let desc = format!("{port:?}");
-            check(stored("1"), port)
-                .await
-                .expect_err(&format!("changed port {desc} accepted"));
-        }
-        check(stored("0"), make_port("p", true, false))
-            .await
-            .expect_err("enabling a stored disabled port");
+        let elsewhere = HashMap::from([("AA:BB:CC:DD:EE:FF".to_string(), "Kids".to_string())]);
+        assert!(devices_leaving_profile(&cfgs, &lookup, &elsewhere, &names).is_empty());
+    }
+
+    #[test]
+    fn a_ports_profile_comes_from_its_address_else_its_zone() {
+        let networks = vec![ProfileNetwork {
+            vlan: 1,
+            device: "br-lan.1".into(),
+            name: "Admin".into(),
+            address: Some("192.168.1.1/24".parse().unwrap()),
+        }];
+        let zones = HashMap::from([("guest".to_string(), "Guest".to_string())]);
+        let mut port = RawPort {
+            dest_ipv4: Some("192.168.1.50".into()),
+            dest_zone: Some("guest".into()),
+            ..raw_v6_port(true, None)
+        };
+        assert_eq!(port_profile(&port, &networks, &zones), Some("Admin"));
+        port.dest_ipv4 = None;
+        assert_eq!(port_profile(&port, &networks, &zones), Some("Guest"));
     }
 
     fn offline_device() -> HashMap<String, DeviceNetInfo> {
@@ -3704,7 +3644,6 @@ config redirect 'pp_p'
                 ipv6: None,
                 ipv6_link_local_only: false,
                 arp_interface: None,
-                has_static_ipv4: true,
             },
         )])
     }
@@ -4380,35 +4319,6 @@ config forwarding 'fwd_lan_guest'
         );
     }
 
-    #[tokio::test]
-    async fn device_zone_prefers_address_and_falls_back_to_neighbor() {
-        let dir = tempfile::tempdir().unwrap();
-        setup_firewall(dir.path(), FORWARDINGS);
-        std::fs::write(dir.path().join("network"), NETWORK).unwrap();
-        let arena = Arena::new();
-        let cfgs = parse_all(dir.path(), &arena, &["firewall", "network"])
-            .await
-            .unwrap();
-
-        // The address decides when it resolves, whatever the neighbor table says.
-        assert_eq!(
-            device_zone(&cfgs, "AA", Some("192.168.101.50"), Some("lan_iot")).as_deref(),
-            Some("lan_guest")
-        );
-        // A device with no IPv4 (IPv6-only) is placed by the neighbor table.
-        assert_eq!(
-            device_zone(&cfgs, "AA", None, Some("lan_iot")).as_deref(),
-            Some("lan_iot")
-        );
-        // An IPv4 outside every profile subnet falls back the same way.
-        assert_eq!(
-            device_zone(&cfgs, "AA", Some("10.9.8.7"), Some("lan_iot")).as_deref(),
-            Some("lan_iot")
-        );
-        assert_eq!(device_zone(&cfgs, "AA", Some("10.9.8.7"), None), None);
-        assert_eq!(device_zone(&cfgs, "AA", None, None), None);
-    }
-
     #[test]
     fn sync_clears_reflection_zones_on_reflection_off_redirect() {
         // fw4 validates `reflection_zone` names before it reads `reflection`,
@@ -4621,32 +4531,19 @@ config rule
         assert!(v6_copies(&cfg).is_empty());
     }
 
-    /// The copies are firewall plumbing, not ports: `list` sees one port,
-    /// and forgetting the device takes the copies with the rule.
+    /// The copies are firewall plumbing, not ports: `list` sees one port.
     #[tokio::test]
-    async fn v6_copies_are_invisible_to_list_and_removed_with_the_port() {
+    async fn v6_copies_are_invisible_to_list() {
         let dir = tempfile::tempdir().unwrap();
         let arena = Arena::new();
         let content = format!("{FORWARDINGS}{V6_RULE}");
         let mut cfg = uciedit::Config::parse_str(&arena, &content).unwrap();
         assert!(sync_hairpin(&mut cfg, &[]).unwrap());
         std::fs::write(dir.path().join("firewall"), cfg.dump_str()).unwrap();
-        std::fs::write(dir.path().join("dhcp"), "").unwrap();
 
         let ports = extract_ports(&arena, dir.path()).await.unwrap();
         assert_eq!(ports.len(), 1);
         assert!(ports[0].ipv6 && !ports[0].ipv4);
-
-        let mut cfgs = parse_all(dir.path(), &arena, &["firewall", "dhcp"])
-            .await
-            .unwrap();
-        let removed =
-            remove_ports_for_macs(&mut cfgs, &HashSet::from(["aa:bb:cc:dd:ee:ff".to_string()]));
-        assert_eq!(removed, 3);
-        assert!(!cfgs["firewall"]
-            .sections
-            .iter()
-            .any(|s| s.name().is_some_and(|n| n.starts_with("pp_"))));
     }
 
     // ── uuid_v4 tests ──
@@ -5218,463 +5115,5 @@ config rule 'apf_sni_8444'
             .await
             .unwrap()
             .contains("ether daddr != { aa:bb:cc:dd:ee:ff } counter drop"));
-    }
-
-    // ── affected_ports_for_macs / remove_ports_for_macs tests ──
-
-    const TWO_PORTS_FW: &str = "\
-config redirect 'pp_a'
-\toption name 'Home Assistant'
-\toption src 'wan'
-\toption dest 'lan'
-\toption target 'DNAT'
-\tlist proto 'tcp'
-\toption src_dport '8123'
-\toption dest_port '8123'
-\toption enabled '1'
-\toption _pp_id 'a'
-\toption _pp_mac 'AA:AA:AA:AA:AA:AA'
-
-config redirect 'pp_b'
-\toption name 'Plex'
-\toption src 'wan'
-\toption dest 'lan'
-\toption target 'DNAT'
-\tlist proto 'tcp'
-\toption src_dport '32400'
-\toption dest_port '32400'
-\toption enabled '1'
-\toption _pp_id 'b'
-\toption _pp_mac 'BB:BB:BB:BB:BB:BB'
-";
-
-    #[tokio::test]
-    async fn affected_filters_by_mac_and_enriches_name() {
-        let dir = tempfile::tempdir().unwrap();
-        setup_firewall(dir.path(), TWO_PORTS_FW);
-
-        let mut macs = HashSet::new();
-        macs.insert("AA:AA:AA:AA:AA:AA".to_string());
-        let mut names = HashMap::new();
-        names.insert("AA:AA:AA:AA:AA:AA".to_string(), "Living Room".to_string());
-
-        let affected = affected_ports_for_macs(dir.path(), &macs, &names)
-            .await
-            .unwrap();
-        assert_eq!(affected.len(), 1, "only the matching MAC's port");
-        assert_eq!(affected[0].id, "a");
-        assert_eq!(affected[0].label, "Home Assistant");
-        assert_eq!(affected[0].device_name.as_deref(), Some("Living Room"));
-    }
-
-    #[tokio::test]
-    async fn affected_case_insensitive_and_empty_macs() {
-        let dir = tempfile::tempdir().unwrap();
-        setup_firewall(dir.path(), TWO_PORTS_FW);
-
-        // lower-case input still matches the upper-case stored MAC
-        let mut macs = HashSet::new();
-        macs.insert("bb:bb:bb:bb:bb:bb".to_string());
-        let affected = affected_ports_for_macs(dir.path(), &macs, &HashMap::new())
-            .await
-            .unwrap();
-        assert_eq!(affected.len(), 1);
-        assert_eq!(affected[0].id, "b");
-        assert!(affected[0].device_name.is_none());
-
-        // empty MAC set short-circuits to no results
-        let none = affected_ports_for_macs(dir.path(), &HashSet::new(), &HashMap::new())
-            .await
-            .unwrap();
-        assert!(none.is_empty());
-    }
-
-    #[tokio::test]
-    async fn remove_ports_drops_sections_and_reservations_for_macs() {
-        let dir = tempfile::tempdir().unwrap();
-        setup_firewall(dir.path(), TWO_PORTS_FW);
-        std::fs::write(
-            dir.path().join("dhcp"),
-            "\
-config host 'host_aaaaaaaaaaaa'
-\toption mac 'AA:AA:AA:AA:AA:AA'
-\toption ip '192.168.3.50'
-\toption dns '1'
-
-config host 'host_bbbbbbbbbbbb'
-\toption mac 'BB:BB:BB:BB:BB:BB'
-\toption ip '192.168.1.60'
-\toption dns '1'
-",
-        )
-        .unwrap();
-
-        let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["firewall", "dhcp"])
-            .await
-            .unwrap();
-
-        let mut macs = HashSet::new();
-        macs.insert("AA:AA:AA:AA:AA:AA".to_string());
-        let removed = remove_ports_for_macs(&mut cfgs, &macs);
-        assert_eq!(removed, 1, "one firewall section removed");
-
-        dump_all(dir.path(), cfgs).await.unwrap();
-
-        let fw = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
-        assert!(!fw.contains("pp_a"), "MAC A's port should be gone");
-        assert!(fw.contains("pp_b"), "MAC B's port should remain");
-
-        let dhcp = std::fs::read_to_string(dir.path().join("dhcp")).unwrap();
-        assert!(
-            !dhcp.contains("AA:AA:AA:AA:AA:AA"),
-            "MAC A's stale reservation should be removed"
-        );
-        assert!(
-            dhcp.contains("BB:BB:BB:BB:BB:BB"),
-            "MAC B's reservation should remain"
-        );
-
-        // The surviving published port is still parseable.
-        let remaining = extract_ports(&Arena::new(), dir.path()).await.unwrap();
-        assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].id, "b");
-    }
-
-    // ── affected_wifi_ports_for_vacated_profiles tests ──
-
-    /// Two profiles: Admin (lan, 192.168.1.0/24) and Guest (guest,
-    /// 192.168.101.0/24). pp_a's device (AA) is reserved on the Guest subnet,
-    /// pp_b's device (BB) on the Admin subnet.
-    fn setup_two_profile_subnets(dir: &std::path::Path) {
-        std::fs::write(
-            dir.join("startwrt"),
-            "\
-config profile lan
-\toption fullname 'Admin'
-\toption interface 'lan'
-\toption vlan_tag '99'
-
-config profile guest
-\toption fullname 'Guest'
-\toption interface 'guest'
-\toption vlan_tag '101'
-",
-        )
-        .unwrap();
-        std::fs::write(
-            dir.join("network"),
-            "\
-config interface 'lan'
-\toption proto 'static'
-\toption ipaddr '192.168.1.1'
-\toption netmask '255.255.255.0'
-
-config interface 'guest'
-\toption proto 'static'
-\toption ipaddr '192.168.101.1'
-\toption netmask '255.255.255.0'
-",
-        )
-        .unwrap();
-        setup_firewall(dir, TWO_PORTS_FW);
-        std::fs::write(
-            dir.join("dhcp"),
-            "\
-config host 'host_a'
-\toption mac 'AA:AA:AA:AA:AA:AA'
-\toption ip '192.168.101.50'
-
-config host 'host_b'
-\toption mac 'BB:BB:BB:BB:BB:BB'
-\toption ip '192.168.1.60'
-",
-        )
-        .unwrap();
-    }
-
-    #[tokio::test]
-    async fn affected_wifi_ports_filters_by_subnet_and_connection() {
-        let dir = tempfile::tempdir().unwrap();
-        setup_two_profile_subnets(dir.path());
-        let ctx = TestContext(dir.path().to_path_buf());
-
-        let mut vacated = HashSet::new();
-        vacated.insert("Guest".to_string());
-
-        // Both devices WiFi-connected: only AA (on the vacated Guest subnet) is
-        // affected; BB sits on the Admin subnet, which isn't vacated.
-        let wifi_macs: HashSet<String> = ["AA:AA:AA:AA:AA:AA", "BB:BB:BB:BB:BB:BB"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let (macs, ports) = affected_wifi_ports_for_vacated_profiles(
-            &ctx,
-            &vacated,
-            &wifi_macs,
-            &HashMap::new(),
-            &HashMap::new(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(ports.len(), 1, "only the Guest-subnet device's port");
-        assert_eq!(ports[0].id, "a");
-        assert_eq!(macs.len(), 1);
-        assert!(macs.contains("AA:AA:AA:AA:AA:AA"));
-
-        // AA is on Ethernet (not in wifi_macs) and BB is on the Admin subnet, so
-        // nothing is affected even though Guest is vacated.
-        let eth_only: HashSet<String> = ["BB:BB:BB:BB:BB:BB"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let (macs, ports) = affected_wifi_ports_for_vacated_profiles(
-            &ctx,
-            &vacated,
-            &eth_only,
-            &HashMap::new(),
-            &HashMap::new(),
-        )
-        .await
-        .unwrap();
-        assert!(ports.is_empty() && macs.is_empty());
-
-        // Empty vacated set short-circuits to nothing.
-        let (macs, ports) = affected_wifi_ports_for_vacated_profiles(
-            &ctx,
-            &HashSet::new(),
-            &wifi_macs,
-            &HashMap::new(),
-            &HashMap::new(),
-        )
-        .await
-        .unwrap();
-        assert!(ports.is_empty() && macs.is_empty());
-    }
-
-    /// An IPv6-only published port (no IPv4 reservation) is attributed to its
-    /// profile via the live `device_profiles` map and caught on vacate.
-    #[tokio::test]
-    async fn affected_wifi_ports_catches_ipv6_only_via_profile() {
-        let dir = tempfile::tempdir().unwrap();
-        // Two profiles, but a single IPv6-only port for device CC with NO DHCP
-        // reservation at all — only the live profile attribution can place it.
-        std::fs::write(
-            dir.path().join("startwrt"),
-            "\
-config profile lan
-\toption fullname 'Admin'
-\toption interface 'lan'
-\toption vlan_tag '99'
-
-config profile guest
-\toption fullname 'Guest'
-\toption interface 'guest'
-\toption vlan_tag '101'
-",
-        )
-        .unwrap();
-        std::fs::write(
-            dir.path().join("network"),
-            "\
-config interface 'guest'
-\toption proto 'static'
-\toption ipaddr '192.168.101.1'
-\toption netmask '255.255.255.0'
-",
-        )
-        .unwrap();
-        setup_firewall(
-            dir.path(),
-            "\
-config rule 'pp_c_v6'
-\toption name 'Cam v6'
-\toption src 'wan'
-\toption dest 'guest'
-\toption target 'ACCEPT'
-\tlist proto 'tcp'
-\toption dest_port '554'
-\toption dest_ip '2001:db8:abcd::cc'
-\toption family 'ipv6'
-\toption enabled '1'
-\toption _pp_id 'c'
-\toption _pp_mac 'CC:CC:CC:CC:CC:CC'
-",
-        );
-        std::fs::write(dir.path().join("dhcp"), "").unwrap();
-        let ctx = TestContext(dir.path().to_path_buf());
-
-        let vacated: HashSet<String> = ["Guest".to_string()].into_iter().collect();
-        let wifi_macs: HashSet<String> = ["CC:CC:CC:CC:CC:CC".to_string()].into_iter().collect();
-        let device_profiles: HashMap<String, String> =
-            [("CC:CC:CC:CC:CC:CC".to_string(), "Guest".to_string())]
-                .into_iter()
-                .collect();
-
-        let (macs, ports) = affected_wifi_ports_for_vacated_profiles(
-            &ctx,
-            &vacated,
-            &wifi_macs,
-            &HashMap::new(),
-            &device_profiles,
-        )
-        .await
-        .unwrap();
-        assert_eq!(ports.len(), 1, "the IPv6-only port should be caught");
-        assert_eq!(ports[0].id, "c");
-        assert!(macs.contains("CC:CC:CC:CC:CC:CC"));
-
-        // Same device on a non-vacated profile → not affected.
-        let admin_profiles: HashMap<String, String> =
-            [("CC:CC:CC:CC:CC:CC".to_string(), "Admin".to_string())]
-                .into_iter()
-                .collect();
-        let (macs, ports) = affected_wifi_ports_for_vacated_profiles(
-            &ctx,
-            &vacated,
-            &wifi_macs,
-            &HashMap::new(),
-            &admin_profiles,
-        )
-        .await
-        .unwrap();
-        assert!(ports.is_empty() && macs.is_empty());
-    }
-
-    #[tokio::test]
-    async fn remove_ports_preserves_named_host_but_clears_ip() {
-        let dir = tempfile::tempdir().unwrap();
-        setup_firewall(dir.path(), TWO_PORTS_FW);
-        // host_a is user-named with a manual IPv6 hostid; host_b is an anonymous
-        // published-port auto-reservation.
-        std::fs::write(
-            dir.path().join("dhcp"),
-            "\
-config host 'host_a'
-\toption name 'Living Room NAS'
-\toption mac 'AA:AA:AA:AA:AA:AA'
-\toption ip '192.168.3.50'
-\toption hostid 'dead:beef:0:50'
-\toption dns '1'
-
-config host 'host_b'
-\toption mac 'BB:BB:BB:BB:BB:BB'
-\toption ip '192.168.1.60'
-\toption dns '1'
-",
-        )
-        .unwrap();
-
-        let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["firewall", "dhcp"])
-            .await
-            .unwrap();
-
-        let macs: HashSet<String> = ["AA:AA:AA:AA:AA:AA", "BB:BB:BB:BB:BB:BB"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        remove_ports_for_macs(&mut cfgs, &macs);
-        dump_all(dir.path(), cfgs).await.unwrap();
-
-        let dhcp = std::fs::read_to_string(dir.path().join("dhcp")).unwrap();
-        // Named host kept; its stale IPv4 cleared but name + manual hostid survive.
-        assert!(
-            dhcp.contains("Living Room NAS"),
-            "named host should survive:\n{dhcp}"
-        );
-        assert!(
-            dhcp.contains("dead:beef:0:50"),
-            "manual hostid should survive:\n{dhcp}"
-        );
-        assert!(
-            !dhcp.contains("192.168.3.50"),
-            "stale IPv4 should be cleared:\n{dhcp}"
-        );
-        // Anonymous host removed entirely.
-        assert!(
-            !dhcp.contains("BB:BB:BB:BB:BB:BB"),
-            "anonymous host should be removed:\n{dhcp}"
-        );
-    }
-
-    /// A profile move strands an automatic forward exactly as it strands a
-    /// manual one — it pins the device's old address and zone — so both go.
-    /// The device's *permission* to make them must survive, though: it's a user
-    /// decision, and on an unnamed host it's the only thing on the section.
-    #[tokio::test]
-    async fn remove_ports_drops_auto_forwards_but_keeps_the_permission() {
-        let dir = tempfile::tempdir().unwrap();
-        setup_firewall(
-            dir.path(),
-            "\
-config redirect 'apf_aaaaaaaaaaaa_8443'
-\toption name 'Auto forward (PCP)'
-\toption src 'wan'
-\toption dest 'lan'
-\toption target 'DNAT'
-\tlist proto 'tcp'
-\toption src_dport '8443'
-\toption dest_port '8443'
-\toption dest_ip '192.168.1.50'
-\toption enabled '1'
-\toption _apf_label 'PCP'
-\toption _apf_mac 'AA:AA:AA:AA:AA:AA'
-
-config redirect 'apf_bbbbbbbbbbbb_9443'
-\toption name 'Auto forward (UPnP)'
-\toption src 'wan'
-\toption dest 'lan'
-\toption target 'DNAT'
-\tlist proto 'tcp'
-\toption src_dport '9443'
-\toption dest_port '9443'
-\toption dest_ip '192.168.1.60'
-\toption enabled '1'
-\toption _apf_label 'UPnP'
-\toption _apf_mac 'BB:BB:BB:BB:BB:BB'
-",
-        );
-        // An unnamed host carrying nothing but the auto-forward permission.
-        std::fs::write(
-            dir.path().join("dhcp"),
-            "\
-config host 'host_a'
-\toption mac 'AA:AA:AA:AA:AA:AA'
-\toption ip '192.168.1.50'
-\toption _allow_pcp '1'
-",
-        )
-        .unwrap();
-
-        let arena = Arena::new();
-        let mut cfgs = parse_all(dir.path(), &arena, &["firewall", "dhcp"])
-            .await
-            .unwrap();
-        let mut macs = HashSet::new();
-        macs.insert("AA:AA:AA:AA:AA:AA".to_string());
-        let removed = remove_ports_for_macs(&mut cfgs, &macs);
-        dump_all(dir.path(), cfgs).await.unwrap();
-
-        assert_eq!(removed, 1, "only the moved device's forward");
-        let fw = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
-        assert!(
-            !fw.contains("apf_aaaaaaaaaaaa_8443"),
-            "stranded auto forward should be removed:\n{fw}"
-        );
-        assert!(
-            fw.contains("apf_bbbbbbbbbbbb_9443"),
-            "another device's forward is untouched:\n{fw}"
-        );
-
-        let dhcp = std::fs::read_to_string(dir.path().join("dhcp")).unwrap();
-        assert!(
-            dhcp.contains("_allow_pcp"),
-            "the permission is user-owned and must survive:\n{dhcp}"
-        );
-        assert!(
-            !dhcp.contains("192.168.1.50"),
-            "but its stale IPv4 pin is cleared:\n{dhcp}"
-        );
     }
 }

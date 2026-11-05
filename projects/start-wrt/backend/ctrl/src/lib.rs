@@ -34,6 +34,7 @@ pub mod profiles;
 pub mod progress;
 pub mod published_ports;
 pub mod registry;
+pub mod reservations;
 pub mod setup;
 pub mod sign;
 pub mod ssh_keys;

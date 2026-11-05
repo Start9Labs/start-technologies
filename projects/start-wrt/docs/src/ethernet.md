@@ -18,7 +18,7 @@ One Ethernet port is designated as the WAN port, which connects to your ISP mode
 
 1. For each non-WAN port, select the desired Security Profile from the dropdown.
 
-1. Confirm the change. If reassigning the port would break any [Published Ports](published-ports.md) rules (the devices on that port move to a new subnet), the confirmation lists the affected rules, which are deleted when you confirm. Canceling leaves the port unchanged.
+1. Confirm the change. The confirmation names any devices on the port that have a reserved address or [Published Ports](published-ports.md) rule for the port's old profile. Those are kept, and apply again if the devices return to that profile. Canceling leaves the port unchanged.
 
 > [!NOTE]
 > Changes take effect as soon as you confirm. The router briefly disconnects the port, and most devices plugged into it rejoin on the new profile's subnet within seconds. A device behind a switch, or one that ignores the brief disconnect, keeps its old address and usually loses Internet access and its connections to other devices until it reconnects. Unplug and replug its cable, or restart the device or the switch. Otherwise it reconnects on its own within 12 hours.
