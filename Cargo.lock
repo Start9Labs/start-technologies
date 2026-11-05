@@ -8500,7 +8500,7 @@ dependencies = [
 
 [[package]]
 name = "start-os"
-version = "0.4.1-rev.2"
+version = "0.4.1-rev.3"
 dependencies = [
  "include_dir",
  "start-core",
