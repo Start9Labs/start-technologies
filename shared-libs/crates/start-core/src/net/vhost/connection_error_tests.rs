@@ -113,22 +113,12 @@ async fn transparent_connection_errors_are_silent() {
         };
         target_socket.bind((ip, 0).into()).unwrap();
         let target = target_socket.local_addr().unwrap();
-        let source_listener = TcpListener::bind((ip, 0)).await.unwrap();
-        let client = source_listener.local_addr().unwrap();
-        crate::net::transparent::transparent_socket(client, target).unwrap();
         let (logs, dispatch) = capture_logs();
         assert!(
-            ProxyTarget::connect_transparent(client, target)
-                .with_subscriber(dispatch.clone())
-                .await
-                .is_none()
-        );
-        assert!(logs.lock().unwrap().is_empty());
-        assert!(
-            ProxyTarget::connect_transparent((ip, 0).into(), target)
+            crate::net::transparent::transparent_connect((ip, 0).into(), target)
                 .with_subscriber(dispatch)
                 .await
-                .is_none()
+                .is_err()
         );
         assert!(logs.lock().unwrap().is_empty());
 
@@ -147,21 +137,103 @@ async fn transparent_connection_errors_are_silent() {
 #[tokio::test]
 #[ignore = "requires both CAP_NET_RAW and CAP_NET_ADMIN to be absent"]
 async fn transparent_socket_setup_failure_warns() {
-    let client = "127.0.0.1:0".parse().unwrap();
-    let target = "127.0.0.1:1".parse().unwrap();
-    let error = crate::net::transparent::transparent_socket(client, target).unwrap_err();
+    let client = "198.51.100.1:23456".parse().unwrap();
+    let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = backend.local_addr().unwrap();
+    let mut target = target(addr);
+    target.preserve_source_ip = true;
+    let error = crate::net::transparent::transparent_socket(client, addr).unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
     let (logs, dispatch) = capture_logs();
     assert!(
-        ProxyTarget::connect_transparent(client, target)
+        target
+            .connect_backend(Some(client))
             .with_subscriber(dispatch)
             .await
             .is_none()
     );
+    assert!(backend.accept().now_or_never().is_none());
     let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
     assert!(logs.contains("WARN"), "{logs}");
     assert!(logs.contains("transparent egress setup"), "{logs}");
-    assert!(logs.contains("connecting plainly"), "{logs}");
+    assert!(logs.contains("refusing connection"), "{logs}");
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "requires CAP_NET_RAW or CAP_NET_ADMIN"]
+async fn source_port_conflicts_never_reach_the_plain_backend() {
+    for (local, wildcard, remote) in [
+        ("127.0.0.1", "0.0.0.0", "198.51.100.1"),
+        ("::1", "::", "2001:db8::1"),
+    ] {
+        let source_listener = TcpListener::bind((wildcard, 0)).await.unwrap();
+        let client = SocketAddr::new(
+            remote.parse().unwrap(),
+            source_listener.local_addr().unwrap().port(),
+        );
+        let backend = TcpListener::bind((local, 0)).await.unwrap();
+        let addr = backend.local_addr().unwrap();
+        let mut target = target(addr);
+        target.preserve_source_ip = true;
+        target.addr_v6 = match addr {
+            SocketAddr::V6(addr) => Some(addr),
+            SocketAddr::V4(_) => None,
+        };
+        let socket = crate::net::transparent::transparent_socket(client, addr).unwrap();
+        assert_eq!(
+            socket.bind(client).unwrap_err().kind(),
+            std::io::ErrorKind::AddrInUse
+        );
+        let (logs, dispatch) = capture_logs();
+        assert!(
+            target
+                .connect_backend(Some(client))
+                .with_subscriber(dispatch)
+                .await
+                .is_none()
+        );
+        assert!(backend.accept().now_or_never().is_none());
+        assert!(logs.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn missing_backend_address_family_never_reaches_the_plain_backend() {
+    let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut target = target(backend.local_addr().unwrap());
+    target.preserve_source_ip = true;
+    let (logs, dispatch) = capture_logs();
+    assert!(
+        target
+            .connect_backend(Some("[2001:db8::1]:23456".parse().unwrap()))
+            .with_subscriber(dispatch)
+            .await
+            .is_none()
+    );
+    assert!(backend.accept().now_or_never().is_none());
+    assert!(logs.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn connections_without_a_transparent_leg_still_reach_the_backend() {
+    for (preserve, peer) in [
+        (false, Some("198.51.100.1:23456")),
+        (true, Some("127.0.0.1:23456")),
+        (true, Some("10.0.3.2:23456")),
+        (true, Some("192.168.1.1:23456")),
+    ] {
+        let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut target = target(backend.local_addr().unwrap());
+        target.preserve_source_ip = preserve;
+        target.private.insert("192.168.1.1".parse().unwrap());
+        let (stream, _) = target
+            .connect_backend(peer.map(|p| p.parse().unwrap()))
+            .await
+            .unwrap();
+        let (accepted, _) = backend.accept().await.unwrap();
+        assert_eq!(accepted.peer_addr().unwrap(), stream.local_addr().unwrap());
+    }
 }
 
 #[tokio::test]

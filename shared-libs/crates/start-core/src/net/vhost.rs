@@ -1214,13 +1214,33 @@ impl ProxyTarget {
             Ok(socket) => socket,
             Err(e) => {
                 tracing::warn!(
-                    "transparent egress setup for {client} failed ({e}); connecting plainly, so {target} will see this host as the peer"
+                    "transparent egress setup for {client} to {target} failed ({e}); refusing connection"
                 );
                 return None;
             }
         };
         socket.bind(client).ok()?;
+        crate::net::transparent::ensure_divert_infra_once()
+            .await
+            .log_err()?;
         socket.connect(target).await.ok()
+    }
+
+    async fn connect_backend(
+        &self,
+        peer: Option<SocketAddr>,
+    ) -> Option<(TcpStream, tokio::time::Instant)> {
+        let Some(client) =
+            peer.filter(|client| self.preserve_source_ip && self.gateways_client(client.ip()))
+        else {
+            return self.connect_plain().await;
+        };
+        let target = match client {
+            SocketAddr::V4(_) => matches!(self.addr, SocketAddr::V4(_)).then_some(self.addr)?,
+            SocketAddr::V6(_) => SocketAddr::V6(self.addr_v6?),
+        };
+        let stream = Self::connect_transparent(client, target).await?;
+        Some((stream, tokio::time::Instant::now() + BACKEND_DIAL_TIMEOUT))
     }
 
     fn register_origin<A>(
@@ -1302,24 +1322,6 @@ impl ProxyTarget {
             }
         }
     }
-
-    /// The `(client, container)` pair to open the internal leg with when the
-    /// client's source address is to be preserved; `None` to connect plainly.
-    /// Both ends must be one family, so a v6 client needs the container's v6.
-    fn transparent_leg(&self, peer: Option<SocketAddr>) -> Option<(SocketAddr, SocketAddr)> {
-        if !self.preserve_source_ip {
-            return None;
-        }
-        let client = peer?;
-        if !self.gateways_client(client.ip()) {
-            return None;
-        }
-        let target = match client {
-            SocketAddr::V4(_) => matches!(self.addr, SocketAddr::V4(_)).then_some(self.addr)?,
-            SocketAddr::V6(_) => SocketAddr::V6(self.addr_v6?),
-        };
-        Some((client, target))
-    }
 }
 
 struct Arrival {
@@ -1396,18 +1398,7 @@ where
         metadata: &'a <A as Accept>::Metadata,
     ) -> Option<(ServerConfig, Self::PreprocessRes)> {
         let peer = extract::<TcpMetadata, _>(metadata).map(|m| m.peer_addr);
-        let (tcp_stream, deadline) = match self.transparent_leg(peer) {
-            Some((client, target)) => {
-                crate::net::transparent::ensure_divert_infra_once()
-                    .await
-                    .log_err();
-                match Self::connect_transparent(client, target).await {
-                    Some(stream) => (stream, tokio::time::Instant::now() + BACKEND_DIAL_TIMEOUT),
-                    None => self.connect_plain().await?,
-                }
-            }
-            None => self.connect_plain().await?,
-        };
+        let (tcp_stream, deadline) = self.connect_backend(peer).await?;
         if let Err(e) = socket2::SockRef::from(&tcp_stream)
             .set_tcp_keepalive(&crate::net::utils::default_keepalive())
         {
