@@ -1416,6 +1416,7 @@ async fn cli_set_address_enabled<Kind: HostApiKind>(
         params,
         inherited_params,
         raw_params,
+        ..
     }: HandlerArgs<CliContext, CliBindingSetAddressEnabledParams, Kind::Inheritance>,
 ) -> Result<(), Error> {
     call_with_address::<Kind>(
@@ -1438,6 +1439,7 @@ async fn cli_set_range_address_enabled<Kind: HostApiKind>(
         params,
         inherited_params,
         raw_params,
+        ..
     }: HandlerArgs<CliContext, CliBindingSetAddressEnabledParams, Kind::Inheritance>,
 ) -> Result<(), Error> {
     call_with_address::<Kind>(
@@ -1460,6 +1462,7 @@ async fn cli_set_gua_wan<Kind: HostApiKind>(
         params,
         inherited_params,
         raw_params,
+        ..
     }: HandlerArgs<CliContext, CliBindingSetGuaWanParams, Kind::Inheritance>,
 ) -> Result<(), Error> {
     call_with_address::<Kind>(
