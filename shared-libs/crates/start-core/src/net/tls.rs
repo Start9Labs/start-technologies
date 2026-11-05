@@ -155,17 +155,14 @@ where
                                             .is_match(buf)
                                     })
                                 {
-                                    handle_http_on_https(stream).await.log_err();
+                                    handle_http_on_https(stream).await.ok();
 
                                     return Ok(None);
                                 } else {
                                     return Err(e).with_kind(ErrorKind::Network);
                                 }
                             }
-                            Err(_) => {
-                                crate::dev_log!(debug, "TLS ClientHello timed out");
-                                return Ok(None);
-                            }
+                            Err(_) => return Ok(None),
                         };
 
                     // Phase 2: Resolve TLS config. `mid` stays in scope so a
@@ -208,14 +205,7 @@ where
                                             Box::pin(stream) as AcceptStream,
                                         ))
                                     }
-                                    Err(e) => {
-                                        crate::dev_log!(
-                                            trace,
-                                            "Error completing TLS handshake: {e}"
-                                        );
-                                        crate::dev_log!(trace, "{e:?}");
-                                        None
-                                    }
+                                    Err(_) => None,
                                 },
                             );
                         }
@@ -236,7 +226,6 @@ where
                             )));
                         }
                         None => {
-                            crate::dev_log!(debug, "no certificate for SNI {:?}", sni);
                             // Writes are buffered until the config settles;
                             // the alert has to reach the wire.
                             let _ = mid.io.stop_buffering();
