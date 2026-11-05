@@ -1,9 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use librqbit::storage::StorageFactoryExt;
 use librqbit::{AddTorrent, AddTorrentOptions, ListenerOptions};
 use serde::{Deserialize, Serialize};
 
+use super::stored_file::StoredFile;
 use super::{
     ContentCommitment, TorrentSession, file_name, session_options, torrent_error, validate_metadata,
 };
@@ -109,16 +111,40 @@ impl SeedService {
         }
         let output = path.join("data");
         commitment.verify(&output.join(file_name(&meta)?)).await?;
-        self.session
+        let source = StoredFile::open(&output.join(file_name(&meta)?)).map_err(torrent_error)?;
+        let torrent = self
+            .session
             .0
             .add_torrent(
                 AddTorrent::from_bytes(bytes),
                 Some(AddTorrentOptions {
-                    overwrite: true,
-                    output_folder: Some(output.to_string_lossy().into_owned()),
+                    paused: true,
+                    storage_factory: Some(source.boxed()),
                     ..Default::default()
                 }),
             )
+            .await
+            .map_err(torrent_error)?
+            .into_handle()
+            .or_not_found("torrent handle")?;
+        torrent
+            .wait_until_initialized()
+            .await
+            .map_err(torrent_error)?;
+        if !torrent.stats().finished {
+            self.session
+                .0
+                .delete(torrent.info_hash().into(), false)
+                .await
+                .map_err(torrent_error)?;
+            return Err(Error::new(
+                eyre!("Stored artifact differs from torrent"),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        self.session
+            .0
+            .unpause(&torrent)
             .await
             .map_err(torrent_error)?;
         Ok(())
@@ -169,6 +195,45 @@ mod tests {
     use crate::sign::commitment::Commitment;
     use crate::sign::commitment::blake3::Blake3Commitment;
     use crate::util::io::open_file;
+
+    #[tokio::test]
+    async fn incompatible_torrent_never_repairs_the_stored_file() -> Result<(), Error> {
+        let source = TmpDir::new().await?;
+        let cache = TmpDir::new().await?;
+        let path = source.join("payload.bin");
+        tokio::fs::write(&path, b"first bytes").await?;
+        let session = TorrentSession::new(
+            source.to_path_buf(),
+            librqbit::SessionOptions {
+                dht: None,
+                ..session_options()
+            },
+        )
+        .await?;
+        let (torrent, _) = session
+            .0
+            .create_and_serve_torrent(&path, Default::default())
+            .await
+            .map_err(torrent_error)?;
+        let bytes = torrent.as_bytes().map_err(torrent_error)?;
+        tokio::fs::write(&path, b"other bytes").await?;
+        let commitment: ContentCommitment =
+            Blake3Commitment::create(&MultiCursorFile::from(open_file(&path).await?))
+                .await?
+                .into();
+        let meta = validate_metadata(&bytes, &commitment)?;
+        let storage = Arc::new(SeedCache::open(cache.to_path_buf()).await?);
+        let retained = storage.retain(&path, &bytes, &commitment).await?;
+        let service = SeedService::start(storage, None).await?;
+        assert!(service.resume(&retained).await.is_err());
+        assert!(service.session.0.get(meta.info_hash.into()).is_none());
+        assert_eq!(
+            tokio::fs::read(retained.join("data").join(file_name(&meta)?)).await?,
+            b"other bytes"
+        );
+        service.stop().await;
+        Ok(())
+    }
 
     #[tokio::test]
     async fn verified_cache_resumes_and_corrupt_content_is_not_seeded() -> Result<(), Error> {

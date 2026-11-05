@@ -25,6 +25,7 @@ use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::util::io::{TmpDir, open_file};
 
 mod seeds;
+mod stored_file;
 pub use seeds::TorrentSeedConfig;
 #[cfg(test)]
 mod tests;

@@ -9154,6 +9154,7 @@ name = "start-core"
 version = "0.4.2"
 dependencies = [
  "aes 0.9.3",
+ "anyhow",
  "astral-tokio-tar",
  "async-compression",
  "async-stream",
