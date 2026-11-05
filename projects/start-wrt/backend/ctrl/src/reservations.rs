@@ -295,6 +295,26 @@ pub(crate) fn write_reservations(
     Ok(())
 }
 
+/// Deletes every reservation in `subnet`. Returns them by uppercase MAC, in
+/// MAC order.
+pub(crate) fn remove_in_subnet(
+    dhcp: &mut Config<'_>,
+    subnet: Ipv4Net,
+) -> Result<Vec<(String, Ipv4Addr)>, Error> {
+    let mut by_mac: Vec<(String, Vec<Ipv4Addr>)> = reservations_by_mac(dhcp).into_iter().collect();
+    by_mac.sort();
+    let mut removed = Vec::new();
+    for (mac, ips) in by_mac {
+        let (gone, kept): (Vec<_>, Vec<_>) = ips.into_iter().partition(|ip| subnet.contains(ip));
+        if gone.is_empty() {
+            continue;
+        }
+        write_reservations(dhcp, &mac, &kept)?;
+        removed.extend(gone.into_iter().map(|ip| (mac.clone(), ip)));
+    }
+    Ok(removed)
+}
+
 /// Names every section of the device, adding its settings section for a name
 /// it has none for. `None` or empty clears the name.
 pub(crate) fn write_name(

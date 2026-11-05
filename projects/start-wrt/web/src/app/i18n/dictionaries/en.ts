@@ -580,4 +580,6 @@ export const ENGLISH: Record<string, number> = {
   'Devices Will Leave Their Profile': 611,
   'Continue': 612,
   'Reserved for another device': 613,
+  'IPv4 reservations deleted with this profile: {list}.': 614,
+  'Published ports deleted with this profile: {list}.': 615,
 }

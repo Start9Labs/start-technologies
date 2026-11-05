@@ -575,4 +575,6 @@ export default {
   611: 'Los dispositivos dejarán su perfil',
   612: 'Continuar',
   613: 'Reservada para otro dispositivo',
+  614: 'Reservas IPv4 que se eliminan con este perfil: {list}.',
+  615: 'Puertos publicados que se eliminan con este perfil: {list}.',
 } satisfies i18n

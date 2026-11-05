@@ -45,7 +45,9 @@ export abstract class ApiService {
   abstract profileGet(params: ProfileIdOpt): Promise<SecurityProfile>
   abstract profileCreate(params: ProfileCreateInput): Promise<ProfileId>
   abstract profileUpdate(params: ProfileUpdateInput): Promise<ProfileId>
-  abstract profileDelete(params: ProfileIdOpt): Promise<null>
+  abstract profileDelete(
+    params: ProfileDeleteParams,
+  ): Promise<ProfileDeleteResult>
   abstract profileScheduleGet(params: {
     interface: string
   }): Promise<ScheduleWindow[]>
@@ -261,6 +263,10 @@ export type WifiBlackoutSetResult = RpcReturnType<Api, 'wifi.blackout-set'>
 export type ProfileId = RpcReturnType<Api, 'profiles.set'>
 
 export type ProfileIdOpt = Bindings.ProfileIdOptInput
+
+export type ProfileDeleteParams = RpcParamType<Api, 'profiles.delete'>
+
+export type ProfileDeleteResult = RpcReturnType<Api, 'profiles.delete'>
 
 export type SecurityProfile = RpcReturnType<Api, 'profiles.get'>
 

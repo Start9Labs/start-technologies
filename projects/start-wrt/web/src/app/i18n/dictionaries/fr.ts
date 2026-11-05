@@ -575,4 +575,6 @@ export default {
   611: 'Des appareils vont quitter leur profil',
   612: 'Continuer',
   613: 'Réservée pour un autre appareil',
+  614: 'Réservations IPv4 supprimées avec ce profil : {list}.',
+  615: 'Ports publiés supprimés avec ce profil : {list}.',
 } satisfies i18n

@@ -575,4 +575,6 @@ export default {
   611: 'Urządzenia opuszczą swój profil',
   612: 'Kontynuuj',
   613: 'Zarezerwowany dla innego urządzenia',
+  614: 'Rezerwacje IPv4 usuwane wraz z tym profilem: {list}.',
+  615: 'Opublikowane porty usuwane wraz z tym profilem: {list}.',
 } satisfies i18n

@@ -33,6 +33,8 @@ import {
   WifiBlackoutSetResult,
   ScheduleWindow,
   ProfileId,
+  ProfileDeleteParams,
+  ProfileDeleteResult,
   ProfileIdOpt,
   SecurityProfile,
   ProfileCreateInput,
@@ -1013,10 +1015,32 @@ export class MockApiService extends ApiService {
     }
   }
 
-  async profileDelete(params: ProfileIdOpt): Promise<null> {
+  async profileDelete(
+    params: ProfileDeleteParams,
+  ): Promise<ProfileDeleteResult> {
     await pauseFor(250)
 
     const deleted = this.findProfile(params)
+    const inProfile = (ip: string | null | undefined) =>
+      !!deleted && !!ip && this.mockProfileOf(ip) === deleted
+    const result: ProfileDeleteResult = {
+      reservations: this.mockDeviceHosts
+        .filter(h => inProfile(h.options.ip))
+        .map(h => ({
+          mac: (h.options.mac ?? '').toUpperCase(),
+          name: this.lookupDeviceByMac(h.options.mac ?? '').name,
+          ipv4: h.options.ip ?? '',
+        })),
+      published_ports: this.mockPublishedPorts
+        .filter(p => inProfile(p.device_ipv4))
+        .map(p => ({
+          id: p.id,
+          label: p.label,
+          mac: p.device_mac.toUpperCase(),
+          name: this.lookupDeviceByMac(p.device_mac).name,
+        })),
+    }
+    if (params.preview) return result
 
     this.mockProfiles = this.mockProfiles.filter(p => p !== deleted)
 
@@ -1053,6 +1077,19 @@ export class MockApiService extends ApiService {
       )
       this.persistVpnServers()
 
+      // Cascade: delete its reservations and published ports
+      const seen = new Set<string>()
+      this.mockDeviceHosts = this.mockDeviceHosts.flatMap(h => {
+        const mac = h.options.mac?.toUpperCase() ?? ''
+        const first = !seen.has(mac)
+        seen.add(mac)
+        if (!inProfile(h.options.ip)) return [h]
+        return first ? [{ ...h, options: { ...h.options, ip: undefined } }] : []
+      })
+      this.mockPublishedPorts = this.mockPublishedPorts.filter(
+        p => !inProfile(p.device_ipv4),
+      )
+
       // Cascade: reset any profiles using this one in lan_access other_profiles
       this.mockProfiles = this.mockProfiles.map(p => {
         if (
@@ -1079,7 +1116,7 @@ export class MockApiService extends ApiService {
         `Deleted profile '${deleted.fullname}'`,
       )
     }
-    return null
+    return result
   }
 
   private mockSchedules: Record<string, ScheduleWindow[]> = {

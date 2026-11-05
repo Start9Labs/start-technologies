@@ -224,6 +224,64 @@ pub(crate) fn devices_leaving_profile(
     out
 }
 
+/// A published port deleted with the profile it forwards into.
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
+pub struct DeletedPublishedPort {
+    pub id: String,
+    pub label: String,
+    pub mac: String,
+    pub name: Option<String>,
+}
+rpc_toolkit::reflect_ts!(DeletedPublishedPort);
+
+/// Deletes the published ports forwarding into `profile`, returned in label
+/// order. `cfgs` must contain "firewall", "network", and "startwrt", with the
+/// profile still in them.
+pub(crate) fn remove_profile_ports(
+    cfgs: &mut Configs,
+    lookup: &Lookup,
+    profile: &str,
+) -> Vec<DeletedPublishedPort> {
+    let networks = reservations::profile_networks(cfgs, lookup);
+    let zones = zone_profiles(cfgs, lookup);
+    let removed: BTreeMap<String, DeletedPublishedPort> = raw_ports(cfgs)
+        .into_iter()
+        .filter(|port| port_profile(port, &networks, &zones) == Some(profile))
+        .map(|port| {
+            let deleted = DeletedPublishedPort {
+                id: port.id.clone(),
+                label: port.label,
+                mac: port.device_mac.to_uppercase(),
+                name: None,
+            };
+            (port.id, deleted)
+        })
+        .collect();
+    cfgs["firewall"]
+        .sections
+        .retain(|section| !pp_section_id(section).is_some_and(|id| removed.contains_key(&id)));
+    let mut removed: Vec<DeletedPublishedPort> = removed.into_values().collect();
+    removed.sort_by(|a, b| a.label.cmp(&b.label).then_with(|| a.id.cmp(&b.id)));
+    removed
+}
+
+/// The id of the published port a firewall section belongs to.
+fn pp_section_id(section: &uciedit::Section<'_>) -> Option<String> {
+    if let Ok(redirect) = section.get::<FirewallRedirect>() {
+        if redirect.target == "DNAT" && redirect._pp_id.is_some() {
+            return redirect._pp_id;
+        }
+    }
+    if let Ok(rule) = section.get::<FirewallRule>() {
+        if is_pp_v6_rule(&rule) {
+            return rule._pp_id;
+        }
+    }
+    let name = section.name()?;
+    let id = name.strip_prefix("pp_")?;
+    Some(id.strip_suffix("_v6").unwrap_or(id).to_string())
+}
+
 /// Firewall zone → the profile whose interface it holds. `cfgs` must contain
 /// "firewall".
 fn zone_profiles(cfgs: &Configs, lookup: &Lookup) -> HashMap<String, String> {
@@ -920,26 +978,9 @@ pub async fn set<C: CtrlContext>(
             HashMap::new()
         };
 
-        // Remove all existing published-port sections (name starts with "pp_")
-        cfgs["firewall"].sections.retain(|section| {
-            if let Some(name) = section.name() {
-                if name.starts_with("pp_") {
-                    return false;
-                }
-            }
-            // Also remove sections with _pp_id metadata (in case name doesn't match)
-            if let Ok(redirect) = section.get::<FirewallRedirect>() {
-                if redirect._pp_id.is_some() && redirect.target == "DNAT" {
-                    return false;
-                }
-            }
-            if let Ok(rule) = section.get::<FirewallRule>() {
-                if is_pp_v6_rule(&rule) {
-                    return false;
-                }
-            }
-            true
-        });
+        cfgs["firewall"]
+            .sections
+            .retain(|section| pp_section_id(section).is_none());
 
         // Manual rules win over automatic (PCP/UPnP) forwards: drop any auto
         // forward whose external range overlaps an enabled manual port, so the
