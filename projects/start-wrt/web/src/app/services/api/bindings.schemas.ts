@@ -193,6 +193,20 @@ export const AutomaticPortUse: z.ZodObject<{
   id: 'AutomaticPortUse',
   description: 'One automatic port use for the published-ports UI.',
 })
+export const BackupCreateParams: z.ZodObject<{ password: z.ZodString }> =
+  /* @__PURE__ */ object({ password: z.string() }).meta({
+    id: 'BackupCreateParams',
+  })
+export const BackupRestoreParams: z.ZodObject<{
+  password: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  password: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'BackupRestoreParams',
+})
 export const BlackoutSetResult: z.ZodObject<{
   /**
    * True (and nothing applied) when a window covers the current time and the
@@ -2875,11 +2889,11 @@ export const Api = {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
         create: {
-          _PARAMS: /* @__PURE__ */ empty,
+          _PARAMS: /* @__PURE__ */ BackupCreateParams,
           _RETURN: /* @__PURE__ */ BackupCreateRes,
         },
         restore: {
-          _PARAMS: /* @__PURE__ */ empty,
+          _PARAMS: /* @__PURE__ */ BackupRestoreParams,
           _RETURN: /* @__PURE__ */ BackupRestoreRes,
         },
       },
