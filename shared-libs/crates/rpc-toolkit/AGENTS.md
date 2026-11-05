@@ -14,6 +14,12 @@ root and `shared-libs/` guidance first. `CLAUDE.md` imports this file.
   remote calls. `output.rs` owns stdout/stderr broken-pipe handling; callers must
   not apply that policy to network or filesystem errors. `server/mcp.rs` (`mcp` feature) owns the MCP tool surface and
   reuses `HttpServer`'s middleware steps rather than reimplementing them.
+  `server/websocket.rs` (`websocket` feature) owns the shared WebSocket connection;
+  `server/rpcstream.rs` owns single-owner producers, bounded event queues, terminal
+  results, drop cancellation, and event encoding.
+  Forward `HandlerArgs::rpc_stream` through adapters; initialize it to `None` for
+  non-WebSocket dispatch. Read [docs/websocket.md](docs/websocket.md) before changing
+  streaming, cancellation, connection limits, or upgrade middleware.
 - `ts.rs` owns handler traversal, deferred parameter/result writers and binding
   composition. `type-helpers.ts` owns method-path parameter/return inference and
   the `RpcSchemaTree` projection of a schema tree; `tool-catalog.ts` owns the
@@ -44,6 +50,7 @@ Run from the repo root:
 ```sh
 cargo build -p rpc-toolkit
 cargo build -p rpc-toolkit --features ts
+cargo test -p rpc-toolkit --features websocket --test websocket
 make rpc-toolkit-test
 make start-core-format
 make start-core-format-check
@@ -54,10 +61,12 @@ cargo check -p start-core
 zod and tests both CBOR-enabled and JSON-only configurations, including real
 serde fixtures, negative TypeScript assertions, node evaluation of generated
 schema modules and RPC dispatch. Dispatch tests run even with TypeScript
-disabled. Changes to handler composition also need backend tests.
+disabled. WebSocket cases use real loopback sockets and also run without default
+features; the all-features matrix checks coexistence with TypeScript and MCP.
+Changes to handler composition also need backend tests.
 
 This crate uses edition 2018, so `assert!` messages need explicit `"{}"`
-arguments. `cbor` is enabled by default; `ts` and `mcp` are opt-in.
+arguments. `cbor` is enabled by default; `ts`, `mcp`, and `websocket` are opt-in.
 Enabling `ts` requires registered handlers to provide bindings or use `no_ts()`.
 Generated schema modules import `zod` 4 from the consuming package.
 Without it, the bridge macros expand to nothing, `TS` and `HandlerTSBindings` are
