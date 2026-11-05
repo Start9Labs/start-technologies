@@ -159,6 +159,30 @@ impl RegistryAsset<Blake3Commitment> {
     }
 }
 impl<C: Clone + Into<ContentCommitment>> RegistryAsset<C> {
+    fn torrent_advertisement<'a>(
+        &'a self,
+        torrents: Option<&'a TorrentClient>,
+    ) -> Option<(&'a Url, &'a TorrentClient)> {
+        let (descriptor, torrents) = (self.torrent.as_ref()?, torrents?);
+        self.urls
+            .iter()
+            .all(|url| torrents.for_source(url).is_some())
+            .then_some((descriptor, torrents))
+    }
+
+    pub(crate) async fn sharing_metadata(
+        &self,
+        client: Client,
+        torrents: Option<&TorrentClient>,
+    ) -> Result<Option<SharingMetadata>, Error> {
+        let Some((descriptor, torrents)) = self.torrent_advertisement(torrents) else {
+            return Ok(None);
+        };
+        torrents
+            .metadata_for(descriptor, self.commitment.clone().into(), client)
+            .await
+    }
+
     async fn torrent_source(
         &self,
         client: Client,
@@ -166,16 +190,9 @@ impl<C: Clone + Into<ContentCommitment>> RegistryAsset<C> {
         progress: &mut PhaseProgressTrackerHandle,
         path: Option<&Path>,
     ) -> Result<(Option<BufferedTransport>, Option<SharingMetadata>), Error> {
-        let (Some(descriptor), Some(torrents)) = (&self.torrent, torrents) else {
+        let Some((descriptor, torrents)) = self.torrent_advertisement(torrents) else {
             return Ok((None, None));
         };
-        if self
-            .urls
-            .iter()
-            .any(|url| torrents.for_source(url).is_none())
-        {
-            return Ok((None, None));
-        }
         let attempt = match torrents
             .download(descriptor, self.commitment.clone().into(), client, progress)
             .await

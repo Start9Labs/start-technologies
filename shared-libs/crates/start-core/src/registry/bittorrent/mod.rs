@@ -28,6 +28,7 @@ use crate::util::io::{TmpDir, open_file};
 mod seeds;
 mod stored_file;
 pub use seeds::TorrentSeedConfig;
+pub(crate) mod discovery;
 #[cfg(test)]
 mod tests;
 
@@ -35,6 +36,7 @@ const METADATA_LIMIT: u64 = 4 * 1024 * 1024;
 const METADATA_TIMEOUT: Duration = Duration::from_secs(30);
 const STALL_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
+const DISCOVERY_INTERVAL: Duration = Duration::from_secs(300);
 
 fn torrent_error(error: impl std::fmt::Display) -> Error {
     Error::new(eyre!("{error:#}"), ErrorKind::Network)
@@ -111,6 +113,27 @@ pub(crate) struct SharingMetadata {
 pub(crate) struct TorrentAttempt {
     pub(crate) metadata: SharingMetadata,
     pub(crate) source: Option<(Arc<TmpDir>, PathBuf)>,
+}
+
+struct TorrentWorkspace {
+    session: TorrentSession,
+    directory: Arc<TmpDir>,
+    output: PathBuf,
+}
+
+struct ResolvedTorrent {
+    workspace: Option<TorrentWorkspace>,
+    meta: TorrentMetaV1Owned,
+    bytes: bytes::Bytes,
+}
+
+impl ResolvedTorrent {
+    fn sharing_metadata(&self, commitment: ContentCommitment) -> SharingMetadata {
+        SharingMetadata {
+            torrent: crate::util::serde::Base64(self.bytes.to_vec()),
+            commitment,
+        }
+    }
 }
 
 struct TorrentSession(Arc<Session>);
@@ -202,10 +225,15 @@ impl TorrentClient {
         self.enabled
     }
 
-    pub(crate) async fn maintain_seeding(
+    pub(crate) async fn maintain_seeding<F, Fut>(
         &self,
         mut enabled: patch_db::TypedDbWatch<bool>,
-    ) -> Result<(), Error> {
+        discover: F,
+    ) -> Result<(), Error>
+    where
+        F: Fn() -> Fut + Send + Sync,
+        Fut: std::future::Future<Output = Result<(), Error>> + Send,
+    {
         loop {
             let should_seed: bool = from_value(enabled.as_mut().peek_and_mark_seen()?)?;
             let changed = tokio::select! {
@@ -213,17 +241,28 @@ impl TorrentClient {
                 result = enabled.changed() => result,
                 result = async {
                     if should_seed {
-                        loop {
-                            let service = self.seeds.read().await.clone();
-                            let result = match service {
-                                Some(service) => service.refresh().await,
-                                None => self.resume_seeding().await,
-                            };
-                            if let Err(error) = result {
-                                tracing::warn!(%error, "Cannot refresh stored-artifact sharing");
+                        let maintenance = async {
+                            loop {
+                                let service = self.seeds.read().await.clone();
+                                let result = match service {
+                                    Some(service) => service.refresh().await,
+                                    None => self.resume_seeding().await,
+                                };
+                                if let Err(error) = result {
+                                    tracing::warn!(%error, "Cannot refresh stored-artifact sharing");
+                                }
+                                tokio::time::sleep(Duration::from_secs(30)).await;
                             }
-                            tokio::time::sleep(Duration::from_secs(30)).await;
-                        }
+                        };
+                        let discovery = async {
+                            loop {
+                                if let Err(error) = discover().await {
+                                    tracing::warn!(%error, "Cannot discover stored software advertisements");
+                                }
+                                tokio::time::sleep(DISCOVERY_INTERVAL).await;
+                            }
+                        };
+                        futures::future::join(maintenance, discovery).await;
                     }
                     std::future::pending::<Result<(), patch_db::Error>>().await
                 } => result,
@@ -276,34 +315,24 @@ impl TorrentClient {
         }
     }
 
-    pub(crate) async fn download(
+    async fn resolve(
         &self,
         url: &Url,
-        commitment: ContentCommitment,
+        commitment: &ContentCommitment,
         client: Client,
-        progress: &mut PhaseProgressTrackerHandle,
-    ) -> Result<Option<TorrentAttempt>, Error> {
+    ) -> Result<Option<ResolvedTorrent>, Error> {
         if self.for_source(url).is_none() {
             return Ok(None);
         }
         validate_torrent_url(url)?;
-        let tmp = Arc::new(TmpDir::new().await?);
-        let output = tmp.join("data");
-        tokio::fs::create_dir(&output).await?;
-        let session = TorrentSession::new(
-            output.clone(),
-            SessionOptions {
-                disable_upload: self.disable_upload,
-                ..session_options()
-            },
-        )
-        .await?;
+        let mut workspace = None;
         let bytes = match url.scheme() {
             "http" | "https" => metadata(client, url).await?,
             "magnet" => {
+                let resolver = self.workspace().await?;
                 let response = timeout(
                     METADATA_TIMEOUT,
-                    session.0.add_torrent(
+                    resolver.session.0.add_torrent(
                         AddTorrent::from_url(url.as_str()),
                         Some(AddTorrentOptions {
                             list_only: true,
@@ -320,28 +349,95 @@ impl TorrentClient {
                         ErrorKind::InvalidRequest,
                     ));
                 };
+                workspace = Some(resolver);
                 metadata.torrent_bytes
             }
             _ => return Ok(None),
         };
-        let meta = validate_metadata(&bytes, &commitment)?;
-        let path = output.join(file_name(&meta)?);
-        let result =
-            Self::download_payload(&session, &bytes, &path, &meta, &commitment, progress).await;
+        let meta = validate_metadata(&bytes, commitment)?;
+        Ok(Some(ResolvedTorrent {
+            workspace,
+            meta,
+            bytes,
+        }))
+    }
+
+    pub(crate) async fn metadata_for(
+        &self,
+        url: &Url,
+        commitment: ContentCommitment,
+        client: Client,
+    ) -> Result<Option<SharingMetadata>, Error> {
+        Ok(self
+            .resolve(url, &commitment, client)
+            .await?
+            .map(|resolved| resolved.sharing_metadata(commitment)))
+    }
+
+    pub(crate) async fn download(
+        &self,
+        url: &Url,
+        commitment: ContentCommitment,
+        client: Client,
+        progress: &mut PhaseProgressTrackerHandle,
+    ) -> Result<Option<TorrentAttempt>, Error> {
+        let Some(resolved) = self.resolve(url, &commitment, client).await? else {
+            return Ok(None);
+        };
+        let metadata = resolved.sharing_metadata(commitment.clone());
+        let result = self
+            .download_resolved(resolved, &commitment, progress)
+            .await;
         let source = match result {
-            Ok(()) => Some((tmp, path)),
+            Ok(source) => Some(source),
             Err(error) => {
                 tracing::warn!(%error, "BitTorrent payload failed; falling back to HTTP mirrors");
                 None
             }
         };
-        Ok(Some(TorrentAttempt {
-            metadata: SharingMetadata {
-                torrent: crate::util::serde::Base64(bytes.to_vec()),
-                commitment,
+        Ok(Some(TorrentAttempt { metadata, source }))
+    }
+
+    async fn workspace(&self) -> Result<TorrentWorkspace, Error> {
+        let directory = Arc::new(TmpDir::new().await?);
+        let output = directory.join("data");
+        tokio::fs::create_dir(&output).await?;
+        let session = TorrentSession::new(
+            output.clone(),
+            SessionOptions {
+                disable_upload: self.disable_upload,
+                ..session_options()
             },
-            source,
-        }))
+        )
+        .await?;
+        Ok(TorrentWorkspace {
+            session,
+            directory,
+            output,
+        })
+    }
+
+    async fn download_resolved(
+        &self,
+        mut resolved: ResolvedTorrent,
+        commitment: &ContentCommitment,
+        progress: &mut PhaseProgressTrackerHandle,
+    ) -> Result<(Arc<TmpDir>, PathBuf), Error> {
+        let workspace = match resolved.workspace.take() {
+            Some(workspace) => workspace,
+            None => self.workspace().await?,
+        };
+        let path = workspace.output.join(file_name(&resolved.meta)?);
+        Self::download_payload(
+            &workspace.session,
+            &resolved.bytes,
+            &path,
+            &resolved.meta,
+            commitment,
+            progress,
+        )
+        .await?;
+        Ok((workspace.directory, path))
     }
 
     async fn download_payload(

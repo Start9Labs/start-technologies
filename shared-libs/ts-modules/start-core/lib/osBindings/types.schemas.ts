@@ -6559,7 +6559,7 @@ export const ServerInfo: z.ZodObject<{
   ntpSynced: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   zram: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   /**
-   * Persisted intent to retain verified torrents after downloads.
+   * Persisted intent to share compatible installed S9PKs and stored OS images.
    */
   registrySeeding: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   governor: z.ZodCodec<
@@ -6621,11 +6621,11 @@ export const ServerInfo: z.ZodObject<{
   ntpSynced: wire(z.boolean().optional(), z.boolean()),
   zram: wire(z.boolean().optional(), z.boolean()),
   /**
-   * Persisted intent to retain verified torrents after downloads.
+   * Persisted intent to share compatible installed S9PKs and stored OS images.
    */
   registrySeeding: wire(z.boolean().optional(), z.boolean()).meta({
     description:
-      'Persisted intent to retain verified torrents after downloads.',
+      'Persisted intent to share compatible installed S9PKs and stored OS images.',
   }),
   governor: wire(Governor.nullable().optional(), Governor.nullable()),
   epp: wire(Epp.nullable().optional(), Epp.nullable()),

@@ -1,4 +1,3 @@
-use std::ops::Deref;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -23,7 +22,7 @@ use crate::context::{CliContext, RpcContext};
 use crate::db::model::package::{ManifestPreference, PackageStateMatchModelRef};
 use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, PhasedProgressBar};
-use crate::registry::context::{RegistryContext, RegistryUrlParams};
+use crate::registry::context::RegistryContext;
 use crate::registry::package::get::GetPackageResponse;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::s9pk::manifest::PackageId;
@@ -41,7 +40,6 @@ pub const PKG_ARCHIVE_DIR: &str = "package-data/archive";
 pub const PKG_PUBLIC_DIR: &str = "package-data/public";
 pub const PKG_WASM_DIR: &str = "package-data/wasm";
 
-// #[command(display(display_serializable))]
 pub async fn list(ctx: RpcContext) -> Result<Vec<Value>, Error> {
     Ok(ctx
         .db
@@ -140,28 +138,8 @@ pub async fn install(
         accept_signers,
     }: InstallParams,
 ) -> Result<(), Error> {
-    let package: GetPackageResponse = from_value(
-        ctx.call_remote_with::<RegistryContext, _>(
-            "package.get",
-            [("get_device_info", Value::Bool(true))]
-                .into_iter()
-                .collect(),
-            json!({
-                "id": id,
-                "targetVersion": VersionRange::exactly(version.deref().clone()),
-                "otherVersions": "none",
-            }),
-            RegistryUrlParams {
-                registry: registry.clone(),
-            },
-        )
-        .await?,
-    )?;
-
-    let (_, asset) = package
-        .best
-        .get(&version)
-        .and_then(|i| i.s9pks.first())
+    let asset = crate::registry::package::get::remote_asset(&ctx, &registry, &id, &version)
+        .await?
         .ok_or_else(|| {
             Error::new(
                 eyre!("{id}@{version} not found on {registry}"),

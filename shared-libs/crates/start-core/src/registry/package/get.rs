@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
@@ -11,15 +12,17 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::PackageId;
-use crate::context::CliContext;
+use crate::context::{CliContext, RpcContext};
 use crate::prelude::*;
 use crate::progress::{FullProgressTracker, ProgressUnits};
-use crate::registry::context::RegistryContext;
+use crate::registry::asset::RegistryAsset;
+use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::package::index::{PackageIndex, PackageVersionInfo};
 use crate::s9pk::manifest::{HardwareRequirements, LocaleString};
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::v2::SIG_CONTEXT;
+use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::util::VersionString;
 use crate::util::io::{TrackingIO, to_tmp_path};
 use crate::util::serde::{WithIoFormat, display_serializable};
@@ -96,6 +99,36 @@ pub struct GetPackageResponse {
     pub best: BTreeMap<VersionString, PackageVersionInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub other_versions: Option<BTreeMap<VersionString, PackageInfoShort>>,
+}
+
+pub(crate) async fn remote_asset(
+    ctx: &RpcContext,
+    registry: &reqwest::Url,
+    id: &PackageId,
+    version: &VersionString,
+) -> Result<Option<RegistryAsset<MerkleArchiveCommitment>>, Error> {
+    let package: GetPackageResponse = from_value(
+        ctx.call_remote_with::<RegistryContext, _>(
+            "package.get",
+            [("get_device_info", Value::Bool(true))]
+                .into_iter()
+                .collect(),
+            json!({
+                "id": id,
+                "targetVersion": VersionRange::exactly(version.deref().clone()),
+                "otherVersions": "none",
+            }),
+            RegistryUrlParams {
+                registry: registry.clone(),
+            },
+        )
+        .await?,
+    )?;
+    Ok(package
+        .best
+        .get(version)
+        .and_then(|info| info.s9pks.first())
+        .map(|(_, asset)| asset.clone()))
 }
 
 rpc_toolkit::reflect_ts!(GetPackageResponse);

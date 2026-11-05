@@ -198,7 +198,7 @@ pub struct ServerInfo {
     pub ntp_synced: bool,
     #[serde(default)]
     pub zram: bool,
-    /// Persisted intent to retain verified torrents after downloads.
+    /// Persisted intent to share compatible installed S9PKs and stored OS images.
     #[serde(default = "default_registry_seeding")]
     pub registry_seeding: bool,
     pub governor: Option<Governor>,

@@ -483,8 +483,22 @@ impl RpcContext {
             .await
             .typed::<bool>();
         let torrents = res.torrents.clone();
+        let weak = Arc::downgrade(&seed);
         res.add_cron(async move {
-            if let Err(error) = torrents.maintain_seeding(seeding).boxed().await {
+            if let Err(error) = torrents
+                .maintain_seeding(seeding, || {
+                    let context = weak.upgrade().map(Self);
+                    async move {
+                        if let Some(context) = context {
+                            crate::registry::bittorrent::discovery::register_existing(&context)
+                                .await?;
+                        }
+                        Ok(())
+                    }
+                })
+                .boxed()
+                .await
+            {
                 tracing::warn!(%error, "Registry seeding watcher stopped");
             }
         });

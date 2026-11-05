@@ -71,9 +71,15 @@ impl SeedCatalog {
             source: tokio::fs::canonicalize(source).await?,
             metadata: metadata.clone(),
         };
+        let bytes = serde_json::to_vec(&record).with_kind(ErrorKind::Serialization)?;
+        match tokio::fs::read(&path).await {
+            Ok(saved) if saved == bytes => return Ok(()),
+            Ok(_) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(error) => return Err(error.into()),
+        }
         let mut out = AtomicFile::new(&path, None::<&Path>).await?;
-        out.write_all(&serde_json::to_vec(&record).with_kind(ErrorKind::Serialization)?)
-            .await?;
+        out.write_all(&bytes).await?;
         out.sync_all().await?;
         out.save().await?;
         Ok(())
@@ -330,6 +336,13 @@ mod tests {
         }
         let service = SeedService::start(catalog, listen).await?;
         service.refresh().await?;
+        let before = service.session.0.get(meta.info_hash.into()).unwrap();
+        service.catalog.register(&path, &metadata).await?;
+        service.refresh().await?;
+        assert!(Arc::ptr_eq(
+            &before,
+            &service.session.0.get(meta.info_hash.into()).unwrap()
+        ));
         let destination = TmpDir::new().await?;
         let receiver = TorrentSession::new(
             destination.to_path_buf(),

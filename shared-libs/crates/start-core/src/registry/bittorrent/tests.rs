@@ -347,6 +347,91 @@ async fn a_torrent_without_available_peers_falls_back_to_http() -> Result<(), Er
 }
 
 #[tokio::test]
+async fn existing_artifact_metadata_lookup_does_not_download_a_payload() -> Result<(), Error> {
+    let swarm = Swarm::new().await?;
+    let client = TorrentClient::for_server(TorrentDownloadConfig::default(), None);
+    let asset = swarm.asset(swarm.url.join("metadata.torrent")?);
+    let resolved = client
+        .resolve(
+            asset.torrent.as_ref().unwrap(),
+            &asset.commitment.clone().into(),
+            Client::new(),
+        )
+        .await?
+        .unwrap();
+    assert!(resolved.workspace.is_none());
+    assert_eq!(resolved.bytes, swarm.torrent);
+    let metadata = asset
+        .sharing_metadata(Client::new(), Some(&client))
+        .await?
+        .unwrap();
+    assert_eq!(metadata.torrent.0, swarm.torrent);
+    assert_eq!(swarm.http_hits.load(Ordering::SeqCst), 0);
+    assert!(client.catalog.get().is_none());
+    assert!(client.seeds.read().await.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn slow_metadata_discovery_does_not_block_sharing_or_disable() -> Result<(), Error> {
+    struct DiscoveryGuard(Arc<AtomicUsize>);
+    impl Drop for DiscoveryGuard {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    let catalog = TmpDir::new().await?;
+    let client = Arc::new(TorrentClient::for_server(
+        TorrentDownloadConfig::default(),
+        Some(TorrentSeedConfig {
+            directory: catalog.to_path_buf(),
+            listen: None,
+        }),
+    ));
+    let db = patch_db::PatchDb::in_memory();
+    db.put(&patch_db::json_ptr::ROOT, &imbl_value::json!(false))
+        .await?;
+    let watch = db
+        .watch(patch_db::json_ptr::ROOT.to_owned())
+        .await
+        .typed::<bool>();
+    let started = Arc::new(AtomicUsize::new(0));
+    let cancelled = Arc::new(AtomicUsize::new(0));
+    let owner = client.clone();
+    let (began, ended) = (started.clone(), cancelled.clone());
+    let task: NonDetachingJoinHandle<_> = tokio::spawn(async move {
+        owner
+            .maintain_seeding(watch, move || {
+                let (started, cancelled) = (began.clone(), ended.clone());
+                async move {
+                    let _guard = DiscoveryGuard(cancelled);
+                    started.fetch_add(1, Ordering::SeqCst);
+                    std::future::pending::<Result<(), Error>>().await
+                }
+            })
+            .await
+    })
+    .into();
+    assert_eq!(started.load(Ordering::SeqCst), 0);
+    db.put(&patch_db::json_ptr::ROOT, &imbl_value::json!(true))
+        .await?;
+    wait_for_seeding(&client, true).await;
+    timeout(Duration::from_secs(10), async {
+        while started.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    db.put(&patch_db::json_ptr::ROOT, &imbl_value::json!(false))
+        .await?;
+    wait_for_seeding(&client, false).await;
+    assert_eq!(cancelled.load(Ordering::SeqCst), 1);
+    drop(task);
+    Ok(())
+}
+
+#[tokio::test]
 async fn invalid_torrent_metadata_falls_back_to_http() -> Result<(), Error> {
     let swarm = Swarm::new().await?;
     assert_eq!(
@@ -584,7 +669,10 @@ async fn seeding_follows_persisted_intent_and_can_restart_with_an_old_service_re
     let watch = db.watch(ptr.clone()).await.typed::<bool>();
     let owner = client.clone();
     let task: NonDetachingJoinHandle<_> =
-        tokio::spawn(async move { Box::pin(owner.maintain_seeding(watch)).await }).into();
+        tokio::spawn(
+            async move { Box::pin(owner.maintain_seeding(watch, || async { Ok(()) })).await },
+        )
+        .into();
     db.put(&ptr, &true).await?;
     wait_for_seeding(&client, true).await;
     let old = client.seeds.read().await.clone().unwrap();
@@ -654,7 +742,7 @@ async fn cancelling_the_seeding_worker_prevents_late_service_publication() -> Re
         .await
         .typed::<bool>();
     let publication = client.seeds.write().await;
-    let mut worker = Box::pin(client.maintain_seeding(watch));
+    let mut worker = Box::pin(client.maintain_seeding(watch, || async { Ok(()) }));
     assert!(futures::poll!(&mut worker).is_pending());
     drop(worker);
     drop(publication);

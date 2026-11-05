@@ -97,6 +97,11 @@ pub async fn connect(
 }
 
 const KEY_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
+const OS_REGISTRY_KEY: &str = "startosRegistry";
+
+pub(crate) fn selected_os_registry(ui: &Value) -> Option<&str> {
+    ui.get(OS_REGISTRY_KEY).and_then(Value::as_str)
+}
 
 /// Imports keys a connected registry newly offers, untrusted, and notifies about each new and dropped key.
 pub async fn check_registry(ctx: RpcContext, url: &Url) -> Result<(), Error> {
@@ -125,10 +130,7 @@ pub async fn check_registry(ctx: RpcContext, url: &Url) -> Result<(), Error> {
         .mutate(|db| {
             let (added, dropped) = db.as_public_mut().mutate(|public| {
                 let changes = refresh_public(public, &url, &info)?;
-                let os_registry = public
-                    .ui
-                    .get("startosRegistry")
-                    .and_then(Value::as_str)
+                let os_registry = selected_os_registry(&public.ui)
                     .is_some_and(|os| same_registry(os, url.as_str()));
                 let keys = &public.server_info.trusted_keys;
                 let name = |id: &InternedString| {
@@ -251,12 +253,7 @@ fn forget_registry(
 }
 
 fn remove_public(public: &mut Public, url: &Url) -> Result<BTreeSet<InternedString>, Error> {
-    if public
-        .ui
-        .get("startosRegistry")
-        .and_then(Value::as_str)
-        .is_some_and(|os| same_registry(os, url.as_str()))
-    {
+    if selected_os_registry(&public.ui).is_some_and(|os| same_registry(os, url.as_str())) {
         return Err(Error::new(
             eyre!("{}", t!("trusted-keys.os-registry-in-use")),
             ErrorKind::InvalidRequest,
@@ -295,7 +292,7 @@ fn set_os_registry_public(
     let mut ui = public.ui.clone();
     ui.as_object_mut()
         .ok_or_else(invalid_key)?
-        .insert("startosRegistry".into(), to_value(url)?);
+        .insert(OS_REGISTRY_KEY.into(), to_value(url)?);
     let mut keys = public.server_info.trusted_keys.clone();
     let mut enabled = BTreeSet::new();
     for (id, key) in &mut keys {
