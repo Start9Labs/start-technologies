@@ -188,7 +188,7 @@ impl ServiceMap {
     }
 
     #[instrument(skip_all)]
-    pub async fn install<F, Fut, S: FileSource + Clone>(
+    pub async fn install<F, Fut, L, S: FileSource + Clone>(
         &self,
         ctx: RpcContext,
         s9pk: F,
@@ -339,9 +339,6 @@ impl ServiceMap {
         Ok(async move {
             let sync_progress_task = reload_guard
                 .handle(async {
-                    if let Some(check) = signer_check {
-                        check.await?;
-                    }
                     let download_path = s9pk_download_path(&commitment);
 
                     let deref_id = id.clone();
@@ -357,6 +354,10 @@ impl ServiceMap {
                             },
                             Some(Duration::from_millis(100)),
                         )));
+
+                    if let Some(check) = signer_check {
+                        check.await?;
+                    }
 
                     let out = crate::util::io::create_file(&download_path).await?;
                     // `+C` before any extents exist, so fallocate lands nodatacow.
