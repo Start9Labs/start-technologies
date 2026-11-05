@@ -365,6 +365,8 @@ fn test_libuci_values() {
         ("'line one\nline two'", "line one\nline two"),
         ("\"line one\nline two\"", "line one\nline two"),
         ("joined\\\nhere", "joinedhere"),
+        ("joined\\\r\nhere", "joinedhere"),
+        (r"a\#b", "a#b"),
         ("'émoji 🚀'", "émoji 🚀"),
         ("''", ""),
     ];
@@ -399,6 +401,7 @@ fn test_libuci_statements() {
                 \to proto static\n\
                 \tl dns 1.1.1.1; l dns 9.9.9.9\n\
                 \toption key abc#def\n\
+                \toption q 'x'#c\n\
                 \toption empty\n";
     let config = Config::parse_str(&arena, text).unwrap();
     assert!(matches!(
@@ -424,6 +427,7 @@ fn test_libuci_statements() {
         ("dns", "1.1.1.1"),
         ("dns", "9.9.9.9"),
         ("key", "abc"),
+        ("q", "x"),
         ("empty", ""),
     ]
     .map(|(k, v)| (k.to_string(), v.to_string()));
@@ -436,6 +440,7 @@ fn test_libuci_statements() {
          \tlist dns 1.1.1.1\n\
          \tlist dns 9.9.9.9\n\
          \toption key abc #def\n\
+         \toption q 'x' #c\n\
          \toption empty ''\n"
     );
 }
@@ -503,6 +508,28 @@ fn test_written_values_round_trip() {
         r"'Rich'\''s Wi-Fi'"
     );
     assert_eq!(Token::from_str("a b", &arena).to_string(), "'a b'");
+}
+
+#[test]
+fn test_backslash_at_end_of_input() {
+    let arena = Arena::new();
+    let config = Config::parse_str(&arena, "config a\n\toption v abc\\").unwrap();
+    let Line::Option { value, .. } = config.sections[0].lines[1] else {
+        panic!("{:?}", config.sections[0].lines[1]);
+    };
+    assert_eq!(value.as_str(), "abc");
+    assert_eq!(Token::from_str("", &arena).to_string(), "''");
+}
+
+#[test]
+fn test_plain_quoted_value_borrows() {
+    let Line::Option { value, .. } = Line::parse("\toption v 'a \"b\" \\c'", 0).unwrap() else {
+        panic!("expected an option");
+    };
+    assert!(matches!(
+        value.as_str(),
+        std::borrow::Cow::Borrowed(r#"a "b" \c"#)
+    ));
 }
 
 #[test]
