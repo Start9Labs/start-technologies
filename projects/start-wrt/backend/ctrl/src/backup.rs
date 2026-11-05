@@ -95,6 +95,14 @@ fn decrypt(backup: &[u8], password: &str) -> Result<Zeroizing<Vec<u8>>, Error> {
     let (header, rest) = rest.split_at(len);
     let aad = &backup[..backup.len() - rest.len()];
     let header: EncryptedHeader = serde_json::from_slice(header).map_err(|_| invalid_archive())?;
+    let config = argon2::Config::rfc9106_low_mem();
+    let prefix = format!(
+        "${}$v={}$m={},t={},p={}$",
+        config.variant, config.version, config.mem_cost, config.time_cost, config.lanes,
+    );
+    if !header.password_hash.starts_with(&prefix) {
+        return Err(invalid_archive());
+    }
     if !argon2::verify_encoded(&header.password_hash, password.as_bytes())
         .map_err(|_| invalid_archive())?
     {
@@ -542,6 +550,34 @@ mod tests {
         let mut oversized = backup.clone();
         oversized[MAGIC.len() + 1..][..4].copy_from_slice(&u32::MAX.to_be_bytes());
         assert_eq!(kind(&oversized, PASSWORD), ErrorKind::InvalidRequest);
+    }
+
+    #[test]
+    fn altered_password_hash_parameters_are_invalid() {
+        let backup = encrypt(ARCHIVE, PASSWORD).unwrap();
+        let end = header_end(&backup);
+        let header: EncryptedHeader =
+            serde_json::from_slice(&backup[MAGIC.len() + 5..end]).unwrap();
+        for (parameter, replacement) in [
+            ("m=65536", "m=4294967295"),
+            ("t=3", "t=4294967295"),
+            ("p=1", "p=4294967295"),
+            ("v=19", "v=16"),
+            ("argon2id", "argon2i"),
+        ] {
+            let altered = serde_json::to_vec(&EncryptedHeader {
+                password_hash: header.password_hash.replace(parameter, replacement),
+                wrapped_key: header.wrapped_key.clone(),
+            })
+            .unwrap();
+            let mut tampered = backup[..MAGIC.len() + 1].to_vec();
+            tampered.extend_from_slice(&(altered.len() as u32).to_be_bytes());
+            tampered.extend_from_slice(&altered);
+            tampered.extend_from_slice(&backup[end..]);
+            for password in [PASSWORD, "wrong-password"] {
+                assert_eq!(kind(&tampered, password), ErrorKind::InvalidRequest);
+            }
+        }
     }
 
     #[test]
