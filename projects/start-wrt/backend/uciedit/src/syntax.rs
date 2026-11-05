@@ -776,11 +776,20 @@ impl PartialEq<str> for Token<'_> {
     }
 }
 
+/// An escape at end of input would take the newline written after it.
+fn dangling_escape(raw: &str) -> bool {
+    let body = raw.strip_suffix('\r').unwrap_or(raw);
+    body.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 1
+}
+
 impl fmt::Display for Token<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.raw {
-            "" => f.write_str("''"),
-            raw => f.write_str(raw),
+        if self.raw.is_empty() {
+            f.write_str("''")
+        } else if dangling_escape(self.raw) {
+            f.write_str(&quote(&decode(self.raw)))
+        } else {
+            f.write_str(self.raw)
         }
     }
 }

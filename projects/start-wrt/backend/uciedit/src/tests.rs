@@ -522,6 +522,52 @@ fn test_backslash_at_end_of_input() {
 }
 
 #[test]
+fn test_eof_escape_does_not_consume_an_appended_option() {
+    for (raw, expected, written) in [
+        (r"abc\", "abc", "'abc'"),
+        (r"'abc'\", "abc", "'abc'"),
+        (r"abc\\", r"abc\", r"abc\\"),
+        (r"\", "", "''"),
+        ("abc\\\r", "abc\r", "'abc\r'"),
+    ] {
+        let arena = Arena::new();
+        let original: &str = arena.alloc(format!("config a\n\toption v {raw}"));
+        let mut config = Config::parse_str(&arena, original).unwrap();
+        config.sections[0]
+            .lines
+            .push(Line::option_from_display("after", "ok", &arena));
+        let dumped: &str = arena.alloc(config.dump_str());
+        let mut bytes = Vec::new();
+        config.dump_io(&mut bytes).unwrap();
+        assert_eq!(bytes, dumped.as_bytes());
+        assert_eq!(
+            dumped,
+            format!("config a\n\toption v {written}\n\toption after 'ok'\n"),
+            "{raw:?}"
+        );
+        let parsed = Config::parse_str(&arena, dumped).unwrap();
+        let values: Vec<_> = parsed.sections[0]
+            .lines
+            .iter()
+            .filter_map(|line| match line {
+                Line::Option { option, value, .. } => {
+                    Some((option.unquoted_string(), value.unquoted_string()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            values,
+            vec![
+                ("v".to_string(), expected.to_string()),
+                ("after".to_string(), "ok".to_string()),
+            ],
+            "{raw:?}"
+        );
+    }
+}
+
+#[test]
 fn test_plain_quoted_value_borrows() {
     let Line::Option { value, .. } = Line::parse("\toption v 'a \"b\" \\c'", 0).unwrap() else {
         panic!("expected an option");
