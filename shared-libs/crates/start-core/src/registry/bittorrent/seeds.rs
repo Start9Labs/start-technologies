@@ -221,7 +221,7 @@ impl SeedService {
     }
 
     async fn resume(&self, record: &StoredTorrent, source: StoredFile) -> Result<(), Error> {
-        record.metadata.commitment.verify(&record.source).await?;
+        record.metadata.commitment.verify_source(&source).await?;
         let torrent = self
             .session
             .0

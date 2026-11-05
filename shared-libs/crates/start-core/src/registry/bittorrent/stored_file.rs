@@ -6,6 +6,11 @@ use std::time::SystemTime;
 use anyhow::{Result, ensure};
 use librqbit::storage::{BoxStorageFactory, StorageFactory, StorageFactoryExt, TorrentStorage};
 use librqbit::{ManagedTorrentShared, TorrentMetadata};
+use tokio::io::AsyncRead;
+
+use crate::s9pk::merkle_archive::source::{ArchiveSource, checked_end};
+
+const VERIFY_CHUNK_SIZE: u64 = 256 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct FileIdentity {
@@ -47,6 +52,52 @@ impl StoredFile {
             "Stored artifact changed"
         );
         Ok(file)
+    }
+}
+
+impl ArchiveSource for StoredFile {
+    type FetchReader = Box<dyn AsyncRead + Unpin + Send>;
+    type FetchAllReader = Self::FetchReader;
+
+    async fn size(&self) -> Option<u64> {
+        Some(self.identity.length)
+    }
+
+    async fn fetch_all(&self) -> Result<Self::FetchAllReader, crate::prelude::Error> {
+        self.fetch(0, self.identity.length).await
+    }
+
+    async fn fetch(
+        &self,
+        position: u64,
+        size: u64,
+    ) -> Result<Self::FetchReader, crate::prelude::Error> {
+        checked_end(self, position, size).await?;
+        let chunks = futures::stream::try_unfold(
+            (self.clone(), position, size),
+            |(source, position, remaining)| async move {
+                if remaining == 0 {
+                    return Ok::<_, std::io::Error>(None);
+                }
+                let (bytes, source) = tokio::task::spawn_blocking(move || {
+                    let mut buffer = vec![0; remaining.min(VERIFY_CHUNK_SIZE) as usize];
+                    source
+                        .pread_exact(0, position, &mut buffer)
+                        .map_err(std::io::Error::other)?;
+                    Ok::<_, std::io::Error>((bytes::Bytes::from(buffer), source))
+                })
+                .await
+                .map_err(std::io::Error::other)??;
+                let length = bytes.len() as u64;
+                Ok(Some((
+                    bytes,
+                    (source, position + length, remaining - length),
+                )))
+            },
+        );
+        Ok(Box::new(tokio_util::io::StreamReader::new(Box::pin(
+            chunks,
+        ))))
     }
 }
 
@@ -104,6 +155,51 @@ impl TorrentStorage for StoredFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn verification_reader_stops_after_the_owner_deletes_the_file() {
+        use tokio::io::AsyncReadExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("image.rootfs");
+        std::fs::write(&path, vec![7; VERIFY_CHUNK_SIZE as usize * 2]).unwrap();
+        let source = StoredFile::open(&path).unwrap();
+        let mut reader = source.fetch_all().await.unwrap();
+        let mut first = vec![0; VERIFY_CHUNK_SIZE as usize];
+        reader.read_exact(&mut first).await.unwrap();
+        assert!(first.iter().all(|byte| *byte == 7));
+        std::fs::remove_file(&path).unwrap();
+        assert!(reader.read_to_end(&mut Vec::new()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn verification_source_preserves_ranges_and_signed_content_checks() {
+        use tokio::io::AsyncReadExt;
+
+        use crate::registry::bittorrent::ContentCommitment;
+        use crate::sign::commitment::Commitment;
+        use crate::sign::commitment::blake3::Blake3Commitment;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("image.rootfs");
+        let bytes: Vec<_> = (0..VERIFY_CHUNK_SIZE as usize * 2 + 13)
+            .map(|index| (index % 251) as u8)
+            .collect();
+        let expected = std::sync::Arc::<[u8]>::from(bytes.clone());
+        let commitment =
+            ContentCommitment::from(Blake3Commitment::create(&expected).await.unwrap());
+        std::fs::write(&path, &bytes).unwrap();
+        let source = StoredFile::open(&path).unwrap();
+        commitment.verify_source(&source).await.unwrap();
+        let mut range = source.fetch(VERIFY_CHUNK_SIZE - 5, 19).await.unwrap();
+        let mut result = Vec::new();
+        range.read_to_end(&mut result).await.unwrap();
+        assert_eq!(
+            result,
+            bytes[VERIFY_CHUNK_SIZE as usize - 5..VERIFY_CHUNK_SIZE as usize + 14]
+        );
+        assert!(source.fetch(bytes.len() as u64, 1).await.is_err());
+    }
 
     #[test]
     fn reads_existing_bytes_and_rejects_every_mutation() {

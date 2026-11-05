@@ -18,6 +18,7 @@ use url::Url;
 use crate::prelude::*;
 use crate::progress::{PhaseProgressTrackerHandle, ProgressUnits};
 use crate::s9pk::S9pk;
+use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::sign::commitment::Commitment;
 use crate::sign::commitment::blake3::Blake3Commitment;
@@ -79,14 +80,15 @@ impl From<MerkleArchiveCommitment> for ContentCommitment {
 }
 impl ContentCommitment {
     async fn verify(&self, path: &Path) -> Result<(), Error> {
+        self.verify_source(&MultiCursorFile::from(open_file(path).await?))
+            .await
+    }
+
+    async fn verify_source<S: ArchiveSource + Clone>(&self, source: &S) -> Result<(), Error> {
         match self {
-            Self::Blake3(commitment) => {
-                commitment
-                    .check(&MultiCursorFile::from(open_file(path).await?))
-                    .await
-            }
+            Self::Blake3(commitment) => commitment.check(source).await,
             Self::MerkleArchive(commitment) => {
-                let s9pk = S9pk::open(path, None).await?;
+                let s9pk = S9pk::deserialize_local(source, None).await?;
                 commitment.copy_to(&s9pk, tokio::io::sink()).await
             }
         }
