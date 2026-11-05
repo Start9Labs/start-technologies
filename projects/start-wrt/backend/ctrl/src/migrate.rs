@@ -34,6 +34,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::RemoveServerCert,
     Migration::EnableFlowOffloading,
     Migration::ScopeReservedNames,
+    Migration::NameProfileFirewallSections,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -62,6 +63,8 @@ enum Migration {
     EnableFlowOffloading,
     /// Earlier releases served a reserved device's name to every profile.
     ScopeReservedNames,
+    /// Earlier releases generated a profile's firewall sections without names.
+    NameProfileFirewallSections,
 }
 
 impl Migration {
@@ -78,6 +81,7 @@ impl Migration {
             Migration::RemoveServerCert => remove_server_cert(root).await,
             Migration::EnableFlowOffloading => enable_flow_offloading(root).await,
             Migration::ScopeReservedNames => scope_reserved_names(root).await,
+            Migration::NameProfileFirewallSections => name_profile_firewall_sections(root).await,
         }
     }
 }
@@ -291,6 +295,15 @@ async fn pppoe_wan_ipv6(root: &Path) -> Result<(), Error> {
         break;
     }
     if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+async fn name_profile_firewall_sections(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["firewall", "network", "startwrt"]).await?;
+    if crate::profiles::name_profile_firewall_sections(&mut cfgs)? {
         dump_all(uci_root(root), cfgs).await?;
     }
     Ok(())

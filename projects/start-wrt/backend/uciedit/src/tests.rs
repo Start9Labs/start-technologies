@@ -276,6 +276,31 @@ fn test_remove_append_does_not_accumulate_separators() {
 }
 
 #[test]
+fn test_insert_and_rename_sections() {
+    let arena = Arena::new();
+    let mut config = Config::parse_str(
+        &arena,
+        "config retain first\n\toption value 'first'\n\nconfig retain\n\toption value 'last'\n",
+    )
+    .unwrap();
+    config
+        .insert(
+            1,
+            &ReplaceSection {
+                value: "middle".into(),
+            },
+            Some("middle"),
+        )
+        .unwrap();
+    config.sections[2].set_name("last");
+    let expected = "config retain first\n\toption value 'first'\n\nconfig replace middle\n\toption value 'middle'\n\nconfig retain last\n\toption value 'last'\n";
+    assert_eq!(config.dump_str(), expected);
+    let reparsed = Config::parse_str(&arena, arena.alloc(config.dump_str())).unwrap();
+    assert_eq!(reparsed.sections[1].name().as_deref(), Some("middle"));
+    assert_eq!(reparsed.sections[2].name().as_deref(), Some("last"));
+}
+
+#[test]
 fn test_remove_section_keeps_retained_body_and_header_comments() {
     let arena = Arena::new();
     let original = "# first header\nconfig retain first\n\toption value 'first'\n\t# first body\n\n# removed header\n\nconfig remove\n\toption value 'removed'\n\t# removed body\n\n# last header\n\nconfig retain last\n\toption value 'last'\n\t# last body\n";
