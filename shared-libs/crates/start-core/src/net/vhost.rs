@@ -1209,6 +1209,20 @@ impl ProxyTarget {
         Some((stream, deadline))
     }
 
+    async fn connect_transparent(client: SocketAddr, target: SocketAddr) -> Option<TcpStream> {
+        let socket = match crate::net::transparent::transparent_socket(client, target) {
+            Ok(socket) => socket,
+            Err(e) => {
+                tracing::warn!(
+                    "transparent egress setup for {client} failed ({e}); connecting plainly, so {target} will see this host as the peer"
+                );
+                return None;
+            }
+        };
+        socket.bind(client).ok()?;
+        socket.connect(target).await.ok()
+    }
+
     fn register_origin<A>(
         &self,
         metadata: &A::Metadata,
@@ -1387,9 +1401,9 @@ where
                 crate::net::transparent::ensure_divert_infra_once()
                     .await
                     .log_err();
-                match crate::net::transparent::transparent_connect(client, target).await {
-                    Ok(stream) => (stream, tokio::time::Instant::now() + BACKEND_DIAL_TIMEOUT),
-                    Err(_) => self.connect_plain().await?,
+                match Self::connect_transparent(client, target).await {
+                    Some(stream) => (stream, tokio::time::Instant::now() + BACKEND_DIAL_TIMEOUT),
+                    None => self.connect_plain().await?,
                 }
             }
             None => self.connect_plain().await?,

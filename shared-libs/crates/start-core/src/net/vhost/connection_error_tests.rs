@@ -100,6 +100,70 @@ async fn other_backend_connect_errors_are_silent() {
     assert!(logs.lock().unwrap().is_empty());
 }
 
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "requires CAP_NET_RAW or CAP_NET_ADMIN"]
+async fn transparent_connection_errors_are_silent() {
+    for ip in ["127.0.0.1", "::1"] {
+        let ip: IpAddr = ip.parse().unwrap();
+        let target_socket = if ip.is_ipv4() {
+            tokio::net::TcpSocket::new_v4().unwrap()
+        } else {
+            tokio::net::TcpSocket::new_v6().unwrap()
+        };
+        target_socket.bind((ip, 0).into()).unwrap();
+        let target = target_socket.local_addr().unwrap();
+        let source_listener = TcpListener::bind((ip, 0)).await.unwrap();
+        let client = source_listener.local_addr().unwrap();
+        crate::net::transparent::transparent_socket(client, target).unwrap();
+        let (logs, dispatch) = capture_logs();
+        assert!(
+            ProxyTarget::connect_transparent(client, target)
+                .with_subscriber(dispatch.clone())
+                .await
+                .is_none()
+        );
+        assert!(logs.lock().unwrap().is_empty());
+        assert!(
+            ProxyTarget::connect_transparent((ip, 0).into(), target)
+                .with_subscriber(dispatch)
+                .await
+                .is_none()
+        );
+        assert!(logs.lock().unwrap().is_empty());
+
+        let backend = TcpListener::bind((ip, 0)).await.unwrap();
+        let target = backend.local_addr().unwrap();
+        let stream = crate::net::transparent::transparent_connect((ip, 0).into(), target)
+            .await
+            .unwrap();
+        let (accepted, _) = backend.accept().await.unwrap();
+        assert_eq!(accepted.peer_addr().unwrap(), stream.local_addr().unwrap());
+        assert_eq!(stream.local_addr().unwrap().ip(), ip);
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "requires both CAP_NET_RAW and CAP_NET_ADMIN to be absent"]
+async fn transparent_socket_setup_failure_warns() {
+    let client = "127.0.0.1:0".parse().unwrap();
+    let target = "127.0.0.1:1".parse().unwrap();
+    let error = crate::net::transparent::transparent_socket(client, target).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    let (logs, dispatch) = capture_logs();
+    assert!(
+        ProxyTarget::connect_transparent(client, target)
+            .with_subscriber(dispatch)
+            .await
+            .is_none()
+    );
+    let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
+    assert!(logs.contains("WARN"), "{logs}");
+    assert!(logs.contains("transparent egress setup"), "{logs}");
+    assert!(logs.contains("connecting plainly"), "{logs}");
+}
+
 #[tokio::test]
 async fn malformed_http_from_clients_and_services_is_silent() {
     tokio::time::timeout(Duration::from_secs(5), async {
