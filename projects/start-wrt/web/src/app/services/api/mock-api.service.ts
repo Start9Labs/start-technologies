@@ -1078,16 +1078,18 @@ export class MockApiService extends ApiService {
       this.persistVpnServers()
 
       // Cascade: delete its reservations and published ports
+      const reserved = new Set(result.reservations.map(r => r.ipv4))
+      const ports = new Set(result.published_ports.map(p => p.id))
       const seen = new Set<string>()
       this.mockDeviceHosts = this.mockDeviceHosts.flatMap(h => {
         const mac = h.options.mac?.toUpperCase() ?? ''
         const first = !seen.has(mac)
         seen.add(mac)
-        if (!inProfile(h.options.ip)) return [h]
+        if (!reserved.has(h.options.ip ?? '')) return [h]
         return first ? [{ ...h, options: { ...h.options, ip: undefined } }] : []
       })
       this.mockPublishedPorts = this.mockPublishedPorts.filter(
-        p => !inProfile(p.device_ipv4),
+        p => !ports.has(p.id),
       )
 
       // Cascade: reset any profiles using this one in lan_access other_profiles
