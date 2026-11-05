@@ -1,1 +1,0 @@
-- Las comprobaciones `ready` de daemons y las de `addHealthCheck()` dejan de consumir más memoria en cada ejecución mientras el servicio está activo. Reconstruye los paquetes con esta versión del SDK para recibir la corrección.
