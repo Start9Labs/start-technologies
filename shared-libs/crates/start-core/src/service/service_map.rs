@@ -29,6 +29,7 @@ use crate::s9pk::manifest::{Manifest, PackageId};
 use crate::s9pk::merkle_archive::source::{DynFileSource, FileSource};
 use crate::service::rpc::{ExitParams, InitKind};
 use crate::service::{LoadDisposition, Service, ServiceRef, get_data_version};
+use crate::sign::commitment::Commitment;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::status::StatusInfo;
 use crate::util::future::NonDetachingJoinHandle;
@@ -201,11 +202,34 @@ impl ServiceMap {
         Fut: Future<Output = Result<S9pk<S>, Error>>,
         S: FileSource + Clone,
     {
+        let s9pk = s9pk().await?;
+        let source_commitment = s9pk.as_archive().commitment().await?;
+        self.install_prepared(
+            ctx,
+            s9pk.clone(),
+            source_commitment,
+            std::future::ready(Ok(s9pk)),
+            registry,
+            recovery_source,
+            progress,
+        )
+        .await
+    }
+
+    /// Metadata must already match the supplied commitment.
+    pub(crate) async fn install_prepared<S: FileSource + Clone>(
+        &self,
+        ctx: RpcContext,
+        mut s9pk: S9pk<S>,
+        source_commitment: MerkleArchiveCommitment,
+        payload: impl Future<Output = Result<S9pk<S>, Error>> + Send + 'static,
+        registry: Option<Url>,
+        recovery_source: Option<impl GenericMountGuard>,
+        progress: Option<FullProgressTracker>,
+    ) -> Result<DownloadInstallFuture, Error> {
         let progress = progress.unwrap_or_else(|| FullProgressTracker::new());
         let mut validate_progress = progress.add_phase("Validating Headers".into(), Some(1));
         let mut unpack_progress = progress.add_phase("Unpacking".into(), Some(100));
-
-        let mut s9pk = s9pk().await?;
         validate_progress.start();
         s9pk.validate_and_filter(ctx.s9pk_arch)?;
         validate_progress.complete();
@@ -247,7 +271,6 @@ impl ServiceMap {
                 }
             }
         }
-        let size = s9pk.size();
         let op_name = if recovery_source.is_none() {
             if service.is_none() {
                 "Installing"
@@ -353,6 +376,12 @@ impl ServiceMap {
                             },
                             Some(Duration::from_millis(100)),
                         )));
+
+                    let mut s9pk = payload.await?;
+                    source_commitment.check(s9pk.as_archive()).await?;
+                    s9pk.validate_and_filter(ctx.s9pk_arch)?;
+                    let size = s9pk.size();
+                    installing_s9pk.replace(s9pk.clone().into_dyn());
 
                     let out = crate::util::io::create_file(&download_path).await?;
                     // `+C` before any extents exist, so fallocate lands nodatacow.
@@ -550,6 +579,12 @@ impl InstallingS9pkGuard {
             ctx: ctx.clone(),
             id: id.clone(),
         }
+    }
+
+    fn replace(&self, s9pk: S9pk<DynFileSource>) {
+        self.ctx
+            .installing_s9pks
+            .mutate(|sources| sources.insert(self.id.clone(), s9pk));
     }
 }
 impl Drop for InstallingS9pkGuard {

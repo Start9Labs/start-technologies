@@ -10,7 +10,7 @@ use librqbit::{
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt};
 use tokio::sync::{OnceCell, RwLock};
 use tokio::time::{Instant, timeout};
 use url::Url;
@@ -33,7 +33,7 @@ pub(crate) mod discovery;
 mod tests;
 
 const METADATA_LIMIT: u64 = 4 * 1024 * 1024;
-const METADATA_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const METADATA_TIMEOUT: Duration = Duration::from_secs(30);
 const STALL_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const DISCOVERY_INTERVAL: Duration = Duration::from_secs(300);
@@ -110,9 +110,114 @@ pub(crate) struct SharingMetadata {
     pub(crate) commitment: ContentCommitment,
 }
 
-pub(crate) struct TorrentAttempt {
+pub(crate) struct TorrentAttempt<T = (Arc<TmpDir>, PathBuf)> {
     pub(crate) metadata: SharingMetadata,
-    pub(crate) source: Option<(Arc<TmpDir>, PathBuf)>,
+    pub(crate) source: Option<T>,
+}
+
+pub(crate) struct TorrentTransfer {
+    workspace: TorrentWorkspace,
+    torrent: Arc<librqbit::ManagedTorrent>,
+    path: PathBuf,
+    length: u64,
+    commitment: ContentCommitment,
+}
+
+impl TorrentAttempt<Arc<TorrentTransfer>> {
+    pub(crate) async fn complete(
+        &self,
+        progress: &mut PhaseProgressTrackerHandle,
+    ) -> TorrentAttempt {
+        let source = match &self.source {
+            Some(transfer) => match transfer.complete(progress).await {
+                Ok(source) => Some(source),
+                Err(error) => {
+                    tracing::warn!(%error, "BitTorrent payload failed; falling back to HTTP mirrors");
+                    None
+                }
+            },
+            None => None,
+        };
+        TorrentAttempt {
+            metadata: self.metadata.clone(),
+            source,
+        }
+    }
+}
+
+impl TorrentTransfer {
+    async fn complete(
+        &self,
+        progress: &mut PhaseProgressTrackerHandle,
+    ) -> Result<(Arc<TmpDir>, PathBuf), Error> {
+        let _cancel = self
+            .workspace
+            .session
+            .0
+            .cancellation_token()
+            .clone()
+            .drop_guard();
+        progress.start();
+        progress.set_units(Some(ProgressUnits::Bytes));
+        progress.set_total(self.length);
+        let mut last_progress = 0;
+        let mut last_change = Instant::now();
+        loop {
+            let stats = self.torrent.stats();
+            if let Some(error) = stats.error {
+                return Err(Error::new(eyre!("{error}"), ErrorKind::Network));
+            }
+            if stats.progress_bytes > last_progress {
+                progress.set_done(stats.progress_bytes);
+                last_progress = stats.progress_bytes;
+                last_change = Instant::now();
+            }
+            if stats.finished {
+                break;
+            }
+            ensure_code!(
+                last_change.elapsed() < STALL_TIMEOUT,
+                ErrorKind::Timeout,
+                "{}",
+                t!("registry.bittorrent.stalled")
+            );
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+        self.workspace.session.0.stop().await;
+        self.commitment.verify(&self.path).await?;
+        progress.complete();
+        Ok((self.workspace.directory.clone(), self.path.clone()))
+    }
+}
+
+impl ArchiveSource for TorrentTransfer {
+    type FetchReader = Box<dyn AsyncRead + Unpin + Send>;
+    type FetchAllReader = Box<dyn AsyncRead + Unpin + Send>;
+
+    async fn size(&self) -> Option<u64> {
+        Some(self.length)
+    }
+
+    async fn fetch_all(&self) -> Result<Self::FetchAllReader, Error> {
+        Ok(Box::new(
+            self.torrent
+                .clone()
+                .stream(0)
+                .await
+                .map_err(torrent_error)?,
+        ))
+    }
+
+    async fn fetch(&self, position: u64, size: u64) -> Result<Self::FetchReader, Error> {
+        let mut stream = self
+            .torrent
+            .clone()
+            .stream(0)
+            .await
+            .map_err(torrent_error)?;
+        stream.seek(std::io::SeekFrom::Start(position)).await?;
+        Ok(Box::new(stream.take(size)))
+    }
 }
 
 struct TorrentWorkspace {
@@ -381,17 +486,26 @@ impl TorrentClient {
         client: Client,
         progress: &mut PhaseProgressTrackerHandle,
     ) -> Result<Option<TorrentAttempt>, Error> {
+        let Some(pending) = self.begin(url, commitment, client).await? else {
+            return Ok(None);
+        };
+        Ok(Some(pending.complete(progress).await))
+    }
+
+    pub(crate) async fn begin(
+        &self,
+        url: &Url,
+        commitment: ContentCommitment,
+        client: Client,
+    ) -> Result<Option<TorrentAttempt<Arc<TorrentTransfer>>>, Error> {
         let Some(resolved) = self.resolve(url, &commitment, client).await? else {
             return Ok(None);
         };
         let metadata = resolved.sharing_metadata(commitment.clone());
-        let result = self
-            .download_resolved(resolved, &commitment, progress)
-            .await;
-        let source = match result {
-            Ok(source) => Some(source),
+        let source = match self.start_transfer(resolved, commitment).await {
+            Ok(transfer) => Some(Arc::new(transfer)),
             Err(error) => {
-                tracing::warn!(%error, "BitTorrent payload failed; falling back to HTTP mirrors");
+                tracing::warn!(%error, "Cannot start BitTorrent payload; falling back to HTTP mirrors");
                 None
             }
         };
@@ -417,74 +531,32 @@ impl TorrentClient {
         })
     }
 
-    async fn download_resolved(
+    async fn start_transfer(
         &self,
         mut resolved: ResolvedTorrent,
-        commitment: &ContentCommitment,
-        progress: &mut PhaseProgressTrackerHandle,
-    ) -> Result<(Arc<TmpDir>, PathBuf), Error> {
+        commitment: ContentCommitment,
+    ) -> Result<TorrentTransfer, Error> {
         let workspace = match resolved.workspace.take() {
             Some(workspace) => workspace,
             None => self.workspace().await?,
         };
         let path = workspace.output.join(file_name(&resolved.meta)?);
-        Self::download_payload(
-            &workspace.session,
-            &resolved.bytes,
-            &path,
-            &resolved.meta,
-            commitment,
-            progress,
-        )
-        .await?;
-        Ok((workspace.directory, path))
-    }
-
-    async fn download_payload(
-        session: &TorrentSession,
-        bytes: &bytes::Bytes,
-        path: &Path,
-        meta: &TorrentMetaV1Owned,
-        commitment: &ContentCommitment,
-        progress: &mut PhaseProgressTrackerHandle,
-    ) -> Result<(), Error> {
-        let torrent = session
+        let length = resolved.meta.info.data.length.unwrap();
+        let torrent = workspace
+            .session
             .0
-            .add_torrent(AddTorrent::from_bytes(bytes.clone()), None)
+            .add_torrent(AddTorrent::from_bytes(resolved.bytes), None)
             .await
             .map_err(torrent_error)?
             .into_handle()
             .or_not_found("torrent handle")?;
-        progress.start();
-        progress.set_units(Some(ProgressUnits::Bytes));
-        progress.set_total(meta.info.data.length.unwrap());
-        let mut last_progress = 0;
-        let mut last_change = Instant::now();
-        loop {
-            let stats = torrent.stats();
-            if let Some(error) = stats.error {
-                return Err(Error::new(eyre!("{error}"), ErrorKind::Network));
-            }
-            if stats.progress_bytes > last_progress {
-                progress.set_done(stats.progress_bytes);
-                last_progress = stats.progress_bytes;
-                last_change = Instant::now();
-            }
-            if stats.finished {
-                break;
-            }
-            ensure_code!(
-                last_change.elapsed() < STALL_TIMEOUT,
-                ErrorKind::Timeout,
-                "{}",
-                t!("registry.bittorrent.stalled")
-            );
-            tokio::time::sleep(POLL_INTERVAL).await;
-        }
-        session.0.stop().await;
-        commitment.verify(path).await?;
-        progress.complete();
-        Ok(())
+        Ok(TorrentTransfer {
+            workspace,
+            torrent,
+            path,
+            length,
+            commitment,
+        })
     }
 }
 

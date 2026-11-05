@@ -24,7 +24,7 @@ Package details include a **Signed by** section listing every key that signed th
 
 When a registry advertises a BitTorrent source, StartOS prefers it for package downloads and OS updates, with HTTP fallback if the torrent is unavailable, stalls, or fails verification. Both transports use the same signed content commitments. BitTorrent sources must contain a single asset file. V1/v2 hybrid torrents use their v1-compatible swarm. Recovery-mode OS updates stream over HTTP directly to the image partition.
 
-BitTorrent downloads buffer a complete asset on the data disk before installation. Temporary transfer files are cleaned up afterward.
+BitTorrent downloads buffer a complete asset on the data disk before unpacking package files or applying an OS update. Install progress appears once signed package metadata is ready, and the remaining transfer can be cancelled. Metadata can come from advertised HTTP mirrors or BitTorrent peers. Temporary transfer files are cleaned up afterward.
 
 > [!WARNING]
 > BitTorrent peers can see the server's IP address and the torrent it requests. Onion registries use HTTP through Tor instead of BitTorrent.

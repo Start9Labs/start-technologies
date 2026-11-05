@@ -3,6 +3,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use futures::FutureExt;
+use futures::future::{BoxFuture, Shared, select_ok};
 use reqwest::header::RANGE;
 use reqwest::{Client, Response};
 use serde::{Deserialize, Serialize};
@@ -11,12 +13,14 @@ use url::Url;
 
 use crate::prelude::*;
 use crate::progress::PhaseProgressTrackerHandle;
-use crate::registry::bittorrent::{ContentCommitment, SharingMetadata, TorrentClient};
+use crate::registry::bittorrent::{
+    ContentCommitment, METADATA_TIMEOUT, SharingMetadata, TorrentAttempt, TorrentClient,
+};
 use crate::registry::signer::AcceptSigners;
 use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
-use crate::s9pk::merkle_archive::source::{ArchiveSource, Section, TmpSource};
+use crate::s9pk::merkle_archive::source::{ArchiveSource, DynFileSource, Section, TmpSource};
 use crate::sign::commitment::blake3::Blake3Commitment;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::sign::commitment::{Commitment, SignedCommitment};
@@ -85,10 +89,7 @@ impl<Commitment> RegistryAsset<Commitment> {
                 return Ok(source);
             }
         }
-        Err(Error::new(
-            eyre!("{}", t!("registry.asset.failed-to-load-http-url")),
-            ErrorKind::Network,
-        ))
+        Err(http_source_unavailable())
     }
     pub async fn load_buffered_http_source(
         &self,
@@ -183,6 +184,25 @@ impl<C: Clone + Into<ContentCommitment>> RegistryAsset<C> {
             .await
     }
 
+    async fn torrent_attempt(
+        &self,
+        client: Client,
+        torrents: Option<&TorrentClient>,
+        progress: &mut PhaseProgressTrackerHandle,
+    ) -> Option<TorrentAttempt> {
+        let (descriptor, torrents) = self.torrent_advertisement(torrents)?;
+        match torrents
+            .download(descriptor, self.commitment.clone().into(), client, progress)
+            .await
+        {
+            Ok(attempt) => attempt,
+            Err(error) => {
+                tracing::warn!(%error, "BitTorrent unavailable; falling back to HTTP mirrors");
+                None
+            }
+        }
+    }
+
     async fn torrent_source(
         &self,
         client: Client,
@@ -190,35 +210,7 @@ impl<C: Clone + Into<ContentCommitment>> RegistryAsset<C> {
         progress: &mut PhaseProgressTrackerHandle,
         path: Option<&Path>,
     ) -> Result<(Option<BufferedTransport>, Option<SharingMetadata>), Error> {
-        let Some((descriptor, torrents)) = self.torrent_advertisement(torrents) else {
-            return Ok((None, None));
-        };
-        let attempt = match torrents
-            .download(descriptor, self.commitment.clone().into(), client, progress)
-            .await
-        {
-            Ok(Some(attempt)) => attempt,
-            Ok(None) => return Ok((None, None)),
-            Err(error) => {
-                tracing::warn!(%error, "BitTorrent unavailable; falling back to HTTP mirrors");
-                return Ok((None, None));
-            }
-        };
-        let Some((tmp, file)) = attempt.source else {
-            return Ok((None, Some(attempt.metadata)));
-        };
-        let file = if let Some(path) = path {
-            let mut dest = create_file(path).await?;
-            crate::util::writeback::set_no_cow(path).await;
-            tokio::io::copy(&mut open_file(&file).await?, &mut dest).await?;
-            MultiCursorFile::open(&dest).await?
-        } else {
-            MultiCursorFile::from(open_file(file).await?)
-        };
-        Ok((
-            Some(BufferedTransport::Torrent(TmpSource::new(tmp, file))),
-            Some(attempt.metadata),
-        ))
+        torrent_transport(self.torrent_attempt(client, torrents, progress).await, path).await
     }
 
     async fn load_buffered_source(
@@ -228,9 +220,20 @@ impl<C: Clone + Into<ContentCommitment>> RegistryAsset<C> {
         mut progress: PhaseProgressTrackerHandle,
         path: Option<&Path>,
     ) -> Result<BufferedAssetSource, Error> {
-        let (transport, sharing) = self
-            .torrent_source(client.clone(), torrents, &mut progress, path)
-            .await?;
+        let attempt = self
+            .torrent_attempt(client.clone(), torrents, &mut progress)
+            .await;
+        self.buffer_attempt(attempt, client, progress, path).await
+    }
+
+    async fn buffer_attempt(
+        &self,
+        attempt: Option<TorrentAttempt>,
+        client: Client,
+        progress: PhaseProgressTrackerHandle,
+        path: Option<&Path>,
+    ) -> Result<BufferedAssetSource, Error> {
+        let (transport, sharing) = torrent_transport(attempt, path).await?;
         let transport = match transport {
             Some(transport) => transport,
             None => BufferedTransport::Http(match path {
@@ -244,16 +247,171 @@ impl<C: Clone + Into<ContentCommitment>> RegistryAsset<C> {
         Ok(BufferedAssetSource { transport, sharing })
     }
 }
+fn http_source_unavailable() -> Error {
+    Error::new(
+        eyre!("{}", t!("registry.asset.failed-to-load-http-url")),
+        ErrorKind::Network,
+    )
+}
+
+async fn torrent_transport(
+    attempt: Option<TorrentAttempt>,
+    path: Option<&Path>,
+) -> Result<(Option<BufferedTransport>, Option<SharingMetadata>), Error> {
+    let Some(attempt) = attempt else {
+        return Ok((None, None));
+    };
+    let Some((tmp, file)) = attempt.source else {
+        return Ok((None, Some(attempt.metadata)));
+    };
+    let file = if let Some(path) = path {
+        let mut dest = create_file(path).await?;
+        crate::util::writeback::set_no_cow(path).await;
+        tokio::io::copy(&mut open_file(&file).await?, &mut dest).await?;
+        MultiCursorFile::open(&dest).await?
+    } else {
+        MultiCursorFile::from(open_file(file).await?)
+    };
+    Ok((
+        Some(BufferedTransport::Torrent(TmpSource::new(tmp, file))),
+        Some(attempt.metadata),
+    ))
+}
+
+pub(crate) struct DownloadedPackage {
+    pub(crate) package: S9pk<DynFileSource>,
+    pub(crate) source: Arc<BufferedAssetSource>,
+}
+
+impl
+    From<(
+        S9pk<Section<Arc<BufferedAssetSource>>>,
+        Arc<BufferedAssetSource>,
+    )> for DownloadedPackage
+{
+    fn from(
+        (package, source): (
+            S9pk<Section<Arc<BufferedAssetSource>>>,
+            Arc<BufferedAssetSource>,
+        ),
+    ) -> Self {
+        Self {
+            package: package.into_dyn(),
+            source,
+        }
+    }
+}
+
+pub(crate) struct PreparedPackage {
+    pub(crate) metadata: S9pk<DynFileSource>,
+    pub(crate) download: Shared<BoxFuture<'static, Result<Arc<DownloadedPackage>, Arc<Error>>>>,
+}
+
 impl RegistryAsset<MerkleArchiveCommitment> {
+    pub(crate) async fn prepare_install(
+        &self,
+        client: Client,
+        torrents: Option<Arc<TorrentClient>>,
+        mut progress: PhaseProgressTrackerHandle,
+    ) -> Result<PreparedPackage, Error> {
+        let Some((descriptor, _)) = self.torrent_advertisement(torrents.as_deref()) else {
+            let loaded = Arc::new(DownloadedPackage::from(
+                self.deserialize_s9pk_buffered(client, None, progress)
+                    .await?,
+            ));
+            return Ok(PreparedPackage {
+                metadata: loaded.package.clone(),
+                download: std::future::ready(Ok(loaded)).boxed().shared(),
+            });
+        };
+        let descriptor = descriptor.clone();
+        let commitment = self.commitment;
+        let engine = torrents.unwrap();
+        let peer_client = client.clone();
+        let preparing = async move {
+            engine
+                .begin(&descriptor, commitment.into(), peer_client)
+                .await
+                .map(|attempt| attempt.map(Arc::new))
+                .map_err(Arc::new)
+        }
+        .boxed()
+        .shared();
+        let http_header = async {
+            self.deserialize_s9pk(client.clone())
+                .await
+                .map(S9pk::into_dyn)
+        }
+        .boxed();
+        let peer_header = async {
+            let attempt = preparing
+                .clone()
+                .await
+                .map_err(|error| error.clone_output())?
+                .or_not_found("torrent metadata")?;
+            let source = attempt.source.as_ref().or_not_found("torrent stream")?;
+            Ok::<_, Error>(
+                S9pk::deserialize(source, Some(&commitment))
+                    .await?
+                    .into_dyn(),
+            )
+        }
+        .boxed();
+        let peer_header = async {
+            tokio::time::timeout(METADATA_TIMEOUT, peer_header)
+                .await
+                .with_kind(ErrorKind::Timeout)?
+        }
+        .boxed();
+        let metadata = {
+            let (metadata, _) = select_ok(vec![http_header, peer_header]).await?;
+            metadata
+        };
+        let asset = self.clone();
+        let download = async move {
+            progress.start();
+            let attempt = match preparing.await {
+                Ok(Some(pending)) => Some(pending.complete(&mut progress).await),
+                Ok(None) => None,
+                Err(error) => {
+                    tracing::warn!(%error, "BitTorrent unavailable; falling back to HTTP mirrors");
+                    None
+                }
+            };
+            let source = Arc::new(
+                asset
+                    .buffer_attempt(attempt, client, progress, None)
+                    .await?,
+            );
+            let package = S9pk::deserialize(&source, Some(&asset.commitment)).await?;
+            Ok::<_, Error>(Arc::new(DownloadedPackage::from((package, source))))
+        }
+        .map(|result| result.map_err(Arc::new))
+        .boxed()
+        .shared();
+        Ok(PreparedPackage { metadata, download })
+    }
+
     pub async fn deserialize_s9pk(
         &self,
         client: Client,
     ) -> Result<S9pk<Section<Arc<HttpSource>>>, Error> {
-        S9pk::deserialize(
-            &Arc::new(self.load_http_source(client).await?),
-            Some(&self.commitment),
-        )
-        .await
+        let mut last_error = None;
+        for url in &self.urls {
+            let metadata = async {
+                let source = Arc::new(HttpSource::new(client.clone(), url.clone()).await?);
+                S9pk::deserialize(&source, Some(&self.commitment)).await
+            };
+            match tokio::time::timeout(METADATA_TIMEOUT, metadata)
+                .await
+                .with_kind(ErrorKind::Timeout)
+                .and_then(|result| result)
+            {
+                Ok(package) => return Ok(package),
+                Err(error) => last_error = Some(error),
+            }
+        }
+        Err(last_error.unwrap_or_else(http_source_unavailable))
     }
     pub async fn deserialize_s9pk_buffered(
         &self,

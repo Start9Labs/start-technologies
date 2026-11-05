@@ -168,6 +168,15 @@ impl Swarm {
             )
             .route("/invalid.torrent", get(|| async { "invalid torrent" }))
             .route(
+                "/head-only",
+                get(|| async { axum::http::StatusCode::BAD_GATEWAY })
+                    .head(|| async { axum::http::StatusCode::OK }),
+            )
+            .route(
+                "/original-package",
+                get(|| async { package_bytes().await.unwrap().0 }),
+            )
+            .route(
                 "/announce",
                 get(move || {
                     let peers = peers.clone();
@@ -233,6 +242,218 @@ impl Swarm {
 
 fn cli_client() -> TorrentClient {
     TorrentClient::download_only(TorrentDownloadConfig::default(), false)
+}
+
+async fn package_asset(swarm: &Swarm) -> Result<RegistryAsset<MerkleArchiveCommitment>, Error> {
+    Ok(RegistryAsset {
+        published_at: Utc::now(),
+        urls: vec![swarm.url.join("asset")?],
+        torrent: Some(swarm.url.join("metadata.torrent")?),
+        commitment: package_bytes().await?.1,
+        signatures: Default::default(),
+    })
+}
+
+#[tokio::test]
+async fn install_metadata_is_ready_while_the_torrent_payload_is_stalled() -> Result<(), Error> {
+    let swarm = Swarm::with_content(package_bytes().await?.0).await?;
+    swarm._seed.0.stop().await;
+    let asset = package_asset(&swarm).await?;
+    let progress = FullProgressTracker::new();
+    let phase = progress.add_phase("Downloading".into(), Some(100));
+    let prepared = timeout(
+        Duration::from_secs(5),
+        asset.prepare_install(Client::new(), Some(Arc::new(cli_client())), phase),
+    )
+    .await
+    .with_kind(ErrorKind::Timeout)??;
+    assert_eq!(
+        prepared.metadata.as_archive().commitment().await?,
+        asset.commitment
+    );
+    let id = prepared.metadata.as_manifest().id.clone();
+    let state = crate::db::model::package::PackageState::Installing(
+        crate::db::model::package::InstallingState {
+            installing_info: crate::db::model::package::InstallingInfo {
+                new_manifest: prepared.metadata.as_manifest().clone(),
+                progress: progress.snapshot(),
+            },
+        },
+    );
+    let entries =
+        std::collections::BTreeMap::from([(id.clone(), imbl_value::json!({"stateInfo": state}))]);
+    let raw = patch_db::PatchDb::in_memory();
+    raw.put(
+        &patch_db::json_ptr::ROOT,
+        &imbl_value::json!({"public": {"packageData": entries}}),
+    )
+    .await?;
+    let db = patch_db::TypedPatchDb::<crate::db::model::Database, Error>::load_unchecked(raw);
+    let update_id = id.clone();
+    let sync: NonDetachingJoinHandle<_> = tokio::spawn(progress.sync_to_db(
+        db.clone(),
+        move |model| {
+            model
+                .as_public_mut()
+                .as_package_data_mut()
+                .as_idx_mut(&update_id)
+                .and_then(|entry| entry.as_state_info_mut().as_installing_info_mut())
+                .map(|info| info.as_progress_mut())
+        },
+        Some(Duration::from_millis(10)),
+    ))
+    .into();
+    assert!(
+        timeout(Duration::from_millis(100), prepared.download.clone())
+            .await
+            .is_err()
+    );
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let state = db
+                .peek()
+                .await
+                .as_public()
+                .as_package_data()
+                .as_idx(&id)
+                .unwrap()
+                .as_state_info()
+                .de()
+                .unwrap();
+            let crate::db::model::package::PackageState::Installing(state) = state else {
+                panic!("install state lost")
+            };
+            if !matches!(
+                state.installing_info.progress.phases[0].progress,
+                crate::progress::Progress::NotStarted(_)
+            ) {
+                assert!(!state.installing_info.progress.overall.is_complete());
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    drop(prepared);
+    drop(sync);
+    Ok(())
+}
+
+#[tokio::test]
+async fn install_metadata_uses_a_secondary_mirror_after_a_false_positive_head() -> Result<(), Error>
+{
+    let swarm = Swarm::with_content(package_bytes().await?.0).await?;
+    swarm._seed.0.stop().await;
+    let mut asset = package_asset(&swarm).await?;
+    asset.urls.insert(0, swarm.url.join("head-only")?);
+    let phase = FullProgressTracker::new().add_phase("Downloading".into(), Some(100));
+    let prepared = timeout(
+        Duration::from_secs(5),
+        asset.prepare_install(Client::new(), Some(Arc::new(cli_client())), phase),
+    )
+    .await
+    .with_kind(ErrorKind::Timeout)??;
+    assert_eq!(
+        prepared.metadata.as_archive().commitment().await?,
+        asset.commitment
+    );
+    drop(prepared);
+    Ok(())
+}
+
+#[tokio::test]
+async fn install_preparation_uses_peer_headers_when_http_is_unavailable() -> Result<(), Error> {
+    let swarm = Swarm::with_content(package_bytes().await?.0).await?;
+    let mut asset = package_asset(&swarm).await?;
+    asset.urls = vec![swarm.url.join("missing")?];
+    let phase = FullProgressTracker::new().add_phase("Downloading".into(), Some(100));
+    let prepared = timeout(
+        Duration::from_secs(10),
+        asset.prepare_install(Client::new(), Some(Arc::new(cli_client())), phase),
+    )
+    .await
+    .with_kind(ErrorKind::Timeout)??;
+    let loaded = prepared
+        .download
+        .await
+        .map_err(|error| error.clone_output())?;
+    assert_eq!(
+        loaded.package.as_manifest().id,
+        prepared.metadata.as_manifest().id
+    );
+    let mut bytes = Vec::new();
+    loaded
+        .source
+        .fetch_all()
+        .await?
+        .read_to_end(&mut bytes)
+        .await?;
+    assert_eq!(bytes, swarm.content);
+    assert!(loaded.source.sharing.is_some());
+    assert_eq!(swarm.http_hits.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn install_preparation_reparses_http_fallback_after_a_bad_torrent() -> Result<(), Error> {
+    let mut content = package_bytes().await?.0;
+    *content.last_mut().unwrap() ^= 1;
+    let swarm = Swarm::with_content(content).await?;
+    let mut asset = package_asset(&swarm).await?;
+    asset.urls = vec![swarm.url.join("original-package")?];
+    let phase = FullProgressTracker::new().add_phase("Downloading".into(), Some(100));
+    let prepared = asset
+        .prepare_install(Client::new(), Some(Arc::new(cli_client())), phase)
+        .await?;
+    let loaded = prepared
+        .download
+        .await
+        .map_err(|error| error.clone_output())?;
+    let mut bytes = Vec::new();
+    loaded
+        .source
+        .fetch_all()
+        .await?
+        .read_to_end(&mut bytes)
+        .await?;
+    assert_eq!(bytes, package_bytes().await?.0);
+    assert_eq!(
+        loaded.source.sharing.as_ref().unwrap().torrent.0,
+        swarm.torrent
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn install_payload_cancellation_also_closes_metadata_readers() -> Result<(), Error> {
+    let swarm = Swarm::with_content(package_bytes().await?.0).await?;
+    swarm._seed.0.stop().await;
+    let asset = package_asset(&swarm).await?;
+    let client = cli_client();
+    let pending = client
+        .begin(
+            asset.torrent.as_ref().unwrap(),
+            asset.commitment.into(),
+            Client::new(),
+        )
+        .await?
+        .unwrap();
+    let source = pending.source.as_ref().unwrap().clone();
+    let token = source.workspace.session.0.cancellation_token().clone();
+    let _metadata_reader = source.fetch(0, 1).await?;
+    let mut phase = FullProgressTracker::new().add_phase("Downloading".into(), Some(100));
+    let mut completion = Box::pin(pending.complete(&mut phase));
+    assert!(
+        timeout(Duration::from_millis(100), completion.as_mut())
+            .await
+            .is_err()
+    );
+    assert!(!token.is_cancelled());
+    drop(completion);
+    assert!(token.is_cancelled());
+    assert!(source.torrent.stats().progress_bytes < source.length);
+    Ok(())
 }
 
 #[tokio::test]

@@ -157,15 +157,27 @@ pub async fn install(
 
     let progress_tracker = FullProgressTracker::new();
     let download_progress = progress_tracker.add_phase("Downloading".into(), Some(100));
-    let torrents = ctx.torrents.for_source(&registry);
-    let (s9pk, source) = asset
-        .deserialize_s9pk_buffered(ctx.client.get(), torrents, download_progress)
+    let torrents = ctx
+        .torrents
+        .for_source(&registry)
+        .map(|_| ctx.torrents.clone());
+    let prepared = asset
+        .prepare_install(ctx.client.get(), torrents, download_progress)
         .await?;
+    let payload = prepared.download.clone();
     let download = ctx
         .services
-        .install(
+        .install_prepared(
             ctx.clone(),
-            || async move { Ok(s9pk) },
+            prepared.metadata,
+            asset.commitment,
+            async move {
+                Ok(payload
+                    .await
+                    .map_err(|error| error.clone_output())?
+                    .package
+                    .clone())
+            },
             Some(registry),
             None::<Never>,
             Some(progress_tracker),
@@ -173,7 +185,11 @@ pub async fn install(
         .await?;
     tokio::spawn(async move {
         let installed = download.await?.await?;
-        if let Some(metadata) = &source.sharing {
+        let loaded = prepared
+            .download
+            .await
+            .map_err(|error| error.clone_output())?;
+        if let Some(metadata) = &loaded.source.sharing {
             if let Err(error) = ctx.torrents.register_stored(&installed, metadata).await {
                 tracing::warn!(%error, "Cannot register installed S9PK for sharing");
             }
