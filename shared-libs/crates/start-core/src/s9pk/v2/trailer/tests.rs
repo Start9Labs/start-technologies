@@ -223,13 +223,10 @@ async fn s9pk_trailer_local_load_requires_a_valid_embedded_signature() {
 async fn sideload_request_signatures_are_verified_against_the_uploaded_archive() {
     let source = Arc::<[u8]>::from(bytes("base.s9pk"));
     for index in 0..3 {
-        let signatures = vec![(
+        let signatures = std::collections::HashMap::from([(
             key(index),
-            vectors()["endorsements"][index]["signature"]
-                .as_str()
-                .unwrap()
-                .to_owned(),
-        )];
+            serde_json::from_value(vectors()["endorsements"][index]["signature"].clone()).unwrap(),
+        )]);
         crate::s9pk::load_for_sideload(
             source.clone(),
             || panic!("v2"),
@@ -240,16 +237,10 @@ async fn sideload_request_signatures_are_verified_against_the_uploaded_archive()
         .await
         .unwrap();
     }
-    let valid = vectors()["endorsements"][0]["signature"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let wrong_bound = vectors()["largeBound"]["signature"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let invalid =
-        AnySignature::Ed25519ph(ed25519_dalek::Signature::from_bytes(&[0; 64])).to_string();
+    let valid: AnySignature =
+        serde_json::from_value(vectors()["endorsements"][0]["signature"].clone()).unwrap();
+    let wrong_bound = serde_json::from_value(vectors()["largeBound"]["signature"].clone()).unwrap();
+    let invalid = AnySignature::Ed25519ph(ed25519_dalek::Signature::from_bytes(&[0; 64]));
     for (signatures, pins, expected) in [
         (vec![], Some(vec![key(0)]), false),
         (vec![(key(0), invalid.clone())], Some(vec![key(0)]), false),
@@ -258,17 +249,10 @@ async fn sideload_request_signatures_are_verified_against_the_uploaded_archive()
         (vec![(key(0), valid.clone())], Some(vec![key(1)]), false),
         (vec![(key(0), valid.clone())], Some(vec![]), false),
         (vec![(key(0), valid.clone())], Some(vec![key(0)]), true),
-        (
-            vec![
-                (key(0), "malformed".to_owned()),
-                (key(0), invalid),
-                (key(0), valid),
-            ],
-            Some(vec![key(0)]),
-            true,
-        ),
+        (vec![(key(0), invalid)], None, false),
         (vec![], None, true),
     ] {
+        let signatures = signatures.into_iter().collect();
         let result = crate::s9pk::load_for_sideload(
             source.clone(),
             || panic!("v2"),
@@ -282,13 +266,7 @@ async fn sideload_request_signatures_are_verified_against_the_uploaded_archive()
             assert_eq!(result.err().unwrap().kind, ErrorKind::InvalidSignature);
         }
     }
-    let signatures = vec![(
-        key(0),
-        vectors()["endorsements"][0]["signature"]
-            .as_str()
-            .unwrap()
-            .to_owned(),
-    )];
+    let signatures = std::collections::HashMap::from([(key(0), valid)]);
     let mut corrupt = source.to_vec();
     corrupt[35] ^= 1;
     for policy in [None, crate::trusted_keys::signer_policy(Some(vec![key(0)]))] {
@@ -338,13 +316,10 @@ async fn sideload_request_signatures_allow_loading_and_progress_before_the_trail
     send.send(Ok(Bytes::copy_from_slice(&full[..split])))
         .await
         .unwrap();
-    let signatures = vec![(
+    let signatures = std::collections::HashMap::from([(
         key(0),
-        vectors()["endorsements"][0]["signature"]
-            .as_str()
-            .unwrap()
-            .to_owned(),
-    )];
+        serde_json::from_value(vectors()["endorsements"][0]["signature"].clone()).unwrap(),
+    )]);
     let package = tokio::time::timeout(
         Duration::from_secs(5),
         crate::s9pk::load_for_sideload(

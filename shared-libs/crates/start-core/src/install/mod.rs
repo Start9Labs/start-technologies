@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -29,6 +30,7 @@ use crate::registry::package::get::GetPackageResponse;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::s9pk::manifest::PackageId;
 use crate::s9pk::v2::SIG_CONTEXT;
+use crate::sign::{AnySignature, AnyVerifyingKey};
 use crate::trusted_keys::{self, TrustContext};
 use crate::upload::upload;
 use crate::util::io::open_file;
@@ -42,7 +44,6 @@ pub const PKG_ARCHIVE_DIR: &str = "package-data/archive";
 pub const PKG_PUBLIC_DIR: &str = "package-data/public";
 pub const PKG_WASM_DIR: &str = "package-data/wasm";
 
-// #[command(display(display_serializable))]
 pub async fn list(ctx: RpcContext) -> Result<Vec<Value>, Error> {
     Ok(ctx
         .db
@@ -199,9 +200,9 @@ pub async fn install(
 #[serde(rename_all = "camelCase")]
 pub struct SideloadParams {
     pub accept_signers: Option<crate::registry::signer::AcceptSigners>,
-    /// Supplemental DER64 signature candidates; malformed signatures remain isolated.
+    /// DER64 supplemental signatures for the uploaded archive.
     #[serde(default)]
-    pub signatures: Vec<(crate::sign::AnyVerifyingKey, String)>,
+    pub signatures: HashMap<AnyVerifyingKey, AnySignature>,
     /// Accepts an untrusted signer without skipping signature or integrity verification.
     #[serde(default)]
     trust: bool,
@@ -634,11 +635,10 @@ pub async fn cli_install(
 async fn local_sideload_params(path: &PathBuf, trust: bool) -> Result<SideloadParams, Error> {
     use crate::registry::signer::AcceptSigners;
     use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
-    use crate::util::serde::Der64;
 
     let mut params = SideloadParams {
         accept_signers: None,
-        signatures: Vec::new(),
+        signatures: HashMap::new(),
         trust,
         signer: None,
     };
@@ -655,10 +655,7 @@ async fn local_sideload_params(path: &PathBuf, trust: bool) -> Result<SideloadPa
             .map(AcceptSigners::Signer)
             .collect(),
     ));
-    params.signatures = signatures
-        .into_iter()
-        .map(|(key, signature)| (key, Der64::new(signature).to_string()))
-        .collect();
+    params.signatures = signatures;
     Ok(params)
 }
 

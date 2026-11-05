@@ -4892,18 +4892,10 @@
               "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
             },
             "signatures": {
-              "description": "Supplemental DER64 signature candidates; malformed signatures remain isolated.",
-              "type": "array",
-              "items": {
-                "type": "array",
-                "prefixItems": [
-                  { "$ref": "#/$defs/AnyVerifyingKey" },
-                  { "type": "string" }
-                ],
-                "items": false,
-                "minItems": 2,
-                "maxItems": 2
-              }
+              "description": "DER64 supplemental signatures for the uploaded archive.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/AnySignature" }
             },
             "trust": {
               "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
@@ -4944,7 +4936,8 @@
             }
           ]
         },
-        "AnyVerifyingKey": { "type": "string" }
+        "AnyVerifyingKey": { "type": "string" },
+        "AnySignature": { "type": "string" }
       },
       "type": "object",
       "properties": {
@@ -4952,18 +4945,10 @@
           "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
         },
         "signatures": {
-          "description": "Supplemental DER64 signature candidates; malformed signatures remain isolated.",
-          "type": "array",
-          "items": {
-            "type": "array",
-            "prefixItems": [
-              { "$ref": "#/$defs/AnyVerifyingKey" },
-              { "type": "string" }
-            ],
-            "items": false,
-            "minItems": 2,
-            "maxItems": 2
-          }
+          "description": "DER64 supplemental signatures for the uploaded archive.",
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/AnySignature" }
         },
         "trust": {
           "description": "Accepts an untrusted signer without skipping signature or integrity verification.",

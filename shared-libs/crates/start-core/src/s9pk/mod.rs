@@ -5,6 +5,7 @@ pub mod rpc;
 pub mod v1;
 pub mod v2;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncSeek};
@@ -16,7 +17,7 @@ use crate::registry::signer::AcceptSigners;
 use crate::s9pk::merkle_archive::source::{ArchiveSource, DynFileSource};
 use crate::s9pk::v1::reader::S9pkReader;
 use crate::s9pk::v2::compat::MAGIC_AND_VERSION;
-use crate::sign::AnyVerifyingKey;
+use crate::sign::{AnySignature, AnyVerifyingKey};
 use crate::util::io::TmpDir;
 
 pub async fn load<S, K>(
@@ -42,7 +43,7 @@ pub async fn load_for_sideload<S, K>(
     source: S,
     key: K,
     progress: Option<&FullProgressTracker>,
-    signatures: &[(AnyVerifyingKey, String)],
+    signatures: &HashMap<AnyVerifyingKey, AnySignature>,
     accepted: Option<AcceptSigners>,
 ) -> Result<S9pk<DynFileSource>, Error>
 where
@@ -58,11 +59,7 @@ where
     policy.process_verified_signer(&AnyVerifyingKey::Ed25519(s9pk.as_archive().signer()));
     let commitment = s9pk.as_archive().commitment().await?;
     for (signer, signature) in signatures {
-        if let Err(error) = signature.parse().and_then(|signature| {
-            policy.process_signature(signer, &commitment, v2::SIG_CONTEXT, &signature)
-        }) {
-            tracing::warn!(%error, "{}", t!("s9pk.trailer.invalid-signature"));
-        }
+        policy.process_signature(signer, &commitment, v2::SIG_CONTEXT, signature)?;
     }
     policy.try_accept()?;
     Ok(s9pk.into_dyn())

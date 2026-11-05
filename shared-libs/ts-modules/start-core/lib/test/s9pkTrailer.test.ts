@@ -70,7 +70,9 @@ test('native binary endorsements expose claimed keys and immutable parse diagnos
     ...vectors.endorsements.map(record => record.signer),
   ])
   expect(packageInfo.signatures).toEqual(
-    vectors.endorsements.map(({ signer, signature }) => [signer, signature]),
+    Object.fromEntries(
+      vectors.endorsements.map(({ signer, signature }) => [signer, signature]),
+    ),
   )
   expect(packageInfo.diagnostics).toEqual([])
   expect(Object.isFrozen(packageInfo.signatures)).toBe(true)
@@ -93,12 +95,12 @@ test('browser parsing does not authenticate embedded or supplemental signatures'
   expect(result.diagnostics).toEqual([])
 })
 
-test('duplicate identities appear once while signature candidates preserve every record', async () => {
+test('duplicate identities appear once and keep their last signature', async () => {
   const result = await read(
     file([
       good(),
       tlv(65535, new Uint8Array([255, 0, 5])),
-      good(),
+      tlv(1, endorsement(vectors.endorsements[0].signer, new Uint8Array([1]))),
       tlv(1, endorsement(vectors.embedded, new Uint8Array([0]))),
     ]),
   )
@@ -106,11 +108,10 @@ test('duplicate identities appear once while signature candidates preserve every
     vectors.embedded,
     vectors.endorsements[0].signer,
   ])
-  expect(result.signatures).toEqual([
-    [vectors.endorsements[0].signer, vectors.endorsements[0].signature],
-    [vectors.endorsements[0].signer, vectors.endorsements[0].signature],
-    [vectors.embedded, 'AA=='],
-  ])
+  expect(result.signatures).toEqual({
+    [vectors.endorsements[0].signer]: 'AQ==',
+    [vectors.embedded]: 'AA==',
+  })
   expect(result.diagnostics).toEqual([])
 })
 
@@ -125,21 +126,10 @@ test('a key the backend cannot decode stays out of the sideload request', async 
     vectors.embedded,
     vectors.endorsements[0].signer,
   ])
-  expect(result.signatures).toEqual([
-    [vectors.endorsements[0].signer, vectors.endorsements[0].signature],
-  ])
+  expect(result.signatures).toEqual({
+    [vectors.endorsements[0].signer]: vectors.endorsements[0].signature,
+  })
   expect(result.diagnostics.map(({ kind }) => kind)).toEqual(['invalid-record'])
-})
-
-test('an invalid candidate cannot displace a later valid endorsement in a sideload request', async () => {
-  const result = await read(new Blob([bytes('mixed.s9pk')]))
-  expect(result.signatures).toHaveLength(5)
-  expect(result.signatures[0][0]).toBe(vectors.endorsements[0].signer)
-  expect(result.signatures[0][1]).not.toBe(vectors.endorsements[0].signature)
-  expect(result.signatures.slice(1)).toEqual([
-    ...vectors.endorsements.map(({ signer, signature }) => [signer, signature]),
-    [vectors.endorsements[0].signer, vectors.endorsements[0].signature],
-  ])
 })
 
 test.each([
@@ -187,7 +177,7 @@ test('malformed TLV framing discards every supplemental candidate before process
   for (const bad of [new Uint8Array([0]), huge]) {
     const result = await read(file([good(), bad]))
     expect(result.signers).toEqual([vectors.embedded])
-    expect(result.signatures).toEqual([])
+    expect(result.signatures).toEqual({})
     expect(result.diagnostics[0].kind).toBe('invalid-framing')
   }
   for (const size of [1048576 - 10, 1048576 - 9]) {

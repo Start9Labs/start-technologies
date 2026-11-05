@@ -4191,13 +4191,11 @@ export const SideloadParams: z.ZodObject<{
     z.ZodNullable<typeof AcceptSigners>
   >
   /**
-   * Supplemental DER64 signature candidates; malformed signatures remain isolated.
+   * DER64 supplemental signatures for the uploaded archive.
    */
   signatures: z.ZodCodec<
-    z.ZodOptional<
-      z.ZodArray<z.ZodTuple<[typeof AnyVerifyingKey, z.ZodString], null>>
-    >,
-    z.ZodArray<z.ZodTuple<[typeof AnyVerifyingKey, z.ZodString], null>>
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
   >
   /**
    * Accepts an untrusted signer without skipping signature or integrity verification.
@@ -4209,14 +4207,13 @@ export const SideloadParams: z.ZodObject<{
     AcceptSigners.nullable(),
   ),
   /**
-   * Supplemental DER64 signature candidates; malformed signatures remain isolated.
+   * DER64 supplemental signatures for the uploaded archive.
    */
   signatures: wire(
-    z.array(z.tuple([AnyVerifyingKey, z.string()])).optional(),
-    z.array(z.tuple([AnyVerifyingKey, z.string()])),
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
   ).meta({
-    description:
-      'Supplemental DER64 signature candidates; malformed signatures remain isolated.',
+    description: 'DER64 supplemental signatures for the uploaded archive.',
   }),
   /**
    * Accepts an untrusted signer without skipping signature or integrity verification.

@@ -21,7 +21,7 @@ export async function readTrailer(
   signatures: Readonly<SideloadParams['signatures']>
   diagnostics: readonly S9pkDiagnostic[]
 }> {
-  const signatures: SideloadParams['signatures'] = []
+  const signatures: SideloadParams['signatures'] = {}
   const diagnostics: S9pkDiagnostic[] = []
   const diagnose = (kind: string, message: string, offset: number) => {
     diagnostics.push(Object.freeze({ kind, message, offset }))
@@ -30,7 +30,7 @@ export async function readTrailer(
     signers: Object.freeze([
       ...new Set([
         ed25519PublicKeyDer64(archive.signer.pubkey),
-        ...signatures.map(([signer]) => signer),
+        ...Object.keys(signatures),
       ]),
     ]),
     signatures: Object.freeze(signatures),
@@ -119,7 +119,7 @@ export async function readTrailer(
       const keyEnd = value + 8 + Number(keyLength)
       const signer = bytesToBase64(raw.subarray(value + 8, keyEnd))
       parseEd25519PublicKey(signer)
-      signatures.push([signer, bytesToBase64(raw.subarray(keyEnd, record.end))])
+      signatures[signer] = bytesToBase64(raw.subarray(keyEnd, record.end))
     } catch {
       diagnose(
         'invalid-record',

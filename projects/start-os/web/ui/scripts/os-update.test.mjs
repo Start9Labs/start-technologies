@@ -1670,13 +1670,12 @@ test('the upload RPC receives the confirmed override and failed setup does not n
   assert.equal(navigated, false)
 })
 
-test('sideload pins only package-trusted keys and forwards every signature candidate', async () => {
+test('sideload pins only package-trusted keys and forwards the signature map', async () => {
   const calls = []
-  const signatures = [
-    [OS_UPDATE_SIGNERS[0], 'AQ=='],
-    [untrustedSigner, 'AA=='],
-    [OS_UPDATE_SIGNERS[0], 'Ag=='],
-  ]
+  const signatures = {
+    [OS_UPDATE_SIGNERS[0]]: 'Ag==',
+    [untrustedSigner]: 'AA==',
+  }
   const instance = {
     file: () => new File(['data'], 'test.s9pk'),
     pkg: () => ({

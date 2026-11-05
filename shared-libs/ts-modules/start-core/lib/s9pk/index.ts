@@ -49,7 +49,7 @@ export class S9pk {
     readonly size: number,
     /** Claimed canonical DER64 signing identities; the backend must verify their signatures. */
     readonly signers: readonly string[],
-    /** Supplemental signature candidates for backend verification against the archive. */
+    /** Supplemental signature map for backend verification against the archive. */
     readonly signatures: Readonly<SideloadParams['signatures']>,
     /** Optional metadata issues; these never replace base archive validation. */
     readonly diagnostics: readonly S9pkDiagnostic[],
@@ -70,7 +70,7 @@ export class S9pk {
    * Deserializes an `S9pk` from a `Blob` (e.g. a `File` from a browser file input).
    *
    * Validates the magic bytes and version header, then parses the Merkle archive structure.
-   * Signature bytes are not verified. Sideload callers forward the candidates and pin matched keys.
+   * Signature bytes are not verified. Sideload callers forward the signature map and pin matched keys.
    * An external commitment additionally pins the archive's Merkle root and size bound.
    *
    * @param source - The raw `.s9pk` file as a `Blob`

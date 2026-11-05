@@ -57,7 +57,7 @@ async fn sideload_enforces_trust_on_verified_archive_signatures() {
             source.clone(),
             || panic!("v2 needs no conversion key"),
             None,
-            &[],
+            &Default::default(),
             crate::trusted_keys::signer_policy(accepted),
         )
         .await
@@ -73,7 +73,7 @@ async fn sideload_enforces_trust_on_verified_archive_signatures() {
                 source.clone(),
                 || panic!("v2 needs no conversion key"),
                 None,
-                &[],
+                &Default::default(),
                 crate::trusted_keys::signer_policy(Some(accepted))
             )
             .await
@@ -87,7 +87,7 @@ async fn sideload_enforces_trust_on_verified_archive_signatures() {
             Arc::<[u8]>::from(corrupted),
             || panic!("v2 needs no conversion key"),
             None,
-            &[],
+            &Default::default(),
             None
         )
         .await

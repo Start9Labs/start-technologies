@@ -166,7 +166,7 @@ async fn legacy_sideload_checks_original_signer_before_resigning() {
             source.clone(),
             || panic!("untrusted legacy archive must not reach conversion"),
             None,
-            &[],
+            &Default::default(),
             crate::trusted_keys::signer_policy(Some(vec![AnyVerifyingKey::Ed25519(
                 host.verifying_key()
             )])),
@@ -180,7 +180,7 @@ async fn legacy_sideload_checks_original_signer_before_resigning() {
             source.clone(),
             || panic!("conversion key cannot satisfy request pins"),
             None,
-            &[],
+            &Default::default(),
             Some(AcceptSigners::All(vec![
                 AcceptSigners::Signer(AnyVerifyingKey::Ed25519(original.verifying_key())),
                 AcceptSigners::Signer(AnyVerifyingKey::Ed25519(host.verifying_key()))
@@ -193,7 +193,7 @@ async fn legacy_sideload_checks_original_signer_before_resigning() {
         source,
         || Ok(host.clone()),
         None,
-        &[],
+        &Default::default(),
         crate::trusted_keys::signer_policy(Some(vec![AnyVerifyingKey::Ed25519(
             original.verifying_key(),
         )])),
