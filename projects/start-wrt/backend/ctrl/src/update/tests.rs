@@ -1,5 +1,5 @@
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use openssl::pkey::PKey;
 use startos::s9pk::manifest::LocaleString;
@@ -111,10 +111,41 @@ async fn firmware_asset_selection_preserves_format_preference() {
 }
 
 async fn mirror() -> (reqwest::Url, NonDetachingJoinHandle<()>) {
-    let router = Router::new().route(
-        "/firmware",
-        get(|| async { FIRMWARE }).head(|| async { StatusCode::METHOD_NOT_ALLOWED }),
-    );
+    let router = Router::new()
+        .route(
+            "/firmware",
+            get(|| async { FIRMWARE }).head(|| async { StatusCode::METHOD_NOT_ALLOWED }),
+        )
+        .route(
+            "/rpc/v0",
+            post(
+                |headers: axum::http::HeaderMap,
+                 axum::Json(request): axum::Json<serde_json::Value>| async move {
+                    assert_eq!(
+                        request,
+                        serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": 0,
+                            "method": "fixture.method",
+                            "params": { "fixture": true },
+                        }),
+                    );
+                    assert_eq!(
+                        headers[crate::registry::device_info::DEVICE_INFO_HEADER],
+                        "fixture"
+                    );
+                    (
+                        [(
+                            axum::http::header::CONTENT_TYPE,
+                            "application/json; charset=utf-8",
+                        )],
+                        axum::Json(serde_json::json!({
+                            "jsonrpc": "2.0", "id": 0, "result": { "ok": true },
+                        })),
+                    )
+                },
+            ),
+        );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/firmware", listener.local_addr().unwrap())
         .parse()
@@ -123,6 +154,21 @@ async fn mirror() -> (reqwest::Url, NonDetachingJoinHandle<()>) {
         axum::serve(listener, router).await.unwrap();
     }));
     (url, task)
+}
+
+#[tokio::test]
+async fn registry_rpc_uses_shared_envelope_and_preserves_json_charset_support() {
+    let (url, _server) = mirror().await;
+    let result = crate::registry::call_registry_rpc(
+        &reqwest::Client::new(),
+        url.join("/").unwrap().as_str(),
+        "fixture.method",
+        serde_json::json!({ "fixture": true }),
+        Some(axum::http::HeaderValue::from_static("fixture")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result, serde_json::json!({ "ok": true }));
 }
 
 #[tokio::test]

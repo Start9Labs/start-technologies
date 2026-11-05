@@ -5,16 +5,13 @@ pub mod os;
 
 use http::HeaderValue;
 use reqwest::Client;
+use rpc_toolkit::yajrc::{GenericRpcMethod, Id, RpcRequest};
 use serde_json::Value;
 use url::Url;
 
 use crate::Error;
 
-// ── Registry RPC client ──────────────────────────────────────────────
-
-/// Make a JSON-RPC call to the Start9 registry.
-///
-/// This mirrors start-os's `call_remote` in `middleware/auth/signature.rs`.
+/// Sends unsigned requests with a 30-second request timeout.
 pub async fn call_registry_rpc(
     client: &Client,
     registry_url: &str,
@@ -22,17 +19,15 @@ pub async fn call_registry_rpc(
     params: Value,
     device_info_header: Option<HeaderValue>,
 ) -> Result<Value, Error> {
-    // Build JSON-RPC request
-    let rpc_req = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 0,
-        "method": method,
-        "params": params,
-    });
-    let body = serde_json::to_vec(&rpc_req)
-        .map_err(|e| Error::other(format!("serializing RPC request: {e}")))?;
+    let mut rpc_req = serde_json::to_value(RpcRequest {
+        id: Some(Id::Number(0.into())),
+        method: GenericRpcMethod::<_, _, Value>::new(method),
+        params,
+    })?;
+    // `RpcRequest` omits the JSON-RPC version tag.
+    rpc_req["jsonrpc"] = "2.0".into();
+    let body = serde_json::to_vec(&rpc_req)?;
 
-    // Build URL: {registry}/rpc/v0
     let url: Url = registry_url
         .parse()
         .map_err(|e| Error::other(format!("invalid registry URL: {e}")))?;
@@ -48,7 +43,6 @@ pub async fn call_registry_rpc(
         .header(http::header::ACCEPT, "application/json")
         .header(http::header::CONTENT_LENGTH, body.len());
 
-    // Add device info header
     if let Some(di) = device_info_header {
         req = req.header(device_info::DEVICE_INFO_HEADER, di);
     }
@@ -85,7 +79,6 @@ pub async fn call_registry_rpc(
         .await
         .map_err(|e| Error::other(format!("parsing registry response: {e}")))?;
 
-    // Extract result from JSON-RPC response
     if let Some(error) = rpc_res.get("error") {
         return Err(Error::other(format!("registry RPC error: {error}")));
     }
