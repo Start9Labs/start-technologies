@@ -84,9 +84,10 @@ function fileMerge(...args: any[]): any {
       arg &&
       typeof res === 'object' &&
       typeof arg === 'object' &&
-      !Array.isArray(res) &&
-      !Array.isArray(arg)
+      isPlainObject(res) &&
+      isPlainObject(arg)
     ) {
+      res = { ...res }
       for (const key of Object.keys(arg)) {
         res[key] = fileMerge(res[key], arg[key])
       }

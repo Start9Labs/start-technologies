@@ -19,12 +19,13 @@ else
 BASE_NAME := $(PACKAGE_ID)
 endif
 
-.PHONY: all arches aarch64 x86_64 riscv64 arm arm64 x86 riscv arch/* clean install check-deps check-init package ingredients format
+.PHONY: all arches aarch64 x86_64 riscv64 arm arm64 x86 riscv arch/* universal clean install sign publish check-deps check-init package ingredients format
 .DELETE_ON_ERROR:
 .SECONDARY:
 
 SDK_DIR := node_modules/@start9labs/start-sdk
 PRETTIER_CONFIG := $(SDK_DIR)/prettier.config.json
+START_CLI_HOST = $(if $(HOST),-H "$(HOST)")
 
 TS_CHECK ?= npx tsc --noEmit
 FORMAT ?= npx prettier --config $(PRETTIER_CONFIG) --write startos
@@ -82,12 +83,17 @@ ingredients: $(INGREDIENTS)
 	@echo "   Re-evaluating ingredients..."
 
 install: | check-deps check-init
-	@device_info=$$(start-cli server device-info --format json) || exit 1; \
+	@device_info=$$(start-cli $(START_CLI_HOST) server device-info --format json) || exit 1; \
 	arch=$$(printf '%s' "$$device_info" | jq -er '.hardware.arch') || exit 1; \
 	S9PK="$(BASE_NAME)_$$arch.s9pk"; \
 	$(MAKE) --no-print-directory "$$S9PK" || exit 1; \
 	printf "\n🚀 Installing %s ...\n" "$$S9PK"; \
-	start-cli package install -s "$$S9PK"
+	start-cli $(START_CLI_HOST) package install --trust -s "$$S9PK"
+
+sign: | all check-init
+	@for s9pk in *.s9pk; do \
+		start-cli s9pk sign "$$s9pk" || exit 1; \
+	done
 
 publish: | all
 	@command -v s3cmd >/dev/null || \
