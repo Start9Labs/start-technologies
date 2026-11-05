@@ -115,7 +115,9 @@ async fn add_asset(
     let signatures = crate::sign::compat::verify_signatures(
         &commitment,
         SIG_CONTEXT,
-        std::iter::once((&signer, &signature)).chain(&signatures),
+        &signatures,
+        &signer,
+        &signature,
     )?;
     ctx.db
         .mutate(|db| {

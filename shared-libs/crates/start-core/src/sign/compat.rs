@@ -25,14 +25,17 @@ pub fn verify_commitment<C: SignedCommitment>(
         })
 }
 
-/// Returns verified signatures with canonical algorithm tags.
-pub fn verify_signatures<'a, C: SignedCommitment>(
+/// Returns canonical verified endorsements, preferring the uploader's signature for its key.
+pub fn verify_signatures<C: SignedCommitment>(
     commitment: &C,
     context: &str,
-    signatures: impl IntoIterator<Item = (&'a AnyVerifyingKey, &'a AnySignature)>,
+    signatures: &HashMap<AnyVerifyingKey, AnySignature>,
+    uploader: &AnyVerifyingKey,
+    signature: &AnySignature,
 ) -> Result<HashMap<AnyVerifyingKey, AnySignature>, Error> {
     signatures
-        .into_iter()
+        .iter()
+        .chain(std::iter::once((uploader, signature)))
         .map(|(key, signature)| {
             Ok((
                 key.clone(),

@@ -63,7 +63,10 @@ async fn os_promotion_preserves_all_asset_signatures_and_destination_endorsement
     let asset =
         RegistryAsset {
             published_at: chrono::Utc::now(),
-            urls: vec!["https://example.com/os.iso".parse().unwrap()],
+            urls: vec![
+                "https://example.com/os.iso".parse().unwrap(),
+                "https://mirror.example.com/os.iso".parse().unwrap(),
+            ],
             commitment: commitment.clone(),
             signatures: HashMap::from([
                 (
@@ -109,6 +112,8 @@ async fn os_promotion_preserves_all_asset_signatures_and_destination_endorsement
     .unwrap();
     let mut expected = asset.signatures.clone();
     expected.insert(uploader_key, signature(&uploader, &commitment));
+    let mut expected_urls = asset.urls.clone();
+    let destination_url: Url = "https://destination.example.com/os.iso".parse().unwrap();
 
     for repeat in [false, true] {
         if repeat {
@@ -131,6 +136,7 @@ async fn os_promotion_preserves_all_asset_signatures_and_destination_endorsement
                                     AnyVerifyingKey::Ed25519(destination_signer.verifying_key()),
                                     signature(&destination_signer, &commitment),
                                 );
+                                asset.urls.push(destination_url.clone());
                             }
                             Ok(())
                         })
@@ -142,6 +148,7 @@ async fn os_promotion_preserves_all_asset_signatures_and_destination_endorsement
                 AnyVerifyingKey::Ed25519(destination_signer.verifying_key()),
                 signature(&destination_signer, &commitment),
             );
+            expected_urls.push(destination_url.clone());
         }
         cli_os_promote(
             cli.clone(),
@@ -167,7 +174,7 @@ async fn os_promotion_preserves_all_asset_signatures_and_destination_endorsement
         {
             assert_eq!(promoted_asset.signatures, expected);
             assert_eq!(promoted_asset.commitment, commitment);
-            assert_eq!(promoted_asset.urls, asset.urls);
+            assert_eq!(promoted_asset.urls, expected_urls);
         }
         assert_eq!(promoted.signers, target_before.signers);
         assert_eq!(promoted.trust_signers, target_before.trust_signers);
@@ -228,11 +235,15 @@ async fn os_asset_ingestion_defaults_old_requests_and_verifies_signatures_atomic
     add_iso(ctx.clone(), same_signer).await.unwrap();
     let mut repeated_signer = params(&uploader, HashMap::new());
     repeated_signer.platform = "riscv64".into();
+    repeated_signer.signature = pure;
     add_iso(ctx.clone(), repeated_signer).await.unwrap();
 
     let index = ctx.db.peek().await.as_index().de().unwrap();
     let assets = &index.os.versions.0[&"0.4.0.5".parse().unwrap()].iso;
-    assert_eq!(assets["riscv64"].signatures[&uploader_key], pure);
+    assert_eq!(
+        assets["riscv64"].signatures[&uploader_key],
+        signature(&uploader, &commitment())
+    );
     let asset = &assets["x86_64"];
     assert_eq!(asset.signatures.len(), 2);
     assert_eq!(
@@ -267,6 +278,13 @@ async fn os_asset_ingestion_defaults_old_requests_and_verifies_signatures_atomic
     );
     invalid_uploader.signature = signature(&endorser, &commitment());
     assert!(add_iso(ctx.clone(), invalid_uploader).await.is_err());
+    assert_eq!(snapshot(&ctx).await, before);
+
+    let invalid_same_key = params(
+        &uploader,
+        [(uploader_key, signature(&endorser, &commitment()))].into(),
+    );
+    assert!(add_iso(ctx.clone(), invalid_same_key).await.is_err());
     assert_eq!(snapshot(&ctx).await, before);
 
     let mut different_commitment = params(&uploader, HashMap::new());

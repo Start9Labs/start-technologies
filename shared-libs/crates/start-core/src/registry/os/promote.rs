@@ -144,20 +144,22 @@ async fn promote_assets(
             .sign_commitment(commitment, SIG_CONTEXT)
             .await?;
 
-        call_registry(
-            ctx,
-            to_url.clone(),
-            method,
-            imbl_value::json!({
-                "version": version,
-                "platform": platform,
-                "url": &asset.urls[0],
-                "signature": signature,
-                "signatures": &asset.signatures,
-                "commitment": commitment,
-            }),
-        )
-        .await?;
+        for url in &asset.urls {
+            call_registry(
+                ctx,
+                to_url.clone(),
+                method,
+                imbl_value::json!({
+                    "version": version,
+                    "platform": platform,
+                    "url": url,
+                    "signature": signature,
+                    "signatures": &asset.signatures,
+                    "commitment": commitment,
+                }),
+            )
+            .await?;
+        }
     }
     Ok(())
 }

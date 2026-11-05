@@ -125,9 +125,9 @@ fn merge_submitted_signatures(
         let verified = crate::sign::compat::verify_signatures(
             &asset.commitment,
             SIG_CONTEXT,
-            signatures
-                .iter()
-                .chain(std::iter::once((uploader, signature))),
+            &signatures,
+            uploader,
+            signature,
         )?;
         let commitment = asset.commitment;
         asset.merge_signatures(&commitment, verified);
