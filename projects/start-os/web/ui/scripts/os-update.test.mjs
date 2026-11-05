@@ -1454,6 +1454,7 @@ test('PEM form parsing canonicalizes multiple keys and rejects empty, private, n
     first + 'trailing junk',
     first.slice(0, -15),
     rsa,
+    publicKeyPem(Uint8Array.from([2, ...new Array(31).fill(0)])),
     privateKey.export({ type: 'pkcs8', format: 'pem' }),
   ]) {
     assert.throws(() => parsePublicKeys(invalid))

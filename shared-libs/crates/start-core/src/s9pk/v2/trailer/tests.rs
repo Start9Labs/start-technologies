@@ -4,7 +4,7 @@ use ed25519_dalek::{Signer as _, SigningKey};
 use serde_json::{Value, json};
 
 use super::*;
-use crate::s9pk::{S9pk, load_with_signers};
+use crate::s9pk::{S9pk, load};
 use crate::sign::ed25519::Ed25519ph;
 use crate::sign::{SignatureScheme, append_commitment, signing_message};
 
@@ -143,7 +143,7 @@ fn key_from_record(record: &Value) -> AnyVerifyingKey {
 }
 
 #[tokio::test]
-async fn s9pk_trailer_verified_map_and_trust_policy() {
+async fn s9pk_trailer_verified_map_and_local_load() {
     let package = read(bytes("mixed.s9pk")).await;
     let signatures = package.signatures().await.unwrap();
     assert_eq!(signatures.len(), 4);
@@ -171,38 +171,8 @@ async fn s9pk_trailer_verified_map_and_trust_policy() {
             .unwrap();
     }
     let source = Arc::<[u8]>::from(bytes("mixed.s9pk"));
-    for policy in [
-        None,
-        Some(vec![key(0)]),
-        Some(vec![key(1)]),
-        Some(vec![key(2)]),
-    ] {
-        load_with_signers(
-            source.clone(),
-            || panic!(),
-            None,
-            crate::trusted_keys::signer_policy(policy),
-        )
-        .await
-        .unwrap();
-    }
-    for policy in [
-        vec![],
-        vec![AnyVerifyingKey::Ed25519(
-            SigningKey::from_bytes(&[1; 32]).verifying_key(),
-        )],
-    ] {
-        assert!(
-            load_with_signers(
-                source.clone(),
-                || panic!(),
-                None,
-                crate::trusted_keys::signer_policy(Some(policy))
-            )
-            .await
-            .is_err()
-        );
-    }
+    let loaded = load(source.clone(), || panic!("v2"), None).await.unwrap();
+    assert_eq!(loaded.signatures().await.unwrap(), signatures);
     let mut corrupt = source.to_vec();
     corrupt[35] ^= 1;
     assert!(
@@ -213,7 +183,7 @@ async fn s9pk_trailer_verified_map_and_trust_policy() {
 }
 
 #[tokio::test]
-async fn s9pk_trailer_backend_authority_rejects_a_pinned_invalid_claim() {
+async fn s9pk_trailer_isolates_invalid_claims_before_exposing_signatures() {
     let invalid = AnySignature::Ed25519ph(ed25519_dalek::Signature::from_bytes(&[0; 64]));
     let mut region = tlv(1, &encode_endorsement(&key(0), &invalid).unwrap());
     region.extend(record(&vectors()["endorsements"][1]));
@@ -224,28 +194,10 @@ async fn s9pk_trailer_backend_authority_rejects_a_pinned_invalid_claim() {
     assert!(!signatures.contains_key(&key(0)));
     assert!(signatures.contains_key(&key(1)));
     assert_eq!(package.diagnostics()[0].kind, "invalid-signature");
-    for (pins, accepted) in [
-        (None, true),
-        (Some(vec![key(1)]), true),
-        (Some(vec![key(0)]), false),
-    ] {
-        let result = load_with_signers(
-            source.clone(),
-            || panic!("v2 requires no conversion key"),
-            None,
-            crate::trusted_keys::signer_policy(pins),
-        )
-        .await;
-        if accepted {
-            assert!(result.is_ok());
-        } else {
-            assert_eq!(result.err().unwrap().kind, ErrorKind::InvalidSignature);
-        }
-    }
 }
 
 #[tokio::test]
-async fn s9pk_trailer_backend_authority_requires_valid_embedded_signature_with_matching_pins() {
+async fn s9pk_trailer_local_load_requires_a_valid_embedded_signature() {
     let valid = with_region(bytes("base.s9pk"), &good());
     let commitment = read(valid.clone())
         .await
@@ -258,31 +210,36 @@ async fn s9pk_trailer_backend_authority_requires_valid_embedded_signature_with_m
     key(0)
         .verify_commitment(&commitment, "s9pk", &signature)
         .unwrap();
-    load_with_signers(
-        Arc::<[u8]>::from(valid.clone()),
-        || panic!("v2 requires no conversion key"),
-        None,
-        crate::trusted_keys::signer_policy(Some(vec![key(0)])),
-    )
-    .await
-    .unwrap();
+    load(Arc::<[u8]>::from(valid.clone()), || panic!("v2"), None)
+        .await
+        .unwrap();
     let mut corrupt = valid;
     corrupt[35] ^= 1;
-    for pins in [None, Some(vec![key(0)])] {
-        let result = load_with_signers(
-            Arc::<[u8]>::from(corrupt.clone()),
-            || panic!("v2 requires no conversion key"),
-            None,
-            crate::trusted_keys::signer_policy(pins),
-        )
-        .await;
-        assert_eq!(result.err().unwrap().kind, ErrorKind::InvalidSignature);
-    }
+    let result = load(Arc::<[u8]>::from(corrupt), || panic!("v2"), None).await;
+    assert_eq!(result.err().unwrap().kind, ErrorKind::InvalidSignature);
 }
 
 #[tokio::test]
 async fn sideload_request_signatures_are_verified_against_the_uploaded_archive() {
     let source = Arc::<[u8]>::from(bytes("base.s9pk"));
+    for index in 0..3 {
+        let signatures = vec![(
+            key(index),
+            vectors()["endorsements"][index]["signature"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        )];
+        crate::s9pk::load_for_sideload(
+            source.clone(),
+            || panic!("v2"),
+            None,
+            &signatures,
+            crate::trusted_keys::signer_policy(Some(vec![key(index)])),
+        )
+        .await
+        .unwrap();
+    }
     let valid = vectors()["endorsements"][0]["signature"]
         .as_str()
         .unwrap()

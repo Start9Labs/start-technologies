@@ -137,6 +137,10 @@ async fn package_request_pins_use_update_policy_and_remain_required_with_overrid
     let request: SideloadParams =
         serde_json::from_value(serde_json::to_value(request).unwrap()).unwrap();
     assert_eq!(request.signatures.len(), signatures.len());
+    for (_, signature) in &request.signatures {
+        assert!(!signature.contains("-----BEGIN"));
+        assert!(!signature.chars().any(char::is_whitespace));
+    }
     let embedded = AnyVerifyingKey::Ed25519(SigningKey::from_bytes(&[7; 32]).verifying_key());
     let endorsement = AnyVerifyingKey::Ed25519(SigningKey::from_bytes(&[8; 32]).verifying_key());
     let unrelated = AnyVerifyingKey::Ed25519(SigningKey::from_bytes(&[1; 32]).verifying_key());

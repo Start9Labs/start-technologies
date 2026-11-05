@@ -634,6 +634,7 @@ pub async fn cli_install(
 async fn local_sideload_params(path: &PathBuf, trust: bool) -> Result<SideloadParams, Error> {
     use crate::registry::signer::AcceptSigners;
     use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
+    use crate::util::serde::Der64;
 
     let mut params = SideloadParams {
         accept_signers: None,
@@ -656,7 +657,7 @@ async fn local_sideload_params(path: &PathBuf, trust: bool) -> Result<SideloadPa
     ));
     params.signatures = signatures
         .into_iter()
-        .map(|(key, signature)| (key, signature.to_string()))
+        .map(|(key, signature)| (key, Der64::new(signature).to_string()))
         .collect();
     Ok(params)
 }

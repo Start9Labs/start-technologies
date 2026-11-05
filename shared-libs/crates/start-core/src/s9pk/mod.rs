@@ -29,32 +29,12 @@ where
     S::FetchAllReader: AsyncSeek + Sync,
     K: FnOnce() -> Result<ed25519_dalek::SigningKey, Error>,
 {
-    load_with_signers(source, key, progress, None).await
-}
-
-pub async fn load_with_signers<S, K>(
-    source: S,
-    key: K,
-    progress: Option<&FullProgressTracker>,
-    accepted: Option<AcceptSigners>,
-) -> Result<S9pk<DynFileSource>, Error>
-where
-    S: ArchiveSource,
-    S::FetchAllReader: AsyncSeek + Sync,
-    K: FnOnce() -> Result<ed25519_dalek::SigningKey, Error>,
-{
     if is_v1(&source).await? {
-        return convert_v1(source, key, progress, accepted).await;
+        return convert_v1(source, key, progress, None).await;
     }
-    let s9pk = S9pk::deserialize_local(&Arc::new(source), None).await?;
-    if let Some(mut policy) = accepted {
-        let commitment = s9pk.as_archive().commitment().await?;
-        for (signer, signature) in s9pk.signatures().await? {
-            policy.process_signature(&signer, &commitment, v2::SIG_CONTEXT, &signature)?;
-        }
-        policy.try_accept()?;
-    }
-    Ok(s9pk.into_dyn())
+    Ok(S9pk::deserialize_local(&Arc::new(source), None)
+        .await?
+        .into_dyn())
 }
 
 /// Verifies request-supplied endorsements without reading an upload's trailer.

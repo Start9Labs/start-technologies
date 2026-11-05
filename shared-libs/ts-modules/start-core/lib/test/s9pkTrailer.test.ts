@@ -114,6 +114,23 @@ test('duplicate identities appear once while signature candidates preserve every
   expect(result.diagnostics).toEqual([])
 })
 
+test('a key the backend cannot decode stays out of the sideload request', async () => {
+  const offCurve = ed25519PublicKeyDer64(
+    Uint8Array.from([2, ...new Array(31).fill(0)]),
+  )
+  const result = await read(
+    file([tlv(1, endorsement(offCurve, new Uint8Array([0]))), good()]),
+  )
+  expect(result.signers).toEqual([
+    vectors.embedded,
+    vectors.endorsements[0].signer,
+  ])
+  expect(result.signatures).toEqual([
+    [vectors.endorsements[0].signer, vectors.endorsements[0].signature],
+  ])
+  expect(result.diagnostics.map(({ kind }) => kind)).toEqual(['invalid-record'])
+})
+
 test('an invalid candidate cannot displace a later valid endorsement in a sideload request', async () => {
   const result = await read(new Blob([bytes('mixed.s9pk')]))
   expect(result.signatures).toHaveLength(5)
