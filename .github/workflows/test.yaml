@@ -127,7 +127,6 @@ jobs:
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
-          free-space: 'false'
           setup-docker: 'false'
           setup-sccache: 'false'
 
