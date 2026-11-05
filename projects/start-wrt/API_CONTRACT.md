@@ -2005,8 +2005,26 @@ struct ProfileSetRequest {
 ### `profiles.delete`
 
 ```rust
-// Request: ProfileIdOpt
-// Response: null
+// Request: ProfileIdOpt fields are flattened in alongside the preview flag.
+#[derive(Deserialize)]
+struct ProfileDeleteRequest {
+    #[serde(flatten)]
+    id: ProfileIdOpt,
+    /// Delete nothing; report what deleting the profile deletes.
+    #[serde(default)]
+    preview: bool,
+}
+
+// Response: the reservations and published ports deleted with the profile.
+#[derive(Serialize)]
+struct ProfileDeleteResult {
+    reservations: Vec<DeletedReservation>,       // { mac, name: Option<String>, ipv4 }
+    published_ports: Vec<DeletedPublishedPort>,  // { id, label, mac, name: Option<String> }
+}
+// Backend: deletes the reservations in the profile's subnet and the published
+// ports forwarding into it, IPv4 redirect and IPv6 rule, along with the
+// profile's zone, interface, DHCP server and points of entry. A device's
+// reservations in other profiles and its settings stay.
 ```
 
 ### `profiles.edit`
