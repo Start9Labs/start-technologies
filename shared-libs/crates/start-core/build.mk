@@ -21,7 +21,9 @@ MAN_DIRS := projects/start-cli/man projects/start-registry/man projects/start-tu
 OSBINDINGS_DIR := shared-libs/ts-modules/start-core/lib/osBindings
 MCP_TOOLS := shared-libs/crates/start-core/mcp-tools.json
 
-.PHONY: manpages manpages-check start-core-ts-bindings-check start-core-mcp-tools start-core-mcp-tools-check
+.PHONY: generated-artifacts-check manpages manpages-check start-core-ts-bindings-check start-core-mcp-tools start-core-mcp-tools-check
+generated-artifacts-check: manpages-check start-core-ts-bindings-check start-core-mcp-tools-check
+
 # Regenerate the committed clap man pages (roff) for every product binary.
 manpages:
 	./shared-libs/crates/start-core/build/build-manpage.sh

@@ -65,6 +65,7 @@ export type MarketplacePkgBase = T.PackageVersionInfo & {
   flavor: string | null
   /** Signing keys declared by a local archive, not authenticated signatures. */
   signers?: string[]
+  signatures?: T.SideloadParams['signatures']
 }
 
 export type MarketplacePkg = MarketplacePkgBase &

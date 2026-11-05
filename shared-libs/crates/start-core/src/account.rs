@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::time::SystemTime;
 
 use openssl::pkey::{PKey, Private};
@@ -91,25 +90,13 @@ impl AccountInfo {
         db.as_private_mut()
             .as_developer_key_mut()
             .ser(Der64::new_ref(&self.developer_key))?;
-        let key_store = db.as_private_mut().as_key_store_mut();
-        let cert_store = key_store.as_local_certs_mut();
+        let cert_store = db.as_private_mut().as_key_store_mut().as_local_certs_mut();
         if cert_store.as_root_cert().de()?.0 != self.root_ca_cert {
-            cert_store
-                .as_root_key_mut()
-                .ser(Der64::new_ref(&self.root_ca_key))?;
-            cert_store
-                .as_root_cert_mut()
-                .ser(Pem::new_ref(&self.root_ca_cert))?;
-            let int_key = crate::net::ssl::gen_nistp256()?;
-            let branding = CertBranding::start_os(self.hostname.as_ref());
-            let int_cert = crate::net::ssl::make_int_cert(
-                (&self.root_ca_key, &self.root_ca_cert),
-                &int_key,
-                &branding,
+            cert_store.install_root(
+                &self.root_ca_key,
+                &self.root_ca_cert,
+                &CertBranding::start_os(self.hostname.as_ref()),
             )?;
-            cert_store.as_int_key_mut().ser(&Der64(int_key))?;
-            cert_store.as_int_cert_mut().ser(&Pem(int_cert))?;
-            cert_store.as_leaves_mut().ser(&BTreeMap::new())?;
         }
         Ok(())
     }

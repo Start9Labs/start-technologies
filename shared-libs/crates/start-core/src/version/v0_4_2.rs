@@ -1,7 +1,7 @@
 use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
-use super::{VersionT, v0_4_1_2};
+use super::{VersionT, v0_4_1_3};
 use crate::prelude::*;
 
 lazy_static::lazy_static! {
@@ -12,7 +12,7 @@ lazy_static::lazy_static! {
 pub struct Version;
 
 impl VersionT for Version {
-    type Previous = v0_4_1_2::Version;
+    type Previous = v0_4_1_3::Version;
     type PreUpRes = ();
 
     async fn pre_up(self) -> Result<Self::PreUpRes, Error> {
@@ -55,7 +55,7 @@ mod tests {
         for key in trust.values_mut() {
             key.os = false;
         }
-        for from in ["0.4.1", "0.4.1.1", "0.4.1.2"] {
+        for from in ["0.4.1", "0.4.1.1", "0.4.1.2", "0.4.1.3"] {
             for enabled in [false, true] {
                 let mut fixture =
                     to_value(&Database::init(&account, false, None, None).unwrap()).unwrap();
@@ -63,11 +63,12 @@ mod tests {
                 fixture["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
                 fixture["public"]["serverInfo"]["nut"] =
                     json!({ "enabled": enabled, "settings": settings.clone() });
-                fixture["public"]["serverInfo"]["trustedKeys"] = if from == "0.4.1.2" {
-                    to_value(&trust).unwrap()
-                } else {
-                    to_value(&legacy::grouped_keys(trust.clone())).unwrap()
-                };
+                fixture["public"]["serverInfo"]["trustedKeys"] =
+                    if from == "0.4.1.2" || from == "0.4.1.3" {
+                        to_value(&trust).unwrap()
+                    } else {
+                        to_value(&legacy::grouped_keys(trust.clone())).unwrap()
+                    };
                 fixture["private"]["sessions"]["tokens"] =
                     json!({ "a".repeat(64): crate::auth::Session::default() });
                 let saved_nut = fixture["public"]["serverInfo"]["nut"].clone();

@@ -367,6 +367,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
@@ -378,6 +379,7 @@ where
                 params,
                 inherited_params,
                 raw_params,
+                rpc_stream,
             },
             result,
         )
@@ -498,6 +500,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
@@ -509,6 +512,7 @@ where
                 params,
                 inherited_params,
                 raw_params,
+                rpc_stream,
             },
             result,
         )
@@ -698,6 +702,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.handler.handle_sync(HandlerArgs {
@@ -707,6 +712,7 @@ where
             params,
             inherited_params: (self.inherit)(inherited_params.0, inherited_params.1),
             raw_params,
+            rpc_stream,
         })
     }
     async fn handle_async(
@@ -718,6 +724,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.handler
@@ -728,6 +735,7 @@ where
                 params,
                 inherited_params: (self.inherit)(inherited_params.0, inherited_params.1),
                 raw_params,
+                rpc_stream,
             })
             .await
     }
@@ -766,6 +774,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
@@ -777,6 +786,7 @@ where
                 params,
                 inherited_params: (self.inherit)(inherited_params.0, inherited_params.1),
                 raw_params,
+                rpc_stream,
             },
             result,
         )
