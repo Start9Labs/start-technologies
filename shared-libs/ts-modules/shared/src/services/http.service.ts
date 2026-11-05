@@ -1,14 +1,23 @@
-import { HttpClient } from '@angular/common/http'
+import {
+  HttpClient,
+  HttpEventType,
+  HttpResponse,
+  HttpXhrBackend,
+} from '@angular/common/http'
 import { DOCUMENT, inject, Service } from '@angular/core'
 import {
+  filter,
   firstValueFrom,
   from,
+  fromEvent,
   interval,
   lastValueFrom,
   map,
   Observable,
   race,
   take,
+  takeUntil,
+  tap,
 } from 'rxjs'
 
 import { HttpError } from '../classes/http-error'
@@ -24,6 +33,7 @@ import { RPCOptions, RPCResponse } from '../types/rpc.types'
 export class HttpService {
   private readonly relativeUrl = inject(RELATIVE_URL)
   private readonly http = inject(HttpClient)
+  private readonly xhr = new HttpClient(inject(HttpXhrBackend))
   private readonly fullUrl = inject(DOCUMENT).location.origin
 
   async rpcRequest<T>(
@@ -43,6 +53,7 @@ export class HttpService {
 
   async httpRequest<T>(opts: HttpOptions): Promise<LocalHttpResponse<T>> {
     let { method, url, headers, body, responseType, timeout } = opts
+    opts.signal?.throwIfAborted()
 
     url = opts.url.startsWith('/') ? this.fullUrl + url : url
 
@@ -62,11 +73,34 @@ export class HttpService {
       responseType: responseType || 'json',
     }
 
-    let req: Observable<LocalHttpResponse<T>>
-    if (method === 'GET') {
-      req = this.http.get(url, options as any) as any
-    } else {
-      req = this.http.post(url, body, options as any) as any
+    const client = opts.uploadProgress ? this.xhr : this.http
+    let req = client
+      .request<T>(method, url, {
+        ...options,
+        body,
+        observe: 'events',
+        reportProgress: !!opts.uploadProgress,
+        responseType: options.responseType as 'json',
+      })
+      .pipe(
+        tap(event => {
+          if (event.type === HttpEventType.UploadProgress) {
+            opts.uploadProgress?.(event.loaded, event.total)
+          }
+        }),
+        filter(event => event instanceof HttpResponse),
+      ) as Observable<LocalHttpResponse<T>>
+
+    if (opts.signal) {
+      req = req.pipe(
+        takeUntil(
+          fromEvent(opts.signal, 'abort').pipe(
+            map(() => {
+              throw opts.signal!.reason
+            }),
+          ),
+        ),
+      )
     }
 
     return firstValueFrom(timeout ? withTimeout(req, timeout) : req).catch(

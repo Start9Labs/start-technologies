@@ -1,10 +1,10 @@
-import { Component, inject, signal } from '@angular/core'
-import { toSignal } from '@angular/core/rxjs-interop'
+import { Component, DestroyRef, inject, signal } from '@angular/core'
 import {
   DialogService,
   getErrorMessage,
   i18nKey,
   i18nPipe,
+  TaskService,
 } from '@start9labs/shared'
 import { IST, T, utils } from '@start9labs/start-core'
 import {
@@ -13,16 +13,21 @@ import {
   TuiLoader,
   TuiNotification,
 } from '@taiga-ui/core'
+import { TuiProgress } from '@taiga-ui/kit'
 import { injectContext } from '@taiga-ui/polymorpheus'
-import { compare } from 'fast-json-patch'
+import { compare, Operation } from 'fast-json-patch'
 import { PatchDB } from 'patch-db-client'
-import { catchError, EMPTY, endWith, firstValueFrom, from, map } from 'rxjs'
+import { endWith, firstValueFrom } from 'rxjs'
 import {
   ActionButton,
   FormComponent,
 } from 'src/app/routes/portal/components/form.component'
 import { InvalidService } from 'src/app/routes/portal/components/form/containers/control.directive'
 import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
+import {
+  prepareActionFiles,
+  uploadActionFiles,
+} from 'src/app/services/action-files'
 import { ActionService } from 'src/app/services/action.service'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
@@ -65,6 +70,7 @@ export type PackageActionData = {
       }
 
       <app-form
+        [attr.inert]="submitting() ? '' : null"
         [spec]="res.spec"
         [value]="res.originalValue || {}"
         [buttons]="buttons"
@@ -81,6 +87,18 @@ export type PackageActionData = {
       </app-form>
     } @else if (!error()) {
       <tui-loader size="l" textContent="loading" />
+    }
+    @for (upload of uploads(); track upload.id) {
+      <p>
+        <label>
+          {{ upload.name }}
+          <progress
+            tuiProgressBar
+            [max]="upload.size || 1"
+            [value]="upload.complete ? upload.size || 1 : upload.loaded"
+          ></progress>
+        </label>
+      </p>
     }
   `,
   styles: `
@@ -104,6 +122,7 @@ export type PackageActionData = {
     TuiNotification,
     TuiLoader,
     TuiButton,
+    TuiProgress,
     FormComponent,
     i18nPipe,
     PkgIconDirective,
@@ -118,6 +137,8 @@ export class ActionInputModal {
   private readonly context =
     injectContext<TuiDialogContext<void, PackageActionData>>()
   private readonly i18n = inject(i18nPipe)
+  private readonly tasks = inject(TaskService)
+  private readonly abort = new AbortController()
 
   readonly actionId = this.context.data.actionInfo.id
   readonly warning = this.context.data.actionInfo.metadata.warning
@@ -132,55 +153,124 @@ export class ActionInputModal {
     },
   ]
 
+  protected readonly submitting = signal(false)
+  protected readonly uploads = signal<
+    {
+      id: string
+      name: string
+      size: number
+      loaded: number
+      complete: boolean
+    }[]
+  >([])
   readonly error = signal('')
-  readonly res = toSignal(
-    from(
-      this.api.rpc.package.action
-        .getInput({
-          packageId: this.pkgInfo.id,
-          actionId: this.actionId,
-          prefill: this.prefill ?? null,
-        })
-        .then(res => res && { ...res, spec: res.spec as IST.InputSpec }),
-    ).pipe(
-      map(res => {
-        if (!res) throw new Error('Invalid response from server')
-        const originalValue = res.value || {}
-        this.eventId = res.eventId
+  readonly res = signal<{
+    spec: IST.InputSpec
+    originalValue: Record<string, unknown>
+    operations: Operation[] | null
+  } | null>(null)
 
-        const operations = this.prefill
-          ? compare(
-              JSON.parse(JSON.stringify(originalValue)),
-              utils.deepMerge(
+  constructor() {
+    inject(DestroyRef).onDestroy(() => this.abort.abort())
+    void this.load()
+  }
+
+  private async load(value?: Record<string, unknown>) {
+    this.res.set(null)
+    this.error.set('')
+    try {
+      const res = await this.api.rpc.package.action.getInput({
+        packageId: this.pkgInfo.id,
+        actionId: this.actionId,
+        prefill: this.prefill ?? null,
+      })
+      if (!res)
+        throw new Error(this.i18n.transform('Invalid response from server'))
+      const originalValue = res.value || {}
+      this.eventId = res.eventId
+      this.res.set({
+        spec: res.spec as IST.InputSpec,
+        originalValue: value ?? originalValue,
+        operations:
+          !value && this.prefill
+            ? compare(
                 JSON.parse(JSON.stringify(originalValue)),
-                this.prefill,
-              ) as object,
-            )
-          : null
+                utils.deepMerge(
+                  JSON.parse(JSON.stringify(originalValue)),
+                  this.prefill,
+                ) as object,
+              )
+            : null,
+      })
+    } catch (e) {
+      this.error.set(String(getErrorMessage(e)))
+    }
+  }
 
-        return {
-          spec: res.spec,
-          originalValue,
-          operations,
-        }
-      }),
-      catchError(e => {
-        console.error('catchError', e)
-        this.error.set(String(getErrorMessage(e)))
-        return EMPTY
-      }),
-    ),
-  )
-
-  async execute(input: object) {
-    if (await this.checkConflicts(input)) {
-      await this.actionService.execute(
-        this.pkgInfo.id,
-        this.eventId,
-        this.actionId,
+  async execute(input: Record<string, unknown>) {
+    if (this.submitting()) return
+    this.submitting.set(true)
+    try {
+      const { input: prepared, uploads } = prepareActionFiles(
+        this.res()!.spec,
         input,
       )
-      this.context.$implicit.complete()
+      if (!(await this.checkConflicts(prepared))) return
+      const uploaded = await this.tasks.runInline(async () => {
+        if (new Set(uploads.map(upload => upload.id)).size !== uploads.length) {
+          throw new Error(
+            this.i18n.transform(
+              'Each file must have its own upload destination.',
+            ),
+          )
+        }
+        this.uploads.set(
+          uploads.map(({ id, file }) => ({
+            id,
+            name: file.name,
+            size: file.size,
+            loaded: 0,
+            complete: false,
+          })),
+        )
+        try {
+          await uploadActionFiles(
+            uploads,
+            (id, file, signal, progress) =>
+              this.api.uploadFile(id, file, {
+                filename: file.name,
+                signal,
+                progress,
+              }),
+            this.abort.signal,
+            (id, loaded, complete) =>
+              this.uploads.update(uploads =>
+                uploads.map(upload =>
+                  upload.id === id ? { ...upload, loaded, complete } : upload,
+                ),
+              ),
+          )
+        } catch (error) {
+          if (!this.abort.signal.aborted) throw error
+        }
+      })
+      if (this.abort.signal.aborted) return
+      if (
+        uploaded &&
+        (await this.actionService.execute(
+          this.pkgInfo.id,
+          this.eventId,
+          this.actionId,
+          prepared,
+        ))
+      ) {
+        this.context.$implicit.complete()
+      } else {
+        await this.load(input)
+        this.uploads.set([])
+      }
+    } finally {
+      this.submitting.set(false)
     }
   }
 

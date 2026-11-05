@@ -15,6 +15,10 @@ Actions vary by service. Common examples include:
 
 Click an action in the sidebar to run it. Some actions execute immediately and display a result. Others present a form for you to fill out before submitting.
 
+A form can ask you to select files. Uploads start after you submit, with a progress bar for each file; the action runs once every upload finishes. If an upload or the action fails, the form keeps your selections for another submission.
+
+An action can also return a file to download. Click **Download** in its result. Download links are single-use and expire after 30 minutes; run the action again if you need another link.
+
 ## When Actions Are Available
 
 Not all actions are available at all times. Some actions only appear — or can only be run — when a service is running, stopped, or in a particular state. If an action is unavailable, it will be grayed out or hidden.

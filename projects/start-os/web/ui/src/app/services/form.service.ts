@@ -10,8 +10,8 @@ import {
   ValidatorFn,
   Validators,
 } from '@angular/forms'
-import { IST, utils } from '@start9labs/start-core'
-import { tuiCreateFileFormatValidator } from '@taiga-ui/kit'
+import { ISB, IST, utils } from '@start9labs/start-core'
+import { TUI_FORMAT_ERROR, tuiCreateFileSizeValidator } from '@taiga-ui/kit'
 import Mustache from 'mustache'
 
 @Injectable({
@@ -107,7 +107,7 @@ export class FormService {
         if (currentValue !== undefined) {
           value = currentValue
         } else {
-          value = spec.default || null
+          value = spec.default
         }
         return this.formBuilder.control(value, numberValidators(spec))
       case 'color':
@@ -151,18 +151,15 @@ export class FormService {
       case 'hidden':
         return this.formBuilder.control(currentValue || null)
       case 'file':
-        return this.formBuilder.control(null, fileValidators(spec))
+        return this.formBuilder.control(
+          currentValue instanceof File ? currentValue : null,
+          fileValidators(spec),
+        )
       default:
         return this.formBuilder.control(null)
     }
   }
 }
-
-// function getListItemValidators(spec: IST.ValueSpecList) {
-//   if (IST.isValueSpecListOf(spec, 'text')) {
-//     return stringValidators(spec.spec)
-//   }
-// }
 
 function stringValidators(
   spec: IST.ValueSpecText | IST.ValueSpecTextarea | IST.ListValueSpecText,
@@ -240,7 +237,11 @@ function multiselectValidators(spec: IST.ValueSpecMultiselect): ValidatorFn[] {
 
 function fileValidators(spec: IST.ValueSpecFile): ValidatorFn[] {
   const validators: ValidatorFn[] = [
-    tuiCreateFileFormatValidator(spec.extensions.join(',')),
+    ({ value }) =>
+      value && !IST.matchesFileExtensions(value.name, spec.extensions)
+        ? { [TUI_FORMAT_ERROR]: true }
+        : null,
+    tuiCreateFileSizeValidator(spec.maxSize ?? Infinity),
   ]
 
   if (spec.required) {
@@ -257,30 +258,17 @@ function listValidators(spec: IST.ValueSpecList): ValidatorFn[] {
   return validators
 }
 
-// function fileValidators(spec: IST.ValueSpecFile): ValidatorFn[] {
-//   const validators: ValidatorFn[] = []
-
-//   if (spec.required) {
-//     validators.push(Validators.required)
-//   }
-
-//   return validators
-// }
-
 export function numberInRange(
   min: number | null,
   max: number | null,
 ): ValidatorFn {
-  return control => {
-    const value = control.value
+  const parser = ISB.numberParser({ min, max })
+  return ({ value }) => {
     if (typeof value !== 'number') return null
-    if (min && value < min)
-      return {
-        numberNotInRange: `Number must be greater than or equal to ${min}`,
-      }
-    if (max && value > max)
-      return { numberNotInRange: `Number must be less than or equal to ${max}` }
-    return null
+    const result = parser.safeParse(value)
+    return result.success
+      ? null
+      : { numberNotInRange: result.error.issues[0]!.message }
   }
 }
 
@@ -290,10 +278,14 @@ export function isNumber(): ValidatorFn {
 }
 
 export function isInteger(): ValidatorFn {
-  return ({ value }) =>
-    !value || value == Math.trunc(value)
+  const parser = ISB.numberParser({ integer: true })
+  return ({ value }) => {
+    if (!value) return null
+    const result = parser.safeParse(Number(value))
+    return result.success
       ? null
-      : { numberNotInteger: 'Must be an integer' }
+      : { numberNotInteger: result.error.issues[0]!.message }
+  }
 }
 
 export function listInRange(

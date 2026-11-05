@@ -16,6 +16,9 @@ export interface HttpOptions {
   responseType?: 'json' | 'text' | 'arraybuffer'
   body?: any
   timeout?: number
+  /** Uses XHR to report bytes sent; fetch does not expose upload progress. */
+  uploadProgress?: (loaded: number, total?: number) => void
+  signal?: AbortSignal
 }
 
 export interface HttpAngularOptions {

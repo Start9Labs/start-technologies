@@ -957,4 +957,8 @@ export const ENGLISH: Record<string, number> = {
   'Checking package signatures': 1104,
   'Enabled for service packages': 1105,
   'Enabled for StartOS updates': 1106,
+  'Each file must have its own upload destination.': 1107,
+  'Invalid file format': 1108,
+  'Invalid response from server': 1109,
+  'Maximum file size': 1110,
 }
