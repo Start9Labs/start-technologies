@@ -35,7 +35,7 @@ pub mod progress;
 pub mod published_ports;
 pub mod registry;
 pub mod setup;
-pub mod sign;
+pub use startos::sign;
 pub mod ssh_keys;
 pub mod ssl;
 pub mod system;
