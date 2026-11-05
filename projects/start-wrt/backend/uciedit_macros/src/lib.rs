@@ -36,6 +36,7 @@ struct UciFieldOpts {
     default: bool,
     default_value: Option<Expr>,
     inpt: bool,
+    accept_list: bool,
 }
 
 struct UciField {
@@ -46,6 +47,7 @@ struct UciField {
     default_value: Option<Expr>,
     agg: AggMode,
     parse: ParseMode,
+    accept_list: bool,
     crat: Path,
 }
 
@@ -58,43 +60,55 @@ impl UciField {
         }
     }
 
-    fn read_option_arm(&self) -> TokenStream {
-        if self.agg == List {
-            return TokenStream::new();
+    fn parse(&self, token: Ident) -> TokenStream {
+        let name = &self.name;
+        match self.parse {
+            FromStr => quote! { #token.parse_fromstr(#name)? },
+            Inpt => quote! { #token.parse_inpt(#name, arena)? },
+            Bool => quote! { #token.parse_bool(#name)? },
         }
+    }
+
+    /// An `option` replaces what `list` lines of its name gave, the way libuci reads it.
+    fn read_option_arm(&self) -> TokenStream {
         let UciField {
             placehold, name, ..
         } = self;
-        match self.parse {
-            FromStr => quote! {
-                #name if #placehold.is_none() => #placehold = Some(value.parse_fromstr(index)?),
-            },
-            Inpt => quote! {
-                #name if #placehold.is_none() => #placehold = Some(value.parse_inpt(index, arena)?),
-            },
-            Bool => quote! {
-                #name if #placehold.is_none() => #placehold = Some(value.parse_bool(index)?),
-            },
+        if self.agg == List {
+            let parse = self.parse(format_ident!("item"));
+            return quote! {
+                #name => {
+                    #placehold.clear();
+                    for item in value.words(arena) {
+                        #placehold.push(#parse);
+                    }
+                }
+            };
+        }
+        let parse = self.parse(format_ident!("value"));
+        if self.accept_list {
+            return quote! {
+                #name => #placehold = Some(#parse),
+            };
+        }
+        quote! {
+            #name if #placehold.is_none() => #placehold = Some(#parse),
         }
     }
 
     fn read_list_arm(&self) -> TokenStream {
-        if self.agg != List {
-            return TokenStream::new();
-        }
         let UciField {
             placehold, name, ..
         } = self;
-        match self.parse {
-            FromStr => quote! {
-                #name => #placehold.push(item.parse_fromstr(index)?),
+        let parse = self.parse(format_ident!("item"));
+        match (self.agg, self.accept_list) {
+            (List, _) => quote! {
+                #name => #placehold.push(#parse),
             },
-            Inpt => quote! {
-                #name => #placehold.push(item.parse_inpt(index, arena)?),
+            (_, true) => quote! {
+                #name if #placehold.is_none() => #placehold = Some(#parse),
             },
-            Bool => quote! {
-                #name => #placehold.push(item.parse_bool(index)?),
-            },
+            (_, false) => TokenStream::new(),
         }
     }
 
@@ -119,7 +133,7 @@ impl UciField {
             (None, Optional | List, _) => quote! { #field: #placehold, },
             (None, Single, true) => quote! { #field: #placehold.unwrap_or_default(), },
             (None, Single, false) => {
-                quote! { #field: #placehold.ok_or(#crat::Error::MissingOption { src: 0.into(), missing: #name.into() })?, }
+                quote! { #field: #placehold.ok_or_else(|| #crat::Error::MissingOption { src: section.header_src(), missing: #name.into() })?, }
             }
         }
     }
@@ -132,7 +146,11 @@ impl UciField {
             name,
             ..
         } = self;
-        match (self.agg, self.parse) {
+        let taken = self.accept_list.then(|| {
+            let taken = format_ident!("{}_taken", placehold);
+            quote! { let mut #taken = false; }
+        });
+        let lines = match (self.agg, self.parse) {
             (Single, Bool) => quote! {
                 let mut #placehold = [#crat::Line::option_from_bool(#name, self.#field, arena)].into_iter();
             },
@@ -151,30 +169,48 @@ impl UciField {
             (List, Inpt | FromStr) => quote! {
                 let mut #placehold = #crat::Line::list_from_display(#name, &self.#field, arena);
             },
-        }
+        };
+        quote! { #taken #lines }
     }
 
     fn write_option_arm(&self) -> TokenStream {
-        if self.agg == List {
-            return TokenStream::new();
-        }
         let UciField {
             placehold, name, ..
         } = self;
+        if self.accept_list {
+            let taken = format_ident!("{}_taken", placehold);
+            return quote! {
+                #name => {
+                    #taken = true;
+                    #placehold.next()
+                }
+            };
+        }
         quote! {
             #name => #placehold.next(),
         }
     }
 
+    /// A single-valued field replaces its first `list` line and keeps the rest.
     fn write_list_arm(&self) -> TokenStream {
-        if self.agg != List {
-            return TokenStream::new();
-        }
         let UciField {
             placehold, name, ..
         } = self;
-        quote! {
-            #name => #placehold.next(),
+        match (self.agg, self.accept_list) {
+            (List, _) => quote! {
+                #name => #placehold.next(),
+            },
+            (_, true) => {
+                let taken = format_ident!("{}_taken", placehold);
+                quote! {
+                    #name if #taken => continue,
+                    #name => {
+                        #taken = true;
+                        #placehold.next()
+                    }
+                }
+            }
+            (_, false) => TokenStream::new(),
         }
     }
 }
@@ -200,10 +236,10 @@ fn read_body(fields: &[UciField], struc: Ident, ty: String, crat: Path) -> Token
             index += 1;
         }
         let Some(#crat::Line::Section { ty, .. }) = lines.get(index) else {
-            return Err(#crat::Error::ExpectedSection { src: index.into() })
+            return Err(#crat::Error::ExpectedSection { src: #crat::Source::Unknown })
         };
         if ty.as_str() != #ty {
-            return Err(#crat::Error::ExpectedSectionType { src: index.into(), expected: (#ty).into(), found: ty.as_str().into(), })
+            return Err(#crat::Error::ExpectedSectionType { src: ty.src(), expected: (#ty).into(), found: ty.as_str().into(), })
         }
         #(#decl)*
 
@@ -351,6 +387,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 },
                 default: o.default,
                 default_value: o.default_value,
+                accept_list: o.accept_list,
                 agg: if is_collection_with_generic(&f.ty, "Option", |_| true) {
                     Optional
                 } else if is_collection_with_generic(&f.ty, "Vec", |_| true) {

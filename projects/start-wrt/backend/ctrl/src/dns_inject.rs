@@ -536,7 +536,7 @@ fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
             if s.name().as_deref() != Some(iface.as_str()) {
                 return None;
             }
-            s.get::<NetworkInterface>().ok()?.ipaddr
+            s.get::<NetworkInterface>().ok()?.ipv4()
         }) else {
             return;
         };

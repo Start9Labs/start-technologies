@@ -2240,6 +2240,59 @@ struct InjectedDnsRecord {
 // devices re-assert.
 ```
 
+## 18. Configuration Check
+
+### `config.check`
+
+Finds configuration, typically written by hand or in LuCI, that a page of the UI cannot
+represent. The UI shows a page with findings in place of its form, with a link to LuCI. A
+finding marked `notice` is shown above the form instead.
+
+```rust
+// Request: {}
+
+#[derive(Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ConfigView {
+    // Settings, which holds the recovery tools, is never one.
+    Wan, PublishedPorts, Outbound, Lan, Devices, Profiles, Ethernet, Wifi, Inbound,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ConfigProblem {
+    Syntax,       // the file does not parse
+    Value,        // a value that does not parse as the option's type
+    Missing,      // a required option is absent
+    Unsupported,  // a value that parses but that the page cannot show or keep
+    Unnamed,      // a section without a name where the page needs one
+    Absent,       // a section the page requires is absent
+    Extra,        // a section beyond the one the page shows in its place
+    Unmanaged,    // a value beyond the one the page manages, left as written
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigFinding {
+    views: Vec<ConfigView>,
+    config: String,                // file name under /etc/config
+    line: Option<u32>,             // one-based
+    section: Option<String>,
+    section_type: Option<String>,
+    option: Option<String>,
+    found: Option<String>,
+    problem: ConfigProblem,
+    notice: bool,                  // shown beside the page's settings rather than in their place
+    detail: Option<String>,        // the parser's explanation, in English
+}
+
+struct ConfigCheck {
+    findings: Vec<ConfigFinding>,
+}
+// Response: ConfigCheck
+// Backend: ctrl/src/config_check.rs; reads ddns, dhcp, firewall, network, startwrt, wireless.
+```
+
 ---
 
 ## HTTP Routes
@@ -2352,8 +2405,9 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `backup.restore`                    | Backup          |                             |
 | `diagnostics.create`                | Diagnostics     |                             |
 | `dns.injected-list`                 | DNS Injection   |                             |
+| `config.check`                      | Config Check    |                             |
 
-**Totals:** 84 RPC methods across 17 categories, plus the HTTP/WebSocket routes
+**Totals:** 85 RPC methods across 18 categories, plus the HTTP/WebSocket routes
 table above and the deprecated generic endpoints below.
 
 ---

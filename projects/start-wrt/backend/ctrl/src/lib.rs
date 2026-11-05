@@ -8,6 +8,7 @@ pub mod backup;
 pub mod bins;
 pub mod boot0;
 pub mod captive;
+pub mod config_check;
 pub mod continuations;
 pub mod device_ident;
 pub mod device_names;
@@ -416,6 +417,7 @@ pub fn main_api<C: CtrlContext + Clone>() -> ParentHandler<C> {
         .subcommand("activity", activity::activity::<C>())
         .subcommand("backup", backup::backup::<C>())
         .subcommand("diagnostics", diagnostics::diagnostics::<C>())
+        .subcommand("config", config_check::config::<C>())
 }
 
 /// Spawn a command with stdio redirected to /dev/null and wait for the

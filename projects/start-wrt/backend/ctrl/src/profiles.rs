@@ -427,7 +427,7 @@ pub(crate) fn rewrite_all_dns_forwarding(cfgs: &mut Configs) -> Result<(), Error
                         .iter()
                         .find_map(|s| {
                             if s.name().as_deref() == Some(interface) {
-                                s.get::<NetworkInterface>().ok().and_then(|i| i.ipaddr)
+                                s.get::<NetworkInterface>().ok().and_then(|i| i.ipv4())
                             } else {
                                 None
                             }
@@ -705,7 +705,7 @@ pub(crate) fn get_config(
                         ErrorKind::CorruptedProfile,
                     ));
                 }
-                if let Some(ip) = iface.ipaddr {
+                if let Some(ip) = iface.ipv4() {
                     wip_profile.gateway_ip = ip;
                 } else {
                     return Err(Error::new(
@@ -1414,7 +1414,7 @@ fn get_lan_ip(cfgs: &uciedit::Configs) -> Option<Ipv4Addr> {
     for section in &cfgs["network"].sections {
         if section.name().as_deref() == Some(crate::lan::LAN_INTERFACE) {
             if let Ok(Some(iface)) = section.get_typed::<NetworkInterface>() {
-                return iface.ipaddr;
+                return iface.ipv4();
             }
         }
     }
@@ -1475,7 +1475,7 @@ pub(crate) fn guard_subnet_collision(
             .iter()
             .find(|s| s.name().as_deref() == Some(iface))
             .and_then(|s| s.get_typed::<NetworkInterface>().ok().flatten())
-            .and_then(|i| i.ipaddr)
+            .and_then(|i| i.ipv4())
     });
     if let Some(cur) = current_ip {
         let c = cur.octets();
@@ -1495,7 +1495,7 @@ pub(crate) fn guard_subnet_collision(
             .iter()
             .find(|s| s.name().as_deref() == Some(existing.interface.as_str()))
             .and_then(|s| s.get_typed::<NetworkInterface>().ok().flatten())
-            .and_then(|i| i.ipaddr);
+            .and_then(|i| i.ipv4());
         if let Some(ip) = existing_ip {
             let o = ip.octets();
             if o[0] == new[0] && o[1] == new[1] && o[2] == new[2] {
@@ -1608,10 +1608,10 @@ fn set_config<C: CtrlContext>(
             }
             if name == profile.id.interface {
                 if let Some(ref mut old) = old_state {
-                    old.gateway_ip = iface.ipaddr;
+                    old.gateway_ip = iface.ipv4();
                 }
                 iface.proto = InterfaceProto::STATIC;
-                iface.ipaddr = Some(profile.gateway_ip);
+                iface.ipaddr = Some(profile.gateway_ip.into());
                 iface.netmask = Some(Ipv4Addr::new(255, 255, 255, 0));
                 // The admin LAN's prefix delegation is owned by lan::ipv6_set
                 // (the LAN IPv6 page) and uses the user-configured prefix — don't
@@ -1634,7 +1634,7 @@ fn set_config<C: CtrlContext>(
             &NetworkInterface {
                 device: format!("{}.{}", found_bridge, profile.id.vlan_tag),
                 proto: InterfaceProto::STATIC,
-                ipaddr: Some(profile.gateway_ip),
+                ipaddr: Some(profile.gateway_ip.into()),
                 netmask: Some(Ipv4Addr::new(255, 255, 255, 0)),
                 ip6assign: if ipv6 { Some("64".into()) } else { None },
                 ..Default::default()
@@ -1933,7 +1933,7 @@ fn create_config(
             &NetworkInterface {
                 device: format!("{found_bridge}.{vlan_tag}"),
                 proto: InterfaceProto::STATIC,
-                ipaddr: Some(profile.gateway_ip),
+                ipaddr: Some(profile.gateway_ip.into()),
                 netmask: Some(Ipv4Addr::new(255, 255, 255, 0)),
                 ip6assign: if ipv6 { Some("64".into()) } else { None },
                 ..Default::default()
@@ -2785,7 +2785,7 @@ pub(crate) fn sync_cross_subnet_routes(cfgs: &mut Configs) -> Result<(), Error> 
             if !iface.device.starts_with("br-lan") {
                 return None;
             }
-            let ip = iface.ipaddr?;
+            let ip = iface.ipv4()?;
             let o = ip.octets();
             Some((name, format!("{}.{}.{}.0/24", o[0], o[1], o[2])))
         })
@@ -3181,13 +3181,18 @@ pub async fn bootstrap_admin_profile(uci_root: &str) -> Result<(), Error> {
     let arena = Arena::new();
     let mut cfgs = parse_all(uci_root, &arena, &["startwrt"]).await?;
 
-    // Check if a LAN owner profile already exists
-    for section in &cfgs["startwrt"].sections {
-        if let Ok(profile) = section.get::<UciProfile>() {
-            if profile.interface == "lan" {
-                return Ok(());
-            }
-        }
+    // Read without the typed reader, which a hand-edited owner would fail.
+    let owns_lan = |section: &uciedit::Section| {
+        section.ty() == UciProfile::TY
+            && (section.name().as_deref() == Some(crate::lan::LAN_INTERFACE)
+                || section.lines.iter().any(|line| {
+                    matches!(line, Line::Option { option, value, .. }
+                        if option.as_str() == "interface"
+                            && value.as_str() == crate::lan::LAN_INTERFACE)
+                }))
+    };
+    if cfgs["startwrt"].sections.iter().any(owns_lan) {
+        return Ok(());
     }
 
     // Register the existing LAN as the Admin profile
@@ -3246,37 +3251,10 @@ pub(crate) fn migrate_lan_access_mode(
     Ok(!migrated.is_empty())
 }
 
-/// Repair IPv6 state that a pre-1.0.2 router could be left in, where the LAN
-/// says IPv6 is off while individual profiles carry on advertising it.
-///
-/// Before the `!profile.owns_lan` guard in [`rewrite_dhcp`], any profile rewrite
-/// re-derived `dhcp.lan.ra` from the *Admin* profile's outbound, and would write
-/// `disabled` there while touching nothing else. The result is a router where
-/// `dhcp.lan.ra = 'disabled'` — which is what `is_ipv6_enabled`, the LAN IPv6
-/// page, and the IPv6 published-port guard all read — but the profile VLANs
-/// still hold `ra 'server'` and their `ip6assign`, so they keep handing out
-/// addresses. The UI says one thing and the network does another, and nothing
-/// converges them: the guard stops the divergence arising, it cannot undo one
-/// that already has.
-///
-/// Detection is deliberately narrow. On current code this combination is
-/// unreachable: [`lan::ipv6_set`](crate::lan::ipv6_set) writes the LAN and every
-/// profile in one transaction, and [`rewrite_dhcp`] derives each profile's `ra`
-/// from [`is_ipv6_enabled`], which reads `dhcp.lan.ra`. Firing only on the
-/// impossible state therefore cannot clobber a legitimate configuration.
-///
-/// The repair reconciles *down*, toward off — the direction every other part of
-/// the system already believes. That makes reality match what the product is
-/// already asserting, and it is fully recoverable: the LAN IPv6 toggle now works
-/// correctly and turns everything back on together. Reconciling *up* would be a
-/// guess at intent that silently resumes advertising on VLANs the user has been
-/// told are quiet.
-///
-/// NOTE: if a per-profile IPv6 toggle is ever introduced (the ULA→GUA redesign
-/// contemplates one), "LAN off, profile on" becomes a legitimate state and this
-/// heal must be revisited or removed — it would otherwise silently fight it.
-///
-/// Idempotent: a no-op, with no reload, once the state is consistent.
+/// Turns IPv6 off on every profile VLAN still advertising it while the LAN says
+/// it is off, a state a pre-1.0.2 profile rewrite could leave behind. Runs only
+/// when `dhcp.lan` reads and has both `ra` and `dhcpv6` off, so a relay or a
+/// hand-written LAN section is left alone. A no-op once consistent.
 pub async fn heal_ipv6_state(uci_root: &str) -> Result<(), Error> {
     let arena = Arena::new();
     let mut cfgs = parse_all(uci_root, &arena, &["network", "dhcp", "startwrt"]).await?;
@@ -3309,13 +3287,24 @@ pub async fn heal_ipv6_state(uci_root: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// The LAN's IPv6 is in the off state StartWRT writes. An unreadable `dhcp.lan`,
+/// or one relaying in LuCI, is not.
+fn lan_ipv6_off(cfgs: &Configs) -> bool {
+    let off = |mode: &Option<String>| matches!(mode.as_deref(), None | Some("disabled"));
+    cfgs["dhcp"].sections.iter().any(|s| {
+        s.name().as_deref() == Some(crate::lan::LAN_INTERFACE)
+            && s.get_typed::<Dhcp>()
+                .ok()
+                .flatten()
+                .is_some_and(|d| off(&d.ra) && off(&d.dhcpv6))
+    })
+}
+
 /// The config half of [`heal_ipv6_state`], split out so it can be tested
 /// without spawning init scripts. Returns the interfaces it changed, sorted;
 /// empty means the state was already consistent and nothing should be applied.
 fn heal_ipv6_state_in_cfgs(cfgs: &mut Configs) -> Result<Vec<String>, Error> {
-    // Nothing to repair while the LAN is serving IPv6: profiles advertising
-    // alongside it is the normal, consistent state.
-    if is_ipv6_enabled(cfgs) {
+    if !lan_ipv6_off(cfgs) {
         return Ok(Vec::new());
     }
 
@@ -4036,6 +4025,31 @@ config dhcp 'iot'
         assert!(repaired.is_empty(), "nothing to repair: {repaired:?}");
         assert!(!network_out.contains("ip6assign"));
         assert!(!dhcp.contains("'server'"));
+    }
+
+    #[tokio::test]
+    async fn bootstrap_keeps_an_unreadable_admin_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let startwrt = "config profile 'lan'\n\toption fullname 'Admin'\n\toption interface 'lan'\n\toption vlan_tag 'one'\n";
+        std::fs::write(dir.path().join("startwrt"), startwrt).unwrap();
+        bootstrap_admin_profile(dir.path().to_str().unwrap())
+            .await
+            .unwrap();
+        let after = std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
+        assert_eq!(after, startwrt);
+    }
+
+    #[tokio::test]
+    async fn heal_ipv6_leaves_a_lan_it_cannot_read_alone() {
+        let relaying = heal_dhcp("relay", "server");
+        let unreadable =
+            heal_dhcp("disabled", "server").replacen("\toption leasetime '12h'\n", "", 1);
+        for dhcp in [relaying, unreadable] {
+            let (repaired, network, _) =
+                run_ipv6_heal(HEAL_NETWORK_DIVERGED, &dhcp, HEAL_STARTWRT).await;
+            assert!(repaired.is_empty(), "healed {dhcp}: {repaired:?}");
+            assert_eq!(network.matches("ip6assign").count(), 3);
+        }
     }
 
     #[tokio::test]

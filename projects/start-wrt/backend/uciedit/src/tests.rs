@@ -602,23 +602,212 @@ fn test_token_functionality() {
     assert_eq!(Token::from_bool(true).as_str(), "1");
     assert_eq!(Token::from_bool(false).as_str(), "0");
 
-    assert!(Token::from_str("true", &arena).parse_bool(0).unwrap());
-    assert!(!Token::from_str("0", &arena).parse_bool(0).unwrap());
+    assert!(Token::from_str("true", &arena).parse_bool("b").unwrap());
+    assert!(!Token::from_str("0", &arena).parse_bool("b").unwrap());
     assert!(matches!(
-        Token::from_str("maybe", &arena).parse_bool(0),
-        Err(Error::ValueBoolean { .. })
+        Token::from_str("maybe", &arena).parse_bool("b"),
+        Err(Error::InvalidValue { option, found, .. }) if option == "b" && found == "maybe"
     ));
 
     assert_eq!(
         Token::from_str("123", &arena)
-            .parse_fromstr::<i32>(0)
+            .parse_fromstr::<i32>("n")
             .unwrap(),
         123
     );
     assert!(matches!(
-        Token::from_str("abc", &arena).parse_fromstr::<i32>(0),
-        Err(Error::ValueMsg { .. })
+        Token::from_str("abc", &arena).parse_fromstr::<i32>("n"),
+        Err(Error::InvalidValue {
+            src: Source::Unknown,
+            ..
+        })
     ));
+}
+
+/// Typed-read failures name the file line, option, and value.
+#[test]
+fn test_typed_read_errors_are_located() {
+    let arena = Arena::new();
+    let text = "# header\n\nconfig bar 'x'\n\toption always 'zero'\n\nconfig requiredfield 'y'\n";
+    let config = Config::parse_str(&arena, text).unwrap();
+    match config.sections[0].get::<Bar>() {
+        Err(Error::InvalidValue {
+            src: Source::UnknownLine(3),
+            option,
+            found,
+            ..
+        }) => assert_eq!((option.as_str(), found.as_str()), ("always", "zero")),
+        other => panic!("{:?}", other.err()),
+    }
+    match config.sections[1].get::<RequiredField>() {
+        Err(Error::MissingOption {
+            src: Source::UnknownLine(5),
+            missing,
+        }) => assert_eq!(missing, "must_exist"),
+        other => panic!("{:?}", other.err()),
+    }
+    match config.sections[1].get::<Bar>() {
+        Err(Error::ExpectedSectionType {
+            src: Source::UnknownLine(5),
+            ..
+        }) => {}
+        other => panic!("{:?}", other.err()),
+    }
+    let bytes_err = Config::parse_str(&arena, "config a\n\toption b 'c' 'd'\n")
+        .err()
+        .unwrap()
+        .map_src(|src| match src {
+            Source::UnknownLine(n) => Source::Line("wireless".into(), n),
+            src => src,
+        });
+    assert_eq!(bytes_err.src().line(), Some(1));
+    assert!(bytes_err.to_string().contains("wireless:2"), "{bytes_err}");
+}
+
+#[derive(TypedSection, PartialEq, Eq, Debug, Default)]
+#[uci(ty = "host")]
+struct ListedHost {
+    #[uci(default, accept_list)]
+    mac: String,
+    #[uci(default)]
+    name: Option<String>,
+}
+
+#[test]
+fn test_accept_list_reads_and_rewrites_first_item() {
+    let arena = Arena::new();
+    let text = "config host\n\toption name 'nas'\n\tlist mac 'AA'\n\tlist mac 'BB'\n";
+    let mut config = Config::parse_str(&arena, text).unwrap();
+    let host: ListedHost = config.sections[0].get().unwrap();
+    assert_eq!(host.mac, "AA");
+    config.sections[0]
+        .set(&ListedHost {
+            mac: "CC".into(),
+            name: Some("nas".into()),
+        })
+        .unwrap();
+    assert_eq!(
+        config.dump_str(),
+        "config host\n\toption name 'nas'\n\toption mac 'CC'\n\tlist mac 'BB'\n"
+    );
+}
+
+#[derive(TypedSection, PartialEq, Eq, Debug, Default)]
+#[uci(ty = "rule")]
+struct ListedRule {
+    proto: Vec<String>,
+    #[uci(accept_list)]
+    ipaddr: Option<String>,
+}
+
+#[test]
+fn test_list_field_reads_an_option_as_words() {
+    let arena = Arena::new();
+    let text = "config rule
+	option proto 'tcp udp'
+	option x '1'
+";
+    let mut config = Config::parse_str(&arena, text).unwrap();
+    let rule: ListedRule = config.sections[0].get().unwrap();
+    assert_eq!(rule.proto, vec!["tcp", "udp"]);
+    config.sections[0]
+        .set(&ListedRule {
+            proto: vec!["udp".into(), "icmp".into()],
+            ipaddr: None,
+        })
+        .unwrap();
+    assert_eq!(
+        config.dump_str(),
+        "config rule
+	list proto 'udp'
+	option x '1'
+	list proto 'icmp'
+"
+    );
+    config.sections[0].set(&ListedRule::default()).unwrap();
+    assert_eq!(
+        config.dump_str(),
+        "config rule
+	option x '1'
+"
+    );
+}
+
+#[test]
+fn test_option_after_list_replaces_it() {
+    let arena = Arena::new();
+    let text = "config rule
+	list proto 'tcp'
+	option proto 'udp'
+	list proto 'icmp'
+";
+    let config = Config::parse_str(&arena, text).unwrap();
+    let rule: ListedRule = config.sections[0].get().unwrap();
+    assert_eq!(rule.proto, vec!["udp", "icmp"]);
+}
+
+#[test]
+fn test_accept_list_option_wins_over_list_items() {
+    let arena = Arena::new();
+    let text = "config rule\n\tlist ipaddr '10.0.1.1/24'\n\toption ipaddr '10.0.0.1'\n";
+    let mut config = Config::parse_str(&arena, text).unwrap();
+    let rule: ListedRule = config.sections[0].get().unwrap();
+    assert_eq!(rule.ipaddr.as_deref(), Some("10.0.0.1"));
+    config.sections[0]
+        .set(&ListedRule {
+            proto: vec![],
+            ipaddr: Some("10.0.2.1".into()),
+        })
+        .unwrap();
+    assert_eq!(
+        config.dump_str(),
+        "config rule\n\toption ipaddr '10.0.2.1'\n"
+    );
+}
+
+#[test]
+fn test_accept_list_optional_keeps_later_items() {
+    let arena = Arena::new();
+    let text = "config rule
+	list ipaddr '10.0.0.1/24'
+	list ipaddr '10.0.1.1/24'
+";
+    let mut config = Config::parse_str(&arena, text).unwrap();
+    let rule: ListedRule = config.sections[0].get().unwrap();
+    assert_eq!(rule.ipaddr.as_deref(), Some("10.0.0.1/24"));
+    config.sections[0]
+        .set(&ListedRule {
+            proto: vec![],
+            ipaddr: Some("10.0.2.1/24".into()),
+        })
+        .unwrap();
+    assert_eq!(
+        config.dump_str(),
+        "config rule
+	option ipaddr '10.0.2.1/24'
+	list ipaddr '10.0.1.1/24'
+"
+    );
+    config.sections[0].set(&ListedRule::default()).unwrap();
+    assert_eq!(
+        config.dump_str(),
+        "config rule
+	list ipaddr '10.0.1.1/24'
+"
+    );
+}
+
+#[test]
+fn test_ipv4_address_forms() {
+    use crate::openwrt::Ipv4Address;
+    let bare: Ipv4Address = "192.168.1.1".parse().unwrap();
+    assert_eq!(bare.prefix, None);
+    assert_eq!(bare.to_string(), "192.168.1.1");
+    let cidr: Ipv4Address = "192.168.1.1/24".parse().unwrap();
+    assert_eq!(cidr.prefix, Some(24));
+    assert_eq!(cidr.to_string(), "192.168.1.1/24");
+    assert!("192.168.1.1/33".parse::<Ipv4Address>().is_err());
+    assert!("192.168.1/24".parse::<Ipv4Address>().is_err());
 }
 
 #[derive(TypedSection, PartialEq, Eq, Debug)]
