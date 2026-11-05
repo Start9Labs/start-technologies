@@ -508,3 +508,9 @@ mod tests {
 #[cfg(test)]
 #[path = "package/ingestion_tests.rs"]
 mod ingestion_tests;
+#[cfg(test)]
+#[path = "os/ingestion_tests.rs"]
+mod os_ingestion_tests;
+#[cfg(test)]
+#[path = "test_utils.rs"]
+mod test_utils;

@@ -101,7 +101,9 @@ keys for packages when connecting; keys discovered on later package or OS
 update requests start disabled, with a notification. StartOS trusts a registry's keys for OS updates automatically only when a user
 chooses it for StartOS updates.
 
-Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hold versions, dependency `VersionRange`s, and `RegistryAsset`s. Assets carry **Blake3 commitments** (`sign/commitment/blake3`) for content addressing and integrity, and are signed by registered signers.
+Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hold versions, dependency `VersionRange`s, and `RegistryAsset`s. Package assets carry Merkle archive commitments; OS assets carry Blake3 commitments.
+
+Package and OS asset ingestion accept a default-empty `signatures` map alongside the authenticated uploader's `signature`. Each submitted signature is verified against the asset commitment and signature context before merging with existing signatures. Promotion forwards the source map and adds the promoter's signature. Endorsements do not register signers, change trust proposals, or grant publishing authorization; the authenticated uploader must retain permission to publish. Deploy the updated registry before the promoting CLI: older registries ignore the additional map.
 
 OS versions use the shared `LocaleString` for `releaseNotes`, as package metadata does:
 a plain string or a locale-to-Markdown map. The compiler includes `en_US` in translated

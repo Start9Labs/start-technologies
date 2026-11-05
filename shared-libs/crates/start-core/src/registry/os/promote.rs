@@ -153,6 +153,7 @@ async fn promote_assets(
                 "platform": platform,
                 "url": &asset.urls[0],
                 "signature": signature,
+                "signatures": &asset.signatures,
                 "commitment": commitment,
             }),
         )

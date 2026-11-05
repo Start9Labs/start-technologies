@@ -1,5 +1,7 @@
 //! Compatibility with clients and registries that label Ed25519ph signatures `id-Ed25519`.
 
+use std::collections::HashMap;
+
 use crate::prelude::*;
 use crate::sign::commitment::SignedCommitment;
 use crate::sign::ed25519::Ed25519ph;
@@ -21,6 +23,23 @@ pub fn verify_commitment<C: SignedCommitment>(
                 .map_err(|_| e),
             _ => Err(e),
         })
+}
+
+/// Returns verified signatures with canonical algorithm tags.
+pub fn verify_signatures<'a, C: SignedCommitment>(
+    commitment: &C,
+    context: &str,
+    signatures: impl IntoIterator<Item = (&'a AnyVerifyingKey, &'a AnySignature)>,
+) -> Result<HashMap<AnyVerifyingKey, AnySignature>, Error> {
+    signatures
+        .into_iter()
+        .map(|(key, signature)| {
+            Ok((
+                key.clone(),
+                verify_commitment(key, commitment, context, signature)?,
+            ))
+        })
+        .collect()
 }
 
 /// Relabels stored `id-Ed25519` registry signatures as Ed25519ph.
