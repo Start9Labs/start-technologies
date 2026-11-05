@@ -8,6 +8,24 @@ This file tracks notable changes since the move to the monorepo, and is what eac
 [GitHub release](https://github.com/Start9Labs/start-technologies/releases) links to
 for the detail behind its highlights.
 
+## [0.4.1.2]
+
+### Changed
+
+- Diagnostic updates honor your saved StartOS-update signing keys without needing the data drive. Accepting an untrusted signer requires an authenticated CLI running locally on the server.
+- Removed preseeded Alpha build keys from new installations and during migration; connected registries can offer those keys again for explicit trust.
+
+- Removed the Podman dependency from StartOS; legacy service conversion uses bundled system image archives offline.
+- Preserved images used only by legacy health checks or dependency configuration during conversion.
+
+- Reworked signing-key management makes it easier to see who signed packages and StartOS updates, inspect key details, and control trust separately for each in **System → Trusted Keys**. Manage registries and choose your StartOS update source under **System → Registries**. Keys listed by connected registries show their links and cannot be deleted while still listed.
+
+### Fixed
+
+- iPhones and iPads can install the Root CA of a server set up on StartOS 0.4.0 or 0.4.0.1. Its fingerprint changes on update, and devices that already trust it keep trusting the server.
+
+- Fixed migration from StartOS 0.3 and sideloading legacy service packages that use system images, including most services' backup procedures.
+
 ## [0.4.1.1]
 
 ### Fixed
