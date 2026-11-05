@@ -1,0 +1,144 @@
+# WebSocket JSON-RPC and response streams
+
+Enable the `websocket` Cargo feature and mount `Server::for_websocket()` or
+`HttpServer::for_websocket()` as an Axum GET handler. The latter preserves the
+server's configured middleware. HTTP, CLI, and line-delimited socket transports
+remain available independently.
+
+Each WebSocket text message contains one JSON-RPC request or a batch. Calls may
+complete out of order; notifications execute without response messages. Missing
+`params` means an empty object. Binary RPC messages are rejected. WebSocket
+Ping/Pong frames provide keepalive.
+
+## Opting into a response stream
+
+A client adds `rpcstream: "1.0"` to an ordinary request with a non-null ID:
+
+```json
+{ "jsonrpc": "2.0", "rpcstream": "1.0", "id": 42, "method": "db.watch", "params": {} }
+```
+
+The initiating response is an ordinary JSON-RPC response, with its own result type:
+
+```json
+{ "jsonrpc": "2.0", "id": 42, "result": { "id": 100, "value": {} } }
+```
+
+Subsequent events use the same request ID and a separate protocol discriminator:
+
+```json
+{ "rpcstream": "1.0", "id": 42, "result": { "id": 101, "patch": [] }, "end": false }
+```
+
+## Producer handle
+
+`HandlerArgs::rpc_stream` contains an optional `RpcStream` producer handle. It is
+absent without the client's opt-in and on other transports. Existing handlers
+can use that distinction to retain their legacy continuation path; the transport
+never interprets a legacy GUID as a response stream.
+
+The handle has one owner and is not cloneable. Move it into a producer task or
+ordinary thread, or retain it after the handler returns. `HandlerArgs` is also
+not cloneable; clone context and parameter fields separately when needed.
+
+- `send<T: Serialize>(value).await` serializes immediately and waits for bounded
+  queue capacity. Event types can vary between calls, and borrowed or non-`Send`
+  inputs need no `'static` bound. A serialization failure returns an internal
+  error without enqueuing an event; the handle remains usable.
+- `blocking_send<T: Serialize>(value)` performs the same operation from an
+  ordinary thread. Tokio panics if it is used inside an async execution context.
+- `close<T: Serialize, E: Into<RpcError>>(result)` consumes the handle and queues
+  one terminal result. It is synchronous and uses a reserved slot even when the
+  event buffer is full. A terminal serialization failure becomes an internal
+  error on the wire.
+- `closed().await` resolves when the transport drops the receiver. Pending sends
+  then fail with `RPCSTREAM_CANCELLED_ERROR`; producers waiting on other work can
+  select on `closed()` to stop promptly.
+
+A successful send or close accepts data locally; it is not a delivery
+acknowledgment. Applications own their producer tasks and threads and must act
+on transport closure. The runnable [example](../examples/websocket.rs) exposes
+`watch` from an async task and `watch-thread` from an ordinary thread.
+
+The initiating response and every event or terminal result have independent
+serializable types. For example, an explicit successful close can finish with a
+summary rather than a null result:
+
+```json
+{ "rpcstream": "1.0", "id": 42, "result": { "count": 5 }, "end": true }
+```
+
+`close(Err(error))` produces a terminal JSON-RPC-shaped error instead. Dropping
+the producer without calling `close` drains queued events and then emits this
+fixed cancellation error, including when a handler ignores its handle:
+
+```json
+{ "rpcstream": "1.0", "id": 42, "error": { "code": -32800, "message": "Response stream canceled" }, "end": true }
+```
+
+## Ordering and cancellation
+
+The connection drains the event queue after its successful initiating response
+is sent. For a batch, the entire batch response precedes every associated event
+and terminal result. Awaiting more events than the buffer can hold from inside
+the initiating handler can prevent that response completing; run a producing
+loop independently. Synchronous `close` does not wait for buffer space.
+
+Accepted events precede the terminal result or drop-cancellation error. After a
+terminal event, no further events are sent for that request ID. An initiating
+error drops the receiver and creates no response stream. Client cancellation
+and socket loss can discard queued events and terminal results.
+
+The client cancels a stream with a standalone control message:
+
+```json
+{ "rpcstream": "1.0", "close": 42 }
+```
+
+Canceling an established stream drops its receiver and acknowledges closure with
+`result: null, end: true`. Canceling an initiating stream request still in
+progress aborts the handler and returns a JSON-RPC error with code `-32800`,
+without a response stream. If its initiating result is already buffered inside
+an unfinished batch, cancellation drops its receiver; the initiating response
+remains part of the batch and no stream events follow it. Unknown or already-ended
+IDs are ignored. Canceling an ordinary, non-opted-in call has no effect.
+
+The client must tolerate events already in flight when it cancels a stream. IDs
+are scoped to the connection and must remain unique while their initiating call
+or response stream is active. Reusing an active ID returns an invalid-request
+error without replacing the original operation. String and numeric IDs are
+separate; integer IDs retain their JSON precision. The version discriminator is
+the string `"1.0"`, including in close messages.
+
+## Ownership and limits
+
+One connection task owns all initiating calls, buffered replies, and response
+receivers. The transport creates no per-stream forwarding task. Each opted-in
+request has one bounded event channel and one reserved terminal slot. Closing or
+losing the socket drops pending handlers and receivers, waking producers.
+Applications must also bound upstream queues such as database subscriptions.
+
+`WebSocketOptions` bounds in-flight calls/buffered initiating responses, active
+streams, queued events per stream, inbound message/frame size, and stalled sends.
+Defaults are 64 in-flight calls, 64 streams, 16 queued events per stream plus its
+terminal slot, 1 MiB inbound messages/frames, and a 15-second send deadline. The
+buffer limit counts serialized values, not bytes, and must fit Tokio's bounded
+channel capacity. These are resource limits, not authentication decisions.
+
+A batch larger than the in-flight limit closes the connection with policy code 1008. Capacity rejection does not execute rejected calls. Receivers are polled
+fairly; a stalled network write ends the connection after its send deadline.
+
+HTTP middleware runs once during upgrade. Each RPC call clones that prepared
+middleware state and runs the existing RPC middleware pipeline. Per-call state
+mutations do not leak to other calls or batch members. Middleware response
+rewrites apply to the initiating result; stream event payloads follow their own
+handler-defined contract. HTTP-response middleware runs on the upgrade response,
+not on later WebSocket frames.
+
+Applications own authentication, authorization, origin policy, and revocation.
+Authentication of an upgrade must authorize the connection, not merely an
+unrelated HTTP body. The connection's RPC middleware still authorizes individual
+methods. A producer must observe any application-specific revocation signal.
+Unauthenticated continuation limits must follow verified authentication or
+explicit endpoint policy, not whether a legacy continuation happens to use `ws`
+or `ws_authed`.

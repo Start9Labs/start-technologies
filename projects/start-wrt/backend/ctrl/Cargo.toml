@@ -28,15 +28,7 @@ blake3 = "1"
 chrono = { version = "0.4.42", features = ["serde", "std"] }
 clap = "4.5.37"
 color-eyre = "0.6.3"
-der = { version = "0.7", features = ["pem", "derive", "oid"] }
-digest = "0.10.7"
 dirs = "6"
-ed25519-dalek = { version = "2", features = [
-  "rand_core",
-  "pkcs8",
-  "pem",
-  "digest",
-] }
 fd-lock-rs = "0.1.4"
 flate2 = "1"
 form_urlencoded = "1"
@@ -63,12 +55,8 @@ num_enum = "0.7"
 openssh-keys = "0.6.2"
 openssl = { version = "0.10", features = ["vendored"] }
 patch-db = { path = "../../../../shared-libs/crates/patch-db/core" }
-pkcs8 = { version = "0.10", features = ["pem"] }
 pwhash = "1.0.0"
 rand = "0.9.1"
-rand_core_06 = { package = "rand_core", version = "0.6", features = [
-  "getrandom",
-] }
 reqwest = { version = "0.12", default-features = false, features = [
   "rustls-tls",
   "json",
@@ -115,3 +103,6 @@ url = { version = "2", features = ["serde"] }
 visit-rs = { path = "../../../../shared-libs/crates/visit-rs" }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 zeroize = "1"
+
+[dev-dependencies]
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
