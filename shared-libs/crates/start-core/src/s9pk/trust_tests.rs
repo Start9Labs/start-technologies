@@ -53,10 +53,11 @@ async fn sideload_enforces_trust_on_verified_archive_signatures() {
         None,
         Some(vec![AnyVerifyingKey::Ed25519(signer.verifying_key())]),
     ] {
-        let loaded = load_with_signers(
+        let loaded = load_for_sideload(
             source.clone(),
             || panic!("v2 needs no conversion key"),
             None,
+            &[],
             crate::trusted_keys::signer_policy(accepted),
         )
         .await
@@ -68,10 +69,11 @@ async fn sideload_enforces_trust_on_verified_archive_signatures() {
         vec![AnyVerifyingKey::Ed25519(other.verifying_key())],
     ] {
         assert!(
-            load_with_signers(
+            load_for_sideload(
                 source.clone(),
                 || panic!("v2 needs no conversion key"),
                 None,
+                &[],
                 crate::trusted_keys::signer_policy(Some(accepted))
             )
             .await
@@ -81,10 +83,11 @@ async fn sideload_enforces_trust_on_verified_archive_signatures() {
     let mut corrupted = bytes;
     corrupted[3 + 32] ^= 1;
     assert!(
-        load_with_signers(
+        load_for_sideload(
             Arc::<[u8]>::from(corrupted),
             || panic!("v2 needs no conversion key"),
             None,
+            &[],
             None
         )
         .await

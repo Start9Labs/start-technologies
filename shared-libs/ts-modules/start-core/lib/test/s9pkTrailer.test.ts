@@ -69,7 +69,11 @@ test('native binary endorsements expose claimed keys and immutable parse diagnos
     vectors.embedded,
     ...vectors.endorsements.map(record => record.signer),
   ])
+  expect(packageInfo.signatures).toEqual(
+    vectors.endorsements.map(({ signer, signature }) => [signer, signature]),
+  )
   expect(packageInfo.diagnostics).toEqual([])
+  expect(Object.isFrozen(packageInfo.signatures)).toBe(true)
   expect(Object.isFrozen(packageInfo.signers)).toBe(true)
   expect(Object.isFrozen(packageInfo.diagnostics)).toBe(true)
 })
@@ -89,7 +93,7 @@ test('browser parsing does not authenticate embedded or supplemental signatures'
   expect(result.diagnostics).toEqual([])
 })
 
-test('duplicate claimed identities appear once and unknown TLV types are ignored', async () => {
+test('duplicate identities appear once while signature candidates preserve every record', async () => {
   const result = await read(
     file([
       good(),
@@ -102,7 +106,23 @@ test('duplicate claimed identities appear once and unknown TLV types are ignored
     vectors.embedded,
     vectors.endorsements[0].signer,
   ])
+  expect(result.signatures).toEqual([
+    [vectors.endorsements[0].signer, vectors.endorsements[0].signature],
+    [vectors.endorsements[0].signer, vectors.endorsements[0].signature],
+    [vectors.embedded, 'AA=='],
+  ])
   expect(result.diagnostics).toEqual([])
+})
+
+test('an invalid candidate cannot displace a later valid endorsement in a sideload request', async () => {
+  const result = await read(new Blob([bytes('mixed.s9pk')]))
+  expect(result.signatures).toHaveLength(5)
+  expect(result.signatures[0][0]).toBe(vectors.endorsements[0].signer)
+  expect(result.signatures[0][1]).not.toBe(vectors.endorsements[0].signature)
+  expect(result.signatures.slice(1)).toEqual([
+    ...vectors.endorsements.map(({ signer, signature }) => [signer, signature]),
+    [vectors.endorsements[0].signer, vectors.endorsements[0].signature],
+  ])
 })
 
 test.each([
@@ -150,6 +170,7 @@ test('malformed TLV framing discards every supplemental candidate before process
   for (const bad of [new Uint8Array([0]), huge]) {
     const result = await read(file([good(), bad]))
     expect(result.signers).toEqual([vectors.embedded])
+    expect(result.signatures).toEqual([])
     expect(result.diagnostics[0].kind).toBe('invalid-framing')
   }
   for (const size of [1048576 - 10, 1048576 - 9]) {

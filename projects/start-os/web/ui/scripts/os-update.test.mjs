@@ -1618,9 +1618,10 @@ test('a trusted package installs without a prompt or override', async () => {
 test('the upload RPC receives the confirmed override and failed setup does not navigate', async () => {
   const calls = []
   const file = new File(['data'], 'test.s9pk')
+  const signatures = [[untrustedSigner, 'AA==']]
   const instance = {
     file: () => file,
-    pkg: () => ({ s9pks: [], signers: [untrustedSigner] }),
+    pkg: () => ({ s9pks: [], signers: [untrustedSigner], signatures }),
     trust: { keys: () => ({}) },
     tasks: {
       run: async work => {
@@ -1645,7 +1646,11 @@ test('the upload RPC receives the confirmed override and failed setup does not n
   }
   assert.equal(await Controls.prototype.upload.call(instance, true), true)
   assert.deepEqual(calls, [
-    { trust: true, acceptSigners: { any: [{ signer: untrustedSigner }] } },
+    {
+      trust: true,
+      signatures,
+      acceptSigners: { any: [{ signer: untrustedSigner }] },
+    },
   ])
   let navigated = false
   await Controls.prototype.installOrUpload.call(
@@ -1664,13 +1669,19 @@ test('the upload RPC receives the confirmed override and failed setup does not n
   assert.equal(navigated, false)
 })
 
-test('sideload pins only matching package-trusted keys without an override', async () => {
+test('sideload pins only package-trusted keys and forwards every signature candidate', async () => {
   const calls = []
+  const signatures = [
+    [OS_UPDATE_SIGNERS[0], 'AQ=='],
+    [untrustedSigner, 'AA=='],
+    [OS_UPDATE_SIGNERS[0], 'Ag=='],
+  ]
   const instance = {
     file: () => new File(['data'], 'test.s9pk'),
     pkg: () => ({
       s9pks: [],
       signers: [OS_UPDATE_SIGNERS[0], untrustedSigner],
+      signatures,
     }),
     trust: { keys: () => trustedSigners },
     tasks: {
@@ -1695,6 +1706,7 @@ test('sideload pins only matching package-trusted keys without an override', asy
   assert.deepEqual(calls, [
     {
       trust: false,
+      signatures,
       acceptSigners: { any: [{ signer: OS_UPDATE_SIGNERS[0] }] },
     },
   ])

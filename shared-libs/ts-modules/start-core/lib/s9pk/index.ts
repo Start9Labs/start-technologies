@@ -4,6 +4,7 @@ import {
   Manifest,
   MerkleArchiveCommitment,
   PackageId,
+  SideloadParams,
 } from '../osBindings'
 import { ArrayBufferReader, MerkleArchive } from './merkleArchive'
 import mime from 'mime'
@@ -15,11 +16,6 @@ export type { S9pkDiagnostic } from './trailer'
 const magicAndVersion = new Uint8Array([59, 59, 2])
 export const s9pkHeaderSize = magicAndVersion.length + MerkleArchive.headerSize
 
-/**
- * Compares two `Uint8Array` instances byte-by-byte for equality.
- *
- * @returns `true` if both arrays have the same length and identical bytes
- */
 export function compare(a: Uint8Array, b: Uint8Array) {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) {
@@ -53,6 +49,8 @@ export class S9pk {
     readonly size: number,
     /** Claimed canonical DER64 signing identities; the backend must verify their signatures. */
     readonly signers: readonly string[],
+    /** Supplemental signature candidates for backend verification against the archive. */
+    readonly signatures: Readonly<SideloadParams['signatures']>,
     /** Optional metadata issues; these never replace base archive validation. */
     readonly diagnostics: readonly S9pkDiagnostic[],
   ) {}
@@ -72,7 +70,7 @@ export class S9pk {
    * Deserializes an `S9pk` from a `Blob` (e.g. a `File` from a browser file input).
    *
    * Validates the magic bytes and version header, then parses the Merkle archive structure.
-   * Signature bytes are not verified. Callers must pin the matched keys for backend validation.
+   * Signature bytes are not verified. Sideload callers forward the candidates and pin matched keys.
    * An external commitment additionally pins the archive's Merkle root and size bound.
    *
    * @param source - The raw `.s9pk` file as a `Blob`
@@ -112,6 +110,7 @@ export class S9pk {
       archive,
       source.size,
       trailer.signers,
+      trailer.signatures,
       trailer.diagnostics,
     )
   }
