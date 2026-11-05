@@ -24,9 +24,9 @@ use crate::install::PKG_ARCHIVE_DIR;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::progress::{FullProgressTracker, PhaseProgressTrackerHandle, ProgressTrackerWriter};
-use crate::s9pk::S9pk;
 use crate::s9pk::manifest::{Manifest, PackageId};
 use crate::s9pk::merkle_archive::source::{DynFileSource, FileSource};
+use crate::s9pk::{S9pk, SignerCheck};
 use crate::service::rpc::{ExitParams, InitKind};
 use crate::service::{LoadDisposition, Service, ServiceRef, get_data_version};
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
@@ -198,14 +198,15 @@ impl ServiceMap {
     ) -> Result<DownloadInstallFuture, Error>
     where
         F: FnOnce() -> Fut,
-        Fut: Future<Output = Result<S9pk<S>, Error>>,
+        Fut: Future<Output = Result<L, Error>>,
+        L: LoadedS9pk<S>,
         S: FileSource + Clone,
     {
         let progress = progress.unwrap_or_else(|| FullProgressTracker::new());
         let mut validate_progress = progress.add_phase("Validating Headers".into(), Some(1));
         let mut unpack_progress = progress.add_phase("Unpacking".into(), Some(100));
 
-        let mut s9pk = s9pk().await?;
+        let (mut s9pk, signer_check) = s9pk().await?.into_parts();
         validate_progress.start();
         s9pk.validate_and_filter(ctx.s9pk_arch)?;
         validate_progress.complete();
@@ -338,6 +339,9 @@ impl ServiceMap {
         Ok(async move {
             let sync_progress_task = reload_guard
                 .handle(async {
+                    if let Some(check) = signer_check {
+                        check.await?;
+                    }
                     let download_path = s9pk_download_path(&commitment);
 
                     let deref_id = id.clone();
@@ -556,6 +560,20 @@ impl InstallingS9pkGuard {
 impl Drop for InstallingS9pkGuard {
     fn drop(&mut self) {
         self.ctx.installing_s9pks.mutate(|s| s.remove(&self.id));
+    }
+}
+
+pub trait LoadedS9pk<S> {
+    fn into_parts(self) -> (S9pk<S>, Option<SignerCheck>);
+}
+impl<S> LoadedS9pk<S> for S9pk<S> {
+    fn into_parts(self) -> (S9pk<S>, Option<SignerCheck>) {
+        (self, None)
+    }
+}
+impl<S> LoadedS9pk<S> for (S9pk<S>, Option<SignerCheck>) {
+    fn into_parts(self) -> (S9pk<S>, Option<SignerCheck>) {
+        self
     }
 }
 

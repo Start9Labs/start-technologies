@@ -720,3 +720,67 @@ async fn s9pk_trailer_read_failure_keeps_valid_base_and_refuses_editing() {
         }
     }
 }
+
+struct Gated {
+    bytes: Arc<[u8]>,
+    gate: u64,
+    open: tokio::sync::watch::Receiver<bool>,
+}
+impl ArchiveSource for Gated {
+    type FetchReader = <Arc<[u8]> as ArchiveSource>::FetchReader;
+    type FetchAllReader = <Arc<[u8]> as ArchiveSource>::FetchAllReader;
+    async fn size(&self) -> Option<u64> {
+        Some(self.bytes.len() as u64)
+    }
+    async fn fetch(&self, position: u64, size: u64) -> Result<Self::FetchReader, Error> {
+        if position + size > self.gate {
+            self.open.clone().wait_for(|open| *open).await.unwrap();
+        }
+        self.bytes.fetch(position, size).await
+    }
+    async fn fetch_all(&self) -> Result<Self::FetchAllReader, Error> {
+        self.open.clone().wait_for(|open| *open).await.unwrap();
+        self.bytes.fetch_all().await
+    }
+}
+
+#[tokio::test]
+async fn s9pk_trailer_deferred_signer_check_waits_for_the_trailer_but_the_header_does_not() {
+    use std::time::Duration;
+
+    let base = bytes("base.s9pk");
+    let full = Arc::<[u8]>::from(with_region(base.clone(), &good()));
+    for (pins, accepted) in [(vec![key(0)], true), (vec![key(1)], false)] {
+        let (open, gate) = tokio::sync::watch::channel(false);
+        let source = Gated {
+            bytes: full.clone(),
+            gate: base.len() as u64,
+            open: gate,
+        };
+        let (_, check) = tokio::time::timeout(
+            Duration::from_secs(5),
+            crate::s9pk::load_deferring_signers(
+                source,
+                || panic!("v2 requires no conversion key"),
+                None,
+                crate::trusted_keys::signer_policy(Some(pins)),
+            ),
+        )
+        .await
+        .expect("header load waited for the trailer")
+        .unwrap();
+        let mut check = check.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut check)
+                .await
+                .is_err()
+        );
+        open.send_replace(true);
+        let result = check.await;
+        if accepted {
+            result.unwrap();
+        } else {
+            assert_eq!(result.err().unwrap().kind, ErrorKind::InvalidSignature);
+        }
+    }
+}

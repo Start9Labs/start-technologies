@@ -364,10 +364,16 @@ impl<S: ArchiveSource + Clone> S9pk<Section<S>> {
         commitment: Option<&MerkleArchiveCommitment>,
     ) -> Result<Self, Error> {
         let mut package = Self::deserialize(source, commitment).await?;
+        package.read_trailer(source).await?;
+        Ok(package)
+    }
+
+    /// Reads the supplemental endorsements, which follow the archive at the end of the source.
+    pub async fn read_trailer(&mut self, source: &S) -> Result<(), Error> {
         let trailer = trailer::Trailer::read(
             source,
-            &package.archive.commitment().await?,
-            package.archive.contents().source_end(),
+            &self.archive.commitment().await?,
+            self.archive.contents().source_end(),
         )
         .await;
         for diagnostic in &trailer.diagnostics {
@@ -378,8 +384,8 @@ impl<S: ArchiveSource + Clone> S9pk<Section<S>> {
                 diagnostic.message
             );
         }
-        package.trailer = trailer;
-        Ok(package)
+        self.trailer = trailer;
+        Ok(())
     }
 }
 impl S9pk {

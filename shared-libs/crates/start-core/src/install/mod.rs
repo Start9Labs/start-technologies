@@ -310,7 +310,7 @@ pub async fn sideload(
                 .install(
                     ctx.clone(),
                     || {
-                        crate::s9pk::load_with_signers(
+                        crate::s9pk::load_deferring_signers(
                             file.clone(),
                             || Ok(key.de()?.0),
                             Some(&progress_tracker),
