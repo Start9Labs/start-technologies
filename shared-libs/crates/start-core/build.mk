@@ -16,17 +16,16 @@ start-core-mcp-tools: start-core-ts-bindings
 	npm --prefix shared-libs/ts-modules/start-core exec -- tsx shared-libs/crates/start-core/build/mcp-tools.ts shared-libs/crates/start-core/mcp-tools.json
 	npm --prefix shared-libs/ts-modules/start-core exec -- prettier --config .prettierrc.json -w shared-libs/crates/start-core/mcp-tools.json
 
-# --- generated-artifact freshness (CI gates: regenerate, then fail on any diff) ---
 MAN_DIRS := projects/start-cli/man projects/start-registry/man projects/start-tunnel/man projects/start-os/man
 OSBINDINGS_DIR := shared-libs/ts-modules/start-core/lib/osBindings
 MCP_TOOLS := shared-libs/crates/start-core/mcp-tools.json
 
-.PHONY: manpages manpages-check start-core-ts-bindings-check start-core-mcp-tools start-core-mcp-tools-check
-# Regenerate the committed clap man pages (roff) for every product binary.
+.PHONY: generated-artifacts-check manpages manpages-check start-core-ts-bindings-check start-core-mcp-tools start-core-mcp-tools-check
+generated-artifacts-check: manpages-check start-core-ts-bindings-check start-core-mcp-tools-check
+
 manpages:
 	./shared-libs/crates/start-core/build/build-manpage.sh
 
-# Fail if the committed man pages don't match the current CLI definitions.
 manpages-check: manpages
 	@if [ -n "$$(git status --porcelain -- $(MAN_DIRS))" ]; then \
 		echo "Man pages are out of date — run 'make manpages' and commit the result:"; \
@@ -34,7 +33,6 @@ manpages-check: manpages
 		exit 1; \
 	fi
 
-# Fail if the committed TS osBindings don't match the current Rust types.
 start-core-ts-bindings-check: start-core-ts-bindings
 	@if [ -n "$$(git status --porcelain -- $(OSBINDINGS_DIR))" ]; then \
 		echo "TS bindings are out of date — run 'make start-core-ts-bindings' and commit the result:"; \
@@ -42,7 +40,6 @@ start-core-ts-bindings-check: start-core-ts-bindings
 		exit 1; \
 	fi
 
-# Fail if the committed MCP tool catalog doesn't match the current TS bindings.
 start-core-mcp-tools-check: start-core-mcp-tools
 	@if [ -n "$$(git status --porcelain -- $(MCP_TOOLS))" ]; then \
 		echo "MCP tool catalog is out of date — run 'make start-core-mcp-tools' and commit the result:"; \

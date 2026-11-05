@@ -36,6 +36,10 @@ opt-level = 3
 [profile.dev.package.backtrace]
 opt-level = 3
 
+[profile.generated]
+debug = 0
+inherits = "dev"
+
 [profile.bindings]
 debug = 0
 incremental = false
