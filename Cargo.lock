@@ -8564,6 +8564,7 @@ version = "1.4.0"
 dependencies = [
  "async_cell",
  "axum",
+ "base32",
  "base64 0.22.1",
  "blake3",
  "chrono",
@@ -8600,6 +8601,7 @@ dependencies = [
  "rpassword",
  "rpc-toolkit",
  "rusqlite",
+ "rust-argon2",
  "rustls",
  "semver",
  "serde",
@@ -8623,6 +8625,7 @@ dependencies = [
  "url",
  "visit-rs",
  "x25519-dalek 2.0.1",
+ "zeroize",
 ]
 
 [[package]]
