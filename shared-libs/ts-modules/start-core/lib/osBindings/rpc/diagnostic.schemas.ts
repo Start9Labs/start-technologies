@@ -38,27 +38,47 @@ export const CapabilityVerdict: z.ZodObject<{
 }).meta({
   id: 'CapabilityVerdict',
 })
-export const DiagnosticUpdateSystemParams: z.ZodObject<{
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  targetVersion: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  progress: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-}> = /* @__PURE__ */ object({
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Accepts an untrusted signer without skipping signature or integrity verification.',
+export const DiagnosticUpdateSystemParams: z.ZodCodec<
+  z.ZodObject<{
+    /**
+     * Accepts an untrusted signer without skipping signature or integrity verification.
+     */
+    trust: z.ZodOptional<z.ZodBoolean>
+    targetVersion: z.ZodOptional<z.ZodNullable<z.ZodString>>
+    progress: z.ZodOptional<z.ZodBoolean>
+  }>,
+  z.ZodObject<{
+    /**
+     * Accepts an untrusted signer without skipping signature or integrity verification.
+     */
+    trust: z.ZodBoolean
+    targetVersion: z.ZodNullable<z.ZodString>
+    progress: z.ZodBoolean
+  }>
+> = /* @__PURE__ */ wire(
+  object({
+    /**
+     * Accepts an untrusted signer without skipping signature or integrity verification.
+     */
+    trust: z.boolean().optional().meta({
+      description:
+        'Accepts an untrusted signer without skipping signature or integrity verification.',
+    }),
+    targetVersion: z.string().nullable().optional(),
+    progress: z.boolean().optional(),
   }),
-  targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
-  progress: wire(z.boolean().optional(), z.boolean()),
-}).meta({
+  object({
+    /**
+     * Accepts an untrusted signer without skipping signature or integrity verification.
+     */
+    trust: z.boolean().meta({
+      description:
+        'Accepts an untrusted signer without skipping signature or integrity verification.',
+    }),
+    targetVersion: z.string().nullable(),
+    progress: z.boolean(),
+  }),
+).meta({
   id: 'DiagnosticUpdateSystemParams',
 })
 export const DnsSource: z.ZodEnum<{
