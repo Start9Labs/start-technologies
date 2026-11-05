@@ -1619,7 +1619,7 @@ test('a trusted package installs without a prompt or override', async () => {
 test('the upload RPC receives the confirmed override and failed setup does not navigate', async () => {
   const calls = []
   const file = new File(['data'], 'test.s9pk')
-  const signatures = [[untrustedSigner, 'AA==']]
+  const signatures = { [untrustedSigner]: 'AA==' }
   const instance = {
     file: () => file,
     pkg: () => ({ s9pks: [], signers: [untrustedSigner], signatures }),
