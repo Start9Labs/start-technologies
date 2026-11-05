@@ -395,6 +395,10 @@ It has two sections:
 
 Packages with multiple upstream sources (e.g. a service plus its database sidecar) get one subsection per source under each heading. Bumping the package version itself — editing `current.ts` or spinning off a version file, migrations, release notes — lives in [Versions](./versions.md) and is not restated here.
 
+**Every package has one.** When the upstream is frozen, or the package builds only its own code, it says so and still covers every image it pins.
+
+**It holds the recipe and nothing else.** A fact the bump depends on stays: a carried patch that must keep applying, a cadence rule that decides whether to bump at all, a constraint between two pins. Everything else goes: this guide's rules, which it never restates; how to test a bump, which belongs to the reviewer and to the PR that needed it; how the package works, which is `README.md`; why it was built that way, which is the commit history; and repo mechanics a bump doesn't touch, which are `AGENTS.md`.
+
 ## assets/
 
 Stores supplementary files and scripts needed by the service, such as configuration generators or entrypoint scripts. **Required** -- the `assets/` directory must exist and contain at least one file for git to track it and for the build to succeed, so it carries a `.gitkeep` even when the package has no assets of its own. Keep the `.gitkeep` when you add real assets; it costs nothing and keeps every package's layout identical.
