@@ -631,6 +631,11 @@ fn decode(raw: &str) -> Cow<'_, str> {
     if !raw.contains(['\'', '"', '\\']) {
         return Cow::Borrowed(raw);
     }
+    if let Some(inner) = raw.strip_prefix('\'').and_then(|r| r.strip_suffix('\'')) {
+        if !inner.contains('\'') {
+            return Cow::Borrowed(inner);
+        }
+    }
     fn escaped(chars: &mut std::str::Chars, out: &mut String) {
         if let Some(rest) = chars.as_str().strip_prefix("\r\n") {
             *chars = rest.chars();
