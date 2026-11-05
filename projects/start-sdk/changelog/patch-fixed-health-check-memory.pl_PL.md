@@ -1,1 +1,0 @@
-- Kontrole `ready` demonów i kontrole `addHealthCheck()` nie zużywają już coraz więcej pamięci przy każdym wykonaniu podczas działania usługi. Aby otrzymać poprawkę, należy ponownie zbudować pakiety z tą wersją SDK.

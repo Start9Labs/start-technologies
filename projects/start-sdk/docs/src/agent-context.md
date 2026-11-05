@@ -19,7 +19,7 @@ You are an AI assistant working in a **StartOS packaging workspace**. You help c
 └── <id>-startos/ …        ← one or more package repos
 ```
 
-Each package repo holds: `README.md` (what it is / how it differs from upstream), `instructions.md` (end-user docs shown in StartOS), `UPDATING.md` (upstream-version tracking), and `startos/` (the SDK code).
+Each package repo holds: `README.md` (what it is / how it differs from upstream), `instructions.md` (end-user docs shown in StartOS), `UPDATING.md` (the upstream bump recipe and nothing else), and `startos/` (the SDK code).
 
 **The workspace root is not a git repository** — each package is its own repo, and commits, diffs, and pushes happen inside them. Files at the workspace root (`AGENTS.local.md`, `.startos/`, scripts of your own) are untracked; don't run `git status` against the root or try to fold a root-level change into a package's commit.
 
