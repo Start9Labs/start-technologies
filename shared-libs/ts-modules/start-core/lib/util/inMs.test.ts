@@ -19,7 +19,7 @@ describe('inMs', () => {
   test('1m', () => {
     expect(inMs('1m')).toBe(60000)
   })
-  test('1m', () => {
+  test('1d', () => {
     expect(inMs('1d')).toBe(1000 * 60 * 60 * 24)
   })
   test('123', () => {
@@ -28,7 +28,7 @@ describe('inMs', () => {
   test('123 as number', () => {
     expect(inMs(123)).toBe(123)
   })
-  test.only('undefined', () => {
+  test('undefined', () => {
     expect(inMs(undefined)).toBe(undefined)
   })
 })
