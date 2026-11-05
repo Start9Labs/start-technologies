@@ -36,7 +36,7 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
           tuiIconButton
           docsLink
           path="/start-os/marketplace.html"
-          fragment="#optional-seeding"
+          fragment="#software-sharing"
           size="xs"
           appearance="icon"
           iconStart="@tui.book-open-text"
@@ -46,7 +46,7 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
       </header>
       @if (availability() === 'error') {
         <div tuiNotification appearance="negative">
-          {{ 'Download settings could not be loaded.' | i18n }}
+          {{ 'Sharing settings could not be loaded.' | i18n }}
           <button tuiButton appearance="flat" size="s" (click)="load()">
             {{ 'Retry' | i18n }}
           </button>
@@ -64,10 +64,10 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
         }
         <label tuiCell>
           <span tuiTitle>
-            <b>{{ 'Continue seeding' | i18n }}</b>
+            <b>{{ 'Share S9PKs and OS images' | i18n }}</b>
             <span tuiSubtitle>
               {{
-                'Retain verified BitTorrent downloads to share after installation and updates.'
+                'Share compatible installed S9PKs and OS images already stored on this server.'
                   | i18n
               }}
             </span>
@@ -83,7 +83,7 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
         </label>
         <p tuiSubtitle>
           {{
-            'Active BitTorrent downloads can already upload. This setting controls sharing after downloads finish.'
+            'Active BitTorrent downloads can upload even when this setting is off.'
               | i18n
           }}
         </p>
@@ -96,7 +96,13 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
       </div>
       <p tuiSubtitle>
         {{
-          'Retained copies use additional disk space and remain until removed. Disabling continued seeding keeps those copies.'
+          'Sharing uses upload bandwidth, not extra payload copies. Installation, uninstall and image cleanup control file retention.'
+            | i18n
+        }}
+      </p>
+      <p tuiSubtitle>
+        {{
+          'Uploads can use outgoing peer connections. Incoming peers need a configured TCP listener and an open firewall/router port.'
             | i18n
         }}
       </p>

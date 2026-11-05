@@ -4811,11 +4811,11 @@ help.arg.revision-cache-size:
   pl_PL: "Maksymalna liczba rewizji w pamięci podręcznej"
 
 help.arg.seeding-enabled:
-  en_US: "Retain completed, verified downloads for continued seeding"
-  de_DE: "Abgeschlossene, geprüfte Downloads zum weiteren Seeding aufbewahren"
-  es_ES: "Conservar las descargas completadas y verificadas para seguir compartiéndolas"
-  fr_FR: "Conserver les téléchargements terminés et vérifiés pour continuer à les partager"
-  pl_PL: "Zachowaj ukończone, zweryfikowane pobrania do dalszego udostępniania"
+  en_US: "Share compatible installed S9PKs and stored OS images"
+  de_DE: "Kompatible installierte S9PKs und gespeicherte OS-Images teilen"
+  es_ES: "Compartir S9PK instalados e imágenes del sistema almacenadas compatibles"
+  fr_FR: "Partager les S9PK installés et les images système stockées compatibles"
+  pl_PL: "Udostępniaj zgodne z torrentem zainstalowane pliki S9PK i zapisane obrazy systemu"
 
 help.arg.server-id:
   en_US: "Unique server identifier"
@@ -7714,11 +7714,11 @@ about.ssl-generate-certificate:
   pl_PL: "Wygeneruj certyfikat SSL z głównego CA systemu"
 
 about.system.bittorrent:
-  en_US: "Manage continued BitTorrent seeding"
-  de_DE: "Fortgesetztes BitTorrent-Seeding verwalten"
-  es_ES: "Gestionar la siembra continua de BitTorrent"
-  fr_FR: "Gérer le partage BitTorrent après téléchargement"
-  pl_PL: "Zarządzaj dalszym udostępnianiem przez BitTorrent"
+  en_US: "Manage BitTorrent sharing of stored software"
+  de_DE: "BitTorrent-Freigabe gespeicherter Software verwalten"
+  es_ES: "Gestionar el uso compartido de software almacenado mediante BitTorrent"
+  fr_FR: "Gérer le partage BitTorrent des logiciels stockés"
+  pl_PL: "Zarządzaj udostępnianiem zapisanego oprogramowania przez BitTorrent"
 
 about.system.bittorrent-enabled:
   en_US: "Show whether BitTorrent is enabled on the server"
@@ -7728,11 +7728,11 @@ about.system.bittorrent-enabled:
   pl_PL: "Pokaż, czy BitTorrent jest włączony na serwerze"
 
 about.system.set-seeding:
-  en_US: "Set continued seeding of completed, verified downloads"
-  de_DE: "Fortgesetztes Seeding abgeschlossener, geprüfter Downloads einstellen"
-  es_ES: "Configurar la siembra continua de descargas completadas y verificadas"
-  fr_FR: "Configurer le partage continu des téléchargements terminés et vérifiés"
-  pl_PL: "Ustaw dalsze udostępnianie ukończonych, zweryfikowanych pobrań"
+  en_US: "Set sharing of compatible installed S9PKs and stored OS images"
+  de_DE: "Freigabe kompatibler installierter S9PKs und gespeicherter OS-Images einstellen"
+  es_ES: "Configurar el uso compartido de S9PK instalados e imágenes del sistema almacenadas compatibles"
+  fr_FR: "Configurer le partage des S9PK installés et des images système stockées compatibles"
+  pl_PL: "Ustaw udostępnianie zgodnych z torrentem zainstalowanych plików S9PK i zapisanych obrazów systemu"
 
 about.teardown-rebuild-containers:
   en_US: "Teardown and rebuild containers"

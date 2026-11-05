@@ -24,33 +24,37 @@ Package details include a **Signed by** section listing every key that signed th
 
 When a registry advertises a BitTorrent source, StartOS prefers it for package downloads and OS updates, with HTTP fallback if the torrent is unavailable, stalls, or fails verification. Both transports use the same signed content commitments. BitTorrent sources must contain a single asset file. V1/v2 hybrid torrents use their v1-compatible swarm. Recovery-mode OS updates stream over HTTP directly to the image partition.
 
-BitTorrent downloads buffer a complete asset on the data disk before installation. Retained seeding keeps an additional copy.
+BitTorrent downloads buffer a complete asset on the data disk before installation. Temporary transfer files are cleaned up afterward.
 
 > [!WARNING]
 > BitTorrent peers can see the server's IP address and the torrent it requests. Onion registries use HTTP through Tor instead of BitTorrent.
 
 To use HTTP exclusively, set `bittorrent: false` in `/media/startos/config/config.yaml` and restart StartOS.
 
-### Optional Seeding
+### Software Sharing
 
-Continued seeding of completed, verified BitTorrent downloads is disabled by default. Enable **Continue seeding** under **System → Download sharing**, or use:
+Sharing compatible installed S9PKs and OS images already stored by StartOS is disabled by default. Enable **Share S9PKs and OS images** under **System → Software sharing**, or use:
 
 ```sh
 start-cli server bittorrent set-seeding --enabled true
 ```
 
-This preference applies without restarting and persists across restarts. StartOS keeps additional copies under `/media/startos/data/package-data/registry-seeds` and revalidates them before resuming seeding. Active BitTorrent downloads can upload regardless of this preference.
+This preference applies without restarting and persists across restarts. Active BitTorrent downloads can upload even when it is off. Use `--enabled false` to stop sharing stored software.
 
-Use `--enabled false` to stop continued seeding without deleting the cache. The cache grows as assets are retained. To reclaim its disk space, disable seeding, restart StartOS, then delete the cache or selected entries inside it.
+StartOS discovers advertisements for installed packages from their recorded registry and for stored OS images from the selected update registry. It also remembers torrent metadata from new installations and updates, including downloads that fall back to HTTP. Files without an advertised source are not assigned a swarm.
 
-Seeding uses outgoing peer connections by default. To accept incoming connections, configure the following in `/media/startos/config/config.yaml`, restart StartOS, and arrange TCP reachability for that address and port:
+Sharing requires an exact byte match with the advertised torrent. Installation can filter package architectures and remove supplemental signature trailers, leaving an installed S9PK that cannot join the original swarm. StartOS skips incompatible files without modifying them.
+
+Sharing adds only source-path, commitment and torrent-metadata records under `/media/startos/data/package-data/registry-torrents`. It creates no extra payload copies or extended retention: installation, uninstall and native image cleanup still control the software files. Disabling sharing keeps this ordinary file management unchanged.
+
+Uploads can use outgoing peer connections without an incoming port forward. To accept incoming peers, configure the following in `/media/startos/config/config.yaml`, restart StartOS, and allow TCP traffic to that address and port through the firewall and, where needed, a router port forward:
 
 ```yaml
 bittorrent-seed:
   listen: '[::]:6882'
 ```
 
-An optional `directory` under `bittorrent-seed` overrides the cache location; these storage/listener options do not enable seeding. Router and firewall configuration remain the administrator's responsibility. `bittorrent: false` suppresses both peer downloads and continued seeding while preserving the saved seeding preference.
+An optional `directory` under `bittorrent-seed` overrides the metadata-catalog location, not a payload-storage location. These storage/listener options do not enable sharing. StartOS does not create an automatic UPnP port mapping; router and firewall configuration remain the administrator's responsibility. `bittorrent: false` suppresses both peer downloads and software sharing while preserving the saved sharing preference.
 
 ## Open Ecosystem
 

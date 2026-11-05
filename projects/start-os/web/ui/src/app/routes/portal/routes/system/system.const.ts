@@ -8,7 +8,7 @@ export const TRUSTED_KEYS_LINK = ['/system', TRUSTED_KEYS_MENU_ITEM.link]
 
 export const DOWNLOADS_MENU_ITEM = {
   icon: '@tui.share-2',
-  item: 'Download sharing',
+  item: 'Software sharing',
   link: 'downloads',
 } as const
 
