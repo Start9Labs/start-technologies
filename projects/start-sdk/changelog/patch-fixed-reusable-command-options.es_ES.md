@@ -1,1 +1,0 @@
-- Conserva las opciones del llamador al reutilizar las opciones `spawn` o `launch` de subcontenedores.

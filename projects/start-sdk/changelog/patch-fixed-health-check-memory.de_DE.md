@@ -1,1 +1,0 @@
-- `ready`-Prüfungen von Daemons und Prüfungen mit `addHealthCheck()` belegen während des Dienstbetriebs nicht mehr bei jeder Ausführung zusätzlichen Speicher. Pakete müssen mit dieser SDK-Version neu gebaut werden, um die Korrektur zu erhalten.

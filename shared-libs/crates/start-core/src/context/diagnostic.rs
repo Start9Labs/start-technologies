@@ -7,6 +7,7 @@ use tokio::sync::broadcast::Sender;
 use tracing::instrument;
 
 use crate::context::config::ServerConfig;
+use crate::middleware::auth::local::LocalAuthContext;
 use crate::prelude::*;
 use crate::rpc_continuations::RpcContinuations;
 use crate::shutdown::Shutdown;
@@ -18,7 +19,7 @@ pub struct DiagnosticContextSeed {
     pub error: Arc<RpcError>,
     pub disk_guid: Option<InternedString>,
     pub rpc_continuations: RpcContinuations,
-    /// Single-flight token for `diagnostic.update`; strong count > 1 means an update is running.
+    /// A strong count above one means an update is running.
     pub update_in_progress: SyncMutex<Arc<()>>,
 }
 
@@ -26,7 +27,7 @@ pub struct DiagnosticContextSeed {
 pub struct DiagnosticContext(Arc<DiagnosticContextSeed>);
 impl DiagnosticContext {
     #[instrument(skip_all)]
-    pub fn init(
+    pub async fn init(
         _config: &ServerConfig,
         disk_guid: Option<InternedString>,
         error: Error,
@@ -38,6 +39,7 @@ impl DiagnosticContext {
         );
         tracing::debug!("{:?}", error);
 
+        Self::init_auth_cookie().await.log_err();
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
 
         Ok(Self(Arc::new(DiagnosticContextSeed {
