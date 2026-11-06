@@ -2216,30 +2216,52 @@ struct ActivityDeleteParams {
 ### `backup.create`
 
 ```rust
-// Request: {}
+#[derive(Deserialize)]
+struct BackupCreateParams {
+    password: String,  // the current admin password; IncorrectPassword (7) otherwise
+}
 
 #[derive(Serialize)]
 struct BackupCreateRes {
-    /// Download the archive via GET /rest/rpc/{guid}
+    /// Download the backup via GET /rest/rpc/{guid}
     guid: String,
-    filename: String,  // "backup-<hostname>-<YYYY-MM-DD>.tar.gz"
+    filename: String,  // "backup-<hostname>-<YYYY-MM-DD>.swbk"
 }
-// Backend: runs `sysupgrade --create-backup -`, buffers the archive, and
-// registers a one-shot download continuation at /rest/rpc/{guid}
+// Backend: checks the password against /etc/shadow, runs
+// `sysupgrade --create-backup -`, encrypts the archive, and registers a
+// one-shot download continuation at /rest/rpc/{guid}
 ```
+
+An encrypted backup is one file:
+
+```
+"STARTWRT-BACKUP" | version (u8 = 1) | header length (u32 BE) | header JSON
+| nonce (12 bytes) | AES-256-GCM ciphertext of the .tar.gz | tag (16 bytes)
+```
+
+The header JSON holds StartOS's `unencrypted-metadata.json` fields:
+`passwordHash`, an Argon2id hash of the admin password, and `wrappedKey`, a
+random 32-byte key wrapped under that password by start-core's
+`wrap_backup_key`. That key encrypts the archive, authenticating every byte
+before the nonce.
 
 ### `backup.restore`
 
 ```rust
-// Request: {}
+#[derive(Deserialize)]
+struct BackupRestoreParams {
+    password: Option<String>,  // the admin password when the backup was created
+}
 
 #[derive(Serialize)]
 struct BackupRestoreRes {
-    /// POST the .tar.gz to /rest/rpc/{guid} (64 MiB body limit)
+    /// POST the backup to /rest/rpc/{guid} (64 MiB body limit)
     upload: String,
 }
-// Backend: the upload continuation validates the archive (`tar -tzf`), applies
-// it with `sysupgrade --restore-backup`, keeps the router's own system log
+// Backend: the upload continuation decrypts an encrypted backup, failing with
+// IncorrectPassword before anything changes, and takes a plain .tar.gz from an
+// earlier release as is. It validates the archive (`tar -tzf`), applies it
+// with `sysupgrade --restore-backup`, keeps the router's own system log
 // preceded by any older history the backup carried, then reboots after a
 // short delay
 ```

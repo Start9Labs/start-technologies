@@ -2280,15 +2280,19 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async backupCreate(): Promise<BackupCreateRes> {
+  async backupCreate(
+    params: RpcParamType<Api, 'backup.create'>,
+  ): Promise<BackupCreateRes> {
     await pauseFor(500)
     return {
       guid: 'mock-backup-guid',
-      filename: 'backup-startwrt-2026-03-19.tar.gz',
+      filename: 'backup-startwrt-2026-03-19.swbk',
     }
   }
 
-  async backupRestore(): Promise<BackupRestoreRes> {
+  async backupRestore(
+    params: RpcParamType<Api, 'backup.restore'>,
+  ): Promise<BackupRestoreRes> {
     await pauseFor(250)
     return { upload: 'mock-restore-guid' }
   }

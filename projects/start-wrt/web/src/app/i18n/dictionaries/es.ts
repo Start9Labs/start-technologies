@@ -564,8 +564,8 @@ export default {
   599: 'Los dispositivos en {port} pasarán al perfil {profile}. La mayoría se reconecta en unos segundos. Si después un dispositivo no tiene acceso a Internet o no puede comunicarse con otros dispositivos, algo habitual detrás de un switch, desconecte y vuelva a conectar su cable, o reinicie el dispositivo o el switch. De lo contrario, se reconectará por sí solo en un plazo de 12 horas.',
   600: '¿Cambiar el perfil de seguridad?',
   601: 'Cambiar perfil',
-  602: 'Fuera de la subred del perfil de este dispositivo',
-  603: 'No es una dirección de host utilizable',
+  602: 'Introduce tu contraseña de administrador para cifrar esta copia de seguridad.',
+  603: 'Se sobrescribirán todos los ajustes actuales y el dispositivo se reiniciará. Introduce la contraseña de administrador vigente cuando se creó esta copia de seguridad.',
   605: 'inactivo',
   606: 'Reservas inactivas',
   607: 'Cada una se aplica cuando el dispositivo está en su perfil.',
@@ -577,4 +577,6 @@ export default {
   613: 'Reservada para otro dispositivo',
   614: 'Reservas IPv4 que se eliminan con este perfil: {list}.',
   615: 'Puertos publicados que se eliminan con este perfil: {list}.',
+  616: 'Fuera de la subred del perfil de este dispositivo',
+  617: 'No es una dirección de host utilizable',
 } satisfies i18n

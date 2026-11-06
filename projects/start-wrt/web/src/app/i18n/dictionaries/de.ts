@@ -564,8 +564,8 @@ export default {
   599: 'Geräte an {port} wechseln in das Profil {profile}. Die meisten verbinden sich innerhalb weniger Sekunden neu. Hat ein Gerät danach keinen Internetzugang oder erreicht es keine anderen Geräte, was hinter einem Switch häufig vorkommt, ziehen Sie sein Kabel ab und stecken Sie es wieder ein, oder starten Sie das Gerät oder den Switch neu. Andernfalls verbindet es sich innerhalb von 12 Stunden von selbst neu.',
   600: 'Sicherheitsprofil ändern?',
   601: 'Profil ändern',
-  602: 'Außerhalb des Subnetzes des Profils dieses Geräts',
-  603: 'Keine nutzbare Host-Adresse',
+  602: 'Geben Sie Ihr Administrator-Passwort ein, um diese Sicherung zu verschlüsseln.',
+  603: 'Alle aktuellen Einstellungen werden überschrieben und das Gerät startet neu. Geben Sie das Administrator-Passwort ein, das beim Erstellen dieser Sicherung galt.',
   605: 'inaktiv',
   606: 'Inaktive Reservierungen',
   607: 'Jede gilt, wenn sich das Gerät in ihrem Profil befindet.',
@@ -577,4 +577,6 @@ export default {
   613: 'Für ein anderes Gerät reserviert',
   614: 'Mit diesem Profil gelöschte IPv4-Reservierungen: {list}.',
   615: 'Mit diesem Profil gelöschte veröffentlichte Ports: {list}.',
+  616: 'Außerhalb des Subnetzes des Profils dieses Geräts',
+  617: 'Keine nutzbare Host-Adresse',
 } satisfies i18n

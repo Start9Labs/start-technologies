@@ -564,8 +564,8 @@ export default {
   599: 'Les appareils sur {port} passeront au profil {profile}. La plupart se reconnectent en quelques secondes. Si un appareil n’a ensuite plus accès à Internet ou ne peut plus joindre d’autres appareils, ce qui est fréquent derrière un switch, débranchez puis rebranchez son câble, ou redémarrez l’appareil ou le switch. Sinon, il se reconnectera de lui-même dans les 12 heures.',
   600: 'Changer le profil de sécurité ?',
   601: 'Changer de profil',
-  602: 'En dehors du sous-réseau du profil de cet appareil',
-  603: "Pas une adresse d'hôte utilisable",
+  602: 'Saisissez votre mot de passe administrateur pour chiffrer cette sauvegarde.',
+  603: 'Tous les paramètres actuels seront écrasés et l’appareil redémarrera. Saisissez le mot de passe administrateur en vigueur lors de la création de cette sauvegarde.',
   605: 'inactif',
   606: 'Réservations inactives',
   607: "Chacune s'applique lorsque l'appareil est dans son profil.",
@@ -577,4 +577,6 @@ export default {
   613: 'Réservée pour un autre appareil',
   614: 'Réservations IPv4 supprimées avec ce profil : {list}.',
   615: 'Ports publiés supprimés avec ce profil : {list}.',
+  616: 'En dehors du sous-réseau du profil de cet appareil',
+  617: "Pas une adresse d'hôte utilisable",
 } satisfies i18n

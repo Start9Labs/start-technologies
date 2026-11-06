@@ -89,6 +89,10 @@ export type ApChannel = z.output<typeof schemas.ApChannel>
  * One automatic port use for the published-ports UI.
  */
 export type AutomaticPortUse = z.output<typeof schemas.AutomaticPortUse>
+export type BackupCreateParamsInput = z.input<typeof schemas.BackupCreateParams>
+export type BackupRestoreParamsInput = z.input<
+  typeof schemas.BackupRestoreParams
+>
 export type BlackoutSetResult = z.output<typeof schemas.BlackoutSetResult>
 export type BlackoutWindow = z.output<typeof schemas.BlackoutWindow>
 export type BlackoutWindowInput = z.input<typeof schemas.BlackoutWindow>

@@ -555,6 +555,7 @@ impl<T: HandlerFor<C>, C: Context> HandlerFor<C> for DisplaySerializable<T> {
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<C, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.0.handle_sync(HandlerArgs {
@@ -564,6 +565,7 @@ impl<T: HandlerFor<C>, C: Context> HandlerFor<C> for DisplaySerializable<T> {
             params: params.rest,
             inherited_params,
             raw_params,
+            rpc_stream,
         })
     }
     async fn handle_async(
@@ -575,6 +577,7 @@ impl<T: HandlerFor<C>, C: Context> HandlerFor<C> for DisplaySerializable<T> {
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<C, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.0
@@ -585,6 +588,7 @@ impl<T: HandlerFor<C>, C: Context> HandlerFor<C> for DisplaySerializable<T> {
                 params: params.rest,
                 inherited_params,
                 raw_params,
+                rpc_stream,
             })
             .await
     }

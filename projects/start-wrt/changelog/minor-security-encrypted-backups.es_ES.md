@@ -1,0 +1,1 @@
+- **Las copias de seguridad se cifran con tu contraseña de administrador.** Al descargar una copia de seguridad se pide la contraseña de administrador, y al restaurarla, la contraseña de administrador vigente cuando se creó. Las copias de seguridad de versiones anteriores se siguen restaurando sin contraseña.
