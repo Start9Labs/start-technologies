@@ -29,6 +29,7 @@ ts = [
   "dep:yasi",
 ]
 url = ["ts", "url/serde"]
+websocket = ["axum/ws"]
 yajrc = ["ts"]
 
 [dependencies]
@@ -84,7 +85,12 @@ yasi = { path = "../yasi", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+tokio-tungstenite = "0.29"
 
 [[example]]
 name = "generate_ts"
 required-features = ["ts"]
+
+[[example]]
+name = "websocket"
+required-features = ["websocket"]

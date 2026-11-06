@@ -1,5 +1,10 @@
 import { webcrypto } from 'node:crypto'
-import { normalizeDer64, signRequest } from '../auth/signature'
+import {
+  ed25519PublicKeyDer64,
+  normalizeDer64,
+  parseEd25519PublicKey,
+  signRequest,
+} from '../auth/signature'
 
 const der64 = 'MCowBQYDK2VwAyEAgTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q='
 const pem = `-----BEGIN PUBLIC KEY-----\n${der64}\n-----END PUBLIC KEY-----\n`
@@ -19,6 +24,20 @@ test('DER64 normalization preserves standard Base64 and padding', () => {
   ]) {
     expect(normalizeDer64(input)).toBe(der64)
   }
+})
+
+test('public-key decoding rejects off-curve points but retains backend ZIP-215 encodings', () => {
+  const offCurve = Uint8Array.from([2, ...new Array(31).fill(0)])
+  expect(() => parseEd25519PublicKey(ed25519PublicKeyDer64(offCurve))).toThrow(
+    'Public key is not a curve point',
+  )
+  for (const key of [
+    Uint8Array.from([1, ...new Array(31).fill(0)]),
+    Uint8Array.from([238, ...new Array(30).fill(255), 127]),
+  ]) {
+    expect(parseEd25519PublicKey(ed25519PublicKeyDer64(key))).toEqual(key)
+  }
+  expect(parseEd25519PublicKey(pem)).toEqual(parseEd25519PublicKey(der64))
 })
 
 test('HTTP signature headers retain their base64url envelope', async () => {

@@ -4,7 +4,7 @@ System volumes are user-owned local folders, folders on attached drives or CIFS/
 
 ## Declare support
 
-Add this property to `setupManifest`:
+Use Start SDK 4.1.0 or later. Add this property to `setupManifest`:
 
 ```ts
 sharedVolumes: true,
