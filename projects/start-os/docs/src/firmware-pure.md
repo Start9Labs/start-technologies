@@ -15,7 +15,12 @@ Generally, you do not need to manually flash your device using this guide, as th
 
 1. Connect a monitor and keyboard to your server using two of the USB3 (blue) ports.
 
-1. Download [pureboot-librem_mini_v2-basic_usb_autoboot_blob_jail-Release-29.zip](https://github.com/Start9Labs/pureboot/releases/download/Release-29/pureboot-librem_mini_v2-basic_usb_autoboot_blob_jail-Release-29.zip). It is the firmware for every Server Pure, with or without WiFi.
+1. Open the [latest PureBoot release](https://github.com/Start9Labs/pureboot/releases/latest) and download the `.zip` that matches your server:
+
+   - **Most Server Pures sold since 2024:** `pureboot-librem_mini_v2-basic_usb_autoboot-start9-<version>.zip`
+   - **An older Server Pure with a WiFi card:** `pureboot-librem_mini_v2-basic_usb_autoboot_blob_jail-start9-<version>.zip`
+
+   If you are not sure which one you have, download the `basic_usb_autoboot_blob_jail` zip.
 
 1. Extract the zip and copy the `.rom` file inside it to the USB stick.
 
