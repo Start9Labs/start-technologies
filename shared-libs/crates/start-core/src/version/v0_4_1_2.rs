@@ -267,8 +267,8 @@ mod tests {
                 .unwrap();
         let historical =
             legacy::individual_keys(&legacy::historical_keyrings(), Utc::now()).unwrap();
-        fixture["public"]["serverInfo"]["version"] = imbl_value::json!("0.4.1.2");
         fixture["public"]["serverInfo"]["trustedKeys"] = to_value(&historical).unwrap();
+        fixture["public"]["serverInfo"]["version"] = to_value(&Version.semver()).unwrap();
         fixture["public"]["serverInfo"]["latestMigrationRevision"] = imbl_value::json!(1);
         let db = patch_db::PatchDb::in_memory();
         db.put(&patch_db::json_ptr::ROOT, &fixture).await.unwrap();

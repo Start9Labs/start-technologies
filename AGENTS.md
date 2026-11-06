@@ -136,11 +136,14 @@ make start-os-scripts-test   # StartOS shell scripts (projects/start-os/build/te
 make bash-completion-test    # completion staging and lazy loading (requires bash-completion)
 make start-wrt-test          # StartWRT Rust crates
 make release-notes-test      # changelog fragments, versions, release notes, signed commits, apt publish
-make package-ci-test         # shared GitHub/Forgejo service-package CI (root npm dependencies)
+make package-ci-test         # shared GitHub/Forgejo service-package CI and generated-artifact orchestration (root npm dependencies)
+make -k generated-artifacts-check # regenerate and check man pages, TS bindings, and MCP catalog
 
 # Run a specific Rust test
 cd shared-libs/crates/start-core && cargo test <test_name> --features=test
 ```
+
+Preserve level-3 optimization in development and test profiles. Unoptimized builds have hit binary-size limits and async stack overflows; lowering optimization requires verification of both constraints.
 
 Each product's `AGENTS.md` covers its own scoped tests.
 
@@ -333,6 +336,7 @@ before adding one. `deny.toml` encodes which licenses are accepted.
 - **A token swap is not a doc fix.** After renaming a symbol in prose, read each changed sentence and fix the claim around it, not just the name.
 - **Reuse before designing.** Search production code, dependencies, and platform facilities for the existing owner of a concept. Prefer direct use, extension, or composition; establish the semantic limitation before introducing a parallel mechanism.
 - **One source of truth per rule.** Consolidate repeated decisions, defaults, validation, mappings, and transitions in the smallest production owner; make every caller use it. Share the common primitive, not a flag-driven function that selects between unrelated workflows.
+- **Signature collections use `start_core::sign::SignatureMap`.** This concrete BTreeMap holds `AnyVerifyingKey` and `AnySignature`. Product clients reuse the shared registry and signing types rather than mirroring them.
 - **Establish the contract and ownership.** Trace caller-visible success, failure, cancellation, retry, and shutdown behavior. Separate persisted intent, observed availability, and derived values. Additional state, tasks, locks, or lifecycle hooks need a reachable condition, an owner, a lifetime, and a guarantee existing mechanisms cannot supply.
 - **No defensive patches without a diagnosis.** Never add a safety net, retry, or idempotency guard for a bug whose root cause you can't explain. Say what you've ruled out and what you'd look at next instead.
 - **Verify before handoff.** Run the applicable typechecks, lint, tests, builds, and formatting checks exposed by the affected scopes. Exercise supported callers and artifacts directly; regression tests must fail against the previous behavior. Provision fixtures, containers, or VMs when needed rather than delegating verification to a reviewer.

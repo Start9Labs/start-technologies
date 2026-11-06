@@ -1197,7 +1197,8 @@ pull_published_img_gz() {
     url=$(os_img_gz_origin "$img")
     published_exists "$url" || return 0
     tmp=$(mktemp "${img}.gz.XXXXXX")
-    if ! curl -fsSL "${APT_NO_CACHE[@]}" "$url" -o "$tmp" \
+    echo "  img.gz -> ${img}.gz"
+    if ! curl -fSL --progress-bar "${APT_NO_CACHE[@]}" "$url" -o "$tmp" \
         || ! digest=$(gzip -dc "$tmp" | b3sum --no-names) \
         || [ "$digest" != "$(b3sum --no-names "$img")" ]; then
         rm -f "$tmp"
