@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use axum::Router;
+use axum::http::{HeaderMap, StatusCode, Uri, header};
+use axum::response::Redirect;
 use futures::future::ready;
 use imbl_value::InternedString;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, Server, from_fn_async};
@@ -90,7 +92,6 @@ pub fn registry_api<C: Context>() -> ParentHandler<C> {
             "info",
             info::info_api::<C>().with_about("about.commands-registry-info"),
         )
-        // set info and categories
         .subcommand(
             "os",
             os::os_api::<C>().with_about("about.commands-os-assets-versions"),
@@ -113,10 +114,47 @@ pub fn registry_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
+async fn marketplace_redirect(headers: HeaderMap, uri: Uri) -> Result<Redirect, StatusCode> {
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .map(|value| value.to_str())
+        .transpose()
+        .map_err(|_| StatusCode::BAD_REQUEST)?
+        .or(uri.scheme_str())
+        .unwrap_or("http");
+    if !matches!(scheme, "http" | "https") {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let authority = uri
+        .authority()
+        .cloned()
+        .or_else(|| {
+            headers
+                .get(header::HOST)?
+                .to_str()
+                .ok()?
+                .parse::<http::uri::Authority>()
+                .ok()
+        })
+        .ok_or(StatusCode::BAD_REQUEST)?;
+    let registry = Uri::builder()
+        .scheme(scheme)
+        .authority(authority)
+        .path_and_query("/")
+        .build()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let mut marketplace = url::Url::parse("https://marketplace.start9.com/").unwrap();
+    marketplace
+        .query_pairs_mut()
+        .append_pair("registry", &registry.to_string());
+    Ok(Redirect::temporary(marketplace.as_str()))
+}
+
 pub fn registry_router(ctx: RegistryContext) -> Router {
     use axum::extract as x;
     use axum::routing::{any, get};
     Router::new()
+        .route("/", get(marketplace_redirect))
         .route(
             "/os/security",
             get({
