@@ -26,11 +26,12 @@ Apps import the libs via the root `tsconfig.json` path aliases `@start9labs/shar
 
 All backend communication uses JSON-RPC, not REST.
 
-- **`HttpService`** (`shared/src/services/http.service.ts`) — Low-level HTTP wrapper. Sends JSON-RPC POST requests via `rpcRequest()`.
-- **`ApiService`** (`ui/src/app/services/api/embassy-api.service.ts`) — Abstract class defining 100+ RPC methods. Two implementations:
+- **`HttpService`** (`shared/src/services/http.service.ts`) — HTTP transport. `rpcRequest()` prepares an unsigned request; `rpcMessage()` sends an already serialized message unchanged. Both use the shared JSON headers and response-compatibility adapter.
+- **`AuthKeyService`** (`shared/src/services/auth-key.service.ts`) — Owns the browser's enrolled device key. `signRpcBody()` captures the shared request serialization before asynchronous key lookup/signing and adds the JSON proof without reparsing numeric tokens. StartOS and Tunnel pass that body to `rpcMessage()`; StartWRT retains its separate aborting HTTP transport. Resource requests keep legacy header signing.
+- **`ApiService`** (`ui/src/app/services/api/embassy-api.service.ts`) — Abstract contract over the generated typed RPC client and product-specific operations. Two implementations:
   - `LiveApiService` — Production, calls the real backend
   - `MockApiService` — Development with mocks
-- **`api.types.ts`** (`ui/src/app/services/api/api.types.ts`) — Namespace `RR` with all request/response type pairs.
+- **`api.types.ts`** (`ui/src/app/services/api/api.types.ts`) — `ApiClient`, `Params`, and result aliases selected from the generated `RPC.StartOS` method tree.
 
 **Calling an RPC endpoint from a component:**
 
@@ -42,7 +43,7 @@ async doSomething() {
 }
 ```
 
-The live API handles `x-patch-sequence` headers — after a mutating call, it waits for the PatchDB WebSocket to catch up before resolving. This ensures the UI always reflects the result of the call.
+The live API reads `meta.patchSequence` — after a mutating call, it waits for the PatchDB WebSocket to catch up before resolving. The shared HTTP compatibility adapter projects older servers' `x-patch-sequence` headers when JSON metadata is absent. This ensures the UI always reflects the result of the call.
 
 ## PatchDB (Reactive State)
 

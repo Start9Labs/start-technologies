@@ -3,6 +3,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 const test = require('node:test')
 const vm = require('node:vm')
+require('@angular/compiler')
+const { HttpHeaders } = require('@angular/common/http')
 const ts = require('typescript')
 const {
   BehaviorSubject,
@@ -45,6 +47,8 @@ function harness(moduleOverrides = new Map()) {
     DOCUMENT: tokens.DOCUMENT,
     Injector: tokens.Injector,
     Injectable: () => value => value,
+    Service: () => value => value,
+    InjectionToken: class {},
     Component: () => value => value,
     signal: initial => {
       const stream$ = new BehaviorSubject(initial)
@@ -75,13 +79,14 @@ function harness(moduleOverrides = new Map()) {
       ...load('shared-libs/ts-modules/shared/src/util/misc.util.ts'),
       pauseFor: async () => {},
       ...load('shared-libs/ts-modules/shared/src/types/rpc.types.ts'),
+      ...load('shared-libs/ts-modules/shared/src/services/rpc-request.ts'),
       ...load('shared-libs/ts-modules/shared/src/classes/rpc-error.ts'),
     })
     const requireSource = request => {
       if (moduleOverrides.has(request)) return moduleOverrides.get(request)
       if (request === '@angular/core') return angular
       if (request === '@angular/common/http')
-        return { HttpClient: tokens.HttpClient }
+        return { HttpClient: tokens.HttpClient, HttpHeaders }
       if (request === '@start9labs/shared') return shared()
       if (request === '@start9labs/marketplace')
         return load('shared-libs/ts-modules/marketplace/src/types.ts')
@@ -93,6 +98,8 @@ function harness(moduleOverrides = new Map()) {
         return { StaleUiService: tokens.StaleUiService }
       if (request.endsWith('patch-db-source'))
         return { PATCH_CACHE: tokens.PATCH_CACHE }
+      if (request.endsWith('tokens/relative-url'))
+        return { RELATIVE_URL: tokens.RELATIVE_URL }
       if (request.startsWith('src/')) {
         const app = filename.slice(
           0,
@@ -118,6 +125,7 @@ function harness(moduleOverrides = new Map()) {
         console: { ...console, error() {} },
         Buffer,
         URL,
+        TextEncoder,
         structuredClone,
       },
       { filename },
@@ -131,6 +139,164 @@ function harness(moduleOverrides = new Map()) {
   dependencies.set(tokens.RELATIVE_URL, '/rpc/v1')
   return { dependencies, tokens, load }
 }
+
+function mockPatchFixture(data) {
+  return {
+    mockPatchData: data,
+    mockRegistryCache: () => ({
+      info: {
+        name: 'Fixture registry',
+        description: null,
+        icon: null,
+        categories: {},
+        trustSigners: {},
+      },
+      packages: {},
+      connected: true,
+    }),
+    mockOsUpdateCache: registry => ({
+      registry,
+      versions: {},
+      connected: true,
+    }),
+  }
+}
+
+function deviceSigner() {
+  const { load } = harness(new Map([['@ng-web-apis/common', {}]]))
+  const { AuthKeyService } = load(
+    'shared-libs/ts-modules/shared/src/services/auth-key.service.ts',
+  )
+  return AuthKeyService.prototype
+}
+
+function assertRpcProof(body) {
+  const { auth } = require('@start9labs/start-core')
+  const { blake3 } = require('@noble/hashes/blake3')
+  const proof = new URLSearchParams(JSON.parse(body).signature)
+  const bytes = auth.rpcSigningBody(body)
+  assert.equal(proof.get('commitment'), 'request')
+  assert.equal(proof.get('size'), String(bytes.length))
+  assert.equal(
+    proof.get('blake3'),
+    Buffer.from(blake3(bytes)).toString('base64url'),
+  )
+}
+
+for (const enrolled of [false, true]) {
+  test(`RPC serialization captures params before asynchronous ${enrolled ? 'signing' : 'key lookup'}`, async () => {
+    const { auth } = require('@start9labs/start-core')
+    const key = enrolled ? await auth.generateAuthKey() : null
+    let finish
+    const lookup = new Promise(resolve => {
+      finish = resolve
+    })
+    let serialized = 0
+    const params = {
+      value: 'original',
+      toJSON() {
+        serialized++
+        return { value: this.value }
+      },
+    }
+    const pending = deviceSigner().signRpcBody.call(
+      { get: () => lookup, host: 'server.test' },
+      { method: 'test', params },
+    )
+    params.value = 'changed'
+    finish(key)
+    const body = await pending
+    assert.equal(serialized, 1)
+    assert.equal(JSON.parse(body).params.value, 'original')
+    if (enrolled) assertRpcProof(body)
+    else assert.equal(JSON.parse(body).signature, undefined)
+  })
+}
+
+test('RPC proofs preserve raw integer and floating-point tokens', async () => {
+  const { auth } = require('@start9labs/start-core')
+  const key = await auth.generateAuthKey()
+  const body = await deviceSigner().signRpcBody.call(
+    { get: async () => key, host: 'server.test' },
+    {
+      method: 'test',
+      params: {
+        integer: JSON.rawJSON('18446744073709551615'),
+        float: JSON.rawJSON('1.0'),
+        zero: JSON.rawJSON('-0'),
+      },
+    },
+  )
+  assert.ok(body.includes('18446744073709551615'))
+  assert.ok(body.includes('"float":1.0'))
+  assert.ok(body.includes('"zero":-0'))
+  assertRpcProof(body)
+})
+
+test('resource headers retain legacy signing and caller headers without mutation', async () => {
+  const { auth } = require('@start9labs/start-core')
+  const key = await auth.generateAuthKey()
+  const original = new HttpHeaders({
+    'x-trace': ['one', 'two'],
+    'x-start-auth-sig': 'caller',
+  })
+  const headers = await deviceSigner().signHeader.call(
+    { get: async () => key, host: 'server.test' },
+    '',
+    original,
+  )
+  assert.deepEqual(headers.getAll('x-trace'), ['one', 'two'])
+  assert.equal(headers.getAll(auth.AUTH_SIG_HEADER).length, 1)
+  assert.notEqual(headers.get(auth.AUTH_SIG_HEADER), 'caller')
+  assert.equal(
+    new URLSearchParams(headers.get(auth.AUTH_SIG_HEADER)).get('size'),
+    '0',
+  )
+  assert.equal(original.get(auth.AUTH_SIG_HEADER), 'caller')
+  const withoutKey = await deviceSigner().signHeader.call(
+    { get: async () => null },
+    '',
+    original,
+  )
+  assert.equal(withoutKey.get(auth.AUTH_SIG_HEADER), 'caller')
+})
+
+test('shared HTTP sends captured RPC bodies as JSON and preserves response compatibility', async () => {
+  const { HttpResponse } = require('@angular/common/http')
+  const { dependencies, tokens, load } = harness()
+  const calls = []
+  dependencies.set(tokens.HttpClient, {
+    post: (url, body, options) => {
+      calls.push({ url, body, options })
+      return of(
+        new HttpResponse({
+          body: { result: null },
+          headers: new HttpHeaders({ 'x-patch-sequence': '0' }),
+        }),
+      )
+    },
+  })
+  const client = new (load(
+    'shared-libs/ts-modules/shared/src/services/http.service.ts',
+  ).HttpService)()
+  const body =
+    '{"signature":"proof","method":"test","params":{"integer":18446744073709551615}}'
+  const response = await client.rpcMessage(body, {
+    headers: { 'content-type': 'text/plain', 'x-trace': 'keep' },
+  })
+  assert.equal(calls[0].url, 'https://router.test/rpc/v1')
+  assert.equal(calls[0].body, body)
+  assert.equal(calls[0].options.headers.get('Content-Type'), 'application/json')
+  assert.equal(calls[0].options.headers.get('x-trace'), 'keep')
+  assert.equal(calls[0].options.headers.has('X-Start-Auth-Sig'), false)
+  assert.equal(response.body.meta.patchSequence, 0)
+  await client.rpcRequest(
+    { method: 'public', params: { value: 1 } },
+    'https://registry.test/rpc',
+  )
+  assert.equal(calls[1].url, 'https://registry.test/rpc')
+  assert.equal(calls[1].body, '{"method":"public","params":{"value":1}}')
+})
 
 for (const [name, file, className, deauthMethod] of [
   [
@@ -151,21 +317,24 @@ for (const [name, file, className, deauthMethod] of [
     const cache = new BehaviorSubject({ id: 1 })
     const calls = []
     const signed = []
-    let patchSequence = '3'
+    let patchSequence = 3
     dependencies.set(tokens.PATCH_CACHE, cache)
     dependencies.set(tokens.AuthService, { deauthenticate() {} })
     dependencies.set(tokens.AuthKeyService, {
-      signRpcHeaders: async options => {
+      signRpcBody: async options => {
         signed.push(options)
-        return { signature: 'signed' }
+        return JSON.stringify({
+          method: options.method,
+          params: options.params,
+          signature: 'signed',
+        })
       },
     })
     dependencies.set(tokens.HttpService, {
-      rpcRequest: async (options, url) => {
-        calls.push({ options, url })
+      rpcMessage: async (request, options, url) => {
+        calls.push({ request, options, url })
         return {
-          body: { result: null },
-          headers: { get: () => patchSequence },
+          body: { result: null, meta: { patchSequence } },
         }
       },
     })
@@ -186,7 +355,8 @@ for (const [name, file, className, deauthMethod] of [
     assert.equal(settled, false)
     assert.equal(signed[0], options)
     assert.equal(calls[0].options.headers.existing, 'preserved')
-    assert.equal(calls[0].options.headers.signature, 'signed')
+    assert.equal(calls[0].options.headers.signature, undefined)
+    assert.equal(JSON.parse(calls[0].request).signature, 'signed')
     cache.next({ id: 2 })
     await new Promise(resolve => setImmediate(resolve))
     assert.equal(settled, false)
@@ -199,6 +369,7 @@ for (const [name, file, className, deauthMethod] of [
     )
     assert.equal(signed.length, 1)
     assert.equal(calls[1].options, options)
+    assert.equal(JSON.parse(calls[1].request).signature, undefined)
     assert.equal(calls[1].url, 'https://foreign.test/rpc')
     cache.complete()
   })
@@ -211,10 +382,10 @@ for (const [name, file, className, deauthMethod] of [
       [deauthMethod]: () => deauthenticated++,
     })
     dependencies.set(tokens.AuthKeyService, {
-      signRpcHeaders: async () => ({}),
+      signRpcBody: async options => JSON.stringify(options),
     })
     dependencies.set(tokens.HttpService, {
-      rpcRequest: async () => ({
+      rpcMessage: async () => ({
         body: {
           error: {
             code: 34,
@@ -378,7 +549,7 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
       ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: fixtures }],
-      ['./mock-patch', { mockPatchData: {} }],
+      ['./mock-patch', mockPatchFixture({})],
       ['./md-sample.md', ''],
     ]),
   )
@@ -451,7 +622,7 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
       ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: {} }],
-      ['./mock-patch', { mockPatchData: data }],
+      ['./mock-patch', mockPatchFixture(data)],
       ['./md-sample.md', ''],
     ]),
   )
@@ -506,12 +677,10 @@ test('StartOS DNS mock updates the selected gateway using live gateway state', a
       ['./api.fixures', { Mock: {} }],
       [
         './mock-patch',
-        {
-          mockPatchData: {
-            ui: { registries: {} },
-            serverInfo: { trustedKeys: {}, registryKeys: {} },
-          },
-        },
+        mockPatchFixture({
+          ui: { registries: {}, startosRegistry: 'https://registry.test/' },
+          serverInfo: { trustedKeys: {}, registryKeys: {} },
+        }),
       ],
       ['./md-sample.md', ''],
     ]),
@@ -1469,9 +1638,18 @@ test('WRT lazily invalidates authentication and preserves host errors and nullab
   let invalidated = 0
   let lookups = 0
   let response = { result: null }
-  dependencies.set(tokens.AuthKeyService, { signRpcHeaders: async () => ({}) })
+  const { rpcRequestBody } = load(
+    'shared-libs/ts-modules/shared/src/services/rpc-request.ts',
+  )
+  const requests = []
+  dependencies.set(tokens.AuthKeyService, {
+    signRpcBody: async options => rpcRequestBody(options),
+  })
   dependencies.set(tokens.HttpService, {
-    request: async () => ({ body: response }),
+    request: async options => {
+      requests.push(options)
+      return { body: response }
+    },
   })
   dependencies.set(tokens.Injector, {
     get: token => {
@@ -1484,9 +1662,18 @@ test('WRT lazily invalidates authentication and preserves host errors and nullab
     'projects/start-wrt/web/src/app/services/rpc.service.ts',
   ).RpcService)()
   assert.equal(
-    await client.request({ method: 'auth.logout', params: {} }),
+    await client.request({
+      method: 'auth.logout',
+      params: {},
+      headers: { trace: 'keep' },
+      timeout: 450,
+    }),
     null,
   )
+  assert.equal(requests[0].body, '{"method":"auth.logout","params":{}}')
+  assert.equal(requests[0].headers.get('Content-Type'), 'application/json')
+  assert.equal(requests[0].headers.get('trace'), 'keep')
+  assert.equal(requests[0].timeout, 450)
   assert.equal(lookups, 0)
   response = { error: { code: 34, message: 'unauthorized', data: 'expired' } }
   await assert.rejects(

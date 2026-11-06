@@ -19,6 +19,7 @@ import {
   LocalHttpResponse,
 } from '../types/http.types'
 import { RPCOptions, RPCResponse } from '../types/rpc.types'
+import { rpcRequestBody, rpcRequestHeaders } from './rpc-request'
 import { withLegacyPatchSequence } from './rpc-response'
 
 @Service()
@@ -31,13 +32,19 @@ export class HttpService {
     opts: RPCOptions,
     fullUrl?: string,
   ): Promise<LocalHttpResponse<RPCResponse<T>>> {
-    const { method, headers, params, timeout } = opts
+    return this.rpcMessage<T>(rpcRequestBody(opts), opts, fullUrl)
+  }
 
+  async rpcMessage<T>(
+    body: string,
+    { headers, timeout }: Pick<RPCOptions, 'headers' | 'timeout'>,
+    fullUrl?: string,
+  ): Promise<LocalHttpResponse<RPCResponse<T>>> {
     const response = await this.httpRequest<RPCResponse<T>>({
       method: 'POST',
       url: fullUrl || this.relativeUrl,
-      headers,
-      body: { method, params },
+      headers: rpcRequestHeaders(headers),
+      body,
       timeout,
     })
     return response.clone({

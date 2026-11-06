@@ -2,7 +2,10 @@ import { Injectable, DOCUMENT, inject } from '@angular/core'
 import { HttpClient, HttpResponse } from '@angular/common/http'
 import { firstValueFrom, timeout, TimeoutError } from 'rxjs'
 import { HttpErrorResponse } from '@angular/common/http'
-import { RELATIVE_URL } from '@start9labs/shared'
+import {
+  RELATIVE_URL,
+  type HttpOptions as SharedHttpOptions,
+} from '@start9labs/shared'
 import { StaleUiService } from 'src/app/services/stale-ui.service'
 
 @Injectable({
@@ -32,19 +35,15 @@ export class HttpService {
     })
 
     try {
-      // A timeout here unsubscribes, aborting the underlying request, so a
-      // wedged connection is dropped rather than awaited to its TCP deadline.
+      // Timeout unsubscription aborts the underlying request.
       const res = await firstValueFrom(
         timeoutMs ? req$.pipe(timeout({ each: timeoutMs })) : req$,
       )
-      // Every RPC response carries the firmware's build stamp; a quick daemon
-      // restart (CLI deploy) drops no request, so this — not connection-loss
-      // recovery — is what lets an open tab notice a firmware update.
+      // A daemon restart can change firmware without dropping this connection.
       this.staleUi.checkHash(res.headers.get('x-startwrt-git-hash'))
       return res
     } catch (e: any) {
-      // Surface a timeout as a network error (code 0) so isNetworkError() and
-      // the reconnect flow treat it the same as a dropped connection.
+      // Timeouts drive the same reconnect flow as network failures.
       if (e instanceof TimeoutError) {
         throw Object.assign(new Error('Network timeout'), { code: 0 })
       }
@@ -72,9 +71,7 @@ export class HttpError {
 type ParamPrimitive = string | number | boolean
 
 export type HttpOptions = {
-  headers?: {
-    [header: string]: string | string[]
-  }
+  headers?: SharedHttpOptions['headers']
   params?: {
     [param: string]: ParamPrimitive | ParamPrimitive[]
   }

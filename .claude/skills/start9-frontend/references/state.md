@@ -50,8 +50,11 @@ promise-based**; components call `await this.api.method(params)` and never touch
 - **Monorepo = JSON-RPC** over `HttpService` (`@start9labs/shared`): POST `{ method, params }`
   to `RELATIVE_URL`, `withCredentials`; transport failures wrap as `HttpError`, RPC-level errors
   are checked with `isRpcError(body)` → `RpcError` (code 34 → force logout). StartOS's live API
-  reads the `x-patch-sequence` header and awaits the PatchDB cache before resolving, so the UI
-  always reflects a mutation's result. Streams (logs, PatchDB, metrics) via
+  reads `meta.patchSequence` and awaits the PatchDB cache before resolving. Shared HTTP
+  compatibility projects older servers' `x-patch-sequence` headers when JSON metadata is absent.
+  `AuthKeyService.signRpcBody()` captures serialization before asynchronous signing; send that
+  body unchanged through `HttpService.rpcMessage()`. Endpoint overrides stay unsigned by the
+  local device key. Resource requests retain HTTP header signatures. Streams (logs, PatchDB, metrics) via
   `api.openWebsocket$<T>(guid)` (`rxjs/webSocket`), buffered (`bufferTime(250…1000)`), with
   retry/backoff in the source service.
 - **start-wrt keeps its own `HttpService`/`RpcService`/`ConnectionService` stack deliberately**:

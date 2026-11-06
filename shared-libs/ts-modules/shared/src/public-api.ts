@@ -36,6 +36,7 @@ export * from './services/download-html.service'
 export * from './services/exver.service'
 export * from './services/error.service'
 export * from './services/http.service'
+export * from './services/rpc-request'
 export * from './services/setup-logs.service'
 export * from './services/task.service'
 

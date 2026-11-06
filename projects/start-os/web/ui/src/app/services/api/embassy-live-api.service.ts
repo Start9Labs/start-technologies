@@ -8,6 +8,7 @@ import {
   isRpcError,
   RpcError,
   RPCOptions,
+  rpcRequestBody,
 } from '@start9labs/shared'
 import { createRpcClient } from '@start9labs/start-core'
 import { Dump } from 'patch-db-client'
@@ -82,8 +83,6 @@ export class LiveApiService extends ApiService {
     )
   }
 
-  // websocket
-
   openWebsocket$<T>(
     guid: string,
     config: WebsocketConfig<T> = {},
@@ -98,21 +97,9 @@ export class LiveApiService extends ApiService {
     })
   }
 
-  // state
-
   async echo(params: Params<'echo'>, url: string): Promise<string> {
     return this.rpcRequest<string>({ method: 'echo', params }, url)
   }
-
-  // db
-
-  // auth
-
-  // diagnostic
-
-  // init
-
-  // server
 
   async toggleKiosk(enable: boolean): Promise<null> {
     return this.rpcRequest({
@@ -121,102 +108,15 @@ export class LiveApiService extends ApiService {
     })
   }
 
-  // marketplace URLs
-
-  // notification
-
-  // proxies
-
-  // wifi
-
-  // smtp
-
-  // ssh
-
-  // backup
-
-  // async addBackupTarget(
-  //   type: BackupTargetType,
-  //   params: RR.AddCifsBackupTargetReq | RR.AddCloudBackupTargetReq,
-  // ): Promise<RR.AddBackupTargetRes> {
-  //   params.path = params.path.replace('/\\/g', '/')
-  //   return this.rpcRequest({ method: `backup.target.${type}.add`, params })
-  // }
-
-  // async updateBackupTarget(
-  //   type: BackupTargetType,
-  //   params: RR.UpdateCifsBackupTargetReq | RR.UpdateCloudBackupTargetReq,
-  // ): Promise<RR.UpdateBackupTargetRes> {
-  //   return this.rpcRequest({ method: `backup.target.${type}.update`, params })
-  // }
-
-  // async removeBackupTarget(
-  //   params: RR.RemoveBackupTargetReq,
-  // ): Promise<RR.RemoveBackupTargetRes> {
-  //   return this.rpcRequest({ method: 'backup.target.remove', params })
-  // }
-
-  // async getBackupJobs(
-  //   params: RR.GetBackupJobsReq,
-  // ): Promise<RR.GetBackupJobsRes> {
-  //   return this.rpcRequest({ method: 'backup.job.list', params })
-  // }
-
-  // async createBackupJob(
-  //   params: RR.CreateBackupJobReq,
-  // ): Promise<RR.CreateBackupJobRes> {
-  //   return this.rpcRequest({ method: 'backup.job.create', params })
-  // }
-
-  // async updateBackupJob(
-  //   params: RR.UpdateBackupJobReq,
-  // ): Promise<RR.UpdateBackupJobRes> {
-  //   return this.rpcRequest({ method: 'backup.job.update', params })
-  // }
-
-  // async deleteBackupJob(
-  //   params: RR.DeleteBackupJobReq,
-  // ): Promise<RR.DeleteBackupJobRes> {
-  //   return this.rpcRequest({ method: 'backup.job.delete', params })
-  // }
-
-  // async getBackupRuns(
-  //   params: RR.GetBackupRunsReq,
-  // ): Promise<RR.GetBackupRunsRes> {
-  //   return this.rpcRequest({ method: 'backup.runs.list', params })
-  // }
-
-  // async deleteBackupRuns(
-  //   params: RR.DeleteBackupRunsReq,
-  // ): Promise<RR.DeleteBackupRunsRes> {
-  //   return this.rpcRequest({ method: 'backup.runs.delete', params })
-  // }
-
-  // package
-
-  // async setServiceOutboundProxy(
-  //   params: RR.SetServiceOutboundTunnelReq,
-  // ): Promise<RR.SetServiceOutboundTunnelRes> {
-  //   return this.rpcRequest({ method: 'package.proxy.set-outbound', params })
-  // }
-
   private async rpcRequest<T>(
     options: RPCOptions<Record<string, unknown>, string>,
     urlOverride?: string,
   ): Promise<T> {
-    // Foreign origins must never receive a signature valid at home.
-    const res = await this.http.rpcRequest<T>(
-      urlOverride
-        ? options
-        : {
-            ...options,
-            headers: {
-              ...options.headers,
-              ...(await this.authKeys.signRpcHeaders(options)),
-            },
-          },
-      urlOverride,
-    )
+    // An endpoint override must not receive the local device proof.
+    const request = urlOverride
+      ? rpcRequestBody(options)
+      : await this.authKeys.signRpcBody(options)
+    const res = await this.http.rpcMessage<T>(request, options, urlOverride)
     const body = res.body
 
     if (isRpcError(body)) {
@@ -241,17 +141,16 @@ export class LiveApiService extends ApiService {
   }
 
   private async httpResponse<T>(opts: HttpOptions) {
-    // Static asset routes require a signature.
     if (
       opts.url.startsWith('/s9pk') ||
       opts.url.startsWith('/registry/icons/')
     ) {
       opts = {
         ...opts,
-        headers: {
-          ...opts.headers,
-          ...(await this.authKeys.signHeader(new Uint8Array(0))),
-        },
+        headers: await this.authKeys.signHeader(
+          new Uint8Array(0),
+          opts.headers,
+        ),
       }
     }
     const res = await this.http.httpRequest<T>(opts)

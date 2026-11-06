@@ -1,6 +1,11 @@
+import { HttpHeaders } from '@angular/common/http'
 import { inject, InjectionToken, Service } from '@angular/core'
 import { WA_WINDOW } from '@ng-web-apis/common'
 import { auth } from '@start9labs/start-core'
+
+import type { HttpOptions } from '../types/http.types'
+import type { RPCOptions } from '../types/rpc.types'
+import { rpcRequestBody } from './rpc-request'
 
 /** IndexedDB record key for the device key. Override per app so two apps
  *  served from one origin (dev servers, a re-pointed forward) can't clobber
@@ -32,8 +37,7 @@ export class AuthKeyService {
   private readonly storageKey = inject(AUTH_KEY_STORAGE_KEY)
   private readonly host = inject(AUTH_SIGNING_HOST)
   private cached: auth.AuthKey | null | undefined
-  /** Record displaced by this tab's `create()`, restored by `rollback()` so a
-   *  failed login here can't wipe the key another tab is signing with. */
+  /** Preserves another tab's displaced key across a failed login. */
   private displaced: auth.AuthKey | null = null
 
   async get(): Promise<auth.AuthKey | null> {
@@ -42,7 +46,6 @@ export class AuthKeyService {
         this.cached =
           (await this.idb('readonly', s => s.get(this.storageKey))) ?? null
       } catch {
-        // A corrupt slot must degrade to logged-out, not brick the app.
         this.cached = null
         await this.delete().catch(() => {})
       }
@@ -57,8 +60,7 @@ export class AuthKeyService {
     return key
   }
 
-  /** Roll back `create()` after a failed login: restore whatever the slot held
-   *  before, so a mistyped password in one tab can't sign out the others. */
+  /** Restores the key displaced by a failed login. */
   async rollback(): Promise<void> {
     const restore = this.displaced
     this.displaced = null
@@ -75,25 +77,32 @@ export class AuthKeyService {
     await this.delete()
   }
 
-  async signHeader(body: string | Uint8Array): Promise<Record<string, string>> {
+  async signHeader(
+    body: string | Uint8Array,
+    headers?: HttpOptions['headers'],
+  ): Promise<HttpHeaders> {
+    const result =
+      headers instanceof HttpHeaders ? headers : new HttpHeaders(headers)
     const key = await this.get()
-    if (!key) return {}
+    if (!key) return result
     const bytes =
       typeof body === 'string' ? new TextEncoder().encode(body) : body
-    return {
-      [auth.AUTH_SIG_HEADER]: await auth.signRequest(key, this.host, bytes),
-    }
+    return result.set(
+      auth.AUTH_SIG_HEADER,
+      await auth.signRequest(key, this.host, bytes),
+    )
   }
 
-  /** Sign an RPC request. The signed bytes must match the body `HttpService`
-   *  serializes — `{ method, params }`, in this order, via `JSON.stringify`. */
-  signRpcHeaders(options: {
-    method: string
-    params: unknown
-  }): Promise<Record<string, string>> {
-    return this.signHeader(
-      JSON.stringify({ method: options.method, params: options.params }),
-    )
+  /** Captures a serialized RPC body and adds the stored device key's proof when available. */
+  async signRpcBody(
+    options: Pick<RPCOptions<unknown>, 'method' | 'params'>,
+  ): Promise<string> {
+    const body = rpcRequestBody(options)
+    const key = await this.get()
+    if (!key) return body
+    const proof = await auth.signRpcRequest(key, this.host, body)
+    // Reparsing would round raw JSON integers and change numeric token types.
+    return `{${JSON.stringify(auth.RPC_SIGNATURE_FIELD)}:${JSON.stringify(proof)},${body.slice(1)}`
   }
 
   private async put(key: auth.AuthKey): Promise<void> {

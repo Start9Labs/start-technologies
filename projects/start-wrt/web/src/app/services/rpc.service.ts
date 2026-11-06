@@ -1,7 +1,12 @@
 import { Injectable, Injector, inject } from '@angular/core'
 import { HttpService } from './http.service'
 import { AuthService } from './auth.service'
-import { AuthKeyService, isRpcError, RpcError } from '@start9labs/shared'
+import {
+  AuthKeyService,
+  isRpcError,
+  RpcError,
+  rpcRequestHeaders,
+} from '@start9labs/shared'
 import type {
   RPCOptions as SharedRPCOptions,
   RPCResponse,
@@ -33,14 +38,11 @@ export class RpcService {
   async request<M extends RpcMethod<Api>>(
     options: RPCOptions<M>,
   ): Promise<RpcReturnType<Api, M>> {
-    const { method, headers, params, timeout } = options
-
+    const { headers, timeout } = options
+    const request = await this.authKeys.signRpcBody(options)
     const res = await this.http.request<RPCResponse<RpcReturnType<Api, M>>>({
-      headers: {
-        ...headers,
-        ...(await this.authKeys.signRpcHeaders({ method, params })),
-      },
-      body: { method, params },
+      headers: rpcRequestHeaders(headers),
+      body: request,
       timeout,
     })
 

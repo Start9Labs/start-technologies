@@ -5,6 +5,7 @@ import {
   isRpcError,
   RpcError,
   RPCOptions,
+  rpcRequestBody,
 } from '@start9labs/shared'
 import { createRpcClient } from '@start9labs/start-core'
 import { filter, firstValueFrom, Observable } from 'rxjs'
@@ -48,19 +49,11 @@ export class LiveApiService extends ApiService {
     options: RPCOptions<Record<string, unknown>, string>,
     urlOverride?: string,
   ): Promise<T> {
-    // Foreign origins must never receive a signature valid at home.
-    const res = await this.http.rpcRequest<T>(
-      urlOverride
-        ? options
-        : {
-            ...options,
-            headers: {
-              ...options.headers,
-              ...(await this.authKeys.signRpcHeaders(options)),
-            },
-          },
-      urlOverride,
-    )
+    // An endpoint override must not receive the local device proof.
+    const request = urlOverride
+      ? rpcRequestBody(options)
+      : await this.authKeys.signRpcBody(options)
+    const res = await this.http.rpcMessage<T>(request, options, urlOverride)
     const body = res.body
 
     if (isRpcError(body)) {
