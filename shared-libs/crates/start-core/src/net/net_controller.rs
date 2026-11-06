@@ -324,6 +324,23 @@ fn ssl_vhost_public_v4<'a>(
         .collect()
 }
 
+/// Gateways of the public domains served on the binding's own SSL port.
+fn passthrough_domain_gateways<'a>(
+    enabled_addresses: impl IntoIterator<Item = &'a &'a HostnameInfo>,
+    assigned_ssl_port: u16,
+) -> BTreeSet<GatewayId> {
+    enabled_addresses
+        .into_iter()
+        .filter(|a| {
+            a.public
+                && a.ssl
+                && a.port == Some(assigned_ssl_port)
+                && matches!(a.metadata, HostnameMetadata::PublicDomain { .. })
+        })
+        .flat_map(|a| a.metadata.gateways().cloned())
+        .collect()
+}
+
 /// The loopback and bridge addresses of a binding's SSL port. Every name the
 /// binding serves accepts them.
 fn ssl_vhost_internal_ips<'a>(
@@ -636,18 +653,26 @@ impl NetServiceData {
                 // is actually public — so a GUA-only-public gateway never
                 // accepts or forwards bare IPv4. The controller derives the IPv4
                 // `*` pinhole from `public_v4`; the GUA needs no NAT.
-                let server_public_v4 = ssl_vhost_public_v4(enabled_addresses.iter().copied());
+                let mut server_public_v4 = ssl_vhost_public_v4(enabled_addresses.iter().copied());
                 // Per-IP (per-GUA), not per-gateway: one gateway can carry
                 // several GUAs that are independently Local vs Public, so only
                 // the specific enabled-public GUAs accept WAN. Scoped to the SSL
                 // exposure (`a.ssl`), since this `*` vhost answers TLS on the
                 // ssl port — a GUA public only on a non-SSL port is served by the
                 // v6 DNAT forward, not this vhost.
-                let server_public_v6: BTreeSet<Ipv6Addr> = enabled_addresses
+                let mut server_public_v6: BTreeSet<Ipv6Addr> = enabled_addresses
                     .iter()
                     .filter(|a| a.public && a.ssl)
                     .filter_map(|a| a.gua().map(|g| *g.ip()))
                     .collect();
+
+                let passthrough = bind.options.add_ssl.is_none();
+                if passthrough {
+                    // Admits SNI-less clients wherever the binding's public domain resolves.
+                    let gws = passthrough_domain_gateways(&enabled_addresses, assigned_ssl_port);
+                    server_public_v6.extend(crate::net::utils::gua_ips(&net_ifaces, &gws));
+                    server_public_v4.extend(gws);
+                }
 
                 if !server_private_ips.is_empty()
                     || !server_public_v4.is_empty()
@@ -678,7 +703,6 @@ impl NetServiceData {
                 // decided. Neither is public, so neither contributes an upstream
                 // port map. Every name accepts the bridge, where other services
                 // and a plugin's provider reach it.
-                let passthrough = bind.options.add_ssl.is_none();
                 add_named_vhosts(
                     &mut vhosts,
                     &enabled_addresses,
@@ -2057,6 +2081,29 @@ mod tests {
             ssl_vhost_public_v4(addrs.iter()),
             BTreeSet::from([wg.clone()]),
             "an SSL-port bare IP does mark it public"
+        );
+    }
+
+    #[test]
+    fn a_passthrough_domain_on_its_own_port_admits_its_gateway_without_sni() {
+        let domain = |port, public, gateway: &str| HostnameInfo {
+            ssl: true,
+            public,
+            hostname: InternedString::intern("smp.example.com"),
+            port: Some(port),
+            metadata: HostnameMetadata::PublicDomain {
+                gateway: gw(gateway),
+            },
+        };
+        let own = domain(5223, true, "wg1");
+        let shared = domain(443, true, "eth0");
+        let private = domain(5223, false, "eth1");
+        let lan = lan_ip("192.168.1.5", true, 5223, "eth2");
+
+        assert_eq!(
+            passthrough_domain_gateways(&[&own, &shared, &private, &lan], 5223),
+            BTreeSet::from([gw("wg1")]),
+            "only a public domain on the binding's own SSL port counts"
         );
     }
 
