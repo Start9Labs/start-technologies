@@ -116,7 +116,7 @@ mod tests {
     use super::*;
 
     fn database() -> DatabaseModel {
-        let mut db = Model::from_value(json!({
+        let mut db = DatabaseModel::from_value(json!({
             "public": { "serverInfo": { "version": "0.4.0.5", "unreadNotificationCount": 0 } },
             "private": { "notifications": {}, "osSecurityNotifications": {} }
         }));

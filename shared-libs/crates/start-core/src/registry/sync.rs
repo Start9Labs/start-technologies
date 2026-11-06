@@ -392,6 +392,7 @@ fn publish_snapshot(
                     device_info: Some(package_device),
                     other_versions: Some(crate::registry::package::get::PackageDetailLevel::Short),
                     all_revisions: false,
+                    reader: Default::default(),
                 },
             )?)?;
             refresh_registry(db, url, &info)?;

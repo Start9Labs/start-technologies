@@ -36,9 +36,10 @@ Defined in `shared-libs/crates/start-core/src/bins/registry.rs`:
 Defined in `shared-libs/crates/start-core/src/registry/mod.rs`:
 
 - `POST /rpc/{*path}` — JSON-RPC, wrapped in `Cors`, `Auth` (local + signature auth), and `DeviceInfoMiddleware`.
+- `GET /ws/rpc` — multiplexed JSON-RPC and opt-in `rpcstream` responses, using the HTTP route's middleware. A signed upgrade authenticates the connection with the existing empty-body request-signature commitment.
 - `GET /ws/rpc/{*path}` — WebSocket RPC continuations, keyed by a `Guid`.
 - `/rest/rpc/{*path}` — REST continuation channel (e.g. large asset streams), keyed by a `Guid`.
-- `GET /icons/{*path}` — a package or dependency icon from the content-addressed store, unauthenticated and immutable. Package versions refer to an icon by this path, `blake3/<hash>.<ext>`; `DeviceInfoMiddleware` inlines it as a data URL for StartOS before 0.4.0.3.
+- `GET /icons/{*path}` — a package or dependency icon from the content-addressed store. Access follows the visibility of packages referencing the bytes. Public references permit immutable public caching; private-only references require an authorized request signature and return `private, no-store`. Package versions refer to an icon by this path, `blake3/<hash>.<ext>`; `DeviceInfoMiddleware` inlines it as a data URL for StartOS before 0.4.0.3.
 
 ## RPC API surface (`registry_api`)
 
@@ -49,12 +50,17 @@ Subcommands (same module), each available over RPC and to the `start-registry` C
 | `index`   | `mod::get_full_index` | full combined index (name, icon, packages, OS, signers)                  |
 | `info`    | `registry/info.rs`    | set/get registry info and categories                                     |
 | `os`      | `registry/os/`        | OS version index + asset (image) management                              |
-| `package` | `registry/package/`   | add/get/list packages, versions, assets                                  |
+| `package` | `registry/package/`   | add/get/list packages, versions, assets; manage private-package access   |
 | `admin`   | `registry/admin.rs`   | manage admins and signers                                                |
 | `db`      | `registry/db.rs`      | dump/inspect the registry database; subscribe to `/index` or any subpath |
 | `metrics` | `registry/metrics.rs` | download/user metrics summaries (admin-only)                             |
 
 ### Registry index subscriptions
+
+`db.watch` accepts the same pointer on the multiplexed WebSocket with `rpcstream: "1.0"`.
+Its initiating JSON-RPC result is the `{ id, value }` dump. Subsequent events carry `Revision`
+objects using that request ID. Closing the stream releases its subscription; ordinary calls and
+other watches share the connection.
 
 The public `db.subscribe` RPC accepts `{ "pointer": <JSON Pointer> }`. The pointer may select
 `/index` or any descendant; omitting it or passing `null` selects `/index`. The response contains
@@ -67,9 +73,12 @@ backend cache; browser sessions observe projected package and OS metadata throug
 Subscriptions reconnect with jittered backoff and a fresh dump. Cached metadata remains available
 offline, with connection availability reported separately from registry configuration.
 
-Registry subscriptions use bounded JSON revision queues. Slow subscribers close rather than skip
-patches. Unauthenticated RPC WebSocket continuations share incoming buffer/message/frame limits
-and bounded sends; authenticated bulk-transfer continuations retain their transport settings.
+Both subscription methods read filtered in-memory mirrors and use bounded, 32-revision JSON
+queues. Slow subscribers close rather than skip patches. Public-only callers share one mirror;
+registered admins and signers with private-package access receive a mirror keyed by their verified
+request key. Every source revision rechecks key enrollment, admin status, and package permissions.
+A public-mirror subscriber must resubscribe after receiving a private-access grant. Weak mirror
+entries share work across subscribers; dropping the last subscriber cancels that mirror's task.
 
 StartOS derives security notifications from the selected source's OS metadata, filtering by source
 version, platform, and installed build. Delivery history remains keyed by registry URL, version, and
@@ -93,6 +102,13 @@ with notifications for newly offered or dropped keys. StartOS trusts a registry'
 chooses it for StartOS updates.
 
 Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hold versions, dependency `VersionRange`s, and `RegistryAsset`s. Assets carry **Blake3 commitments** (`sign/commitment/blake3`) for content addressing and integrity, and are signed by registered signers.
+
+`PackageInfo` flattens `PackageAccessControl` into its wire record: `private` defaults to false and
+`readers` defaults to an empty signer-ID set. The flattened policy deserializes independently of
+version metadata, including existing rows without either field. One visibility primitive admits
+public packages, admins, authorized publishers, and listed readers. Browsing endpoints, mirrors,
+and stored-icon references use it. Admin-only `package.access` commands manage the policy.
+Signed public browsing retains the verified identity without adding admin audit records.
 
 OS versions use the shared `LocaleString` for `releaseNotes`, as package metadata does:
 a plain string or a locale-to-Markdown map. The compiler includes `en_US` in translated

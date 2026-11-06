@@ -16,7 +16,7 @@ use crate::prelude::*;
 use crate::progress::{FullProgressTracker, ProgressUnits};
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
-use crate::registry::package::index::{PackageIndex, PackageVersionInfo};
+use crate::registry::package::index::{PackageIndex, PackageVersionInfo, ReaderParams};
 use crate::s9pk::manifest::{HardwareRequirements, LocaleString};
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::v2::SIG_CONTEXT;
@@ -83,6 +83,9 @@ pub struct GetPackageParams {
     #[arg(long, help = "help.arg.all-revisions")]
     #[serde(default)]
     pub all_revisions: bool,
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub reader: ReaderParams,
 }
 
 rpc_toolkit::reflect_ts!(GetPackageParams);
@@ -279,7 +282,10 @@ fn hide_superseded_revisions(
 
 pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Result<Value, Error> {
     let peek = ctx.db.peek().await;
-    let result = select_packages(peek.as_index().as_package(), &params)?;
+    let reader = params.reader.reader(&peek)?;
+    let mut index = peek.as_index().as_package().clone();
+    index.retain_visible(reader.as_ref())?;
+    let result = select_packages(&index, &params)?;
     if let Some(id) = &params.id {
         if params.target_version.is_some() {
             let created_at = Utc::now().to_rfc3339();

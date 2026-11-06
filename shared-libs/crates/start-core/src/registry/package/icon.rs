@@ -2,16 +2,18 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use axum::body::Body;
+use axum::extract::Request;
 use axum::response::Response;
 use http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use imbl_value::InternedString;
 use new_mime_guess::MimeGuess;
 use serde::{Deserialize, Serialize};
 
-use crate::net::static_server::{bad_request, not_found, server_error};
+use crate::middleware::auth::signature::{AUTH_SIG_HEADER, verify_request_signature};
+use crate::net::static_server::{bad_request, not_found, server_error, unauthorized};
 use crate::prelude::*;
 use crate::registry::context::RegistryContext;
-use crate::registry::package::index::PackageIndex;
+use crate::registry::package::index::{PackageIndex, PackageInfo, Reader};
 use crate::util::DataUrl;
 
 const ICON_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
@@ -115,15 +117,33 @@ pub async fn load_icon(dir: &Path, path: &str) -> Result<String, Error> {
     Ok(DataUrl::from_vec(&icon_mime(path), data).to_string())
 }
 
-/// Serves a stored icon by its path under `/icons/`.
-pub async fn stored_icon(ctx: &RegistryContext, path: &str) -> Response {
+pub async fn stored_icon(ctx: &RegistryContext, path: &str, mut request: Request) -> Response {
     if !is_stored_path(path) {
         return bad_request();
     }
+    let key = if request.headers().contains_key(AUTH_SIG_HEADER) {
+        match verify_request_signature(ctx, &mut request).await {
+            Ok(key) => Some(key),
+            Err(e) => return unauthorized(e, request.uri().path()),
+        }
+    } else {
+        None
+    };
+    let cache_control = async {
+        let db = ctx.db.peek().await;
+        let reader = Reader::resolve(&db, key.as_ref())?;
+        icon_cache_control(db.as_index().as_package(), path, reader.as_ref())
+    }
+    .await;
+    let cache_control = match cache_control {
+        Ok(Some(cache_control)) => cache_control,
+        Ok(None) => return not_found(),
+        Err(e) => return server_error(e),
+    };
     match tokio::fs::read(icons_dir(&ctx.datadir).join(path)).await {
         Ok(data) => Response::builder()
             .header(CONTENT_TYPE, icon_mime(path))
-            .header(CACHE_CONTROL, ICON_CACHE_CONTROL)
+            .header(CACHE_CONTROL, cache_control)
             .body(Body::from(data))
             .unwrap(),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => not_found(),
@@ -131,22 +151,50 @@ pub async fn stored_icon(ctx: &RegistryContext, path: &str) -> Response {
     }
 }
 
-/// Every stored icon path the package index refers to.
-pub fn referenced_icons(index: &PackageIndex) -> BTreeSet<InternedString> {
-    index
-        .packages
-        .values()
-        .flat_map(|p| p.versions.values())
-        .flat_map(|v| {
-            v.icon
-                .iter()
-                .chain(v.dependency_metadata.values().flat_map(|d| d.icon.iter()))
-        })
-        .filter_map(|icon| match icon {
-            PackageIcon::Stored(path) => Some(path.clone()),
-            PackageIcon::Inline(_) => None,
-        })
-        .collect()
+fn package_icons(package: &Model<PackageInfo>) -> Result<BTreeSet<InternedString>, Error> {
+    let mut paths = BTreeSet::new();
+    for (_, version) in package.as_versions().as_entries()? {
+        let dependencies = version
+            .as_dependency_metadata()
+            .as_entries()?
+            .into_iter()
+            .map(|(_, dependency)| dependency.as_icon().de())
+            .collect::<Result<Vec<_>, _>>()?;
+        for icon in std::iter::once(version.as_icon().de()?)
+            .chain(dependencies)
+            .flatten()
+        {
+            if let PackageIcon::Stored(path) = icon {
+                paths.insert(path);
+            }
+        }
+    }
+    Ok(paths)
+}
+
+fn icon_cache_control(
+    index: &Model<PackageIndex>,
+    path: &str,
+    reader: Option<&Reader>,
+) -> Result<Option<&'static str>, Error> {
+    let mut private_access = false;
+    for (_, package) in index.as_packages().as_entries()? {
+        if package_icons(package)?.contains(path) {
+            if package.is_visible_to(None)? {
+                return Ok(Some(ICON_CACHE_CONTROL));
+            }
+            private_access |= package.is_visible_to(reader)?;
+        }
+    }
+    Ok(private_access.then_some("private, no-store"))
+}
+
+pub fn referenced_icons(index: &Model<PackageIndex>) -> Result<BTreeSet<InternedString>, Error> {
+    let mut paths = BTreeSet::new();
+    for (_, package) in index.as_packages().as_entries()? {
+        paths.extend(package_icons(package)?);
+    }
+    Ok(paths)
 }
 
 /// Deletes stored icons and interrupted writes that the index no longer refers to.
@@ -188,6 +236,51 @@ pub async fn sweep_icons(dir: &Path, referenced: &BTreeSet<InternedString>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn icon_references_share_visibility_and_sweep_ownership() {
+        let reader = Reader {
+            signer: crate::rpc_continuations::Guid::new(),
+            admin: false,
+        };
+        let public_version =
+            imbl_value::json!({"icon": "blake3/shared.png", "dependencyMetadata": {}});
+        let private_version = imbl_value::json!({
+            "icon": "blake3/secret.png", "dependencyMetadata": {
+                "dependency": {"icon": "blake3/dependency.png"},
+                "shared": {"icon": "blake3/shared.png"}
+            }
+        });
+        let index: Model<PackageIndex> = imbl_value::json!({"categories": {}, "packages": {
+            "public": {"authorized": {}, "versions": {"1.0.0:0": public_version}},
+            "secret": {"private": true, "readers": [reader.signer], "authorized": {},
+                "versions": {"1.0.0:0": private_version}}
+        }})
+        .into();
+        assert_eq!(
+            referenced_icons(&index).unwrap(),
+            BTreeSet::from([
+                "blake3/shared.png".into(),
+                "blake3/secret.png".into(),
+                "blake3/dependency.png".into()
+            ])
+        );
+        for path in ["blake3/secret.png", "blake3/dependency.png"] {
+            assert_eq!(icon_cache_control(&index, path, None).unwrap(), None);
+            assert_eq!(
+                icon_cache_control(&index, path, Some(&reader)).unwrap(),
+                Some("private, no-store")
+            );
+        }
+        assert_eq!(
+            icon_cache_control(&index, "blake3/shared.png", None).unwrap(),
+            Some(ICON_CACHE_CONTROL)
+        );
+        assert_eq!(
+            icon_cache_control(&index, "blake3/missing.png", Some(&reader)).unwrap(),
+            None
+        );
+    }
 
     fn png(data: &[u8]) -> DataUrl<'static> {
         DataUrl::from_vec("image/png", data.to_vec())

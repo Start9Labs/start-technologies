@@ -1,5 +1,6 @@
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::ws::{self, Utf8Bytes};
@@ -13,12 +14,12 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use crate::context::CliContext;
-pub use crate::db::{
-    ApplyWithPathParams as ApplyParams, DumpParams, DumpParams as SubscribeParams, SubscribeRes,
-};
+pub use crate::db::{ApplyWithPathParams as ApplyParams, DumpParams, SubscribeRes};
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::context::RegistryContext;
+use crate::registry::mirror::{IndexMirror, index_mirror, mirror_key};
+use crate::registry::package::index::ReaderParams;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
 
@@ -45,6 +46,15 @@ pub fn db_api<C: Context>() -> ParentHandler<C> {
             "subscribe",
             from_fn_async(subscribe)
                 .with_metadata("authenticated", Value::Bool(false))
+                .with_metadata("get_signer", Value::Bool(true))
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                .no_cli(),
+        )
+        .subcommand(
+            "watch",
+            from_fn_async(watch)
+                .with_metadata("authenticated", Value::Bool(false))
+                .with_metadata("get_signer", Value::Bool(true))
                 .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .no_cli(),
         )
@@ -132,17 +142,79 @@ async fn subscription(
     ))
 }
 
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscribeIndexParams {
+    pub pointer: Option<JsonPointer>,
+    #[serde(flatten)]
+    pub reader: ReaderParams,
+}
+
+rpc_toolkit::reflect_ts!(SubscribeIndexParams);
+
+async fn visible_subscription(
+    ctx: &RegistryContext,
+    SubscribeIndexParams { pointer, reader }: SubscribeIndexParams,
+) -> Result<(Arc<IndexMirror>, Dump, JsonSubscriber), Error> {
+    let pointer = subscription_pointer(pointer)?;
+    let key = mirror_key(&ctx.db.peek().await, reader.signer)?;
+    let mirror = index_mirror(&ctx.index_mirrors, &ctx.db, key).await?;
+    let (dump, sub) = subscription(&mirror.db, Some(pointer)).await?;
+    Ok((mirror, dump, sub))
+}
+
+pub async fn watch(
+    HandlerArgs {
+        context,
+        params,
+        rpc_stream,
+        ..
+    }: HandlerArgs<RegistryContext, SubscribeIndexParams>,
+) -> Result<Dump, Error> {
+    let stream = rpc_stream.ok_or_else(|| {
+        Error::new(
+            eyre!("{}", t!("registry.db.stream-required")),
+            ErrorKind::InvalidRequest,
+        )
+    })?;
+    let (mirror, dump, mut sub) = visible_subscription(&context, params).await?;
+    tokio::spawn(async move {
+        let _mirror = mirror;
+        let result = async {
+            loop {
+                let revision = tokio::select! {
+                    _ = stream.closed() => return Ok::<_, Error>(()),
+                    revision = sub.recv() => revision?,
+                };
+                let Some(revision) = revision else {
+                    return Ok(());
+                };
+                stream
+                    .send(
+                        serde_json::from_slice::<patch_db::Revision>(&revision)
+                            .with_kind(ErrorKind::Deserialization)?,
+                    )
+                    .await?;
+            }
+        }
+        .await;
+        let _ = stream.close(result);
+    });
+    Ok(dump)
+}
+
 pub async fn subscribe(
     ctx: RegistryContext,
-    SubscribeParams { pointer }: SubscribeParams,
+    params: SubscribeIndexParams,
 ) -> Result<SubscribeRes, Error> {
-    let (dump, mut sub) = subscription(&ctx.db, pointer).await?;
+    let (mirror, dump, mut sub) = visible_subscription(&ctx, params).await?;
     let guid = Guid::new();
     ctx.rpc_continuations
         .add(
             guid.clone(),
             RpcContinuation::ws(
                 |mut ws| async move {
+                    let _mirror = mirror;
                     if let Err(e) = async {
                         loop {
                             tokio::select! {
@@ -233,7 +305,7 @@ mod tests {
             serde_json::json!({}),
             serde_json::json!({ "pointer": null }),
         ] {
-            let params: SubscribeParams = serde_json::from_value(params).unwrap();
+            let params: SubscribeIndexParams = serde_json::from_value(params).unwrap();
             assert!(params.pointer.is_none());
         }
     }

@@ -203,7 +203,11 @@ reqwest = { version = "0.12.25", features = [
   "stream",
 ] }
 rpassword = "7.2.0"
-rpc-toolkit = { path = "../rpc-toolkit", features = ["cbor", "mcp"] }
+rpc-toolkit = { path = "../rpc-toolkit", features = [
+  "cbor",
+  "mcp",
+  "websocket",
+] }
 rusqlite = { version = "0.34", features = ["bundled"] }
 rust-argon2 = "3.0.0"
 rust-i18n = "3.1.5"

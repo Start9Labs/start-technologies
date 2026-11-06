@@ -30,6 +30,7 @@ use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
 use crate::registry::migrations::run_migrations;
+use crate::registry::mirror::IndexMirrors;
 use crate::registry::package::icon::{icons_dir, referenced_icons, sweep_icons};
 use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
@@ -89,6 +90,7 @@ pub struct RegistryContextSeed {
     pub hostnames: Vec<InternedString>,
     pub listen: SocketAddr,
     pub db: TypedPatchDb<RegistryDatabase>,
+    pub index_mirrors: IndexMirrors,
     pub datadir: PathBuf,
     pub startwrt: bool,
     pub rpc_continuations: RpcContinuations,
@@ -121,7 +123,7 @@ impl RegistryContext {
         db.mutate(|db| run_migrations(db, &datadir)).await.result?;
         sweep_icons(
             &icons_dir(&datadir),
-            &referenced_icons(&db.peek().await.into_index().into_package().de()?),
+            &referenced_icons(db.peek().await.as_index().as_package())?,
         )
         .await?;
 
@@ -165,6 +167,7 @@ impl RegistryContext {
             hostnames: config.registry_hostname.clone(),
             listen: config.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN),
             db,
+            index_mirrors: IndexMirrors::default(),
             datadir,
             startwrt: config.startwrt,
             rpc_continuations: RpcContinuations::new(),
@@ -356,6 +359,8 @@ async fn onion_tor_hint(ctx: &RpcContext, original: RpcError) -> RpcError {
 pub struct RegistryAuthMetadata {
     #[serde(default)]
     admin: bool,
+    #[serde(default = "crate::util::serde::const_true")]
+    authenticated: bool,
 }
 
 impl SignatureAuthMetadata for RegistryAuthMetadata {}
@@ -419,6 +424,9 @@ impl SignatureAuthContext for RegistryContext {
         pubkey: Option<&AnyVerifyingKey>,
         metadata: Self::AdditionalMetadata,
     ) -> Result<Self::CheckPubkeyRes, Error> {
+        if !metadata.authenticated {
+            return Ok(None);
+        }
         if let Some(pubkey) = pubkey {
             let (guid, admin) = db.as_index().as_signers().get_signer_info(pubkey)?;
             if !metadata.admin || db.as_admins().de()?.contains(&guid) {
@@ -473,6 +481,43 @@ mod tests {
         );
         assert!(RegistryConfig::try_parse_from(["registry", "--security-notifications"]).is_err());
     }
+}
+
+#[cfg(test)]
+pub(super) async fn test_context(datadir: PathBuf, uploader: AnyVerifyingKey) -> RegistryContext {
+    use crate::rpc_continuations::Guid;
+
+    tokio::fs::create_dir_all(&datadir).await.unwrap();
+    let db =
+        TypedPatchDb::load_unchecked(PatchDb::open(datadir.join("registry.db")).await.unwrap());
+    let mut database = RegistryDatabase::init();
+    let guid = Guid::new();
+    database.admins.insert(guid.clone());
+    database.index.trust_signers.insert(guid.clone());
+    database.index.signers.insert(
+        guid,
+        SignerInfo {
+            name: "Uploader".into(),
+            contact: vec![],
+            keys: [uploader].into(),
+            gpg_exports: Default::default(),
+        },
+    );
+    db.put(&ROOT, &database).await.unwrap();
+    RegistryContext(Arc::new(RegistryContextSeed {
+        hostnames: vec!["localhost".into(), "127.0.0.1".into()],
+        listen: "127.0.0.1:0".parse().unwrap(),
+        db,
+        index_mirrors: Default::default(),
+        datadir,
+        startwrt: false,
+        rpc_continuations: RpcContinuations::new(),
+        open_authed_continuations: OpenAuthedContinuations::new(),
+        auth_sig_nonce_cache: SyncMutex::new(Default::default()),
+        client: Client::new(),
+        shutdown: tokio::sync::broadcast::channel(1).0,
+        metrics_db: SyncMutex::new(Connection::open_in_memory().unwrap()),
+    }))
 }
 
 #[cfg(test)]

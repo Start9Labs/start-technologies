@@ -25,6 +25,23 @@ start-registry info set-trust-signers <SIGNER_ID> [SIGNER_ID...]
 
 Run `start-registry info set-trust-signers` without IDs to clear the selection. Registries start with no proposed signers. `registry.info` exposes the selected signer IDs and their complete signer records as `trustSigners`, including public keys and preserved GPG exports. Connecting a registry in StartOS trusts the offered keys it does not already have for packages. Keys added later are imported untrusted when StartOS next fetches packages or OS updates from the registry, with a notification for each that offers to trust it. Choosing the registry for StartOS updates trusts its offered keys for StartOS updates.
 
+## Private packages
+
+Admins can restrict package metadata and icons to admins, authorized publishers, and selected
+registered signers:
+
+```bash
+start-registry package access set-private <PACKAGE_ID> true
+start-registry package access add-reader <PACKAGE_ID> <SIGNER_ID>
+start-registry package access get <PACKAGE_ID>
+start-registry package access remove-reader <PACKAGE_ID> <SIGNER_ID>
+```
+
+`set-private` creates a package entry when needed, allowing restriction before publication.
+Existing packages default to public. Readers authenticate with signed requests; revocations update
+active subscriptions. A subscriber using the public mirror must reconnect after receiving a private
+access grant. Archive URLs remain governed by their download host.
+
 ## Package endorsements
 
 Package add and add-mirror import the hosted archive's embedded signature and a submitted `signatures` map. The CLI reads verified endorsements from its local v2 S9PK and submits that map separately from the authenticated uploader's signature. Promotion forwards the existing indexed map. Every submitted endorsement must verify against the exact indexed Merkle root, signed bound, and `s9pk` context; an invalid entry rejects the request atomically. Hosted URLs can serve the base archive alone. Source URLs and bytes remain unchanged.
@@ -67,13 +84,13 @@ Configuration is read from CLI flags and a config file (`-c <path>`; default sea
 | `-d, --datadir <path>`  | data directory (default `/var/lib/startos`)     |
 | `-c, --config <path>`   | config file                                     |
 
-Clients synchronize registry metadata through the public `db.subscribe` RPC and its WebSocket continuation. StartOS maintains package, signer, and OS-update caches independently of open browser sessions. OS releases marked `security` generate notifications on compatible StartOS servers using that registry for updates.
+Clients synchronize registry metadata through `db.watch` on the multiplexed `/ws/rpc` socket or the public `db.subscribe` RPC and its WebSocket continuation. StartOS maintains package, signer, and OS-update caches independently of open browser sessions. OS releases marked `security` generate notifications on compatible StartOS servers using that registry for updates.
 
 Server state lives in `<datadir>/registry.db` (PatchDB) plus a SQLite metrics database and hosted asset files.
 
 > [!NOTE]
 > **Non-StartOS deployments only:** A separately managed reverse proxy must forward `/rpc/`,
-> `/ws/rpc/`, `/rest/rpc/`, and `/icons/`. The WebSocket route also needs HTTP/1.1 upgrade forwarding and a
+> `/ws/rpc`, `/ws/rpc/`, `/rest/rpc/`, and `/icons/`. The WebSocket routes also need HTTP/1.1 upgrade forwarding and a
 > long-lived idle timeout. StartOS-hosted registries expose these routes through their exported
 > `protocol: 'http'` interface automatically.
 

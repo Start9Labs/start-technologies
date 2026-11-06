@@ -14,7 +14,7 @@ use crate::prelude::*;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfoMiddleware;
 use crate::registry::os::index::OsIndex;
-use crate::registry::package::index::PackageIndex;
+use crate::registry::package::index::{PackageIndex, ReaderParams};
 use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::manifest::LocaleString;
@@ -30,10 +30,14 @@ pub mod device_info;
 pub mod info;
 pub mod metrics;
 mod migrations;
+pub mod mirror;
 pub mod os;
 pub mod package;
 pub mod signer;
 pub mod sync;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel)]
 #[serde(rename_all = "camelCase")]
@@ -74,8 +78,15 @@ pub struct FullIndex {
 rpc_toolkit::reflect_ts!(FullIndex);
 rpc_toolkit::ts_export!(FullIndex, namespaces = [""]);
 
-pub async fn get_full_index(ctx: RegistryContext) -> Result<FullIndex, Error> {
-    ctx.db.peek().await.into_index().de()
+pub async fn get_full_index(
+    ctx: RegistryContext,
+    params: ReaderParams,
+) -> Result<FullIndex, Error> {
+    let db = ctx.db.peek().await;
+    let reader = params.reader(&db)?;
+    let mut index = db.into_index();
+    index.as_package_mut().retain_visible(reader.as_ref())?;
+    index.de()
 }
 
 pub fn registry_api<C: Context>() -> ParentHandler<C> {
@@ -83,6 +94,8 @@ pub fn registry_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "index",
             from_fn_async(get_full_index)
+                .with_metadata("authenticated", Value::Bool(false))
+                .with_metadata("get_signer", Value::Bool(true))
                 .with_display_serializable()
                 .with_about("about.list-registry-info-packages")
                 .with_call_remote::<CliContext>(),
@@ -91,7 +104,6 @@ pub fn registry_api<C: Context>() -> ParentHandler<C> {
             "info",
             info::info_api::<C>().with_about("about.commands-registry-info"),
         )
-        // set info and categories
         .subcommand(
             "os",
             os::os_api::<C>().with_about("about.commands-os-assets-versions"),
@@ -117,22 +129,20 @@ pub fn registry_api<C: Context>() -> ParentHandler<C> {
 pub fn registry_router(ctx: RegistryContext) -> Router {
     use axum::extract as x;
     use axum::routing::{any, get};
+    let rpc_context = ctx.clone();
+    let server = Server::new(move || ready(Ok(rpc_context.clone())), registry_api())
+        .middleware(Cors::new())
+        .middleware(Auth::new().with_local_auth().with_signature_auth())
+        .middleware(DeviceInfoMiddleware::new());
     Router::new()
-        .route("/rpc/{*path}", {
-            let ctx = ctx.clone();
-            any(
-                Server::new(move || ready(Ok(ctx.clone())), registry_api())
-                    .middleware(Cors::new())
-                    .middleware(Auth::new().with_local_auth().with_signature_auth())
-                    .middleware(DeviceInfoMiddleware::new()),
-            )
-        })
+        .route("/rpc/{*path}", any(server.clone()))
+        .route("/ws/rpc", get(server.for_websocket()))
         .route(
             "/icons/{*path}",
             get({
                 let ctx = ctx.clone();
-                move |x::Path(path): x::Path<String>| async move {
-                    package::icon::stored_icon(&ctx, &path).await
+                move |x::Path(path): x::Path<String>, request: x::Request| async move {
+                    package::icon::stored_icon(&ctx, &path, request).await
                 }
             }),
         )

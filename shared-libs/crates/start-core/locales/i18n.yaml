@@ -2778,6 +2778,13 @@ registry.db.pointer-outside-index:
   fr_FR: "Le pointeur d'abonnement doit être situé au niveau ou en dessous de /index"
   pl_PL: "Wskaźnik subskrypcji musi znajdować się w /index lub poniżej"
 
+registry.db.stream-required:
+  en_US: "db.watch requires an rpcstream WebSocket request"
+  de_DE: "db.watch erfordert eine rpcstream-WebSocket-Anfrage"
+  es_ES: "db.watch requiere una solicitud WebSocket rpcstream"
+  fr_FR: "db.watch nécessite une requête WebSocket rpcstream"
+  pl_PL: "db.watch wymaga żądania WebSocket rpcstream"
+
 # registry/os/asset/add.rs
 registry.os.asset.commitment-mismatch:
   en_US: "Commitment does not match"
@@ -2865,6 +2872,21 @@ registry.package.remove-not-exist:
   es_ES: "%{id}%{version}%{sighash} no existe, por lo que no se eliminó"
   fr_FR: "%{id}%{version}%{sighash} n'existe pas, donc non supprimé"
   pl_PL: "%{id}%{version}%{sighash} nie istnieje, więc nie usunięto"
+
+# registry/package/access.rs
+registry.package.access.not-reader:
+  en_US: "Signer %{signer} is not a reader of %{id}"
+  de_DE: "Unterzeichner %{signer} ist kein Leser von %{id}"
+  es_ES: "El firmante %{signer} no es lector de %{id}"
+  fr_FR: "Le signataire %{signer} n'est pas un lecteur de %{id}"
+  pl_PL: "Sygnatariusz %{signer} nie jest czytelnikiem %{id}"
+
+registry.package.access.private:
+  en_US: "Private"
+  de_DE: "Privat"
+  es_ES: "Privado"
+  fr_FR: "Privé"
+  pl_PL: "Prywatny"
 
 # registry/package/add.rs
 registry.package.add.must-specify-url:
@@ -4663,6 +4685,13 @@ help.arg.package-ids-to-backup:
   fr_FR: "IDs de paquets à inclure dans la sauvegarde"
   pl_PL: "Identyfikatory pakietów do uwzględnienia w kopii zapasowej"
 
+help.arg.package-private:
+  en_US: "Whether only admins, the package's signers, and its readers can see it"
+  de_DE: "Ob nur Administratoren, die Unterzeichner des Pakets und seine Leser es sehen können"
+  es_ES: "Si solo los administradores, los firmantes del paquete y sus lectores pueden verlo"
+  fr_FR: "Si seuls les administrateurs, les signataires du paquet et ses lecteurs peuvent le voir"
+  pl_PL: "Czy tylko administratorzy, sygnatariusze pakietu i jego czytelnicy mogą go widzieć"
+
 help.arg.package-url:
   en_US: "URL of the package"
   de_DE: "URL des Pakets"
@@ -5674,6 +5703,13 @@ about.add-package-category:
   fr_FR: "Ajouter un paquet à une catégorie"
   pl_PL: "Dodaj pakiet do kategorii"
 
+about.add-package-reader:
+  en_US: "Allow a signer to see a private package"
+  de_DE: "Einem Unterzeichner erlauben, ein privates Paket zu sehen"
+  es_ES: "Permitir que un firmante vea un paquete privado"
+  fr_FR: "Autoriser un signataire à voir un paquet privé"
+  pl_PL: "Zezwól sygnatariuszowi na widzenie prywatnego pakietu"
+
 about.add-package-registry:
   en_US: "Add package to registry index"
   de_DE: "Paket zum Registry-Index hinzufügen"
@@ -6101,6 +6137,13 @@ about.commands-os-assets-versions:
   es_ES: "Comandos relacionados con activos y versiones del SO"
   fr_FR: "Commandes liées aux actifs et versions du système d'exploitation"
   pl_PL: "Polecenia związane z zasobami i wersjami systemu operacyjnego"
+
+about.commands-package-access:
+  en_US: "Commands to manage private package access"
+  de_DE: "Befehle zur Verwaltung des Zugriffs auf private Pakete"
+  es_ES: "Comandos para gestionar el acceso a paquetes privados"
+  fr_FR: "Commandes pour gérer l'accès aux paquets privés"
+  pl_PL: "Polecenia do zarządzania dostępem do prywatnych pakietów"
 
 about.commands-packages:
   en_US: "Commands related to packages"
@@ -6690,6 +6733,13 @@ about.get-os-versions-info:
   fr_FR: "Obtenir les informations sur les versions du système d'exploitation"
   pl_PL: "Pobierz informacje o wersjach systemu operacyjnego"
 
+about.get-package-access:
+  en_US: "Show whether a package is private and which signers can see it"
+  de_DE: "Anzeigen, ob ein Paket privat ist und welche Unterzeichner es sehen können"
+  es_ES: "Mostrar si un paquete es privado y qué firmantes pueden verlo"
+  fr_FR: "Indiquer si un paquet est privé et quels signataires peuvent le voir"
+  pl_PL: "Pokaż, czy pakiet jest prywatny i którzy sygnatariusze mogą go widzieć"
+
 about.get-pubkey-from-server:
   en_US: "Get the public key from the server"
   de_DE: "Öffentlichen Schlüssel vom Server abrufen"
@@ -7181,6 +7231,13 @@ about.remove-package-category:
   fr_FR: "Supprimer le package de la catégorie"
   pl_PL: "Usuń pakiet z kategorii"
 
+about.remove-package-reader:
+  en_US: "Revoke a signer's access to a private package"
+  de_DE: "Den Zugriff eines Unterzeichners auf ein privates Paket widerrufen"
+  es_ES: "Revocar el acceso de un firmante a un paquete privado"
+  fr_FR: "Révoquer l'accès d'un signataire à un paquet privé"
+  pl_PL: "Odbierz sygnatariuszowi dostęp do prywatnego pakietu"
+
 about.remove-package-registry:
   en_US: "Remove package from registry"
   de_DE: "Paket aus der Registry entfernen"
@@ -7454,6 +7511,13 @@ about.set-outbound-gateway-package:
   fr_FR: "Définir la passerelle sortante pour un package"
   pl_PL: "Ustaw bramę wychodzącą dla pakietu"
 
+
+about.set-package-private:
+  en_US: "Set whether a package is private"
+  de_DE: "Festlegen, ob ein Paket privat ist"
+  es_ES: "Establecer si un paquete es privado"
+  fr_FR: "Définir si un paquet est privé"
+  pl_PL: "Ustaw, czy pakiet jest prywatny"
 
 about.set-registry-icon:
   en_US: "Set the registry icon"

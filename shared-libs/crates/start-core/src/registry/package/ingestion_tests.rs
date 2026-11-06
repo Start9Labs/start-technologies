@@ -43,38 +43,7 @@ fn larger_bound_fixture() -> (Vec<u8>, MerkleArchiveCommitment) {
     (bytes, commitment)
 }
 
-async fn context(datadir: PathBuf, uploader: AnyVerifyingKey) -> RegistryContext {
-    tokio::fs::create_dir_all(&datadir).await.unwrap();
-    let db =
-        TypedPatchDb::load_unchecked(PatchDb::open(datadir.join("registry.db")).await.unwrap());
-    let mut database = RegistryDatabase::init();
-    let guid = Guid::new();
-    database.admins.insert(guid.clone());
-    database.index.trust_signers.insert(guid.clone());
-    database.index.signers.insert(
-        guid,
-        SignerInfo {
-            name: "Uploader".into(),
-            contact: vec![],
-            keys: [uploader].into(),
-            gpg_exports: Default::default(),
-        },
-    );
-    db.put(&ROOT, &database).await.unwrap();
-    RegistryContext(Arc::new(RegistryContextSeed {
-        hostnames: vec!["localhost".into(), "127.0.0.1".into()],
-        listen: "127.0.0.1:0".parse().unwrap(),
-        db,
-        datadir,
-        startwrt: false,
-        rpc_continuations: RpcContinuations::new(),
-        open_authed_continuations: OpenAuthedContinuations::new(),
-        auth_sig_nonce_cache: SyncMutex::new(Default::default()),
-        client: Client::new(),
-        shutdown: tokio::sync::broadcast::channel(1).0,
-        metrics_db: SyncMutex::new(Connection::open_in_memory().unwrap()),
-    }))
-}
+use super::test_context as context;
 
 type Requests = Arc<Mutex<Vec<Option<(usize, usize)>>>>;
 
