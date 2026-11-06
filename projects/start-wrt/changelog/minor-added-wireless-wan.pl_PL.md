@@ -1,0 +1,1 @@
+- **Bezprzewodowy WAN łączy router z inną siecią Wi-Fi w celu dostępu do Internetu**, jako zapas dla portu WAN lub zamiast niego. Wybierz sieć po skanowaniu na nowej stronie `Internet > Bezprzewodowy WAN`. Profile, opublikowane porty i dostęp zdalny korzystają z niego tak samo jak z portu WAN. Strona Wi-Fi nie wyłącza już pasma obsługującego łącze, także skonfigurowanego w LuCI.

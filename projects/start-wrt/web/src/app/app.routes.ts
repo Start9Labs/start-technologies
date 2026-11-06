@@ -28,6 +28,10 @@ export const routes: Routes = [
             loadChildren: () => import('./routes/wan'),
           },
           {
+            path: 'wwan',
+            loadComponent: () => import('./routes/wwan'),
+          },
+          {
             path: 'published-ports',
             loadComponent: () => import('./routes/published-ports'),
           },

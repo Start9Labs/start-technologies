@@ -1438,6 +1438,103 @@ export const WifiRadio: z.ZodObject<{
 }).meta({
   id: 'WifiRadio',
 })
+
+/**
+ * Which uplink carries traffic while both the WAN port and the Wi-Fi uplink are up.
+ */
+export const WwanPriority: z.ZodEnum<{
+  backup: 'backup'
+  preferred: 'preferred'
+}> = /* @__PURE__ */ z.enum(['backup', 'preferred']).meta({
+  id: 'WwanPriority',
+  description:
+    'Which uplink carries traffic while both the WAN port and the Wi-Fi uplink are up.',
+})
+export const WwanRadio: z.ZodObject<{
+  /**
+   * The `wifi-device` section, e.g. `radio0`.
+   */
+  radio: z.ZodString
+  band: z.ZodString
+  enabled: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  /**
+   * The `wifi-device` section, e.g. `radio0`.
+   */
+  radio: z.string().meta({
+    description: 'The `wifi-device` section, e.g. `radio0`.',
+  }),
+  band: z.string(),
+  enabled: z.boolean(),
+}).meta({
+  id: 'WwanRadio',
+})
+export const WwanScanRequest: z.ZodObject<{ radio: z.ZodString }> =
+  /* @__PURE__ */ object({ radio: z.string() }).meta({
+    id: 'WwanScanRequest',
+  })
+export const WwanSecurity: z.ZodEnum<{
+  open: 'open'
+  wpa2: 'wpa2'
+  wpa2Wpa3: 'wpa2Wpa3'
+  wpa3: 'wpa3'
+}> = /* @__PURE__ */ z.enum(['open', 'wpa2', 'wpa2Wpa3', 'wpa3']).meta({
+  id: 'WwanSecurity',
+})
+
+/**
+ * What the router observes of the uplink. Absent off the router.
+ */
+export const WwanState: z.ZodObject<{
+  associated: z.ZodBoolean
+  /**
+   * The uplink's IPv4 address, once DHCP has assigned one.
+   */
+  address: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * Signal strength in dBm.
+   */
+  signal: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  channel: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  /**
+   * Whether the router's Internet traffic leaves through the Wi-Fi uplink.
+   */
+  active: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  associated: z.boolean(),
+  /**
+   * The uplink's IPv4 address, once DHCP has assigned one.
+   */
+  address: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description: "The uplink's IPv4 address, once DHCP has assigned one.",
+  }),
+  /**
+   * Signal strength in dBm.
+   */
+  signal: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description: 'Signal strength in dBm.',
+  }),
+  channel: wire(z.int().nullable().optional(), z.int().nullable()),
+  /**
+   * Whether the router's Internet traffic leaves through the Wi-Fi uplink.
+   */
+  active: z.boolean().meta({
+    description:
+      "Whether the router's Internet traffic leaves through the Wi-Fi uplink.",
+  }),
+}).meta({
+  id: 'WwanState',
+  description: 'What the router observes of the uplink. Absent off the router.',
+})
 export const ActivityListResponse: z.ZodObject<{
   entries: z.ZodArray<typeof ActivityEntry>
   total: z.ZodInt
@@ -2678,6 +2775,104 @@ export const WifiSetResult: z.ZodObject<{
 }).meta({
   id: 'WifiSetResult',
 })
+export const WwanConnectRequest: z.ZodObject<{
+  radio: z.ZodString
+  ssid: z.ZodString
+  security: typeof WwanSecurity
+  /**
+   * Ignored for an open network.
+   */
+  password: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  priority: typeof WwanPriority
+}> = /* @__PURE__ */ object({
+  radio: z.string(),
+  ssid: z.string(),
+  security: WwanSecurity,
+  /**
+   * Ignored for an open network.
+   */
+  password: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description: 'Ignored for an open network.',
+  }),
+  priority: WwanPriority,
+}).meta({
+  id: 'WwanConnectRequest',
+})
+export const WwanNetwork: z.ZodObject<{
+  /**
+   * Empty for a network that hides its name.
+   */
+  ssid: z.ZodString
+  bssid: z.ZodString
+  channel: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  /**
+   * Signal strength in dBm.
+   */
+  signal: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  /**
+   * `None` for a network StartWRT cannot join, such as WPA Enterprise.
+   */
+  security: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof WwanSecurity>>,
+    z.ZodNullable<typeof WwanSecurity>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Empty for a network that hides its name.
+   */
+  ssid: z.string().meta({
+    description: 'Empty for a network that hides its name.',
+  }),
+  bssid: z.string(),
+  channel: wire(z.int().nullable().optional(), z.int().nullable()),
+  /**
+   * Signal strength in dBm.
+   */
+  signal: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description: 'Signal strength in dBm.',
+  }),
+  /**
+   * `None` for a network StartWRT cannot join, such as WPA Enterprise.
+   */
+  security: wire(
+    WwanSecurity.nullable().optional(),
+    WwanSecurity.nullable(),
+  ).meta({
+    description:
+      '`None` for a network StartWRT cannot join, such as WPA Enterprise.',
+  }),
+}).meta({
+  id: 'WwanNetwork',
+})
+export const WwanPrioritySetRequest: z.ZodObject<{
+  priority: typeof WwanPriority
+}> = /* @__PURE__ */ object({ priority: WwanPriority }).meta({
+  id: 'WwanPrioritySetRequest',
+})
+export const WwanUplink: z.ZodObject<{
+  radio: z.ZodString
+  band: z.ZodString
+  ssid: z.ZodString
+  security: typeof WwanSecurity
+  priority: typeof WwanPriority
+}> = /* @__PURE__ */ object({
+  radio: z.string(),
+  band: z.string(),
+  ssid: z.string(),
+  security: WwanSecurity,
+  priority: WwanPriority,
+}).meta({
+  id: 'WwanUplink',
+})
 
 /**
  * `wifi.blackout-set` request: the blackout windows plus a confirmation flag.
@@ -2774,6 +2969,34 @@ export const WifiRegulatory: z.ZodObject<{
   }),
 }).meta({
   id: 'WifiRegulatory',
+})
+export const WwanResponse: z.ZodObject<{
+  radios: z.ZodArray<typeof WwanRadio>
+  uplink: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof WwanUplink>>,
+    z.ZodNullable<typeof WwanUplink>
+  >
+  state: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof WwanState>>,
+    z.ZodNullable<typeof WwanState>
+  >
+  /**
+   * Client-mode Wi-Fi interfaces StartWRT did not create, by section name.
+   */
+  unmanaged: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({
+  radios: z.array(WwanRadio),
+  uplink: wire(WwanUplink.nullable().optional(), WwanUplink.nullable()),
+  state: wire(WwanState.nullable().optional(), WwanState.nullable()),
+  /**
+   * Client-mode Wi-Fi interfaces StartWRT did not create, by section name.
+   */
+  unmanaged: z.array(z.string()).meta({
+    description:
+      'Client-mode Wi-Fi interfaces StartWRT did not create, by section name.',
+  }),
+}).meta({
+  id: 'WwanResponse',
 })
 export const SessionList: z.ZodObject<{
   current: z.ZodCodec<
@@ -4128,6 +4351,95 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ WifiSetResult,
+        },
+      },
+    },
+    wwan: {
+      _PARAMS: /* @__PURE__ */ empty,
+      _CHILDREN: {
+        connect: {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            WwanConnectRequest.meta({
+              description:
+                'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
+            }),
+          ),
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        disconnect: {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            empty,
+          ),
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        get: {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            empty,
+          ),
+          _RETURN: /* @__PURE__ */ WwanResponse,
+        },
+        'priority-set': {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            WwanPrioritySetRequest.meta({
+              description:
+                'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
+            }),
+          ),
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        scan: {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            WwanScanRequest.meta({
+              description:
+                'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
+            }),
+          ),
+          _RETURN: /* @__PURE__ */ z.array(WwanNetwork),
         },
       },
     },

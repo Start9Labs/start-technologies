@@ -49,6 +49,7 @@ pub mod vpn_server;
 pub mod wan;
 pub mod wg;
 pub mod wifi;
+pub mod wwan;
 
 use std::io::IsTerminal;
 use std::ops::Deref;
@@ -410,6 +411,7 @@ pub fn main_api<C: CtrlContext + Clone>() -> ParentHandler<C> {
         .subcommand("devices", devices::devices::<C>())
         .subcommand("dns", dns_inject::dns::<C>())
         .subcommand("wan", wan::wan::<C>())
+        .subcommand("wwan", wwan::wwan::<C>())
         .subcommand("lan", lan::lan::<C>())
         .subcommand("published-ports", published_ports::published_ports::<C>())
         .subcommand("ssh-keys", ssh_keys::ssh_keys::<C>())

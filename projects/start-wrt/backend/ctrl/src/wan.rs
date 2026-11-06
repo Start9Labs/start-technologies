@@ -22,6 +22,10 @@ fn serde_name(v: &impl Serialize) -> String {
 
 pub const WAN_INTERFACE: &str = "wan";
 pub const WAN6_INTERFACE: &str = "wan6";
+/// The Wi-Fi uplink, a member of the `wan` firewall zone.
+pub const WWAN_INTERFACE: &str = "wwan";
+/// Interfaces whose upstream DNS servers follow the WAN DNS mode.
+const DNS_INTERFACES: [&str; 3] = [WAN_INTERFACE, WAN6_INTERFACE, WWAN_INTERFACE];
 /// netifd alias for the `wan` interface's layer-3 device.
 pub const WAN6_DEVICE: &str = "@wan";
 const DDNS_SECTION: &str = "wan";
@@ -918,6 +922,33 @@ pub async fn dns_get<C: CtrlContext>(ctx: C) -> Result<WanDnsResponse, Error> {
     }
 }
 
+/// The DNS options of an interface, written without touching its other options.
+#[derive(Debug, TypedSection, Default)]
+#[uci(ty = "interface")]
+struct InterfaceDns {
+    #[uci(default)]
+    peerdns: Option<String>,
+    dns: Vec<String>,
+}
+
+/// Off keeps the upstream network's DNS servers out of dnsmasq's resolv file.
+fn set_peer_dns(cfgs: &mut uciedit::Configs, peer_dns: bool) -> Result<(), Error> {
+    for section in &mut cfgs["network"].sections {
+        if !section
+            .name()
+            .is_some_and(|n| DNS_INTERFACES.contains(&&*n))
+        {
+            continue;
+        }
+        if let Some(mut iface) = section.get_typed::<InterfaceDns>()? {
+            iface.peerdns = Some(if peer_dns { "1" } else { "0" }.to_string());
+            iface.dns = vec![];
+            section.set(&iface)?;
+        }
+    }
+    Ok(())
+}
+
 #[instrument(skip_all)]
 pub async fn dns_set<C: CtrlContext>(
     ctx: C,
@@ -948,33 +979,9 @@ pub async fn dns_set<C: CtrlContext>(
                     Some("system_dns"),
                 )?;
 
-                // Set peerdns=0 on WAN/WAN6 to prevent ISP DNS from appearing in resolvfile
-                for section in &mut cfgs["network"].sections {
-                    let name = section.name();
-                    let n = name.as_deref();
-                    if n == Some(WAN_INTERFACE) || n == Some(WAN6_INTERFACE) {
-                        if let Some(mut iface) = section.get_typed::<NetworkInterface>()? {
-                            iface.peerdns = Some("0".to_string());
-                            iface.dns = vec![];
-                            section.set(&iface)?;
-                        }
-                    }
-                }
+                set_peer_dns(&mut cfgs, false)?;
             }
-            DnsMode::Isp => {
-                // Restore peerdns=1 on WAN/WAN6
-                for section in &mut cfgs["network"].sections {
-                    let name = section.name();
-                    let n = name.as_deref();
-                    if n == Some(WAN_INTERFACE) || n == Some(WAN6_INTERFACE) {
-                        if let Some(mut iface) = section.get_typed::<NetworkInterface>()? {
-                            iface.peerdns = Some("1".to_string());
-                            iface.dns = vec![];
-                            section.set(&iface)?;
-                        }
-                    }
-                }
-            }
+            DnsMode::Isp => set_peer_dns(&mut cfgs, true)?,
         }
 
         // Rewrite DNS forwarding (dnsmasq + firewall DNAT) for all profiles
@@ -1672,6 +1679,54 @@ config zone
                 },
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn dns_mode_follows_onto_the_wifi_uplink() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_network(dir.path());
+        setup_startwrt(dir.path());
+        let network = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        std::fs::write(
+            dir.path().join("network"),
+            format!(
+                "{network}\nconfig interface 'wwan'\n\toption proto 'dhcp'\n\toption metric '20'\n"
+            ),
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        let wwan = || {
+            let text = std::fs::read_to_string(dir.path().join("network")).unwrap();
+            text[text.find("'wwan'").unwrap()..].to_string()
+        };
+
+        dns_set(
+            ctx.clone(),
+            DeserializeStdin(WanDnsSetRequest {
+                mode: DnsMode::Custom,
+                servers: Some(vec![DnsServer {
+                    address: "9.9.9.9".into(),
+                    ssl: false,
+                }]),
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(wwan().contains("option peerdns '0'"));
+        assert!(wwan().contains("option metric '20'"));
+        assert!(!wwan().contains("device"));
+
+        dns_set(
+            ctx,
+            DeserializeStdin(WanDnsSetRequest {
+                mode: DnsMode::Isp,
+                servers: None,
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(wwan().contains("option peerdns '1'"));
+        assert!(!wwan().contains("device"));
     }
 
     // ── DDNS ──
