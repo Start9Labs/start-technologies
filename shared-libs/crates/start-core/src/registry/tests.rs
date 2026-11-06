@@ -19,7 +19,7 @@ fn signer(seed: u8) -> Signer {
     ))
 }
 
-async fn fixture() -> (tempfile::TempDir, RegistryContext, Signer, Signer, String) {
+pub(super) async fn fixture() -> (tempfile::TempDir, RegistryContext, Signer, Signer, String) {
     let temp = tempfile::tempdir().unwrap();
     let admin = signer(31);
     let reader = signer(32);
@@ -55,7 +55,7 @@ async fn fixture() -> (tempfile::TempDir, RegistryContext, Signer, Signer, Strin
     (temp, ctx, admin, reader, path.to_string())
 }
 
-async fn server(ctx: RegistryContext) -> (Url, NonDetachingJoinHandle<()>) {
+pub(super) async fn server(ctx: RegistryContext) -> (Url, NonDetachingJoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/", listener.local_addr().unwrap())
         .parse()

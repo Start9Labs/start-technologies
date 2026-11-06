@@ -25,13 +25,16 @@ use crate::context::config::{CONFIG_PATH, ContextConfig};
 use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
 use crate::middleware::auth::local::{LocalAuthContext, dial_addr, is_loopback, local_auth_header};
-use crate::middleware::auth::signature::{NonceCache, SignatureAuthContext, SignatureAuthMetadata};
+use crate::middleware::auth::signature::{
+    NonceCache, SignatureAuthContext, SignatureAuthMetadata, SigningContext,
+};
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
 use crate::registry::migrations::run_migrations;
 use crate::registry::mirror::IndexMirrors;
 use crate::registry::package::icon::{icons_dir, referenced_icons, sweep_icons};
+use crate::registry::package::promote::registry_rpc_url;
 use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
 use crate::sign::AnyVerifyingKey;
@@ -227,20 +230,14 @@ impl CallRemote<RegistryContext> for CliContext {
             let is_local = is_loopback(&url);
             (url, is_local)
         } else if local_auth.is_some() || !self.registry_hostname.is_empty() {
-            let mut url: Url = format!(
+            let url: Url = format!(
                 "http://{}",
                 dial_addr(self.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN))
             )
             .parse()
             .map_err(Error::from)?;
-            url.path_segments_mut()
-                .map_err(|_| eyre!("Url cannot be base"))
-                .with_kind(crate::ErrorKind::ParseUrl)?
-                .push("rpc")
-                .push("v0");
-            // Derived from the registry's own listen address, so it names this
-            // machine even when that address isn't loopback.
-            (url, true)
+            // The listen address identifies this machine, including non-loopback binds.
+            (registry_rpc_url(&url)?, true)
         } else {
             return Err(Error::new(
                 eyre!("{}", t!("registry.context.registry-required")),
@@ -281,7 +278,7 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
         mut method: &str,
         metadata: OrdMap<&'static str, Value>,
         mut params: Value,
-        RegistryUrlParams { mut registry }: RegistryUrlParams,
+        RegistryUrlParams { registry }: RegistryUrlParams,
     ) -> Result<Value, RpcError> {
         super::compat::pem_wire(&mut params);
         let mut headers = HeaderMap::new();
@@ -303,17 +300,17 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
             return Ok(result);
         }
 
-        registry
-            .path_segments_mut()
-            .map_err(|_| Error::new(eyre!("cannot extend URL path"), ErrorKind::ParseUrl))?
-            .push("rpc")
-            .push("v0");
+        let registry = registry_rpc_url(&registry)?;
 
         let is_onion = registry.host_str().map_or(false, |h| h.ends_with(".onion"));
 
+        let identity = registry
+            .host_str()
+            .or_not_found("registry hostname")?
+            .to_owned();
         let mut res = match crate::middleware::auth::signature::call_remote_with_client(
-            None,
-            self.client.get(),
+            Some((self.signing_key()?, &identity)),
+            self.client.get_without_redirects(),
             registry,
             headers,
             method,

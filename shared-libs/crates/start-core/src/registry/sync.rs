@@ -2,32 +2,24 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::{SinkExt, StreamExt};
-use http::HeaderMap;
-use patch_db::{Dump, ModelExt, Revision};
+use patch_db::ModelExt;
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use url::Url;
 
 use crate::context::RpcContext;
-use crate::db::SubscribeRes;
 use crate::db::model::{Database, DatabaseModel};
-use crate::middleware::auth::signature::call_remote_with_client;
 use crate::prelude::*;
 use crate::registry::FullIndex;
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::info::RegistryInfo;
 use crate::registry::os::index::{OsIndex, OsVersionInfo};
 use crate::registry::package::get::{GetPackageParams, GetPackagesResponse, select_packages};
-use crate::registry::package::promote::registry_rpc_url;
-use crate::rpc_continuations::Guid;
 use crate::trusted_keys::connection::{
     is_connected, refresh_registry, registry_url, same_registry,
 };
 use crate::util::future::NonDetachingJoinHandle;
+
+mod connection;
 
 /// Last synchronized package listings and registry trust proposals.
 #[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
@@ -75,6 +67,13 @@ impl Subscription {
         }
     }
 
+    fn request_id(&self) -> u64 {
+        match self {
+            Self::Index(_) => 1,
+            Self::Os(_) => 2,
+        }
+    }
+
     fn selected(&self, ui: &Value) -> bool {
         match self {
             Self::Index(url) => is_connected(ui, url.as_str()),
@@ -99,13 +98,24 @@ fn subscriptions(ui: &Value) -> Result<BTreeSet<Subscription>, Error> {
     Ok(subscriptions)
 }
 
+fn connections(subscriptions: &BTreeSet<Subscription>) -> BTreeSet<BTreeSet<Subscription>> {
+    let mut connections: BTreeMap<&Url, BTreeSet<Subscription>> = BTreeMap::new();
+    for subscription in subscriptions {
+        connections
+            .entry(subscription.registry())
+            .or_default()
+            .insert(subscription.clone());
+    }
+    connections.into_values().collect()
+}
+
 pub async fn watch_registries(
     db: TypedPatchDb<Database>,
     context: impl Fn() -> Option<RpcContext> + Send + Sync + 'static,
 ) {
     let context: ContextProvider = Arc::new(context);
     let mut watch = db.watch("/public/ui".parse().unwrap()).await;
-    let mut tasks: BTreeMap<Subscription, NonDetachingJoinHandle<()>> = BTreeMap::new();
+    let mut tasks: BTreeMap<BTreeSet<Subscription>, NonDetachingJoinHandle<()>> = BTreeMap::new();
     loop {
         let desired = watch
             .peek_and_mark_seen()
@@ -113,24 +123,36 @@ pub async fn watch_registries(
             .and_then(|ui| subscriptions(&ui));
         match desired {
             Ok(desired) => {
-                tasks.retain(|subscription, _| desired.contains(subscription));
+                let connections = connections(&desired);
+                tasks.retain(|subscriptions, _| connections.contains(subscriptions));
                 let result = db
-                    .mutate(|db| reconcile(db, &desired, tasks.is_empty()))
+                    .mutate(|db| {
+                        reconcile(db, &desired, tasks.is_empty())?;
+                        for subscriptions in connections
+                            .iter()
+                            .filter(|subscriptions| !tasks.contains_key(*subscriptions))
+                        {
+                            for subscription in subscriptions {
+                                set_disconnected(db, subscription)?;
+                            }
+                        }
+                        Ok::<_, Error>(())
+                    })
                     .await
                     .result;
                 if let Err(error) = result {
                     tracing::error!(?error, "Could not reconcile registry caches");
                     return;
                 }
-                for subscription in desired {
-                    if !tasks.contains_key(&subscription) {
+                for subscriptions in connections {
+                    if !tasks.contains_key(&subscriptions) {
                         let db = db.clone();
                         let context = context.clone();
-                        let key = subscription.clone();
+                        let key = subscriptions.clone();
                         tasks.insert(
                             key,
                             tokio::spawn(async move {
-                                watch_registry(db, subscription, context).await;
+                                watch_registry(db, subscriptions, context).await;
                             })
                             .into(),
                         );
@@ -184,17 +206,22 @@ fn reconcile(
 
 async fn watch_registry(
     db: TypedPatchDb<Database>,
-    subscription: Subscription,
+    subscriptions: BTreeSet<Subscription>,
     context: ContextProvider,
 ) {
     let mut backoff = 30;
     loop {
-        let result = subscribe(&db, &subscription, &context, &mut backoff).await;
+        let result = connection::subscribe(&db, &subscriptions, &context, &mut backoff).await;
         if let Err(error) = result {
-            tracing::debug!(?error, registry = %subscription.registry(), "Registry subscription disconnected");
+            tracing::debug!(?error, ?subscriptions, "Registry connection disconnected");
         }
         let _ = db
-            .mutate(|db| set_disconnected(db, &subscription))
+            .mutate(|db| {
+                for subscription in &subscriptions {
+                    set_disconnected(db, subscription)?;
+                }
+                Ok::<_, Error>(())
+            })
             .await
             .result;
         if context().is_none() {
@@ -244,115 +271,6 @@ fn set_disconnected(db: &mut DatabaseModel, subscription: &Subscription) -> Resu
         }
     }
     Ok(())
-}
-
-fn websocket_url(registry: &Url, guid: &Guid) -> Result<Url, Error> {
-    let mut url = registry.clone();
-    url.path_segments_mut()
-        .map_err(|_| Error::new(eyre!("invalid registry URL"), ErrorKind::ParseUrl))?
-        .pop_if_empty()
-        .push("ws")
-        .push("rpc")
-        .push(guid.as_ref());
-    let scheme = match url.scheme() {
-        "https" => "wss",
-        "http" => "ws",
-        _ => {
-            return Err(Error::new(
-                eyre!("invalid registry scheme"),
-                ErrorKind::ParseUrl,
-            ));
-        }
-    };
-    url.set_scheme(scheme)
-        .map_err(|_| Error::new(eyre!("invalid registry scheme"), ErrorKind::ParseUrl))?;
-    Ok(url)
-}
-
-async fn subscribe(
-    db: &TypedPatchDb<Database>,
-    subscription: &Subscription,
-    context: &ContextProvider,
-    backoff: &mut u64,
-) -> Result<(), Error> {
-    let (dump, socket, device) = {
-        let Some(ctx) = context() else {
-            return Ok(());
-        };
-        let device = DeviceInfo::load(&ctx).await?;
-        let result = tokio::time::timeout(
-            Duration::from_secs(30),
-            call_remote_with_client(
-                None,
-                ctx.client.get(),
-                registry_rpc_url(subscription.registry())?,
-                HeaderMap::new(),
-                "db.subscribe",
-                imbl_value::json!({ "pointer": subscription.pointer() }),
-            ),
-        )
-        .await
-        .with_kind(ErrorKind::Network)??;
-        let SubscribeRes { dump, guid } = from_value(result)?;
-        let config = WebSocketConfig::default()
-            .read_buffer_size(4096)
-            .write_buffer_size(0)
-            .max_write_buffer_size(4096);
-        let socket = tokio::time::timeout(
-            Duration::from_secs(30),
-            ctx.client
-                .websocket(websocket_url(subscription.registry(), &guid)?, config),
-        )
-        .await
-        .with_kind(ErrorKind::Network)??;
-        (dump, socket, device)
-    };
-    receive_updates(socket, dump, db, subscription, &device, backoff).await
-}
-
-async fn receive_updates<S: AsyncRead + AsyncWrite + Unpin>(
-    mut socket: WebSocketStream<S>,
-    mut dump: Dump,
-    db: &TypedPatchDb<Database>,
-    subscription: &Subscription,
-    device: &DeviceInfo,
-    backoff: &mut u64,
-) -> Result<(), Error> {
-    publish(db, subscription, &dump.value, device).await?;
-    *backoff = 30;
-    let mut heartbeat = tokio::time::interval(Duration::from_secs(60));
-    heartbeat.tick().await;
-    let mut last_received = tokio::time::Instant::now();
-    loop {
-        tokio::select! {
-            message = socket.next() => {
-                last_received = tokio::time::Instant::now();
-                match message.transpose().with_kind(ErrorKind::Network)? {
-                Some(Message::Text(text)) => {
-                    let revision: Revision = serde_json::from_str(&text).with_kind(ErrorKind::Deserialization)?;
-                    ensure_code!(revision.id > dump.id, ErrorKind::Database, "out-of-order registry revision");
-                    patch_db::json_patch::patch(&mut dump.value, &revision.patch).with_kind(ErrorKind::Database)?;
-                    dump.id = revision.id;
-                    publish(db, subscription, &dump.value, device).await?;
-                    *backoff = 30;
-                }
-                Some(Message::Ping(_)) => {
-                    tokio::time::timeout(Duration::from_secs(15), socket.flush())
-                        .await.with_kind(ErrorKind::Network)?.with_kind(ErrorKind::Network)?;
-                }
-                Some(Message::Close(_)) | None => return Ok(()),
-                _ => (),
-                }
-            },
-            _ = heartbeat.tick() => {
-                tokio::time::timeout(Duration::from_secs(15), socket.send(Message::Ping(Default::default())))
-                    .await.with_kind(ErrorKind::Network)?.with_kind(ErrorKind::Network)?;
-            }
-            _ = tokio::time::sleep_until(last_received + Duration::from_secs(120)) => {
-                return Err(Error::new(eyre!("registry heartbeat timed out"), ErrorKind::Network));
-            }
-        }
-    }
 }
 
 async fn publish(

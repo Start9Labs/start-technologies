@@ -30,6 +30,10 @@ Subsequent events use the same request ID and a separate protocol discriminator:
 { "rpcstream": "1.0", "id": 42, "result": { "id": 101, "patch": [] }, "end": false }
 ```
 
+Rust clients decode initiating replies with `RpcResponse` and subsequent replies with
+`RpcStreamResponse`. The latter owns the stream envelope's encoding and validation for
+both the server and clients, including non-null IDs and exclusive result/error fields.
+
 ## Producer handle
 
 `HandlerArgs::rpc_stream` contains an optional `RpcStream` producer handle. It is

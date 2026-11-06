@@ -24,7 +24,7 @@ pub mod websocket;
 
 pub use http::*;
 pub use response::RpcResponse;
-pub use rpcstream::{RpcStream, RPCSTREAM_CANCELLED_ERROR, RPCSTREAM_VERSION};
+pub use rpcstream::{RpcStream, RpcStreamResponse, RPCSTREAM_CANCELLED_ERROR, RPCSTREAM_VERSION};
 pub use socket::*;
 #[cfg(feature = "websocket")]
 pub use websocket::*;

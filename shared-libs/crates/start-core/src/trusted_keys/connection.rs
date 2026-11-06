@@ -4,9 +4,10 @@ use url::Url;
 
 use super::*;
 use crate::db::model::public::Public;
-use crate::middleware::auth::signature::call_remote_with_client;
+use crate::middleware::auth::signature::{SigningContext, call_remote_with_client};
 use crate::registry::info::RegistryInfo;
 use crate::registry::package::promote::registry_rpc_url;
+use crate::sign::Signer;
 
 #[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -67,9 +68,13 @@ fn offered_keys(public: &Public, url: &str) -> BTreeSet<AnyVerifyingKey> {
         .collect()
 }
 
-async fn fetch_info(client: reqwest::Client, url: &Url) -> Result<RegistryInfo, Error> {
+async fn fetch_info(
+    client: reqwest::Client,
+    url: &Url,
+    signer: Signer,
+) -> Result<RegistryInfo, Error> {
     let value = call_remote_with_client(
-        None,
+        Some((signer, url.host_str().or_not_found("registry hostname")?)),
         client,
         registry_rpc_url(url)?,
         HeaderMap::new(),
@@ -86,7 +91,7 @@ pub async fn connect(
     params: ConnectRegistryParams,
 ) -> Result<BTreeSet<InternedString>, Error> {
     let url = registry_url(&params.url)?;
-    let info = fetch_info(ctx.client.get(), &url).await?;
+    let info = fetch_info(ctx.client.get_without_redirects(), &url, ctx.signing_key()?).await?;
     ctx.db
         .mutate(|db| {
             db.as_public_mut()
@@ -647,9 +652,13 @@ mod tests {
         let response = serde_json::to_value(&info).unwrap();
         let router = axum::Router::new().route(
             "/catalog/rpc/v0",
-            axum::routing::post(move |axum::Json(request): axum::Json<serde_json::Value>| {
+            axum::routing::post(move |headers: HeaderMap, body: axum::body::Bytes| {
                 let response = response.clone();
                 async move {
+                    let proof = crate::middleware::auth::signature::SignatureHeader::from_header(&headers[crate::middleware::auth::signature::AUTH_SIG_HEADER]).unwrap();
+                    crate::middleware::auth::signature::verify_request(&proof.signer, &proof.commitment, "127.0.0.1", &proof.signature).unwrap();
+                    proof.commitment.verify_bytes(&body).await.unwrap();
+                    let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
                     assert_eq!(request["params"], serde_json::json!({}));
                     axum::Json(if request["method"] == "info" {
                         serde_json::json!({ "jsonrpc": "2.0", "id": request["id"], "result": response })
@@ -671,7 +680,13 @@ mod tests {
         .into();
         let fetched = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            fetch_info(reqwest::Client::new(), &url),
+            fetch_info(
+                reqwest::Client::new(),
+                &url,
+                crate::sign::Signer::Key(crate::sign::AnySigningKey::Ed25519(
+                    ed25519_dalek::SigningKey::from_bytes(&[71; 32]),
+                )),
+            ),
         )
         .await
         .unwrap()

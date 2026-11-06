@@ -36,7 +36,7 @@ Defined in `shared-libs/crates/start-core/src/bins/registry.rs`:
 Defined in `shared-libs/crates/start-core/src/registry/mod.rs`:
 
 - `POST /rpc/{*path}` — JSON-RPC, wrapped in `Cors`, `Auth` (local + signature auth), and `DeviceInfoMiddleware`.
-- `GET /ws/rpc` — multiplexed JSON-RPC and opt-in `rpcstream` responses, using the HTTP route's middleware. A signed upgrade authenticates the connection with the existing empty-body request-signature commitment.
+- `GET /ws/rpc` — multiplexed JSON-RPC and opt-in `rpcstream` responses, using the HTTP route's middleware. Each JSON message carries its own optional root `signature` proof; an upgrade-body signature does not authenticate subsequent messages.
 - `GET /ws/rpc/{*path}` — WebSocket RPC continuations, keyed by a `Guid`.
 - `/rest/rpc/{*path}` — REST continuation channel (e.g. large asset streams), keyed by a `Guid`.
 - `GET /icons/{*path}` — a package or dependency icon from the content-addressed store. Access follows the visibility of packages referencing the bytes. Public references permit immutable public caching; private-only references require an authorized request signature and return `private, no-store`. Package versions refer to an icon by this path, `blake3/<hash>.<ext>`; `DeviceInfoMiddleware` inlines it as a data URL for StartOS before 0.4.0.3.
@@ -67,11 +67,14 @@ The public `db.subscribe` RPC accepts `{ "pointer": <JSON Pointer> }`. The point
 an initial `{ id, value }` dump and a continuation `guid`. Connecting to `/ws/rpc/<guid>` streams
 revisions whose JSON Patch paths are relative to the selected subtree.
 
-StartOS owns one `/index` continuation for each connected registry and an additional `/index/os`
-continuation for its selected OS-update source. Package queries and registry information use the
-backend cache; browser sessions observe projected package and OS metadata through PatchDB.
-Subscriptions reconnect with jittered backoff and a fresh dump. Cached metadata remains available
-offline, with connection availability reported separately from registry configuration.
+StartOS opens one `/ws/rpc` socket per registry, multiplexing `/index` and the selected OS source's
+`/index/os` watches. Each initiating message is signed with the server's developer key; the upgrade
+is unsigned. Response messages and frames each permit 64 MiB independently of request limits.
+Package queries and registry information use the backend cache; browser sessions observe projected
+package and OS metadata through PatchDB. Subscriptions reconnect with jittered backoff and a fresh
+dump. Cached metadata remains available offline, with connection availability reported separately
+from registry configuration. This client requires `db.watch`; upgrade registries before deploying it.
+The legacy `db.subscribe` endpoint remains available for older clients.
 
 Both subscription methods read filtered in-memory mirrors and use bounded, 32-revision JSON
 queues. Slow subscribers close rather than skip patches. Public-only callers share one mirror;

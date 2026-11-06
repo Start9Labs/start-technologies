@@ -28,7 +28,7 @@ use crate::prelude::*;
 use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::commitment::Commitment;
 use crate::sign::commitment::request::RequestCommitment;
-use crate::sign::{AnySignature, AnyVerifyingKey, Signer};
+use crate::sign::{AnySignature, AnySigningKey, AnyVerifyingKey, Signer};
 use crate::util::serde::DerEncoding;
 use crate::util::sync::SyncMutex;
 
@@ -361,6 +361,14 @@ pub trait SigningContext {
 impl SigningContext for CliContext {
     fn signing_key(&self) -> Result<Signer, Error> {
         Ok(self.id_key()?.clone())
+    }
+}
+
+impl SigningContext for RpcContext {
+    fn signing_key(&self) -> Result<Signer, Error> {
+        Ok(Signer::Key(AnySigningKey::Ed25519(
+            self.account.peek(|account| account.developer_key.clone()),
+        )))
     }
 }
 

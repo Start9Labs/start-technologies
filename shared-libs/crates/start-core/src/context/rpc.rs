@@ -137,27 +137,54 @@ pub struct RpcContext(Arc<RpcContextSeed>);
 
 /// Clients acquired before a reload retain their previous trust configuration.
 pub struct ReloadableHttpClient {
-    client: SyncRwLock<Client>,
+    clients: SyncRwLock<HttpClients>,
     socks_proxy_url: String,
+}
+
+#[derive(Clone)]
+struct HttpClients {
+    redirecting: Client,
+    without_redirects: Client,
 }
 impl ReloadableHttpClient {
     fn new(socks_proxy_url: String) -> Result<Self, Error> {
-        let client = Self::build_for_proxy(&socks_proxy_url)?;
+        let clients = Self::build_clients(&socks_proxy_url)?;
         Ok(Self {
-            client: SyncRwLock::new(client),
+            clients: SyncRwLock::new(clients),
             socks_proxy_url,
         })
     }
 
-    fn build_for_proxy(socks_proxy_url: &str) -> Result<Client, Error> {
+    fn build_clients(socks_proxy_url: &str) -> Result<HttpClients, Error> {
+        Ok(HttpClients {
+            redirecting: Self::build_for_proxy(
+                socks_proxy_url,
+                reqwest::redirect::Policy::default(),
+            )?,
+            without_redirects: Self::build_for_proxy(
+                socks_proxy_url,
+                reqwest::redirect::Policy::none(),
+            )?,
+        })
+    }
+
+    fn build_for_proxy(
+        socks_proxy_url: &str,
+        redirects: reqwest::redirect::Policy,
+    ) -> Result<Client, Error> {
         Client::builder()
             .proxy(Proxy::all(socks_proxy_url)?)
+            .redirect(redirects)
             .build()
             .with_kind(ErrorKind::ParseUrl)
     }
 
     pub fn get(&self) -> Client {
-        self.client.read()
+        self.clients.read().redirecting
+    }
+
+    pub(crate) fn get_without_redirects(&self) -> Client {
+        self.clients.read().without_redirects
     }
 
     pub async fn websocket(
@@ -185,8 +212,8 @@ impl ReloadableHttpClient {
     }
 
     pub fn reload(&self) -> Result<(), Error> {
-        let client = Self::build_for_proxy(&self.socks_proxy_url)?;
-        self.client.replace(client);
+        let clients = Self::build_clients(&self.socks_proxy_url)?;
+        self.clients.replace(clients);
         Ok(())
     }
 }
@@ -703,10 +730,20 @@ mod tests {
 
     use super::*;
 
-    fn client_with_generation(generation: &'static str) -> Client {
+    fn clients_with_generation(generation: &'static str) -> HttpClients {
         let mut headers = HeaderMap::new();
         headers.insert("x-client-generation", HeaderValue::from_static(generation));
-        Client::builder().default_headers(headers).build().unwrap()
+        HttpClients {
+            redirecting: Client::builder()
+                .default_headers(headers.clone())
+                .build()
+                .unwrap(),
+            without_redirects: Client::builder()
+                .default_headers(headers)
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap(),
+        }
     }
 
     #[tokio::test]
@@ -730,7 +767,7 @@ mod tests {
                 .unwrap();
         });
         let http = ReloadableHttpClient {
-            client: SyncRwLock::new(client_with_generation("old")),
+            clients: SyncRwLock::new(clients_with_generation("old")),
             socks_proxy_url: proxy_url,
         };
         let old = http.get();
@@ -798,14 +835,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn scoped_http_clients_do_not_forward_redirect_credentials_after_reload() {
+        let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let http =
+            ReloadableHttpClient::new(format!("http://{}", proxy.local_addr().unwrap())).unwrap();
+        let server = tokio::spawn(async move {
+            let mut forwarded = 0;
+            for _ in 0..4 {
+                let (mut stream, _) = proxy.accept().await.unwrap();
+                let mut request = Vec::new();
+                loop {
+                    let mut bytes = [0; 1024];
+                    let count = stream.read(&mut bytes).await.unwrap();
+                    assert!(count > 0);
+                    request.extend_from_slice(&bytes[..count]);
+                    if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let request = String::from_utf8(request).unwrap();
+                let response = if request.contains("/source ") {
+                    "HTTP/1.1 307 Temporary Redirect\r\nLocation: http://another.invalid/forwarded\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                } else {
+                    assert!(request.contains("/forwarded "));
+                    assert!(!request.to_ascii_lowercase().contains("x-start-auth-sig"));
+                    forwarded += 1;
+                    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                };
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+            forwarded
+        });
+        let url = "http://registry.invalid/source";
+        for _ in 0..2 {
+            http.reload().unwrap();
+            let response = http
+                .get_without_redirects()
+                .get(url)
+                .header(
+                    crate::middleware::auth::signature::AUTH_SIG_HEADER,
+                    "private-proof",
+                )
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), http::StatusCode::TEMPORARY_REDIRECT);
+        }
+        assert!(
+            http.get()
+                .get(url)
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .is_success()
+        );
+        assert_eq!(server.await.unwrap(), 1);
+    }
+
+    #[tokio::test]
     async fn reloadable_http_client_keeps_client_when_rebuild_fails() {
         let http = ReloadableHttpClient {
-            client: SyncRwLock::new(client_with_generation("old")),
+            clients: SyncRwLock::new(clients_with_generation("old")),
             socks_proxy_url: "http://[::1".to_owned(),
         };
 
         assert!(http.reload().is_err());
         assert_client_generation(http.get(), "old").await;
+        assert_client_generation(http.get_without_redirects(), "old").await;
     }
 
     async fn assert_client_generation(client: Client, generation: &str) {

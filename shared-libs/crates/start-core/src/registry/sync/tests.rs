@@ -1,13 +1,19 @@
+use futures::{SinkExt, StreamExt};
 use imbl_value::json;
 use patch_db::json_ptr::ROOT;
+use tokio_tungstenite::tungstenite::Message;
 
+use super::connection::{receive_updates, response_config, watch_request, websocket_url};
 use super::*;
 use crate::account::AccountInfo;
 use crate::db::model::public::Public;
 use crate::registry::device_info::OsInfo;
 use crate::registry::os::index::OsVersionInfo;
 use crate::registry::signer::SignerInfo;
+use crate::rpc_continuations::Guid;
 use crate::util::future::NonDetachingJoinHandle;
+
+mod live;
 
 fn url() -> Url {
     registry_url("https://registry.test/catalog/").unwrap()
@@ -62,6 +68,12 @@ fn canonical_configuration_has_one_subscription_per_registry_plus_the_os_source(
     }))
     .unwrap();
     assert_eq!(desired.len(), 3);
+    let connections = connections(&desired);
+    assert_eq!(connections.len(), 2);
+    assert!(connections.contains(&BTreeSet::from([
+        Subscription::Index(url()),
+        Subscription::Os(url())
+    ])));
     assert!(desired.contains(&Subscription::Index(url())));
     assert!(desired.contains(&Subscription::Os(url())));
     assert_eq!(Subscription::Index(url()).pointer(), "/index");
@@ -70,21 +82,18 @@ fn canonical_configuration_has_one_subscription_per_registry_plus_the_os_source(
 
 #[test]
 fn websocket_urls_preserve_the_registry_prefix_and_tls() {
-    let guid = Guid::new();
     for (registry, expected) in [
         (
             "https://registry.test/catalog/",
-            format!("wss://registry.test/catalog/ws/rpc/{guid}"),
+            "wss://registry.test/catalog/ws/rpc".to_owned(),
         ),
         (
             "http://registry.test:5959/",
-            format!("ws://registry.test:5959/ws/rpc/{guid}"),
+            "ws://registry.test:5959/ws/rpc".to_owned(),
         ),
     ] {
         assert_eq!(
-            websocket_url(&registry.parse().unwrap(), &guid)
-                .unwrap()
-                .as_str(),
+            websocket_url(&registry.parse().unwrap()).unwrap().as_str(),
             expected
         );
     }
@@ -358,7 +367,7 @@ fn os_cache_excludes_other_platforms_and_incompatible_sources() {
 }
 
 #[tokio::test]
-async fn continuation_applies_scoped_revisions_and_answers_heartbeats_on_reconnect() {
+async fn watch_applies_scoped_revisions_and_answers_heartbeats_on_reconnect() {
     let temp = tempfile::tempdir().unwrap();
     let db = TypedPatchDb::<Database>::load_unchecked(
         PatchDb::open(temp.path().join("db")).await.unwrap(),
@@ -374,13 +383,32 @@ async fn continuation_applies_scoped_revisions_and_answers_heartbeats_on_reconne
         let server: NonDetachingJoinHandle<()> = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let request = socket.next().await.unwrap().unwrap();
+            let request: Value = serde_json::from_str(request.to_text().unwrap()).unwrap();
+            assert_eq!(request["method"].as_str(), Some("db.watch"));
+            assert_eq!(request["params"]["pointer"].as_str(), Some("/index"));
+            assert_eq!(
+                request["rpcstream"].as_str(),
+                Some(rpc_toolkit::RPCSTREAM_VERSION)
+            );
+            let id = request["id"].clone();
+            socket
+                .send(Message::Text(
+                    json!({"jsonrpc": "2.0", "id": id, "result": dump})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
             if attempt == 0 {
                 let mut next = index();
                 next.name = Some("Renamed".into());
                 let revision = source.put(&ROOT, &next).await.unwrap().unwrap();
                 socket
                     .send(Message::Text(
-                        serde_json::to_string(&revision).unwrap().into(),
+                        json!({"rpcstream":"1.0", "id":id, "result":revision, "end":false})
+                            .to_string()
+                            .into(),
                     ))
                     .await
                     .unwrap();
@@ -402,10 +430,12 @@ async fn continuation_applies_scoped_revisions_and_answers_heartbeats_on_reconne
             Duration::from_secs(5),
             receive_updates(
                 socket,
-                dump,
                 &db,
-                &Subscription::Index(url()),
+                &BTreeSet::from([Subscription::Index(url())]),
                 &device(),
+                &crate::sign::Signer::Key(crate::sign::AnySigningKey::Ed25519(
+                    ed25519_dalek::SigningKey::from_bytes(&[71; 32]),
+                )),
                 &mut backoff,
             ),
         )
