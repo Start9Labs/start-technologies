@@ -36,7 +36,7 @@ assert_log_contains() {
 entrypoint="$repo_root/build/rust-builder/entrypoint.sh"
 profile_flags=CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS
 default_flags=$(env -u DISABLE_RVA23 -u "$profile_flags" bash "$entrypoint" printenv "$profile_flags")
-[[ "$default_flags" == *'target-cpu=generic-rv64'* ]]
+[[ "$default_flags" != *'target-cpu='* ]]
 [[ "$default_flags" == *'+v,'* ]]
 [[ "$default_flags" == *'+supm'* ]]
 test "$(env -u "$profile_flags" DISABLE_RVA23=0 bash "$entrypoint" printenv "$profile_flags")" = "$default_flags"

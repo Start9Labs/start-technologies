@@ -97,7 +97,12 @@ entrypoint=/usr/local/libexec/start9/rust-builder-entrypoint
 env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
   -u CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS -u DISABLE_RVA23 \
   "$entrypoint" cargo zigbuild --locked --target riscv64gc-unknown-linux-musl --target-dir "$scratch/rust-default"
-verify_rva23_profile "$scratch/rust-default/riscv64gc-unknown-linux-musl/debug/builder-probe"
+for object in \
+  "$scratch/rust-default/riscv64gc-unknown-linux-musl/debug/builder-probe" \
+  "$scratch"/rust-default/riscv64gc-unknown-linux-musl/debug/build/builder-probe-*/out/probe.o \
+  "$scratch"/rust-default/riscv64gc-unknown-linux-musl/debug/build/builder-probe-*/out/cmake/CMakeFiles/cmake_probe.dir/probe.c.o; do
+  verify_rva23_profile "$object"
+done
 
 env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
   -u CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS DISABLE_RVA23=1 \
