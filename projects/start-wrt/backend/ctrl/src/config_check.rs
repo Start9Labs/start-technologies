@@ -12,7 +12,7 @@ use uciedit::openwrt::{
 };
 use uciedit::{read_all, Arena, Config, Line, Section, Token, TypedSection};
 
-use crate::lan::LAN_INTERFACE;
+use crate::lan::{LAN_INTERFACE, LAN_NETMASK};
 use crate::prelude::*;
 use crate::profiles::UciProfile;
 use crate::utils::HandlerExtSerde;
@@ -459,6 +459,27 @@ fn static_address(config: &str, section: &Section, views: &[ConfigView], out: &m
         out.section(config, section, views, ConfigProblem::Missing)
             .option = Some("ipaddr".into());
     }
+    if let Ok(iface) = section.get::<NetworkInterface>() {
+        if iface.ipv4_netmask().is_some_and(|mask| mask != LAN_NETMASK) {
+            let address =
+                option(section, "ipaddr").or_else(|| list(section, "ipaddr").first().copied());
+            let (name, token) = if iface.ipaddr.is_some_and(|address| address.prefix.is_some()) {
+                ("ipaddr", address)
+            } else {
+                ("netmask", option(section, "netmask"))
+            };
+            if let Some(token) = token {
+                out.value(
+                    config,
+                    section,
+                    views,
+                    ConfigProblem::Unsupported,
+                    name,
+                    token,
+                );
+            }
+        }
+    }
 }
 
 fn check_wireless(cfg: &Config, out: &mut Findings) {
@@ -757,6 +778,28 @@ mod tests {
         assert!(found[0].notice);
         assert_eq!(found[0].found.as_deref(), Some("10.0.0.1/24"));
         assert_eq!(found[0].line, Some(7));
+    }
+
+    #[test]
+    fn lan_masks_the_forms_cannot_keep() {
+        for address in [
+            "option ipaddr '192.168.1.1/16'",
+            "list ipaddr '192.168.1.1/16'",
+            "option ipaddr '192.168.1.1'\n\toption netmask '255.255.0.0'",
+        ] {
+            let found = findings(&[(
+                "network",
+                &format!(
+                    "config device\n\toption name 'br-lan'\n\toption type 'bridge'\n\
+                     config interface 'lan'\n\toption proto 'static'\n\t{address}\n\
+                     config interface 'wan'\n\toption proto 'dhcp'\n"
+                ),
+            )]);
+            assert_eq!(found.len(), 1, "{found:#?}");
+            assert_eq!(found[0].problem, ConfigProblem::Unsupported);
+            assert_eq!(found[0].views, vec![Lan, Profiles]);
+            assert!(!found[0].notice);
+        }
     }
 
     #[test]

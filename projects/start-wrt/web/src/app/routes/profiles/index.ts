@@ -139,6 +139,7 @@ import { ProfilesService } from './service'
     }
   `,
   host: { class: 'g-page' },
+  providers: [ProfilesService, OutboundService],
   imports: [
     TuiHeader,
     TuiTitle,
