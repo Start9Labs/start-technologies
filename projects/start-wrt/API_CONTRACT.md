@@ -587,7 +587,7 @@ struct WanDnsSetRequest {
 }
 // Response: null
 // Backend: stores custom servers in the `startwrt` config (`system_dns`
-// section), sets `peerdns` on wan/wan6 (0 for Custom, 1 for Isp), rewrites
+// section), sets `peerdns` on wan/wan6/wwan (0 for Custom, 1 for Isp), rewrites
 // per-profile DNS forwarding (dnsmasq + firewall DNAT), regenerates the
 // SmartDNS config, then runs the full reload_system() (network + smartdns +
 // firewall + dnsmasq)
@@ -1753,6 +1753,9 @@ struct WifiSetResult {
 // (`autoWidths` for "auto"), or when the radio's PHY mode cannot express the
 // width (HT stops at 40 MHz).
 // A call that changes `country` instead rejects any width above 80 MHz.
+// Turning off a radio that an enabled client-mode `wifi-iface` uses, whoever
+// configured it, is rejected with `WifiRadioCarriesUplink` (1027), by a preview
+// too.
 ```
 
 ### `wifi.blackout-get`
@@ -2329,6 +2332,112 @@ struct InjectedDnsRecord {
 
 ---
 
+## 18. Wireless WAN
+
+The router as a Wi-Fi client of another network. StartWRT owns the `wwan`
+sections of `wireless` and `network`; the `wwan` interface is a member of the
+`wan` firewall zone. A client-mode `wifi-iface` under another name (one set up
+in LuCI) is reported in `unmanaged` and never written.
+
+### `wwan.get`
+
+```rust
+// Request: {}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum WwanSecurity { Open, Wpa2, Wpa2Wpa3, Wpa3 }  // "open" | "wpa2" | "wpa2Wpa3" | "wpa3"
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum WwanPriority {
+    /// Used while the WAN port has no connection.
+    Backup,
+    /// Used while connected; the WAN port takes over when it drops.
+    Preferred,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WwanResponse {
+    /// Every `wifi-device`, e.g. { radio: "radio0", band: "2g", enabled: true }.
+    radios: Vec<WwanRadio>,
+    uplink: Option<WwanUplink>,  // { radio, band, ssid, security, priority }
+    /// Absent off the router and while there is no uplink.
+    state: Option<WwanState>,    // { associated, address, signal (dBm), channel, active }
+    /// Client-mode Wi-Fi interfaces StartWRT did not create, by section name.
+    unmanaged: Vec<String>,
+}
+// Backend: `state.active` is true while `wwan` carries the default route
+// (`system::active_uplink`, from `network.interface dump`). The priority reads
+// back from the two interfaces' route metrics.
+```
+
+### `wwan.scan`
+
+```rust
+#[derive(Deserialize)]
+struct WwanScanRequest { radio: String }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WwanNetwork {
+    ssid: String,            // empty for a hidden network
+    bssid: String,
+    channel: Option<u32>,
+    signal: Option<i32>,     // dBm
+    /// None for a network StartWRT cannot join (WPA Enterprise, OWE, WEP, WPA1).
+    security: Option<WwanSecurity>,
+}
+// Response: Vec<WwanNetwork>, one entry per network name (strongest access
+// point), hidden networks one per access point, strongest first.
+// Backend: `ubus call iwinfo scan {"device": <radio>}`; iwinfo scans on one of
+// the radio's interfaces or a temporary one. A radio that is off or missing is
+// rejected with `WifiRadioUnavailable` (1029).
+```
+
+### `wwan.connect`
+
+```rust
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WwanConnectRequest {
+    radio: String,
+    ssid: String,               // 1–32 bytes
+    security: WwanSecurity,
+    password: Option<String>,   // 8–63 characters; ignored for Open
+    priority: WwanPriority,
+}
+// Response: null
+// Backend: replaces any `wwan` sections with a client-mode `wifi-iface 'wwan'`
+// (`network 'wwan'`) and a DHCP `interface 'wwan'`, adds `wwan` to the `wan`
+// zone, and writes route metrics: 10 on the preferred uplink, 20 on the other.
+// `peerdns '0'` follows a custom WAN DNS setting. Rejects an off or missing
+// radio (`WifiRadioUnavailable`), a bad name or password (`InvalidValue`), and
+// an unmanaged client interface (`WifiUplinkConfiguredElsewhere`, 1028), writing
+// nothing. Then reload_system().
+```
+
+### `wwan.priority-set`
+
+```rust
+#[derive(Deserialize)]
+struct WwanPrioritySetRequest { priority: WwanPriority }
+// Response: null
+// Backend: rewrites the two route metrics; `NotFound` without an uplink.
+```
+
+### `wwan.disconnect`
+
+```rust
+// Request: {}
+// Response: null
+// Backend: deletes the `wwan` sections, takes `wwan` out of the `wan` zone and
+// clears `network.wan.metric`; `NotFound` without an uplink.
+```
+
+---
+
 ## HTTP Routes
 
 Every RPC method above is a JSON-RPC 2.0 call to a single endpoint: **`POST /rpc/v1`**.
@@ -2381,6 +2490,11 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `wan.dns-set`                       | WAN             |                             |
 | `wan.ddns-get`                      | WAN             |                             |
 | `wan.ddns-set`                      | WAN             |                             |
+| `wwan.get`                          | Wireless WAN    |                             |
+| `wwan.scan`                         | Wireless WAN    |                             |
+| `wwan.connect`                      | Wireless WAN    |                             |
+| `wwan.priority-set`                 | Wireless WAN    |                             |
+| `wwan.disconnect`                   | Wireless WAN    |                             |
 | `lan.ipv4-get`                      | LAN             |                             |
 | `lan.ipv4-set`                      | LAN             |                             |
 | `lan.ipv6-get`                      | LAN             |                             |
@@ -2440,7 +2554,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `diagnostics.create`                | Diagnostics     |                             |
 | `dns.injected-list`                 | DNS Injection   |                             |
 
-**Totals:** 84 RPC methods across 17 categories, plus the HTTP/WebSocket routes
+**Totals:** 89 RPC methods across 18 categories, plus the HTTP/WebSocket routes
 table above and the deprecated generic endpoints below.
 
 ---

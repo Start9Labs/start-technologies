@@ -63,6 +63,11 @@ import {
   WanDnsSetRequest,
   WanDdnsResponse,
   WanDdnsSetRequest,
+  WwanConnectRequest,
+  WwanNetwork,
+  WwanPrioritySetRequest,
+  WwanResponse,
+  WwanScanRequest,
   PublishedPortFromApi,
   PublishedPortsSetRequest,
   PublishedPortsSetResult,
@@ -633,6 +638,18 @@ export class MockApiService extends ApiService {
 
   async wifiSet(params: WifiConfig): Promise<WifiSetResult> {
     await pauseFor(250)
+    const uplinkBand = this.mockWwanUplink?.band
+    if (
+      Object.values(params.radios).some(
+        r => r.band === uplinkBand && !r.enabled,
+      )
+    ) {
+      throw new RpcError({
+        code: 1027,
+        message: 'Radio Carries Wi-Fi Uplink',
+        data: { details: 'This radio carries the Wi-Fi uplink' },
+      } as RPCErrorDetails)
+    }
     if (params.preview) return { leavingProfile: [] }
     this.mockWifi = structuredClone(params)
     this.logActivity(
@@ -1692,6 +1709,99 @@ export class MockApiService extends ApiService {
       'ddns-updated',
       `Updated DDNS (provider: ${params.provider}, ${params.enabled ? 'enabled' : 'disabled'})`,
     )
+    return null
+  }
+
+  // --- Wireless WAN ---
+
+  private mockWwanUplink: WwanResponse['uplink'] = null
+
+  private readonly mockWwanNetworks: WwanNetwork[] = [
+    {
+      ssid: 'Neighbor',
+      bssid: '02:11:22:33:44:01',
+      channel: 6,
+      signal: -48,
+      security: 'wpa2Wpa3',
+    },
+    {
+      ssid: 'Cafe Free Wi-Fi',
+      bssid: '02:11:22:33:44:02',
+      channel: 1,
+      signal: -63,
+      security: 'open',
+    },
+    {
+      ssid: '',
+      bssid: '02:11:22:33:44:03',
+      channel: 11,
+      signal: -70,
+      security: 'wpa2',
+    },
+    {
+      ssid: 'Office',
+      bssid: '02:11:22:33:44:04',
+      channel: 11,
+      signal: -78,
+      security: null,
+    },
+  ]
+
+  async wwanGet(): Promise<WwanResponse> {
+    await pauseFor(250)
+    const radios = Object.values(this.mockWifi.radios)
+    const enabled = (band: string) =>
+      radios.some(r => r.band === band && r.enabled)
+    return {
+      radios: [
+        { radio: 'radio0', band: '2g', enabled: enabled('2g') },
+        { radio: 'radio1', band: '5g', enabled: enabled('5g') },
+      ],
+      uplink: structuredClone(this.mockWwanUplink),
+      state: this.mockWwanUplink && {
+        associated: true,
+        address: '192.168.43.27',
+        signal: -48,
+        channel: 6,
+        active: this.mockWwanUplink.priority === 'preferred',
+      },
+      unmanaged: [],
+    }
+  }
+
+  async wwanScan(_params: WwanScanRequest): Promise<WwanNetwork[]> {
+    await pauseFor(2000)
+    return structuredClone(this.mockWwanNetworks)
+  }
+
+  async wwanConnect(params: WwanConnectRequest): Promise<null> {
+    await pauseFor(1000)
+    this.mockWwanUplink = {
+      radio: params.radio,
+      band: params.radio === 'radio1' ? '5g' : '2g',
+      ssid: params.ssid,
+      security: params.security,
+      priority: params.priority,
+    }
+    this.logActivity('wwan', 'connected', `Joined Wi-Fi uplink ${params.ssid}`)
+    return null
+  }
+
+  async wwanPrioritySet(params: WwanPrioritySetRequest): Promise<null> {
+    await pauseFor(250)
+    if (this.mockWwanUplink) this.mockWwanUplink.priority = params.priority
+    this.logActivity(
+      'wwan',
+      'priority-updated',
+      `Set Wi-Fi uplink as ${params.priority}`,
+    )
+    return null
+  }
+
+  async wwanDisconnect(): Promise<null> {
+    await pauseFor(500)
+    this.mockWwanUplink = null
+    this.logActivity('wwan', 'disconnected', 'Removed Wi-Fi uplink')
     return null
   }
 

@@ -20,8 +20,8 @@ pub const DEFAULT_LAN_BRIDGE: &str = "br-lan";
 /// the 64-hex-char raw-PMK form isn't exposed through this API. Reject out-of-
 /// range lengths at the API boundary so the user gets a clean error instead of
 /// hostapd silently refusing to start the AP.
-const MIN_PSK_LEN: usize = 8;
-const MAX_PSK_LEN: usize = 63;
+pub(crate) const MIN_PSK_LEN: usize = 8;
+pub(crate) const MAX_PSK_LEN: usize = 63;
 
 const REGULATORY_DB: &str = "/lib/firmware/regulatory.db";
 
@@ -836,6 +836,27 @@ fn auto_enable_radios_on_first_admin_password(
     Ok(true)
 }
 
+/// Turning off a radio a client-mode interface uses would drop that uplink.
+fn check_uplink_radios(cfgs: &Configs, radios: &BTreeMap<String, WifiRadio>) -> Result<(), Error> {
+    let uplinks = crate::wwan::uplink_radios(cfgs)?;
+    for (_, iface, _, radio) in find_relevant_with_radios(cfgs, radios)? {
+        if !radio.enabled && uplinks.contains(&iface.device) {
+            crate::activity::log(
+                "wifi",
+                "updated",
+                false,
+                "Failed to update WiFi: radio carries the Wi-Fi uplink",
+                Some("WifiRadioCarriesUplink"),
+            );
+            return Err(Error::new(
+                eyre!("radio {} carries a Wi-Fi uplink", iface.device),
+                ErrorKind::WifiRadioCarriesUplink,
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Determines whether a full wifi restart or PSK-only reload is needed.
 fn set_config(
     _ctx: &impl CtrlContext,
@@ -1099,6 +1120,11 @@ pub async fn set<C: CtrlContext>(
     }
 
     if preview {
+        {
+            let arena = Arena::new();
+            let cfgs = parse_all(ctx.uci_root(), &arena, &["wireless"]).await?;
+            check_uplink_radios(&cfgs, &wifi.radios)?;
+        }
         let leaving_profile = if ctx.effectful() {
             wifi_devices_leaving_profile(&ctx, &wifi).await?
         } else {
@@ -1228,6 +1254,7 @@ pub async fn set<C: CtrlContext>(
             );
             return Err(err);
         }
+        check_uplink_radios(&cfgs, &wifi.radios)?;
         let restart = match set_config(&ctx, &mut cfgs, &wifi, &lookup) {
             Err(Error {
                 kind: ErrorKind::CorruptedWifi,
@@ -4116,5 +4143,95 @@ Band 2:
         assert!(written.contains("option htmode 'HE40'"), "{written}");
         assert!(written.contains("option htmode 'HE80'"), "{written}");
         assert!(written.contains("option country 'US'"), "{written}");
+    }
+
+    #[tokio::test]
+    async fn turning_off_a_radio_that_carries_an_uplink_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("wireless"),
+            "\
+config wifi-device 'radio0'
+\toption type 'mac80211'
+\toption band '2g'
+\toption channel 'auto'
+
+config wifi-iface 'default_radio0'
+\toption device 'radio0'
+\toption mode 'ap'
+\toption ssid 'Start9'
+\toption encryption 'psk2'
+\toption key 'adminpassword'
+
+config wifi-iface 'wifinet2'
+\toption device 'radio0'
+\toption mode 'sta'
+\toption network 'wwan'
+\toption ssid 'Upstream'
+",
+        )
+        .unwrap();
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path().to_path_buf(), &arena, &["wireless"])
+            .await
+            .unwrap();
+        let radio = |enabled| {
+            BTreeMap::from([(
+                "default_radio0".to_string(),
+                WifiRadio {
+                    band: "2g".into(),
+                    channel: "auto".into(),
+                    width: None,
+                    enabled,
+                    broadcast: enabled,
+                },
+            )])
+        };
+        check_uplink_radios(&cfgs, &radio(true)).unwrap();
+        let err = check_uplink_radios(&cfgs, &radio(false)).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::WifiRadioCarriesUplink);
+    }
+
+    #[tokio::test]
+    async fn preview_refuses_turning_off_an_uplink_radio() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_test_configs(dir.path());
+        write_wireless_config_unkeyed(dir.path());
+        let mut wireless = std::fs::read_to_string(dir.path().join("wireless")).unwrap();
+        wireless.push_str(
+            "\nconfig wifi-iface 'wwan'\n\toption device 'radio0'\n\toption mode 'sta'\n\toption network 'wwan'\n\toption ssid 'Upstream'\n",
+        );
+        std::fs::write(dir.path().join("wireless"), &wireless).unwrap();
+
+        let request = |radios| {
+            let mut passwords = BTreeSet::<Password<ProfileIdOpt>>::new();
+            passwords.insert(Password {
+                label: "Admin".into(),
+                profile: None,
+                password: "adminpass1".into(),
+            });
+            DeserializeStdin(super::WifiSetRequest {
+                wifi: Wifi {
+                    ssid: "TestNet".into(),
+                    broadcast_separately: false,
+                    country: None,
+                    radios,
+                    passwords,
+                },
+                preview: true,
+            })
+        };
+        super::set(ctx.clone(), request(make_dual_radios()))
+            .await
+            .unwrap();
+        let err = super::set(ctx, request(make_dual_radios_disabled()))
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::WifiRadioCarriesUplink);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("wireless")).unwrap(),
+            wireless
+        );
     }
 }

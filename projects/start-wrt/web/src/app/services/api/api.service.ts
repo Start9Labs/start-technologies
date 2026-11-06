@@ -96,6 +96,11 @@ export abstract class ApiService {
   abstract wanDnsSet(params: WanDnsSetRequest): Promise<null>
   abstract wanDdnsGet(): Promise<WanDdnsResponse>
   abstract wanDdnsSet(params: WanDdnsSetRequest): Promise<null>
+  abstract wwanGet(): Promise<WwanResponse>
+  abstract wwanScan(params: WwanScanRequest): Promise<WwanNetwork[]>
+  abstract wwanConnect(params: WwanConnectRequest): Promise<null>
+  abstract wwanPrioritySet(params: WwanPrioritySetRequest): Promise<null>
+  abstract wwanDisconnect(): Promise<null>
   abstract publishedPortsList(): Promise<PublishedPortFromApi[]>
   abstract publishedPortsSet(
     params: PublishedPortsSetRequest,
@@ -326,6 +331,20 @@ export type WanMacStrategy = 'router' | 'custom'
 export type WanMacResponse = RpcReturnType<Api, 'wan.mac-get'>
 
 export type WanMacSetRequest = RpcParamType<Api, 'wan.mac-set'>
+
+export type WwanResponse = RpcReturnType<Api, 'wwan.get'>
+
+export type WwanNetwork = Bindings.WwanNetwork
+
+export type WwanSecurity = Bindings.WwanSecurity
+
+export type WwanPriority = Bindings.WwanPriority
+
+export type WwanScanRequest = RpcParamType<Api, 'wwan.scan'>
+
+export type WwanConnectRequest = RpcParamType<Api, 'wwan.connect'>
+
+export type WwanPrioritySetRequest = RpcParamType<Api, 'wwan.priority-set'>
 
 export type WanDnsMode = 'isp' | 'custom'
 

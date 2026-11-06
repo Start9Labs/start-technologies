@@ -31,6 +31,7 @@
 # Internet
 
 - [WAN Settings](wan.md)
+- [Wireless WAN](wireless-wan.md)
 - [Dynamic DNS](ddns.md)
 - [Published Ports](published-ports.md)
 - [Outbound VPNs](outbound-vpn.md)

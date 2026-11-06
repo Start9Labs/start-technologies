@@ -58,6 +58,11 @@ import {
   WanDnsSetRequest,
   WanDdnsResponse,
   WanDdnsSetRequest,
+  WwanConnectRequest,
+  WwanNetwork,
+  WwanPrioritySetRequest,
+  WwanResponse,
+  WwanScanRequest,
   PublishedPortFromApi,
   PublishedPortsSetRequest,
   PublishedPortsSetResult,
@@ -385,6 +390,26 @@ export class LiveApiService extends ApiService {
 
   async wanDdnsSet(params: WanDdnsSetRequest): Promise<null> {
     return this.rpc.request({ method: 'wan.ddns-set', params })
+  }
+
+  async wwanGet(): Promise<WwanResponse> {
+    return this.rpc.request({ method: 'wwan.get', params: {} })
+  }
+
+  async wwanScan(params: WwanScanRequest): Promise<WwanNetwork[]> {
+    return this.rpc.request({ method: 'wwan.scan', params })
+  }
+
+  async wwanConnect(params: WwanConnectRequest): Promise<null> {
+    return this.rpc.request({ method: 'wwan.connect', params })
+  }
+
+  async wwanPrioritySet(params: WwanPrioritySetRequest): Promise<null> {
+    return this.rpc.request({ method: 'wwan.priority-set', params })
+  }
+
+  async wwanDisconnect(): Promise<null> {
+    return this.rpc.request({ method: 'wwan.disconnect', params: {} })
   }
 
   async publishedPortsList(): Promise<PublishedPortFromApi[]> {
