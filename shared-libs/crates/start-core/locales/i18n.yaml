@@ -2778,13 +2778,6 @@ registry.db.pointer-outside-index:
   fr_FR: "Le pointeur d'abonnement doit être situé au niveau ou en dessous de /index"
   pl_PL: "Wskaźnik subskrypcji musi znajdować się w /index lub poniżej"
 
-registry.db.stream-required:
-  en_US: "db.watch requires an rpcstream WebSocket request"
-  de_DE: "db.watch erfordert eine rpcstream-WebSocket-Anfrage"
-  es_ES: "db.watch requiere una solicitud WebSocket rpcstream"
-  fr_FR: "db.watch nécessite une requête WebSocket rpcstream"
-  pl_PL: "db.watch wymaga żądania WebSocket rpcstream"
-
 # registry/os/asset/add.rs
 registry.os.asset.commitment-mismatch:
   en_US: "Commitment does not match"

@@ -84,7 +84,7 @@ Configuration is read from CLI flags and a config file (`-c <path>`; default sea
 | `-d, --datadir <path>`  | data directory (default `/var/lib/startos`)     |
 | `-c, --config <path>`   | config file                                     |
 
-Clients synchronize registry metadata through `db.watch` on the multiplexed `/ws/rpc` socket or the public `db.subscribe` RPC and its WebSocket continuation. StartOS maintains package, signer, and OS-update caches independently of open browser sessions. OS releases marked `security` generate notifications on compatible StartOS servers using that registry for updates.
+Clients synchronize registry metadata through `db.subscribe`: `rpcstream` opt-in uses the shared `/ws/rpc` socket, while ordinary requests retain the GUID WebSocket continuation. A subscription's optional `osVersion` selects a lazily shared backward-compatible index view; omitted versions retain the canonical format. StartOS maintains package, signer, and OS-update caches independently of open browser sessions. OS releases marked `security` generate notifications on compatible StartOS servers using that registry for updates.
 
 Server state lives in `<datadir>/registry.db` (PatchDB) plus a SQLite metrics database and hosted asset files.
 

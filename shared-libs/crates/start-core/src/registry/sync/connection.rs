@@ -44,13 +44,14 @@ pub(super) fn response_config() -> WebSocketConfig {
         .max_frame_size(Some(MAX_RESPONSE_SIZE))
 }
 
-pub(super) async fn watch_request(
+pub(super) async fn subscription_request(
     subscription: &Subscription,
+    os_version: &exver::Version,
     signer: &Signer,
 ) -> Result<Value, Error> {
     let mut request = imbl_value::json!({
         "jsonrpc": "2.0", "rpcstream": RPCSTREAM_VERSION, "id": subscription.request_id(),
-        "method": "db.watch", "params": { "pointer": subscription.pointer() }
+        "method": "db.subscribe", "params": { "pointer": subscription.pointer(), "osVersion": os_version }
     });
     let proof = SignatureHeader::sign_rpc(
         signer,
@@ -137,7 +138,7 @@ pub(super) async fn receive_updates<S: AsyncRead + AsyncWrite + Unpin>(
     let mut watches = BTreeMap::new();
     for subscription in subscriptions {
         let id = subscription.request_id();
-        let request = watch_request(subscription, signer).await?;
+        let request = subscription_request(subscription, &device.os.version, signer).await?;
         tokio::time::timeout(
             Duration::from_secs(15),
             socket.send(Message::Text(request.to_string().into())),

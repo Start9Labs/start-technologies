@@ -2,4 +2,4 @@
 release-notes: false
 ---
 
-- Bound pending registry index revisions and stream OS, package, and signer metadata for background synchronization.
+- Stream OS, package, and signer metadata through opt-in `db.subscribe` streams, with bounded pending revisions and OS-version-compatible views shared across subscribers.

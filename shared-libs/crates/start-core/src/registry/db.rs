@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use axum::extract::ws::{self, Utf8Bytes};
 use clap::Parser;
+use exver::Version;
 use itertools::Itertools;
 use patch_db::json_ptr::{JsonPointer, ROOT};
 use patch_db::{Dump, JsonSubscriber};
@@ -18,6 +19,7 @@ pub use crate::db::{ApplyWithPathParams as ApplyParams, DumpParams, SubscribeRes
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::context::RegistryContext;
+use crate::registry::device_info::WireCompatibility;
 use crate::registry::mirror::{IndexMirror, index_mirror, mirror_key};
 use crate::registry::package::index::ReaderParams;
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
@@ -45,14 +47,6 @@ pub fn db_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "subscribe",
             from_fn_async(subscribe)
-                .with_metadata("authenticated", Value::Bool(false))
-                .with_metadata("get_signer", Value::Bool(true))
-                .with_metadata(crate::mcp::MCP, Value::Bool(false))
-                .no_cli(),
-        )
-        .subcommand(
-            "watch",
-            from_fn_async(watch)
                 .with_metadata("authenticated", Value::Bool(false))
                 .with_metadata("get_signer", Value::Bool(true))
                 .with_metadata(crate::mcp::MCP, Value::Bool(false))
@@ -146,6 +140,8 @@ async fn subscription(
 #[serde(rename_all = "camelCase")]
 pub struct SubscribeIndexParams {
     pub pointer: Option<JsonPointer>,
+    /// Client StartOS version. Omission preserves the canonical index format.
+    pub os_version: Option<Version>,
     #[serde(flatten)]
     pub reader: ReaderParams,
 }
@@ -154,36 +150,66 @@ rpc_toolkit::reflect_ts!(SubscribeIndexParams);
 
 async fn visible_subscription(
     ctx: &RegistryContext,
-    SubscribeIndexParams { pointer, reader }: SubscribeIndexParams,
+    SubscribeIndexParams {
+        pointer,
+        os_version,
+        reader,
+    }: SubscribeIndexParams,
 ) -> Result<(Arc<IndexMirror>, Dump, JsonSubscriber), Error> {
     let pointer = subscription_pointer(pointer)?;
     let key = mirror_key(&ctx.db.peek().await, reader.signer)?;
-    let mirror = index_mirror(&ctx.index_mirrors, &ctx.db, key).await?;
+    let wire = os_version
+        .as_ref()
+        .map(WireCompatibility::for_startos)
+        .transpose()?
+        .unwrap_or_default();
+    let mirror = index_mirror(&ctx.index_mirrors, &ctx.db, key, wire, &ctx.datadir).await?;
     let (dump, sub) = subscription(&mirror.db, Some(pointer)).await?;
     Ok((mirror, dump, sub))
 }
 
-pub async fn watch(
+/// Initial dump, with a continuation GUID when the request does not opt into `rpcstream`.
+#[derive(Deserialize, Serialize, VisitVariants)]
+#[serde(untagged)]
+pub enum SubscribeIndexResult {
+    Continuation(SubscribeRes),
+    Stream(Dump),
+}
+
+rpc_toolkit::reflect_ts!(SubscribeIndexResult);
+
+pub async fn subscribe(
     HandlerArgs {
         context,
         params,
         rpc_stream,
         ..
     }: HandlerArgs<RegistryContext, SubscribeIndexParams>,
-) -> Result<Dump, Error> {
-    let stream = rpc_stream.ok_or_else(|| {
-        Error::new(
-            eyre!("{}", t!("registry.db.stream-required")),
-            ErrorKind::InvalidRequest,
-        )
-    })?;
-    let (mirror, dump, mut sub) = visible_subscription(&context, params).await?;
+) -> Result<SubscribeIndexResult, Error> {
+    let (mirror, dump, sub) = visible_subscription(&context, params).await?;
+    if let Some(stream) = rpc_stream {
+        stream_subscription(stream, mirror, sub);
+        Ok(SubscribeIndexResult::Stream(dump))
+    } else {
+        let guid = legacy_subscription(&context, mirror, sub).await;
+        Ok(SubscribeIndexResult::Continuation(SubscribeRes {
+            dump,
+            guid,
+        }))
+    }
+}
+
+fn stream_subscription(
+    stream: rpc_toolkit::RpcStream,
+    mirror: Arc<IndexMirror>,
+    mut sub: JsonSubscriber,
+) {
     tokio::spawn(async move {
-        let _mirror = mirror;
         let result = async {
             loop {
                 let revision = tokio::select! {
                     _ = stream.closed() => return Ok::<_, Error>(()),
+                    result = mirror.closed() => return result,
                     revision = sub.recv() => revision?,
                 };
                 let Some(revision) = revision else {
@@ -200,14 +226,13 @@ pub async fn watch(
         .await;
         let _ = stream.close(result);
     });
-    Ok(dump)
 }
 
-pub async fn subscribe(
-    ctx: RegistryContext,
-    params: SubscribeIndexParams,
-) -> Result<SubscribeRes, Error> {
-    let (mirror, dump, mut sub) = visible_subscription(&ctx, params).await?;
+async fn legacy_subscription(
+    ctx: &RegistryContext,
+    mirror: Arc<IndexMirror>,
+    mut sub: JsonSubscriber,
+) -> Guid {
     let guid = Guid::new();
     ctx.rpc_continuations
         .add(
@@ -215,10 +240,13 @@ pub async fn subscribe(
             RpcContinuation::ws(
                 WebSocketPolicy::Public,
                 |mut ws| async move {
-                    let _mirror = mirror;
                     if let Err(e) = async {
                         loop {
                             tokio::select! {
+                                result = mirror.closed() => {
+                                    result?;
+                                    return ws.normal_close("complete").await;
+                                }
                                 rev = sub.recv() => {
                                     let Some(rev) = rev? else {
                                         return ws.normal_close("complete").await;
@@ -251,7 +279,7 @@ pub async fn subscribe(
         )
         .await;
 
-    Ok(SubscribeRes { dump, guid })
+    guid
 }
 
 #[cfg(test)]

@@ -3495,12 +3495,29 @@ export const SubscribeIndexParams: z.ZodIntersection<
       z.ZodOptional<z.ZodNullable<z.ZodString>>,
       z.ZodNullable<z.ZodString>
     >
+    /**
+     * Client StartOS version. Omission preserves the canonical index format.
+     */
+    osVersion: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
   }>,
   typeof ReaderParams
 > = /* @__PURE__ */ z
   .intersection(
     object({
       pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+      /**
+       * Client StartOS version. Omission preserves the canonical index format.
+       */
+      osVersion: wire(
+        z.string().nullable().optional(),
+        z.string().nullable(),
+      ).meta({
+        description:
+          'Client StartOS version. Omission preserves the canonical index format.',
+      }),
     }),
     ReaderParams,
   )
@@ -4297,6 +4314,17 @@ export const SideloadParams: z.ZodObject<{
   }),
 }).meta({
   id: 'SideloadParams',
+})
+
+/**
+ * Initial dump, with a continuation GUID when the request does not opt into `rpcstream`.
+ */
+export const SubscribeIndexResult: z.ZodUnion<
+  readonly [typeof SubscribeRes, typeof Dump]
+> = /* @__PURE__ */ z.union([SubscribeRes, Dump]).meta({
+  id: 'SubscribeIndexResult',
+  description:
+    'Initial dump, with a continuation GUID when the request does not opt into `rpcstream`.',
 })
 export const UpdateSystemParams: z.ZodObject<{
   registry: z.ZodString
@@ -5972,14 +6000,7 @@ export const Api = {
                 z.intersection(empty, RegistryUrlParams),
                 SubscribeIndexParams,
               ),
-              _RETURN: /* @__PURE__ */ SubscribeRes,
-            },
-            watch: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, RegistryUrlParams),
-                SubscribeIndexParams,
-              ),
-              _RETURN: /* @__PURE__ */ Dump,
+              _RETURN: /* @__PURE__ */ SubscribeIndexResult,
             },
           },
         },

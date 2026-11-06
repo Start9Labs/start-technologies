@@ -5723,7 +5723,13 @@
           "allOf": [
             {
               "type": "object",
-              "properties": { "pointer": { "type": ["string", "null"] } },
+              "properties": {
+                "pointer": { "type": ["string", "null"] },
+                "osVersion": {
+                  "description": "Client StartOS version. Omission preserves the canonical index format.",
+                  "type": ["string", "null"]
+                }
+              },
               "additionalProperties": true
             },
             { "$ref": "#/$defs/ReaderParams" }
@@ -5736,105 +5742,6 @@
         }
       },
       "type": "object"
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$defs": {
-        "SubscribeRes": {
-          "type": "object",
-          "properties": {
-            "dump": { "$ref": "#/$defs/Dump" },
-            "guid": { "$ref": "#/$defs/Guid" }
-          },
-          "required": ["dump", "guid"],
-          "additionalProperties": true
-        },
-        "Dump": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "value": {}
-          },
-          "required": ["id", "value"],
-          "additionalProperties": true
-        },
-        "Guid": { "type": "string" }
-      },
-      "type": "object",
-      "properties": {
-        "dump": { "$ref": "#/$defs/Dump" },
-        "guid": { "$ref": "#/$defs/Guid" }
-      },
-      "required": ["dump", "guid"],
-      "additionalProperties": true
-    }
-  },
-  {
-    "name": "registry.db.watch",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "allOf": [
-        { "type": "object", "properties": {}, "additionalProperties": true },
-        { "$ref": "#/$defs/RegistryUrlParams" },
-        { "$ref": "#/$defs/SubscribeIndexParams" }
-      ],
-      "$defs": {
-        "RegistryUrlParams": {
-          "type": "object",
-          "properties": { "registry": { "type": "string" } },
-          "required": ["registry"],
-          "additionalProperties": true
-        },
-        "SubscribeIndexParams": {
-          "allOf": [
-            {
-              "type": "object",
-              "properties": { "pointer": { "type": ["string", "null"] } },
-              "additionalProperties": true
-            },
-            { "$ref": "#/$defs/ReaderParams" }
-          ]
-        },
-        "ReaderParams": {
-          "type": "object",
-          "properties": {},
-          "additionalProperties": true
-        }
-      },
-      "type": "object"
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$defs": {
-        "Dump": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "value": {}
-          },
-          "required": ["id", "value"],
-          "additionalProperties": true
-        }
-      },
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        "value": {}
-      },
-      "required": ["id", "value"],
-      "additionalProperties": true
     }
   },
   {

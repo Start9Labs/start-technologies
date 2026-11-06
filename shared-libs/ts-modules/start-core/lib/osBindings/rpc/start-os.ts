@@ -627,6 +627,11 @@ export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
  */
 export type Sessions = z.output<typeof schemas.Sessions>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
+
+/**
+ * Initial dump, with a continuation GUID when the request does not opt into `rpcstream`.
+ */
+export type SubscribeIndexResult = z.output<typeof schemas.SubscribeIndexResult>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type WifiListInfo = z.output<typeof schemas.WifiListInfo>
 export type AddSslOptions = z.output<typeof schemas.AddSslOptions>

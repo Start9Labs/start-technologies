@@ -15,7 +15,7 @@ Ping/Pong frames provide keepalive.
 A client adds `rpcstream: "1.0"` to an ordinary request with a non-null ID:
 
 ```json
-{ "jsonrpc": "2.0", "rpcstream": "1.0", "id": 42, "method": "db.watch", "params": {} }
+{ "jsonrpc": "2.0", "rpcstream": "1.0", "id": 42, "method": "db.subscribe", "params": { "osVersion": "0.4.1.3" } }
 ```
 
 The initiating response is an ordinary JSON-RPC response, with its own result type:

@@ -27,10 +27,11 @@ async fn verify_watch(request: &Value, signer: &Signer, context: &str) -> Signat
 #[tokio::test]
 async fn watch_proofs_bind_each_projection_and_use_distinct_nonces() {
     let signer = signer();
-    let index = watch_request(&Subscription::Index(url()), &signer)
+    let version = device().os.version;
+    let index = subscription_request(&Subscription::Index(url()), &version, &signer)
         .await
         .unwrap();
-    let os = watch_request(&Subscription::Os(url()), &signer)
+    let os = subscription_request(&Subscription::Os(url()), &version, &signer)
         .await
         .unwrap();
     let first = verify_watch(&index, &signer, "registry.test").await;
@@ -39,6 +40,19 @@ async fn watch_proofs_bind_each_projection_and_use_distinct_nonces() {
     assert_ne!(index["id"], os["id"]);
     assert_eq!(index["params"]["pointer"], json!("/index"));
     assert_eq!(os["params"]["pointer"], json!("/index/os"));
+    assert_eq!(index["method"], json!("db.subscribe"));
+    assert_eq!(os["method"], json!("db.subscribe"));
+    assert_eq!(index["params"]["osVersion"], json!(version));
+    assert_eq!(os["params"]["osVersion"], json!(version));
+    let mut changed = index.clone();
+    changed["params"]["osVersion"] = json!("0.4.0.2");
+    assert!(
+        first
+            .commitment
+            .verify_bytes(&rpc_signing_body(&changed).unwrap())
+            .await
+            .is_err()
+    );
     assert!(first.verify_rpc_commitment("another.test").is_err());
     assert!(
         first

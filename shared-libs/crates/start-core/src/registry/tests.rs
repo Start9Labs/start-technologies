@@ -1,3 +1,5 @@
+mod versioned;
+
 use std::collections::BTreeMap;
 
 use futures::{SinkExt, StreamExt};
@@ -517,11 +519,6 @@ async fn legacy_subscriptions_filter_initial_dumps_and_live_revisions() {
     patch_db::json_patch::patch(&mut view, &revision.patch).unwrap();
     assert!(view["package"]["packages"].get("secret").is_none());
     socket.close(None).await.unwrap();
-    let response = rpc(&url, "db.watch", json!({}), None).await;
-    assert_eq!(
-        response["error"]["code"].as_i64(),
-        Some(ErrorKind::InvalidRequest as i64)
-    );
 }
 
 #[tokio::test]
@@ -656,8 +653,25 @@ async fn watches_multiplex_with_ordinary_calls_and_revoke_private_packages() {
             .to_header(),
     );
     let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    socket.send(Message::Text(signed_message(&reader, json!({"jsonrpc":"2.0", "id":40, "method":"db.subscribe", "params":{"osVersion":"0.4.1.3"}})).await.to_string().into())).await.unwrap();
+    let message = tokio::time::timeout(std::time::Duration::from_secs(5), socket.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let legacy: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+    assert_eq!(legacy["id"], json!(40));
+    assert!(
+        legacy["result"]["dump"]["value"]["package"]["packages"]
+            .get("secret")
+            .is_some(),
+        "{legacy}"
+    );
+    assert!(legacy["result"].get("value").is_none());
+    let guid: Guid = from_value(legacy["result"]["guid"].clone()).unwrap();
+    drop(ctx.rpc_continuations.get_ws_handler(&guid).await);
     for (id, pointer) in [(41, "/index"), (42, "/index/os")] {
-        socket.send(Message::Text(signed_message(&reader, json!({"jsonrpc":"2.0", "rpcstream":"1.0", "id":id, "method":"db.watch", "params":{"pointer":pointer}})).await.to_string().into())).await.unwrap();
+        socket.send(Message::Text(signed_message(&reader, json!({"jsonrpc":"2.0", "rpcstream":"1.0", "id":id, "method":"db.subscribe", "params":{"pointer":pointer, "osVersion":"0.4.1.3"}})).await.to_string().into())).await.unwrap();
     }
     let mut dumps = BTreeMap::new();
     for _ in 0..2 {

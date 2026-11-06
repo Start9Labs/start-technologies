@@ -228,6 +228,11 @@ export type OsVersionInfoMap = z.output<typeof schemas.OsVersionInfoMap>
 export type PackageAccess = z.output<typeof schemas.PackageAccess>
 export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
 export type RegistryInfo = z.output<typeof schemas.RegistryInfo>
+
+/**
+ * Initial dump, with a continuation GUID when the request does not opt into `rpcstream`.
+ */
+export type SubscribeIndexResult = z.output<typeof schemas.SubscribeIndexResult>
 export type OsIndex = z.output<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 export type GetPackageResponse = z.output<typeof schemas.GetPackageResponse>

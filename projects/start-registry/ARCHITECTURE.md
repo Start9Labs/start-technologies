@@ -57,30 +57,37 @@ Subcommands (same module), each available over RPC and to the `start-registry` C
 
 ### Registry index subscriptions
 
-`db.watch` accepts the same pointer on the multiplexed WebSocket with `rpcstream: "1.0"`.
-Its initiating JSON-RPC result is the `{ id, value }` dump. Subsequent events carry `Revision`
-objects using that request ID. Closing the stream releases its subscription; ordinary calls and
-other watches share the connection.
+The public `db.subscribe` RPC accepts optional `pointer` and `osVersion` parameters. The pointer
+may select `/index` or any descendant; omitting it or passing `null` selects `/index`. Without
+`rpcstream` opt-in, the response contains an initial `{ id, value }` dump and a continuation
+`guid`. Connecting to `/ws/rpc/<guid>` streams revisions relative to the selected subtree. This
+contract also applies to ordinary calls on the shared WebSocket.
 
-The public `db.subscribe` RPC accepts `{ "pointer": <JSON Pointer> }`. The pointer may select
-`/index` or any descendant; omitting it or passing `null` selects `/index`. The response contains
-an initial `{ id, value }` dump and a continuation `guid`. Connecting to `/ws/rpc/<guid>` streams
-revisions whose JSON Patch paths are relative to the selected subtree.
+With `rpcstream: "1.0"` on `/ws/rpc`, the same method returns the dump directly as its initiating
+result and sends subsequent `Revision` events under that request ID. Closing a stream releases
+its subscription; ordinary calls and other subscriptions retain the connection.
 
 StartOS opens one `/ws/rpc` socket per registry, multiplexing `/index` and the selected OS source's
-`/index/os` watches. Each initiating message is signed with the server's developer key; the upgrade
-is unsigned. Response messages and frames each permit 64 MiB independently of request limits.
+`/index/os` subscriptions. Each initiating message includes the client's OS version and is signed
+with the server's developer key; the upgrade is unsigned. Response messages and frames each permit 64 MiB independently of request limits.
 Package queries and registry information use the backend cache; browser sessions observe projected
 package and OS metadata through PatchDB. Subscriptions reconnect with jittered backoff and a fresh
 dump. Cached metadata remains available offline, with connection availability reported separately
 from registry configuration. Malformed saved source URLs are skipped independently without
-rewriting configured intent. This client requires `db.watch`; upgrade registries before deploying it.
-The legacy `db.subscribe` endpoint remains available for older clients.
+rewriting configured intent. Registries must support `rpcstream` subscriptions before deploying
+this client; the method name alone does not establish support. There is no native legacy transport
+fallback. Older clients can still call `db.subscribe` without opting in.
 
-Both subscription methods read filtered in-memory mirrors and use bounded, 32-revision JSON
-queues. Slow subscribers close rather than skip patches. Public-only callers share one mirror;
-registered admins and signers with private-package access receive a mirror keyed by their verified
-request key. Every source revision rechecks key enrollment, admin status, and package permissions.
+Both transports read filtered in-memory replicas and use bounded, 32-revision JSON queues. Slow
+subscribers close rather than skip patches. Replicas are created lazily for each effective reader
+and wire-compatibility profile. Equivalent OS versions share a profile; unversioned callers retain
+the canonical index format. Public-only readers share the profile's public replica; admins and
+signers with private-package access use their verified request key. Every source revision rechecks
+enrollment, admin status and package permissions before applying the version-specific projection.
+`device_info::WireCompatibility` owns these projections for ordinary RPC responses and replicas,
+including legacy icons, notes and key/signature encodings. Canonical storage remains migrated to
+the current schema; PatchDB derives patches from the projected values. A projection failure ends
+its subscriptions and permits rebuilding the failed replica without closing unrelated streams.
 A public-mirror subscriber must resubscribe after receiving a private-access grant. StartOS's
 marketplace refresh action restarts that registry's grouped watches without changing signing-key
 trust or discarding cached listings. Weak mirror entries share work across subscribers; dropping the last subscriber cancels that mirror's task.

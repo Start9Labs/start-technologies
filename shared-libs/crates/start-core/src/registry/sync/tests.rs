@@ -3,7 +3,7 @@ use imbl_value::json;
 use patch_db::json_ptr::ROOT;
 use tokio_tungstenite::tungstenite::Message;
 
-use super::connection::{receive_updates, response_config, watch_request, websocket_url};
+use super::connection::{receive_updates, response_config, subscription_request, websocket_url};
 use super::*;
 use crate::account::AccountInfo;
 use crate::db::model::public::Public;
@@ -446,7 +446,8 @@ async fn watch_applies_scoped_revisions_and_answers_heartbeats_on_reconnect() {
             let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
             let request = socket.next().await.unwrap().unwrap();
             let request: Value = serde_json::from_str(request.to_text().unwrap()).unwrap();
-            assert_eq!(request["method"].as_str(), Some("db.watch"));
+            assert_eq!(request["method"].as_str(), Some("db.subscribe"));
+            assert_eq!(request["params"]["osVersion"], json!(device().os.version));
             assert_eq!(request["params"]["pointer"].as_str(), Some("/index"));
             assert_eq!(
                 request["rpcstream"].as_str(),
