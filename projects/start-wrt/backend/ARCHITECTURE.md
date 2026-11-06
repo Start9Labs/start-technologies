@@ -119,6 +119,9 @@ backup                  # Backup create/restore (via continuations)
 
 diagnostics             # Diagnostic bundle creation
 
+config
+  └─ check              # Configuration a page cannot represent, with its pages
+
 uci                     # Generic UCI get/set/edit (legacy)
   ├─ get
   ├─ set
@@ -205,6 +208,7 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 | `dns_inject.rs`                   | RFC 2136 DNS UPDATE ingress: records published by permitted devices and inbound VPN peers, served through per-profile dnsmasq (`dns.injected-list`)                                                                                                          |
 | `activity.rs`                     | Activity logging via SQLite                                                                                                                                                                                                                                  |
 | `backup.rs` / `diagnostics.rs`    | Backup/restore and diagnostic bundles (via continuations)                                                                                                                                                                                                    |
+| `config_check.rs`                 | Finds configuration, typically from LuCI or a hand edit, that a page cannot represent (`config.check`)                                                                                                                                                       |
 | `logs.rs`                         | Log snapshot and `system.logs-follow` streaming                                                                                                                                                                                                              |
 | `ssl.rs`                          | Root CA and intermediate CA, their files under `/etc/ssl`, and the Root CA download                                                                                                                                                                          |
 | `tls.rs`                          | HTTPS certificates: a local-CA leaf per name served (`start-core` `CertStore`)                                                                                                                                                                               |
@@ -284,6 +288,8 @@ Macro attributes:
 - `#[uci(default)]` — use `Default::default()` if option missing
 - `#[uci(default_value = expr)]` — custom default value
 - `#[uci(inpt)]` — use `inpt` parser instead of `FromStr`
+- `#[uci(accept_list)]` — a single-valued field also reads `list` lines of that name, as libuci does: its value is the last `option`, else the first item. A write replaces that value, keeps the items after it, and drops the lines it overrides
+- A `Vec` field also reads an `option` line of that name as its whitespace-separated words, the way OpenWrt's own scripts do
 
 Shared, OpenWrt-native typed sections live in `uciedit/src/openwrt.rs`; feature-owned sections (`UciPreferences`, `UciWifiBlackout`, `UciProfile`, the VPN sections, …) are defined in `ctrl` beside their handlers. The sections in `openwrt.rs`:
 
