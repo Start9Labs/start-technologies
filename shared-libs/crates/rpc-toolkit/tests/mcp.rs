@@ -253,26 +253,27 @@ struct Client {
     http: reqwest::Client,
 }
 impl Client {
-    async fn send(&self, method: &str, mut params: serde_json::Value) -> reqwest::Response {
+    fn message(method: &str, mut params: serde_json::Value) -> serde_json::Value {
         params["_meta"] = json!({
             "io.modelcontextprotocol/protocolVersion": "2026-07-28",
             "io.modelcontextprotocol/clientCapabilities": {},
             "io.modelcontextprotocol/clientInfo": { "name": "test", "version": "0.0.0" },
         });
+        json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params })
+    }
+    async fn send(&self, method: &str, params: serde_json::Value) -> reqwest::Response {
+        self.send_message(Self::message(method, params)).await
+    }
+    async fn send_message(&self, message: serde_json::Value) -> reqwest::Response {
         let mut request = self
             .http
             .post(format!("http://{}/mcp", self.addr))
             .header("accept", "application/json, text/event-stream")
             .header("mcp-protocol-version", "2026-07-28")
-            .header("mcp-method", method)
+            .header("mcp-method", message["method"].as_str().unwrap())
             .header("content-type", "application/json")
-            .body(
-                serde_json::to_vec(
-                    &json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }),
-                )
-                .unwrap(),
-            );
-        if let Some(name) = params["name"].as_str() {
+            .body(serde_json::to_vec(&message).unwrap());
+        if let Some(name) = message["params"]["name"].as_str() {
             request = request.header("mcp-name", name);
         }
         if let Some(token) = self.token {
@@ -293,6 +294,16 @@ async fn rpc_response_metadata_maps_to_mcp_result_metadata_on_success_and_error(
     struct ReplyMetadata;
     impl Middleware<Ctx> for ReplyMetadata {
         type Metadata = rpc_toolkit::Empty;
+        async fn process_rpc_message(
+            &mut self,
+            _: &Ctx,
+            message: &Value,
+        ) -> Result<(), RpcResponse> {
+            assert_eq!(message["method"].as_str(), Some("tools/call"));
+            assert!(message["params"]["name"].is_string());
+            assert_eq!(message["signature"].as_str(), Some("original-mcp-proof"));
+            Ok(())
+        }
         async fn process_rpc_response(&mut self, _: &Ctx, response: &mut RpcResponse) {
             response.add_meta(json!({"patchSequence": 7})).unwrap();
         }
@@ -327,9 +338,10 @@ async fn rpc_response_metadata_maps_to_mcp_result_metadata_on_success_and_error(
         ("greet", json!({"name":"mcp"}), false),
         ("fail", json!({}), true),
     ] {
-        let response = client
-            .call("tools/call", json!({"name":name, "arguments":arguments}))
-            .await;
+        let mut message =
+            Client::message("tools/call", json!({"name":name, "arguments":arguments}));
+        message["signature"] = "original-mcp-proof".into();
+        let response = body(client.send_message(message).await).await;
         assert_eq!(response["result"]["_meta"], json!({"patchSequence":7}));
         assert_eq!(response["result"]["isError"] == true, error);
         assert!(response["result"]["structuredContent"]

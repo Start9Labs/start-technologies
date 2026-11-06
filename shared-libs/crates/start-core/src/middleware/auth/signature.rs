@@ -29,7 +29,7 @@ use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::commitment::Commitment;
 use crate::sign::commitment::request::RequestCommitment;
 use crate::sign::{AnySignature, AnyVerifyingKey, Signer};
-use crate::util::serde::{Base64, DerEncoding};
+use crate::util::serde::DerEncoding;
 use crate::util::sync::SyncMutex;
 
 pub mod rpc;
@@ -113,6 +113,7 @@ pub trait SignatureAuthContext: DbContext {
         keys: &BTreeSet<InternedString>,
     ) -> Result<(), Error>;
     /// Signing identities allowed for the request's ingress.
+    /// JSON message checks supply the connection's `RequestOrigin` extension.
     fn sig_context(
         &self,
         extensions: &Extensions,
@@ -335,18 +336,22 @@ pub(crate) fn request_identities<'a, C: SignatureAuthContext>(
     context: &'a C,
     request: &'a Request,
 ) -> impl Future<Output = Result<Vec<InternedString>, Error>> + Send + 'a {
-    let loopback = loopback_identity(request);
-    let extensions = request.extensions();
-    async move {
-        let mut identities = context
-            .sig_context(extensions)
-            .await
-            .into_iter()
-            .map(|identity| identity.map(|identity| InternedString::intern(identity.as_ref())))
-            .collect::<Result<Vec<_>, _>>()?;
-        identities.extend(loopback);
-        Ok(identities)
-    }
+    signing_identities(context, request.extensions(), loopback_identity(request))
+}
+
+async fn signing_identities<C: SignatureAuthContext>(
+    context: &C,
+    ingress: &Extensions,
+    loopback: Option<InternedString>,
+) -> Result<Vec<InternedString>, Error> {
+    let mut identities = context
+        .sig_context(ingress)
+        .await
+        .into_iter()
+        .map(|identity| identity.map(|identity| InternedString::intern(identity.as_ref())))
+        .collect::<Result<Vec<_>, _>>()?;
+    identities.extend(loopback);
+    Ok(identities)
 }
 
 pub trait SigningContext {
@@ -374,6 +379,7 @@ pub struct SignatureAuth {
     signer: Option<Result<(AnyVerifyingKey, InternedString), RpcError>>,
     user_agent: Option<HeaderValue>,
     origin: RequestOrigin,
+    loopback: Option<InternedString>,
 }
 impl SignatureAuth {
     pub fn new() -> Self {
@@ -381,45 +387,49 @@ impl SignatureAuth {
             signer: None,
             user_agent: None,
             origin: RequestOrigin::default(),
+            loopback: None,
         }
     }
 }
 
 const SIG_TIME_GRACE_PERIOD_SECS: u64 = 60;
 
-/// Replay cache for the last 60s of nonces. `seen` gives O(1) membership;
-/// `order` drives eviction, keyed by `(seen_at, nonce)` so two nonces recorded
-/// at the same `Instant` can't collide and silently evict each other.
-///
-/// BEST EFFORT: security degrades when clock is not synced
+const MAX_UNTIMED_NONCES: usize = 1024 * 1024;
+
+/// Retains nonces for 60 seconds with a trusted clock.
+/// Otherwise bounds storage by evicting the oldest submitted timestamps.
 #[derive(Default)]
 pub struct NonceCache {
     seen: HashSet<u64>,
     order: BTreeSet<(i64, u64)>,
 }
 impl NonceCache {
+    fn evict_oldest(&mut self) {
+        let (_, nonce) = self.order.pop_first().unwrap();
+        self.seen.remove(&nonce);
+    }
+
     fn handle_nonce(&mut self, nonce: u64, timestamp: i64, now: Option<i64>) -> Result<(), Error> {
         if let Some(now) = now {
-            while let Some(&(timestamp, n)) = self.order.iter().next() {
+            while let Some(&(timestamp, _)) = self.order.iter().next() {
                 if now.saturating_sub(timestamp) > SIG_TIME_GRACE_PERIOD_SECS as i64 {
-                    self.order.remove(&(timestamp, n));
-                    self.seen.remove(&n);
+                    self.evict_oldest();
                 } else {
                     break;
                 }
             }
-        } else {
-            while self.order.len() > 1024 * 1024 {
-                self.order.pop_first();
-            }
         }
-        // Not `Authorization`: clients treat 34 as key revocation and log out,
-        // but a replay can be an innocent transport retransmit.
+        // Replay errors must not trigger key-revocation logout.
         if !self.seen.insert(nonce) {
             return Err(Error::new(
                 eyre!("{}", t!("middleware.auth.replay-attack-detected")),
                 ErrorKind::InvalidSignature,
             ));
+        }
+        if now.is_none() {
+            while self.order.len() >= MAX_UNTIMED_NONCES {
+                self.evict_oldest();
+            }
         }
         self.order.insert((timestamp, nonce));
         Ok(())
@@ -485,6 +495,19 @@ async fn verify_request_signature_with_address<C: SignatureAuthContext>(
         commitment, signer, ..
     } = header;
 
+    accept_nonce(context, &commitment).await?;
+
+    let mut body = Vec::with_capacity(commitment.size as usize);
+    commitment.copy_to(request, &mut body).await?;
+    *request.body_mut() = Body::from(body);
+
+    Ok((signer, address))
+}
+
+async fn accept_nonce<C: SignatureAuthContext>(
+    context: &C,
+    commitment: &RequestCommitment,
+) -> Result<(), Error> {
     let now = if context.clock_synced().await {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -500,13 +523,7 @@ async fn verify_request_signature_with_address<C: SignatureAuthContext>(
     } else {
         None
     };
-    context.mutate_nonce_cache(|n| n.handle_nonce(commitment.nonce, commitment.timestamp, now))?;
-
-    let mut body = Vec::with_capacity(commitment.size as usize);
-    commitment.copy_to(request, &mut body).await?;
-    *request.body_mut() = Body::from(body);
-
-    Ok((signer, address))
+    context.mutate_nonce_cache(|n| n.handle_nonce(commitment.nonce, commitment.timestamp, now))
 }
 
 fn verified_address(
@@ -553,19 +570,18 @@ impl SignatureHeader {
         })
     }
     pub async fn sign(signer: &Signer, body: &[u8], context: &str) -> Result<Self, Error> {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or_else(|e| e.duration().as_secs() as i64 * -1);
-        let nonce = rand::random();
-        let commitment = RequestCommitment {
-            timestamp,
-            nonce,
-            size: body.len() as u64,
-            blake3: Base64(*blake3::hash(body).as_bytes()),
-        };
+        Self::sign_tagged(signer, body, REQUEST_AUTH_TAG, context).await
+    }
+
+    async fn sign_tagged(
+        signer: &Signer,
+        body: &[u8],
+        tag: &[u8],
+        context: &str,
+    ) -> Result<Self, Error> {
+        let commitment = RequestCommitment::for_bytes(body);
         let signature = signer
-            .sign_message(&request_signing_message(&commitment, context)?)
+            .sign_message(&crate::sign::signing_message(tag, &commitment, context)?)
             .await?;
         Ok(Self {
             commitment,
@@ -593,8 +609,6 @@ fn decode_header_der<T: DerEncoding>(value: &str) -> Result<T, Error> {
 const REQUEST_AUTH_TAG: &[u8] = b"Start-Auth-Sig v2\0";
 const REQUEST_AUTH_TAG_V1: &[u8] = b"Start-Auth-Sig v1\0";
 
-/// The message a request signature commits to, bound to the server identity
-/// (hostname/IP/domain). Signed with pure Ed25519, so any WebCrypto client can produce it.
 fn request_signing_message(
     commitment: &RequestCommitment,
     context: &str,
@@ -616,14 +630,26 @@ pub fn verify_request(
     context: &str,
     signature: &AnySignature,
 ) -> Result<(), Error> {
+    request_signing_message(commitment, context)
+        .and_then(|message| verify_auth_message(key, signature, &message))
+        .or_else(|_| {
+            verify_auth_message(
+                key,
+                signature,
+                &request_signing_message_v1(commitment, context),
+            )
+        })
+}
+
+fn verify_auth_message(
+    key: &AnyVerifyingKey,
+    signature: &AnySignature,
+    message: &[u8],
+) -> Result<(), Error> {
     match (key, signature) {
         (AnyVerifyingKey::Ed25519(key), AnySignature::Ed25519(signature)) => {
-            match request_signing_message(commitment, context) {
-                Ok(msg) if key.verify_strict(&msg, signature).is_ok() => Ok(()),
-                _ => Ok(
-                    key.verify_strict(&request_signing_message_v1(commitment, context), signature)?
-                ),
-            }
+            key.verify_strict(message, signature)?;
+            Ok(())
         }
         (_, AnySignature::Ed25519ph(_)) => Err(Error::new(
             eyre!("{}", t!("sign.unknown-signature-algorithm")),
@@ -640,14 +666,34 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
         request: &mut Request,
     ) -> Result<(), axum::response::Response> {
         self.user_agent = request.headers().get(USER_AGENT).cloned();
-        if request.headers().contains_key(AUTH_SIG_HEADER) {
+        self.origin = RequestOrigin::from_extensions(request.extensions());
+        self.loopback = loopback_identity(request);
+        if request
+            .extensions()
+            .get::<rpc_toolkit::WebSocketRequest>()
+            .is_none()
+            && request.headers().contains_key(AUTH_SIG_HEADER)
+        {
             self.signer = Some(
                 verify_request_signature_with_address(context, request)
                     .await
                     .map_err(RpcError::from),
             );
         }
-        self.origin = RequestOrigin::from_extensions(request.extensions());
+        Ok(())
+    }
+    async fn process_rpc_message(
+        &mut self,
+        context: &C,
+        message: &Value,
+    ) -> Result<(), RpcResponse> {
+        if message.get(rpc::RPC_SIGNATURE_FIELD).is_some() {
+            self.signer = Some(
+                rpc::verify_rpc_signature(context, message, &self.origin, self.loopback.clone())
+                    .await
+                    .map_err(RpcError::from),
+            );
+        }
         Ok(())
     }
     async fn process_rpc_request(
@@ -662,8 +708,7 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
             let login = metadata.additional.is_login();
             let db = context.db().peek().await;
             let res = context.check_pubkey(&db, signer, metadata.additional)?;
-            // Injected only for an accepted signer: another method may still
-            // admit the request after a rejected one.
+            // Another auth method may admit this request after signature authorization fails.
             if metadata.get_signer {
                 if let Some(signer) = signer {
                     request.params["__Auth_signer"] = to_value(signer)?;
@@ -773,13 +818,37 @@ mod tests {
     use super::*;
     use crate::sign::AnySigningKey;
 
-    /// Produced by the TypeScript client (`lib/auth/signature.ts`) for secret
-    /// key 0102…1f20, context "start-9.local", and the JSON body below. Guards
-    /// the byte-level contract between the browser signer and this verifier.
+    /// TypeScript-generated proof for seed 0102…1f20 and `BODY`.
     const JS_PRODUCED_HEADER: &str = "commitment=request&timestamp=1792644825&nonce=18095015305127205807&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=MCowBQYDK2VwAyEAebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ&signature=MEkwBQYDK2VwBEBBctoB4q6Ez-Iuc8w7CBw6gz5ysJYD6F2fpz7Cb7A9mX96rUFD-IPWzjs3mt-Y6oBqDfYVVC-cVXbkU9UTGIsC";
-    /// The same inputs signed by the v1 client.
     const JS_PRODUCED_HEADER_V1: &str = "timestamp=1784746349&nonce=5184603501117103523&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=MCowBQYDK2VwAyEAebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ&signature=MEkwBQYDK2VwBEA0QgkL7GFycl72l-Bt076252XjpFG7aLngdxeIs-hNXpCkcJUtq9Xsfm_YV68U0JtK2qLMG2KPSfAVTcg8ntMH";
     const BODY: &[u8] = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server.echo\",\"params\":{}}";
+
+    #[test]
+    fn clockless_nonce_eviction_bounds_both_indexes_without_admitting_retained_replays() {
+        let mut cache = NonceCache {
+            seen: (0..MAX_UNTIMED_NONCES as u64).collect(),
+            order: (0..MAX_UNTIMED_NONCES as u64)
+                .map(|nonce| (0, nonce))
+                .collect(),
+        };
+        cache.handle_nonce(u64::MAX, 0, None).unwrap();
+        assert_eq!(cache.seen.len(), MAX_UNTIMED_NONCES);
+        assert_eq!(cache.order.len(), MAX_UNTIMED_NONCES);
+        assert!(!cache.seen.contains(&0));
+        assert!(cache.seen.contains(&u64::MAX));
+        assert!(cache.handle_nonce(1, 0, None).is_err());
+        assert!(cache.seen.contains(&1));
+        assert_eq!(cache.order.len(), MAX_UNTIMED_NONCES);
+    }
+
+    #[test]
+    fn timed_nonce_eviction_keeps_both_indexes_consistent() {
+        let mut cache = NonceCache::default();
+        cache.handle_nonce(1, 10, Some(10)).unwrap();
+        cache.handle_nonce(2, 71, Some(71)).unwrap();
+        assert_eq!(cache.seen, HashSet::from([2]));
+        assert_eq!(cache.order, BTreeSet::from([(71, 2)]));
+    }
 
     #[test]
     fn verifies_js_produced_signature_headers() {

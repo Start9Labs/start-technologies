@@ -1,5 +1,8 @@
 import { encode } from 'cborg'
 
+/** Reserved root field for JSON-RPC request proofs. */
+export const RPC_SIGNATURE_FIELD = 'signature'
+
 /**
  * Length-first deterministic CBOR without the root `signature` field.
  * Floats become eight big-endian IEEE-754 bytes; JSON has no byte-string values.
@@ -18,7 +21,7 @@ export function rpcSigningBody(request: string): Uint8Array {
   if (value === null || typeof value !== 'object' || Array.isArray(value))
     throw new Error('RPC request must be an object')
   validateUnicode(value)
-  Reflect.deleteProperty(value, 'signature')
+  Reflect.deleteProperty(value, RPC_SIGNATURE_FIELD)
   return encode(value)
 }
 

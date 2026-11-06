@@ -1,0 +1,9 @@
+{
+  "request": "{\"jsonrpc\":\"2.0\",\"rpcstream\":\"1.0\",\"id\":18446744073709551615,\"method\":\"db.watch\",\"params\":{\"pointer\":\"/index\",\"values\":[1,1.0,-0.0,51.248178375505404],\"signature\":\"nested\"}}",
+  "context": "start-9.local",
+  "timestamp": 1700000000,
+  "nonce": "18446744073709551615",
+  "pkcs8": "MC4CAQAwBQYDK2VwBCIEIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+  "pubkeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\n-----END PUBLIC KEY-----\n",
+  "proof": "commitment=request&timestamp=1700000000&nonce=18446744073709551615&size=131&blake3=dsy63e0M3V3Gwg8X8XGa5EMGNwJYxolxSLdZOpSuI6s&signer=MCowBQYDK2VwAyEAgTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q&signature=MEkwBQYDK2VwBEB5aMjRX21Czk0ZcEv3R6mHM42EEhVNjuUzsRrXg1AAWwGHY_ocJOcVdzWjAHFG_tnZl1skrdMwizYs2y58fxQE"
+}

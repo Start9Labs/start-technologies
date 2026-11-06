@@ -484,7 +484,7 @@ mod tests {
 }
 
 #[cfg(test)]
-pub(super) async fn test_context(datadir: PathBuf, uploader: AnyVerifyingKey) -> RegistryContext {
+pub(crate) async fn test_context(datadir: PathBuf, uploader: AnyVerifyingKey) -> RegistryContext {
     use crate::rpc_continuations::Guid;
 
     tokio::fs::create_dir_all(&datadir).await.unwrap();

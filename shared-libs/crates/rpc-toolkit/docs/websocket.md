@@ -135,7 +135,9 @@ A batch larger than the in-flight limit closes the connection with policy code 1
 fairly; a stalled network write ends the connection after its send deadline.
 
 HTTP middleware runs once during upgrade. Each RPC call clones that prepared
-middleware state and runs the existing RPC middleware pipeline. Per-call state
+middleware state and runs `process_rpc_message` on the original JSON before typed request
+hooks or parameter injection. The original message retains omitted parameters and extension
+fields, including `rpcstream`. Per-call state
 mutations do not leak to other calls or batch members. Middleware response
 rewrites apply to the initiating result; stream event payloads follow their own
 handler-defined contract. HTTP-response middleware runs on the upgrade response,
@@ -143,6 +145,10 @@ not on later WebSocket frames. RPC response middleware can add per-call fields w
 `RpcResponse::add_meta`; initiating replies carry them in a top-level `meta` object on both
 HTTP and WebSocket transports. Stream events and terminal replies retain their handler-defined
 contract and do not rerun RPC response middleware.
+
+`WebSocketRequest` marks the upgrade request in HTTP extensions. It identifies the transport,
+not an authenticated caller; HTTP body-authentication adapters can avoid treating the upgrade
+body as proof for later messages.
 
 Applications own authentication, authorization, origin policy, and revocation.
 Authentication of an upgrade must authorize the connection, not merely an

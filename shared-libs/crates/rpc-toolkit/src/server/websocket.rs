@@ -87,6 +87,10 @@ impl<C: Context> HttpServer<C> {
     }
 }
 
+/// Marks HTTP requests routed through the WebSocket transport, not authenticated callers.
+#[derive(Clone, Copy, Debug)]
+pub struct WebSocketRequest;
+
 impl<C: Context> WebSocketServer<C> {
     /// Sets resource limits for each accepted connection.
     pub fn with_options(mut self, options: WebSocketOptions) -> Self {
@@ -96,9 +100,10 @@ impl<C: Context> WebSocketServer<C> {
 
     /// Runs upgrade middleware and accepts a WebSocket connection.
     pub fn handle(&self, mut request: Request) -> BoxFuture<'static, Response> {
+        request.extensions_mut().insert(WebSocketRequest);
         let server = self.clone();
         async move {
-            let (context, mut middleware) =
+            let (context, mut middleware, _) =
                 match server.server.begin_http_request(&mut request).await {
                     Ok(prepared) => prepared,
                     Err(response) => return response,
@@ -324,7 +329,7 @@ impl<C: Context> Connection<C> {
             let responses: Vec<_> = requests
                 .into_iter()
                 .filter_map(|request| match request {
-                    Ok((request, _)) => request.id.map(|id| {
+                    Ok((request, _, _)) => request.id.map(|id| {
                         RpcResponse::new(
                             Some(id),
                             Err(limit_error("WebSocket request limit reached")),
@@ -348,7 +353,9 @@ impl<C: Context> Connection<C> {
         );
         for request in requests {
             match request {
-                Ok((request, opted_in)) => self.start_call(group, request, opted_in).await?,
+                Ok((request, opted_in, message)) => {
+                    self.start_call(group, request, opted_in, message).await?
+                }
                 Err(response) => {
                     self.complete(CompletedCall {
                         group,
@@ -369,6 +376,7 @@ impl<C: Context> Connection<C> {
         group: usize,
         request: RpcRequest,
         opted_in: bool,
+        message: Value,
     ) -> Result<(), ()> {
         let id = request.id.clone();
         let rejection = if id
@@ -406,10 +414,15 @@ impl<C: Context> Connection<C> {
         let mut middleware = self.middleware.clone();
         let call_id = id.clone();
         let call = async move {
-            let mut response = server
-                .process_rpc_request_with_stream(&context, &mut middleware, request, registration)
+            let response = server
+                .process_rpc_request_with_stream(
+                    &context,
+                    &mut middleware,
+                    request,
+                    &message,
+                    registration,
+                )
                 .await;
-            response.id = call_id.clone();
             let source = if response.result.is_ok() {
                 receiver
             } else {
@@ -515,7 +528,7 @@ fn request_id(value: &Value) -> Option<Id> {
         .and_then(|id| imbl_value::from_value(id).ok())
 }
 
-fn decode_request(mut value: Value) -> Result<(RpcRequest, bool), RpcResponse> {
+fn decode_request(mut value: Value) -> Result<(RpcRequest, bool, Value), RpcResponse> {
     let id = request_id(&value);
     let parse = || -> Result<bool, RpcError> {
         if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
@@ -538,12 +551,13 @@ fn decode_request(mut value: Value) -> Result<(RpcRequest, bool), RpcResponse> {
         Ok(opted_in)
     };
     let opted_in = parse().map_err(|error| RpcResponse::new(id.clone(), Err(error)))?;
+    let message = value.clone();
     if value.get("params").is_none() {
         value["params"] = imbl_value::json!({});
     }
     let request = imbl_value::from_value(value)
         .map_err(|error| RpcResponse::new(id, Err(invalid_request(error))))?;
-    Ok((request, opted_in))
+    Ok((request, opted_in, message))
 }
 
 fn limit_error(message: &'static str) -> RpcError {

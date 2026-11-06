@@ -2,28 +2,22 @@ import { ed25519 } from '@noble/curves/ed25519'
 import { blake3 } from '@noble/hashes/blake3'
 import { concatBytes, hexToBytes } from '@noble/hashes/utils'
 
-export { rpcSigningBody } from './rpc'
+import { rpcSigningBody } from './rpc'
+
+export { rpcSigningBody, RPC_SIGNATURE_FIELD } from './rpc'
 
 /**
- * Client side of the server's signature auth (`X-Start-Auth-Sig`).
+ * Ed25519 authentication for JSON RPC messages and HTTP resource bodies.
  *
- * A request is authorized by signing, with an enrolled Ed25519 key, a
- * message of:
- *
- *   "Start-Auth-Sig v2\0" || len(context) || context || 3 || timestamp || nonce || size || blake3(body)
- *
- * — a fixed protocol tag (cross-protocol separation), the server identity
- * (hostname/IP/domain) the signature is bound to, prefixed with its length as
- * one byte, the request commitment's type, and the commitment. The
- * header value is the query-encoded commitment, tagged with its type, plus the signer's public key
- * and the signature, each as bare base64 DER (no PEM armor).
- *
- * Keys are WebCrypto and non-extractable: a compromised page can sign while
- * it lives, but can never read the key out for offline use. Requires a
- * secure context and Ed25519 WebCrypto support (all evergreen browsers).
+ * HTTP uses the `Start-Auth-Sig v2` domain over raw bytes; RPC uses
+ * `Start-RPC-Auth-Sig v1` over the type-preserving signing-body codec.
+ * Both frame the domain, length-prefixed server identity and request commitment
+ * through `signingMessage`, returning a query-encoded proof with DER keys/signatures.
+ * Generated WebCrypto private keys are non-extractable and require a secure context.
  */
 
 const REQUEST_AUTH_TAG = new TextEncoder().encode('Start-Auth-Sig v2\0')
+const RPC_AUTH_TAG = new TextEncoder().encode('Start-RPC-Auth-Sig v1\0')
 
 // The server's `SignedCommitment::TYPE_ID` for `RequestCommitment`.
 const REQUEST_COMMITMENT_TYPE = 3
@@ -50,10 +44,29 @@ export async function generateAuthKey(): Promise<AuthKey> {
   return { privateKey, pubkeyPem: derToPem('PUBLIC KEY', spki) }
 }
 
+/** Produces an HTTP authentication header for the complete resource body. */
 export async function signRequest(
   key: AuthKey,
   context: string,
   body: Uint8Array,
+): Promise<string> {
+  return signTaggedRequest(key, context, body, REQUEST_AUTH_TAG)
+}
+
+/** Produces the root `signature` value for the serialized JSON request. */
+export async function signRpcRequest(
+  key: AuthKey,
+  context: string,
+  request: string,
+): Promise<string> {
+  return signTaggedRequest(key, context, rpcSigningBody(request), RPC_AUTH_TAG)
+}
+
+async function signTaggedRequest(
+  key: AuthKey,
+  context: string,
+  body: Uint8Array,
+  tag: Uint8Array,
 ): Promise<string> {
   const timestamp = BigInt(Math.floor(Date.now() / 1000))
   const nonce = crypto.getRandomValues(new BigUint64Array(1))[0]
@@ -66,7 +79,7 @@ export async function signRequest(
   view.setBigUint64(16, size, false)
   commitment.set(hash, 24)
   const message = signingMessage(
-    REQUEST_AUTH_TAG,
+    tag,
     context,
     REQUEST_COMMITMENT_TYPE,
     commitment,

@@ -93,6 +93,214 @@ async fn rpc(url: &Url, method: &str, params: Value, signer: Option<&Signer>) ->
         .unwrap()
 }
 
+async fn signed_message(signer: &Signer, mut message: Value) -> Value {
+    let proof = SignatureHeader::sign_rpc(signer, &message, "127.0.0.1")
+        .await
+        .unwrap()
+        .to_header();
+    message[crate::middleware::auth::signature::rpc::RPC_SIGNATURE_FIELD] =
+        Value::from(proof.to_str().unwrap());
+    message
+}
+
+async fn post_json_message(url: &Url, message: &Value) -> Value {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap()
+        .post(url.join("rpc/v0").unwrap())
+        .json(message)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn json_signatures_bind_http_calls_reject_replay_and_keep_batch_proofs_independent() {
+    let (_temp, ctx, admin, _reader, _) = fixture().await;
+    let (url, _task) = server(ctx).await;
+    let message = signed_message(
+        &admin,
+        json!({"id":u64::MAX, "method":"package.access.get", "params":{"id":"secret"}}),
+    )
+    .await;
+    let response = post_json_message(&url, &message).await;
+    assert_eq!(response["id"], json!(u64::MAX));
+    assert_eq!(response["result"]["private"], json!(true));
+    let replay = post_json_message(&url, &message).await;
+    assert_eq!(
+        replay["error"]["code"],
+        json!(ErrorKind::InvalidSignature as i32)
+    );
+    assert_eq!(replay["id"], json!(u64::MAX));
+    let mut tampered = signed_message(
+        &admin,
+        json!({"id":7, "method":"package.access.get", "params":{"id":"secret"}}),
+    )
+    .await;
+    tampered["params"]["id"] = "public".into();
+    assert_eq!(
+        post_json_message(&url, &tampered).await["error"]["code"],
+        json!(ErrorKind::InvalidSignature as i32)
+    );
+    let batch = json!([
+        signed_message(
+            &admin,
+            json!({"id":8,"method":"package.access.get","params":{"id":"secret"}})
+        )
+        .await,
+        signed_message(
+            &admin,
+            json!({"id":9,"method":"package.access.get","params":{"id":"public"}})
+        )
+        .await,
+    ]);
+    let responses = post_json_message(&url, &batch).await;
+    assert_eq!(responses[0]["result"]["private"], json!(true));
+    assert_eq!(responses[1]["result"]["private"], json!(false));
+}
+
+#[tokio::test]
+async fn canonical_signing_bodies_can_exceed_the_wire_request_budget() {
+    let (_temp, ctx, admin, _reader, _) = fixture().await;
+    let (url, _task) = server(ctx).await;
+    let padding = Value::Array(std::iter::repeat_n(Value::from(1.0), 120_000).collect());
+    let message = signed_message(
+        &admin,
+        json!({"id":1,"method":"package.access.get","params":{"id":"secret","padding":padding}}),
+    )
+    .await;
+    let limit = rpc_toolkit::RequestBodyLimit::default().0.get();
+    assert!(serde_json::to_vec(&message).unwrap().len() < limit);
+    assert!(
+        crate::middleware::auth::signature::rpc::rpc_signing_body(&message)
+            .unwrap()
+            .len()
+            > limit
+    );
+    assert_eq!(
+        post_json_message(&url, &message).await["result"]["private"],
+        json!(true)
+    );
+}
+
+#[tokio::test]
+async fn explicit_json_identity_takes_precedence_over_a_legacy_http_proof() {
+    let (_temp, ctx, admin, reader, _) = fixture().await;
+    let (url, _task) = server(ctx).await;
+    let message = signed_message(
+        &reader,
+        json!({"id":1,"method":"package.access.get","params":{"id":"secret"}}),
+    )
+    .await;
+    let bytes = serde_json::to_vec(&message).unwrap();
+    let legacy = SignatureHeader::sign(&admin, &bytes, "127.0.0.1")
+        .await
+        .unwrap()
+        .to_header();
+    let response: Value = reqwest::Client::new()
+        .post(url.join("rpc/v0").unwrap())
+        .header(AUTH_SIG_HEADER, legacy)
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .body(bytes)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        response["error"]["code"],
+        json!(ErrorKind::Authorization as i32)
+    );
+}
+
+#[tokio::test]
+async fn websocket_json_identity_is_per_call_and_upgrade_body_proofs_do_not_authorize_calls() {
+    let (_temp, ctx, admin, reader, _) = fixture().await;
+    let (url, _task) = server(ctx).await;
+    let mut request = url
+        .join("ws/rpc")
+        .unwrap()
+        .to_string()
+        .replacen("http:", "ws:", 1)
+        .into_client_request()
+        .unwrap();
+    request.headers_mut().insert(
+        AUTH_SIG_HEADER,
+        SignatureHeader::sign(&admin, b"", "127.0.0.1")
+            .await
+            .unwrap()
+            .to_header(),
+    );
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    socket
+        .send(Message::Text(
+            json!({"jsonrpc":"2.0","id":1,"method":"package.access.get","params":{"id":"secret"}})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    let response: Value = serde_json::from_str(
+        tokio::time::timeout(std::time::Duration::from_secs(5), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .to_text()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        response["error"]["code"],
+        json!(ErrorKind::Authorization as i32)
+    );
+    let batch = json!([
+        signed_message(&reader, json!({"jsonrpc":"2.0","id":2,"method":"index"})).await,
+        json!({"jsonrpc":"2.0","id":3,"method":"index"}),
+    ]);
+    socket
+        .send(Message::Text(batch.to_string().into()))
+        .await
+        .unwrap();
+    let response: Value = serde_json::from_str(
+        tokio::time::timeout(std::time::Duration::from_secs(5), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .to_text()
+            .unwrap(),
+    )
+    .unwrap();
+    let responses = response.as_array().unwrap();
+    let signed = responses
+        .iter()
+        .find(|response| response["id"] == json!(2))
+        .unwrap();
+    let unsigned = responses
+        .iter()
+        .find(|response| response["id"] == json!(3))
+        .unwrap();
+    assert!(
+        signed["result"]["package"]["packages"]
+            .get("secret")
+            .is_some(),
+        "{signed}"
+    );
+    assert!(
+        unsigned["result"]["package"]["packages"]
+            .get("secret")
+            .is_none(),
+        "{unsigned}"
+    );
+    socket.close(None).await.unwrap();
+}
+
 #[tokio::test]
 async fn legacy_signature_body_limits_apply_before_reads_and_honor_transport_configuration() {
     use std::num::NonZeroUsize;
@@ -388,7 +596,7 @@ async fn watches_multiplex_with_ordinary_calls_and_revoke_private_packages() {
     );
     let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
     for (id, pointer) in [(41, "/index"), (42, "/index/os")] {
-        socket.send(Message::Text(json!({"jsonrpc":"2.0", "rpcstream":"1.0", "id":id, "method":"db.watch", "params":{"pointer":pointer}}).to_string().into())).await.unwrap();
+        socket.send(Message::Text(signed_message(&reader, json!({"jsonrpc":"2.0", "rpcstream":"1.0", "id":id, "method":"db.watch", "params":{"pointer":pointer}})).await.to_string().into())).await.unwrap();
     }
     let mut dumps = BTreeMap::new();
     for _ in 0..2 {
