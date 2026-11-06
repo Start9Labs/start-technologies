@@ -1,11 +1,31 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
+import { dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import '@angular/compiler'
-import { HttpEventType, HttpResponse } from '@angular/common/http'
+import {
+  HttpClient,
+  HttpErrorResponse,
+  HttpEventType,
+  HttpHeaders,
+  HttpResponse,
+  HttpXhrBackend,
+} from '@angular/common/http'
+import { Injector, runInInjectionContext } from '@angular/core'
 import { Observable, Subject } from 'rxjs'
 import ts from 'typescript'
+
+const configPath = fileURLToPath(
+  new URL('../../../../tsconfig.json', import.meta.url),
+)
+const { config, error } = ts.readConfigFile(configPath, ts.sys.readFile)
+assert.equal(error, undefined)
+const compilerOptions = ts.convertCompilerOptionsFromJson(
+  config.compilerOptions,
+  dirname(configPath),
+).options
 
 registerHooks({
   resolve(specifier, context, next) {
@@ -20,11 +40,7 @@ registerHooks({
     return {
       format: 'module',
       source: ts.transpileModule(readFileSync(new URL(url), 'utf8'), {
-        compilerOptions: {
-          target: ts.ScriptTarget.ES2022,
-          module: ts.ModuleKind.ES2022,
-          experimentalDecorators: true,
-        },
+        compilerOptions,
       }).outputText,
       shortCircuit: true,
     }
@@ -32,6 +48,7 @@ registerHooks({
 })
 const { HttpService } = await import('../src/services/http.service.ts')
 const { getErrorMessage } = await import('../src/services/error.service.ts')
+const { HttpError } = await import('../src/classes/http-error.ts')
 
 test('transport error messages preserve structured failures and handle unknown thrown values', () => {
   assert.equal(getErrorMessage(new Error('Upload failed')), 'Upload failed')
@@ -106,6 +123,105 @@ test('upload progress uses XHR and does not resolve until the server confirms th
   ])
 })
 
+test('the pinned XHR backend preserves plaintext transfer errors without an HTTP reason phrase', async () => {
+  const message = 'La taille du fichier dépasse la limite de 3 octets.'
+  const xhr = new (class extends EventTarget {
+    upload = new EventTarget()
+    status = 400
+    statusText = ''
+    response = message
+    readyState = 4
+    DONE = 4
+    open() {}
+    setRequestHeader() {}
+    getAllResponseHeaders() {
+      return 'Content-Type: text/plain; charset=utf-8\r\n'
+    }
+    send() {
+      queueMicrotask(() => this.dispatchEvent(new Event('load')))
+    }
+    abort() {}
+  })()
+  const injector = Injector.create({ providers: [] })
+  try {
+    const { request, instance } = transport()
+    instance.xhr = new HttpClient(
+      runInInjectionContext(
+        injector,
+        () => new HttpXhrBackend({ build: () => xhr }),
+      ),
+    )
+    await assert.rejects(
+      request({
+        method: 'POST',
+        url: '/rest/rpc/upload',
+        body: new Blob(['large']),
+        uploadProgress: () => {},
+      }),
+      error => {
+        assert.ok(error instanceof HttpError)
+        assert.equal(error.code, 400)
+        assert.equal(error.message, message)
+        return true
+      },
+    )
+  } finally {
+    injector.destroy()
+  }
+})
+
+test('HTTP errors accept only declared plaintext bodies and preserve the framework fallback', async () => {
+  for (const progress of [undefined, () => {}]) {
+    for (const [status, contentType, body, expected] of [
+      [
+        400,
+        'Text/Plain; charset=utf-8',
+        'Maximum size: 3 bytes',
+        'Maximum size: 3 bytes',
+      ],
+      [404, 'text/plain', 'Not Found', 'Not Found'],
+      [500, 'text/plain', 'Internal Server Error', 'Internal Server Error'],
+      [502, 'text/html', '<html>proxy error</html>', null],
+      [403, 'application/json', { message: 'unrelated object' }, null],
+      [500, 'text/plain', '', null],
+    ]) {
+      const response = new HttpErrorResponse({
+        status,
+        statusText: 'OK',
+        headers: new HttpHeaders({ 'content-type': contentType }),
+        error: body,
+        url: 'https://start.local/rest/rpc/upload',
+      })
+      const { request, events } = transport()
+      const pending = request({
+        method: 'POST',
+        url: '/rest/rpc/upload',
+        uploadProgress: progress,
+      })
+      events.error(response)
+      await assert.rejects(pending, error => {
+        assert.ok(error instanceof HttpError)
+        assert.equal(error.code, status)
+        assert.equal(error.message, expected ?? response.message)
+        assert.notEqual(error.message, 'OK')
+        return true
+      })
+    }
+  }
+  const network = new HttpError(
+    new HttpErrorResponse({ status: 0, error: new Error('offline') }),
+  )
+  assert.match(getErrorMessage(network), /couldn't reach your server/)
+})
+
+test('non-HTTP failures preserve their original error', async () => {
+  const { request, events } = transport()
+  const original = new Error('timeout')
+  const pending = request({ method: 'GET', url: '/rpc' })
+  events.error(original)
+  await assert.rejects(pending, error => error === original)
+})
+
 test('ordinary requests retain the configured HTTP backend and response type', async () => {
   const { request, requests, events } = transport()
   const pending = request({
@@ -135,8 +251,9 @@ test('aborting unsubscribes the in-flight request instead of merely ignoring its
     uploadProgress: () => {},
     signal: abort.signal,
   })
-  abort.abort(new Error('cancelled'))
-  await assert.rejects(pending)
+  const reason = new Error('cancelled')
+  abort.abort(reason)
+  await assert.rejects(pending, error => error === reason)
   assert.equal(unsubscribed, true)
 })
 

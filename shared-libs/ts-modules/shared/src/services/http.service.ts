@@ -1,6 +1,7 @@
 import {
   HttpClient,
   HttpEventType,
+  HttpErrorResponse,
   HttpResponse,
   HttpXhrBackend,
 } from '@angular/common/http'
@@ -104,8 +105,8 @@ export class HttpService {
     }
 
     return firstValueFrom(timeout ? withTimeout(req, timeout) : req).catch(
-      e => {
-        throw new HttpError(e)
+      (error: unknown) => {
+        throw error instanceof HttpErrorResponse ? new HttpError(error) : error
       },
     )
   }
