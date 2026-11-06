@@ -107,6 +107,11 @@ dns
 
 wan                     # WAN IPv4/IPv6, MAC, DNS, DDNS config
 
+wwan                    # Wi-Fi uplink (Wireless WAN)
+  ├─ get / scan
+  ├─ connect / disconnect
+  └─ priority-set
+
 lan                     # LAN IPv4/IPv6 config
 
 published-ports         # Port forwarding rules
@@ -153,6 +158,12 @@ Manages SSID, per-radio settings (band, channel, enabled, broadcast), and multi-
 Manages WiFi blackout schedules: every Wi-Fi reload re-applies the state for the current time, and crontab (`/etc/crontabs/root`) lines re-apply it at each window boundary.
 
 Creates `WifiStation` (password entries) and `WifiVlan` (VLAN mapping) sections in the `wireless` UCI config.
+
+### wwan.rs — Wireless WAN
+
+Joins another Wi-Fi network as an uplink. It owns the `wwan` sections of `wireless` (a client-mode `wifi-iface`) and `network` (a DHCP interface), and adds `wwan` to the `wan` firewall zone, so profiles routed through the WAN, published ports and remote access treat it as the WAN. The priority is the two interfaces' route `metric`: netifd uses the lower one while both have a default route. `system::active_uplink` reports which one carries traffic, and the WAN address readers follow it.
+
+A client-mode interface on a radio ties that radio's access points to it: hostapd starts them on the upstream network's channel once wpa_supplicant associates, and stops them while it is scanning, authenticating or disconnected. `wifi.set` refuses to turn off a radio that carries one, whoever configured it.
 
 ### ethernet.rs — Ethernet Port Assignment
 
@@ -305,7 +316,7 @@ Shared, OpenWrt-native typed sections live in `uciedit/src/openwrt.rs`; feature-
 - Config errors: `InterfaceNameConflict`, `DuplicateVlanTag`, `DuplicatePassword`, `DuplicatePasswordLabel`, `DuplicateFullname`
 - Profile errors: `MissingProfile`, `CorruptedProfile`, `LanOwnerExists`, `CannotDeleteLanOwner`
 - Infrastructure errors: `MissingLanBridge`, `MissingWanInterface`, `MissingLanInterface`, `MissingFirewallZone`
-- WiFi errors: `CorruptedWifi`, `UnnamedWirelessInterface`, `UnnamedWirelessDevice`
+- WiFi errors: `CorruptedWifi`, `UnnamedWirelessInterface`, `UnnamedWirelessDevice`, `WifiRadioCarriesUplink`, `WifiUplinkConfiguredElsewhere`, `WifiRadioUnavailable`
 - VPN errors: `VpnHasDependents`, `VpnChainCycle`, `VpnPeersWouldBreak`, `VpnDisabled`
 - Validation: `InvalidValue`, `WanPortWithProfile`, `DhcpStaticHostsInSubnet`, `SubnetCollision`, `MissingDeviceAddress`, `PublishedPortsUseIpv6`
 - UCI errors: `UciEdit` (any `uciedit` parse, I/O, or write-conflict failure, and failed `uci` CLI calls)

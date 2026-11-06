@@ -407,6 +407,24 @@ Włącz DNS over HTTPS (DoH) dla szyfrowanych zapytań DNS. Poprawia to prywatno
 DDNS mapuje Twój zmieniający się adres IP na stałą nazwę domeny, umożliwiając zdalny dostęp do Twojej sieci bez znajomości bieżącego adresu IP.
 
 Wymaga konta u obsługiwanego dostawcy. Wprowadź dane uwierzytelniające i nazwę hosta od swojego dostawcy DDNS.`,
+  '/wwan': `## Bezprzewodowy WAN
+
+Router dołącza do innej sieci Wi-Fi i używa jej do dostępu do Internetu. Urządzenia w Twojej sieci łączą się przez nią z Internetem tak samo jak przez port WAN: profile, opublikowane porty i dostęp zdalny traktują ją jak WAN.
+
+### Dołączanie do sieci
+
+Wybierz pasmo, uruchom skanowanie i wybierz **Dołącz** obok sieci albo **Ukryta sieć** dla sieci, która ukrywa swoją nazwę. Obsługiwane są sieci WPA2, WPA3 i otwarte; sieci WPA Enterprise nie są.
+
+### Priorytet
+
+- **Zapasowe:** port WAN jest używany, gdy ma połączenie, a łącze Wi-Fi przejmuje, gdy port WAN traci łącze.
+- **Preferowane:** łącze Wi-Fi jest używane, gdy jest połączone, a port WAN przejmuje, gdy ono zaniknie.
+
+Przełączanie zależy od łącza: sieć nadrzędna, która pozostaje połączona, ale przestaje docierać do Internetu, go nie wywołuje.
+
+### Własne Wi-Fi routera
+
+Pasmo obsługujące łącze korzysta z kanału sieci nadrzędnej, a jego Wi-Fi jest wyłączone, dopóki router nie jest połączony z tą siecią, także po błędnym haśle. Dołącz z urządzenia przewodowego lub z drugiego pasma. Okno wyłączenia Wi-Fi, które wyłącza to pasmo, rozłącza również łącze.`,
   '/settings/activity': `## Ustawienia – Aktywność
 
 Wyświetl ostatnie próby logowania i zdarzenia bezpieczeństwa. Monitoruj podejrzaną aktywność i usuwaj stare wpisy w razie potrzeby.`,

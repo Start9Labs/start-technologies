@@ -9,7 +9,7 @@ Wi-Fi Blackout lets you disable the Wi-Fi radio on a recurring timetable. During
 - **Energy savings** — Turn off Wi-Fi when nobody is home during the day.
 
 > [!NOTE]
-> Wi-Fi Blackout affects the radio hardware itself, not individual devices or profiles. When Wi-Fi is off, all Wi-Fi-connected devices are disconnected regardless of their profile. Ethernet-connected devices are unaffected. For per-profile time restrictions on Internet access (not Wi-Fi connectivity), use [WAN Blackout](security-profiles.md#wan-blackout) in Security Profiles.
+> Wi-Fi Blackout affects the radio hardware itself, not individual devices or profiles. When Wi-Fi is off, all Wi-Fi-connected devices are disconnected regardless of their profile, and so is a [Wireless WAN](wireless-wan.md) uplink. Ethernet-connected devices are unaffected. For per-profile time restrictions on Internet access (not Wi-Fi connectivity), use [WAN Blackout](security-profiles.md#wan-blackout) in Security Profiles.
 
 ## Setting a Schedule
 

@@ -9,6 +9,6 @@
 }
 # WAN Whitelist/Blacklist entries are read against the WAN address to decide a
 # profile's hairpin; fw4's 20-firewall hook has already reloaded by this point.
-[ "$ACTION" = "ifup" -o "$ACTION" = "ifupdate" ] && [ "$INTERFACE" = "wan" ] && {
+[ "$ACTION" = "ifup" -o "$ACTION" = "ifupdate" -o "$ACTION" = "ifdown" ] && [ "$INTERFACE" = "wan" -o "$INTERFACE" = "wwan" ] && {
     (/usr/bin/startwrt-cli published-ports sync-hairpin && /etc/init.d/firewall reload) 2>/dev/null &
 }

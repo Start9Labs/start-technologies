@@ -20,8 +20,8 @@ pub const DEFAULT_LAN_BRIDGE: &str = "br-lan";
 /// the 64-hex-char raw-PMK form isn't exposed through this API. Reject out-of-
 /// range lengths at the API boundary so the user gets a clean error instead of
 /// hostapd silently refusing to start the AP.
-const MIN_PSK_LEN: usize = 8;
-const MAX_PSK_LEN: usize = 63;
+pub(crate) const MIN_PSK_LEN: usize = 8;
+pub(crate) const MAX_PSK_LEN: usize = 63;
 
 const REGULATORY_DB: &str = "/lib/firmware/regulatory.db";
 
@@ -841,6 +841,20 @@ fn auto_enable_radios_on_first_admin_password(
     Ok(true)
 }
 
+/// Turning off a radio a client-mode interface uses would drop that uplink.
+fn check_uplink_radios(cfgs: &Configs, radios: &BTreeMap<String, WifiRadio>) -> Result<(), Error> {
+    let uplinks = crate::wwan::uplink_radios(cfgs)?;
+    for (_, iface, _, radio) in find_relevant_with_radios(cfgs, radios)? {
+        if !radio.enabled && uplinks.contains(&iface.device) {
+            return Err(Error::new(
+                eyre!("radio {} carries a Wi-Fi uplink", iface.device),
+                ErrorKind::WifiRadioCarriesUplink,
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Determines whether a full wifi restart or PSK-only reload is needed.
 fn set_config(
     _ctx: &impl CtrlContext,
@@ -1255,6 +1269,16 @@ pub async fn set<C: CtrlContext>(
                 false,
                 "Failed to update WiFi: channel width unavailable",
                 Some("InvalidValue"),
+            );
+            return Err(err);
+        }
+        if let Err(err) = check_uplink_radios(&cfgs, &wifi.radios) {
+            crate::activity::log(
+                "wifi",
+                "updated",
+                false,
+                "Failed to update WiFi: radio carries the Wi-Fi uplink",
+                Some(&err.to_string()),
             );
             return Err(err);
         }
@@ -4168,5 +4192,52 @@ Band 2:
         assert!(written.contains("option htmode 'HE40'"), "{written}");
         assert!(written.contains("option htmode 'HE80'"), "{written}");
         assert!(written.contains("option country 'US'"), "{written}");
+    }
+
+    #[tokio::test]
+    async fn turning_off_a_radio_that_carries_an_uplink_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("wireless"),
+            "\
+config wifi-device 'radio0'
+\toption type 'mac80211'
+\toption band '2g'
+\toption channel 'auto'
+
+config wifi-iface 'default_radio0'
+\toption device 'radio0'
+\toption mode 'ap'
+\toption ssid 'Start9'
+\toption encryption 'psk2'
+\toption key 'adminpassword'
+
+config wifi-iface 'wifinet2'
+\toption device 'radio0'
+\toption mode 'sta'
+\toption network 'wwan'
+\toption ssid 'Upstream'
+",
+        )
+        .unwrap();
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path().to_path_buf(), &arena, &["wireless"])
+            .await
+            .unwrap();
+        let radio = |enabled| {
+            BTreeMap::from([(
+                "default_radio0".to_string(),
+                WifiRadio {
+                    band: "2g".into(),
+                    channel: "auto".into(),
+                    width: None,
+                    enabled,
+                    broadcast: enabled,
+                },
+            )])
+        };
+        check_uplink_radios(&cfgs, &radio(true)).unwrap();
+        let err = check_uplink_radios(&cfgs, &radio(false)).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::WifiRadioCarriesUplink);
     }
 }
