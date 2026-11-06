@@ -140,6 +140,7 @@ tui-dropdown[data-appearance='start-os'][data-appearance='start-os'] {
 
   // A backdrop-filter on the host zeroes Taiga's anchor detector and hides the dropdown.
   > .t-wrapper {
+    align-self: flex-start;
     backdrop-filter: brightness(5) blur(0.25rem);
     background-color: color-mix(
       in hsl,
