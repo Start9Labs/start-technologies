@@ -274,7 +274,7 @@ start-wrt's targets live in [`build.mk`](build.mk) (included by the root `Makefi
 native-target generator inside the selected shared Rust builder with Cargo's `bindings`
 profile (unoptimized, no debug info, nonincremental), then format the output with the
 host's Prettier. Native bindings and tests select the host sysroot independently of
-cross-build `ARCH`. StartWRT's shared builder alias sets `START9_RVA23=0` for bindings,
+cross-build `ARCH`. StartWRT's shared builder alias sets `DISABLE_RVA23=1` for bindings,
 tests and cross-compilation. The router binary retains its explicit scalar K1 flags,
 compiler wrappers and final ISA check. Product builds consume the committed bindings
 and retain their selected `PROFILE`.

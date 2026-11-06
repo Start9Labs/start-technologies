@@ -18,7 +18,7 @@ fi
 
 alias 'rust-zig-builder'='docker run '"$USE_TTY"' --rm \
   -e "RUSTFLAGS=$RUSTFLAGS" \
-  -e START9_RVA23=0 \
+  -e DISABLE_RVA23=1 \
   -e CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS \
   -e "CC_riscv64gc_unknown_linux_musl=$CC_riscv64gc_unknown_linux_musl" \
   -e "CXX_riscv64gc_unknown_linux_musl=$CXX_riscv64gc_unknown_linux_musl" \

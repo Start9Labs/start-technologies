@@ -85,8 +85,8 @@ done
 
 for arch in x86_64 aarch64 arm64; do
     : > "$DOCKER_LOG"
-    ARCH=riscv64 MOCK_UNAME_ARCH="$arch" START9_RVA23=1 bash -ec 'shopt -s expand_aliases; source projects/start-wrt/build/builder-alias.sh; ARCH=$(native_arch); eval "rust-zig-builder cargo --version"'
-    assert_log_contains START9_RVA23=0
+    ARCH=riscv64 MOCK_UNAME_ARCH="$arch" DISABLE_RVA23=0 bash -ec 'shopt -s expand_aliases; source projects/start-wrt/build/builder-alias.sh; ARCH=$(native_arch); eval "rust-zig-builder cargo --version"'
+    assert_log_contains DISABLE_RVA23=1
     assert_log_contains "PKG_CONFIG_SYSROOT_DIR=/opt/sysroot/${arch/arm64/aarch64}"
 done
 
@@ -97,7 +97,7 @@ for selected_image in "$image" "$custom"; do
     assert_log_contains "$selected_image"
     assert_log_contains PKG_CONFIG_SYSROOT_DIR=/opt/sysroot/aarch64
     assert_log_contains /workdir
-    assert_log_contains START9_RVA23=0
+    assert_log_contains DISABLE_RVA23=1
     assert_log_contains cargo
     assert_log_contains run
     assert_log_contains --profile
