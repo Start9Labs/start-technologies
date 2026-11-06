@@ -1,0 +1,1 @@
+- iPhone’y i iPady mogą zainstalować główny CA routera skonfigurowanego przed StartWRT 1.2.0. Jego odcisk palca zmienia się podczas aktualizacji, a urządzenia, które już mu ufają, nadal ufają routerowi.
