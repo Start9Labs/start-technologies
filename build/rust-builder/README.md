@@ -33,7 +33,7 @@ make rust-builder
 make rust-builder-check
 ```
 
-`RUST_BUILDER_TEST_IMAGE` overrides the local image tag. Building all three sysroots requires QEMU/binfmt for foreign architectures; CI configures it through the shared build-setup action. The image check verifies bindgen output, pkg-config discovery for all three FUSE sysroots, native static FUSE linking, macOS dylib deduplication on both architectures and both argument paths, RISC-V ISA defaults and CPU overrides through generated compiler wrappers, default Rust ISA attributes, the RVA23 opt-out in Rust/C/CMake artifacts, preservation of cached toolchains across profile switches, CMake compilation through upstream-generated toolchains, and a native Linux-musl Rust executable.
+`RUST_BUILDER_TEST_IMAGE` overrides the local image tag. Building all three sysroots requires QEMU/binfmt for foreign architectures; CI configures it through the shared build-setup action. The image check verifies the default shell with no explicit container command, bindgen output, pkg-config discovery for all three FUSE sysroots, native static FUSE linking, macOS dylib deduplication on both architectures and both argument paths, RISC-V ISA defaults and CPU overrides through generated compiler wrappers, default Rust ISA attributes, the RVA23 opt-out in Rust/C/CMake artifacts, preservation of cached toolchains across profile switches, CMake compilation through upstream-generated toolchains, and a native Linux-musl Rust executable.
 
 ## Updates
 
