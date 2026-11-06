@@ -43,7 +43,7 @@ fn invalid_certificate() -> Error {
     )
 }
 
-/// An ephemeral Noise key certified by an existing Ed25519 identity.
+/// An in-memory Noise static key certified by an existing Ed25519 identity.
 /// Identity signing works without exporting its private key, including gpg-agent keys.
 pub struct NoiseIdentity {
     secret: Zeroizing<Vec<u8>>,
