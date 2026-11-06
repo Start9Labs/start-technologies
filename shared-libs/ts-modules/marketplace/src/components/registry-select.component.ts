@@ -1,6 +1,6 @@
-import { Component, inject } from '@angular/core'
+import { Component, inject, input } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { Router } from '@angular/router'
+import { Router, RouterLink } from '@angular/router'
 import {
   DialogService,
   i18nPipe,
@@ -49,17 +49,33 @@ import { StoreIconDirective } from './store-icon.directive'
         <tui-data-list *tuiDropdown size="m">
           <div class="g-title">
             <small>{{ 'Saved Registries' | i18n }}</small>
-            <button
-              tuiButton
-              size="xs"
-              appearance="primary"
-              iconStart="@tui.plus"
-              (click)="add()"
-            >
-              {{ 'Add' | i18n }}
-            </button>
+            @if (manageRegistriesLink()) {
+              <a
+                tuiIconButton
+                size="xs"
+                appearance="icon"
+                iconStart="@tui.settings"
+                [routerLink]="manageRegistriesLink()"
+                (click)="open = false"
+              >
+                {{ 'Manage Registries' | i18n }}
+              </a>
+            } @else {
+              <button
+                tuiButton
+                size="xs"
+                appearance="primary"
+                iconStart="@tui.plus"
+                (click)="add()"
+              >
+                {{ 'Add' | i18n }}
+              </button>
+            }
           </div>
-          @for (registry of d.standard; track registry.url) {
+          @for (
+            registry of manageRegistriesLink() ? d.registries : d.standard;
+            track registry.url
+          ) {
             <button tuiOption (click)="connect(registry.url)">
               <span tuiAvatar><img [storeIcon]="registry.url" /></span>
               <span tuiTitle>
@@ -71,7 +87,7 @@ import { StoreIconDirective } from './store-icon.directive'
               }
             </button>
           }
-          @if (d.unsaved; as url) {
+          @if (!manageRegistriesLink() && d.unsaved; as url) {
             <hr />
             <button tuiOption (click)="saveCurrent(url)">
               <span tuiAvatar><img [storeIcon]="url" /></span>
@@ -82,7 +98,10 @@ import { StoreIconDirective } from './store-icon.directive'
               <tui-icon icon="@tui.bookmark" />
             </button>
           }
-          @for (registry of d.custom; track registry.url) {
+          @for (
+            registry of manageRegistriesLink() ? [] : d.custom;
+            track registry.url
+          ) {
             @if ($first) {
               <hr />
             }
@@ -136,6 +155,7 @@ import { StoreIconDirective } from './store-icon.directive'
   `,
   imports: [
     StoreIconDirective,
+    RouterLink,
     TuiButton,
     TuiDropdown,
     TuiDataList,
@@ -152,14 +172,13 @@ export class MarketplaceRegistrySelectComponent {
   private readonly marketplace = inject(AbstractMarketplaceService)
   private readonly router = inject(Router)
 
+  public readonly manageRegistriesLink = input('')
+
   protected open = false
   protected readonly breakpoint = inject(TUI_BREAKPOINT)
 
-  // The resolved current registry — used to label an arbitrary (deep-linked)
-  // registry that isn't in the saved list yet.
   protected readonly fetched = toSignal(this.marketplace.currentRegistry$)
 
-  // 0 and 1 are the standard registries (start9, community); 2+ are custom.
   protected readonly data = toSignal(
     combineLatest([
       this.marketplace.registries$,
@@ -175,9 +194,9 @@ export class MarketplaceRegistrySelectComponent {
         return {
           currentUrl,
           current,
+          registries: withSelected,
           standard: withSelected.slice(0, 2),
           custom: withSelected.slice(2),
-          // an arbitrary (deep-linked) registry not in the saved list
           unsaved: current ? null : currentUrl,
         }
       }),
@@ -187,7 +206,6 @@ export class MarketplaceRegistrySelectComponent {
   async connect(url: string): Promise<void> {
     this.open = false
 
-    // Already on this registry: just close the dropdown
     if (sameUrl(url, this.data()?.current?.url)) return
 
     this.tasks.run(async () => {

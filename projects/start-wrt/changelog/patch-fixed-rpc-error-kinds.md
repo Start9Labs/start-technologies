@@ -1,1 +1,0 @@
-- Error messages now name the specific error instead of "General error".

@@ -1261,7 +1261,7 @@ pub async fn set(
 
 /// Delete VPN server configuration for a profile
 #[instrument(skip_all)]
-pub async fn delete(ctx: ServerContext, args: DeleteArgs) -> Result<(), Error> {
+pub async fn delete(_ctx: ServerContext, args: DeleteArgs) -> Result<(), Error> {
     let profile_interface = &args.profile;
     let wg_interface_name = format!("wg_{}", profile_interface);
 
@@ -1359,7 +1359,7 @@ pub async fn delete(ctx: ServerContext, args: DeleteArgs) -> Result<(), Error> {
             Ok(()) => {
                 reload_system().await?;
                 if had_dns_injection {
-                    crate::dns_inject::apply_permission_change(&ctx).await?;
+                    crate::dns_inject::permission_changed();
                 }
                 // Clear proxy_arp sysctl — netifd ignores the UCI option
                 if let Some(tag) = vlan_tag {
@@ -1381,7 +1381,7 @@ pub async fn delete(ctx: ServerContext, args: DeleteArgs) -> Result<(), Error> {
 /// Add a peer to a VPN server
 #[instrument(skip_all)]
 pub async fn peer_add(
-    ctx: ServerContext,
+    _ctx: ServerContext,
     DeserializeStdin(PeerAddArgs { profile, mut peer }): DeserializeStdin<PeerAddArgs>,
 ) -> Result<PeerAddResponse, Error> {
     // Validate peer name before any other processing
@@ -1579,20 +1579,8 @@ pub async fn peer_add(
             Ok(()) => {
                 // Restart the WireGuard interface to apply peer changes immediately
                 restart_wireguard_interface(&wg_interface_name).await?;
-                // A failed rewrite must not discard the one-time client config.
                 if peer.allow_dns_injection == Some(true) {
-                    if let Err(err) = crate::dns_inject::apply_permission_change(&ctx).await {
-                        crate::activity::log(
-                            "vpn-server",
-                            "peer-dns-injection",
-                            false,
-                            &format!(
-                                "Failed to enable DNS injection for inbound VPN peer '{}'",
-                                peer.name
-                            ),
-                            Some(&err.to_string()),
-                        );
-                    }
+                    crate::dns_inject::permission_changed();
                 }
 
                 let private_key = client_private_key.map(|k| k.to_base64());
@@ -1631,7 +1619,7 @@ pub async fn peer_add(
 
 /// Delete a peer from a VPN server
 #[instrument(skip_all)]
-pub async fn peer_delete(ctx: ServerContext, args: PeerDeleteArgs) -> Result<(), Error> {
+pub async fn peer_delete(_ctx: ServerContext, args: PeerDeleteArgs) -> Result<(), Error> {
     let profile_interface = &args.profile;
     let wg_interface_name = format!("wg_{}", profile_interface);
     let public_key = &args.public_key;
@@ -1716,7 +1704,7 @@ pub async fn peer_delete(ctx: ServerContext, args: PeerDeleteArgs) -> Result<(),
                 // Restart the WireGuard interface to apply peer changes immediately
                 restart_wireguard_interface(&wg_interface_name).await?;
                 if had_dns_injection {
-                    crate::dns_inject::apply_permission_change(&ctx).await?;
+                    crate::dns_inject::permission_changed();
                 }
                 crate::activity::log(
                     "vpn-server",
@@ -1873,9 +1861,7 @@ pub async fn peer_set_dns_injection<C: CtrlContext>(
             Ok(()) => break name,
         }
     };
-    crate::dns_inject::apply_permission_change(&ctx)
-        .await
-        .inspect_err(log_failure)?;
+    crate::dns_inject::permission_changed();
     crate::activity::log(
         "vpn-server",
         "peer-dns-injection",
@@ -3288,8 +3274,7 @@ config dhcp 'guest'
         assert_eq!(listed.allow_dns_injection, Some(true));
     }
 
-    /// Granting and revoking a peer's permission edits its section and the
-    /// per-profile dnsmasq instances together.
+    /// Granting and revoking a peer's permission edits its section alone.
     #[tokio::test]
     async fn test_peer_set_dns_injection() {
         let dir = tempfile::tempdir().unwrap();
@@ -3307,35 +3292,22 @@ config dhcp 'guest'
         };
         let read = || async {
             let arena = Arena::new();
-            let cfgs = parse_all(dir.path(), &arena, &["network", "dhcp"])
-                .await
-                .unwrap();
+            let cfgs = parse_all(dir.path(), &arena, &["network"]).await.unwrap();
             let peers = get_peers_for_interface(&cfgs, "wg_guest");
             let allowed = peers
                 .iter()
                 .find(|p| p.public_key.as_deref() == Some(peer0_key.as_str()))
                 .unwrap()
                 .allow_dns_injection;
-            let addnhosts = cfgs["dhcp"]
-                .sections
-                .iter()
-                .find(|s| s.name().as_deref() == Some("dns_guest"))
-                .and_then(|s| s.get::<uciedit::openwrt::ProfileDnsmasq>().ok())
-                .map(|d| d.addnhosts)
-                .unwrap_or_default();
-            (allowed, addnhosts)
+            let dhcp = std::fs::read_to_string(dir.path().join("dhcp")).unwrap_or_default();
+            (allowed, dhcp)
         };
 
+        let (_, dhcp_before) = read().await;
         set(true).await.unwrap();
-        assert_eq!(
-            read().await,
-            (
-                Some(true),
-                vec![crate::dns_inject::inject_hosts_path("guest")]
-            )
-        );
+        assert_eq!(read().await, (Some(true), dhcp_before.clone()));
         set(false).await.unwrap();
-        assert_eq!(read().await, (None, vec![]));
+        assert_eq!(read().await, (None, dhcp_before));
 
         let missing = peer_set_dns_injection(
             ctx.clone(),

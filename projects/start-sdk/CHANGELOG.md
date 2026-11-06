@@ -1,5 +1,52 @@
 # Changelog
 
+## [4.0.0]
+
+### Added
+
+- Added `sdk.host.getAddressGateways`, which resolves the gateways publishing the addresses a service advertises beside the gateway its outbound connections leave through, for health checks that report a mismatch.
+
+- `make install HOST=<profile-or-URL>` selects the device for architecture detection and installation. Local development installs use `--trust` to override signer trust while retaining signature and integrity checks.
+- `make sign` builds the configured targets and endorses all local `.s9pk` files with the configured identity key.
+- `make universal` and `make publish` run even when a file has the target's name.
+
+- Browser S9PK readers expose declared embedded and supplemental signing keys and metadata parsing diagnostics. Signature validation belongs to the backend, using the caller's signer pins. Shared Ed25519 public-key codecs accept canonical DER64 and PEM.
+
+### Changed
+
+- Replace the `waiting` health result with `waiting: true` on `starting` or `loading`. Waiting checks show a clock, and every status can display a nonempty custom message verbatim. Update health checks returning `result: 'waiting'` to use `result: 'starting', waiting: true`, and remove `waiting` entries from `statusTrigger` interval maps.
+
+- Configure HTTP proxy authentication and forwarded headers under `bindPort`'s `proxy` option, independently of `addSsl`. Proxy authentication applies to both the original and TLS-wrapper legs.
+- Inherit proxy defaults from the protocol: enabled for HTTP-family protocols, disabled otherwise. Every protocol accepts an explicit `proxy` object or `proxy: null` override.
+- Move `addSsl.auth` to `proxy.auth` and `addSsl.addXForwardedHeaders` to `proxy.addXForwardedHeaders` when rebuilding packages. Keep TLS settings under `addSsl`.
+- Require StartOS 0.4.1 or later for packages built with this SDK.
+
+### Fixed
+
+- Fixed a daemon that keeps restarting, and repeated `exec` calls sharing one `abort` controller, logging `MaxListenersExceededWarning` and growing in memory. Rebuild packages with this SDK version to receive the fix.
+
+- Fixed daemon `ready` checks and `addHealthCheck()` checks using more memory every time they run while the service is up. Rebuild packages with this SDK version to receive the fix.
+
+- Fixed `merge()` keeping a file model's stored date when given a new `Date`. Rebuild packages with this SDK version to receive the fix.
+
+- Fixed `merge()` changing file-model keys it was not given, and `.const()` reads not re-running, when keys fall back to a fixed `.catch()` object. Rebuild packages with this SDK version to receive the fix.
+
+- Preserve caller-owned options when reusing subcontainer `spawn` or `launch` options.
+
+### Security
+
+- Keep daemon and subcontainer command environment values out of process command lines, splitting large environments into bounded chunks.
+- Preserve multiline image environment values in packages built with start-cli 2.6.0 or later.
+- Require StartOS 0.4.1 or later for packages built with this SDK.
+
+## [3.1.1]
+
+### Fixed
+
+- Fixed subcontainer startup from an image with no `/proc`, such as one built `FROM scratch`. Rebuild packages with this SDK version to receive the fix.
+
+- Fixed subcontainer startup with a symlinked `/etc/resolv.conf` and preserved other files linked to an image's resolver. Rebuild packages with this SDK version to receive the fix.
+
 ## [3.1.0]
 
 ### Added

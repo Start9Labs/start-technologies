@@ -1,7 +1,10 @@
+import { getEventListeners } from 'node:events'
+import { setFlagsFromString } from 'node:v8'
+import { runInNewContext } from 'node:vm'
 import { Daemon } from '../mainFn/Daemon'
 import { EXIT_SUCCESS, HealthDaemon } from '../mainFn/HealthDaemon'
 import { HealthCheckResult } from '../health/checkFns'
-import { onceTrigger } from '../trigger'
+import { cooldownTrigger, onceTrigger, Trigger } from '../trigger'
 import * as T from '@start9labs/start-core/types'
 
 type Manifest = {
@@ -149,6 +152,35 @@ describe('Daemon.stop vs Daemon.term (subcontainer lifecycle)', () => {
     // term() is idempotent — a second term() must not double-destroy.
     await daemon.term()
     expect(sub.destroyFsCount).toBe(1)
+  })
+})
+
+describe('Daemon restart loop', () => {
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
+  it('holds one abort listener across retries of a failing command', async () => {
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const daemon = Daemon.of<Manifest>()(fakeEffects(), null, {
+      fn: async () => {
+        throw new Error('boom')
+      },
+    })
+    await daemon.start()
+    const signal: AbortSignal = (daemon as any).loop.abort.signal
+
+    const listeners: number[] = []
+    for (let i = 0; i < 4; i++) {
+      await jest.advanceTimersByTimeAsync(30_000)
+      listeners.push(getEventListeners(signal, 'abort').length)
+    }
+    expect(daemon.failedExits).toBeGreaterThan(11)
+    expect(listeners).toEqual([1, 1, 1, 1])
+
+    // Under fake timers the pending backoff only ends through the abort.
+    await daemon.term()
+    expect(getEventListeners(signal, 'abort')).toHaveLength(0)
+    logged.mockRestore()
   })
 })
 
@@ -334,16 +366,22 @@ describe('HealthDaemon ready polling', () => {
     onExit: jest.fn(),
     isOneshot: () => false,
   })
-  // Returns each result in turn, then repeats the last.
-  const results = (...rs: HealthCheckResult['result'][]) => {
+  const results = (
+    ...rs: (HealthCheckResult | HealthCheckResult['result'])[]
+  ) => {
     let i = 0
-    return jest.fn(
-      (): HealthCheckResult => ({
-        result: rs[Math.min(i++, rs.length - 1)],
-        message: 'm',
-      }),
-    )
+    return jest.fn((): HealthCheckResult => {
+      const health = rs[Math.min(i++, rs.length - 1)]
+      return typeof health === 'string'
+        ? { result: health, message: 'm' }
+        : health
+    })
   }
+  const pendingResults = [
+    { result: 'loading', waiting: false, message: 'Syncing: 25%' },
+    { result: 'loading', waiting: true, message: 'Peers unavailable' },
+    { result: 'starting', waiting: true, message: 'Database unavailable' },
+  ] as const
   const launch = async (daemon: unknown, fn: jest.Mock) => {
     const hd = new HealthDaemon<Manifest>(
       daemon as any,
@@ -369,11 +407,19 @@ describe('HealthDaemon ready polling', () => {
     }
   }
 
-  it.each(['loading', 'waiting'] as const)(
-    'catches a daemon that stops reporting %s within a second, then polls it every 30 seconds',
-    async result => {
-      const fn = results(result, 'success', result)
-      const hd = await launch(fakeDaemon(), fn)
+  const checks = [
+    { kind: 'a daemon', daemon: fakeDaemon },
+    { kind: 'a standalone check', daemon: () => null },
+  ]
+  const pendingChecks = checks.flatMap(c =>
+    pendingResults.map(health => ({ ...c, health, ...health })),
+  )
+
+  it.each(pendingChecks)(
+    'catches $kind leaving $result (waiting: $waiting) within a second, then polls it every 30 seconds',
+    async ({ daemon, health }) => {
+      const fn = results(health, 'success', health)
+      const hd = await launch(daemon(), fn)
 
       await expectPolls(fn, [
         [1_000, 1],
@@ -388,11 +434,11 @@ describe('HealthDaemon ready polling', () => {
     },
   )
 
-  it.each(['loading', 'waiting'] as const)(
-    'backs a daemon reporting %s off to 30 seconds before its first success',
-    async result => {
-      const fn = results(result)
-      const hd = await launch(fakeDaemon(), fn)
+  it.each(pendingChecks)(
+    'backs $kind reporting $result (waiting: $waiting) off to 30 seconds before its first success',
+    async ({ daemon, health }) => {
+      const fn = results(health)
+      const hd = await launch(daemon(), fn)
 
       await expectPolls(fn, [
         [1_000, 1],
@@ -412,6 +458,87 @@ describe('HealthDaemon ready polling', () => {
       await hd.term()
     },
   )
+
+  it.each(pendingResults)(
+    'preserves $result messages and waiting flags',
+    async health => {
+      const setHealth = jest.fn(async () => null)
+      const hd = new HealthDaemon<Manifest>(
+        null,
+        [],
+        'sync',
+        { display: 'Sync', trigger: onceTrigger, fn: () => health },
+        { ...fakeEffects(), setHealth },
+      )
+      await hd.updateStatus()
+      await jest.advanceTimersByTimeAsync(0)
+      expect(setHealth).toHaveBeenLastCalledWith({
+        ...health,
+        id: 'sync',
+        name: 'Sync',
+      })
+      await hd.term()
+    },
+  )
+
+  it('marks dependency-blocked checks as starting and waiting', async () => {
+    const dependency = new HealthDaemon<Manifest>(
+      null,
+      [],
+      'db',
+      { display: 'Database', fn: results('failure') },
+      fakeEffects(),
+    )
+    const setHealth = jest.fn(async () => null)
+    const daemon = fakeDaemon()
+    const hd = new HealthDaemon<Manifest>(
+      daemon as any,
+      [dependency],
+      'app',
+      { display: 'Application', fn: results('success') },
+      { ...fakeEffects(), setHealth },
+    )
+    await hd.updateStatus()
+    expect(setHealth).toHaveBeenLastCalledWith({
+      id: 'app',
+      name: 'Application',
+      result: 'starting',
+      waiting: true,
+      message: 'Database',
+    })
+    expect(daemon.start).not.toHaveBeenCalled()
+    await hd.term()
+    await dependency.term()
+  })
+
+  it('hides displayed probe errors during grace without masking readiness failures', async () => {
+    const setHealth = jest.fn(async () => null)
+    const hd = new HealthDaemon<Manifest>(
+      fakeDaemon() as any,
+      [],
+      'db',
+      { display: 'Database', fn: results('failure') },
+      { ...fakeEffects(), setHealth },
+    )
+    await hd.updateStatus()
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(setHealth).toHaveBeenLastCalledWith({
+      id: 'db',
+      name: 'Database',
+      result: 'starting',
+      message: null,
+    })
+    expect(hd.health).toEqual({ result: 'failure', message: 'm' })
+    expect(hd.isReady).toBe(false)
+    await jest.advanceTimersByTimeAsync(9_000)
+    expect(setHealth).toHaveBeenLastCalledWith({
+      id: 'db',
+      name: 'Database',
+      result: 'failure',
+      message: 'm',
+    })
+    await hd.term()
+  })
 
   it('runs a check with onceTrigger once and reports its failure', async () => {
     jest.advanceTimersByTime(1)
@@ -437,22 +564,90 @@ describe('HealthDaemon ready polling', () => {
 
     await hd.term()
   })
+})
 
-  it.each(['loading', 'waiting'] as const)(
-    'polls a standalone health check reporting %s every 30 seconds',
-    async result => {
-      const fn = results(result)
-      const hd = await launch(null, fn)
+describe('HealthDaemon check loop', () => {
+  const check = (trigger: Trigger) => {
+    const fn = jest.fn(
+      (): HealthCheckResult => ({ result: 'success', message: null }),
+    )
+    const hd = new HealthDaemon<Manifest>(
+      null,
+      [],
+      'check',
+      { display: 'Check', trigger, fn },
+      fakeEffects(),
+    )
+    return { hd, fn }
+  }
+  const macrotask = () => new Promise(resolve => setImmediate(resolve))
 
-      await expectPolls(fn, [
-        [1_000, 1],
-        [30_000, 1],
-        [31_000, 2],
-        [60_000, 2],
-        [61_000, 3],
-      ])
+  it('lets go of each trigger tick once its check has run', async () => {
+    setFlagsFromString('--expose-gc')
+    const gc: () => void = runInNewContext('gc')
+    const ticks: WeakRef<object>[] = []
+    let drained = () => {}
+    const parked = new Promise<void>(resolve => (drained = resolve))
+    const { hd, fn } = check(async function* () {
+      for (let i = 0; i < 100; i++) {
+        const tick = { i }
+        ticks.push(new WeakRef(tick))
+        yield tick
+      }
+      drained()
+      await new Promise(() => {})
+    })
 
+    await hd.updateStatus()
+    await parked
+    await macrotask()
+    gc()
+
+    expect(fn).toHaveBeenCalledTimes(100)
+    // V8's suspended async frame keeps the first tick and the loop the latest.
+    expect(ticks.filter(tick => tick.deref()).length).toBeLessThanOrEqual(2)
+    await hd.term()
+  })
+
+  it('ends a pending wait at once when stopped', async () => {
+    jest.useFakeTimers()
+    try {
+      const { hd, fn } = check(cooldownTrigger(60_000))
+      await hd.updateStatus()
+      await jest.advanceTimersByTimeAsync(60_000)
+      expect(fn).toHaveBeenCalledTimes(1)
+      const signal: AbortSignal = (hd as any).session.abort.signal
+
+      // Under fake timers the pending tick only ends through the abort.
       await hd.term()
-    },
-  )
+      await jest.advanceTimersByTimeAsync(120_000)
+
+      expect(fn).toHaveBeenCalledTimes(1)
+      expect(getEventListeners(signal, 'abort')).toHaveLength(0)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('logs a trigger that throws and stops checking', async () => {
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+    let threw = () => {}
+    const thrown = new Promise<void>(resolve => (threw = resolve))
+    const { hd, fn } = check(async function* () {
+      yield
+      threw()
+      throw new Error('broken trigger')
+    })
+
+    await hd.updateStatus()
+    await thrown
+    await macrotask()
+
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(logged).toHaveBeenCalledWith(
+      'Daemon check health check failed: Error: broken trigger',
+    )
+    logged.mockRestore()
+    await hd.term()
+  })
 })

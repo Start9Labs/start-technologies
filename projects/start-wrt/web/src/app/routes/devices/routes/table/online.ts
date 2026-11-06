@@ -51,7 +51,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
           </td>
           <td tuiTd>
             <a tuiLink routerLink="/profiles">
-              {{ item.securityProfile || ('Default' | i18n) }}
+              {{ item.securityProfile || '-' }}
             </a>
           </td>
           <td tuiTd>{{ item.mac || '-' }}</td>

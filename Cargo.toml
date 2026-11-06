@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "shared-libs/crates/start-core",
+  "shared-libs/crates/backup-fs-protocol",
   "shared-libs/crates/exver",
   "shared-libs/crates/imbl-value",
   "shared-libs/crates/yasi",
@@ -34,6 +35,11 @@ opt-level = 3
 
 [profile.dev.package.backtrace]
 opt-level = 3
+
+[profile.generated]
+debug = 0
+inherits = "dev"
+opt-level = 1
 
 [profile.bindings]
 debug = 0

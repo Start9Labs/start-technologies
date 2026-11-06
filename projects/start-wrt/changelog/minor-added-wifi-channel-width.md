@@ -1,1 +1,0 @@
-- Wi-Fi settings have a channel width for each band: 20 or 40 MHz on 2.4 GHz, and up to 160 MHz on 5 GHz where the radio supports it. Each channel offers only the widths it can use in the selected country.

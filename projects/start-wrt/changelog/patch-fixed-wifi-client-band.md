@@ -1,1 +1,0 @@
-- The Devices page shows which Wi-Fi band (2.4 GHz, 5 GHz, or 6 GHz) each wireless client is connected on, instead of just "Wi-Fi".

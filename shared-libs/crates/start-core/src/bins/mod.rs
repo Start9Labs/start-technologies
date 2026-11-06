@@ -284,9 +284,7 @@ pub(crate) fn assert_no_shadowed_args(root: clap::Command) {
         }
     }
 
-    // The root's own arguments are the CLI's config (`--host`, `--config`, …),
-    // which is parsed separately and never merged into params, so the walk
-    // starts fresh at each top-level subcommand.
+    // Root configuration is parsed separately from subcommand parameters.
     let mut found = Vec::new();
     for sub in root.get_subcommands() {
         walk(sub, sub.get_name(), &BTreeSet::new(), &mut found);
@@ -318,16 +316,6 @@ fn export_manpages(command: clap::Command, product: &str, version: &str) {
         .join(product)
         .join("man");
     std::fs::create_dir_all(&dir).unwrap();
-    let existing = std::fs::read_dir(&dir)
-        .unwrap()
-        .filter_map(|entry| {
-            let path = entry.ok()?.path();
-            (path.extension().and_then(|extension| extension.to_str()) == Some("1")).then(|| {
-                let contents = std::fs::read_to_string(&path).unwrap();
-                (path, contents)
-            })
-        })
-        .collect::<std::collections::BTreeMap<_, _>>();
     clap_mangen::generate_to(command.version(version.to_owned()), &dir).unwrap();
     let normalize = |contents: &str| {
         format!(
@@ -345,11 +333,6 @@ fn export_manpages(command: clap::Command, product: &str, version: &str) {
             continue;
         }
         let contents = std::fs::read_to_string(&path).unwrap();
-        let normalized = normalize(&contents);
-        let contents = match existing.get(&path) {
-            Some(previous) if normalize(previous) == normalized => previous.clone(),
-            _ => normalized,
-        };
-        std::fs::write(path, contents).unwrap();
+        std::fs::write(path, normalize(&contents)).unwrap();
     }
 }

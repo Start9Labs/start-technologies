@@ -55,7 +55,7 @@ old="$name.old"
 if ! exists "$parent" "$name" && exists "$parent" "$old"; then
   rename "$parent" "$old" "$name"
 fi
-jq -n --arg path "$parent" --arg new "$new" --arg old "$old" '{items: [{$path, name: $new}, {$path, name: $old}]}' \
+jq -n --arg path "$parent" --arg new "$new" --arg old "$old" '{items: [{$path, name: $new}, {$path, name: $old}], permanent: true}' \
   | json DELETE /files > /dev/null
 jq -n --arg path "$parent" --arg name "$new" '{$path, $name}' | json POST /files/folder > /dev/null
 
@@ -73,8 +73,10 @@ for entry in "$@"; do
     echo "::warning::$folder/$entry is not there to keep"
     continue
   fi
+  # The copy streams NDJSON events; the last one is its outcome.
   to=$(jq -n --arg path "$parent/$name" --arg name "$entry" --arg destination "$parent/$new" \
-    '{items: [{$path, $name}], $destination}' | json POST /files/copy | jq -r '.items[0].to')
+    '{items: [{$path, $name}], $destination}' | json POST /files/copy \
+    | jq -rs 'last | if .type == "done" then .items[0].to else error("copy \(.message // "ended without an outcome")") end')
   [ "$to" = "$parent/$new/$entry" ] || { echo "$folder/$entry collides with the published contents" >&2; exit 1; }
 done
 
@@ -82,7 +84,7 @@ if exists "$parent" "$name"; then
   rename "$parent" "$name" "$old"
 fi
 rename "$parent" "$new" "$name"
-jq -n --arg path "$parent" --arg name "$old" '{items: [{$path, $name}]}' | json DELETE /files > /dev/null
+jq -n --arg path "$parent" --arg name "$old" '{items: [{$path, $name}], permanent: true}' | json DELETE /files > /dev/null
 
 api POST /auth/logout > /dev/null
 echo "published $count files to $parent/$name"

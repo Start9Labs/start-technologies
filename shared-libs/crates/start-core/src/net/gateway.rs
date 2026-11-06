@@ -1528,21 +1528,27 @@ async fn watcher(
                                 policy_ifaces.insert(iface.clone(), table_id);
                             }
                             if watch_activation.peek(|a| a.contains_key(&iface)) {
-                                jobs.push(Either::Left(watch_activated(
+                                jobs.push((
+                                    iface.clone(),
+                                    Either::Left(watch_activated(
+                                        &connection,
+                                        device_proxy.clone(),
+                                        iface.clone(),
+                                        &watch_activation,
+                                    )),
+                                ));
+                            }
+
+                            jobs.push((
+                                iface.clone(),
+                                Either::Right(watch_ip(
                                     &connection,
                                     device_proxy.clone(),
                                     iface.clone(),
-                                    &watch_activation,
-                                )));
-                            }
-
-                            jobs.push(Either::Right(watch_ip(
-                                &connection,
-                                device_proxy.clone(),
-                                iface.clone(),
-                                &watch_ip_info,
-                                db.as_ref(),
-                            )));
+                                    &watch_ip_info,
+                                    db.as_ref(),
+                                )),
+                            ));
                             ifaces.insert(iface);
                         }
 
@@ -1563,8 +1569,15 @@ async fn watcher(
                                 ensure_main_suppress_rule(v6).await.log_err();
                             }
                         }
-                        for result in futures::future::join_all(jobs).await {
-                            result.log_err();
+                        let mut jobs = jobs
+                            .into_iter()
+                            .map(|(iface, job)| job.map(move |res| (iface, res)))
+                            .collect::<futures::stream::FuturesUnordered<_>>();
+                        while let Some((iface, res)) = jobs.next().await {
+                            if let Err(e) = res {
+                                tracing::error!("{iface}: {e}");
+                                tracing::debug!("{e:?}");
+                            }
                         }
 
                         Ok::<_, Error>(())

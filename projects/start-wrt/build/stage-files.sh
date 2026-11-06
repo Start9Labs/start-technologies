@@ -178,6 +178,13 @@ for f in "$PROJECT_DIR"/backend/nftables/ruleset-pre/*.nft; do
     cp "$f" "${FILES_DIR}/usr/share/nftables.d/ruleset-pre/$(basename "$f")"
 done
 
+# fw4 auto-includes these at the top of the fw4 chain their directory names.
+for f in "$PROJECT_DIR"/backend/nftables/chain-pre/*/*.nft; do
+    chain=$(basename "$(dirname "$f")")
+    mkdir -p "${FILES_DIR}/usr/share/nftables.d/chain-pre/$chain"
+    cp "$f" "${FILES_DIR}/usr/share/nftables.d/chain-pre/$chain/$(basename "$f")"
+done
+
 # Runs one-time upgrade migrations after uci-defaults and before network.
 # reload_config notifies the services already running of what they changed.
 cat > "${FILES_DIR}/etc/init.d/startwrt-migrate" << 'MIGRATEEOF'
@@ -197,10 +204,9 @@ mkdir -p "${FILES_DIR}/lib/upgrade/keep.d"
 cat > "${FILES_DIR}/lib/upgrade/keep.d/startwrt" << 'KEEPEOF'
 /etc/ssl/certs/startwrt-ca.pem
 /etc/ssl/certs/startwrt-int.pem
-/etc/ssl/certs/startwrt-server.pem
 /etc/ssl/private/startwrt-ca.key
 /etc/ssl/private/startwrt-int.key
-/etc/ssl/private/startwrt-server.key
+/etc/startwrt/certs/
 /etc/nlbwmon/data/
 /etc/startwrt/pending-update
 /etc/startwrt/migrations

@@ -274,8 +274,6 @@ async fn from_layers(
             None => apply_layer(&mut filesystem, reader, &diff_id).await?,
         }
     }
-    // StartOS copies the resolver onto this path from outside the image's root.
-    filesystem.replace_symlink_with_empty_file(Path::new("etc/resolv.conf"));
     Ok((
         filesystem.into_squashfs()?,
         config.config.unwrap_or_default(),

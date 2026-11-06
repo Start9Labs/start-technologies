@@ -1,1 +1,0 @@
-- Choosing a Wi-Fi channel that cannot carry the radio's channel width, such as 5 GHz channel 165 in the United States, no longer leaves that band's network down. A router already saved with such a pair narrows the width when it next starts.

@@ -9,6 +9,7 @@ import {
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { TuiButton, TuiInput, TuiTitle } from '@taiga-ui/core'
+import { TuiBadge } from '@taiga-ui/kit'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
@@ -22,7 +23,20 @@ import { RECOVER } from './recover.component'
       <table [appTable]="['Hostname', 'StartOS Version', 'Created', null]">
         @for (server of servers; track server[0]) {
           <tr>
-            <td class="name">{{ server[1].hostname }}.local</td>
+            <td class="name">
+              {{ server[1].hostname }}.local
+              @if (server[1].formatStatus === 'legacy') {
+                <button
+                  tuiBadge
+                  type="button"
+                  appearance="warning"
+                  size="m"
+                  (click)="explainOldFormat()"
+                >
+                  {{ 'Old format' | i18n }}
+                </button>
+              }
+            </td>
             <td>{{ server[1].version }}</td>
             <td>{{ server[1].timestamp | date: 'medium' }}</td>
             <td>
@@ -35,6 +49,17 @@ import { RECOVER } from './recover.component'
       </table>
     } @else {
       <section class="unlock-flow">
+        @if (target.entry.startOs[serverId]?.formatStatus === 'legacy') {
+          <button
+            tuiBadge
+            type="button"
+            appearance="warning"
+            size="m"
+            (click)="explainOldFormat()"
+          >
+            {{ 'Old format' | i18n }}
+          </button>
+        }
         <span tuiTitle>
           <b>{{ 'Password' | i18n }}</b>
           <span tuiSubtitle>
@@ -120,6 +145,7 @@ import { RECOVER } from './recover.component'
     TuiButton,
     TuiInput,
     TuiTitle,
+    TuiBadge,
     TableComponent,
     i18nPipe,
   ],
@@ -136,6 +162,15 @@ export class BackupRestoreComponent {
   protected serverId = this.servers.length === 1 ? this.servers[0]![0] : ''
   protected readonly password = signal('')
   protected passwordMasked = true
+
+  protected explainOldFormat(): void {
+    this.dialog
+      .openAlert(
+        'This backup uses an old format. It remains usable for restores. To enable stronger tamper detection and read-only snapshots, update it under Backups → Manage backup locations on the server this backup belongs to. Conversion may take a long time, and this backup is unavailable until it finishes.',
+        { label: 'Old format' },
+      )
+      .subscribe()
+  }
 
   protected selectedServerName(): string {
     const server = this.servers.find(([id]) => id === this.serverId)?.[1]

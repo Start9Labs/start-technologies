@@ -31,6 +31,9 @@ use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::dir_size;
 use crate::version::VersionT;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
@@ -229,19 +232,14 @@ pub async fn backup_all(
         .decrypt(&ctx)?;
     let password = password.decrypt(&ctx)?;
 
-    // Progress is shown from the moment the request is accepted. The
-    // "Initializing" phase covers mounting the target and opening its encrypted
-    // store — work that runs before perform_backup adds the per-package phases —
-    // so the UI shows a labeled phase instead of a bare 0% during that window.
+    // Initializing covers target mounting before per-package phases exist.
     let progress = FullProgressTracker::new();
     let mut init_phase = progress.add_phase(
         InternedString::intern(&*t!("backup.bulk.initializing")),
         None,
     );
     init_phase.start();
-    // The mutate closure runs under catch_unwind, so it can't capture the
-    // tracker (its watch channels aren't unwind-safe); seed the db with a plain
-    // snapshot instead.
+    // Watch channels cannot cross Patch-DB's catch_unwind boundary.
     let init_progress = progress.snapshot();
 
     let (fs, package_ids, server_id, activity_id) = ctx
@@ -260,8 +258,8 @@ pub async fn backup_all(
                     .map(|(id, _)| id)
                     .collect()
             };
-            assure_backing_up(db, &init_progress)?;
             let server_id: String = db.as_public().as_server_info().as_id().de()?;
+            assure_backing_up(db, &init_progress, &target_id, &server_id)?;
             let activity = running_activity(
                 BackupActivityKind::Manual,
                 target_id,
@@ -354,13 +352,35 @@ pub async fn backup_all(
 }
 
 #[instrument(skip(db, initial))]
-fn assure_backing_up(db: &mut DatabaseModel, initial: &FullProgress) -> Result<(), Error> {
-    let backing_up = db
-        .as_public_mut()
+fn assure_backing_up(
+    db: &mut DatabaseModel,
+    initial: &FullProgress,
+    target: &BackupTargetId,
+    server: &str,
+) -> Result<(), Error> {
+    if db
+        .as_public()
+        .as_server_info()
+        .as_status_info()
+        .as_backup_progress()
+        .transpose_ref()
+        .is_some()
+    {
+        return Err(Error::new(
+            eyre!("{}", t!("backup.bulk.already-backing-up")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    super::target::conversion::ensure_available(
+        &super::target::conversion::jobs(db)?,
+        target,
+        server,
+    )?;
+    db.as_public_mut()
         .as_server_info_mut()
         .as_status_info_mut()
-        .as_backup_progress_mut();
-    backing_up.ser(&Some(initial.clone()))?;
+        .as_backup_progress_mut()
+        .ser(&Some(initial.clone()))?;
     Ok(())
 }
 

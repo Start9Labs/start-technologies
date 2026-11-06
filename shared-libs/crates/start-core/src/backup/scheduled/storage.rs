@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{BackupRun, RetentionPolicy, ServiceSnapshot, ServiceSnapshotId, ServiceTargetHistory};
 use crate::auth::check_password;
+#[cfg(test)]
 use crate::disk::BACKUP_DIR_NAME;
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::filesystem::backupfs::BackupFS;
@@ -16,7 +17,7 @@ use crate::disk::util::{MAX_BACKUP_RECOVERY_METADATA_BYTES, MAX_BACKUP_TARGET_ME
 use crate::hostname::ServerHostname;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
-use crate::util::crypto::{decrypt_slice, encrypt_slice};
+use crate::util::crypto::{unwrap_backup_key, wrap_backup_key};
 use crate::util::io::{delete_dir, delete_file, dir_copy, dir_size, rename, write_file_atomic};
 use crate::util::serde::{IoFormat, read_json_file_bounded};
 use crate::version::VersionT;
@@ -43,17 +44,7 @@ pub struct ScheduledBackupRecoveryInfo {
 impl ScheduledBackupRecoveryInfo {
     fn encryption_key(&self, password: &str) -> Result<String, Error> {
         check_password(&self.password_hash, password)?;
-        let wrapped_key = base32::decode(
-            base32::Alphabet::Rfc4648 { padding: true },
-            &self.wrapped_key,
-        )
-        .ok_or_else(|| {
-            Error::new(
-                eyre!("{}", t!("backup.scheduled.decode-key-failed")),
-                ErrorKind::Backup,
-            )
-        })?;
-        Ok(String::from_utf8(decrypt_slice(wrapped_key, password))?)
+        unwrap_backup_key(&self.wrapped_key, password).map(|(key, _)| key)
     }
 }
 
@@ -199,7 +190,7 @@ impl<G: GenericMountGuard> ScheduledBackupMountGuard<G> {
         password: &str,
         old_password: Option<&str>,
     ) -> Result<(Self, String), Error> {
-        let root = scheduled_root(target_guard.path(), server_id);
+        let root = scheduled_root(target_guard.path(), server_id)?;
         let recovery_path = root.join("unencrypted-metadata.json");
         let initializing = match tokio::fs::metadata(&root).await {
             Ok(_) => false,
@@ -228,10 +219,7 @@ impl<G: GenericMountGuard> ScheduledBackupMountGuard<G> {
                     &argon2::Config::rfc9106_low_mem(),
                 )
                 .with_kind(ErrorKind::PasswordHashGeneration)?,
-                wrapped_key: base32::encode(
-                    base32::Alphabet::Rfc4648 { padding: true },
-                    &encrypt_slice(&encryption_key, password),
-                ),
+                wrapped_key: wrap_backup_key(&encryption_key, password)?,
                 has_system_backup: Some(false),
             };
             (recovery, encryption_key)
@@ -255,7 +243,7 @@ impl<G: GenericMountGuard> ScheduledBackupMountGuard<G> {
         encryption_key: &str,
     ) -> Result<Self, Error> {
         let recovery_path =
-            scheduled_root(target_guard.path(), server_id).join("unencrypted-metadata.json");
+            scheduled_root(target_guard.path(), server_id)?.join("unencrypted-metadata.json");
         let recovery: ScheduledBackupRecoveryInfo =
             read_json_file_bounded(&recovery_path, MAX_BACKUP_RECOVERY_METADATA_BYTES).await?;
         if recovery.target_instance_id != expected_target_instance_id {
@@ -298,7 +286,7 @@ impl<G: GenericMountGuard> ScheduledBackupMountGuard<G> {
         password: &str,
     ) -> Result<(Self, String), Error> {
         let recovery_path =
-            scheduled_root(target_guard.path(), server_id).join("unencrypted-metadata.json");
+            scheduled_root(target_guard.path(), server_id)?.join("unencrypted-metadata.json");
         let recovery: ScheduledBackupRecoveryInfo =
             read_json_file_bounded(&recovery_path, MAX_BACKUP_RECOVERY_METADATA_BYTES).await?;
         let encryption_key = recovery.encryption_key(password)?;
@@ -322,7 +310,7 @@ impl<G: GenericMountGuard> ScheduledBackupMountGuard<G> {
         encryption_key: &str,
         initializing: bool,
     ) -> Result<Self, Error> {
-        let crypt_path = scheduled_root(target_guard.path(), server_id).join("crypt");
+        let crypt_path = scheduled_root(target_guard.path(), server_id)?.join("crypt");
         tokio::fs::create_dir_all(&crypt_path)
             .await
             .with_ctx(|_| (ErrorKind::Filesystem, crypt_path.display()))?;
@@ -626,10 +614,9 @@ impl<G: GenericMountGuard> Drop for ScheduledBackupMountGuard<G> {
     }
 }
 
-fn scheduled_root(target_path: &Path, server_id: &str) -> PathBuf {
-    target_path
-        .join(BACKUP_DIR_NAME)
-        .join(format!("{server_id}.automatic"))
+fn scheduled_root(target_path: &Path, server_id: &str) -> Result<PathBuf, Error> {
+    crate::disk::mount::backup::backup_directory(target_path, server_id)
+        .map(|path| path.with_file_name(format!("{server_id}.automatic")))
 }
 
 fn set_archive_state(history: &mut OnTargetServiceHistory, archived: bool) {
@@ -1024,8 +1011,9 @@ mod tests {
 
     #[test]
     fn existing_store_requires_its_original_password() {
-        let original = "original password";
-        let key = "target encryption key";
+        use crate::util::crypto::backup_key_tests::{KEY, LEGACY_PASSWORD, legacy_fixture};
+        let original = LEGACY_PASSWORD;
+        let key = KEY;
         let recovery = ScheduledBackupRecoveryInfo {
             target_instance_id: "target".into(),
             hostname: ServerHostname::new("test-server".into()).unwrap(),
@@ -1037,13 +1025,13 @@ mod tests {
                 &argon2::Config::default(),
             )
             .unwrap(),
-            wrapped_key: base32::encode(
-                base32::Alphabet::Rfc4648 { padding: true },
-                &encrypt_slice(key, original),
-            ),
+            wrapped_key: wrap_backup_key(&key, original).unwrap(),
             has_system_backup: Some(false),
         };
         assert_eq!(recovery.encryption_key(original).unwrap(), key);
+        let mut legacy = recovery.clone();
+        legacy.wrapped_key = legacy_fixture(true);
+        assert_eq!(legacy.encryption_key(original).unwrap(), key);
         assert_eq!(
             recovery
                 .encryption_key("changed server password")
@@ -1230,10 +1218,24 @@ mod tests {
     }
 
     #[test]
+    fn scheduled_root_rejects_paths_outside_the_server_directory() {
+        for server in [
+            "",
+            ".",
+            "..",
+            "../outside",
+            "server/../../outside",
+            "/outside",
+        ] {
+            assert!(scheduled_root(Path::new("/target"), server).is_err());
+        }
+    }
+
+    #[test]
     fn scheduled_root_is_separate_from_the_manual_backup_set() {
         let target = Path::new("/target");
         let manual = target.join(BACKUP_DIR_NAME).join("server-id");
-        let scheduled = scheduled_root(target, "server-id");
+        let scheduled = scheduled_root(target, "server-id").unwrap();
         assert_eq!(
             scheduled,
             target.join(BACKUP_DIR_NAME).join("server-id.automatic")

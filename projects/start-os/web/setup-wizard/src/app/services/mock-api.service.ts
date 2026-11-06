@@ -117,6 +117,7 @@ export class MockApiService extends ApiService {
         '9876-5432-1234-5678': {
           hostname: 'server-name',
           version: '0.4.0',
+          formatStatus: 'legacy',
           timestamp: new Date().toISOString(),
           scheduled: false,
           serverId: null,
@@ -125,6 +126,7 @@ export class MockApiService extends ApiService {
         '9876-5432-1234-5671': {
           hostname: 'server-name',
           version: '0.4.0',
+          formatStatus: 'current',
           timestamp: new Date().toISOString(),
           scheduled: false,
           serverId: null,
@@ -350,6 +352,7 @@ const MOCK_DISKS: DiskInfo[] = [
           'small-server-id': {
             hostname: 'small-server',
             version: '0.4.0',
+            formatStatus: 'unknown',
             timestamp: new Date().toISOString(),
             scheduled: false,
             serverId: null,
@@ -410,6 +413,7 @@ const MOCK_DISKS: DiskInfo[] = [
           '1234-5678-9876-5432': {
             hostname: 'existing-server',
             version: '0.4.0',
+            formatStatus: 'unknown',
             timestamp: new Date().toISOString(),
             scheduled: false,
             serverId: null,
@@ -445,6 +449,7 @@ const MOCK_DISKS: DiskInfo[] = [
           'backup-server-id': {
             hostname: 'backup-server',
             version: '0.3.5',
+            formatStatus: 'unknown',
             timestamp: new Date(Date.now() - 86400000).toISOString(),
             scheduled: false,
             serverId: null,

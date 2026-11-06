@@ -1,13 +1,15 @@
 import { Component, inject, output } from '@angular/core'
 import { ActivatedRoute } from '@angular/router'
 import { ConvertBytesPipe, DialogService, i18nPipe } from '@start9labs/shared'
-import { TuiButton } from '@taiga-ui/core'
+import { TuiButton, TuiNotificationService } from '@taiga-ui/core'
+import { filter } from 'rxjs'
 import { TuiButtonLoading } from '@taiga-ui/kit'
-
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { DiskBackupTarget } from 'src/app/services/api/api.types'
 import { BackupService, MappedBackupTarget } from './backup.service'
+import { BackupConversion, ConversionLabel } from './conversion'
+import { FORMAT_DRIVE } from './format'
 import { BackupLegacyWarningComponent } from './legacy-warning.component'
 import { BackupStatusComponent } from './status.component'
 
@@ -16,12 +18,23 @@ import { BackupStatusComponent } from './status.component'
   template: `
     <header>
       {{ 'Physical Drives' | i18n }}
+      @if (type !== 'restore') {
+        <button
+          tuiButton
+          size="xs"
+          iconStart="@tui.hard-drive"
+          [style.margin-inline-start]="'auto'"
+          (click)="format()"
+        >
+          {{ 'Format a drive' | i18n }}
+        </button>
+      }
     </header>
 
     <table
       [appTable]="['Status', 'Logicalname', 'Name', 'Capacity', 'Free', null]"
     >
-      @for (target of service.drives(); track $index) {
+      @for (target of service.drives(); track target.id) {
         <tr
           tabindex="0"
           (click)="select(target)"
@@ -41,12 +54,28 @@ import { BackupStatusComponent } from './status.component'
             }
           </td>
           <td class="actions">
-            @if (type === 'create' && target.entry.legacyBackup) {
-              <backup-legacy-warning
-                [id]="target.id"
-                [hasCurrentBackup]="target.hasCurrentBackup"
-              />
-            }
+            <div class="controls">
+              @if (
+                type !== 'restore' &&
+                  (target.entry.startOs
+                    | backupConversionLabel
+                      : service.conversions()[target.id]
+                      : service.serverId());
+                as label
+              ) {
+                <button
+                  backupConversion
+                  [targetId]="target.id"
+                  [label]="label"
+                ></button>
+              }
+              @if (type !== 'restore' && target.entry.legacyBackup) {
+                <backup-legacy-warning
+                  [id]="target.id"
+                  [hasCurrentBackup]="target.hasCurrentBackup"
+                />
+              }
+            </div>
           </td>
         </tr>
       } @empty {
@@ -86,6 +115,17 @@ import { BackupStatusComponent } from './status.component'
       container-type: inline-size;
       inline-size: 100%;
       min-inline-size: 0;
+    }
+
+    .controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    td.actions {
+      text-align: right;
+      white-space: nowrap;
     }
 
     table {
@@ -213,6 +253,8 @@ import { BackupStatusComponent } from './status.component'
     PlaceholderComponent,
     BackupStatusComponent,
     BackupLegacyWarningComponent,
+    BackupConversion,
+    ConversionLabel,
     TableComponent,
     ConvertBytesPipe,
     i18nPipe,
@@ -220,6 +262,8 @@ import { BackupStatusComponent } from './status.component'
 })
 export class BackupPhysicalComponent {
   private readonly dialog = inject(DialogService)
+  private readonly alerts = inject(TuiNotificationService)
+
   private readonly i18n = inject(i18nPipe)
 
   protected readonly type = inject(ActivatedRoute).snapshot.data['type']
@@ -233,6 +277,23 @@ export class BackupPhysicalComponent {
       [entry.vendor, entry.model].filter(Boolean).join(' ') ||
       this.i18n.transform('Unknown Drive')
     )
+  }
+
+  format() {
+    this.dialog
+      .openComponent<boolean>(FORMAT_DRIVE, { size: 'm' })
+      .pipe(filter(Boolean))
+      .subscribe(() => {
+        this.alerts
+          .open(
+            this.i18n.transform(
+              'Drive formatted. It is listed under Physical Drives.',
+            ),
+            { appearance: 'positive' },
+          )
+          .subscribe()
+        this.service.getBackupTargets()
+      })
   }
 
   protected select(target: MappedBackupTarget<DiskBackupTarget>) {

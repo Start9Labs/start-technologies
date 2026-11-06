@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -17,7 +16,7 @@ use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::merkle_archive::source::{ArchiveSource, Section};
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::sign::commitment::{Commitment, SignedCommitment};
-use crate::sign::{AnySignature, AnyVerifyingKey};
+use crate::sign::{AnySignature, AnyVerifyingKey, SignatureMap};
 use crate::upload::{DownloadAttemptContext, DownloadHandle, UploadingFile};
 use crate::util::future::NonDetachingJoinHandle;
 #[cfg(test)]
@@ -30,12 +29,25 @@ pub struct RegistryAsset<Commitment> {
     pub published_at: DateTime<Utc>,
     pub urls: Vec<Url>,
     pub commitment: Commitment,
-    pub signatures: HashMap<AnyVerifyingKey, AnySignature>,
+    pub signatures: SignatureMap,
 }
 
 rpc_toolkit::reflect_ts!(generic RegistryAsset<Commitment>);
 rpc_toolkit::ts_export!(generic RegistryAsset<Commitment>, namespaces = [""]);
 impl<Commitment> RegistryAsset<Commitment> {
+    pub fn merge_signatures(
+        &mut self,
+        commitment: &Commitment,
+        signatures: impl IntoIterator<Item = (AnyVerifyingKey, AnySignature)>,
+    ) where
+        Commitment: PartialEq,
+    {
+        if &self.commitment == commitment {
+            for (key, signature) in signatures {
+                self.signatures.entry(key).or_insert(signature);
+            }
+        }
+    }
     pub fn all_signers(&self) -> AcceptSigners {
         AcceptSigners::All(
             self.signatures
@@ -73,6 +85,14 @@ impl<Commitment> RegistryAsset<Commitment> {
     }
 }
 impl<Commitment: SignedCommitment> RegistryAsset<Commitment> {
+    pub fn validate_all(&self, context: &str, policy: Option<AcceptSigners>) -> Result<(), Error> {
+        self.validate(context, self.all_signers())?;
+        if let Some(policy) = policy {
+            self.validate(context, policy)?;
+        }
+        Ok(())
+    }
+
     pub fn validate(&self, context: &str, mut accept: AcceptSigners) -> Result<&Commitment, Error> {
         for (signer, signature) in &self.signatures {
             accept.process_signature(signer, &self.commitment, context, signature)?;
@@ -490,7 +510,7 @@ mod tests {
             published_at: Utc::now(),
             urls: vec![server.url.join("resume")?, server.url.join("complete")?],
             commitment: (),
-            signatures: HashMap::new(),
+            signatures: SignatureMap::new(),
         };
 
         assert_eq!(buffered_contents(asset).await?, b"hello world");
@@ -508,7 +528,7 @@ mod tests {
                 server.url.join("complete")?,
             ],
             commitment: (),
-            signatures: HashMap::new(),
+            signatures: SignatureMap::new(),
         };
 
         assert_eq!(buffered_contents(asset).await?, b"hello world");
@@ -526,7 +546,7 @@ mod tests {
                 server.url.join("complete")?,
             ],
             commitment: (),
-            signatures: HashMap::new(),
+            signatures: SignatureMap::new(),
         };
 
         assert_eq!(buffered_contents(asset).await?, b"hello world");
@@ -541,11 +561,8 @@ mod tests {
             published_at: Utc::now(),
             urls: vec![server.url.join("changes")?, server.url.join("complete")?],
             commitment: (),
-            signatures: HashMap::new(),
+            signatures: SignatureMap::new(),
         };
-
-        // Splicing the two generations would corrupt the archive, so the
-        // download fails rather than recover.
         assert!(buffered_contents(asset).await.is_err());
         assert_eq!(server.complete_hits.load(Ordering::SeqCst), 0);
         assert_eq!(server.changes_full_hits.load(Ordering::SeqCst), 1);
@@ -559,7 +576,7 @@ mod tests {
             published_at: Utc::now(),
             urls: vec![server.url.join("always-truncated")?],
             commitment: (),
-            signatures: HashMap::new(),
+            signatures: SignatureMap::new(),
         };
 
         assert!(buffered_contents(asset).await.is_err());
@@ -573,12 +590,11 @@ mod tests {
             published_at: Utc::now(),
             urls: vec![server.url.join("slow-tail")?],
             commitment: (),
-            signatures: HashMap::new(),
+            signatures: SignatureMap::new(),
         };
 
         let progress = FullProgressTracker::new().add_phase("Downloading".into(), Some(100));
         let tmp_dir = TmpDir::new().await?;
-        // Opening the source and reading the head must not wait out the 5s tail.
         let source = tokio::time::timeout(std::time::Duration::from_secs(3), async {
             let source = asset
                 .load_buffered_http_source_with_path(

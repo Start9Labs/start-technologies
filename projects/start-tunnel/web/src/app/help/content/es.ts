@@ -21,7 +21,7 @@ Cómo resuelve la subred los nombres de dominio: los resolutores del proveedor d
 
 Desde qué dirección pública sale el tráfico de la subred, y su bloque IPv6 enrutado opcional.
 
-<a href="https://start9.com/start-tunnel/subnets.html" target="_blank" rel="noreferrer">Más información →</a>`,
+<a href="https://docs.start9.com/start-tunnel/subnets.html" target="_blank" rel="noreferrer">Más información →</a>`,
 
   '/subnets/add': `## Añadir o editar subred
 
@@ -51,7 +51,7 @@ Desde cuál de las direcciones IPv4 públicas del VPS sale el tráfico saliente 
 
 Un bloque IPv6 enrutado opcional (p. ej. <code>2001:db8:abcd::/64</code>) para que cada dispositivo tenga una dirección global estable. Déjalo en blanco para ninguno.
 
-<a href="https://start9.com/start-tunnel/subnets.html#creating-a-subnet" target="_blank" rel="noreferrer">Más información →</a>`,
+<a href="https://docs.start9.com/start-tunnel/subnets.html#creating-a-subnet" target="_blank" rel="noreferrer">Más información →</a>`,
 
   '/devices': `## Dispositivos
 
@@ -69,7 +69,7 @@ Teléfonos, portátiles y otros pares que solo se conectan hacia fuera; no tiene
 
 Nombre, subred, IPv4 de LAN, la dirección pública desde la que sale el tráfico (IPv4 de WAN) y la IPv6 de cada dispositivo. Usa el menú de una fila para editarlo, ver su configuración de WireGuard, cambiar su rol o quitarlo.
 
-<a href="https://start9.com/start-tunnel/devices.html" target="_blank" rel="noreferrer">Más información →</a>`,
+<a href="https://docs.start9.com/start-tunnel/devices.html" target="_blank" rel="noreferrer">Más información →</a>`,
 
   '/devices/add': `## Añadir o editar dispositivo
 
@@ -95,11 +95,13 @@ Desde qué dirección pública sale el tráfico saliente de este dispositivo. **
 
 Solo para servidores. Permiten que este servidor gestione los registros DNS del túnel y publique sus propios puertos mediante PCP/UPnP. Activados de forma predeterminada: actívalos solo para dispositivos de confianza.
 
-<a href="https://start9.com/start-tunnel/devices.html#adding-a-device" target="_blank" rel="noreferrer">Más información →</a>`,
+<a href="https://docs.start9.com/start-tunnel/devices.html#adding-a-device" target="_blank" rel="noreferrer">Más información →</a>`,
 
   '/devices/config': `## Configuración del dispositivo
 
 La configuración de WireGuard de este dispositivo: úsala para conectarlo al túnel. Se abre automáticamente tras añadir un dispositivo, y en cualquier momento con **Ver configuración**.
+
+**Endpoint de WireGuard** comienza con el host de la URL de tu navegador. Cámbialo por una dirección IP o un nombre DNS accesible desde el dispositivo y pulsa **Generar configuración**. Se conserva el puerto configurado de WireGuard. Si la interfaz usa un proxy inverso HTTPS que no reenvía UDP de WireGuard, usa la dirección accesible del servidor del túnel. Esto solo cambia la configuración generada, no el reenvío ni SNAT.
 
 ### Archivo
 
@@ -111,7 +113,7 @@ Un código QR de la misma configuración. Escanéalo con la app móvil de WireGu
 
 Para un servidor StartOS, añádela en <code>Sistema › Puertas de enlace</code> en lugar de una app de WireGuard.
 
-<a href="https://start9.com/start-tunnel/devices.html#adding-a-device" target="_blank" rel="noreferrer">Más información →</a>`,
+<a href="https://docs.start9.com/start-tunnel/devices.html#adding-a-device" target="_blank" rel="noreferrer">Más información →</a>`,
 
   '/published-ports': `## Puertos publicados
 
@@ -129,7 +131,7 @@ Puertos que un servidor publica por sí mismo automáticamente (PCP/UPnP). Son d
 
 Etiqueta, el **servidor** de destino, un **nombre de host** TLS opcional (SNI), los puertos externo e interno, el protocolo (siempre TCP/UDP) y la **IP** pública en la que es accesible.
 
-<a href="https://start9.com/start-tunnel/published-ports.html" target="_blank" rel="noreferrer">Más información →</a>`,
+<a href="https://docs.start9.com/start-tunnel/published-ports.html" target="_blank" rel="noreferrer">Más información →</a>`,
 
   '/published-ports/add': `## Añadir puerto publicado
 
@@ -163,13 +165,13 @@ Accede al servicio por IPv4, IPv6 o ambos. IPv6 requiere que la subred del servi
 
 Un dominio TLS/SSL (SNI) para que varios nombres de host compartan un mismo puerto externo. Solo IPv4, y no disponible para rangos.
 
-<a href="https://start9.com/start-tunnel/published-ports.html#add-a-port-manually" target="_blank" rel="noreferrer">Más información →</a>`,
+<a href="https://docs.start9.com/start-tunnel/published-ports.html#add-a-port-manually" target="_blank" rel="noreferrer">Más información →</a>`,
 
   '/published-ports/edit-label': `## Editar etiqueta
 
 Renombra este puerto publicado, o añádele una etiqueta si aún no tiene. La etiqueta es solo para tu referencia en la lista: no afecta al enrutamiento.
 
-<a href="https://start9.com/start-tunnel/published-ports.html#manual-and-automatic-ports" target="_blank" rel="noreferrer">Más información →</a>`,
+<a href="https://docs.start9.com/start-tunnel/published-ports.html#manual-and-automatic-ports" target="_blank" rel="noreferrer">Más información →</a>`,
 
   '/dns': `## Registros DNS
 
@@ -185,7 +187,7 @@ Un servidor de confianza con la **inyección de DNS** activada registra aquí su
 
 Cada fila muestra el nombre de host, el tipo, el servidor de destino (o valor) y el TTL del registro.
 
-<a href="https://start9.com/start-tunnel/dns-records.html" target="_blank" rel="noreferrer">Más información →</a>`,
+<a href="https://docs.start9.com/start-tunnel/dns-records.html" target="_blank" rel="noreferrer">Más información →</a>`,
 
   '/dns/add': `## Añadir registro DNS
 
@@ -209,7 +211,7 @@ Para A y AAAA, elige uno de tus dispositivos servidor, o **Otro (personalizado)*
 
 Cuánto tiempo pueden otros sistemas almacenar en caché este registro antes de volver a consultarlo. El valor predeterminado es 300.
 
-<a href="https://start9.com/start-tunnel/dns-records.html#viewing-and-managing-records" target="_blank" rel="noreferrer">Más información →</a>`,
+<a href="https://docs.start9.com/start-tunnel/dns-records.html#viewing-and-managing-records" target="_blank" rel="noreferrer">Más información →</a>`,
 
   '/settings': `## Ajustes
 
@@ -219,7 +221,7 @@ La versión de StartTunnel instalada. **Buscar actualizaciones** comprueba si ha
 
 ### Redirección HTTP (80 → 443)
 
-Para cada IPv4 pública, si los visitantes por <code>http://</code> simple se redirigen a <code>https://</code> seguro. Activado de forma predeterminada. Una dirección no puede tener a la vez una redirección y un puerto publicado en el puerto 80: el interruptor se desactiva mientras el puerto 80 esté publicado. Consulta <a href="https://start9.com/start-tunnel/http-redirects.html" target="_blank" rel="noreferrer">Redirecciones HTTP</a>.
+Para cada IPv4 pública, si los visitantes por <code>http://</code> simple se redirigen a <code>https://</code> seguro. Activado de forma predeterminada. Una dirección no puede tener a la vez una redirección y un puerto publicado en el puerto 80: el interruptor se desactiva mientras el puerto 80 esté publicado. Consulta <a href="https://docs.start9.com/start-tunnel/http-redirects.html" target="_blank" rel="noreferrer">Redirecciones HTTP</a>.
 
 ### Idioma
 
@@ -229,7 +231,7 @@ El idioma en el que se muestra la interfaz.
 
 Cambia tu contraseña de acceso, reinicia el VPS o cierra sesión.
 
-<a href="https://start9.com/start-tunnel/updating.html" target="_blank" rel="noreferrer">Más información →</a>`,
+<a href="https://docs.start9.com/start-tunnel/updating.html" target="_blank" rel="noreferrer">Más información →</a>`,
 
   '/settings/change-password': `## Cambiar contraseña
 
@@ -245,7 +247,7 @@ Vuelve a escribirla exactamente; verás un error si las dos no coinciden.
 
 Si alguna vez la olvidas, restablécela desde el VPS con <code>start-tunnel auth reset-password</code>.
 
-<a href="https://start9.com/start-tunnel/faq.html#what-if-i-forget-my-password" target="_blank" rel="noreferrer">Más información →</a>`,
+<a href="https://docs.start9.com/start-tunnel/faq.html#what-if-i-forget-my-password" target="_blank" rel="noreferrer">Más información →</a>`,
 }
 
 export default HELP_ES

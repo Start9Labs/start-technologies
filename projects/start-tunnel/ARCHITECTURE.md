@@ -18,6 +18,7 @@ shared `start-core` crate.
 | Tunnel module root             | `shared-libs/crates/start-core/src/tunnel/mod.rs`  |
 | Angular UI                     | `projects/start-tunnel/web/`                       |
 | systemd unit                   | `projects/start-tunnel/start-tunneld.service`      |
+| Kernel settings (sysctl.d)     | `projects/start-tunnel/sysctl.conf`                |
 | User & reference docs (mdbook) | `projects/start-tunnel/docs/`                      |
 
 `src/main.rs` embeds the compiled UI (`web/dist/static/start-tunnel`) via

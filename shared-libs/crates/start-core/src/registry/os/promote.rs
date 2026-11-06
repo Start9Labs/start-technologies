@@ -8,7 +8,9 @@ use crate::context::CliContext;
 use crate::prelude::*;
 use crate::registry::os::SIG_CONTEXT;
 use crate::registry::os::index::OsIndex;
+use crate::registry::os::version::AddVersionParams;
 use crate::registry::package::promote::{call_registry, resolve_registry_url};
+use crate::s9pk::git_hash::GitHash;
 use crate::sign::commitment::blake3::Blake3Commitment;
 
 #[derive(Debug, Deserialize, Serialize, Parser)]
@@ -22,11 +24,18 @@ pub struct CliOsPromoteParams {
     pub to: Option<Url>,
     #[arg(help = "help.arg.os-version")]
     pub version: Version,
+    #[arg(long, help = "help.arg.expected-os-git-hash")]
+    pub expected_git_hash: Option<GitHash>,
 }
 
 pub async fn cli_os_promote(
     ctx: CliContext,
-    CliOsPromoteParams { from, to, version }: CliOsPromoteParams,
+    CliOsPromoteParams {
+        from,
+        to,
+        version,
+        expected_git_hash,
+    }: CliOsPromoteParams,
 ) -> Result<(), Error> {
     if from.is_none() && to.is_none() {
         return Err(Error::new(
@@ -38,11 +47,9 @@ pub async fn cli_os_promote(
     let from_url = resolve_registry_url(from.as_ref(), &ctx)?;
     let to_url = resolve_registry_url(to.as_ref(), &ctx)?;
 
-    // Fetch OS index from source registry
     let res: Value = call_registry(&ctx, from_url, "os.index", imbl_value::json!({})).await?;
     let os_index: OsIndex = from_value(res)?;
 
-    // Find the target version
     let version_info = os_index.versions.0.get(&version).ok_or_else(|| {
         Error::new(
             eyre!(
@@ -53,21 +60,18 @@ pub async fn cli_os_promote(
         )
     })?;
 
-    // Add the version to the target registry
+    if let Some(expected) = expected_git_hash {
+        version_info.require_git_hash(&expected)?;
+    }
+
     call_registry(
         &ctx,
         to_url.clone(),
         "os.version.add",
-        imbl_value::json!({
-            "version": &version,
-            "headline": &version_info.headline,
-            "releaseNotes": &version_info.release_notes,
-            "sourceVersion": &version_info.source_version,
-        }),
+        to_value(&AddVersionParams::from_info(version.clone(), version_info))?,
     )
     .await?;
 
-    // Promote all assets for each type and platform
     promote_assets(
         &ctx,
         &to_url,
@@ -94,6 +98,33 @@ pub async fn cli_os_promote(
     .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::os::index::OsVersionInfo;
+
+    #[test]
+    fn promotion_carries_release_metadata() {
+        let info = OsVersionInfo {
+            headline: "Security update".into(),
+            release_notes: "Release notes".parse().unwrap(),
+            source_version: ">=0.4.0".parse().unwrap(),
+            git_hash: Some("0123456789abcdef".parse().unwrap()),
+            security: true,
+            ..Default::default()
+        };
+        let version: Version = "0.4.0.5".parse().unwrap();
+        let params = AddVersionParams::from_info(version.clone(), &info);
+        assert_eq!(params.version, version);
+        assert_eq!(params.headline, info.headline);
+        assert_eq!(params.release_notes, info.release_notes);
+        assert_eq!(params.source_version, info.source_version);
+        assert_eq!(params.git_hash, info.git_hash);
+        assert!(params.security);
+        assert!(params.signer.is_none());
+    }
 }
 
 async fn promote_assets(

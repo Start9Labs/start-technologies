@@ -537,8 +537,6 @@ export class SystemForEmbassy implements System {
           addSsl = {
             preferredExternalPort: lanPortNum,
             alpn: [],
-            addXForwardedHeaders: false,
-            auth: null,
           }
         }
         return [

@@ -1,1 +1,0 @@
-- Changing a LAN Network Block or a profile subnet offers to delete the inbound VPN server it would break, instead of showing an error.

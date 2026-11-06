@@ -99,8 +99,8 @@ StartOS uses **Patch-DB**, a custom diff-based database, to manage system state.
 
 The database has two layers:
 
-- **Public model** — Synced to the frontend. Contains everything the UI needs: service status, installed packages, system settings, network configuration, notifications.
-- **Private model** — Backend-only. Contains internal state like cryptographic keys, enrolled device keys, and operational data that should never leave the server.
+- **Public model** — Synced to the frontend. Contains service status, installed packages, system settings, network configuration, and the unread notification count.
+- **Private model** — Backend-only storage for cryptographic keys, enrolled device keys, notifications, push subscriptions, and operational data. Authenticated RPC methods expose the data clients need; private signing keys remain on the server.
 
 ## Security
 
@@ -116,6 +116,10 @@ Each service runs in its own LXC container with:
 ### Encrypted Backups
 
 All backups are encrypted using the user's master password. Backups can be stored on physical drives or network shares (SMB/CIFS). Each service's backup retains the password that was active when the backup was created.
+
+### Physical Access
+
+Physical access to the server is root access. Your master password does not encrypt the data drive, so anyone holding the server or its drive can read every service's data. Data a service encrypts itself is the exception — Vaultwarden, for example, stores entries encrypted under each user's own master password. A service's documentation says what it encrypts.
 
 ### Authentication
 

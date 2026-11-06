@@ -486,6 +486,8 @@ pub struct ProfileDnsmasq {
     #[uci(default)]
     pub nonwildcard: Option<String>,
     #[uci(default)]
+    pub localise_queries: Option<String>,
+    #[uci(default)]
     pub listen_address: Vec<String>,
     #[uci(default)]
     pub notinterface: Vec<String>,
@@ -493,6 +495,16 @@ pub struct ProfileDnsmasq {
     pub rebind_domain: Vec<String>,
     #[uci(default)]
     pub rebind_protection: Option<String>,
+    #[uci(default)]
+    pub rebind_localhost: Option<String>,
+    #[uci(default)]
+    pub authoritative: Option<String>,
+    #[uci(default)]
+    pub domainneeded: Option<String>,
+    #[uci(default)]
+    pub cachesize: Option<String>,
+    #[uci(default)]
+    pub ednspacket_max: Option<String>,
     #[uci(default)]
     pub localuse: Option<String>,
     #[uci(default)]

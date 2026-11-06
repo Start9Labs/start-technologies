@@ -302,7 +302,18 @@ impl<Context: crate::Context> HttpServer<Context> {
         &self,
         ctx: &Context,
         mid: &mut Vector<DynMiddleware<Context>>,
+        req: RpcRequest,
+    ) -> RpcResponse {
+        self.process_rpc_request_with_stream(ctx, mid, req, None)
+            .await
+    }
+
+    pub(crate) async fn process_rpc_request_with_stream(
+        &self,
+        ctx: &Context,
+        mid: &mut Vector<DynMiddleware<Context>>,
         mut req: RpcRequest,
+        rpc_stream: Option<crate::RpcStream>,
     ) -> RpcResponse {
         let metadata = Value::Object(
             self.inner
@@ -335,7 +346,9 @@ impl<Context: crate::Context> HttpServer<Context> {
                     return res;
                 }
             }
-            self.inner.handle_single_request(req).await
+            self.inner
+                .handle_single_request_with_stream(req, rpc_stream)
+                .await
         }
         .await;
         for middleware in mid.iter_mut() {

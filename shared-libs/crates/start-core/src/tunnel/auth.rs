@@ -221,7 +221,7 @@ pub async fn add_key(
         .mutate(|db| {
             db.as_session_pubkeys_mut().mutate(|session_pubkeys| {
                 session_pubkeys.0.insert(
-                    key.interned_pem(),
+                    key.interned_der64(),
                     Session {
                         name: Some(name),
                         ..Default::default()
@@ -248,7 +248,7 @@ pub async fn remove_key(
     ctx: TunnelContext,
     RemoveKeyParams { key }: RemoveKeyParams,
 ) -> Result<(), Error> {
-    ctx.unenroll([key.interned_pem()]).await?;
+    ctx.unenroll([key.interned_der64()]).await?;
     Ok(())
 }
 

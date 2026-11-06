@@ -1,1 +1,0 @@
-- Saving published ports while a device is offline no longer removes that device's IPv6 forwards; they keep the device's last IPv6 address. Adding IPv6 to a port for a device that has no global IPv6 address is now refused with an error instead of being silently left out.

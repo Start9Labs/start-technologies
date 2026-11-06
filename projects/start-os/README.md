@@ -84,7 +84,7 @@ test suite.
 
 ## Getting StartOS as a user
 
-- **Buy a server** from [store.start9.com](https://store.start9.com) — easiest path.
+- **Buy a server** from [start9.com](https://start9.com) — easiest path.
 - **Install on your own hardware** — follow the
   [install guide](https://docs.start9.com/start-os/installing-startos.html).
 - Browse services on the [Start9 Marketplace](https://marketplace.start9.com/).

@@ -53,8 +53,9 @@ pub async fn call_registry(
     ctx: &CliContext,
     url: Url,
     method: &str,
-    params: Value,
+    mut params: Value,
 ) -> Result<Value, Error> {
+    crate::registry::compat::pem_wire(&mut params);
     let sig_context = url.host().as_ref().map(InternedString::from_display);
     crate::middleware::auth::signature::call_remote(
         ctx,
@@ -133,6 +134,7 @@ pub async fn cli_promote(
             imbl_value::json!({
                 "urls": &asset.urls,
                 "signature": signature,
+                "signatures": &asset.signatures,
                 "commitment": commitment,
             }),
         )

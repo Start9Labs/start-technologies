@@ -5,12 +5,14 @@ import {
   i18nKey,
   MARKDOWN,
 } from '@start9labs/shared'
+import { schemas } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import { merge, of, shareReplay, Subject } from 'rxjs'
 import { REPORT } from 'src/app/components/backup-report.component'
 import { ServerNotification } from 'src/app/services/api/api.types'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
+import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
 
 @Injectable({ providedIn: 'root' })
 export class NotificationService {
@@ -18,6 +20,7 @@ export class NotificationService {
   private readonly errorService = inject(ErrorService)
   private readonly api = inject(ApiService)
   private readonly dialogs = inject(DialogService)
+  private readonly trust = inject(TrustedKeysService)
   private readonly localUnreadCount$ = new Subject<number>()
 
   readonly unreadCount$ = merge(
@@ -62,11 +65,16 @@ export class NotificationService {
     }
   }
 
+  getLink(notification: ServerNotification<number>): string | null {
+    return schemas.OsUpdateAvailable.safeParse(notification.data).success
+      ? '/system/general'
+      : null
+  }
+
   viewModal(notification: ServerNotification<number>) {
     const { data, createdAt, code, title, message } = notification
 
     switch (code) {
-      // Backup report - structured report with per-service results
       case 1:
         this.dialogs
           .openComponent(REPORT, {
@@ -77,7 +85,6 @@ export class NotificationService {
           .subscribe()
         break
 
-      // OS update - data contains the full release notes markdown
       case 2:
         this.dialogs
           .openComponent(MARKDOWN, {
@@ -88,7 +95,14 @@ export class NotificationService {
           .subscribe()
         break
 
-      // General notification - show the message text
+      case 4:
+        this.viewKey(schemas.RegistryKeyAdded.safeParse(data).data?.key)
+        break
+
+      case 5:
+        this.viewKey(schemas.RegistryKeyDropped.safeParse(data).data?.key)
+        break
+
       default:
         this.dialogs
           .openComponent(MARKDOWN, {
@@ -99,5 +113,9 @@ export class NotificationService {
           .subscribe()
         break
     }
+  }
+
+  private viewKey(key?: string) {
+    if (key) this.trust.viewKey(key)
   }
 }

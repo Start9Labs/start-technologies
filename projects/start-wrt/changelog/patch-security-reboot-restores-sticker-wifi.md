@@ -1,2 +1,0 @@
-- Rebooting no longer brings back the sticker Wi-Fi password or turns disabled radios back on when no Wi-Fi password is assigned to the Admin profile. Previously, after any reboot, the sticker password gave Admin access to the LAN and reset the network name to `StartWRT`.
-- A router that already picked up the sticker password shows it as a **Default** entry on the `Points of Entry > Wi-Fi > Passwords` page. Delete that entry to remove the access it granted.

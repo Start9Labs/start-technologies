@@ -52,7 +52,7 @@ enum Protocol {
 
 A request is authorized if either credential is valid:
 
-- **Request signature** — an `X-Start-Auth-Sig` header carrying an Ed25519 signature, by a key enrolled through `auth.login`, over a timestamp, a nonce, the body's BLAKE3 hash, and the server identity the client addressed (`router.lan`, any non-loopback address on the router's interfaces, or the enabled DDNS hostname; a loopback address only from a loopback peer). The protocol is `start-core`'s `SignatureAuth`; the browser holds a non-extractable WebCrypto key in IndexedDB. Timestamps must fall within 30 seconds of the router's clock once ntpd reports valid time; a replayed nonce is rejected.
+- **Request signature** — an `X-Start-Auth-Sig` header carrying an Ed25519 signature, by a key enrolled through `auth.login`, over a timestamp, a nonce, the body's BLAKE3 hash, and the server identity the client addressed (`router.lan`, `router.local`, any non-loopback address on the router's interfaces, or the enabled DDNS hostname; a loopback address only from a loopback peer). The protocol is `start-core`'s `SignatureAuth`; the browser holds a non-extractable WebCrypto key in IndexedDB. Timestamps must fall within 30 seconds of the router's clock once ntpd reports valid time; a replayed nonce is rejected.
 - **Local auth token** — `Authorization: Bearer <token>`, where the token is the contents of `/run/startwrt/rpc.authcookie` (regenerated at daemon start, mode `0640`, `root:root`). `startwrt-cli` sends it only to loopback hosts.
 
 Endpoints registered with `authenticated: false` metadata answer without either. Enrolled keys persist in `/etc/startwrt/auth.db`, which sysupgrade keeps, and stay valid until revoked by `auth.logout`, `auth.session.kill`, or a password change, or until 24 hours after their `loggedIn` time, however recently they were used. The microSD wizard's Keep settings reflash does not carry them over. An expired key is rejected as unauthorized (code 34) on its next request. Before ntpd reports valid time the check judges age alone; afterwards a `loggedIn` more than 5 minutes in the future also counts as expired. The sweep that unenrolls expired keys runs hourly and waits for ntpd to report valid time.
@@ -66,7 +66,7 @@ The request must be signed by the key it enrolls. A valid local auth token rejec
 #[serde(rename_all = "camelCase")]
 struct LoginParams {
     password: String,
-    /// PEM-encoded Ed25519 public key to enroll
+    /// DER64 or PEM-encoded Ed25519 public key to enroll
     pubkey: AnyVerifyingKey,
     /// Enroll in memory only. Unsupported (InvalidRequest).
     #[serde(default)]
@@ -96,19 +96,31 @@ unsigned local-token request is rejected as unnecessary.
 struct SessionList {
     /// The key that signed this request
     current: Option<String>,
-    /// Enrolled keys by PEM: { name, loggedIn, lastActive, userAgent }.
+    sessions: Sessions,
+}
+
+struct Sessions {
+    /// Enrolled keys by DER64 SPKI: { name, loggedIn, lastActive, userAgent }.
     /// `lastActive` is persisted at most hourly.
-    sessions: BTreeMap<String, Session>,
+    pubkeys: BTreeMap<String, Session>,
+    /// Empty on StartWRT.
+    tokens: BTreeMap<String, Session>,
 }
 ```
 
 ### `auth.session.kill`
 
+StartWRT revokes enrolled keys through `pubkeys`. The shared request also accepts
+`tokens`, but StartWRT has no bearer-token sessions.
+
 ```rust
 #[derive(Deserialize)]
 struct KillParams {
-    /// PEM-encoded keys to revoke
-    ids: Vec<String>,
+    /// DER64 or PEM-encoded keys to revoke
+    #[serde(default)]
+    pubkeys: Vec<AnyVerifyingKey>,
+    #[serde(default)]
+    tokens: Vec<String>,
 }
 // Response: null
 ```
@@ -677,8 +689,7 @@ struct LanIpv4SetRequest {
 // Backend: updates UCI network.lan ipaddr (netmask /24) — and every profile's
 // addresses on a /16 block change — then clears DHCP leases, cycles only the LAN
 // interface (plus every profile interface on a block change) with ifdown/ifup,
-// reloads the firewall and dnsmasq, restarts Wi-Fi, and regenerates the HTTPS
-// certificate.
+// reloads the firewall and dnsmasq, and restarts Wi-Fi.
 // Inbound VPN peers the change would break fail the call with
 //   ErrorKind::VpnPeersWouldBreak unless force is set.
 // Validation: address must fall inside an RFC 1918 block at one of the
@@ -732,8 +743,7 @@ struct LanIpv6SetRequest {
 // With SLAAC enabled, `prefix` outside 48..=64, or shorter than the live
 // delegated prefix, is rejected (`InvalidRequest`), matching the UI validator.
 // Backend: updates UCI dhcp + network for the LAN and every profile, reloads
-// odhcpd to withdraw the old prefix, restarts network, and regenerates the HTTPS
-// certificate.
+// odhcpd to withdraw the old prefix, and restarts network.
 // Disabling SLAAC while any *enabled* IPv6 published-port rule exists is
 // rejected (`PublishedPortsUseIpv6`): it would strand every pp_*_v6 pinhole on
 // an address no device will hold. The UI locks the toggle for the same reason;
@@ -946,9 +956,8 @@ struct SetDnsInjectionReq {
 }
 // Response: null
 // Backend: stores `_allow_dns_inject` on the device's DHCP host section,
-// creating one if needed, rewrites the per-profile dnsmasq instances, and
-// applies the change immediately. `allow: false` also drops the records the
-// device has published.
+// creating one if needed, and applies the change immediately. `allow: false`
+// also drops the records the device has published.
 ```
 
 ### `devices.set-router-advertisements`
@@ -1611,9 +1620,9 @@ struct PeerSetDnsInjectionArgs {
 }
 // Response: null
 // Backend: stores `_allow_dns_inject` on the peer's `wireguard_wg_<profile>`
-// section, rewrites the per-profile dnsmasq instances, and applies the change
-// immediately. A peer's signed updates are refused without it. `allow: false`
-// also drops the records the peer has published.
+// section and applies the change immediately. A peer's signed updates are
+// refused without it. `allow: false` also drops the records the peer has
+// published.
 ```
 
 ---

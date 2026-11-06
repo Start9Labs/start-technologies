@@ -6,5 +6,7 @@ if [ -n "$DPKG_MAINTSCRIPT_PACKAGE" ]; then
 	  SYSTEMCTL=deb-systemd-helper
 fi
 
+/usr/lib/systemd/systemd-sysctl --strict --prefix=/net/ipv4/ip_local_port_range
+
 $SYSTEMCTL enable start-tunneld.service
 $SYSTEMCTL restart start-tunneld.service

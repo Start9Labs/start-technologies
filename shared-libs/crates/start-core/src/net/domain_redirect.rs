@@ -234,6 +234,7 @@ mod test {
                 preferred_external_port: 80,
                 add_ssl: None,
                 secure: None,
+                proxy: None,
             },
             net: NetInfo {
                 assigned_port: Some(8080),

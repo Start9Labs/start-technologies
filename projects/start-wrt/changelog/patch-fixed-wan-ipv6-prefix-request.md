@@ -1,1 +1,0 @@
-- The IPv6 prefix length set on the WAN page is now saved in SLAAC and DHCPv6 modes, not only in Static mode.

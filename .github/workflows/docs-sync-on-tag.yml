@@ -13,9 +13,11 @@ name: Sync a release onto live-docs
 # The shared site tree (projects/start-docs) rides along only with a product
 # that ships a book: a bookless release (start-cli, start-registry) has nothing
 # to redeploy, and docs-deploy.yml's paths filter is what keeps it from firing.
-# projects/start-docs/versions.conf rides along with the rest of that tree, so
-# the version each book is published under is whatever the tagged tree said. It
-# is a deliberate, hand-maintained file: set it in master before you tag.
+# projects/start-docs/versions.conf rides along with the rest of that tree, but
+# a tag speaks only for its own book's line: scripts/docs-versions.mjs holds
+# other products' lines at what live-docs publishes, and derives the StartOS and
+# StartWRT labels from the tag. The other books' lines, and the archive lines
+# (`book=version@tag`), are set by hand in master before tagging.
 #
 # Two guards protect live-docs: the tagged commit must be an ancestor of master,
 # and nothing moves backwards. A product's own tree is judged against that
@@ -24,7 +26,7 @@ name: Sync a release onto live-docs
 # project, while a backfilled or re-cut tag cannot roll anything back.
 on:
   push:
-    tags: ['*/v*']
+    tags: ['*/v*', '!start-os/v*-rc.*']
 
 permissions:
   contents: read
@@ -73,14 +75,16 @@ jobs:
             git fetch --no-tags origin master
             git checkout --detach origin/master
             BASE=$(git rev-parse HEAD)
-            for script in changelog.mjs changelog-version.mjs commit-staged.mjs; do
-              git show "origin/master:scripts/$script" > "$RUNNER_TEMP/$script"
+            mkdir -p "$RUNNER_TEMP/scripts" "$RUNNER_TEMP/shared-libs/crates/start-core/locales"
+            for script in changelog.mjs changelog-version.mjs commit-staged.mjs docs-versions.mjs; do
+              git show "origin/master:scripts/$script" > "$RUNNER_TEMP/scripts/$script"
             done
-            node "$RUNNER_TEMP/changelog.mjs" sync
+            git show origin/master:shared-libs/crates/start-core/locales/release-notes.json > "$RUNNER_TEMP/shared-libs/crates/start-core/locales/release-notes.json"
+            node "$RUNNER_TEMP/scripts/changelog.mjs" sync
             git add -- projects/
             if git diff --cached --quiet; then break; fi
             printf 'chore: compile released changelog fragments\n' > "$RUNNER_TEMP/changelog-message"
-            if node "$RUNNER_TEMP/commit-staged.mjs" "$RUNNER_TEMP/changelog-message" master "$BASE"; then
+            if node "$RUNNER_TEMP/scripts/commit-staged.mjs" "$RUNNER_TEMP/changelog-message" master "$BASE"; then
               break
             fi
             if [ "$attempt" = 3 ]; then exit 1; fi
@@ -188,11 +192,20 @@ jobs:
                 esac
               done
             done
+            if [ "$HAS_BOOK" = 1 ]; then
+              git show HEAD:projects/start-docs/versions.conf > "$RUNNER_TEMP/published-versions.conf"
+              git show "$TAG:projects/start-docs/versions.conf" > "$RUNNER_TEMP/tagged-versions.conf"
+              node "$RUNNER_TEMP/scripts/docs-versions.mjs" "$PROJECT" "${TAG#*/v}" \
+                "$RUNNER_TEMP/published-versions.conf" "$RUNNER_TEMP/tagged-versions.conf" \
+                projects/start-docs/versions.conf
+            fi
           fi
 
           git ls-tree -r --name-only origin/master -- projects/ \
             | grep -E '^projects/[^/]+/CHANGELOG\.md$' \
             | while read -r changelog; do git checkout origin/master -- "$changelog"; done
+          node "$RUNNER_TEMP/scripts/changelog.mjs" archives "projects/$PROJECT" --ref origin/master \
+            | while read -r notes; do git checkout origin/master -- "$notes"; done
           git rm -rfq --ignore-unmatch -- "projects/$PROJECT/changelog"
 
           git add -A

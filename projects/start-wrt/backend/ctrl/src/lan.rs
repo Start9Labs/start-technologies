@@ -331,19 +331,6 @@ pub async fn ipv4_set<C: CtrlContext>(
                 }
 
                 if ctx.effectful() {
-                    // Regenerate server cert with updated LAN IP as SAN
-                    let ip_changed = old_address.map_or(true, |old| old != address);
-                    if ip_changed {
-                        let addrs = crate::ssl::LanAddresses {
-                            ipv4: address,
-                            // IPv6 hasn't changed, carry it forward from the live system
-                            ipv6: crate::ssl::read_lan_ipv6_from_ubus().await,
-                        };
-                        if let Err(e) = crate::ssl::regenerate_server_cert(&addrs).await {
-                            tracing::error!("failed to regenerate server cert: {e}");
-                        }
-                    }
-
                     let mut ifaces: Vec<String> = vec![LAN_INTERFACE.to_string()];
                     ifaces.extend(
                         profile_interfaces
@@ -627,44 +614,12 @@ pub async fn ipv6_set<C: CtrlContext>(
                     None,
                 );
                 if ctx.effectful() {
-                    let ipv6_enabled = req.slaac || req.dhcpv6;
-
                     // Withdraw the old prefix while it is still on the interface
                     // — see deprecate_odhcpd_prefixes. Without this, disabling
                     // IPv6 leaves clients holding SLAAC addresses until they
                     // expire on their own.
                     crate::deprecate_odhcpd_prefixes().await;
                     crate::wifi::restart_network().await;
-
-                    // Regenerate server cert to include/remove IPv6 SAN.
-                    // When enabling IPv6, poll for the address to appear on
-                    // the LAN interface — network restart is async and odhcpd
-                    // needs time to assign the ULA address.
-                    let ipv6 = if ipv6_enabled {
-                        let mut found = None;
-                        for _ in 0..30 {
-                            if let Some(addr) = crate::ssl::read_lan_ipv6_from_ubus().await {
-                                found = Some(addr);
-                                break;
-                            }
-                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                        }
-                        if found.is_none() {
-                            tracing::warn!(
-                                "IPv6 address not yet available on LAN after network restart"
-                            );
-                        }
-                        found
-                    } else {
-                        None
-                    };
-                    let addrs = crate::ssl::LanAddresses {
-                        ipv4: crate::ssl::read_lan_ip(&ctx.uci_root()).await,
-                        ipv6,
-                    };
-                    if let Err(e) = crate::ssl::regenerate_server_cert(&addrs).await {
-                        tracing::error!("failed to regenerate server cert after IPv6 change: {e}");
-                    }
                 }
                 return Ok(());
             }

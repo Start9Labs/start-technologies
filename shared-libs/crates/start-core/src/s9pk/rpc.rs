@@ -93,6 +93,13 @@ pub fn s9pk() -> ParentHandler<CliContext> {
                 .with_about("about.publish-s9pk"),
         )
         .subcommand(
+            "sign",
+            from_fn_async(sign)
+                .no_ts()
+                .no_display()
+                .with_about("about.sign-s9pk"),
+        )
+        .subcommand(
             "select",
             from_fn_async(select)
                 .no_ts()
@@ -112,6 +119,19 @@ struct S9pkPath {
 }
 
 rpc_toolkit::reflect_ts!(S9pkPath);
+
+async fn sign(ctx: CliContext, S9pkPath { s9pk: path }: S9pkPath) -> Result<(), Error> {
+    let package = super::S9pk::open(&path, None).await?;
+    let identity = ctx.id_key()?;
+    let signer = identity.verifying_key().await?;
+    if !package.needs_endorsement(&signer).await? {
+        return Ok(());
+    }
+    let signature = identity
+        .sign_commitment(&package.as_archive().commitment().await?, SIG_CONTEXT)
+        .await?;
+    super::v2::trailer::Trailer::append(&path, signer, signature).await
+}
 
 fn edit() -> ParentHandler<CliContext, S9pkPath> {
     let only_parent = |a, _| a;

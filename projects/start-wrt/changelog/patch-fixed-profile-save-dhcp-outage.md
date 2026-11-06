@@ -1,1 +1,0 @@
-- Saving a profile, the LAN address, or a VPN or DNS setting no longer takes DHCP and DNS offline on every network for up to a few minutes, and a network that comes up during the save no longer stays without DHCP until another setting is saved or the router restarts.

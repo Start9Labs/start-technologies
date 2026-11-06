@@ -14,12 +14,14 @@ use crate::util::Invoke;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 use crate::{Error, ErrorKind};
 
+pub mod format;
 pub mod fsck;
 pub mod main;
 pub mod mount;
 pub mod util;
 
 pub const BOOT_RW_PATH: &str = "/media/boot-rw";
+pub const LIVE_MEDIUM_PATH: &str = "/run/live/medium";
 pub const REPAIR_DISK_PATH: &str = "/media/startos/config/repair-disk";
 pub const BACKUP_DIR_NAME: &str = "StartOSBackupsV2";
 pub const LEGACY_BACKUP_DIR_NAME: &str = "StartOSBackups";
@@ -222,6 +224,16 @@ pub fn disk<C: Context>() -> ParentHandler<C> {
                     .with_about("about.repair-disk-corruption"),
             ),
         )
+        .subcommand(
+            "format",
+            from_fn_async(format::format)
+                .with_display_serializable()
+                .with_custom_display_fn(|handle, partition| {
+                    format::display_formatted(handle.params, partition)
+                })
+                .with_about("about.format-disk")
+                .with_call_remote::<CliContext>(),
+        )
 }
 
 fn display_disk_info(params: WithIoFormat<Empty>, args: Vec<DiskInfo>) -> Result<(), Error> {
@@ -256,7 +268,7 @@ fn display_disk_info(params: WithIoFormat<Empty>, args: Vec<DiskInfo>) -> Result
                 } else {
                     "N/A"
                 },
-                part.capacity,
+                &format!("{:.2} GiB", part.capacity as f64 / 1024.0 / 1024.0 / 1024.0),
                 &if let Some(used) = part
                     .used
                     .map(|u| format!("{:.2} GiB", u as f64 / 1024.0 / 1024.0 / 1024.0))
@@ -288,7 +300,15 @@ fn display_disk_info(params: WithIoFormat<Empty>, args: Vec<DiskInfo>) -> Result
 
 // #[command(display(display_disk_info))]
 pub async fn list(ctx: RpcContext, _: Empty) -> Result<Vec<DiskInfo>, Error> {
-    crate::disk::util::list(&ctx.os_partitions, None).await
+    let server_id = ctx
+        .db
+        .peek()
+        .await
+        .as_public()
+        .as_server_info()
+        .as_id()
+        .de()?;
+    crate::disk::util::list(&ctx.os_partitions, Some(server_id.as_str())).await
 }
 
 pub async fn repair() -> Result<(), Error> {

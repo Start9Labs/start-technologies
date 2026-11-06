@@ -101,6 +101,7 @@ impl From<BackupUnencryptedMetadata> for StartOsRecoveryInfo {
             scheduled: false,
             server_id: None,
             has_system_backup: Some(true),
+            format_status: Default::default(),
         }
     }
 }
@@ -119,6 +120,8 @@ pub struct StartOsRecoveryInfo {
     pub server_id: Option<String>,
     #[serde(default)]
     pub has_system_backup: Option<bool>,
+    #[serde(default)]
+    pub format_status: backup_fs_protocol::FormatStatus,
 }
 
 rpc_toolkit::reflect_ts!(StartOsRecoveryInfo);
@@ -242,6 +245,34 @@ pub async fn get_label<P: AsRef<Path>>(path: P) -> Result<Option<String>, Error>
 }
 
 #[instrument(skip_all)]
+pub async fn get_logical_block_size(path: &Path) -> Result<u64, Error> {
+    Ok(String::from_utf8(
+        Command::new("lsblk")
+            .arg("-bndo")
+            .arg("LOG-SEC")
+            .arg(path)
+            .invoke(ErrorKind::BlockDevice)
+            .await?,
+    )?
+    .trim()
+    .parse()?)
+}
+
+#[instrument(skip_all)]
+pub async fn get_type<P: AsRef<Path>>(path: P) -> Result<String, Error> {
+    Ok(String::from_utf8(
+        Command::new("lsblk")
+            .arg("-ndo")
+            .arg("type")
+            .arg(path.as_ref())
+            .invoke(crate::ErrorKind::BlockDevice)
+            .await?,
+    )?
+    .trim()
+    .to_owned())
+}
+
+#[instrument(skip_all)]
 pub async fn get_part_type<P: AsRef<Path>>(path: P) -> Result<Option<String>, Error> {
     let part_type = String::from_utf8(
         Command::new("lsblk")
@@ -315,6 +346,10 @@ pub async fn get_percentage<P: AsRef<Path>>(path: P) -> Result<u64, Error> {
     .parse::<u64>()?)
 }
 
+pub fn is_startos_pool_guid(guid: &str) -> bool {
+    guid.starts_with("EMBASSY_") || guid.starts_with("STARTOS_")
+}
+
 #[instrument(skip_all)]
 pub async fn pvscan() -> Result<BTreeMap<PathBuf, Option<InternedString>>, Error> {
     let pvscan_out = Command::new("pvscan")
@@ -371,6 +406,7 @@ async fn recovery_info_with_limit(
                             scheduled: true,
                             server_id: Some(base_server_id),
                             has_system_backup: scheduled.has_system_backup,
+                            format_status: Default::default(),
                         },
                     );
                 }
@@ -390,6 +426,16 @@ async fn recovery_info_with_limit(
                 .await?;
                 let mut info: StartOsRecoveryInfo = metadata.into();
                 info.server_id = Some(server_id.clone());
+                info.format_status =
+                    match super::mount::filesystem::backupfs::inspect(&entry.path().join("crypt"))
+                        .await
+                    {
+                        Ok(status) => status,
+                        Err(error) => {
+                            tracing::debug!(?error, "backup format inspection failed");
+                            backup_fs_protocol::FormatStatus::Unknown
+                        }
+                    };
                 res.insert(server_id, info);
             }
         }
@@ -506,6 +552,9 @@ pub async fn list(os: &OsPartitionInfo, server_id: Option<&str>) -> Result<Vec<D
 
     let mut res = Vec::with_capacity(disks.len());
     for (disk, index) in disks {
+        if matches!(get_type(&disk).await.as_deref(), Ok("rom")) {
+            continue;
+        }
         if index.internal {
             for (part, stable_part_path) in index.parts {
                 let mut disk_info = disk_info(disk.clone(), index.stable_path.clone()).await;
@@ -856,6 +905,21 @@ fn test_pvscan_parser() {
     println!("{:?}", parse_pvscan_output(s2));
     println!("{:?}", parse_pvscan_output(s3));
     println!("{:?}", parse_pvscan_output(s4));
+}
+
+#[test]
+fn recovery_info_accepts_metadata_without_format_status() {
+    let recovery: StartOsRecoveryInfo = serde_json::from_value(serde_json::json!({
+        "hostname": "server",
+        "version": "0.4.0",
+        "timestamp": "2026-01-01T00:00:00Z",
+    }))
+    .unwrap();
+    assert_eq!(
+        recovery.format_status,
+        backup_fs_protocol::FormatStatus::Unknown
+    );
+    assert!(!recovery.scheduled);
 }
 
 #[tokio::test]

@@ -18,7 +18,7 @@ use super::target::BackupTargetId;
 use crate::backup::os::OsBackup;
 use crate::context::rpc::InitRpcContextPhases;
 use crate::context::setup::SetupResult;
-use crate::context::{RpcContext, SetupContext};
+use crate::context::{CliContext, RpcContext, SetupContext};
 use crate::db::model::Database;
 use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::ReadWrite;
@@ -41,7 +41,7 @@ use crate::{PackageId, SYSTEM_PACKAGE_ID};
 pub struct RestorePackageParams {
     #[arg(help = "help.arg.backup-target-id")]
     pub target_id: BackupTargetId,
-    #[arg(help = "help.arg.backup-password")]
+    #[arg(skip)]
     pub password: String,
     #[arg(help = "help.arg.package-ids")]
     pub ids: Vec<PackageId>,
@@ -52,7 +52,41 @@ pub struct RestorePackageParams {
 rpc_toolkit::reflect_ts!(RestorePackageParams);
 rpc_toolkit::ts_export!(RestorePackageParams, namespaces = [""]);
 
-// #[command(rename = "restore", display(display_none))]
+#[cfg(test)]
+mod password_cli_tests {
+    use super::*;
+
+    #[test]
+    fn restore_cli_only_parses_target_and_packages() {
+        let mut params =
+            RestorePackageParams::try_parse_from(["restore", "cifs-0", "immich", "bitcoind"])
+                .unwrap();
+        assert!(params.password.is_empty());
+        assert_eq!(
+            params
+                .ids
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["immich", "bitcoind"]
+        );
+        params.password = "provided out of band".into();
+        assert_eq!(
+            serde_json::to_value(&params).unwrap()["password"],
+            "provided out of band"
+        );
+    }
+}
+
+#[instrument(skip_all)]
+pub async fn cli_restore_packages(
+    mut args: rpc_toolkit::HandlerArgs<CliContext, RestorePackageParams>,
+) -> Result<(), Error> {
+    args.params.password = super::read_password()?;
+    super::call_remote(args).await?;
+    Ok(())
+}
+
 #[instrument(skip(ctx, password))]
 pub async fn restore_packages_rpc(
     ctx: RpcContext,
@@ -822,7 +856,7 @@ async fn initialize_recovered_server(
 
     let result = SetupResult {
         hostname: os_backup.account.hostname,
-        root_ca: Pem(os_backup.account.root_ca_cert),
+        root_ca: Pem(rpc_ctx.account.peek(|account| account.root_ca_cert.clone())),
         needs_restart: ctx.install_rootfs.peek(|a| a.is_some()),
     };
     Ok((result, rpc_ctx, restore_phase))

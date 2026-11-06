@@ -23,7 +23,7 @@ The view follows the end of the log, so new lines appear as they are written. Sc
 
 **Download**, at the bottom of any log view, saves the most recent 10,000 entries as an HTML file that opens in any browser, colored the same as it appears onscreen. The file is named for what it came from — `<service-id>-logs.html`, `os-logs.html`, or `kernel-logs.html`.
 
-Attach that file when you [contact support](https://start9.com/contact). It carries far more than the last error onscreen, and it is the fastest way to get an answer.
+Attach that file when you [ask for help](https://start9.com/help). It carries far more than the last error onscreen, and it is the fastest way to get an answer.
 
 ## From the Command Line
 

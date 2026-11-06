@@ -31,6 +31,7 @@ import {
   formatCifsLocation,
   MappedBackupTarget,
 } from './backup.service'
+import { BackupConversion, ConversionLabel } from './conversion'
 import { BackupLegacyWarningComponent } from './legacy-warning.component'
 import { BackupStatusComponent } from './status.component'
 
@@ -99,7 +100,7 @@ const NETWORK_DELETE = new PolymorpheusComponent(NetworkDeleteDialog)
     </header>
 
     <table [appTable]="['Status', 'Name', 'Hostname', 'Path', 'Free', null]">
-      @for (target of service.cifs(); track $index) {
+      @for (target of service.cifs(); track target.id) {
         <tr
           tabindex="0"
           (click)="select(target)"
@@ -115,7 +116,7 @@ const NETWORK_DELETE = new PolymorpheusComponent(NetworkDeleteDialog)
                   class="g-negative"
                   [style.font-size.rem]="1"
                 />
-                Unable to connect
+                {{ 'Unable to connect' | i18n }}
               </span>
             }
           </td>
@@ -134,7 +135,21 @@ const NETWORK_DELETE = new PolymorpheusComponent(NetworkDeleteDialog)
           <td>
             <div class="actions">
               @if (
-                type === 'create' &&
+                type !== 'restore' &&
+                  (target.entry.startOs
+                    | backupConversionLabel
+                      : service.conversions()[target.id]
+                      : service.serverId());
+                as label
+              ) {
+                <button
+                  backupConversion
+                  [targetId]="target.id"
+                  [label]="label"
+                ></button>
+              }
+              @if (
+                type !== 'restore' &&
                 target.entry.mountable &&
                 target.entry.legacyBackup
               ) {
@@ -152,6 +167,7 @@ const NETWORK_DELETE = new PolymorpheusComponent(NetworkDeleteDialog)
                 iconStart="@tui.ellipsis-vertical"
                 tuiDropdownAuto
                 (click)="$event.stopPropagation()"
+                (keydown.enter)="$event.stopPropagation()"
               >
                 {{ 'More' | i18n }}
                 <tui-data-list *tuiDropdown="let close" (click)="close()">
@@ -392,6 +408,8 @@ const NETWORK_DELETE = new PolymorpheusComponent(NetworkDeleteDialog)
     PlaceholderComponent,
     BackupStatusComponent,
     BackupLegacyWarningComponent,
+    BackupConversion,
+    ConversionLabel,
     TableComponent,
     ConvertBytesPipe,
     i18nPipe,

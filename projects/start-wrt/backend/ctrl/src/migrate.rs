@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use tokio::io::AsyncWriteExt;
-use uciedit::openwrt::{Dhcp, InterfaceProto, NetworkInterface};
+use uciedit::openwrt::{Dhcp, DhcpHost, InterfaceProto, NetworkInterface};
 use uciedit::{dump_all, parse_all, Arena, TypedSection};
 
 use crate::prelude::*;
@@ -31,6 +31,9 @@ const MIGRATIONS: &[Migration] = &[
     Migration::StoreLogsUnderVar,
     Migration::RemoveSessionsJson,
     Migration::ForceDhcpPools,
+    Migration::RemoveServerCert,
+    Migration::EnableFlowOffloading,
+    Migration::ScopeReservedNames,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -53,6 +56,12 @@ enum Migration {
     RemoveSessionsJson,
     /// Earlier releases probed for another DHCP server before serving a pool.
     ForceDhcpPools,
+    /// Earlier images served one certificate from `/etc/ssl`.
+    RemoveServerCert,
+    /// Earlier images passed every forwarded packet through the firewall.
+    EnableFlowOffloading,
+    /// Earlier releases served a reserved device's name to every profile.
+    ScopeReservedNames,
 }
 
 impl Migration {
@@ -66,6 +75,9 @@ impl Migration {
             Migration::StoreLogsUnderVar => store_logs_under_var(root).await,
             Migration::RemoveSessionsJson => remove_sessions_json(root).await,
             Migration::ForceDhcpPools => force_dhcp_pools(root).await,
+            Migration::RemoveServerCert => remove_server_cert(root).await,
+            Migration::EnableFlowOffloading => enable_flow_offloading(root).await,
+            Migration::ScopeReservedNames => scope_reserved_names(root).await,
         }
     }
 }
@@ -184,6 +196,65 @@ async fn force_dhcp_pools(root: &Path) -> Result<(), Error> {
             dhcp.force = Some(true);
             section.set(&dhcp)?;
             changed = true;
+        }
+    }
+    if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+async fn scope_reserved_names(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["dhcp"]).await?;
+    let mut changed = false;
+    for section in &mut cfgs["dhcp"].sections {
+        let Ok(mut host) = section.get::<DhcpHost>() else {
+            continue;
+        };
+        if host.dns.take().is_some() {
+            section.set(&host)?;
+            changed = true;
+        }
+    }
+    if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+async fn remove_server_cert(root: &Path) -> Result<(), Error> {
+    for path in [
+        "etc/ssl/certs/startwrt-server.pem",
+        "etc/ssl/private/startwrt-server.key",
+    ] {
+        match tokio::fs::remove_file(root.join(path)).await {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, TypedSection, Default)]
+#[uci(ty = "defaults")]
+struct FirewallDefaults {
+    flow_offloading: Option<String>,
+}
+
+/// An explicit setting is a later choice and stays.
+async fn enable_flow_offloading(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["firewall"]).await?;
+    let mut changed = false;
+    for section in &mut cfgs["firewall"].sections {
+        if let Some(mut defaults) = section.get_typed::<FirewallDefaults>()? {
+            if defaults.flow_offloading.is_none() {
+                defaults.flow_offloading = Some("1".to_string());
+                section.set(&defaults)?;
+                changed = true;
+            }
+            break;
         }
     }
     if changed {
@@ -353,6 +424,14 @@ config system
 \toption log_file '/etc/log/messages'
 ";
 
+    const SHIPPED_FIREWALL_DEFAULTS: &str = "\
+config defaults
+\toption syn_flood '1'
+\toption input 'REJECT'
+\toption output 'ACCEPT'
+\toption forward 'REJECT'
+";
+
     const PPPOE_WAN: &str = "\
 config interface 'wan'
 \toption device 'eth1'
@@ -381,6 +460,12 @@ config dhcp 'guest'
 \toption limit '198'
 \toption leasetime '12h'
 \toption force '0'
+
+config host 'host_aabbccddeeff'
+\toption mac 'AA:BB:CC:DD:EE:FF'
+\toption name 'nas'
+\toption ip '192.168.1.50'
+\toption dns '1'
 ";
 
     fn router(record: Option<&str>, has_run: bool) -> tempfile::TempDir {
@@ -509,7 +594,7 @@ config forwarding
         write(
             &dir,
             "etc/config/firewall",
-            &format!("config zone 'wan'\n\toption name 'wan'\n\toption input 'REJECT'\n\toption output 'ACCEPT'\n\toption forward 'REJECT'\n\tlist network 'wan'\n\tlist network 'wg_old'\n{LEGACY_PROFILE_ZONES}"),
+            &format!("{SHIPPED_FIREWALL_DEFAULTS}\nconfig zone 'wan'\n\toption name 'wan'\n\toption input 'REJECT'\n\toption output 'ACCEPT'\n\toption forward 'REJECT'\n\tlist network 'wan'\n\tlist network 'wg_old'\n{LEGACY_PROFILE_ZONES}"),
         );
         write(&dir, "etc/config/startwrt", LEGACY_PROFILES);
         write(&dir, "etc/config/system", SHIPPED_SYSTEM);
@@ -534,6 +619,7 @@ config forwarding
         assert_eq!(read(&dir, "etc/config/dhcp"), migrated[4]);
         assert_eq!(wan_ipv6(&dir).as_deref(), Some("1"));
         assert!(migrated[1].contains("option dest 'vlan_guest'"));
+        assert!(migrated[1].contains("option flow_offloading '1'"));
         assert!(migrated[2].contains("option lan_access 'all'"));
         assert!(migrated[2].contains("option lan_access 'same_profile'"));
     }
@@ -695,6 +781,43 @@ config forwarding
         assert!(!section("guest").contains("option force '0'"));
         assert!(!section("wan").contains("force"));
         assert!(!dhcp.split("\n\n").next().unwrap().contains("force"));
+    }
+
+    #[tokio::test]
+    async fn flow_offloading_is_enabled_unless_set() {
+        let dir = router(Some("9\n"), true);
+        write(&dir, "etc/config/firewall", SHIPPED_FIREWALL_DEFAULTS);
+        run(dir.path()).await.unwrap();
+        assert_eq!(record(&dir), current());
+        let firewall = read(&dir, "etc/config/firewall");
+        assert!(
+            firewall.contains("option flow_offloading '1'"),
+            "{firewall}"
+        );
+        assert!(firewall.contains("option syn_flood '1'"), "{firewall}");
+        assert!(firewall.contains("option forward 'REJECT'"), "{firewall}");
+
+        let disabled = format!("{SHIPPED_FIREWALL_DEFAULTS}\toption flow_offloading '0'\n");
+        let dir = router(Some("9\n"), true);
+        write(&dir, "etc/config/firewall", &disabled);
+        run(dir.path()).await.unwrap();
+        assert_eq!(read(&dir, "etc/config/firewall"), disabled);
+    }
+
+    #[tokio::test]
+    async fn reserved_names_leave_the_shared_hosts_file() {
+        let dir = router(Some("9\n"), true);
+        write(&dir, "etc/config/dhcp", LEGACY_DHCP);
+        run(dir.path()).await.unwrap();
+        assert_eq!(record(&dir), current());
+        let dhcp = read(&dir, "etc/config/dhcp");
+        let host = dhcp
+            .split("\n\n")
+            .find(|s| s.contains("config host"))
+            .unwrap();
+        assert!(!host.contains("option dns"));
+        assert!(host.contains("option name 'nas'"));
+        assert!(host.contains("option ip '192.168.1.50'"));
     }
 
     #[tokio::test]

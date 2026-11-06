@@ -38,7 +38,7 @@ import { MarketplaceService } from 'src/app/services/marketplace.service'
         appearance="primary-success"
         target="_blank"
         rel="noreferrer"
-        href="https://store.start9.com"
+        href="https://start9.com"
       >
         {{ 'Get a Start9 server' | i18n }}
       </a>

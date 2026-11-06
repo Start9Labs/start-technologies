@@ -3,6 +3,16 @@
 Restore a manual or automatic checkpoint to recover individual services, or use
 a server backup during disaster recovery after a data-drive failure.
 
+## Backup Filesystem Formats
+
+Existing format-1 backups remain available for backups and restores without conversion. Conversion is optional, but once started, it must finish before that server backup can be restored. Other server backups on the same target remain independent.
+
+The server selection list marks each old-format backup with a yellow **Old format** tag. Selecting the tag explains the format and where to update it; conversion is available under **Backups → Manage backup locations** of the server the backup belongs to.
+
+To resume an interrupted conversion, open **System → Backups → Manage backup locations** on that server and select **Resume conversion** beside the target. Enter the password used to encrypt that backup. Progress continues in the background; closing the dialog does not cancel it.
+
+If initial setup cannot restore an interrupted backup, finish conversion on its original server before retrying setup recovery. The setup wizard does not automatically convert a backup. Converted backups cannot be read by older StartOS releases.
+
 ## Restoring Individual Services
 
 An individual restore can recover service data from a manual or automatic

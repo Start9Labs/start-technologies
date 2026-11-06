@@ -55,6 +55,21 @@ mod non_fuse_tests {
     }
 
     #[test]
+    fn dirty_inodes_evict_the_least_recently_modified() {
+        let mut dirty = super::DirtyInodes::default();
+        let attrs = |id| InodeAttributes::new(Inode(id), None, FileData::Inline(Vec::new()));
+        for id in [2, 3, 4] {
+            dirty.insert(Inode(id), attrs(id));
+        }
+        dirty.insert(Inode(2), attrs(2));
+        assert_eq!(dirty.pop_least_recent().unwrap().inode, Inode(3));
+        assert!(dirty.remove(&Inode(4)).is_some());
+        assert_eq!(dirty.pop_least_recent().unwrap().inode, Inode(2));
+        assert!(dirty.pop_least_recent().is_none());
+        assert_eq!(dirty.len(), 0);
+    }
+
+    #[test]
     fn readable_size_clamps_offsets_at_and_past_eof() {
         assert_eq!(readable_size(10, 4, 20), 6);
         assert_eq!(readable_size(10, 10, 20), 0);
@@ -71,6 +86,9 @@ mod non_fuse_tests {
         for _ in 0..40 {
             ctrl.save(&attrs).unwrap();
         }
+        ctrl.syncfs().unwrap();
+        drop(ctrl);
+        let ctrl = controller(&data);
         let segment_bytes = || {
             fs::read_dir(data.path().join("segments"))
                 .unwrap()
@@ -165,9 +183,7 @@ mod non_fuse_tests {
         let source_bytes = bytes(3 * CHUNK_SIZE as usize);
         let source = create_file(&ctrl, &source_bytes);
         let destination = create_file(&ctrl, &[]);
-        let blocked = ctrl.resolve_block_path(ContentId::from(source), 1);
-        fs::remove_file(&blocked).unwrap();
-        fs::create_dir(&blocked).unwrap();
+        ctrl.corrupt_block(ContentId::from(source), 1);
 
         let mut handler = Handler::new(ctrl.clone());
         let source_fh = handler.fopen(source, true, false, |_, _| Ok(())).unwrap();
@@ -196,7 +212,6 @@ mod non_fuse_tests {
             .unwrap();
         assert_eq!(result, source_bytes[..copied]);
         drop(contents);
-        fs::remove_dir(blocked).unwrap();
         handler.fclose(source_fh).unwrap();
         handler.fclose(destination_fh).unwrap();
     }
@@ -208,8 +223,7 @@ mod non_fuse_tests {
         let source_bytes = bytes(17 * CHUNK_SIZE as usize);
         let source = create_file(&ctrl, &source_bytes);
         let destination = create_file(&ctrl, &[]);
-        let blocked = ctrl.resolve_block_path(ContentId::from(destination), 0);
-        fs::create_dir_all(&blocked).unwrap();
+        ctrl.fail_block_puts(Some(ContentId::from(destination)));
 
         let mut handler = Handler::new(ctrl.clone());
         let source_fh = handler.fopen(source, true, false, |_, _| Ok(())).unwrap();
@@ -229,7 +243,7 @@ mod non_fuse_tests {
             )
             .unwrap();
         assert_eq!(copied, 16 * CHUNK_SIZE as usize);
-        fs::remove_dir(blocked).unwrap();
+        ctrl.fail_block_puts(None);
         handler.fclose(source_fh).unwrap();
         handler.fclose(destination_fh).unwrap();
         let result = read_file(ctrl, destination);
@@ -241,8 +255,7 @@ mod non_fuse_tests {
         let data = TempDir::with_prefix("backupfs_data").unwrap();
         let ctrl = controller(&data);
         let inode = create_file(&ctrl, &vec![0xab; 200 * 1024]);
-        let blocked = ctrl.resolve_block_path(ContentId::from(inode), 0);
-        fs::create_dir_all(&blocked).unwrap();
+        ctrl.fail_block_puts(Some(ContentId::from(inode)));
         let requested = 17 * CHUNK_SIZE as usize;
         let requested_bytes = bytes(requested);
 
@@ -252,7 +265,7 @@ mod non_fuse_tests {
             .write(inode, fh, 0, &requested_bytes, 0, 0, None)
             .unwrap();
         assert_eq!(written, 16 * CHUNK_SIZE as usize);
-        fs::remove_dir(blocked).unwrap();
+        ctrl.fail_block_puts(None);
         handler.fclose(fh).unwrap();
         assert_eq!(read_file(ctrl, inode), requested_bytes[..written]);
     }
@@ -378,7 +391,7 @@ pub struct Handler {
     /// same inode after release, and before this cache they each fired a
     /// full AtomicFile::save barrier. Here they collapse into a single
     /// save when the inode is evicted (or on destroy).
-    dirty: BTreeMap<Inode, InodeAttributes>,
+    dirty: DirtyInodes,
     /// Clean LRU cache of InodeAttributes loaded from disk. Covers
     /// multi-pass read workloads (rsync's checksum / verify phases)
     /// where the same inode is stat'd many times and the open+decrypt
@@ -393,26 +406,18 @@ impl Handler {
             ctrl,
             next_fh: FileHandleId(1),
             inodes: BTreeMap::new(),
-            dirty: BTreeMap::new(),
+            dirty: DirtyInodes::default(),
             read_cache: RefCell::new(InodeReadCache::new(read_cache_cap())),
             open_files: BTreeMap::new(),
             open_dirs: BTreeMap::new(),
         }
     }
 
-    /// Queue an inode save. For non-open inodes the attrs go into the
-    /// dirty cache and get coalesced until eviction or destroy — this is
-    /// where rsync's post-close utime/chmod/chown trio collapses to one
-    /// disk write.
+    /// Queue an inode save, coalesced until eviction, flush or close.
     ///
-    /// For open inodes we save through immediately (same as the historical
-    /// behaviour). We can't mark Contents::changed from here without
-    /// re-borrowing — most callers are already inside a mutate_inode
-    /// closure that holds the RefCell borrow. Luckily the important
-    /// coalescing case (setattrs on closed files) is the one rsync uses.
+    /// An open inode's attributes must be its `Contents`' own copy, mutated
+    /// through [`Self::mutate_inode`]; closing or flushing the file saves them.
     pub fn save_inode(&mut self, attrs: &InodeAttributes) -> BkfsResult<()> {
-        // Any save invalidates the read cache — the cached copy is
-        // now stale relative to the authoritative state.
         self.read_cache.borrow_mut().remove(attrs.inode);
         if self
             .inodes
@@ -420,60 +425,19 @@ impl Handler {
             .and_then(Weak::upgrade)
             .is_some()
         {
-            // Open inodes skip the dirty cache, but still go through
-            // the batched sync path — per-file sync_all on inode saves
-            // was a major small-file bottleneck on slow backing stores.
-            self.ctrl.save_fast(attrs)?;
-            self.ctrl.tick_save()?;
             return Ok(());
         }
         self.dirty.insert(attrs.inode, attrs.clone());
         self.evict_dirty_overflow()
     }
 
-    /// Persist inode attrs durably (sync_all) to disk and keep the
-    /// in-memory caches in sync. Used where ordering against a
-    /// subsequent file removal (gc_inode) matters: a pointer update
-    /// that lands in the dirty cache but crashes before flush leaves
-    /// the on-disk parent referencing an already-deleted inode, which
-    /// the heal then prunes — destroying the user's new data.
-    pub fn save_inode_durable(&mut self, attrs: &InodeAttributes) -> BkfsResult<()> {
-        self.read_cache.borrow_mut().remove(attrs.inode);
-        self.ctrl.save(attrs)?;
-        if self
-            .inodes
-            .get(&attrs.inode)
-            .and_then(Weak::upgrade)
-            .is_none()
-        {
-            // Closed inode: keep dirty cache consistent with what we
-            // just wrote, so subsequent loads don't fetch the stale
-            // pre-modification clone that may still be sitting there.
-            self.dirty.insert(attrs.inode, attrs.clone());
-            self.evict_dirty_overflow()?;
-        }
-        Ok(())
-    }
-
-    /// Append an inode record to the log *now* (closed-inode safe), via the
-    /// batched (non-durable) path. Used where ordering against a following
-    /// content tombstone matters: the record must land in the log at a lower
-    /// offset than the tombstone so the batched `syncfs` — which flushes the
-    /// log prefix and the block files together — can never make the tombstone
-    /// durable without also making this record and its blocks durable.
-    ///
-    /// Unlike `save_inode`, this never parks the record in the dirty cache
-    /// (which is invisible to the log-offset ordering the tombstone relies
-    /// on); unlike `save_inode_durable`, it does not fsync the log segment in
-    /// isolation (which would risk a durable record outliving its not-yet-
-    /// synced block files across a crash).
+    /// Appends the record before any later removal can commit.
     pub fn save_inode_logged(&mut self, attrs: &InodeAttributes) -> BkfsResult<()> {
         self.read_cache.borrow_mut().remove(attrs.inode);
-        // Drop any stale dirty clone so a later flush_all_dirty can't overwrite
-        // the log record we're about to append with an older copy.
+        // A stale dirty clone would overwrite this record at the next flush.
         self.dirty.remove(&attrs.inode);
-        self.ctrl.save_fast(attrs)?;
-        self.ctrl.tick_save()?;
+        self.ctrl.save(attrs)?;
+        self.ctrl.tick_save();
         Ok(())
     }
 
@@ -492,68 +456,54 @@ impl Handler {
 
     fn evict_dirty_overflow(&mut self) -> BkfsResult<()> {
         while self.dirty.len() > DIRTY_INODE_LIMIT {
-            // BTreeMap's first key is the smallest Inode — roughly "oldest
-            // allocated," which correlates with "least recently rsync'd"
-            // for a sequential backup. Good enough as an eviction hint.
-            let Some((&inode, _)) = self.dirty.iter().next() else {
+            let Some(attrs) = self.dirty.pop_least_recent() else {
                 break;
             };
-            let attrs = self.dirty.remove(&inode).unwrap();
-            self.ctrl.save_fast(&attrs)?;
-            self.ctrl.tick_save()?;
+            self.ctrl.save(&attrs)?;
+            self.ctrl.tick_save();
         }
         Ok(())
     }
 
-    /// Persist all pending state to disk durably. Called on destroy
-    /// and on FUSE_SYNCFS (`sync -f <mountpoint>`).
+    /// Logs all pending state and commits it.
     ///
-    /// Uses per-file `ctrl.save` (sync_all) instead of `save_fast`
-    /// so durability does not depend on the trailing `syncfs` being
-    /// effective — which it isn't under start-os's `umount -l` on a
-    /// backing FS whose teardown has already begun.
+    /// Open files stay locked until the commit completes, so it records
+    /// every file as of one moment between requests.
     pub fn flush_all_dirty(&mut self) -> BkfsResult<()> {
         let mut errs = Vec::new();
-
-        // Flush open Contents first — their in-memory state is
-        // authoritative for the inode, and its post-rename parents
-        // may differ from whatever save_fast last wrote to disk.
-        // Taking a snapshot of the inode set avoids holding a borrow
-        // across the save, since each save may mutate caches.
-        let open: Vec<_> = self
-            .inodes
+        let open: Vec<_> = self.inodes.values().filter_map(Weak::upgrade).collect();
+        let mut locked: Vec<_> = open
             .iter()
-            .filter_map(|(ino, weak)| weak.upgrade().map(|arc| (*ino, arc)))
+            .map(|contents| contents.lock().unwrap())
             .collect();
-        for (_, contents) in open {
-            let mut contents = contents.lock().unwrap();
+        for contents in &mut locked {
             if let Err(e) = contents.flush() {
                 errs.push(e);
             }
-            // Now also durably re-save the inode attrs — contents.flush
-            // uses save_fast, same reason as above.
             if let Err(e) = self.ctrl.save(&contents.inode) {
                 errs.push(e);
             }
         }
-
-        let pending = std::mem::take(&mut self.dirty);
-        for (_, attrs) in pending {
+        for attrs in std::mem::take(&mut self.dirty).into_values() {
             if let Err(e) = self.ctrl.save(&attrs) {
                 errs.push(e);
             }
         }
-        // Dirty-cache entries that shared an inode number with an open
-        // file were cleared into `dirty` before this call or handled
-        // via the open path above.
         self.read_cache.borrow_mut().clear();
-        // Best-effort trailing syncfs — durability is already on the
-        // platter from the per-file sync_all, so a failure here is
-        // only an early warning of backing-FS issues.
         if let Err(e) = self.ctrl.syncfs() {
             errs.push(e.into());
         }
+        drop(locked);
         BkfsResult::multiple((), errs)
+    }
+
+    /// Commits once enough saves have accumulated. Call only between requests.
+    pub fn commit_if_due(&mut self) {
+        if self.ctrl.commit_due() {
+            if let Err(error) = self.flush_all_dirty() {
+                warn!("backup commit failed: {error}");
+            }
+        }
     }
 
     /// Cache-or-disk read. Populates the cache on miss. Used by paths
@@ -662,7 +612,9 @@ impl Handler {
     ) -> BkfsResult<T> {
         if let Some(contents) = self.inodes.get(&inode).and_then(Weak::upgrade) {
             let mut contents = contents.lock().unwrap();
-            return f(self, &mut contents.inode);
+            let result = f(self, &mut contents.inode);
+            contents.changed = true;
+            return result;
         }
         if let Some(mut attrs) = self.dirty.remove(&inode) {
             // Any mutation invalidates the read cache — clear it now
@@ -698,6 +650,47 @@ impl Handler {
     }
 }
 
+/// Unsaved inode attributes; eviction takes the least recently modified.
+#[derive(Default)]
+struct DirtyInodes {
+    entries: HashMap<Inode, (u64, InodeAttributes)>,
+    recency: BTreeMap<u64, Inode>,
+    clock: u64,
+}
+
+impl DirtyInodes {
+    fn insert(&mut self, inode: Inode, attrs: InodeAttributes) {
+        self.clock += 1;
+        if let Some((tick, _)) = self.entries.insert(inode, (self.clock, attrs)) {
+            self.recency.remove(&tick);
+        }
+        self.recency.insert(self.clock, inode);
+    }
+
+    fn remove(&mut self, inode: &Inode) -> Option<InodeAttributes> {
+        let (tick, attrs) = self.entries.remove(inode)?;
+        self.recency.remove(&tick);
+        Some(attrs)
+    }
+
+    fn get(&self, inode: &Inode) -> Option<&InodeAttributes> {
+        self.entries.get(inode).map(|(_, attrs)| attrs)
+    }
+
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    fn pop_least_recent(&mut self) -> Option<InodeAttributes> {
+        let (_, inode) = self.recency.pop_first()?;
+        self.entries.remove(&inode).map(|(_, attrs)| attrs)
+    }
+
+    fn into_values(self) -> impl Iterator<Item = InodeAttributes> {
+        self.entries.into_values().map(|(_, attrs)| attrs)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FileHandleId(pub u64);
 
@@ -710,9 +703,9 @@ pub struct FileHandle {
 }
 impl FileHandle {
     pub fn close(self, handler: &mut Handler) -> BkfsResult<()> {
-        match Arc::try_unwrap(self.contents) {
-            Ok(contents) => contents.into_inner().unwrap().close(handler)?,
-            Err(contents) => contents.lock().unwrap().fsync()?,
+        // Another handle keeps the file open; its last close saves it.
+        if let Ok(contents) = Arc::try_unwrap(self.contents) {
+            contents.into_inner().unwrap().close(handler)?;
         }
         Ok(())
     }
@@ -843,7 +836,7 @@ impl Handler {
                 let ctrl = self.ctrl().clone();
                 let parent_inode = parent.inode;
                 if let FileData::Directory(dir) = &mut parent.attrs.contents {
-                    dir.remove(&ctrl, parent_inode, name, false)?;
+                    dir.remove(&ctrl, parent_inode, name)?;
                 }
                 self.save_inode(&parent)?;
                 BkfsResult::errno_notrace(libc::ENOENT)
@@ -989,7 +982,6 @@ impl Handler {
                 inode: new.inode,
                 ty: (&new.attrs.contents).into(),
             },
-            false,
         )?;
 
         self.save_inode(&new)?;
@@ -997,7 +989,7 @@ impl Handler {
         if let Some((gen, buckets)) = reap {
             // A reshard produced a superseded bucket generation: the new
             // marker must be durable BEFORE the old generation is deleted.
-            self.save_inode_durable(&parent)?;
+            self.save_inode_logged(&parent)?;
             DirectoryContents::reap_generation(&ctrl, parent_inode, gen, buckets)?;
         } else {
             self.save_inode(&parent)?;
@@ -1035,19 +1027,11 @@ impl Handler {
         self.dirty.remove(&inode.inode);
         self.read_cache.borrow_mut().remove(inode.inode);
 
-        // A packed extent's tombstone is appended (non-durable) BEFORE the
-        // inode tombstone, so the inode tombstone's fsync below makes both
-        // durable together — no window where the inode is gone but its extent
-        // lingers as an unreferenced orphan.
         if let FileData::Packed(content) = &inode.attrs.contents {
-            self.ctrl().cpack_tombstone(*content, false)?;
+            self.ctrl().cpack_tombstone(*content)?;
         }
-        // Tombstone the inode in the log durably BEFORE removing its block /
-        // bucket content: a crash with the content gone but the tombstone not
-        // yet durable would leave the inode "live" on replay pointing at
-        // deleted content. (An inode that only ever lived in the dirty cache
-        // and was never appended still gets a harmless tombstone.)
-        self.ctrl().log_tombstone(inode.inode, true)?;
+        self.ctrl().log_tombstone(inode.inode)?;
+        self.ctrl().sync_legacy()?;
         match &inode.attrs.contents {
             FileData::File(contents) => {
                 crate::blockstore::remove_all_blocks(self.ctrl(), *contents, inode.attrs.size)?;
@@ -1097,9 +1081,9 @@ impl Handler {
             // pruning — the data-loss path users hit when the daemon is
             // killed mid-op, so the ordering matters.
             if let FileData::Directory(dir) = &mut parent.attrs.contents {
-                dir.remove(&ctrl, parent_inode, name, true)?;
+                dir.remove(&ctrl, parent_inode, name)?;
             }
-            handler.save_inode_durable(&parent)?;
+            handler.save_inode_logged(&parent)?;
             if !handler.gc_inode(&*inode)? {
                 handler.save_inode(&*inode)?;
             }
@@ -1121,7 +1105,7 @@ impl Handler {
                     parent.inode, name, entry.inode
                 );
                 if let FileData::Directory(dir) = &mut parent.attrs.contents {
-                    dir.remove(&ctrl, parent_inode, name, false)?;
+                    dir.remove(&ctrl, parent_inode, name)?;
                 }
                 self.save_inode(&parent)?;
                 Ok(())
@@ -1222,24 +1206,14 @@ impl Handler {
                     // Replace the entry. When we're about to gc the old
                     // target, the new pointer must be durable first.
                     if let FileData::Directory(dir) = &mut new_parent.attrs.contents {
-                        reap_gen = dir.insert(
-                            &ctrl,
-                            new_parent_inode,
-                            new_name.to_owned(),
-                            new_entry,
-                            should_gc,
-                        )?;
+                        reap_gen =
+                            dir.insert(&ctrl, new_parent_inode, new_name.to_owned(), new_entry)?;
                     }
                 }
                 (None, _) => {
                     if let FileData::Directory(dir) = &mut new_parent.attrs.contents {
-                        reap_gen = dir.insert(
-                            &ctrl,
-                            new_parent_inode,
-                            new_name.to_owned(),
-                            new_entry,
-                            false,
-                        )?;
+                        reap_gen =
+                            dir.insert(&ctrl, new_parent_inode, new_name.to_owned(), new_entry)?;
                     } else {
                         return BkfsResult::errno(libc::ENOTDIR);
                     }
@@ -1255,8 +1229,8 @@ impl Handler {
                 // Disk ordering matters: make the new pointer + the new
                 // directory marker durable BEFORE removing the old target's
                 // files or a superseded bucket generation.
-                handler.save_inode_durable(&*inode)?;
-                handler.save_inode_durable(&new_parent)?;
+                handler.save_inode_logged(&*inode)?;
+                handler.save_inode_logged(&new_parent)?;
             } else {
                 handler.save_inode(&*inode)?;
                 handler.save_inode(&new_parent)?;
@@ -1405,15 +1379,6 @@ impl Handler {
         }
 
         Ok(written)
-    }
-
-    pub fn fsync(&mut self, _req: &Request, _inode: Inode, fh: FileHandleId) -> BkfsResult<()> {
-        let fh = self
-            .handle(fh)
-            .ok_or(libc::EBADF)
-            .map_err(io::Error::from_raw_os_error)?;
-        fh.contents.lock().unwrap().fsync()?;
-        Ok(())
     }
 
     pub fn opendir(

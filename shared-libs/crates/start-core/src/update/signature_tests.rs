@@ -1,11 +1,9 @@
-use std::collections::HashMap;
-
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
 
 use super::*;
 use crate::sign::ed25519::Ed25519ph;
-use crate::sign::{AnySignature, AnyVerifyingKey, SignatureScheme};
+use crate::sign::{AnySignature, AnyVerifyingKey, SignatureMap, SignatureScheme};
 use crate::util::serde::Base64;
 
 fn signed_asset(key: &SigningKey) -> RegistryAsset<Blake3Commitment> {
@@ -20,7 +18,7 @@ fn signed_asset(key: &SigningKey) -> RegistryAsset<Blake3Commitment> {
         published_at: Utc::now(),
         urls: Vec::new(),
         commitment,
-        signatures: HashMap::from([(
+        signatures: SignatureMap::from([(
             AnyVerifyingKey::Ed25519(key.verifying_key()),
             AnySignature::Ed25519ph(signature),
         )]),
@@ -69,23 +67,14 @@ fn update_keeps_verifying_every_signature_and_rejecting_unsigned_assets() {
 }
 
 #[test]
-fn diagnostic_updates_reject_other_signers_and_unsigned_assets() {
-    let key = SigningKey::from_bytes(&[2; 32]);
-    let mut asset = signed_asset(&key);
-    assert!(validate_update_signatures(&asset, None).is_ok());
-    assert!(super::diagnostic::validate_signatures(&asset).is_err());
-    asset.signatures.clear();
-    assert!(super::diagnostic::validate_signatures(&asset).is_err());
-}
-
-#[test]
-fn update_signer_policy_round_trips_and_is_optional_for_existing_callers() {
+fn update_signer_policy_round_trips_and_override_requires_explicit_trust() {
     let mut params: UpdateSystemParams = serde_json::from_value(serde_json::json!({
         "registry": "https://registry.test",
         "targetVersion": "=0.4.0.4"
     }))
     .unwrap();
     assert!(params.accept_signers.is_none());
+    assert!(!params.trust);
 
     let key = SigningKey::from_bytes(&[1; 32]);
     params.accept_signers = require(&key);

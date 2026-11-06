@@ -13,6 +13,7 @@ import { OSService } from 'src/app/services/os.service'
 import { TitleDirective } from 'src/app/services/title.service'
 import { BACKUP } from './backup.component'
 import { BackupService, MappedBackupTarget } from './backup.service'
+import { CONVERSIONS } from './conversion'
 import { LEGACY_BACKUP } from './legacy.component'
 import { BackupLocationPicker } from '../../../backups/location-picker'
 import { BackupProgressComponent } from './progress.component'
@@ -81,7 +82,7 @@ import { BACKUP_RESTORE } from './restore.component'
     } @else {
       @if (service.loading()) {
         <tui-loader
-          textContent="Fetching backups"
+          [textContent]="'Loading' | i18n"
           size="l"
           [style.height.rem]="20"
         />
@@ -154,6 +155,20 @@ export default class SystemBackupComponent {
   ) {
     if (this.type() === 'create') {
       if (!(await this.confirmLegacy(target.entry))) return
+      const readiness = await this.service.prepareBackup(
+        target.id,
+        target.entry.startOs,
+      )
+      if (readiness === 'cancelled') return
+      if (readiness === 'conversion') {
+        this.dialog
+          .openComponent(CONVERSIONS, {
+            size: 'l',
+            data: { targetId: target.id },
+          })
+          .subscribe()
+        return
+      }
 
       this.dialog
         .openComponent(BACKUP, {

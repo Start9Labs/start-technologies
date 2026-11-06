@@ -6,21 +6,24 @@ use imbl_value::InternedString;
 use itertools::Itertools;
 use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
+use tracing::Instrument;
 use url::Url;
 
 use crate::PackageId;
 use crate::context::CliContext;
 use crate::prelude::*;
 use crate::progress::FullProgressTracker;
+use crate::registry::RegistryDatabase;
 use crate::registry::asset::BufferedHttpSource;
 use crate::registry::context::RegistryContext;
 use crate::registry::package::icon::icons_dir;
 use crate::registry::package::index::PackageVersionInfo;
+use crate::rpc_continuations::Guid;
 use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::v2::SIG_CONTEXT;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
-use crate::sign::{AnySignature, AnyVerifyingKey};
+use crate::sign::{AnySignature, AnyVerifyingKey, SignatureMap};
 use crate::util::VersionString;
 use crate::util::io::TrackingIO;
 use crate::util::serde::Base64;
@@ -34,6 +37,8 @@ pub struct AddPackageParams {
     pub uploader: AnyVerifyingKey,
     pub commitment: MerkleArchiveCommitment,
     pub signature: AnySignature,
+    #[serde(default)]
+    pub signatures: SignatureMap,
 }
 
 rpc_toolkit::reflect_ts!(AddPackageParams);
@@ -46,6 +51,7 @@ pub async fn add_package(
         uploader,
         commitment,
         signature,
+        signatures,
     }: AddPackageParams,
 ) -> Result<(), Error> {
     let signature =
@@ -64,6 +70,7 @@ pub async fn add_package(
         &Arc::new(HttpSource::new(ctx.client.clone(), url.clone()).await?),
         Some(&commitment),
     )
+    .instrument(tracing::info_span!("registry-package-source", %url))
     .await?;
 
     for url in rest {
@@ -71,32 +78,18 @@ pub async fn add_package(
             &Arc::new(HttpSource::new(ctx.client.clone(), url.clone()).await?),
             Some(&commitment),
         )
+        .instrument(tracing::info_span!("registry-package-source", %url))
         .await?;
     }
 
     let manifest = s9pk.as_manifest();
 
     let mut info = PackageVersionInfo::from_s9pk(&s9pk, urls, &icons_dir(&ctx.datadir)).await?;
-    for (_, s9pk) in &mut info.s9pks {
-        if !s9pk.signatures.contains_key(&uploader) && s9pk.commitment == commitment {
-            s9pk.signatures.insert(uploader.clone(), signature.clone());
-        }
-    }
+    merge_submitted_signatures(&mut info, &uploader, &signature, signatures)?;
 
     ctx.db
         .mutate(|db| {
-            if db.as_admins().de()?.contains(&uploader_guid)
-                || db
-                    .as_index()
-                    .as_package()
-                    .as_packages()
-                    .as_idx(&manifest.id)
-                    .or_not_found(&manifest.id)?
-                    .as_authorized()
-                    .de()?
-                    .get(&uploader_guid)
-                    .map_or(false, |v| manifest.version.satisfies(v))
-            {
+            if can_publish(db, &uploader_guid, &manifest.id, &manifest.version)? {
                 let package = db
                     .as_index_mut()
                     .as_package_mut()
@@ -119,6 +112,53 @@ pub async fn add_package(
         })
         .await
         .result
+}
+
+fn merge_submitted_signatures(
+    info: &mut PackageVersionInfo,
+    uploader: &AnyVerifyingKey,
+    signature: &AnySignature,
+    signatures: SignatureMap,
+) -> Result<(), Error> {
+    for (_, asset) in &mut info.s9pks {
+        let verified = signatures
+            .iter()
+            .chain(std::iter::once((uploader, signature)))
+            .map(|(key, signature)| {
+                Ok((
+                    key.clone(),
+                    crate::sign::compat::verify_commitment(
+                        key,
+                        &asset.commitment,
+                        SIG_CONTEXT,
+                        signature,
+                    )?,
+                ))
+            })
+            .collect::<Result<SignatureMap, Error>>()?;
+        let commitment = asset.commitment;
+        asset.merge_signatures(&commitment, verified);
+    }
+    Ok(())
+}
+
+pub fn can_publish(
+    db: &Model<RegistryDatabase>,
+    signer: &Guid,
+    id: &PackageId,
+    version: &VersionString,
+) -> Result<bool, Error> {
+    Ok(db.as_admins().de()?.contains(signer)
+        || db
+            .as_index()
+            .as_package()
+            .as_packages()
+            .as_idx(id)
+            .or_not_found(id)?
+            .as_authorized()
+            .de()?
+            .get(signer)
+            .map_or(false, |v| version.satisfies(v)))
 }
 
 #[derive(Debug, Deserialize, Serialize, Parser)]
@@ -207,6 +247,7 @@ pub async fn cli_add_package_impl(
         imbl_value::json!({
             "urls": &url,
             "signature": signature,
+            "signatures": s9pk.signatures().await?,
             "commitment": commitment,
         }),
     )
@@ -349,6 +390,8 @@ pub struct AddMirrorParams {
     pub uploader: AnyVerifyingKey,
     pub commitment: MerkleArchiveCommitment,
     pub signature: AnySignature,
+    #[serde(default)]
+    pub signatures: SignatureMap,
 }
 
 rpc_toolkit::reflect_ts!(AddMirrorParams);
@@ -361,6 +404,7 @@ pub async fn add_mirror(
         uploader,
         commitment,
         signature,
+        signatures,
     }: AddMirrorParams,
 ) -> Result<(), Error> {
     let signature =
@@ -372,32 +416,18 @@ pub async fn add_mirror(
         &Arc::new(HttpSource::new(ctx.client.clone(), url.clone()).await?),
         Some(&commitment),
     )
+    .instrument(tracing::info_span!("registry-package-source", %url))
     .await?;
 
     let manifest = s9pk.as_manifest();
 
     let mut info =
         PackageVersionInfo::from_s9pk(&s9pk, vec![url], &icons_dir(&ctx.datadir)).await?;
-    for (_, s9pk) in &mut info.s9pks {
-        if !s9pk.signatures.contains_key(&uploader) && s9pk.commitment == commitment {
-            s9pk.signatures.insert(uploader.clone(), signature.clone());
-        }
-    }
+    merge_submitted_signatures(&mut info, &uploader, &signature, signatures)?;
 
     ctx.db
         .mutate(|db| {
-            if db.as_admins().de()?.contains(&uploader_guid)
-                || db
-                    .as_index()
-                    .as_package()
-                    .as_packages()
-                    .as_idx(&manifest.id)
-                    .or_not_found(&manifest.id)?
-                    .as_authorized()
-                    .de()?
-                    .get(&uploader_guid)
-                    .map_or(false, |v| manifest.version.satisfies(v))
-            {
+            if can_publish(db, &uploader_guid, &manifest.id, &manifest.version)? {
                 let package = db
                     .as_index_mut()
                     .as_package_mut()
@@ -492,6 +522,7 @@ pub async fn cli_add_mirror(
         imbl_value::json!({
             "url": &url,
             "signature": signature,
+            "signatures": s9pk.signatures().await?,
             "commitment": commitment,
         }),
     )

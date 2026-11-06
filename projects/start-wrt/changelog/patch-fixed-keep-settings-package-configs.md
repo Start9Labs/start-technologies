@@ -1,1 +1,0 @@
-- Keeping settings while flashing from a microSD card now also preserves the configuration files of installed packages outside `/etc/config` that you have edited, such as SmartDNS and dnsmasq configuration. Files still at their package defaults take the new firmware's defaults.

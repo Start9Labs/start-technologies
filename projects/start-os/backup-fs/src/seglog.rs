@@ -1,98 +1,45 @@
-//! Log-structured object store for inode records.
-//!
-//! Inodes (and, later, the small-file content inlined in them) are stored as
-//! append-only **records** in shared **segment** files under `segments/`,
-//! rather than one file per inode. For a backup of many small files this
-//! turns "one CREATE + one RENAME per inode" into "append to a shared
-//! segment", amortizing the per-object backing-store cost that dominates the
-//! many-small-files workload.
-//!
-//! ## Frame format (self-locating, resync-able)
-//!
-//! ```text
-//!   magic        "BKL1"  (4)            // resync anchor
-//!   header_crc   u32     (4)            // CRC-32 of the 16 header bytes below
-//!   seq          u64     (8)            // global monotonic sequence number
-//!   payload_len  u32     (4)            // length of the sealed payload
-//!   reserved     u32     (4)            // 0
-//!   payload      [u8; payload_len]      // vault::seal(bincode(Record))
-//!   (zero-pad to 8-byte alignment)
-//! ```
-//!
-//! The `magic` + `header_crc` let replay **scan forward to the next valid
-//! header** when a frame is torn/corrupt, instead of truncating the log at
-//! the first bad byte. `seq` (not physical position) is the authority for
-//! "latest record for an inode wins" — so a later compaction stage can
-//! relocate a frame to a new segment/offset while preserving its `seq`.
-//!
-//! Each payload is independently `vault`-sealed (ChaCha20 + SHA-256 tag +
-//! Reed-Solomon ECC), so corruption within one frame is self-healed by its
-//! own parity and never spreads.
-//!
-//! ## Durability & caching
-//!
-//! Segment writes go through the page cache (so a read right after a write
-//! sees the data — "read your writes" — without an O_DIRECT tail buffer),
-//! and [`SegmentLog::sync`] issues `fdatasync` + `posix_fadvise(DONTNEED)` to
-//! make the tail durable and then drop the now-clean pages. Frames are small
-//! and flushed on the batched-syncfs cadence, so dirty metadata stays bounded
-//! — avoiding the CIFS "need-memory-to-flush / need-flush-to-free" trap that
-//! large content writes (still O_DIRECT, see `blockstore`) are the real risk
-//! for.
-//!
-//! ## Crash recovery
-//!
-//! [`SegmentLog::open`] replays every segment, applying records by `seq`
-//! (later wins; `Tombstone` deletes), rebuilding the in-RAM index and the
-//! per-segment live-byte accounting from scratch — never trusting counts
-//! across a crash. A torn tail frame fails its header CRC or `vault::open`
-//! and is skipped via forward-resync.
-
-use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::Read;
-use std::os::fd::AsRawFd;
+use std::collections::{HashMap, HashSet};
+use std::fs::File;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 
 use chacha20::Key;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{BkfsError, BkfsResult};
+use crate::error::{BkfsError, BkfsResult, BkfsResultExt};
 use crate::inode::{Attributes, Inode};
+use crate::metadata::Reference;
 use crate::serde::{data_config, decode, encode};
-use crate::vault::{self, EccParams};
+use crate::state::{Counters, State, View};
+use crate::vault::{self, AuthenticationTag, Binding, EccParams};
 
-const MAGIC: [u8; 4] = *b"BKL1";
-const HEADER_LEN: usize = 24; // magic(4) + crc(4) + seq(8) + payload_len(4) + reserved(4)
-const ALIGN: u64 = 8;
-
-/// Default rolled-segment size, used only by the test-facing [`SegmentLog::open`]
-/// convenience. Production opens via [`SegmentLog::open_sized`] with the size
-/// pinned by the superblock (see `Constants::segment_size`). Small enough that
-/// the active segment stays a modest object for rsync/rclone to re-scan;
-/// large enough to amortize per-segment overhead.
-#[cfg(test)]
-fn segment_size() -> u64 {
-    use std::sync::OnceLock;
-    static N: OnceLock<u64> = OnceLock::new();
-    *N.get_or_init(|| {
-        std::env::var("BACKUPFS_SEGMENT_SIZE")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .filter(|&n| n >= 4096)
-            .unwrap_or(8 * 1024 * 1024)
-    })
+fn decode_frame(key: &Key, loc: Location, bytes: &[u8], binding: Binding) -> BkfsResult<Record> {
+    let (seq, payload_len) =
+        parse_header(bytes).ok_or_else(|| BkfsError::unsupported("invalid log header"))?;
+    if seq != loc.seq
+        || payload_len != loc.payload_len as usize
+        || frame_size(payload_len) != loc.len as u64
+    {
+        return Err(BkfsError::unsupported("log reference mismatch"));
+    }
+    let payload = bytes
+        .get(HEADER_LEN..HEADER_LEN + payload_len)
+        .ok_or_else(|| BkfsError::unsupported("truncated log frame"))?;
+    let plain = vault::open_bound(payload, key, binding)?.verify_reference(&loc.tag)?;
+    decode(&plain, data_config())
 }
 
-/// One persisted record. Single-key by design: directory entries live in
-/// their own bucket files (see `directory`) and large content in block files
-/// (see `blockstore`), so the log never needs multi-key atomic records.
-///
-/// **Append-only: never reorder or remove variants.** The serialized form is a
-/// bincode variant index (declaration order), so a reorder would silently
-/// misread every existing log frame. Any unavoidable reorder requires a
-/// `superblock::FORMAT_VERSION` bump.
+const MAGIC: [u8; 4] = *b"BKL1";
+const HEADER_LEN: usize = 24;
+const ALIGN: u64 = 8;
+pub(crate) const INDEX_CACHE_NAME: &str = "index.cache";
+
+pub(crate) fn next_sequence(seq: u64) -> BkfsResult<u64> {
+    seq.checked_add(1)
+        .ok_or_else(|| BkfsError::unsupported("record sequence exhausted"))
+}
+
+/// Variant order is part of every filesystem format's record encoding.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Record {
     Inode {
@@ -102,9 +49,6 @@ pub enum Record {
     Tombstone {
         inode: u64,
     },
-    /// Packed content for a small/medium file (≤ one chunk). Shares the
-    /// segments with inode records but lives in a separate `content` index,
-    /// so a content id may equal its file's inode number without colliding.
     Content {
         id: u64,
         bytes: Vec<u8>,
@@ -112,914 +56,1062 @@ pub enum Record {
     ContentTombstone {
         id: u64,
     },
+    Block {
+        content: u64,
+        index: u64,
+        bytes: Vec<u8>,
+    },
+    Bucket {
+        directory: u64,
+        generation: u64,
+        index: u32,
+        bytes: Vec<u8>,
+    },
 }
 
-/// Which index a record belongs to. Inode numbers and content ids occupy
-/// independent key spaces (a file's content id equals its inode number).
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Space {
-    Inode,
-    Content,
+impl Record {
+    pub(crate) fn key(&self) -> RecordKey {
+        match self {
+            Self::Inode { inode, .. } | Self::Tombstone { inode } => RecordKey::Inode(*inode),
+            Self::Content { id, .. } | Self::ContentTombstone { id } => RecordKey::Content(*id),
+            Self::Block { content, index, .. } => RecordKey::Block(*content, *index),
+            Self::Bucket {
+                directory,
+                generation,
+                index,
+                ..
+            } => RecordKey::Bucket(*directory, *generation, *index),
+        }
+    }
+
+    fn verify_key(self, key: RecordKey) -> BkfsResult<Self> {
+        if self.key() != key {
+            return Err(BkfsError::unsupported("log record identity mismatch"));
+        }
+        Ok(self)
+    }
+
+    pub(crate) fn is_tombstone(&self) -> bool {
+        matches!(self, Self::Tombstone { .. } | Self::ContentTombstone { .. })
+    }
 }
 
-/// A record already serialized + vault-sealed, ready to append. Produced
-/// outside the log lock so the global append section never serializes crypto.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum RecordKey {
+    Inode(u64),
+    Content(u64),
+    Block(u64, u64),
+    Bucket(u64, u64, u32),
+}
+
+impl RecordKey {
+    pub(crate) fn stream(self) -> Stream {
+        match self {
+            Self::Content(_) | Self::Block(..) => Stream::Data,
+            Self::Inode(_) | Self::Bucket(..) => Stream::Metadata,
+        }
+    }
+}
+
 pub struct SealedRecord {
-    key: u64,
-    bytes: Vec<u8>,
-    space: Space,
+    key: RecordKey,
+    sealed: vault::Sealed,
     tombstone: bool,
 }
 
-/// Seal an inode record (encryption + ECC) without touching the log.
+impl SealedRecord {
+    pub(crate) fn len(&self) -> u64 {
+        self.sealed.bytes.len() as u64
+    }
+}
+
+pub(crate) fn seal_record(
+    key: &Key,
+    ecc: EccParams,
+    record: Record,
+    binding: Binding,
+) -> BkfsResult<SealedRecord> {
+    let sealed = vault::seal_bound(&encode(&record, data_config())?, key, ecc, binding);
+    Ok(SealedRecord {
+        key: record.key(),
+        sealed,
+        tombstone: record.is_tombstone(),
+    })
+}
+
+#[cfg(test)]
 pub fn seal_inode(
     key: &Key,
     ecc: EccParams,
     inode: Inode,
     attrs: &Attributes,
 ) -> BkfsResult<SealedRecord> {
-    let plain = encode(
-        &Record::Inode {
+    seal_record(
+        key,
+        ecc,
+        Record::Inode {
             inode: inode.0,
             attrs: attrs.clone(),
         },
-        data_config(),
-    )?;
-    let bytes = vault::seal(&plain, key, ecc);
-    Ok(SealedRecord {
-        key: inode.0,
-        bytes,
-        space: Space::Inode,
-        tombstone: false,
-    })
+        Binding::Record,
+    )
 }
-
-/// Seal an inode tombstone record without touching the log.
+#[cfg(test)]
 pub fn seal_tombstone(key: &Key, ecc: EccParams, inode: Inode) -> BkfsResult<SealedRecord> {
-    let plain = encode(&Record::Tombstone { inode: inode.0 }, data_config())?;
-    let bytes = vault::seal(&plain, key, ecc);
-    Ok(SealedRecord {
-        key: inode.0,
-        bytes,
-        space: Space::Inode,
-        tombstone: true,
-    })
+    seal_record(
+        key,
+        ecc,
+        Record::Tombstone { inode: inode.0 },
+        Binding::Record,
+    )
 }
-
-/// Seal a packed-content record without touching the log.
-pub fn seal_content(key: &Key, ecc: EccParams, id: u64, bytes: &[u8]) -> BkfsResult<SealedRecord> {
-    let plain = encode(
-        &Record::Content {
-            id,
-            bytes: bytes.to_vec(),
+pub fn seal_block(
+    key: &Key,
+    ecc: EccParams,
+    content: u64,
+    index: u64,
+    bytes: Vec<u8>,
+) -> BkfsResult<SealedRecord> {
+    seal_record(
+        key,
+        ecc,
+        Record::Block {
+            content,
+            index,
+            bytes,
         },
-        data_config(),
-    )?;
-    let sealed = vault::seal(&plain, key, ecc);
-    Ok(SealedRecord {
-        key: id,
-        bytes: sealed,
-        space: Space::Content,
-        tombstone: false,
-    })
+        Binding::Record,
+    )
+}
+pub fn seal_bucket(
+    key: &Key,
+    ecc: EccParams,
+    directory: u64,
+    generation: u64,
+    index: u32,
+    bytes: Vec<u8>,
+) -> BkfsResult<SealedRecord> {
+    seal_record(
+        key,
+        ecc,
+        Record::Bucket {
+            directory,
+            generation,
+            index,
+            bytes,
+        },
+        Binding::Record,
+    )
 }
 
-/// Seal a content tombstone record without touching the log.
-pub fn seal_content_tombstone(key: &Key, ecc: EccParams, id: u64) -> BkfsResult<SealedRecord> {
-    let plain = encode(&Record::ContentTombstone { id }, data_config())?;
-    let bytes = vault::seal(&plain, key, ecc);
-    Ok(SealedRecord {
-        key: id,
-        bytes,
-        space: Space::Content,
-        tombstone: true,
-    })
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Roots {
+    pub index: HashMap<u64, Location>,
+    pub content: HashMap<u64, Location>,
+    pub blocks: HashMap<(u64, u64), Location>,
+    pub buckets: HashMap<(u64, u64, u32), Location>,
+    /// Committed segment lengths.
+    pub sizes: HashMap<u64, u64>,
 }
 
-/// Physical location of a record's frame within the log.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+impl Roots {
+    pub(crate) fn get(&self, key: RecordKey) -> Option<&Location> {
+        match key {
+            RecordKey::Inode(id) => self.index.get(&id),
+            RecordKey::Content(id) => self.content.get(&id),
+            RecordKey::Block(content, index) => self.blocks.get(&(content, index)),
+            RecordKey::Bucket(directory, generation, index) => {
+                self.buckets.get(&(directory, generation, index))
+            }
+        }
+    }
+
+    pub(crate) fn update(
+        &mut self,
+        key: RecordKey,
+        location: Option<Location>,
+    ) -> Option<Location> {
+        fn replace<K: std::hash::Hash + Eq>(
+            index: &mut HashMap<K, Location>,
+            key: K,
+            location: Option<Location>,
+        ) -> Option<Location> {
+            match location {
+                Some(location) => index.insert(key, location),
+                None => index.remove(&key),
+            }
+        }
+        match key {
+            RecordKey::Inode(id) => replace(&mut self.index, id, location),
+            RecordKey::Content(id) => replace(&mut self.content, id, location),
+            RecordKey::Block(content, index) => {
+                replace(&mut self.blocks, (content, index), location)
+            }
+            RecordKey::Bucket(directory, generation, index) => {
+                replace(&mut self.buckets, (directory, generation, index), location)
+            }
+        }
+    }
+
+    pub(crate) fn entries(&self) -> impl Iterator<Item = (RecordKey, Location)> + '_ {
+        self.index
+            .iter()
+            .map(|(&id, &loc)| (RecordKey::Inode(id), loc))
+            .chain(
+                self.content
+                    .iter()
+                    .map(|(&id, &loc)| (RecordKey::Content(id), loc)),
+            )
+            .chain(
+                self.blocks
+                    .iter()
+                    .map(|(&(content, index), &loc)| (RecordKey::Block(content, index), loc)),
+            )
+            .chain(
+                self.buckets
+                    .iter()
+                    .map(|(&(directory, generation, index), &loc)| {
+                        (RecordKey::Bucket(directory, generation, index), loc)
+                    }),
+            )
+    }
+
+    pub fn segments(&self) -> impl Iterator<Item = u64> + '_ {
+        self.entries().map(|(_, loc)| loc.segment)
+    }
+
+    pub(crate) fn entry_count(&self) -> u64 {
+        (self.index.len()
+            + self.content.len()
+            + self.blocks.len()
+            + self.buckets.len()
+            + self.sizes.len()) as u64
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Location {
     pub segment: u64,
     pub offset: u64,
     pub len: u32,
+    pub seq: u64,
+    pub payload_len: u32,
+    pub tag: AuthenticationTag,
 }
 
-#[derive(Default, Clone, Copy, Serialize, Deserialize)]
-struct SegMeta {
-    total: u64,
-    live: u64,
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub(crate) struct SegMeta {
+    pub total: u64,
+    pub live: u64,
 }
 
-/// Padded on-disk size of a frame carrying `payload_len` sealed bytes.
-fn frame_size(payload_len: usize) -> u64 {
-    let raw = HEADER_LEN as u64 + payload_len as u64;
-    raw.div_ceil(ALIGN) * ALIGN
-}
-
-fn encode_frame(seq: u64, payload: &[u8]) -> Vec<u8> {
-    let total = frame_size(payload.len()) as usize;
-    let mut buf = vec![0u8; total];
-    buf[0..4].copy_from_slice(&MAGIC);
-    // header_crc covers seq + payload_len + reserved (the 16 bytes at [8..24])
-    buf[8..16].copy_from_slice(&seq.to_le_bytes());
-    buf[16..20].copy_from_slice(&(payload.len() as u32).to_le_bytes());
-    // reserved [20..24] stays zero
-    let crc = crc32fast::hash(&buf[8..24]);
-    buf[4..8].copy_from_slice(&crc.to_le_bytes());
-    buf[HEADER_LEN..HEADER_LEN + payload.len()].copy_from_slice(payload);
-    buf
-}
-
-/// Parse a frame header at the start of `buf`. Returns `(seq, payload_len)`
-/// if the header is intact (magic + CRC), else None (caller resyncs).
-fn parse_header(buf: &[u8]) -> Option<(u64, usize)> {
-    if buf.len() < HEADER_LEN || buf[0..4] != MAGIC {
-        return None;
-    }
-    let crc = u32::from_le_bytes(buf[4..8].try_into().unwrap());
-    if crc32fast::hash(&buf[8..24]) != crc {
-        return None;
-    }
-    let seq = u64::from_le_bytes(buf[8..16].try_into().unwrap());
-    let payload_len = u32::from_le_bytes(buf[16..20].try_into().unwrap()) as usize;
-    Some((seq, payload_len))
-}
-
-pub struct SegmentLog {
-    dir: PathBuf,
-    key: Key,
-    /// Open append handle for the active (highest-id) segment.
-    active: File,
-    active_id: u64,
-    active_offset: u64,
-    next_seq: u64,
-    /// inode number → latest inode-record location.
-    index: HashMap<u64, Location>,
-    /// content id → latest content-record location.
-    content: HashMap<u64, Location>,
-    seg_meta: HashMap<u64, SegMeta>,
-    /// Highest inode number ever observed in any frame (incl. tombstoned),
-    /// so a recovered allocator never re-hands a number that was used.
-    max_inode: u64,
-    /// Roll to a new segment once the active one would exceed this. Captured
-    /// at open (from `segment_size()`) so it can't shift under us — and so a
-    /// test can pin it without racing the process-global env cache.
-    segment_size: u64,
-    /// Held write handle for the index checkpoint, opened at mount. The
-    /// checkpoint is written from `Filesystem::destroy`, which runs *after*
-    /// start-core's lazy `umount -l` has detached the backing store from the
-    /// namespace — so a fresh path open (`File::create`) would resolve to the
-    /// empty mountpoint and fail. Writing through this held fd (as the active
-    /// segment and the unmount `syncfs` do) reaches the real backing store.
-    checkpoint_fd: File,
-}
-
-fn segment_path(dir: &std::path::Path, id: u64) -> PathBuf {
+pub(crate) fn segment_path(dir: &Path, id: u64) -> PathBuf {
     dir.join(format!("{id:016x}.seg"))
 }
 
-/// Name of the sealed index-checkpoint sidecar in the segments dir. Not a
-/// `.seg`, so the replay scan and compaction ignore it.
-const INDEX_CACHE_NAME: &str = "index.cache";
-
-/// Bumped if [`Checkpoint`]'s layout changes; a mismatch just forces a replay.
-const CHECKPOINT_VERSION: u32 = 1;
-
-/// A sealed snapshot of the in-RAM index so a mount can skip replaying and
-/// re-decrypting every segment. Pure cache: adopted only when `segments`
-/// exactly matches the current on-disk segment sizes, else the caller falls
-/// back to a full replay (see [`SegmentLog::try_open_from_checkpoint`]).
-#[derive(Serialize, Deserialize)]
-struct Checkpoint {
-    version: u32,
-    next_seq: u64,
-    max_inode: u64,
-    index: HashMap<u64, Location>,
-    content: HashMap<u64, Location>,
-    seg_meta: HashMap<u64, SegMeta>,
-    /// `(id, on-disk size)` for every segment the index reflects, sorted. Any
-    /// append or compaction changes a size or the set and invalidates it.
-    segments: Vec<(u64, u64)>,
-}
-
-/// `(id, size)` for every `*.seg` in `dir`, sorted by id.
-fn list_segments(dir: &Path) -> BkfsResult<Vec<(u64, u64)>> {
-    let mut segs = Vec::new();
+pub(crate) fn list_segments(dir: &Path) -> BkfsResult<Vec<(u64, u64)>> {
+    let mut segments = Vec::new();
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if let Some(hex) = name.strip_suffix(".seg") {
-            if let Ok(id) = u64::from_str_radix(hex, 16) {
-                segs.push((id, entry.metadata()?.len()));
-            }
+        if let Some(id) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.strip_suffix(".seg"))
+            .and_then(|hex| u64::from_str_radix(hex, 16).ok())
+        {
+            segments.push((id, entry.metadata()?.len()));
         }
     }
-    segs.sort_unstable();
-    Ok(segs)
+    segments.sort_unstable();
+    Ok(segments)
 }
 
-impl SegmentLog {
-    /// Open (creating if absent) the log under `dir` with the default segment
-    /// size, replaying existing segments to rebuild the in-RAM index. Test
-    /// convenience; production uses [`SegmentLog::open_sized`] with the
-    /// superblock-pinned size.
-    #[cfg(test)]
-    pub fn open(dir: PathBuf, key: Key) -> BkfsResult<Self> {
-        Self::open_sized(dir, key, segment_size())
-    }
+fn frame_size(payload_len: usize) -> u64 {
+    (HEADER_LEN as u64 + payload_len as u64).div_ceil(ALIGN) * ALIGN
+}
 
-    /// As [`open`], with an explicit segment size (from the superblock at
-    /// mount; pinned per-test elsewhere) instead of the env-cached default.
-    pub(crate) fn open_sized(dir: PathBuf, key: Key, segment_size: u64) -> BkfsResult<Self> {
-        std::fs::create_dir_all(&dir)?;
-        if let Some(log) = Self::try_open_from_checkpoint(&dir, &key, segment_size) {
-            return Ok(log);
-        }
-        let replay_start = std::time::Instant::now();
-        let mut segment_ids = Vec::new();
-        for entry in std::fs::read_dir(&dir)? {
-            let entry = entry?;
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if let Some(hex) = name.strip_suffix(".seg") {
-                if let Ok(id) = u64::from_str_radix(hex, 16) {
-                    segment_ids.push(id);
-                }
+pub(crate) fn encode_frame(seq: u64, payload: &[u8]) -> Vec<u8> {
+    let mut bytes = vec![0; frame_size(payload.len()) as usize];
+    bytes[..4].copy_from_slice(&MAGIC);
+    bytes[8..16].copy_from_slice(&seq.to_le_bytes());
+    bytes[16..20].copy_from_slice(&(payload.len() as u32).to_le_bytes());
+    let crc = crc32fast::hash(&bytes[8..24]);
+    bytes[4..8].copy_from_slice(&crc.to_le_bytes());
+    bytes[HEADER_LEN..HEADER_LEN + payload.len()].copy_from_slice(payload);
+    bytes
+}
+
+fn parse_header(bytes: &[u8]) -> Option<(u64, usize)> {
+    if bytes.len() < HEADER_LEN || bytes[..4] != MAGIC || bytes[20..24] != [0; 4] {
+        return None;
+    }
+    let crc = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+    if crc32fast::hash(&bytes[8..24]) != crc {
+        return None;
+    }
+    Some((
+        u64::from_le_bytes(bytes[8..16].try_into().unwrap()),
+        u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize,
+    ))
+}
+
+pub(crate) struct Frame<'a> {
+    pub offset: usize,
+    pub seq: u64,
+    pub payload: &'a [u8],
+    pub len: u32,
+}
+pub(crate) struct Frames<'a> {
+    bytes: &'a [u8],
+    position: usize,
+}
+impl<'a> Frames<'a> {
+    pub fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, position: 0 }
+    }
+}
+impl<'a> Iterator for Frames<'a> {
+    type Item = Frame<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.position + HEADER_LEN <= self.bytes.len() {
+            let offset = self.position;
+            let Some((seq, payload_len)) = parse_header(&self.bytes[offset..]) else {
+                self.position += self.bytes[offset + 1..]
+                    .windows(MAGIC.len())
+                    .position(|window| window == MAGIC)?
+                    + 1;
+                continue;
+            };
+            let end = offset + HEADER_LEN + payload_len;
+            if end > self.bytes.len() {
+                self.position = self.bytes.len();
+                return None;
             }
+            let len = u32::try_from(frame_size(payload_len)).ok()?;
+            self.position = (offset + len as usize).min(self.bytes.len());
+            return Some(Frame {
+                offset,
+                seq,
+                payload: &self.bytes[offset + HEADER_LEN..end],
+                len,
+            });
         }
-        segment_ids.sort_unstable();
-
-        let mut index: HashMap<u64, Location> = HashMap::new();
-        let mut content: HashMap<u64, Location> = HashMap::new();
-        // Winning seq per key per space, so a later-seq record wins even if
-        // physically earlier (after a compaction relocation).
-        let mut winning_inode: HashMap<u64, u64> = HashMap::new();
-        let mut winning_content: HashMap<u64, u64> = HashMap::new();
-        let mut seg_meta: HashMap<u64, SegMeta> = HashMap::new();
-        let mut next_seq = 1u64;
-        let mut max_inode = 0u64;
-
-        for &id in &segment_ids {
-            let mut file = File::open(segment_path(&dir, id))?;
-            let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes)?;
-            let mut pos = 0usize;
-            let mut live = 0u64;
-            while pos + HEADER_LEN <= bytes.len() {
-                let Some((seq, payload_len)) = parse_header(&bytes[pos..]) else {
-                    // Torn/garbage frame: resync to the next magic.
-                    pos += match find_magic(&bytes[pos + 1..]) {
-                        Some(off) => off + 1,
-                        None => break,
-                    };
-                    continue;
-                };
-                let frame_len = frame_size(payload_len);
-                let end = pos + HEADER_LEN + payload_len;
-                if end > bytes.len() {
-                    break; // truncated tail
-                }
-                let payload = &bytes[pos + HEADER_LEN..end];
-                match vault::open(payload, &key).and_then(|p| decode::<Record>(&p, data_config())) {
-                    Ok(record) => {
-                        next_seq = next_seq.max(seq + 1);
-                        let key = record.key();
-                        let loc = Location {
-                            segment: id,
-                            offset: pos as u64,
-                            len: frame_len as u32,
-                        };
-                        match record {
-                            Record::Inode { .. } | Record::Tombstone { .. } => {
-                                max_inode = max_inode.max(key);
-                                if winning_inode.get(&key).map_or(true, |&w| seq >= w) {
-                                    winning_inode.insert(key, seq);
-                                    if matches!(record, Record::Inode { .. }) {
-                                        index.insert(key, loc);
-                                    } else {
-                                        index.remove(&key);
-                                    }
-                                }
-                            }
-                            Record::Content { .. } | Record::ContentTombstone { .. } => {
-                                if winning_content.get(&key).map_or(true, |&w| seq >= w) {
-                                    winning_content.insert(key, seq);
-                                    if matches!(record, Record::Content { .. }) {
-                                        content.insert(key, loc);
-                                    } else {
-                                        content.remove(&key);
-                                    }
-                                }
-                            }
-                        }
-                        live += frame_len;
-                    }
-                    Err(_) => {
-                        // Frame failed ECC/integrity: skip it (a later good
-                        // frame for the same inode, if any, still applies).
-                        pos += match find_magic(&bytes[pos + 1..]) {
-                            Some(off) => off + 1,
-                            None => break,
-                        };
-                        continue;
-                    }
-                }
-                pos += frame_len as usize;
-            }
-            seg_meta.insert(
-                id,
-                SegMeta {
-                    total: bytes.len() as u64,
-                    live,
-                },
-            );
-        }
-
-        // Recompute live bytes precisely: a frame is live iff it is the
-        // current index Location for its inode. The pass above counted every
-        // parseable frame; correct it by subtracting superseded frames.
-        recompute_live(&index, &content, &mut seg_meta);
-
-        // Open (or create) the active segment = the highest id, appended to.
-        let active_id = segment_ids.last().copied().unwrap_or(0);
-        let active = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .append(false)
-            .write(true)
-            .open(segment_path(&dir, active_id))?;
-        let active_offset = active.metadata()?.len();
-
-        log::info!(
-            "replayed {} segment(s), {} bytes, in {:?}",
-            segment_ids.len(),
-            seg_meta.values().map(|m| m.total).sum::<u64>(),
-            replay_start.elapsed()
-        );
-        let checkpoint_fd = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(dir.join(INDEX_CACHE_NAME))?;
-        Ok(Self {
-            dir,
-            key,
-            active,
-            active_id,
-            active_offset,
-            next_seq,
-            index,
-            content,
-            seg_meta,
-            max_inode,
-            segment_size,
-            checkpoint_fd,
-        })
-    }
-
-    /// Adopt the sealed index checkpoint if present and still current, skipping
-    /// the full segment replay. Best-effort: any problem — absent, unreadable,
-    /// wrong key, version/layout change, or a segment set that no longer matches
-    /// the fingerprint — returns `None` so the caller full-replays. Correctness
-    /// never depends on the checkpoint.
-    fn try_open_from_checkpoint(dir: &Path, key: &Key, segment_size: u64) -> Option<Self> {
-        let sealed = std::fs::read(dir.join(INDEX_CACHE_NAME)).ok()?;
-        let cp: Checkpoint = decode(&vault::open(&sealed, key).ok()?, data_config()).ok()?;
-        if cp.version != CHECKPOINT_VERSION || list_segments(dir).ok()? != cp.segments {
-            log::info!("index checkpoint present but stale — replaying");
-            return None;
-        }
-        let active_id = cp.segments.last().map(|&(id, _)| id).unwrap_or(0);
-        let active = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(segment_path(dir, active_id))
-            .ok()?;
-        let active_offset = active.metadata().ok()?.len();
-        log::info!(
-            "loaded index from checkpoint ({} segments) — skipping replay",
-            cp.segments.len()
-        );
-        let checkpoint_fd = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(dir.join(INDEX_CACHE_NAME))
-            .ok()?;
-        Some(Self {
-            dir: dir.to_path_buf(),
-            key: *key,
-            active,
-            active_id,
-            active_offset,
-            next_seq: cp.next_seq,
-            index: cp.index,
-            content: cp.content,
-            seg_meta: cp.seg_meta,
-            max_inode: cp.max_inode,
-            segment_size,
-            checkpoint_fd,
-        })
-    }
-
-    /// Persist the in-RAM index as a sealed checkpoint so the next mount can
-    /// skip replaying the log.
-    ///
-    /// This runs from `Filesystem::destroy`, which fires *after* start-core's
-    /// lazy `umount -l` has detached the backing store from the mount namespace.
-    /// So it must not do any fresh path lookup (they'd resolve to the now-empty
-    /// mountpoint and fail — the same reason the unmount `syncfs` and segment
-    /// appends use held fds): the fingerprint is taken from the in-RAM
-    /// `seg_meta` (whose `total` tracks each segment's on-disk size) instead of
-    /// re-reading the directory, and the bytes are written through the held
-    /// `checkpoint_fd`. Not fsynced or tmp+renamed — a torn, stale, or lost
-    /// checkpoint is safely ignored on load (the mount falls back to a full
-    /// replay), so it's a pure rebuildable cache.
-    pub fn save_checkpoint(&self) -> BkfsResult<()> {
-        let mut segments: Vec<(u64, u64)> =
-            self.seg_meta.iter().map(|(&id, m)| (id, m.total)).collect();
-        segments.sort_unstable();
-        let n = segments.len();
-        let cp = Checkpoint {
-            version: CHECKPOINT_VERSION,
-            next_seq: self.next_seq,
-            max_inode: self.max_inode,
-            index: self.index.clone(),
-            content: self.content.clone(),
-            seg_meta: self.seg_meta.clone(),
-            segments,
-        };
-        let sealed = vault::seal(
-            &encode(&cp, data_config())?,
-            &self.key,
-            EccParams::default(),
-        );
-        self.checkpoint_fd.set_len(0)?;
-        self.checkpoint_fd.write_all_at(&sealed, 0)?;
-        log::info!("wrote index checkpoint ({n} segments)");
-        Ok(())
-    }
-
-    pub fn contains(&self, inode: Inode) -> bool {
-        self.index.contains_key(&inode.0)
-    }
-
-    pub fn max_inode(&self) -> u64 {
-        self.max_inode
-    }
-
-    /// Read and decode the record at `loc`.
-    pub fn read_at(&self, loc: Location) -> BkfsResult<Record> {
-        let mut frame = vec![0u8; loc.len as usize];
-        let file;
-        let f: &File = if loc.segment == self.active_id {
-            &self.active
-        } else {
-            file = File::open(segment_path(&self.dir, loc.segment))?;
-            &file
-        };
-        f.read_exact_at(&mut frame, loc.offset)?;
-        let (_, payload_len) = parse_header(&frame)
-            .ok_or_else(|| BkfsError::wrap(std::io::Error::other("corrupt log frame header")))?;
-        let payload = &frame[HEADER_LEN..HEADER_LEN + payload_len];
-        let plain = vault::open(payload, &self.key)?;
-        decode(&plain, data_config())
-    }
-
-    /// Load an inode's attributes, or None if it isn't in the index.
-    pub fn load(&self, inode: Inode) -> BkfsResult<Option<Attributes>> {
-        let Some(&loc) = self.index.get(&inode.0) else {
-            return Ok(None);
-        };
-        match self.read_at(loc)? {
-            Record::Inode { attrs, .. } => Ok(Some(attrs)),
-            _ => Ok(None),
-        }
-    }
-
-    /// Load a packed content extent by id, or None if absent.
-    pub fn load_content(&self, id: u64) -> BkfsResult<Option<Vec<u8>>> {
-        let Some(&loc) = self.content.get(&id) else {
-            return Ok(None);
-        };
-        match self.read_at(loc)? {
-            Record::Content { bytes, .. } => Ok(Some(bytes)),
-            _ => Ok(None),
-        }
-    }
-
-    /// Number of live packed-content extents (content index entries).
-    #[cfg(test)]
-    pub fn content_count(&self) -> usize {
-        self.content.len()
-    }
-
-    /// Append a pre-sealed record (see [`seal_inode`]/[`seal_tombstone`]).
-    /// Sealing is done by the caller *outside* the log lock so the global
-    /// append critical section never serializes ChaCha20/Reed-Solomon work.
-    pub fn append(&mut self, rec: &SealedRecord) -> BkfsResult<()> {
-        let seq = self.next_seq;
-        self.next_seq += 1;
-        let frame = encode_frame(seq, &rec.bytes);
-        // Roll to a new segment if the active one is full (but never leave a
-        // segment empty: always write at least one frame per segment).
-        if self.active_offset > 0 && self.active_offset + frame.len() as u64 > self.segment_size {
-            self.roll()?;
-        }
-        let offset = self.active_offset;
-        self.active.write_all_at(&frame, offset)?;
-        self.active_offset += frame.len() as u64;
-        let loc = Location {
-            segment: self.active_id,
-            offset,
-            len: frame.len() as u32,
-        };
-
-        let seg = self.seg_meta.entry(self.active_id).or_default();
-        seg.total += frame.len() as u64;
-        seg.live += frame.len() as u64;
-
-        let dst = match rec.space {
-            Space::Inode => {
-                self.max_inode = self.max_inode.max(rec.key);
-                &mut self.index
-            }
-            Space::Content => &mut self.content,
-        };
-        // Supersede any prior live frame for this key in its space.
-        if let Some(prev) = dst.get(&rec.key).copied() {
-            if let Some(m) = self.seg_meta.get_mut(&prev.segment) {
-                m.live = m.live.saturating_sub(prev.len as u64);
-            }
-        }
-        if rec.tombstone {
-            // The tombstone frame is itself dead weight once written.
-            dst.remove(&rec.key);
-            if let Some(m) = self.seg_meta.get_mut(&loc.segment) {
-                m.live = m.live.saturating_sub(loc.len as u64);
-            }
-        } else {
-            dst.insert(rec.key, loc);
-        }
-        Ok(())
-    }
-
-    /// Append/replace an inode record (seals inline; convenience for tests).
-    #[cfg(test)]
-    pub fn put(&mut self, inode: Inode, attrs: &Attributes) -> BkfsResult<()> {
-        let rec = seal_inode(&self.key, EccParams::default(), inode, attrs)?;
-        self.append(&rec)
-    }
-
-    /// Append a tombstone (seals inline; convenience for tests).
-    #[cfg(test)]
-    pub fn tombstone(&mut self, inode: Inode) -> BkfsResult<()> {
-        let rec = seal_tombstone(&self.key, EccParams::default(), inode)?;
-        self.append(&rec)
-    }
-
-    fn roll(&mut self) -> BkfsResult<()> {
-        // Make the segment we're leaving durable before starting a new one.
-        self.sync()?;
-        self.active_id += 1;
-        self.active = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(segment_path(&self.dir, self.active_id))?;
-        self.active_offset = 0;
-        // Make the new segment's directory entry durable.
-        self.fsync_dir()?;
-        Ok(())
-    }
-
-    /// Flush the active segment to stable storage and drop its now-clean
-    /// pages from the cache to keep metadata cache bounded.
-    pub fn sync(&self) -> BkfsResult<()> {
-        self.active.sync_data()?;
-        // Best-effort: drop clean pages we just synced.
-        let fd = self.active.as_raw_fd();
-        // SAFETY: fd is a valid owned fd; DONTNEED on a synced range is advisory.
-        unsafe {
-            libc::posix_fadvise(
-                fd,
-                0,
-                self.active_offset as libc::off_t,
-                libc::POSIX_FADV_DONTNEED,
-            );
-        }
-        Ok(())
-    }
-
-    /// fsync the segments directory so a create/rename/unlink of a segment
-    /// file is itself durable (a lost segment dir-entry is catastrophic,
-    /// unlike a per-inode file the heal could prune).
-    fn fsync_dir(&self) -> BkfsResult<()> {
-        File::open(&self.dir)?.sync_all()?;
-        Ok(())
-    }
-
-    /// Read a frame's raw on-disk bytes (header + sealed payload + padding).
-    fn read_raw_frame(&self, loc: Location) -> BkfsResult<Vec<u8>> {
-        let mut frame = vec![0u8; loc.len as usize];
-        let file;
-        let f: &File = if loc.segment == self.active_id {
-            &self.active
-        } else {
-            file = File::open(segment_path(&self.dir, loc.segment))?;
-            &file
-        };
-        f.read_exact_at(&mut frame, loc.offset)?;
-        Ok(frame)
-    }
-
-    /// Append an existing frame VERBATIM (preserving its seq), repointing the
-    /// index. Used by compaction to relocate a live frame without re-sealing
-    /// — re-sealing would change every byte (fresh nonce) and break rsync
-    /// delta-matching of the relocated bytes.
-    fn append_verbatim(&mut self, frame: &[u8], space: Space, key: u64) -> BkfsResult<()> {
-        if self.active_offset > 0 && self.active_offset + frame.len() as u64 > self.segment_size {
-            self.roll()?;
-        }
-        let offset = self.active_offset;
-        self.active.write_all_at(frame, offset)?;
-        self.active_offset += frame.len() as u64;
-        let loc = Location {
-            segment: self.active_id,
-            offset,
-            len: frame.len() as u32,
-        };
-        let seg = self.seg_meta.entry(self.active_id).or_default();
-        seg.total += frame.len() as u64;
-        seg.live += frame.len() as u64;
-        match space {
-            Space::Inode => self.index.insert(key, loc),
-            Space::Content => self.content.insert(key, loc),
-        };
-        Ok(())
-    }
-
-    /// Reclaim dead space: rewrite every sealed segment whose dead-byte ratio
-    /// exceeds `dead_threshold` by copying its still-live frames verbatim into
-    /// the active segment, then deleting it. Crash-safe: the relocated copies
-    /// are made durable (and the dir fsynced) BEFORE the old segment is
-    /// removed, so a crash can only leave reclaimable dead duplicates, never
-    /// lose a live frame. Returns the number of segments compacted.
-    pub fn compact(&mut self, dead_threshold: f64) -> BkfsResult<usize> {
-        // The active segment is never a compaction candidate, so its own dead
-        // frames would strand for the mount's lifetime. If it's grown dead
-        // enough, seal it (roll) first so it becomes compactable below.
-        if let Some(m) = self.seg_meta.get(&self.active_id) {
-            if self.active_offset > 0
-                && m.total > 0
-                && (m.total - m.live) as f64 / m.total as f64 > dead_threshold
-            {
-                self.roll()?;
-            }
-        }
-        let candidates: Vec<u64> = self
-            .seg_meta
-            .iter()
-            .filter(|(&id, m)| {
-                id != self.active_id
-                    && m.total > 0
-                    && (m.total - m.live) as f64 / m.total as f64 > dead_threshold
-            })
-            .map(|(&id, _)| id)
-            .collect();
-        for seg_id in &candidates {
-            self.compact_segment(*seg_id)?;
-        }
-        Ok(candidates.len())
-    }
-
-    fn compact_segment(&mut self, seg_id: u64) -> BkfsResult<()> {
-        // Live frames in this segment = index entries pointing into it.
-        let mut live: Vec<(Space, u64, Location)> = Vec::new();
-        for (&k, &l) in &self.index {
-            if l.segment == seg_id {
-                live.push((Space::Inode, k, l));
-            }
-        }
-        for (&k, &l) in &self.content {
-            if l.segment == seg_id {
-                live.push((Space::Content, k, l));
-            }
-        }
-        for (space, key, loc) in live {
-            let frame = self.read_raw_frame(loc)?;
-            self.append_verbatim(&frame, space, key)?;
-        }
-        // Relocated copies durable before the source is deleted.
-        self.sync()?;
-        self.fsync_dir()?;
-        std::fs::remove_file(segment_path(&self.dir, seg_id))?;
-        self.fsync_dir()?;
-        self.seg_meta.remove(&seg_id);
-        Ok(())
-    }
-
-    /// Number of live inodes (index entries).
-    pub fn live_count(&self) -> usize {
-        self.index.len()
-    }
-
-    #[cfg(test)]
-    pub fn index_len(&self) -> usize {
-        self.index.len()
+        None
     }
 }
 
-impl Record {
-    fn key(&self) -> u64 {
+use crate::segwriter::SegmentWriter;
+pub(crate) use crate::segwriter::Stream;
+
+const OPEN_READERS: usize = 64;
+const READ_WINDOW: u64 = 1 << 20;
+const CACHED_WINDOWS: usize = 16;
+/// Frames up to this length are read through cached windows.
+const WINDOWED_FRAME: u32 = 64 << 10;
+
+/// Segment ids present in the directory, ignoring their lengths.
+pub(crate) fn segment_ids(dir: &Path) -> BkfsResult<Vec<u64>> {
+    let mut ids = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        if let Some(id) = entry?
+            .file_name()
+            .to_str()
+            .and_then(|name| name.strip_suffix(".seg"))
+            .and_then(|hex| u64::from_str_radix(hex, 16).ok())
+        {
+            ids.push(id);
+        }
+    }
+    ids.sort_unstable();
+    Ok(ids)
+}
+
+enum Persistence {
+    Current(State),
+    Legacy(crate::legacy::Log),
+}
+
+impl Persistence {
+    fn directory(&self) -> &Path {
         match self {
-            Record::Inode { inode, .. } | Record::Tombstone { inode } => *inode,
-            Record::Content { id, .. } | Record::ContentTombstone { id } => *id,
+            Self::Current(state) => state.directory_path(),
+            Self::Legacy(log) => &log.path,
+        }
+    }
+    fn binding(&self) -> Binding {
+        match self {
+            Self::Current(_) => Binding::Record,
+            Self::Legacy(_) => Binding::Legacy,
+        }
+    }
+    fn check_rw(&self) -> BkfsResult<()> {
+        match self {
+            Self::Current(state) => state.check_rw(),
+            Self::Legacy(log) => log.check_rw(),
+        }
+    }
+    fn catalog(&self) -> Option<Reference> {
+        match self {
+            Self::Current(state) => state.catalog(),
+            Self::Legacy(_) => None,
+        }
+    }
+    fn has_pending(&self) -> bool {
+        match self {
+            Self::Current(state) => state.has_pending(),
+            Self::Legacy(log) => log.dirty,
+        }
+    }
+    fn record(&mut self, key: RecordKey, location: Option<Location>) -> BkfsResult<()> {
+        match self {
+            Self::Current(state) => state.record(key, location),
+            Self::Legacy(log) => {
+                log.dirty = true;
+                Ok(())
+            }
+        }
+    }
+    fn record_size(&mut self, segment: u64, len: u64) -> BkfsResult<()> {
+        match self {
+            Self::Current(state) => state.record_size(segment, len),
+            Self::Legacy(_) => Ok(()),
         }
     }
 }
 
-/// Index of the first occurrence of MAGIC in `buf`, if any.
-fn find_magic(buf: &[u8]) -> Option<usize> {
-    buf.windows(MAGIC.len()).position(|w| w == MAGIC)
-}
-
-/// Reset every segment's live bytes to the sum of frame sizes still pointed
-/// at by an index — BOTH the inode index and the content index. (Omitting
-/// the content index scored every live packed extent as dead after a
-/// remount, so compaction needlessly rewrote fully-live content segments.)
-fn recompute_live(
-    index: &HashMap<u64, Location>,
-    content: &HashMap<u64, Location>,
-    seg_meta: &mut HashMap<u64, SegMeta>,
-) {
-    for m in seg_meta.values_mut() {
-        m.live = 0;
-    }
-    for loc in index.values().chain(content.values()) {
-        if let Some(m) = seg_meta.get_mut(&loc.segment) {
-            m.live += loc.len as u64;
-        }
-    }
+pub struct SegmentLog {
+    key: Key,
+    ecc: EccParams,
+    state: Persistence,
+    roots: Roots,
+    writer: Option<SegmentWriter>,
+    next_seq: u64,
+    max_inode: u64,
+    pinned: HashSet<u64>,
+    seg_meta: HashMap<u64, SegMeta>,
+    readers: std::cell::RefCell<Vec<(u64, std::sync::Arc<File>)>>,
+    /// Committed segment bytes, most recently used last.
+    windows: std::cell::RefCell<Vec<(u64, u64, std::sync::Arc<Vec<u8>>)>>,
+    /// Directory buckets written since the last commit, appended by it.
+    staged_buckets: HashMap<(u64, u64, u32), Vec<u8>>,
+    appended: u64,
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::inode::{FileData, InodeAttributes};
+#[path = "seglog_tests.rs"]
+mod tests;
 
-    fn key() -> Key {
-        Key::from([5u8; 32])
-    }
-
-    fn attrs(size: u64) -> Attributes {
-        let mut a =
-            InodeAttributes::new(Inode(1), None, FileData::File(crate::inode::ContentId(1)));
-        a.attrs.size = size;
-        a.attrs
-    }
-
-    #[test]
-    fn put_load_roundtrip_and_replay() {
-        let tmp = tempfile::TempDir::with_prefix("seglog").unwrap();
-        let dir = tmp.path().join("segments");
+impl Drop for SegmentLog {
+    fn drop(&mut self) {
+        if self.writer.is_some()
+            && (self.state.has_pending() || self.has_unsynced() || !self.staged_buckets.is_empty())
         {
-            let mut log = SegmentLog::open(dir.clone(), key()).unwrap();
-            for i in 1..=50u64 {
-                log.put(Inode(i), &attrs(i * 100)).unwrap();
+            if let Err(error) = self.sync() {
+                log::error!("failed to commit backup index on close: {error}");
             }
-            // overwrite some
-            for i in 1..=10u64 {
-                log.put(Inode(i), &attrs(999)).unwrap();
-            }
-            log.tombstone(Inode(25)).unwrap();
-            log.sync().unwrap();
-            assert!(log.load(Inode(25)).unwrap().is_none());
-            assert_eq!(log.load(Inode(1)).unwrap().unwrap().size, 999);
-            assert_eq!(log.load(Inode(40)).unwrap().unwrap().size, 4000);
-        }
-        // Reopen → replay rebuilds the index, latest-seq-wins, tombstone gone.
-        let log = SegmentLog::open(dir, key()).unwrap();
-        assert_eq!(log.index_len(), 49); // 50 created, 1 tombstoned
-        assert!(log.load(Inode(25)).unwrap().is_none());
-        assert_eq!(log.load(Inode(1)).unwrap().unwrap().size, 999);
-        assert_eq!(log.load(Inode(50)).unwrap().unwrap().size, 5000);
-        assert_eq!(log.max_inode(), 50);
-    }
-
-    #[test]
-    fn rotates_across_segments() {
-        // Pin the segment size directly — `segment_size()` is a process-global
-        // OnceLock cached on first use, so setting the env var here would race
-        // with any other test that touched the log first.
-        const SEG: u64 = 8192;
-        let tmp = tempfile::TempDir::with_prefix("seglog").unwrap();
-        let dir = tmp.path().join("segments");
-        {
-            let mut log = SegmentLog::open_sized(dir.clone(), key(), SEG).unwrap();
-            for i in 1..=200u64 {
-                log.put(Inode(i), &attrs(i)).unwrap();
-            }
-            log.sync().unwrap();
-        }
-        let n_segs = std::fs::read_dir(&dir).unwrap().count();
-        assert!(n_segs > 1, "expected multiple segments, got {n_segs}");
-        let log = SegmentLog::open_sized(dir, key(), SEG).unwrap();
-        assert_eq!(log.index_len(), 200);
-        for i in 1..=200u64 {
-            assert_eq!(log.load(Inode(i)).unwrap().unwrap().size, i);
         }
     }
+}
 
-    #[test]
-    fn checkpoint_roundtrips_without_replay() {
-        const SEG: u64 = 8192;
-        let tmp = tempfile::TempDir::with_prefix("seglog").unwrap();
-        let dir = tmp.path().join("segments");
-        {
-            let mut log = SegmentLog::open_sized(dir.clone(), key(), SEG).unwrap();
-            for i in 1..=100u64 {
-                log.put(Inode(i), &attrs(i * 10)).unwrap();
-            }
-            log.tombstone(Inode(7)).unwrap();
-            log.sync().unwrap();
-            log.save_checkpoint().unwrap();
-        }
-        // index.cache exists and matches the on-disk segments → the fast path
-        // reconstructs the index without replaying, and it must agree with what
-        // a replay would have produced.
-        assert!(dir.join(INDEX_CACHE_NAME).exists());
-        let log = SegmentLog::open_sized(dir, key(), SEG).unwrap();
-        assert_eq!(log.index_len(), 99);
-        assert!(log.load(Inode(7)).unwrap().is_none());
-        assert_eq!(log.load(Inode(50)).unwrap().unwrap().size, 500);
-        assert_eq!(log.max_inode(), 100);
+impl SegmentLog {
+    #[cfg(test)]
+    pub fn open(dir: PathBuf, key: Key) -> BkfsResult<Self> {
+        Self::open_sized(dir, key, 8 * 1024 * 1024, EccParams::default(), false)
     }
 
-    #[test]
-    fn stale_checkpoint_falls_back_to_replay() {
-        const SEG: u64 = 1 << 20;
-        let tmp = tempfile::TempDir::with_prefix("seglog").unwrap();
-        let dir = tmp.path().join("segments");
-        {
-            let mut log = SegmentLog::open_sized(dir.clone(), key(), SEG).unwrap();
-            for i in 1..=10u64 {
-                log.put(Inode(i), &attrs(i)).unwrap();
-            }
-            log.save_checkpoint().unwrap();
-            // Append after the checkpoint without re-saving → its segment
-            // fingerprint is now stale.
-            for i in 11..=20u64 {
-                log.put(Inode(i), &attrs(i)).unwrap();
-            }
-            log.sync().unwrap();
-        }
-        // Fingerprint no longer matches → full replay, so records written after
-        // the checkpoint must still be present.
-        let log = SegmentLog::open_sized(dir, key(), SEG).unwrap();
-        assert_eq!(log.index_len(), 20);
-        assert_eq!(log.load(Inode(20)).unwrap().unwrap().size, 20);
+    pub(crate) fn open_sized(
+        dir: PathBuf,
+        key: Key,
+        segment_size: u64,
+        ecc: EccParams,
+        readonly: bool,
+    ) -> BkfsResult<Self> {
+        Self::open_format(
+            dir,
+            key,
+            segment_size,
+            ecc,
+            readonly,
+            crate::superblock::FORMAT_VERSION,
+        )
     }
 
-    #[test]
-    fn resync_past_corrupt_frame() {
-        let tmp = tempfile::TempDir::with_prefix("seglog").unwrap();
-        let dir = tmp.path().join("segments");
-        {
-            let mut log = SegmentLog::open(dir.clone(), key()).unwrap();
-            for i in 1..=20u64 {
-                log.put(Inode(i), &attrs(i)).unwrap();
+    pub(crate) fn open_format(
+        dir: PathBuf,
+        key: Key,
+        segment_size: u64,
+        ecc: EccParams,
+        readonly: bool,
+        format: u32,
+    ) -> BkfsResult<Self> {
+        let (state, roots, counters) = if format == 1 {
+            let (log, mut roots, counters) = crate::legacy::Log::open(&dir, &key)?;
+            roots.sizes = list_segments(&log.path)?.into_iter().collect();
+            (Persistence::Legacy(log), roots, counters)
+        } else {
+            let (state, roots) = State::open(&dir, &key)?;
+            let counters = state.counters();
+            (Persistence::Current(state), roots, counters)
+        };
+        let writer = if readonly {
+            None
+        } else {
+            let directory = state.directory();
+            let mut next = roots.sizes.keys().max().map_or(0, |&id| id + 1);
+            for id in segment_ids(directory)? {
+                if !roots.sizes.contains_key(&id) {
+                    std::fs::remove_file(segment_path(directory, id))?;
+                }
+                next = next.max(id + 1);
             }
-            log.sync().unwrap();
+            Some(SegmentWriter::new(directory, segment_size, next))
+        };
+        let mut log = Self {
+            key,
+            ecc,
+            state,
+            roots,
+            writer,
+            next_seq: counters.next_seq,
+            max_inode: counters.max_inode,
+            pinned: HashSet::new(),
+            seg_meta: HashMap::new(),
+            readers: Default::default(),
+            windows: Default::default(),
+            staged_buckets: HashMap::new(),
+            appended: 0,
+        };
+        for (&id, &total) in &log.roots.sizes {
+            log.seg_meta.insert(id, SegMeta { total, live: 0 });
         }
-        // Corrupt one frame's payload in the middle of the single segment so
-        // its vault::open fails; replay must still recover the others.
-        let seg = segment_path(&dir, 0);
-        let mut bytes = std::fs::read(&seg).unwrap();
-        // Find the 3rd frame and trash a payload byte.
-        let mut pos = 0;
-        for _ in 0..3 {
-            let (_, plen) = parse_header(&bytes[pos..]).unwrap();
-            if pos / 200 == 2 {
+        log.recompute_live();
+        Ok(log)
+    }
+    pub(crate) fn directory(&self) -> &Path {
+        self.state.directory()
+    }
+    pub(crate) fn check_rw(&self) -> BkfsResult<()> {
+        let Some(writer) = &self.writer else {
+            return BkfsResult::errno_notrace(libc::EROFS);
+        };
+        writer.check()?;
+        self.state.check_rw()
+    }
+    pub(crate) fn note_data_write(&mut self) {
+        if let Persistence::Legacy(log) = &mut self.state {
+            log.dirty = true;
+        }
+    }
+    pub(crate) fn catalog_reference(&self) -> Option<Reference> {
+        self.state.catalog()
+    }
+    pub(crate) fn load_view(&self, view: View) -> BkfsResult<Roots> {
+        view.load(self.directory(), &self.key)
+    }
+    pub(crate) fn adopt_view(&mut self, view: View) -> BkfsResult<()> {
+        self.roots = self.load_view(view)?;
+        Ok(())
+    }
+    pub(crate) fn roots(&self) -> &Roots {
+        &self.roots
+    }
+    pub(crate) fn pin(&mut self, segments: HashSet<u64>) {
+        self.pinned = segments;
+    }
+    pub fn contains(&self, inode: Inode) -> bool {
+        self.roots.index.contains_key(&inode.0)
+    }
+    pub fn max_inode(&self) -> u64 {
+        self.max_inode
+    }
+    pub fn live_count(&self) -> usize {
+        self.roots.index.len()
+    }
+    #[cfg(test)]
+    pub fn content_count(&self) -> usize {
+        self.roots.content.len()
+    }
+
+    pub fn read_at(&self, loc: Location) -> BkfsResult<Record> {
+        decode_frame(
+            &self.key,
+            loc,
+            &self.read_raw_frame(loc)?,
+            self.state.binding(),
+        )
+    }
+    pub(crate) fn read_indexed(&self, key: RecordKey, loc: Location) -> BkfsResult<Record> {
+        self.read_at(loc)?.verify_key(key)
+    }
+
+    pub(crate) fn visit_records<'a>(
+        &self,
+        references: impl Iterator<Item = (RecordKey, &'a Location)>,
+        mut visit: impl FnMut(Record) -> BkfsResult<()>,
+    ) -> BkfsResult<()> {
+        self.visit_record_results(references, |record| visit(record?))
+    }
+
+    /// Backing I/O errors stop traversal without reaching the visitor.
+    pub(crate) fn visit_record_results<'a>(
+        &self,
+        references: impl Iterator<Item = (RecordKey, &'a Location)>,
+        mut visit: impl FnMut(BkfsResult<Record>) -> BkfsResult<()>,
+    ) -> BkfsResult<()> {
+        let mut references: Vec<_> = references.collect();
+        references.sort_unstable_by_key(|(_, loc)| (loc.segment, loc.offset));
+        let mut reader = crate::aligned_io::RangeReader::default();
+        for (key, &loc) in references {
+            let bytes = match self.pending_frame(loc) {
+                Some(bytes) => bytes,
+                None => {
+                    let mut bytes = vec![0; loc.len as usize];
+                    reader
+                        .read_exact(
+                            &segment_path(self.directory(), loc.segment),
+                            loc.offset,
+                            &mut bytes,
+                        )
+                        .map_err(BkfsError::referenced_io)?;
+                    bytes
+                }
+            };
+            visit(
+                decode_frame(&self.key, loc, &bytes, self.state.binding())
+                    .and_then(|record| record.verify_key(key)),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn pending_frame(&self, loc: Location) -> Option<Vec<u8>> {
+        let frame = self.writer.as_ref()?.pending(loc.segment, loc.offset)?;
+        Some(frame.get(..loc.len as usize).unwrap_or(&frame).to_vec())
+    }
+
+    fn reader(&self, segment: u64) -> BkfsResult<std::sync::Arc<File>> {
+        let mut readers = self.readers.borrow_mut();
+        if let Some(position) = readers.iter().position(|(id, _)| *id == segment) {
+            let entry = readers.remove(position);
+            let file = entry.1.clone();
+            readers.push(entry);
+            return Ok(file);
+        }
+        let file = std::sync::Arc::new(
+            File::open(segment_path(self.directory(), segment))
+                .map_err(BkfsError::referenced_io)?,
+        );
+        if readers.len() >= OPEN_READERS {
+            readers.remove(0);
+        }
+        readers.push((segment, file.clone()));
+        Ok(file)
+    }
+
+    fn read_raw_frame(&self, loc: Location) -> BkfsResult<Vec<u8>> {
+        if let Some(bytes) = self.pending_frame(loc) {
+            return Ok(bytes);
+        }
+        let end = loc.offset + loc.len as u64;
+        let committed = self.roots.sizes.get(&loc.segment).copied().unwrap_or(0);
+        if loc.len <= WINDOWED_FRAME && end <= committed {
+            return self.read_window(loc.segment, loc.offset, loc.len as usize, committed);
+        }
+        let mut bytes = vec![0; loc.len as usize];
+        self.reader(loc.segment)?
+            .read_exact_at(&mut bytes, loc.offset)
+            .map_err(BkfsError::referenced_io)?;
+        Ok(bytes)
+    }
+
+    /// Committed bytes served from a cached window of their segment.
+    fn read_window(
+        &self,
+        segment: u64,
+        offset: u64,
+        len: usize,
+        committed: u64,
+    ) -> BkfsResult<Vec<u8>> {
+        let mut windows = self.windows.borrow_mut();
+        let hit = windows.iter().position(|(id, base, bytes)| {
+            *id == segment && *base <= offset && offset + len as u64 <= base + bytes.len() as u64
+        });
+        let (base, bytes) = match hit {
+            Some(position) => {
+                let entry = windows.remove(position);
+                let found = (entry.1, entry.2.clone());
+                windows.push(entry);
+                found
+            }
+            None => {
+                let mut base = offset / READ_WINDOW * READ_WINDOW;
+                if offset + WINDOWED_FRAME as u64 > base + READ_WINDOW {
+                    base = offset;
+                }
+                let mut bytes = vec![0; (committed - base).min(READ_WINDOW) as usize];
+                self.reader(segment)?
+                    .read_exact_at(&mut bytes, base)
+                    .map_err(BkfsError::referenced_io)?;
+                let bytes = std::sync::Arc::new(bytes);
+                if windows.len() >= CACHED_WINDOWS {
+                    windows.remove(0);
+                }
+                windows.push((segment, base, bytes.clone()));
+                (base, bytes)
+            }
+        };
+        let start = (offset - base) as usize;
+        Ok(bytes[start..start + len].to_vec())
+    }
+
+    fn load_indexed(&self, key: RecordKey) -> BkfsResult<Option<Record>> {
+        self.roots
+            .get(key)
+            .map(|&loc| self.read_indexed(key, loc))
+            .transpose()
+    }
+    pub fn load(&self, inode: Inode) -> BkfsResult<Option<Attributes>> {
+        match self.load_indexed(RecordKey::Inode(inode.0))? {
+            Some(Record::Inode { attrs, .. }) => Ok(Some(attrs)),
+            Some(_) => Err(BkfsError::unsupported("invalid inode reference")),
+            None => Ok(None),
+        }
+    }
+    pub fn load_content(&self, id: u64) -> BkfsResult<Option<Vec<u8>>> {
+        match self.load_indexed(RecordKey::Content(id))? {
+            Some(Record::Content { bytes, .. }) => Ok(Some(bytes)),
+            Some(_) => Err(BkfsError::unsupported("invalid content reference")),
+            None => Ok(None),
+        }
+    }
+    pub(crate) fn load_block(&self, content: u64, index: u64) -> BkfsResult<Option<Vec<u8>>> {
+        match self.load_indexed(RecordKey::Block(content, index))? {
+            Some(Record::Block { bytes, .. }) => Ok(Some(bytes)),
+            Some(_) => Err(BkfsError::unsupported("invalid block reference")),
+            None => Ok(None),
+        }
+    }
+    pub(crate) fn load_bucket(
+        &self,
+        directory: u64,
+        generation: u64,
+        index: u32,
+    ) -> BkfsResult<Option<Vec<u8>>> {
+        if let Some(plain) = self.staged_buckets.get(&(directory, generation, index)) {
+            return Ok(Some(plain.clone()));
+        }
+        match self.load_indexed(RecordKey::Bucket(directory, generation, index))? {
+            Some(Record::Bucket { bytes, .. }) => Ok(Some(bytes)),
+            Some(_) => Err(BkfsError::unsupported("invalid directory bucket reference")),
+            None => Ok(None),
+        }
+    }
+    fn update(&mut self, key: RecordKey, location: Option<Location>) -> BkfsResult<()> {
+        self.state.record(key, location)?;
+        if let Some(old) = self.roots.update(key, location) {
+            if let Some(meta) = self.seg_meta.get_mut(&old.segment) {
+                meta.live = meta.live.saturating_sub(old.len as u64);
+            }
+        }
+        if let Some(location) = location {
+            self.seg_meta.entry(location.segment).or_default().live += location.len as u64;
+        }
+        Ok(())
+    }
+    fn write_frame(&mut self, stream: Stream, bytes: Vec<u8>) -> BkfsResult<(u64, u64)> {
+        let len = bytes.len() as u64;
+        let (segment, offset) = self.writer.as_mut().unwrap().append(stream, bytes)?;
+        let meta = self.seg_meta.entry(segment).or_default();
+        meta.total = meta.total.max(offset + len);
+        self.appended += len;
+        Ok((segment, offset))
+    }
+    pub fn append(&mut self, record: &SealedRecord) -> BkfsResult<()> {
+        self.check_rw()?;
+        let next = next_sequence(self.next_seq)?;
+        let seq = self.next_seq;
+        let bytes = encode_frame(seq, &record.sealed.bytes);
+        let len = bytes.len() as u32;
+        let (segment, offset) = self.write_frame(record.key.stream(), bytes)?;
+        self.next_seq = next;
+        if let RecordKey::Inode(id) = record.key {
+            self.max_inode = self.max_inode.max(id);
+        }
+        let location = Location {
+            segment,
+            offset,
+            len,
+            seq,
+            payload_len: record.sealed.bytes.len() as u32,
+            tag: record.sealed.tag,
+        };
+        self.update(record.key, (!record.tombstone).then_some(location))
+    }
+    /// Indexes unauthenticated bytes; reads of the key fail.
+    pub(crate) fn preserve_unreadable(&mut self, key: RecordKey, payload: &[u8]) -> BkfsResult<()> {
+        self.check_rw()?;
+        let next = next_sequence(self.next_seq)?;
+        let seq = self.next_seq;
+        let bytes = encode_frame(seq, payload);
+        let len = bytes.len() as u32;
+        let (segment, offset) = self.write_frame(key.stream(), bytes)?;
+        self.next_seq = next;
+        let location = Location {
+            segment,
+            offset,
+            len,
+            seq,
+            payload_len: payload.len() as u32,
+            tag: Default::default(),
+        };
+        self.update(key, Some(location))
+    }
+    /// Replaces a directory bucket at the next commit.
+    pub(crate) fn stage_bucket(
+        &mut self,
+        directory: u64,
+        generation: u64,
+        index: u32,
+        plain: Vec<u8>,
+    ) -> BkfsResult<()> {
+        self.check_rw()?;
+        self.staged_buckets
+            .insert((directory, generation, index), plain);
+        Ok(())
+    }
+    fn append_staged_buckets(&mut self) -> BkfsResult<()> {
+        let mut staged: Vec<_> = self.staged_buckets.drain().collect();
+        staged.sort_unstable_by_key(|(key, _)| *key);
+        for ((directory, generation, index), plain) in staged {
+            let record = seal_bucket(&self.key, self.ecc, directory, generation, index, plain)?;
+            self.append(&record)?;
+        }
+        Ok(())
+    }
+    /// Whether a removal changed the index.
+    pub(crate) fn remove(&mut self, key: RecordKey) -> BkfsResult<bool> {
+        self.check_rw()?;
+        let staged = match key {
+            RecordKey::Bucket(directory, generation, index) => self
+                .staged_buckets
+                .remove(&(directory, generation, index))
+                .is_some(),
+            _ => false,
+        };
+        if self.roots.get(key).is_none() {
+            return Ok(staged);
+        }
+        self.update(key, None)?;
+        Ok(true)
+    }
+    fn has_unsynced(&self) -> bool {
+        self.writer
+            .as_ref()
+            .is_some_and(|writer| writer.has_unsynced())
+    }
+    /// Makes appended frames durable and records their segment lengths.
+    fn flush_writes(&mut self) -> BkfsResult<()> {
+        if self.writer.is_none() {
+            return Ok(());
+        }
+        self.append_staged_buckets()?;
+        let writer = self.writer.as_mut().unwrap();
+        writer.sync()?;
+        for (segment, len) in writer.take_lengths() {
+            self.roots.sizes.insert(segment, len);
+            self.seg_meta.entry(segment).or_default().total = len;
+            self.state.record_size(segment, len)?;
+        }
+        Ok(())
+    }
+    pub fn sync(&mut self) -> BkfsResult<()> {
+        if self.writer.is_none() {
+            return Ok(());
+        }
+        self.flush_writes()?;
+        let counters = self.counters();
+        match &mut self.state {
+            Persistence::Current(state) => {
+                state.commit(&self.key, self.ecc, counters, state.catalog())
+            }
+            Persistence::Legacy(log) => log.sync(),
+        }
+    }
+    fn counters(&self) -> Counters {
+        Counters {
+            next_seq: self.next_seq,
+            max_inode: self.max_inode,
+        }
+    }
+    pub(crate) fn publish_catalog(
+        &mut self,
+        reference: Reference,
+        pins: HashSet<u64>,
+    ) -> BkfsResult<()> {
+        self.check_rw()?;
+        self.flush_writes()?;
+        let counters = self.counters();
+        let Persistence::Current(state) = &mut self.state else {
+            return Err(BkfsError::unsupported(
+                "convert this backup before creating snapshots",
+            ));
+        };
+        state.commit(&self.key, self.ecc, counters, Some(reference))?;
+        self.pin(pins);
+        Ok(())
+    }
+    /// Commits, then checkpoints once the journal outgrows its policy.
+    pub fn close_session(&mut self, retained: &[View]) -> BkfsResult<()> {
+        self.sync()?;
+        let due = match &self.state {
+            Persistence::Current(state) => state.checkpoint_due(),
+            Persistence::Legacy(_) => true,
+        };
+        if due {
+            self.save_checkpoint(retained)?;
+        }
+        Ok(())
+    }
+    /// The checkpoint view; `None` for a format-1 store.
+    pub fn save_checkpoint(&mut self, retained: &[View]) -> BkfsResult<Option<View>> {
+        self.check_rw()?;
+        self.flush_writes()?;
+        let counters = self.counters();
+        match &mut self.state {
+            Persistence::Current(state) => state
+                .checkpoint(
+                    &self.key,
+                    self.ecc,
+                    &self.roots,
+                    counters,
+                    state.catalog(),
+                    retained,
+                )
+                .map(Some),
+            Persistence::Legacy(log) => {
+                log.checkpoint(&self.key, self.ecc, &self.roots, counters, &self.seg_meta)?;
+                Ok(None)
+            }
+        }
+    }
+    pub(crate) fn retain_storage(
+        &mut self,
+        storage: &HashSet<RecordKey>,
+        packed: &HashSet<u64>,
+    ) -> BkfsResult<()> {
+        self.check_rw()?;
+        let remove: Vec<_> = self
+            .roots
+            .entries()
+            .map(|(key, _)| key)
+            .filter(|key| match key {
+                RecordKey::Inode(_) => false,
+                RecordKey::Content(id) => !packed.contains(id),
+                RecordKey::Block(..) | RecordKey::Bucket(..) => !storage.contains(key),
+            })
+            .collect();
+        for key in remove {
+            self.update(key, None)?;
+        }
+        Ok(())
+    }
+    fn recompute_live(&mut self) {
+        for meta in self.seg_meta.values_mut() {
+            meta.live = 0;
+        }
+        for (_, loc) in self.roots.entries() {
+            if let Some(meta) = self.seg_meta.get_mut(&loc.segment) {
+                meta.live += loc.len as u64;
+            }
+        }
+    }
+    /// Relocates live frames out of mostly-dead segments, then deletes them.
+    pub fn compact(&mut self, threshold: f64, budget: u64) -> BkfsResult<usize> {
+        self.check_rw()?;
+        let active: HashSet<u64> = self.writer.as_ref().unwrap().active_segments().collect();
+        let mut ranked: Vec<_> = self
+            .seg_meta
+            .iter()
+            .filter(|(&id, meta)| {
+                !active.contains(&id)
+                    && !self.pinned.contains(&id)
+                    && meta.total > 0
+                    && meta.total.saturating_sub(meta.live) as f64 / meta.total as f64 > threshold
+            })
+            .map(|(&id, meta)| (meta.live as f64 / meta.total as f64, id, meta.live))
+            .collect();
+        ranked.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        let mut candidates = HashSet::new();
+        let mut relocated = 0;
+        for (_, id, live) in ranked {
+            if relocated > 0 && relocated + live > budget {
                 break;
             }
-            pos += frame_size(plen) as usize;
+            relocated += live;
+            candidates.insert(id);
         }
-        let target = pos + HEADER_LEN + 4;
-        for b in &mut bytes[target..target + 64] {
-            *b ^= 0xFF;
+        if candidates.is_empty() {
+            return Ok(0);
         }
-        std::fs::write(&seg, &bytes).unwrap();
+        let mut live: Vec<_> = self
+            .roots
+            .entries()
+            .filter(|(_, loc)| candidates.contains(&loc.segment))
+            .collect();
+        live.sort_unstable_by_key(|(_, loc)| (loc.segment, loc.offset));
+        for (key, old) in live {
+            let bytes = self.read_raw_frame(old)?;
+            let (segment, offset) = self.write_frame(key.stream(), bytes)?;
+            self.update(
+                key,
+                Some(Location {
+                    segment,
+                    offset,
+                    ..old
+                }),
+            )?;
+        }
+        self.sync()?;
+        for &id in &candidates {
+            self.readers
+                .borrow_mut()
+                .retain(|(segment, _)| *segment != id);
+            self.windows
+                .borrow_mut()
+                .retain(|(segment, ..)| *segment != id);
+            match std::fs::remove_file(segment_path(self.directory(), id)) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(error.into())
+                }
+                _ => {}
+            }
+            self.seg_meta.remove(&id);
+            self.roots.sizes.remove(&id);
+            self.state.record_size(id, 0)?;
+        }
+        File::open(self.directory())?.sync_all()?;
+        self.sync()?;
+        Ok(candidates.len())
+    }
+    /// Bytes appended since the log was opened.
+    pub(crate) fn appended(&self) -> u64 {
+        self.appended
+    }
 
-        let log = SegmentLog::open(dir, key()).unwrap();
-        // At least all-but-one inode survive (the corrupted frame's inode is
-        // beyond ECC repair and is dropped).
-        assert!(
-            log.index_len() >= 19,
-            "expected ≥19 survivors, got {}",
-            log.index_len()
-        );
+    /// Forgets cached segment bytes after a test edits segment files.
+    #[cfg(test)]
+    pub(crate) fn drop_read_caches(&self) {
+        self.readers.borrow_mut().clear();
+        self.windows.borrow_mut().clear();
+    }
+    #[cfg(test)]
+    pub fn put(&mut self, inode: Inode, attrs: &Attributes) -> BkfsResult<()> {
+        let record = seal_inode(&self.key, self.ecc, inode, attrs)?;
+        self.append(&record)
+    }
+    #[cfg(test)]
+    pub fn tombstone(&mut self, inode: Inode) -> BkfsResult<()> {
+        let record = seal_tombstone(&self.key, self.ecc, inode)?;
+        self.append(&record)
     }
 }

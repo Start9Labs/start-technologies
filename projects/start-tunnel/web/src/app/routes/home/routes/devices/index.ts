@@ -35,12 +35,17 @@ type DeviceRow = { name: string; subnet: { name: string }; ip: string }
         <tui-icon icon="@tui.server" />
         <h3 tuiTitle>{{ 'Servers' | i18n }}</h3>
         <aside tuiAccessories>
-          <button tuiButton iconStart="@tui.plus" (click)="onAdd('server')">
+          <button
+            tuiButton
+            iconStart="@tui.plus"
+            [disabled]="loading()"
+            (click)="onAdd('server')"
+          >
             {{ 'Add' | i18n }}
           </button>
         </aside>
       </header>
-      <table tuiTable class="g-table" [tuiSkeleton]="!servers()">
+      <table tuiTable class="g-table" [tuiSkeleton]="loading()">
         <thead>
           <tr>
             <th tuiTh [sorter]="byName">{{ 'Name' | i18n }}</th>
@@ -169,12 +174,17 @@ type DeviceRow = { name: string; subnet: { name: string }; ip: string }
         <tui-icon icon="@tui.laptop" />
         <h3 tuiTitle>{{ 'Clients' | i18n }}</h3>
         <aside tuiAccessories>
-          <button tuiButton iconStart="@tui.plus" (click)="onAdd('client')">
+          <button
+            tuiButton
+            iconStart="@tui.plus"
+            [disabled]="loading()"
+            (click)="onAdd('client')"
+          >
             {{ 'Add' | i18n }}
           </button>
         </aside>
       </header>
-      <table tuiTable class="g-table" [tuiSkeleton]="!clients()">
+      <table tuiTable class="g-table" [tuiSkeleton]="loading()">
         <thead>
           <tr>
             <th tuiTh [sorter]="byName">{{ 'Name' | i18n }}</th>
@@ -324,6 +334,8 @@ export default class Devices {
     { initialValue: null },
   )
 
+  protected readonly loading = computed(() => this.subnets() === null)
+
   protected readonly devices = computed(() => {
     const defaultWan = this.defaultWan()
 
@@ -407,16 +419,13 @@ export default class Devices {
   }
 
   async onConfig({ subnet, ip }: MappedDevice) {
-    this.tasks.run(async () => {
-      const data = await this.api.rpc.device.showConfig({
-        subnet: subnet.range,
-        ip,
+    this.dialogs
+      .open(DEVICES_CONFIG, {
+        data: { subnet: subnet.range, ip },
+        closable: false,
+        size: 'm',
       })
-
-      this.dialogs
-        .open(DEVICES_CONFIG, { data, closable: false, size: 'm' })
-        .subscribe()
-    })
+      .subscribe()
   }
 
   protected onDelete({ subnet, ip }: MappedDevice): void {

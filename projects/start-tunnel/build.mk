@@ -1,7 +1,7 @@
 # When this product's build inputs change, mirror them into the `paths:` filter
 # of .github/workflows/start-tunnel.yaml (see root AGENTS.md "Coupled changes").
 
-TUNNEL_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox projects/start-tunnel/start-tunneld.service
+TUNNEL_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox projects/start-tunnel/start-tunneld.service projects/start-tunnel/sysctl.conf
 
 start-tunnel: target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox
 
@@ -14,6 +14,9 @@ start-tunnel-install: $(TUNNEL_TARGETS) build/bash-completion
 
 	$(call mkdir,$(DESTDIR)/lib/systemd/system)
 	$(call cp,projects/start-tunnel/start-tunneld.service,$(DESTDIR)/lib/systemd/system/start-tunneld.service)
+
+	$(call mkdir,$(DESTDIR)/usr/lib/sysctl.d)
+	$(call cp,projects/start-tunnel/sysctl.conf,$(DESTDIR)/usr/lib/sysctl.d/60-start-tunnel.conf)
 
 	$(call mkdir,$(DESTDIR)/usr/lib/startos/scripts)
 	$(call cp,build/lib/scripts/forward-port,$(DESTDIR)/usr/lib/startos/scripts/forward-port)

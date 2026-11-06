@@ -1,4 +1,4 @@
-import { WA_IS_MOBILE } from '@ng-web-apis/platform'
+import { TUI_BREAKPOINT } from '@taiga-ui/core'
 import { inject } from '@angular/core'
 import {
   ActivatedRouteSnapshot,
@@ -9,15 +9,17 @@ import {
 
 import { titleResolver } from 'src/app/utils/title-resolver'
 import { SystemComponent } from './system.component'
+import { TRUSTED_KEYS_MENU_ITEM } from './system.const'
 
 export default [
   {
     path: '',
     component: SystemComponent,
+    runGuardsAndResolvers: 'always',
     canActivate: [
       ({ firstChild }: ActivatedRouteSnapshot, state: RouterStateSnapshot) =>
         !!firstChild ||
-        inject(WA_IS_MOBILE) ||
+        inject(TUI_BREAKPOINT)() === 'mobile' ||
         inject(Router).parseUrl(`${state.url}/general`),
     ],
     children: [
@@ -66,6 +68,18 @@ export default [
         path: 'ssh',
         title: titleResolver,
         loadComponent: () => import('./routes/ssh/ssh.component'),
+      },
+      {
+        path: 'registries',
+        title: titleResolver,
+        data: { title: 'Registries' },
+        loadComponent: () => import('./routes/registries'),
+      },
+      {
+        path: TRUSTED_KEYS_MENU_ITEM.link,
+        title: titleResolver,
+        data: { title: TRUSTED_KEYS_MENU_ITEM.item },
+        loadComponent: () => import('./routes/trusted-keys'),
       },
       {
         path: 'password',
