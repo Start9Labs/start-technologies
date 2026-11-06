@@ -386,7 +386,7 @@ const inputSpec = async ({ effects }: { effects: T.Effects }) =>
 
 `extensions` belongs to `Value.file`, not the upload effect. It filters the uploaded filename case-insensitively, including compound suffixes such as `.tar.gz`; `[]` permits any filename. It does not inspect the contents or establish a MIME type.
 
-After submission, StartOS shows progress for each selected file. All uploads must finish before the handler runs. The handler receives OS-authored metadata, not a browser `File`:
+After submission, per-file upload progress replaces the form. Once all uploads finish, the dialog closes and the standard action spinner appears while the handler runs. The handler receives OS-authored metadata, not a browser `File`:
 
 ```typescript
 input.certificate // null, or:
@@ -402,7 +402,7 @@ The file is already at the prepared volume path when the handler receives this v
 
 Uploads atomically replace an existing destination only after the complete file is written and synced. A failed upload leaves the previous file intact. Parents must already exist; paths are volume-relative and cannot contain symlinks or parent traversal. Keep the selected directory or file parent stable during upload and coordinate service writers around the destination. Omitted permissions default to mode `0600`, UID `0`, GID `0`; ownership uses the IDs visible to the service. A successfully installed upload remains service-owned even if the action later fails or is cancelled.
 
-Prepared IDs expire after 30 minutes, and an active upload times out after one hour. Completed upload receipts remain available for 90 minutes after installation, allowing sibling uploads to finish before action validation. On a transfer or action error, the UI obtains a fresh form and preserves the selected files for another submission. Custom clients submit the prepared ID string (or `null`) as the field value after POSTing the bytes to `/rest/rpc/<id>`, with a percent-encoded `X-File-Name` header and optional `Content-Type`. IDs are one-shot bearer capabilities, not reusable upload URLs.
+Prepared IDs expire after 30 minutes, and an active upload times out after one hour. Completed upload receipts remain available for 90 minutes after installation, allowing sibling uploads to finish before action validation. On an upload error, the UI obtains a fresh form and preserves the selected files for another submission. Action failures show the standard error alert without reopening the form. Custom clients submit the prepared ID string (or `null`) as the field value after POSTing the bytes to `/rest/rpc/<id>`, with a percent-encoded `X-File-Name` header and optional `Content-Type`. IDs are one-shot bearer capabilities, not reusable upload URLs.
 
 ### Validating Input
 

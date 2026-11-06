@@ -62,7 +62,20 @@ export type PackageActionData = {
         <div [innerHTML]="error()"></div>
       </div>
     }
-    @if (res(); as res) {
+    @if (uploads().length) {
+      @for (upload of uploads(); track upload.id) {
+        <p>
+          <label>
+            {{ upload.name }}
+            <progress
+              tuiProgressBar
+              [max]="upload.size || 1"
+              [value]="upload.complete ? upload.size || 1 : upload.loaded"
+            ></progress>
+          </label>
+        </p>
+      }
+    } @else if (res(); as res) {
       @if (warning) {
         <div tuiNotification appearance="warning">
           <div [innerHTML]="warning"></div>
@@ -70,7 +83,6 @@ export type PackageActionData = {
       }
 
       <app-form
-        [attr.inert]="submitting() ? '' : null"
         [spec]="res.spec"
         [value]="res.originalValue || {}"
         [buttons]="buttons"
@@ -87,18 +99,6 @@ export type PackageActionData = {
       </app-form>
     } @else if (!error()) {
       <tui-loader size="l" textContent="loading" />
-    }
-    @for (upload of uploads(); track upload.id) {
-      <p>
-        <label>
-          {{ upload.name }}
-          <progress
-            tuiProgressBar
-            [max]="upload.size || 1"
-            [value]="upload.complete ? upload.size || 1 : upload.loaded"
-          ></progress>
-        </label>
-      </p>
     }
   `,
   styles: `
@@ -255,20 +255,18 @@ export class ActionInputModal {
         }
       })
       if (this.abort.signal.aborted) return
-      if (
-        uploaded &&
-        (await this.actionService.execute(
-          this.pkgInfo.id,
-          this.eventId,
-          this.actionId,
-          prepared,
-        ))
-      ) {
-        this.context.$implicit.complete()
-      } else {
-        await this.load(input)
+      if (!uploaded) {
         this.uploads.set([])
+        await this.load(input)
+        return
       }
+      this.context.$implicit.complete()
+      await this.actionService.execute(
+        this.pkgInfo.id,
+        this.eventId,
+        this.actionId,
+        prepared,
+      )
     } finally {
       this.submitting.set(false)
     }
@@ -311,8 +309,6 @@ export class ActionInputModal {
   }
 }
 
-// Mirrors the Rust backend's `conflicts()` function in core/src/service/action.rs.
-// A key in the partial that is missing from the full input is NOT a conflict.
 function conflicts(left: unknown, right: unknown): boolean {
   if (
     typeof left === 'object' &&

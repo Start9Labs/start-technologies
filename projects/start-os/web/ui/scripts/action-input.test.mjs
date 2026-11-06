@@ -79,7 +79,12 @@ async function modal(options = {}) {
       pkgInfo: { id: 'service', title: 'Files', status: 'running' },
       actionInfo: { id: 'import', metadata: { warning: null } },
     },
-    $implicit: { complete: () => events.push(['closed']) },
+    $implicit: {
+      complete: () => {
+        events.push(['closed'])
+        options.onClose?.()
+      },
+    },
   }
   const injector = createEnvironmentInjector([
     {
@@ -120,7 +125,7 @@ async function modal(options = {}) {
       useValue: {
         execute: async (...args) => {
           events.push(['execute', ...args])
-          return options.actionResult ?? true
+          return options.execute?.(...args) ?? options.actionResult ?? true
         },
       },
     },
@@ -179,6 +184,7 @@ test('submitting uploads every selected file before executing with tokens', asyn
       ['form', 1],
       ['upload', 'first-1', 'cert.pem'],
       ['upload', 'second-1', 'notes.txt'],
+      ['closed'],
       [
         'execute',
         'service',
@@ -186,13 +192,57 @@ test('submitting uploads every selected file before executing with tokens', asyn
         'import',
         { first: 'first-1', second: 'second-1', text: 'keep' },
       ],
-      ['closed'],
     ])
     assert.equal(instance.uploads().length, 2)
     assert.equal(
       instance.uploads().every(upload => upload.complete),
       true,
     )
+  } finally {
+    injector.destroy()
+  }
+})
+
+test('upload completion closes and destroys the form before a pending action runs', async () => {
+  const started = deferred()
+  const response = deferred()
+  const options = {
+    execute: async () => {
+      started.resolve()
+      await response.promise
+      return true
+    },
+  }
+  const { instance, injector, events, errors } = await modal(options)
+  options.onClose = () => injector.destroy()
+  try {
+    const pending = instance.execute({
+      first: new File(['certificate'], 'cert.pem'),
+      second: null,
+    })
+    await started.promise
+    assert.equal(injector.destroyed, true)
+    assert.deepEqual(
+      events.map(([kind]) => kind),
+      ['form', 'upload', 'closed', 'execute'],
+    )
+    response.resolve()
+    await pending
+    assert.deepEqual(errors, [])
+  } finally {
+    if (!injector.destroyed) injector.destroy()
+  }
+})
+
+test('submissions without uploads dismiss directly into normal action execution', async () => {
+  const { instance, injector, events } = await modal()
+  try {
+    await instance.execute({ first: null, second: null, text: 'keep' })
+    assert.deepEqual(
+      events.map(([kind]) => kind),
+      ['form', 'closed', 'execute'],
+    )
+    assert.deepEqual(instance.uploads(), [])
   } finally {
     injector.destroy()
   }
@@ -224,13 +274,20 @@ test('a failed upload gets fresh capabilities while preserving selected files an
   }
 })
 
-test('failed action execution refreshes the one-shot form without losing files', async () => {
-  const { instance, injector, forms } = await modal({ actionResult: false })
+test('failed action execution does not reload the dismissed form', async () => {
+  const { instance, injector, events, forms } = await modal({
+    actionResult: false,
+  })
   try {
-    const file = new File(['certificate'], 'cert.pem')
-    await instance.execute({ first: file, second: null })
-    assert.equal(forms(), 2)
-    assert.equal(instance.res().originalValue.first, file)
+    await instance.execute({
+      first: new File(['certificate'], 'cert.pem'),
+      second: null,
+    })
+    assert.equal(forms(), 1)
+    assert.deepEqual(
+      events.map(([kind]) => kind),
+      ['form', 'upload', 'closed', 'execute'],
+    )
   } finally {
     injector.destroy()
   }
