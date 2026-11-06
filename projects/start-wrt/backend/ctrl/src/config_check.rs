@@ -252,14 +252,9 @@ impl Findings {
         }
     }
 
-    /// List items beyond the value the page reads: its `option`, else the first item.
+    /// Effective values beyond the first, which the page reads.
     fn unmanaged(&mut self, config: &str, section: &Section, views: &[ConfigView], name: &str) {
-        let items = list(section, name);
-        let extra = match option(section, name) {
-            Some(_) => items.first(),
-            None => items.get(1),
-        };
-        if let Some(extra) = extra {
+        if let Some(extra) = effective(section, name).get(1) {
             self.value(
                 config,
                 section,
@@ -350,6 +345,22 @@ fn list<'a>(section: &Section<'a>, name: &str) -> Vec<Token<'a>> {
             _ => None,
         })
         .collect()
+}
+
+/// The values libuci ends with: an `option` replaces the earlier lines of its name.
+fn effective<'a>(section: &Section<'a>, name: &str) -> Vec<Token<'a>> {
+    let mut values = Vec::new();
+    for line in &section.lines {
+        match line {
+            Line::Option { option, value, .. } if option.as_str() == name => {
+                values.clear();
+                values.push(*value);
+            }
+            Line::List { list, item, .. } if list.as_str() == name => values.push(*item),
+            _ => {}
+        }
+    }
+    values
 }
 
 fn named<'c, 'a>(cfg: &'c Config<'a>, ty: &str, name: &str) -> Option<&'c Section<'a>> {
@@ -455,16 +466,15 @@ fn static_address(config: &str, section: &Section, views: &[ConfigView], out: &m
         _ => {}
     }
     out.unmanaged(config, section, views, "ipaddr");
-    if option(section, "ipaddr").is_none() && list(section, "ipaddr").is_empty() {
+    let addresses = effective(section, "ipaddr");
+    if addresses.is_empty() {
         out.section(config, section, views, ConfigProblem::Missing)
             .option = Some("ipaddr".into());
     }
     if let Ok(iface) = section.get::<NetworkInterface>() {
         if iface.ipv4_netmask().is_some_and(|mask| mask != LAN_NETMASK) {
-            let address =
-                option(section, "ipaddr").or_else(|| list(section, "ipaddr").first().copied());
             let (name, token) = if iface.ipaddr.is_some_and(|address| address.prefix.is_some()) {
-                ("ipaddr", address)
+                ("ipaddr", addresses.first().copied())
             } else {
                 ("netmask", option(section, "netmask"))
             };
@@ -782,10 +792,31 @@ mod tests {
 
     #[test]
     fn lan_masks_the_forms_cannot_keep() {
-        for address in [
-            "option ipaddr '192.168.1.1/16'",
-            "list ipaddr '192.168.1.1/16'",
-            "option ipaddr '192.168.1.1'\n\toption netmask '255.255.0.0'",
+        for (address, option, value, line) in [
+            (
+                "option ipaddr '192.168.1.1/16'",
+                "ipaddr",
+                "192.168.1.1/16",
+                6,
+            ),
+            (
+                "list ipaddr '192.168.1.1/16'",
+                "ipaddr",
+                "192.168.1.1/16",
+                6,
+            ),
+            (
+                "option ipaddr '192.168.1.1'\n\toption netmask '255.255.0.0'",
+                "netmask",
+                "255.255.0.0",
+                7,
+            ),
+            (
+                "option ipaddr '192.168.1.1/24'\n\toption ipaddr '192.168.1.1/16'",
+                "ipaddr",
+                "192.168.1.1/16",
+                7,
+            ),
         ] {
             let found = findings(&[(
                 "network",
@@ -799,7 +830,29 @@ mod tests {
             assert_eq!(found[0].problem, ConfigProblem::Unsupported);
             assert_eq!(found[0].views, vec![Lan, Profiles]);
             assert!(!found[0].notice);
+            assert_eq!(found[0].option.as_deref(), Some(option));
+            assert_eq!(found[0].found.as_deref(), Some(value));
+            assert_eq!(found[0].line, Some(line));
         }
+    }
+
+    #[test]
+    fn addresses_an_option_overrides_are_not_noted() {
+        const LAN: &str = "config device\n\toption name 'br-lan'\n\toption type 'bridge'\n\
+             config interface 'lan'\n\toption proto 'static'\n\
+             \tlist ipaddr '10.0.1.1/24'\n\tlist ipaddr '10.0.4.1/24'\n\
+             \toption ipaddr '192.168.0.1/24'\n";
+        const WAN: &str = "config interface 'wan'\n\toption proto 'dhcp'\n";
+        let found = findings(&[("network", &format!("{LAN}{WAN}"))]);
+        assert!(found.is_empty(), "{found:#?}");
+        let found = findings(&[(
+            "network",
+            &format!("{LAN}\tlist ipaddr '10.0.3.1/24'\n{WAN}"),
+        )]);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert_eq!(found[0].problem, ConfigProblem::Unmanaged);
+        assert_eq!(found[0].found.as_deref(), Some("10.0.3.1/24"));
+        assert_eq!(found[0].line, Some(9));
     }
 
     #[test]
