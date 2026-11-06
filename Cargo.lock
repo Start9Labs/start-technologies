@@ -2481,7 +2481,6 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "sha2 0.10.9",
- "signature 2.2.0",
  "subtle",
  "zeroize",
 ]
@@ -7132,6 +7131,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
+ "tokio-tungstenite 0.29.0",
  "tower-service",
  "url",
  "visit-rs",
@@ -8487,7 +8487,7 @@ dependencies = [
 
 [[package]]
 name = "start-os"
-version = "0.4.1-rev.2"
+version = "0.4.1-rev.3"
 dependencies = [
  "include_dir",
  "start-core",
@@ -8577,7 +8577,6 @@ dependencies = [
  "openssh-keys",
  "openssl",
  "patch-db",
- "pkcs8 0.10.2",
  "pwhash",
  "rand 0.9.5",
  "reqwest",

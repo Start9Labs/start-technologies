@@ -44,7 +44,7 @@ fn larger_bound_fixture() -> (Vec<u8>, MerkleArchiveCommitment) {
     (bytes, commitment)
 }
 
-async fn context(datadir: PathBuf, uploader: AnyVerifyingKey) -> RegistryContext {
+pub(super) async fn context(datadir: PathBuf, uploader: AnyVerifyingKey) -> RegistryContext {
     tokio::fs::create_dir_all(&datadir).await.unwrap();
     let db =
         TypedPatchDb::load_unchecked(PatchDb::open(datadir.join("registry.db")).await.unwrap());

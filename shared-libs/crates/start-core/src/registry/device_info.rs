@@ -351,7 +351,6 @@ fn reads_legacy_signatures(version: &Version) -> Result<bool, Error> {
     Ok(version < &"0.4.0.3".parse::<Version>()?)
 }
 
-/// Whether a StartOS version needs icons inline as data URLs.
 fn reads_inline_icons(version: &Version) -> Result<bool, Error> {
     Ok(version < &"0.4.0.3".parse::<Version>()?)
 }
@@ -535,20 +534,11 @@ mod tests {
             "../install/fixtures/production-bitcoind-31.1-26.json"
         ))
         .unwrap();
-        let keyrings = crate::trusted_keys::initial_trusted_keys();
-        let alpha = arm
-            .signatures
-            .keys()
-            .find(|key| {
-                keyrings
-                    .values()
-                    .any(|trusted| !trusted.os && trusted.public_key == **key)
-            })
-            .unwrap()
-            .clone();
+        assert_eq!(arm.signatures.len(), 2);
+        let signer = arm.signatures.keys().next().unwrap().clone();
         let mut x86 = arm.clone();
-        assert!(x86.signatures.remove(&alpha).is_some());
-        arm.signatures.retain(|key, _| key == &alpha);
+        assert!(x86.signatures.remove(&signer).is_some());
+        arm.signatures.retain(|key, _| key == &signer);
         let response = json!({"best": {"31.1:26": {
             "osVersion": "0.4.0",
             "s9pks": [[{"arch": ["aarch64"]}, arm], [{"arch": ["x86_64"]}, x86]],

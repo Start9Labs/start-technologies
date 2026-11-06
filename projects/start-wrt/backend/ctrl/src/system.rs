@@ -113,7 +113,7 @@ async fn newer_versions(_ctx: ServerContext) -> Result<Vec<VersionInfo>, Error> 
     // Read registry URL from UCI config (fallback to default)
     let registry_url = read_registry_url().unwrap_or_else(|| DEFAULT_REGISTRY_URL.to_string());
 
-    let versions = crate::update::fetch_newer_versions(&registry_url)
+    let versions = crate::update::fetch_versions(&registry_url)
         .await
         .inspect_err(|e| tracing::warn!("Failed to check for updates: {e}"))?;
 
@@ -124,12 +124,12 @@ async fn newer_versions(_ctx: ServerContext) -> Result<Vec<VersionInfo>, Error> 
     let mut result: Vec<VersionInfo> = versions
         .into_iter()
         .filter(|(ver, info)| {
-            crate::update::asset_for_platform(&info, &platform).is_some()
+            crate::update::asset_for_platform(info, &platform).is_some()
                 && is_newer_version(ver, current)
         })
         .map(|(ver, info)| VersionInfo {
             version: ver,
-            release_notes: info.release_notes.localized_for("en_US").into(),
+            release_notes: info.release_notes.localized_for("en_US"),
         })
         .collect();
     // The frontend treats the last version as newest.

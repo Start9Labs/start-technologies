@@ -8,10 +8,9 @@ use startos::registry::asset::RegistryAsset;
 use startos::registry::client::Product;
 use startos::registry::os::index::OsVersionInfo;
 use startos::registry::os::SIG_CONTEXT;
-use startos::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use startos::sign::commitment::blake3::Blake3Commitment;
-use startos::sign::commitment::Commitment;
-use startos::util::io::IOHook;
+use startos::util::io::create_file;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use crate::continuations::{Guid, RpcContinuation};
@@ -19,7 +18,8 @@ use crate::error::Error;
 use crate::progress::{FullProgressTracker, ProgressUnits};
 use crate::{registry, ServerContext};
 
-// ── Request / Response types ─────────────────────────────────────────
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug, Deserialize, Serialize, clap::Parser, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -41,13 +41,8 @@ pub struct UpdateSystemRes {
 }
 rpc_toolkit::reflect_ts!(UpdateSystemRes);
 
-// ── Handlers ─────────────────────────────────────────────────────────
-
-/// Check the registry for newer OS versions.
-/// Used by both `system.newer-versions` and `system.update`.
-pub async fn fetch_newer_versions(
-    registry_url: &str,
-) -> Result<BTreeMap<String, OsVersionInfo>, Error> {
+/// Uses the router's device identity for registry compatibility.
+pub async fn fetch_versions(registry_url: &str) -> Result<BTreeMap<String, OsVersionInfo>, Error> {
     let registry_url = registry_url
         .parse()
         .map_err(|e| Error::other(format!("invalid registry URL: {e}")))?;
@@ -88,8 +83,7 @@ pub async fn update_system(
             .unwrap_or_else(|| crate::system::DEFAULT_REGISTRY_URL.to_string())
     });
 
-    // 1. Fetch available versions
-    let versions = fetch_newer_versions(&registry).await?;
+    let versions = fetch_versions(&registry).await?;
 
     if versions.is_empty() {
         return Ok(UpdateSystemRes {
@@ -98,9 +92,6 @@ pub async fn update_system(
         });
     }
 
-    // 2. Select target version. Note: BTreeMap keys sort lexicographically,
-    // which is wrong for semver (e.g. "9.0.0" > "10.0.0"). Select the max via
-    // numeric comparison instead.
     let (target_ver, version_info) = if let Some(ref target) = target_version {
         let info = versions
             .get(target)
@@ -119,7 +110,6 @@ pub async fn update_system(
         (ver.clone(), info)
     };
 
-    // 3. Find asset for our platform
     let asset = asset_for_platform(version_info, &platform)
         .ok_or_else(|| {
             Error::other(format!(
@@ -128,24 +118,16 @@ pub async fn update_system(
         })?
         .clone();
 
-    // 4. Validate signatures
-    asset.validate(SIG_CONTEXT, asset.all_signers())?;
-
-    // 5. Create progress tracker
+    asset.validate_all(SIG_CONTEXT, None)?;
     let tracker = FullProgressTracker::new();
     let mut download_phase = tracker.add_phase("Downloading firmware".into(), Some(100));
-    // start() must precede set_units/set_total: those only mutate an
-    // already-started Progress::Progress, so on a NotStarted phase they are
-    // silent no-ops and start() would then reset total/units back to None.
+    // Configure totals and units after starting the phase.
     download_phase.start();
     download_phase.set_units(Some(ProgressUnits::Bytes));
     download_phase.set_total(asset.commitment.size);
     let mut verify_phase = tracker.add_phase("Verifying integrity".into(), Some(10));
     let mut apply_phase = tracker.add_phase("Applying update".into(), Some(1));
 
-    // 6. Register WebSocket continuation for progress streaming.
-    // The WS handler creates its own stream from the tracker clone, so the
-    // tracker must outlive both the handler and the background update task.
     let guid = Guid::new();
     let guid_str = guid.to_string();
     let tracker_for_ws = tracker.clone();
@@ -180,7 +162,6 @@ pub async fn update_system(
         )
         .await;
 
-    // 7. Spawn background update task (owns tracker + phase handles)
     let client = reqwest::Client::new();
     let target_ver_for_task = target_ver.clone();
     tokio::spawn(async move {
@@ -220,17 +201,9 @@ pub async fn update_system(
     })
 }
 
-// ── Pending-update marker ────────────────────────────────────────────
-//
-// `do_update` writes this file (the target version) just before invoking
-// `sysupgrade`. A successful sysupgrade reboots, leaving the marker for the
-// freshly-booted firmware to confirm; a failed sysupgrade returns and the
-// marker is cleared. `keep.d/startwrt` lists this path so it survives the
-// sysupgrade overlay wipe.
+// Must match `keep.d/startwrt` in `build/stage-files.sh`.
 const PENDING_UPDATE_MARKER: &str = "/etc/startwrt/pending-update";
 
-/// Record the in-flight update target so the next boot can confirm it.
-/// Best-effort — a marker failure must not abort the update.
 fn write_pending_marker(target_ver: &str) {
     if let Some(dir) = Path::new(PENDING_UPDATE_MARKER).parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -240,17 +213,15 @@ fn write_pending_marker(target_ver: &str) {
     }
 }
 
-/// Remove the pending-update marker (the update did not reach a reboot).
 fn clear_pending_marker() {
     let _ = std::fs::remove_file(PENDING_UPDATE_MARKER);
 }
 
-/// On boot, confirm the outcome of a pending update in the Activity log.
-/// Called once from the daemon's normal-mode startup.
+/// Logs a pending update's boot outcome in Activity during daemon startup.
 pub fn check_pending_update_marker() {
     let target = match std::fs::read_to_string(PENDING_UPDATE_MARKER) {
         Ok(s) => s.trim().to_string(),
-        Err(_) => return, // no marker — an ordinary boot
+        Err(_) => return,
     };
     let current = env!("CARGO_PKG_VERSION");
     if target == current {
@@ -273,7 +244,44 @@ pub fn check_pending_update_marker() {
     clear_pending_marker();
 }
 
-/// Execute the actual update: download, verify, sysupgrade.
+async fn download_firmware(
+    client: &reqwest::Client,
+    asset: &RegistryAsset<Blake3Commitment>,
+    path: &Path,
+    mut on_progress: impl FnMut(u64),
+) -> Result<(), Error> {
+    let mut last_error = None;
+    for url in &asset.urls {
+        let mut response = match client.get(url.clone()).send().await {
+            Ok(response) if response.status().is_success() => response,
+            Ok(response) => {
+                last_error = Some(format!("HTTP {} from {}", response.status(), url));
+                continue;
+            }
+            Err(error) => {
+                last_error = Some(format!("request to {} failed: {}", url, error));
+                continue;
+            }
+        };
+        let file = create_file(path).await?;
+        let mut writer = asset.commitment.verifying_writer(file);
+        let mut written = 0;
+        while let Some(chunk) = response.chunk().await? {
+            writer.write_all(&chunk).await?;
+            written += chunk.len() as u64;
+            on_progress(written);
+        }
+        let mut file = writer.verify().await?;
+        file.flush().await?;
+        file.sync_all().await?;
+        return Ok(());
+    }
+    Err(Error::other(format!(
+        "all asset URLs failed; last error: {}",
+        last_error.unwrap_or_else(|| "no URLs".to_string())
+    )))
+}
+
 async fn do_update(
     client: &reqwest::Client,
     asset: RegistryAsset<Blake3Commitment>,
@@ -284,33 +292,16 @@ async fn do_update(
 ) -> Result<(), Error> {
     let firmware_path = Path::new("/tmp/firmware.bin");
 
-    // Phase 1: Download
-    let mut file = tokio::fs::File::create(firmware_path)
-        .await
-        .map_err(|e| Error::other(format!("creating download file: {e}")))?;
-    let phase = &mut *download_phase;
-    let mut written = 0u64;
-    let mut writer = IOHook::new(&mut file);
-    writer.post_write(move |buf| {
-        written += buf.len() as u64;
-        phase.set_done(written);
-    });
-    asset.download(client.clone(), &mut writer).await?;
-    drop(writer);
-    file.sync_all()
-        .await
-        .map_err(|e| Error::other(format!("syncing download file: {e}")))?;
+    download_firmware(client, &asset, firmware_path, |bytes_written| {
+        download_phase.set_done(bytes_written);
+    })
+    .await?;
     download_phase.complete();
 
-    // Phase 2: Verify (re-read and check blake3)
     verify_phase.start();
-    asset
-        .commitment
-        .check(&MultiCursorFile::open(&file).await?)
-        .await?;
+    asset.commitment.verify_file(firmware_path).await?;
     verify_phase.complete();
 
-    // Phase 3: Apply via sysupgrade
     apply_phase.start();
     crate::activity::log(
         "system",
@@ -320,14 +311,10 @@ async fn do_update(
         None,
     );
     write_pending_marker(target_ver);
-    let status = Command::new("sysupgrade")
-        .arg("/tmp/firmware.bin")
-        .status()
-        .await;
-    // Reached only if sysupgrade did not reboot us — i.e. it failed.
+    // `sysupgrade` must survive cancellation of the daemon's update task.
+    let status = Command::new("sysupgrade").arg(firmware_path).status().await;
     clear_pending_marker();
     let status = status.map_err(|e| Error::other(format!("spawning sysupgrade: {e}")))?;
-
     if !status.success() {
         return Err(Error::other(format!(
             "sysupgrade exited with code {}",
@@ -336,7 +323,6 @@ async fn do_update(
     }
     apply_phase.complete();
 
-    // Device reboots — this point is likely unreachable
     Ok(())
 }
 
@@ -349,142 +335,4 @@ pub(crate) fn asset_for_platform<'a>(
         .get(platform)
         .or_else(|| info.img.get(platform))
         .or_else(|| info.iso.get(platform))
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-
-    use base64::Engine;
-    use ed25519_dalek::pkcs8::EncodePrivateKey;
-    use serde_json::json;
-    use startos::sign::{AnySignature, AnySigningKey, Signer};
-    use startos::util::serde::Base64;
-
-    use super::*;
-
-    const PLATFORM: &str = "spacemit,k1-x";
-
-    /// AlgorithmIdentifier for OID 2.25.31184504503259998342399313009964778715.
-    const ED25519PH_ALGORITHM_ID_DER: &[u8] = &[
-        0x30, 0x15, 0x06, 0x13, 0x69, 0xae, 0xf5, 0xf5, 0xb1, 0xe7, 0x89, 0x8a, 0x85, 0xc9, 0x9c,
-        0x9a, 0xe3, 0xbb, 0x85, 0xfb, 0xf2, 0x89, 0x5b,
-    ];
-
-    fn key() -> AnySigningKey {
-        ed25519_dalek::SigningKey::from_bytes(&[7; 32])
-            .to_pkcs8_pem(Default::default())
-            .unwrap()
-            .parse()
-            .unwrap()
-    }
-
-    fn commitment() -> Blake3Commitment {
-        Blake3Commitment {
-            hash: Base64([3; 32]),
-            size: 4096,
-        }
-    }
-
-    async fn ph_signature(commitment: &Blake3Commitment) -> AnySignature {
-        Signer::Key(key())
-            .sign_commitment(commitment, SIG_CONTEXT)
-            .await
-            .unwrap()
-    }
-
-    fn relabeled_pure(sig: AnySignature) -> AnySignature {
-        match sig {
-            AnySignature::Ed25519ph(s) => AnySignature::Ed25519(s),
-            other => other,
-        }
-    }
-
-    fn ed25519ph_pem(sig: &AnySignature) -> String {
-        let AnySignature::Ed25519ph(sig) = sig else {
-            panic!("expected an Ed25519ph signature")
-        };
-        let mut der = vec![0x30, 0x59];
-        der.extend_from_slice(ED25519PH_ALGORITHM_ID_DER);
-        der.extend_from_slice(&[0x04, 0x40]);
-        der.extend_from_slice(&sig.to_bytes());
-        let b64 = base64::engine::general_purpose::STANDARD.encode(der);
-        let (first, rest) = b64.split_at(64);
-        format!("-----BEGIN SIGNATURE-----\n{first}\n{rest}\n-----END SIGNATURE-----\n")
-    }
-
-    fn parse_asset(signature: String) -> RegistryAsset<Blake3Commitment> {
-        let c = commitment();
-        let signer = key().verifying_key().to_string();
-        let response = json!({
-            "1.3.1": {
-                "headline": "",
-                "releaseNotes": "",
-                "sourceVersion": ">=1.0.0",
-                "authorized": [],
-                "iso": {},
-                "img": {},
-                "squashfs": {
-                    PLATFORM: {
-                        "publishedAt": "2026-10-01T00:00:00Z",
-                        "urls": ["https://example.com/startwrt.img"],
-                        "commitment": { "hash": c.hash.to_string(), "size": c.size },
-                        "signatures": { signer: signature },
-                    },
-                },
-            },
-        });
-        let mut versions: BTreeMap<String, OsVersionInfo> =
-            serde_json::from_value(response).unwrap();
-        versions
-            .remove("1.3.1")
-            .unwrap()
-            .squashfs
-            .remove(PLATFORM)
-            .unwrap()
-    }
-
-    #[tokio::test]
-    async fn ed25519ph_label_parses_and_verifies() {
-        let sig = ph_signature(&commitment()).await;
-        let asset = parse_asset(ed25519ph_pem(&sig));
-        assert_eq!(asset.signatures.values().next(), Some(&sig));
-        asset.validate(SIG_CONTEXT, asset.all_signers()).unwrap();
-        assert!(asset.validate("s9pk", asset.all_signers()).is_err());
-    }
-
-    #[tokio::test]
-    async fn id_ed25519_label_on_ed25519ph_signature_verifies() {
-        let sig = ph_signature(&commitment()).await;
-        let asset = parse_asset(relabeled_pure(sig).to_string());
-        asset.validate(SIG_CONTEXT, asset.all_signers()).unwrap();
-        assert!(asset.validate("s9pk", asset.all_signers()).is_err());
-    }
-
-    #[tokio::test]
-    async fn pure_ed25519_signature_verifies() {
-        let c = commitment();
-        let mut msg = b"Start-Commitment-Sig v1\0".to_vec();
-        msg.push(SIG_CONTEXT.len() as u8);
-        msg.extend_from_slice(SIG_CONTEXT.as_bytes());
-        msg.push(1);
-        msg.extend_from_slice(&*c.hash);
-        msg.extend_from_slice(&c.size.to_be_bytes());
-        let sig = Signer::Key(key()).sign_message(&msg).await.unwrap();
-        let asset = parse_asset(sig.to_string());
-        asset.validate(SIG_CONTEXT, asset.all_signers()).unwrap();
-    }
-
-    #[tokio::test]
-    async fn signature_over_another_commitment_is_rejected() {
-        let sig = ph_signature(&Blake3Commitment {
-            size: 4097,
-            ..commitment()
-        })
-        .await;
-        for pem in [ed25519ph_pem(&sig), relabeled_pure(sig).to_string()] {
-            let asset = parse_asset(pem);
-            assert!(asset.validate(SIG_CONTEXT, asset.all_signers()).is_err());
-        }
-    }
 }
