@@ -450,8 +450,7 @@ sha256_of() {
 verify_alpha_release() {
     local keyring="$1" tmp="$2"
     curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/dists/${APT_ALPHA_SUITE}/InRelease" -o "$tmp/InRelease"
-    if ! gpg --no-default-keyring --keyring "$keyring" --batch --yes \
-        --output "$tmp/Release" --decrypt "$tmp/InRelease" 2> "$tmp/gpg.err"; then
+    if ! "$REPO_ROOT/debian/verify-release.sh" "$keyring" "$tmp/InRelease" "$tmp/Release" 2> "$tmp/gpg.err"; then
         >&2 echo "  ✗ the ${APT_ALPHA_SUITE} InRelease is not signed by the key in ${keyring}"
         >&2 sed 's/^/    /' "$tmp/gpg.err"
         return 1
@@ -1198,7 +1197,8 @@ pull_published_img_gz() {
     url=$(os_img_gz_origin "$img")
     published_exists "$url" || return 0
     tmp=$(mktemp "${img}.gz.XXXXXX")
-    if ! curl -fsSL "${APT_NO_CACHE[@]}" "$url" -o "$tmp" \
+    echo "  img.gz -> ${img}.gz"
+    if ! curl -fSL --progress-bar "${APT_NO_CACHE[@]}" "$url" -o "$tmp" \
         || ! digest=$(gzip -dc "$tmp" | b3sum --no-names) \
         || [ "$digest" != "$(b3sum --no-names "$img")" ]; then
         rm -f "$tmp"

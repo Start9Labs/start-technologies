@@ -28,7 +28,6 @@ use crate::progress::{
     FullProgress, FullProgressTracker, PhaseProgressTrackerHandle, PhasedProgressBar, ProgressUnits,
 };
 use crate::rpc_continuations::{Guid, RpcContinuation};
-use crate::s9pk::v2::pack::{CONTAINER_DATADIR, CONTAINER_TOOL};
 use crate::ssh::SSH_DIR;
 use crate::system::{get_mem_info, sync_kiosk};
 use crate::util::io::{IOHook, dir_copy, open_file};
@@ -203,6 +202,7 @@ pub async fn init(
     let db = cfg.db().await?;
     crate::version::Current::default().pre_init(&db).await?;
     let db = TypedPatchDb::<Database>::load_unchecked(db);
+    db.mutate(crate::net::ssl::repair_root_cert).await.result?;
     let peek = db.peek().await;
     load_database.complete();
 
@@ -304,6 +304,7 @@ pub async fn init(
     load_ca_cert.complete();
 
     load_wifi.start();
+    let system_product_name = crate::firmware::system_product_name().await.log_err();
     crate::net::wifi::synchronize_network_manager(
         MAIN_DATA,
         &peek
@@ -313,6 +314,7 @@ pub async fn init(
             .as_wifi()
             .de()
             .unwrap_or_default(),
+        system_product_name.as_deref(),
     )
     .await?;
     load_wifi.complete();
@@ -328,8 +330,6 @@ pub async fn init(
     crate::disk::mount::util::bind(&tmp_var, "/var/tmp", false).await?;
     let downloading = Path::new(PACKAGE_DATA).join("archive/downloading");
     crate::util::io::delete_dir(&downloading).await?;
-    let tmp_docker = Path::new(PACKAGE_DATA).join("tmp").join(*CONTAINER_TOOL);
-    crate::disk::mount::util::bind(&tmp_docker, *CONTAINER_DATADIR, false).await?;
     init_tmp.complete();
 
     let server_info = db.peek().await.into_public().into_server_info();
@@ -356,11 +356,6 @@ pub async fn init(
     }
 
     let selected_epp = server_info.as_epp().de()?;
-    let system_product_name = if selected_epp.is_none() {
-        crate::firmware::system_product_name().await.log_err()
-    } else {
-        None
-    };
     let epp = cpupower::preferred_epp(selected_epp, system_product_name.as_deref());
     if let Some(epp) = &epp {
         let available_epps = cpupower::get_available_epps()

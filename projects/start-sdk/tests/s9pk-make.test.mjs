@@ -48,14 +48,32 @@ include ${source}
 const fs = require('node:fs')
 const args = process.argv.slice(2)
 fs.appendFileSync('calls', JSON.stringify(args) + '\\n')
+if (args[0] === '-H') args.splice(0, 2)
 if (args.join(' ') === 's9pk list-ingredients') {
-  console.log('javascript/index.js startos/manifest/index.ts Dockerfile')
+  console.log('javascript/index.js startos/manifest/index.ts')
+  if (process.env.DYNAMIC_INGREDIENTS) {
+    if (fs.existsSync('javascript/index.js')) {
+      console.log(JSON.parse(fs.readFileSync('javascript/index.js', 'utf8')).ingredients.join('\\n'))
+    }
+  } else {
+    console.log('Dockerfile')
+  }
+  process.exitCode = Number(process.env.LIST_STATUS || 0)
 } else if (args.join(' ') === 'init-key') {
   process.exit(Number(process.env.INIT_STATUS || 0))
 } else if (args.join(' ') === 'server device-info --format json') {
   console.log(JSON.stringify({ hardware: { arch: process.env.ARCH || 'aarch64' } }))
   process.exit(Number(process.env.DEVICE_STATUS || 0))
+} else if (args[0] === 's9pk' && args[1] === 'inspect') {
+  console.log(JSON.stringify({ title: 'Example', version: '1.0.0', images: {}, sdkVersion: 'test', gitHash: 'test' }))
 } else if (args[0] === 's9pk' && args[1] === 'pack') {
+  if (process.env.DYNAMIC_INGREDIENTS) {
+    const ingredients = JSON.parse(fs.readFileSync('javascript/index.js', 'utf8')).ingredients
+    if (ingredients.some(path => !fs.existsSync(path))) {
+      console.error('Missing current ingredient')
+      process.exit(1)
+    }
+  }
   process.exitCode = Number(process.env.PACK_STATUS || 0)
   if (!process.exitCode) {
     const output = args[args.indexOf('-o') + 1]
@@ -65,8 +83,13 @@ if (args.join(' ') === 's9pk list-ingredients') {
       bundle: fs.readFileSync('javascript/index.js', 'utf8'),
     }))
   }
-} else if (args[0] === 'package' && args[1] === 'install' && args[2] === '-s') {
-  fs.copyFileSync(args[3], 'installed')
+} else if (args[0] === 's9pk' && args[1] === 'inspect') {
+  console.log(JSON.stringify({ title: 'Example', version: '1.0.0', images: [], sdkVersion: '4.0.0', gitHash: 'fixture' }))
+} else if (args[0] === 's9pk' && args[1] === 'sign') {
+  fs.readFileSync(args[2])
+  process.exitCode = Number(process.env.SIGN_STATUS || 0)
+} else if (args[0] === 'package' && args[1] === 'install') {
+  fs.copyFileSync(args[args.indexOf('-s') + 1], 'installed')
   process.exitCode = Number(process.env.INSTALL_STATUS || 0)
 } else {
   console.error('Unexpected start-cli invocation: ' + args.join(' '))
@@ -119,10 +142,42 @@ for (const arch of ['x86_64', 'aarch64', 'riscv64']) {
     assert.deepEqual(f.calls().at(-1), [
       'package',
       'install',
+      '--trust',
       '-s',
       `example_${arch}.s9pk`,
     ])
   })
+}
+
+for (const host of ['prod', 'https://server.local:8443', '']) {
+  for (const source of ['environment', 'command line']) {
+    test(`install uses ${JSON.stringify(host)} from the ${source} for lookup and trusted installation`, t => {
+      const f = fixture(t)
+      const env = source === 'environment' ? { HOST: host } : {}
+      const args =
+        source === 'command line' ? ['install', `HOST=${host}`] : ['install']
+      succeeds(f.make(env, args))
+      const hostArgs = host ? ['-H', host] : []
+      assert.deepEqual(
+        f.calls().find(args => args.includes('device-info')),
+        [...hostArgs, 'server', 'device-info', '--format', 'json'],
+      )
+      assert.deepEqual(f.calls().at(-1), [
+        ...hostArgs,
+        'package',
+        'install',
+        '--trust',
+        '-s',
+        'example_aarch64.s9pk',
+      ])
+      assert.ok(
+        f
+          .calls()
+          .filter(args => args[1] === 'pack')
+          .every(args => !args.includes('-H')),
+      )
+    })
+  }
 }
 
 test('install reuses an up-to-date artifact without repacking or rebundling', t => {
@@ -191,6 +246,7 @@ for (const variantSource of ['default', 'environment', 'command line']) {
     assert.deepEqual(f.calls().at(-1), [
       'package',
       'install',
+      '--trust',
       '-s',
       variantSource === 'default'
         ? 'example_aarch64.s9pk'
@@ -234,6 +290,78 @@ test('installation failures propagate', t => {
   )
 })
 
+test('universal builds even when a file has the target name', t => {
+  const f = fixture(t)
+  writeFileSync(join(f.root, 'universal'), 'target name collision')
+  succeeds(f.make({}, ['universal']))
+  assert.equal(f.calls().filter(args => args[1] === 'pack').length, 1)
+})
+
+test('publish runs even when a file has the target name', t => {
+  const f = fixture(t)
+  writeFileSync(join(f.root, 'publish'), 'target name collision')
+  const result = f.make({}, ['-n', 'publish', 'TARGETS='])
+  succeeds(result)
+  assert.match(result.stdout, /start-cli s9pk publish/)
+})
+
+test('sign builds all architectures and endorses every local package with the identity key', t => {
+  const f = fixture(t)
+  writeFileSync(join(f.root, 'example older.s9pk'), 'existing artifact')
+  writeFileSync(join(f.root, 'sign'), 'target name collision')
+  succeeds(f.make({ HOST: 'prod' }, ['sign']))
+  assert.deepEqual(
+    f.calls().filter(args => args[1] === 'sign'),
+    [
+      ['s9pk', 'sign', 'example older.s9pk'],
+      ['s9pk', 'sign', 'example_aarch64.s9pk'],
+      ['s9pk', 'sign', 'example_riscv64.s9pk'],
+      ['s9pk', 'sign', 'example_x86_64.s9pk'],
+    ],
+  )
+  assert.equal(f.calls().filter(args => args[1] === 'pack').length, 3)
+  assert.equal(f.calls().filter(args => args[0] === 'init-key').length, 1)
+  assert.equal(
+    f.calls().some(args => args.includes('-H') || args[0] === 'package'),
+    false,
+  )
+})
+
+test('sign respects build target and variant overrides and reuses existing artifacts', t => {
+  const f = fixture(t)
+  const args = ['sign', 'TARGETS=universal', 'VARIANT=gpu']
+  succeeds(f.make({}, args))
+  succeeds(f.make({}, args))
+  assert.deepEqual(
+    f.calls().filter(args => args[1] === 'sign'),
+    [
+      ['s9pk', 'sign', 'example_gpu.s9pk'],
+      ['s9pk', 'sign', 'example_gpu.s9pk'],
+    ],
+  )
+  assert.equal(f.calls().filter(args => args[1] === 'pack').length, 1)
+})
+
+for (const [name, env] of [
+  ['identity key initialization', { INIT_STATUS: '1' }],
+  ['packing', { PACK_STATUS: '1' }],
+]) {
+  test(`${name} failure prevents signing`, t => {
+    const f = fixture(t)
+    assert.notEqual(f.make(env, ['sign']).status, 0)
+    assert.equal(
+      f.calls().some(args => args[1] === 'sign'),
+      false,
+    )
+  })
+}
+
+test('signing failures propagate and stop before signing the next package', t => {
+  const f = fixture(t)
+  assert.notEqual(f.make({ SIGN_STATUS: '1' }, ['sign']).status, 0)
+  assert.equal(f.calls().filter(args => args[1] === 'sign').length, 1)
+})
+
 test('build gate failures prevent packing and installation', t => {
   const f = fixture(t)
   assert.notEqual(f.make({}, ['install', 'TS_CHECK=false']).status, 0)
@@ -242,3 +370,71 @@ test('build gate failures prevent packing and installation', t => {
     false,
   )
 })
+
+for (const target of ['x86', 'universal']) {
+  for (const removed of [
+    'image/Dockerfile',
+    'image',
+    'dependency.svg',
+    'dependency.s9pk',
+  ]) {
+    test(`${target} builds on the first attempt after removing ${removed} from the manifest`, t => {
+      const f = fixture(t)
+      const env = { DYNAMIC_INGREDIENTS: '1' }
+      const output = target === 'x86' ? 'example_x86_64.s9pk' : 'example.s9pk'
+      mkdirSync(join(f.root, 'image'))
+      writeFileSync(join(f.root, 'image', 'Dockerfile'), 'FROM scratch\n')
+      writeFileSync(join(f.root, 'dependency.svg'), 'synthetic icon')
+      writeFileSync(join(f.root, 'dependency.s9pk'), 'synthetic dependency')
+      writeFileSync(
+        join(f.root, 'startos', 'index.ts'),
+        JSON.stringify({ ingredients: [removed] }),
+      )
+      succeeds(f.make(env, [target]))
+      f.stale('javascript/index.js')
+      f.stale(output)
+      rmSync(join(f.root, removed), { recursive: true })
+      const updated = JSON.stringify({ ingredients: [] })
+      writeFileSync(join(f.root, 'startos', 'index.ts'), updated)
+      succeeds(f.make(env, [target]))
+      assert.equal(
+        JSON.parse(readFileSync(join(f.root, output), 'utf8')).bundle,
+        updated,
+      )
+      assert.equal(f.calls().filter(args => args[1] === 'pack').length, 2)
+      succeeds(f.make(env, [target]))
+      assert.equal(f.calls().filter(args => args[1] === 'pack').length, 2)
+      assert.equal(
+        readFileSync(join(f.root, 'steps'), 'utf8'),
+        'typecheck\nformat\nbundle\ntypecheck\nformat\nbundle\n',
+      )
+    })
+  }
+}
+
+for (const target of ['x86', 'universal']) {
+  test(`${target} fails when the current manifest still requires a missing ingredient`, t => {
+    const f = fixture(t)
+    const env = { DYNAMIC_INGREDIENTS: '1' }
+    writeFileSync(
+      join(f.root, 'startos', 'index.ts'),
+      JSON.stringify({ ingredients: ['Dockerfile'] }),
+    )
+    succeeds(f.make(env, [target]))
+    f.stale(target === 'x86' ? 'example_x86_64.s9pk' : 'example.s9pk')
+    rmSync(join(f.root, 'Dockerfile'))
+    assert.notEqual(f.make(env, [target]).status, 0)
+  })
+}
+
+for (const target of ['x86', 'universal']) {
+  test(`${target} fails closed on a partial ingredient-list failure`, t => {
+    const f = fixture(t)
+    succeeds(f.make({}, [target]))
+    const packs = f.calls().filter(args => args[1] === 'pack').length
+    const result = f.make({ LIST_STATUS: '9' }, [target])
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /list-ingredients.*failed/)
+    assert.equal(f.calls().filter(args => args[1] === 'pack').length, packs)
+  })
+}

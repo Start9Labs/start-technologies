@@ -3,7 +3,7 @@
 
 IMAGE_TYPE=$(shell if [ "$(PLATFORM)" = raspberrypi ]; then echo img; else echo iso; fi)
 FIRMWARE_ROMS := projects/start-os/build/firmware/$(PLATFORM) $(shell jq --raw-output '.[] | select(.platform[] | contains("$(PLATFORM)")) | "./projects/start-os/build/firmware/$(PLATFORM)/" + .id + ".rom.gz"' projects/start-os/build/lib/firmware.json)
-BUILD_SRC := $(call ls-files, projects/start-os/build/lib) build/lib/scripts/forward-port build/lib/scripts/forward-port6 projects/start-os/build/lib/depends projects/start-os/build/lib/conflicts $(FIRMWARE_ROMS) projects/start-os/build/lib/migration-images/.done
+BUILD_SRC := $(call ls-files, projects/start-os/build/lib projects/start-os/build/etc) build/lib/scripts/forward-port build/lib/scripts/forward-port6 projects/start-os/build/lib/depends projects/start-os/build/lib/conflicts $(FIRMWARE_ROMS) projects/start-os/build/lib/migration-images/.done
 IMAGE_RECIPE_SRC := $(call ls-files, projects/start-os/build/image-recipe/)
 STARTD_SRC := projects/start-os/startd.service projects/start-os/services.slice projects/start-os/startos-shutdown.service projects/start-os/startos-restart.service $(BUILD_SRC)
 STARTOS_RELEASE_NOTES := projects/start-os/release-notes/$(shell cat $(VERSION_FILE)).md
@@ -31,7 +31,8 @@ backup-fs-test: $(call ls-files, projects/start-os/backup-fs/src) projects/start
 container-runtime-test: projects/start-os/container-runtime/node_modules/.package-lock.json $(call ls-files, projects/start-os/container-runtime/src) projects/start-os/container-runtime/package.json projects/start-os/container-runtime/tsconfig.json
 	cd projects/start-os/container-runtime && npm test
 
-start-os-scripts-test: projects/start-os/build/tests/dns-config-test.sh projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/update-image.sh projects/start-os/build/lib/scripts/normalize-fstab projects/start-os/build/tests/normalize-fstab-test.sh projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh projects/start-os/build/tests/init-resize-test.sh projects/start-os/build/image-recipe/build.sh projects/start-os/build/tests/backports-pref-test.sh projects/start-os/build/lib/scripts/gather-debug-info projects/start-os/debian/postinst projects/start-os/build/tests/crash-diagnostics-test.sh projects/start-os/build/tests/btrfsmaintenance-test.sh projects/start-os/build/dpkg-deps/depends projects/start-os/build/tests/runtime-package-upgrade-test.sh
+start-os-scripts-test: projects/start-os/build/tests/dns-config-test.sh projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/update-image.sh projects/start-os/build/lib/scripts/normalize-fstab projects/start-os/build/tests/normalize-fstab-test.sh projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh projects/start-os/build/tests/init-resize-test.sh projects/start-os/build/image-recipe/build.sh projects/start-os/build/tests/backports-pref-test.sh projects/start-os/build/lib/scripts/gather-debug-info projects/start-os/debian/postinst projects/start-os/build/tests/crash-diagnostics-test.sh projects/start-os/build/tests/btrfsmaintenance-test.sh projects/start-os/build/dpkg-deps/depends projects/start-os/build/tests/runtime-package-upgrade-test.sh projects/start-os/build/tests/migration-images-test.sh projects/start-os/build/save-migration-images.sh
+	./projects/start-os/build/tests/migration-images-test.sh
 	./projects/start-os/build/tests/normalize-fstab-test.sh
 	./projects/start-os/build/tests/init-resize-test.sh
 	./projects/start-os/build/tests/backports-pref-test.sh
@@ -41,7 +42,7 @@ start-os-scripts-test: projects/start-os/build/tests/dns-config-test.sh projects
 	./projects/start-os/build/tests/runtime-package-upgrade-test.sh
 
 projects/start-os/build/lib/migration-images/.done: projects/start-os/build/save-migration-images.sh
-	ARCH=$(ARCH) ./projects/start-os/build/save-migration-images.sh projects/start-os/build/lib/migration-images
+	./projects/start-os/build/save-migration-images.sh projects/start-os/build/lib/migration-images
 	touch $@
 
 start-os-deb: results/$(BASENAME).deb
@@ -101,6 +102,9 @@ start-os-install: $(STARTOS_TARGETS) build/bash-completion
 	$(call mkdir,$(DESTDIR)/usr/lib)
 	$(call rm,$(DESTDIR)/usr/lib/startos)
 	$(call cp,projects/start-os/build/lib,$(DESTDIR)/usr/lib/startos)
+	$(call mkdir,$(DESTDIR)/etc/startos)
+	$(call rm,$(DESTDIR)/etc/startos/os-signers)
+	$(call cp,projects/start-os/build/etc/startos/os-signers,$(DESTDIR)/etc/startos/os-signers)
 	$(call cp,projects/start-os/build/firmware/$(PLATFORM),$(DESTDIR)/usr/lib/startos/firmware)
 	$(call cp,build/lib/scripts/forward-port,$(DESTDIR)/usr/lib/startos/scripts/forward-port)
 	$(call cp,build/lib/scripts/forward-port6,$(DESTDIR)/usr/lib/startos/scripts/forward-port6)

@@ -2750,6 +2750,13 @@ export const EditSignerParams: z.ZodObject<{
   addKey: z.ZodArray<z.ZodString>
   removeContact: z.ZodArray<typeof ContactInfo>
   removeKey: z.ZodArray<typeof AnyVerifyingKey>
+  /**
+   * Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.
+   */
+  removeGpgExport: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
 }> = /* @__PURE__ */ object({
   id: Guid,
   setName: wire(z.string().nullable().optional(), z.string().nullable()),
@@ -2757,6 +2764,16 @@ export const EditSignerParams: z.ZodObject<{
   addKey: z.array(z.string()),
   removeContact: z.array(ContactInfo),
   removeKey: z.array(AnyVerifyingKey),
+  /**
+   * Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.
+   */
+  removeGpgExport: wire(
+    z.array(z.string()).optional(),
+    z.array(z.string()),
+  ).meta({
+    description:
+      'Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.',
+  }),
 }).meta({
   id: 'EditSignerParams',
 })
@@ -5253,6 +5270,13 @@ export const SideloadParams: z.ZodObject<{
     z.ZodNullable<typeof AcceptSigners>
   >
   /**
+   * DER64 supplemental signatures for the uploaded archive.
+   */
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
+  /**
    * Accepts an untrusted signer without skipping signature or integrity verification.
    */
   trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
@@ -5261,6 +5285,15 @@ export const SideloadParams: z.ZodObject<{
     AcceptSigners.nullable().optional(),
     AcceptSigners.nullable(),
   ),
+  /**
+   * DER64 supplemental signatures for the uploaded archive.
+   */
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ).meta({
+    description: 'DER64 supplemental signatures for the uploaded archive.',
+  }),
   /**
    * Accepts an untrusted signer without skipping signature or integrity verification.
    */

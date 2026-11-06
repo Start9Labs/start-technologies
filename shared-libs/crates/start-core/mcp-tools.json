@@ -4891,6 +4891,12 @@
             "acceptSigners": {
               "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
             },
+            "signatures": {
+              "description": "DER64 supplemental signatures for the uploaded archive.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/AnySignature" }
+            },
             "trust": {
               "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
               "type": "boolean"
@@ -4930,12 +4936,19 @@
             }
           ]
         },
-        "AnyVerifyingKey": { "type": "string" }
+        "AnyVerifyingKey": { "type": "string" },
+        "AnySignature": { "type": "string" }
       },
       "type": "object",
       "properties": {
         "acceptSigners": {
           "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
+        },
+        "signatures": {
+          "description": "DER64 supplemental signatures for the uploaded archive.",
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/AnySignature" }
         },
         "trust": {
           "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
@@ -5398,6 +5411,11 @@
             "removeKey": {
               "type": "array",
               "items": { "$ref": "#/$defs/AnyVerifyingKey" }
+            },
+            "removeGpgExport": {
+              "description": "Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.",
+              "type": "array",
+              "items": { "type": "string" }
             }
           },
           "required": [

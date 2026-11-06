@@ -407,11 +407,19 @@ describe('HealthDaemon ready polling', () => {
     }
   }
 
-  it.each(pendingResults)(
-    'catches a daemon leaving $result (waiting: $waiting) within a second, then polls it every 30 seconds',
-    async result => {
-      const fn = results(result, 'success', result)
-      const hd = await launch(fakeDaemon(), fn)
+  const checks = [
+    { kind: 'a daemon', daemon: fakeDaemon },
+    { kind: 'a standalone check', daemon: () => null },
+  ]
+  const pendingChecks = checks.flatMap(c =>
+    pendingResults.map(health => ({ ...c, health, ...health })),
+  )
+
+  it.each(pendingChecks)(
+    'catches $kind leaving $result (waiting: $waiting) within a second, then polls it every 30 seconds',
+    async ({ daemon, health }) => {
+      const fn = results(health, 'success', health)
+      const hd = await launch(daemon(), fn)
 
       await expectPolls(fn, [
         [1_000, 1],
@@ -426,11 +434,11 @@ describe('HealthDaemon ready polling', () => {
     },
   )
 
-  it.each(pendingResults)(
-    'backs a daemon reporting $result (waiting: $waiting) off to 30 seconds before its first success',
-    async result => {
-      const fn = results(result)
-      const hd = await launch(fakeDaemon(), fn)
+  it.each(pendingChecks)(
+    'backs $kind reporting $result (waiting: $waiting) off to 30 seconds before its first success',
+    async ({ daemon, health }) => {
+      const fn = results(health)
+      const hd = await launch(daemon(), fn)
 
       await expectPolls(fn, [
         [1_000, 1],
@@ -556,24 +564,6 @@ describe('HealthDaemon ready polling', () => {
 
     await hd.term()
   })
-
-  it.each(pendingResults)(
-    'polls a standalone health check reporting $result (waiting: $waiting) every 30 seconds',
-    async result => {
-      const fn = results(result)
-      const hd = await launch(null, fn)
-
-      await expectPolls(fn, [
-        [1_000, 1],
-        [30_000, 1],
-        [31_000, 2],
-        [60_000, 2],
-        [61_000, 3],
-      ])
-
-      await hd.term()
-    },
-  )
 })
 
 describe('HealthDaemon check loop', () => {
