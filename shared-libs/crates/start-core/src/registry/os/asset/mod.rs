@@ -1,8 +1,30 @@
+use exver::Version;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
+
+use crate::prelude::*;
+use crate::registry::RegistryDatabase;
+use crate::rpc_continuations::Guid;
 
 pub mod add;
 pub mod get;
 pub mod sign;
+
+fn may_manage_assets(
+    db: &Model<RegistryDatabase>,
+    version: &Version,
+    signer: &Guid,
+) -> Result<bool, Error> {
+    Ok(db
+        .as_index()
+        .as_os()
+        .as_versions()
+        .as_idx(version)
+        .or_not_found(version)?
+        .as_authorized()
+        .de()?
+        .contains(signer)
+        || db.as_admins().de()?.contains(signer))
+}
 
 pub fn asset_api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()

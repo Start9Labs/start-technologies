@@ -37,6 +37,8 @@ in the same build checkout before Cargo.
 - `make start-core-format` — format the shared Rust crates with the pinned nightly container (`make start-core-format-check` checks formatting). Set `FMT_NATIVE=1` only when that nightly is installed locally.
 - `cargo build -p start-os --bin startbox` (or the other product crate/bin) to build a binary.
 
+`make manpages` and `make start-core-ts-bindings` use the `generated` Cargo profile: level-1 optimization without debug information, with other settings inherited from `dev`. Explicit `PROFILE=debug`, `dev`, or `release` overrides remain available. `make -k generated-artifacts-check` checks man pages, TypeScript bindings, and the MCP catalog in one dependency graph, continuing independent checks after drift without rebuilding bindings between checks.
+
 Keep `README.md`, `ARCHITECTURE.md`, this file, and the topical references current when changing
 project structure, conventions, build process, or product context.
 
