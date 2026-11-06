@@ -1095,6 +1095,11 @@ export const SetSubnetDnsParams: z.ZodObject<{
    * Up to 3 upstream servers (bare IP or `ip:port`); used when `mode` is `custom`.
    */
   servers: z.ZodArray<z.ZodString>
+  /**
+   * Relay lookups from the asking device's address when every upstream is a
+   * device on the subnet.
+   */
+  preserveSource: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   mode: DnsMode,
   /**
@@ -1110,6 +1115,14 @@ export const SetSubnetDnsParams: z.ZodObject<{
   servers: z.array(z.string()).meta({
     description:
       'Up to 3 upstream servers (bare IP or `ip:port`); used when `mode` is `custom`.',
+  }),
+  /**
+   * Relay lookups from the asking device's address when every upstream is a
+   * device on the subnet.
+   */
+  preserveSource: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      "Relay lookups from the asking device's address when every upstream is a\ndevice on the subnet.",
   }),
 }).meta({
   id: 'SetSubnetDnsParams',
@@ -1312,6 +1325,11 @@ export const WgSubnetConfig: z.ZodObject<{
   clients: typeof WgSubnetClients
   dns: z.ZodCodec<z.ZodOptional<typeof DnsConfig>, typeof DnsConfig>
   /**
+   * Relay lookups from the asking device's own address when every DNS
+   * upstream is a device on this subnet.
+   */
+  dnsPreserveSource: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  /**
    * SNAT this subnet's egress to this WAN IP instead of `masquerade`. `None`
    * keeps the default masquerade; a per-device `wan_ip` overrides this.
    */
@@ -1332,6 +1350,14 @@ export const WgSubnetConfig: z.ZodObject<{
   name: z.string(),
   clients: WgSubnetClients,
   dns: wire(DnsConfig.optional(), DnsConfig),
+  /**
+   * Relay lookups from the asking device's own address when every DNS
+   * upstream is a device on this subnet.
+   */
+  dnsPreserveSource: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      "Relay lookups from the asking device's own address when every DNS\nupstream is a device on this subnet.",
+  }),
   /**
    * SNAT this subnet's egress to this WAN IP instead of `masquerade`. `None`
    * keeps the default masquerade; a per-device `wan_ip` overrides this.

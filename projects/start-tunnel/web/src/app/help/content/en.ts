@@ -55,6 +55,8 @@ The private IP block for this subnet, in CIDR form — a <code>/24</code> by def
 
 This is the subnet's upstream resolver, separate from the DNS records StartTunnel serves for your own hostnames.
 
+**Pass device addresses to the DNS server** lets an on-subnet resolver identify each asking device by its IPv4 tunnel address, for per-device filtering or query logs. Off by default. Every upstream must be an IPv4 address on this subnet; configure the resolver to accept those device addresses before enabling it. IPv6-sourced queries and relay failures use the subnet's server address instead.
+
 ### WAN IP
 
 Which of the VPS's public IPv4 addresses this subnet's outbound traffic leaves from. **System default** lets StartTunnel choose (the address is shown in parentheses). Only matters if your VPS has more than one public IP.
