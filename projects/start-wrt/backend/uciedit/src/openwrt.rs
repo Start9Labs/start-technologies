@@ -230,7 +230,7 @@ pub struct NetworkInterface {
     pub device: String,
     #[uci(default)]
     pub proto: InterfaceProto,
-    /// The first of a `list ipaddr`; the rest stay as written.
+    /// The last `option ipaddr`, else the first `list ipaddr`; a write keeps the items after it.
     #[uci(accept_list)]
     pub ipaddr: Option<Ipv4Address>,
     pub netmask: Option<Ipv4Addr>,
@@ -254,7 +254,7 @@ pub struct NetworkInterface {
     // IPv6 fields
     #[uci(default)]
     pub ip6assign: Option<String>,
-    /// The first of a `list ip6addr`; the rest stay as written.
+    /// The last `option ip6addr`, else the first `list ip6addr`; a write keeps the items after it.
     #[uci(default, accept_list)]
     pub ip6addr: Option<String>,
     #[uci(default)]

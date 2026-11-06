@@ -288,7 +288,7 @@ Macro attributes:
 - `#[uci(default)]` — use `Default::default()` if option missing
 - `#[uci(default_value = expr)]` — custom default value
 - `#[uci(inpt)]` — use `inpt` parser instead of `FromStr`
-- `#[uci(accept_list)]` — a single-valued field also reads the first item of a `list` line of that name, and a write replaces that item and keeps the rest
+- `#[uci(accept_list)]` — a single-valued field also reads `list` lines of that name, as libuci does: its value is the last `option`, else the first item. A write replaces that value, keeps the items after it, and drops the lines it overrides
 - A `Vec` field also reads an `option` line of that name as its whitespace-separated words, the way OpenWrt's own scripts do
 
 Shared, OpenWrt-native typed sections live in `uciedit/src/openwrt.rs`; feature-owned sections (`UciPreferences`, `UciWifiBlackout`, `UciProfile`, the VPN sections, …) are defined in `ctrl` beside their handlers. The sections in `openwrt.rs`:
