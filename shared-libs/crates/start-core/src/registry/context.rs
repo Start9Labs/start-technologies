@@ -509,6 +509,9 @@ mod tests {
 #[path = "package/ingestion_tests.rs"]
 mod ingestion_tests;
 #[cfg(test)]
+#[path = "os/asset/sign_tests.rs"]
+mod os_asset_sign_tests;
+#[cfg(test)]
 #[path = "os/ingestion_tests.rs"]
 mod os_ingestion_tests;
 #[cfg(test)]
