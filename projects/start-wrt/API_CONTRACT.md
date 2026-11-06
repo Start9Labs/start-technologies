@@ -183,14 +183,15 @@ sign, so the user logs in afterwards over HTTPS.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SetInitialPasswordParams {
-    /// Minimum 12 characters (same rule as auth.set-password)
-    password: String,
+    /// Encrypted to the `setup.get-pubkey` key; minimum 12 characters
+    /// (same rule as auth.set-password)
+    password: EncryptedWire,
     /// IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
     timezone: Option<String>,
 }
 // Response: null
-// Backend: writes the root hash to /etc/shadow, revokes every enrolled key,
-// applies the timezone, disables the captive portal
+// Backend: decrypts the password, writes the root hash to /etc/shadow, revokes
+// every enrolled key, applies the timezone, disables the captive portal
 ```
 
 ---
@@ -2093,6 +2094,24 @@ struct DiskState {
 }
 ```
 
+### `setup.get-pubkey`
+
+No auth required. Returns the public half of an ephemeral P-256 key the daemon
+generates each time it starts. `auth.set-initial-password` and
+`/api/setup/flash` take the admin password encrypted to it, since both run over
+plain HTTP before the router's CA is trusted.
+
+```rust
+// Request: {}
+// Response: public JWK, e.g. { "kty": "EC", "crv": "P-256", "x": "…", "y": "…" }
+
+/// start-core's `EncryptedWire`, as StartOS setup sends it
+struct EncryptedWire {
+    /// JWE JSON serialization: alg ECDH-ES, enc A128CBC-HS256
+    encrypted: Value,
+}
+```
+
 ---
 
 ## 14. Activity
@@ -2255,7 +2274,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `/api/setup/flash`                                 | POST      | None (setup wizard)                        | Streams NDJSON `SetupEvent` progress while flashing the eMMC; one flash at a time             |
 | `/static/local-root-ca.crt`                        | GET       | None                                       | Root CA certificate download                                                                  |
 | `/static/local-root-ca.mobileconfig`               | GET       | None                                       | Root CA as an Apple configuration profile                                                     |
-| `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any       | LuCI's own                                 | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`        |
+| `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any       | LuCI's own; HTTPS only                     | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`        |
 | everything else                                    | any       | None                                       | Embedded web UI                                                                               |
 
 ---
@@ -2284,6 +2303,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `system.logs`                       | System          |                             |
 | `system.logs-follow`                | System          |                             |
 | `setup.status`                      | Setup           | No auth                     |
+| `setup.get-pubkey`                  | Setup           | No auth                     |
 | `wan.ipv4-get`                      | WAN             |                             |
 | `wan.ipv4-set`                      | WAN             |                             |
 | `wan.ipv6-get`                      | WAN             |                             |
