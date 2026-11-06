@@ -590,7 +590,10 @@ where
     loop {
         tokio::select! {
             res = from.as_mut() => return Ok(res?),
-            _ = to.as_mut() => {
+            result = to.as_mut() => {
+                if let Err(error) = result {
+                    tracing::trace!(?error, "HTTP/2 backend connection failed");
+                }
                 from.as_mut().graceful_shutdown();
             }
         }

@@ -19,10 +19,18 @@ impl std::io::Write for LogWriter {
 }
 
 pub(super) fn capture_logs() -> (Logs, tracing::Dispatch) {
+    capture_logs_with_filter("start_core=info")
+}
+
+pub(super) fn capture_trace_logs() -> (Logs, tracing::Dispatch) {
+    capture_logs_with_filter("start_core=trace")
+}
+
+fn capture_logs_with_filter(filter: &str) -> (Logs, tracing::Dispatch) {
     let logs = Logs::default();
     let writer = logs.clone();
     let subscriber = tracing_subscriber::fmt()
-        .with_env_filter("start_core=trace")
+        .with_env_filter(filter)
         .without_time()
         .with_ansi(false)
         .with_writer(move || LogWriter(writer.clone()))
@@ -82,6 +90,28 @@ async fn refused_backend_is_silent_and_connects_when_listening() {
         assert_eq!(accepted.peer_addr().unwrap(), stream.local_addr().unwrap());
         assert!(logs.lock().unwrap().is_empty());
     }
+}
+
+#[tokio::test]
+async fn refused_backend_emits_trace_diagnostic() {
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let addr = socket.local_addr().unwrap();
+    let target = target(addr);
+    let (logs, dispatch) = capture_trace_logs();
+    assert!(
+        target
+            .connect_plain()
+            .with_subscriber(dispatch)
+            .await
+            .is_none()
+    );
+    let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
+    assert!(logs.contains("TRACE"), "{logs}");
+    assert!(logs.contains("Backend dial failed"), "{logs}");
+    assert!(logs.contains(&addr.to_string()), "{logs}");
+    assert!(!logs.contains("ERROR"), "{logs}");
+    assert!(!logs.contains("WARN"), "{logs}");
 }
 
 #[tokio::test]
@@ -237,32 +267,42 @@ async fn connections_without_a_transparent_leg_still_reach_the_backend() {
 }
 
 #[tokio::test]
-async fn malformed_http_from_clients_and_services_is_silent() {
+async fn malformed_http_from_clients_and_services_is_trace_only() {
     tokio::time::timeout(Duration::from_secs(5), async {
-        for ssl in [false, true] {
-            for bad_client in [false, true] {
-                let (from, mut client) = tokio::io::duplex(4096);
-                let (to, mut service) = tokio::io::duplex(4096);
-                let mut target = target("127.0.0.1:1".parse().unwrap());
-                target.proxy = Some(ProxyOptions::Http {
-                    add_x_forwarded_headers: false,
-                    auth: None,
-                });
-                if bad_client {
-                    client.write_all(b"invalid HTTP\r\n\r\n").await.unwrap();
-                } else {
-                    client
-                        .write_all(b"GET / HTTP/1.1\r\nHost: service.test\r\n\r\n")
-                        .await
-                        .unwrap();
-                    service.write_all(b"invalid HTTP\r\n\r\n").await.unwrap();
+        for (filter, trace_enabled) in [("start_core=info", false), ("start_core=trace", true)] {
+            for ssl in [false, true] {
+                for bad_client in [false, true] {
+                    let (from, mut client) = tokio::io::duplex(4096);
+                    let (to, mut service) = tokio::io::duplex(4096);
+                    let mut target = target("127.0.0.1:1".parse().unwrap());
+                    target.proxy = Some(ProxyOptions::Http {
+                        add_x_forwarded_headers: false,
+                        auth: None,
+                    });
+                    if bad_client {
+                        client.write_all(b"invalid HTTP\r\n\r\n").await.unwrap();
+                    } else {
+                        client
+                            .write_all(b"GET / HTTP/1.1\r\nHost: service.test\r\n\r\n")
+                            .await
+                            .unwrap();
+                        service.write_all(b"invalid HTTP\r\n\r\n").await.unwrap();
+                    }
+                    let (logs, dispatch) = capture_logs_with_filter(filter);
+                    target
+                        .relay(Box::pin(from), Box::pin(to), None, None, ssl)
+                        .with_subscriber(dispatch)
+                        .await;
+                    let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
+                    if trace_enabled {
+                        assert!(logs.contains("TRACE"), "{logs}");
+                        assert!(logs.contains("HTTP proxy connection failed"), "{logs}");
+                        assert!(!logs.contains("ERROR"), "{logs}");
+                        assert!(!logs.contains("WARN"), "{logs}");
+                    } else {
+                        assert!(logs.is_empty(), "{logs}");
+                    }
                 }
-                let (logs, dispatch) = capture_logs();
-                target
-                    .relay(Box::pin(from), Box::pin(to), None, None, ssl)
-                    .with_subscriber(dispatch)
-                    .await;
-                assert!(logs.lock().unwrap().is_empty());
             }
         }
     })

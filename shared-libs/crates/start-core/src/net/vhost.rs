@@ -907,7 +907,10 @@ impl Accept for VHostBindListener {
                         Box::pin(stream),
                     )));
                 }
-                Poll::Ready(Err(_)) | Poll::Pending => {}
+                Poll::Ready(Err(error)) => {
+                    tracing::trace!(%addr, ?error, "Vhost listener failed to accept connection");
+                }
+                Poll::Pending => {}
             }
         }
         Poll::Pending
@@ -1204,7 +1207,13 @@ impl ProxyTarget {
         let deadline = tokio::time::Instant::now() + BACKEND_DIAL_TIMEOUT;
         let stream = tokio::time::timeout_at(deadline, TcpStream::connect(self.addr))
             .await
+            .inspect_err(
+                |error| tracing::trace!(backend = %self.addr, ?error, "Backend dial timed out"),
+            )
             .ok()?
+            .inspect_err(
+                |error| tracing::trace!(backend = %self.addr, ?error, "Backend dial failed"),
+            )
             .ok()?;
         Some((stream, deadline))
     }
@@ -1219,11 +1228,18 @@ impl ProxyTarget {
                 return None;
             }
         };
-        socket.bind(client).ok()?;
+        socket
+            .bind(client)
+            .inspect_err(
+                |error| tracing::trace!(%client, %target, ?error, "Transparent source bind failed"),
+            )
+            .ok()?;
         crate::net::transparent::ensure_divert_infra_once()
             .await
             .log_err()?;
-        socket.connect(target).await.ok()
+        socket.connect(target).await
+            .inspect_err(|error| tracing::trace!(%client, %target, ?error, "Transparent backend dial failed"))
+            .ok()
     }
 
     async fn connect_backend(
@@ -1235,9 +1251,12 @@ impl ProxyTarget {
         else {
             return self.connect_plain().await;
         };
-        let target = match client {
-            SocketAddr::V4(_) => matches!(self.addr, SocketAddr::V4(_)).then_some(self.addr)?,
-            SocketAddr::V6(_) => SocketAddr::V6(self.addr_v6?),
+        let Some(target) = (match client {
+            SocketAddr::V4(_) => self.addr.is_ipv4().then_some(self.addr),
+            SocketAddr::V6(_) => self.addr_v6.map(SocketAddr::V6),
+        }) else {
+            tracing::trace!(%client, backend = %self.addr, "No backend address for client IP family");
+            return None;
         };
         let stream = Self::connect_transparent(client, target).await?;
         Some((stream, tokio::time::Instant::now() + BACKEND_DIAL_TIMEOUT))
@@ -1266,9 +1285,10 @@ impl ProxyTarget {
             gateway.as_ref(),
         );
         origin.public = !VHostTarget::<A>::filter_private(self, metadata);
-        Ok(Some(
-            origin.register_proxy(stream.local_addr()?, stream.peer_addr()?),
-        ))
+        let (local, peer) = stream.local_addr()
+            .and_then(|local| stream.peer_addr().map(|peer| (local, peer)))
+            .inspect_err(|error| tracing::trace!(backend = %self.addr, ?error, "Proxy origin registration failed"))?;
+        Ok(Some(origin.register_proxy(local, peer)))
     }
 
     async fn relay(
@@ -1313,7 +1333,9 @@ impl ProxyTarget {
                     )
                     .await
                 };
-                result.ok();
+                if let Err(error) = result {
+                    tracing::trace!(backend = %self.addr, ?error, "HTTP proxy connection failed");
+                }
             }
             None => {
                 tokio::io::copy_bidirectional(&mut stream, &mut backend)
@@ -1444,7 +1466,9 @@ where
                         .connect(ServerName::IpAddress(self.addr.ip().into()), tcp_stream),
                 )
                 .await
+                .inspect_err(|error| tracing::trace!(backend = %self.addr, ?error, "Backend TLS handshake timed out"))
                 .ok()?
+                .inspect_err(|error| tracing::trace!(backend = %self.addr, ?error, "Backend TLS handshake failed"))
                 .ok()?;
                 let negotiated = target_stream
                     .get_ref()
@@ -1717,7 +1741,10 @@ impl PlainHttpProxy {
                 let accepted = futures::future::poll_fn(|cx| listener.poll_accept(cx)).await;
                 let (metadata, stream) = match accepted {
                     Ok(accepted) => accepted,
-                    Err(_) => continue,
+                    Err(error) => {
+                        tracing::trace!(?error, "HTTP proxy failed to accept connection");
+                        continue;
+                    }
                 };
                 if !VHostTarget::<VHostBindListener>::filter(&target, &metadata) {
                     continue;
@@ -2169,7 +2196,9 @@ impl<A: Accept> VHostServer<A> {
                     },
                 ));
                 loop {
-                    listener.handle_next().await.ok();
+                    if let Err(error) = listener.handle_next().await {
+                        tracing::trace!(?error, "Vhost server failed to accept connection");
+                    }
                 }
             })
             .into(),
@@ -3123,18 +3152,31 @@ mod upstream_alpn_tests {
     }
 
     #[tokio::test]
-    async fn malformed_backend_tls_is_silent() {
-        let (logs, dispatch) = connection_error_tests::capture_logs();
-        let _guard = tracing::dispatcher::set_default(&dispatch);
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let backend = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            stream.write_all(b"not TLS").await.unwrap();
-        });
-        assert!(try_negotiate(rewrap(), None, &[], addr, &[]).await.is_err());
-        backend.await.unwrap();
-        assert!(logs.lock().unwrap().is_empty());
+    async fn malformed_backend_tls_is_trace_only() {
+        for trace_enabled in [false, true] {
+            let (logs, dispatch) = if trace_enabled {
+                connection_error_tests::capture_trace_logs()
+            } else {
+                connection_error_tests::capture_logs()
+            };
+            let _guard = tracing::dispatcher::set_default(&dispatch);
+            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let backend = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                stream.write_all(b"not TLS").await.unwrap();
+            });
+            assert!(try_negotiate(rewrap(), None, &[], addr, &[]).await.is_err());
+            backend.await.unwrap();
+            let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
+            if trace_enabled {
+                assert!(logs.contains("Backend TLS handshake failed"), "{logs}");
+                assert!(!logs.contains("ERROR"), "{logs}");
+                assert!(!logs.contains("WARN"), "{logs}");
+            } else {
+                assert!(logs.is_empty(), "{logs}");
+            }
+        }
     }
 
     #[tokio::test]

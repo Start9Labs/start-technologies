@@ -36,3 +36,19 @@ start-cli server kernel-logs
 ```
 
 In **Diagnostic Mode**, where StartOS has failed to start normally, the diagnostic page offers **View logs**. There is no download button there, so `start-cli diagnostic logs` is how to capture those. See the [FAQ](faq.md#startos-boots-into-diagnostic-mode).
+
+## Trace Logging
+
+Client and service connection failures, including refused backend ports and TLS errors, are logged at trace level rather than filling normal OS logs. Enable temporary trace output on a running server with:
+
+```bash
+start-cli server set-trace true
+```
+
+Read the output in **System → OS Logs** or with `start-cli server logs --follow`. Trace output covers the entire daemon, including its dependencies, and can contain sensitive details and substantial volume. Disable the override after diagnosis:
+
+```bash
+start-cli server set-trace false
+```
+
+Disabling restores the filter selected at daemon startup, including any explicit `RUST_LOG` settings. Restarting the daemon also clears the override. The command requires the same authentication as other server commands and changes no saved configuration.

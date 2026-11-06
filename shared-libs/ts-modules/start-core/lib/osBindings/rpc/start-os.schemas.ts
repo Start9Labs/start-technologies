@@ -1316,6 +1316,26 @@ export const SetServerHostnameParams: z.ZodObject<{
 }).meta({
   id: 'SetServerHostnameParams',
 })
+
+/**
+ * Controls the running daemon's process-wide trace override.
+ */
+export const SetTraceParams: z.ZodObject<{
+  /**
+   * Disabling restores the filter selected at daemon startup.
+   */
+  enabled: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  /**
+   * Disabling restores the filter selected at daemon startup.
+   */
+  enabled: z.boolean().meta({
+    description: 'Disabling restores the filter selected at daemon startup.',
+  }),
+}).meta({
+  id: 'SetTraceParams',
+  description: "Controls the running daemon's process-wide trace override.",
+})
 export const SetWifiEnabledParams: z.ZodObject<{ enabled: z.ZodBoolean }> =
   /* @__PURE__ */ object({ enabled: z.boolean() }).meta({
     id: 'SetWifiEnabledParams',
@@ -6713,6 +6733,10 @@ export const Api = {
         },
         'set-smtp': {
           _PARAMS: /* @__PURE__ */ SmtpValue,
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        'set-trace': {
+          _PARAMS: /* @__PURE__ */ SetTraceParams,
           _RETURN: /* @__PURE__ */ z.null(),
         },
         shutdown: {

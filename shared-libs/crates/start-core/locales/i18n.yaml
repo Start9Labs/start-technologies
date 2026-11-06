@@ -4965,6 +4965,13 @@ help.arg.tor-proxy-url:
   fr_FR: "URL du proxy SOCKS Tor"
   pl_PL: "URL proxy SOCKS Tor"
 
+help.arg.trace-enabled:
+  en_US: "Enable process-wide trace output; false restores the startup filter"
+  de_DE: "Prozessweite Trace-Ausgabe aktivieren; false stellt den Startfilter wieder her"
+  es_ES: "Activar la salida de traza de todo el proceso; false restaura el filtro de inicio"
+  fr_FR: "Activer les traces pour tout le processus ; false rétablit le filtre de démarrage"
+  pl_PL: "Włącz śledzenie dla całego procesu; false przywraca filtr z uruchomienia"
+
 help.arg.trust:
   en_US: "Install without requiring a trusted signer; signature and integrity checks remain mandatory"
   de_DE: "Ohne vertrauenswürdigen Unterzeichner installieren; Signatur- und Integritätsprüfungen bleiben erforderlich"
@@ -7524,6 +7531,13 @@ about.set-subnet-wan:
   es_ES: "Asignar la IP WAN que usa el tráfico de una subred"
   fr_FR: "Attribuer l'IP WAN qu'utilise le trafic d'un sous-réseau"
   pl_PL: "Przypisz adres IP WAN używany przez ruch podsieci"
+
+about.set-trace-logging:
+  en_US: "Set the running daemon's trace logging override"
+  de_DE: "Trace-Protokollierung für den laufenden Daemon überschreiben"
+  es_ES: "Cambiar el registro de traza del daemon en ejecución"
+  fr_FR: "Modifier la journalisation des traces du démon en cours d'exécution"
+  pl_PL: "Zmień ustawienie śledzenia uruchomionego demona"
 
 about.set-user-interface-password:
   en_US: "Set user interface password"

@@ -289,6 +289,11 @@ export type SetNameParamsInput = z.input<typeof schemas.SetNameParams>
 export type SetServerHostnameParamsInput = z.input<
   typeof schemas.SetServerHostnameParams
 >
+
+/**
+ * Controls the running daemon's process-wide trace override.
+ */
+export type SetTraceParamsInput = z.input<typeof schemas.SetTraceParams>
 export type SetWifiEnabledParamsInput = z.input<
   typeof schemas.SetWifiEnabledParams
 >

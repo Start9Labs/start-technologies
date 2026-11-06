@@ -11388,6 +11388,36 @@
     }
   },
   {
+    "name": "server.set-trace",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SetTraceParams": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Disabling restores the filter selected at daemon startup."
+            }
+          },
+          "required": ["enabled"],
+          "additionalProperties": true,
+          "description": "Controls the running daemon's process-wide trace override."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Disabling restores the filter selected at daemon startup."
+        }
+      },
+      "required": ["enabled"],
+      "additionalProperties": true,
+      "description": "Controls the running daemon's process-wide trace override."
+    }
+  },
+  {
     "name": "server.shutdown",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

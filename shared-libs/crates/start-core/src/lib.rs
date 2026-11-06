@@ -357,6 +357,13 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .with_about("about.display-os-logs"),
         )
         .subcommand(
+            "set-trace",
+            from_fn(system::trace::set_trace)
+                .no_display()
+                .with_about("about.set-trace-logging")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
             "kernel-logs",
             system::kernel_logs::<RpcContext>().with_about("about.display-kernel-logs"),
         )

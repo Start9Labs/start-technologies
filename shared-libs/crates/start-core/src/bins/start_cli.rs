@@ -75,6 +75,28 @@ fn no_shadowed_args_start_cli() {
 }
 
 #[test]
+fn trace_override_requires_an_explicit_boolean() {
+    for (value, expected) in [("true", true), ("false", false)] {
+        let matches = app()
+            .into_command()
+            .try_get_matches_from(["start-cli", "server", "set-trace", value])
+            .unwrap();
+        let params = matches
+            .subcommand_matches("server")
+            .unwrap()
+            .subcommand_matches("set-trace")
+            .unwrap();
+        assert_eq!(params.get_one::<bool>("enabled"), Some(&expected));
+    }
+    for args in [
+        vec!["start-cli", "server", "set-trace"],
+        vec!["start-cli", "server", "set-trace", "invalid"],
+    ] {
+        assert!(app().into_command().try_get_matches_from(args).is_err());
+    }
+}
+
+#[test]
 fn diagnostic_update_accepts_trust_without_an_ignored_registry_argument() {
     let matches = app()
         .into_command()

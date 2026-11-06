@@ -155,14 +155,25 @@ where
                                             .is_match(buf)
                                     })
                                 {
-                                    handle_http_on_https(stream).await.ok();
+                                    handle_http_on_https(stream)
+                                        .await
+                                        .inspect_err(|error| {
+                                            tracing::trace!(
+                                                ?error,
+                                                "HTTP redirect connection failed"
+                                            )
+                                        })
+                                        .ok();
 
                                     return Ok(None);
                                 } else {
                                     return Err(e).with_kind(ErrorKind::Network);
                                 }
                             }
-                            Err(_) => return Ok(None),
+                            Err(error) => {
+                                tracing::trace!(?error, "TLS ClientHello timed out");
+                                return Ok(None);
+                            }
                         };
 
                     // Phase 2: Resolve TLS config. `mid` stays in scope so a
@@ -205,7 +216,10 @@ where
                                             Box::pin(stream) as AcceptStream,
                                         ))
                                     }
-                                    Err(_) => None,
+                                    Err(error) => {
+                                        tracing::trace!(?error, "TLS handshake failed");
+                                        None
+                                    }
                                 },
                             );
                         }
@@ -226,6 +240,7 @@ where
                             )));
                         }
                         None => {
+                            tracing::trace!(?sni, "No TLS configuration for connection");
                             // Writes are buffered until the config settles;
                             // the alert has to reach the wire.
                             let _ = mid.io.stop_buffering();
