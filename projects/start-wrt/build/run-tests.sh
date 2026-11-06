@@ -6,6 +6,7 @@ source ./builder-alias.sh
 
 set -ea
 shopt -s expand_aliases
+ARCH=$(native_arch)
 
 PROFILE=${PROFILE:-release}
 if [ "${PROFILE}" = "release" ]; then

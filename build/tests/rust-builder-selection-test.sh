@@ -27,7 +27,15 @@ cat > "$scratch/bin/objdump" <<'MOCK'
 printf '%s\n' "$@" >> "$OBJDUMP_LOG"
 printf '00000000 <probe>:\n    0: addi a0, a0, 1\n'
 MOCK
-chmod +x "$scratch/bin/docker" "$scratch/bin/objdump"
+cat > "$scratch/bin/uname" <<'MOCK'
+#!/bin/bash
+if [ "$1" = -m ] && [ -n "${MOCK_UNAME_ARCH:-}" ]; then
+    printf '%s\n' "$MOCK_UNAME_ARCH"
+else
+    exec /usr/bin/uname "$@"
+fi
+MOCK
+chmod +x "$scratch/bin/docker" "$scratch/bin/objdump" "$scratch/bin/uname"
 
 assert_log_contains() {
     if ! grep -Fxq -- "$1" "$DOCKER_LOG"; then
@@ -75,9 +83,9 @@ for alias_file in build/builder-alias.sh projects/start-wrt/build/builder-alias.
     assert_log_contains "$custom"
 done
 
-for arch in x86_64 arm64 riscv64; do
+for arch in x86_64 aarch64 arm64; do
     : > "$DOCKER_LOG"
-    ARCH="$arch" START9_RVA23=1 bash -ec 'shopt -s expand_aliases; source projects/start-wrt/build/builder-alias.sh; eval "rust-zig-builder cargo --version"'
+    ARCH=riscv64 MOCK_UNAME_ARCH="$arch" START9_RVA23=1 bash -ec 'shopt -s expand_aliases; source projects/start-wrt/build/builder-alias.sh; ARCH=$(native_arch); eval "rust-zig-builder cargo --version"'
     assert_log_contains START9_RVA23=0
     assert_log_contains "PKG_CONFIG_SYSROOT_DIR=/opt/sysroot/${arch/arm64/aarch64}"
 done
@@ -85,8 +93,9 @@ done
 bindings=(projects/start-wrt/web/src/app/services/api/{bindings.ts,bindings.schemas.ts,events.ts,events.schemas.ts})
 for selected_image in "$image" "$custom"; do
     : > "$DOCKER_LOG"
-    RUST_BUILDER_IMAGE="$selected_image" bash projects/start-wrt/build/generate-bindings.sh "${bindings[@]}"
+    ARCH=riscv64 MOCK_UNAME_ARCH=arm64 RUST_BUILDER_IMAGE="$selected_image" bash projects/start-wrt/build/generate-bindings.sh "${bindings[@]}"
     assert_log_contains "$selected_image"
+    assert_log_contains PKG_CONFIG_SYSROOT_DIR=/opt/sysroot/aarch64
     assert_log_contains /workdir
     assert_log_contains START9_RVA23=0
     assert_log_contains cargo
@@ -132,8 +141,9 @@ if grep -Fxq buildx "$DOCKER_LOG"; then
 fi
 
 : > "$DOCKER_LOG"
-bash projects/start-wrt/build/run-tests.sh
+ARCH=riscv64 MOCK_UNAME_ARCH=x86_64 bash projects/start-wrt/build/run-tests.sh
 assert_log_contains "$image"
+assert_log_contains PKG_CONFIG_SYSROOT_DIR=/opt/sysroot/x86_64
 assert_log_contains startwrt-core
 assert_log_contains uciedit_macros
 

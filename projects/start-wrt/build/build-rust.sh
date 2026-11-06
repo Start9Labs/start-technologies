@@ -4,14 +4,14 @@ shopt -s expand_aliases
 
 cd "$(git rev-parse --show-toplevel)"
 
-ARCH=${ARCH:-riscv64}
-RUST_ARCH=${RUST_ARCH:-riscv64gc}
-PROFILE=${PROFILE:-release}
 PROJECT_DIR=projects/start-wrt
 source "$PROJECT_DIR/build/builder-alias.sh"
 
 trap 'rust-zig-builder sh -c "chown -R $UID:$UID target /usr/local/cargo 2>/dev/null || true"' EXIT
 
+ARCH=${ARCH:-riscv64}
+RUST_ARCH=${RUST_ARCH:-riscv64gc}
+PROFILE=${PROFILE:-release}
 if [ -z "$STARTWRT_GIT_HASH" ]; then
     # The UI compares this stamp to detect stale cached bundles.
     "$PROJECT_DIR/build/env/check-git-hash.sh" >/dev/null || true

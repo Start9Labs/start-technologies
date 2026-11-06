@@ -2,10 +2,14 @@
 
 RUST_BUILDER_IMAGE=$(RUST_BUILDER_IMAGE="${RUST_BUILDER_IMAGE:-}" "$(dirname "${BASH_SOURCE[0]}")/../../../build/rust-builder/image.sh")
 
-ARCH=${ARCH:-$(uname -m)}
-if [ "$ARCH" = arm64 ]; then
-  ARCH=aarch64
-fi
+native_arch() {
+  local arch
+  arch=$(uname -m)
+  if [ "$arch" = arm64 ]; then
+    arch=aarch64
+  fi
+  printf '%s\n' "$arch"
+}
 
 USE_TTY=
 if tty -s; then

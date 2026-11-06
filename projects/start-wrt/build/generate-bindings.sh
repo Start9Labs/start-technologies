@@ -4,6 +4,7 @@ shopt -s expand_aliases
 
 cd "$(git rev-parse --show-toplevel)"
 source projects/start-wrt/build/builder-alias.sh
+ARCH=$(native_arch)
 
 trap 'rust-zig-builder chown -R "$UID:$UID" target /usr/local/cargo "$@"' EXIT
 
