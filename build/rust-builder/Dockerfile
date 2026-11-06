@@ -64,3 +64,4 @@ COPY --from=sysroot_riscv64 / /opt/sysroot/riscv64/
 COPY verify.sh /usr/local/libexec/start9/verify-rust-builder
 COPY --chmod=755 entrypoint.sh /usr/local/libexec/start9/rust-builder-entrypoint
 ENTRYPOINT ["/usr/local/libexec/start9/rust-builder-entrypoint"]
+CMD ["bash"]
