@@ -155,12 +155,17 @@ async fn live_medium_disk() -> Result<Option<PathBuf>, Error> {
         false,
     )
     .await?;
+    Ok(containing_disk(&sys).await)
+}
+
+/// The `/dev` path of the whole disk owning a canonical sysfs block device directory.
+async fn containing_disk(sys: &Path) -> Option<PathBuf> {
     let disk = if tokio::fs::metadata(sys.join("partition")).await.is_ok() {
-        sys.parent().unwrap_or(&sys)
+        sys.parent().unwrap_or(sys)
     } else {
-        &sys
+        sys
     };
-    Ok(disk.file_name().map(|d| Path::new("/dev").join(d)))
+    disk.file_name().map(|d| Path::new("/dev").join(d))
 }
 
 /// Every disk StartOS may be installed to or provision as a data drive.
@@ -881,6 +886,23 @@ mod tests {
 
     use super::*;
     use crate::disk::util::PartitionInfo;
+
+    #[tokio::test]
+    async fn containing_disk_resolves_partitions_to_their_disk() {
+        let root = tempfile::tempdir().unwrap();
+        let partition = root.path().join("nvme0n1/nvme0n1p1");
+        std::fs::create_dir_all(&partition).unwrap();
+        std::fs::write(partition.join("partition"), "1\n").unwrap();
+
+        let disk = Path::new("/dev/nvme0n1");
+        assert_eq!(containing_disk(&partition).await.as_deref(), Some(disk));
+        assert_eq!(
+            containing_disk(&root.path().join("nvme0n1"))
+                .await
+                .as_deref(),
+            Some(disk)
+        );
+    }
 
     fn partition(logicalname: &str, guid: Option<&str>) -> PartitionInfo {
         partition_with_stable(logicalname, logicalname, guid)
