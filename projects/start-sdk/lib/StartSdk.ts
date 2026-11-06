@@ -877,14 +877,14 @@ export class StartSdk<Manifest extends T.SDKManifest> {
        * Built-in trigger strategies that control how often a health check polls.
        *
        * Pass any of these to the `trigger` field on a {@link Ready} config.
-       * If omitted, health checks use `defaultTrigger`, except that a daemon's
-       * `loading` or `waiting: true` before its first `success` backs off from 1 s,
-       * doubling to 30 s.
+       * If omitted, health checks use `defaultTrigger`.
        */
       trigger: {
         /**
          * Every 1 s while `starting` or `failure`; every 30 s while `success`,
-         * `loading`, `disabled`, or `starting` with `waiting: true`.
+         * `loading`, `disabled`, or `starting` with `waiting: true`, except that
+         * `loading` or `waiting: true` before the first `success` backs off from
+         * 1 s, doubling to 30 s.
          */
         defaultTrigger,
         /** Fixed interval between checks. Use for a simple, constant polling rate. */
