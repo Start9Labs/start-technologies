@@ -16,7 +16,7 @@ import { pauseFor } from '@start9labs/shared'
 
 const RESTART_TIMEOUT_MS = 60_000
 
-@Injectable({ providedIn: 'root' })
+@Injectable()
 export class ProfilesService extends FormService<SecurityProfile[]> {
   private readonly api = inject(ApiService)
   private readonly notifications = inject(TuiNotificationMiddleService)
