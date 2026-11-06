@@ -89,9 +89,7 @@ impl StartOSLogger {
             .with_line_number(true)
             .with_file(true)
             .with_target(true)
-            // 0.3.20's ANSI-injection guard (tokio-rs/tracing#3368) escapes ESC
-            // unconditionally, mangling our colored logs (#3369); opt out — these
-            // are our own trusted logs. Toggle added in 0.3.23 (#3484).
+            // Colored log messages contain ANSI escapes.
             .with_ansi_sanitization(false)
             .with_filter(filter);
 
