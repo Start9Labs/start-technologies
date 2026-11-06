@@ -69,13 +69,17 @@ printf '%s\n' \
   '}' > build.rs
 cargo generate-lockfile --offline
 
+verify_rva23_profile() {
+  readelf -A "$1" > "$scratch/isa"
+  for feature in v1p0 zvbb1p0 zicond1p0 supm1p0; do
+    grep -q "_$feature" "$scratch/isa"
+  done
+}
+
 env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
   -u CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS \
   cargo zigbuild --locked --target riscv64gc-unknown-linux-musl --target-dir "$scratch/rva23"
-readelf -A "$scratch"/rva23/riscv64gc-unknown-linux-musl/debug/build/builder-probe-*/out/probe.o > "$scratch/isa"
-for feature in v1p0 zvbb1p0 zicond1p0 supm1p0; do
-  grep -q "_$feature" "$scratch/isa"
-done
+verify_rva23_profile "$scratch"/rva23/riscv64gc-unknown-linux-musl/debug/build/builder-probe-*/out/probe.o
 
 env -u CARGO_ENCODED_RUSTFLAGS -u CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS \
   RUSTFLAGS='-C target-cpu=sifive-u74' \
@@ -85,6 +89,26 @@ if grep -q '_v[0-9]' "$scratch/isa"; then
   printf 'Explicit scalar CPU unexpectedly enables vector instructions\n' >&2
   exit 1
 fi
+
+entrypoint=/usr/local/libexec/start9/rust-builder-entrypoint
+env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+  -u CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS -u START9_RVA23 \
+  "$entrypoint" cargo zigbuild --locked --target riscv64gc-unknown-linux-musl --target-dir "$scratch/rust-default"
+verify_rva23_profile "$scratch/rust-default/riscv64gc-unknown-linux-musl/debug/builder-probe"
+
+env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+  -u CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS START9_RVA23=0 \
+  "$entrypoint" cargo zigbuild --locked --target riscv64gc-unknown-linux-musl --target-dir "$scratch/no-rva23"
+for object in \
+  "$scratch/no-rva23/riscv64gc-unknown-linux-musl/debug/builder-probe" \
+  "$scratch"/no-rva23/riscv64gc-unknown-linux-musl/debug/build/builder-probe-*/out/probe.o \
+  "$scratch"/no-rva23/riscv64gc-unknown-linux-musl/debug/build/builder-probe-*/out/cmake/CMakeFiles/cmake_probe.dir/probe.c.o; do
+  readelf -A "$object" > "$scratch/isa"
+  if grep -Eq '_v[0-9]|_zicond[0-9]|_supm[0-9]' "$scratch/isa"; then
+    printf 'RVA23 opt-out unexpectedly enables RVA23/vector features in %s\n' "$object" >&2
+    exit 1
+  fi
+done
 
 host_target="$host_arch-unknown-linux-musl"
 cargo zigbuild --locked --target "$host_target" --target-dir "$scratch/native"

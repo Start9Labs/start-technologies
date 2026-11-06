@@ -33,6 +33,24 @@ assert_log_contains() {
     fi
 }
 
+entrypoint="$repo_root/build/rust-builder/entrypoint.sh"
+profile_flags=CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS
+default_flags=$(env -u START9_RVA23 -u "$profile_flags" bash "$entrypoint" printenv "$profile_flags")
+[[ "$default_flags" == *'target-cpu=generic-rv64'* ]]
+[[ "$default_flags" == *'+v,'* ]]
+[[ "$default_flags" == *'+supm'* ]]
+test "$(env -u "$profile_flags" START9_RVA23=1 bash "$entrypoint" printenv "$profile_flags")" = "$default_flags"
+env -u "$profile_flags" START9_RVA23=0 bash "$entrypoint" bash -c 'test ! -v "$1"' -- "$profile_flags"
+for profile in 0 1; do
+    for flags in '' '-C target-cpu=sifive-u74'; do
+        test "$(env START9_RVA23="$profile" "$profile_flags=$flags" bash "$entrypoint" printenv "$profile_flags")" = "$flags"
+    done
+done
+test "$(bash "$entrypoint" printf '%s\n' 'argument with spaces' '*')" = $'argument with spaces\n*'
+status=0
+bash "$entrypoint" bash -c 'exit 23' || status=$?
+test "$status" = 23
+
 image=$(./build/rust-builder/image.sh)
 if ! [[ "$image" =~ ^ghcr\.io/start9labs/cargo-zigbuild@sha256:[0-9a-f]{64}$ ]]; then
     printf 'Builder image is not pinned: %s\n' "$image" >&2
@@ -115,4 +133,4 @@ RISCV_OBJDUMP="$scratch/bin/objdump" bash projects/start-wrt/build/verify-isa.sh
 test ! -s "$DOCKER_LOG"
 grep -Fxq -- "$scratch/probe.o" "$OBJDUMP_LOG"
 
-printf 'Builder selection, overrides, derived images, and K1 disassembly checks passed.\n'
+printf 'Builder selection, RVA23 opt-out, overrides, derived images, and K1 disassembly checks passed.\n'

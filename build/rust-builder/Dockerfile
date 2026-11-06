@@ -28,7 +28,6 @@ RUN previous=$(rustup show active-toolchain | awk '{print $1}') && \
 RUN apt-get update && \
     apt-get install -y --no-install-recommends cmake lld rsync && \
     rm -rf /var/lib/apt/lists/*
-ENV CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-cpu=generic-rv64 -C target-feature=+v,+zicsr,+zifencei,+zicntr,+zihpm,+ziccif,+ziccamoa,+zicclsm,+ziccrse,+za64rs,+zihintpause,+zic64b,+zicbom,+zicbop,+zicboz,+zba,+zbb,+zbs,+zfhmin,+zkt,+zvfhmin,+zvbb,+zvkt,+zihintntl,+zicond,+zimop,+zcmop,+zcb,+zfa,+zawrs,+supm"
 
 FROM toolchain AS builder
 WORKDIR /build/cargo-zigbuild
@@ -63,3 +62,5 @@ COPY --from=sysroot_amd64 / /opt/sysroot/x86_64/
 COPY --from=sysroot_arm64 / /opt/sysroot/aarch64/
 COPY --from=sysroot_riscv64 / /opt/sysroot/riscv64/
 COPY verify.sh /usr/local/libexec/start9/verify-rust-builder
+COPY --chmod=755 entrypoint.sh /usr/local/libexec/start9/rust-builder-entrypoint
+ENTRYPOINT ["/usr/local/libexec/start9/rust-builder-entrypoint"]
