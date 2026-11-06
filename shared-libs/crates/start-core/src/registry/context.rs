@@ -520,3 +520,7 @@ pub(crate) async fn test_context(datadir: PathBuf, uploader: AnyVerifyingKey) ->
 #[cfg(test)]
 #[path = "package/ingestion_tests.rs"]
 mod ingestion_tests;
+
+#[cfg(test)]
+#[path = "os/asset/sign_tests.rs"]
+mod os_asset_sign_tests;

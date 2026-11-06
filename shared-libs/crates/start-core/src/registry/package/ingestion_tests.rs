@@ -43,7 +43,7 @@ fn larger_bound_fixture() -> (Vec<u8>, MerkleArchiveCommitment) {
     (bytes, commitment)
 }
 
-use super::test_context as context;
+pub(super) use super::test_context as context;
 
 type Requests = Arc<Mutex<Vec<Option<(usize, usize)>>>>;
 
