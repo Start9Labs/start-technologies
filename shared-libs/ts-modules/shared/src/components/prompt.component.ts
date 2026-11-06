@@ -1,8 +1,8 @@
 import { Component } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import { TuiButton, TuiDialogContext, TuiIcon, TuiInput } from '@taiga-ui/core'
-import { TuiPassword } from '@taiga-ui/kit'
+import { TuiButton, TuiDialogContext, TuiInput } from '@taiga-ui/core'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
+
 import { i18nPipe } from '../i18n/i18n.pipe'
 import { i18nKey } from '../i18n/i18n.providers'
 
@@ -26,12 +26,21 @@ import { i18nKey } from '../i18n/i18n.providers'
         autocapitalize="off"
         [(ngModel)]="value"
         [placeholder]="options.placeholder || ''"
-        [type]="options.useMask ? 'password' : 'text'"
+        [type]="options.useMask && masked ? 'password' : 'text'"
         [autocomplete]="options.useMask ? 'off' : ''"
         (keyup.enter)="submit(value.trim())"
       />
       @if (options.useMask) {
-        <tui-icon tuiPassword />
+        <button
+          tuiIconButton
+          type="button"
+          size="xs"
+          appearance="icon"
+          [iconStart]="masked ? '@tui.eye' : '@tui.eye-off'"
+          (click)="masked = !masked"
+        >
+          {{ (masked ? 'Show password' : 'Hide password') | i18n }}
+        </button>
       }
     </tui-textfield>
     @if (error) {
@@ -60,7 +69,7 @@ import { i18nKey } from '../i18n/i18n.providers'
       color: var(--tui-status-negative);
     }
   `,
-  imports: [FormsModule, TuiButton, TuiIcon, TuiInput, TuiPassword, i18nPipe],
+  imports: [FormsModule, TuiButton, TuiInput, i18nPipe],
 })
 export class PromptModal {
   private readonly context =
@@ -68,6 +77,7 @@ export class PromptModal {
 
   value = this.options.initialValue || ''
   error = ''
+  masked = true
 
   get options(): PromptOptions {
     return this.context.data

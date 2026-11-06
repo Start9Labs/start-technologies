@@ -799,6 +799,7 @@ mod test {
         DatabaseModel::from(imbl_value::json!({
             "public": {
                 "ui": {},
+                "scheduledBackups": imbl_value::to_value(&crate::backup::scheduled::ScheduledBackupState::default()).unwrap(),
                 "serverInfo": {
                     "hostname": "server",
                     "network": {

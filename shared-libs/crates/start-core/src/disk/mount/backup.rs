@@ -16,14 +16,16 @@ use crate::disk::BACKUP_DIR_NAME;
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::filesystem::backupfs::BackupFS;
 use crate::disk::mount::guard::SubPath;
-use crate::disk::util::BackupUnencryptedMetadata;
+use crate::disk::util::{
+    BackupUnencryptedMetadata, MAX_BACKUP_RECOVERY_METADATA_BYTES, MAX_BACKUP_TARGET_METADATA_BYTES,
+};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::util::crypto::{unwrap_backup_key, wrap_backup_key};
 use crate::util::io::AtomicFile;
-use crate::util::serde::IoFormat;
+use crate::util::serde::{IoFormat, read_json_file_bounded};
 
-fn backup_directory(root: &Path, server_id: &str) -> Result<PathBuf, Error> {
+pub(crate) fn backup_directory(root: &Path, server_id: &str) -> Result<PathBuf, Error> {
     let mut components = Path::new(server_id).components();
     if !matches!(components.next(), Some(Component::Normal(name)) if name == Path::new(server_id).as_os_str())
         || components.next().is_some()
@@ -73,8 +75,14 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
         let unencrypted_metadata_path = backup_dir.join("unencrypted-metadata.json");
         let crypt_path = backup_dir.join("crypt");
         let mut unencrypted_metadata: BackupUnencryptedMetadata =
-            match tokio::fs::read(&unencrypted_metadata_path).await {
-                Ok(bytes) => IoFormat::Json.from_slice(&bytes)?,
+            match tokio::fs::metadata(&unencrypted_metadata_path).await {
+                Ok(_) => {
+                    read_json_file_bounded(
+                        &unencrypted_metadata_path,
+                        MAX_BACKUP_RECOVERY_METADATA_BYTES,
+                    )
+                    .await?
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Default::default(),
                 Err(e) => {
                     return Err(e).with_ctx(|_| {
@@ -135,19 +143,23 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
     ) -> Result<(), Error> {
         let unencrypted_metadata_path =
             backup_directory(backup_disk_path, server_id)?.join("unencrypted-metadata.json");
-        let bytes = match tokio::fs::read(&unencrypted_metadata_path).await {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => {
-                return Err(e).with_ctx(|_| {
+        match tokio::fs::metadata(&unencrypted_metadata_path).await {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(error).with_ctx(|_| {
                     (
                         crate::ErrorKind::Filesystem,
                         unencrypted_metadata_path.display().to_string(),
                     )
                 });
             }
-        };
-        let unencrypted_metadata: BackupUnencryptedMetadata = IoFormat::Json.from_slice(&bytes)?;
+        }
+        let unencrypted_metadata: BackupUnencryptedMetadata = read_json_file_bounded(
+            &unencrypted_metadata_path,
+            MAX_BACKUP_RECOVERY_METADATA_BYTES,
+        )
+        .await?;
         if let Some(hash) = unencrypted_metadata.password_hash.as_ref() {
             check_password(hash, password)?;
         }
@@ -210,12 +222,7 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
 
         let metadata_path = encrypted_guard.path().join("metadata.json");
         let metadata: BackupInfo = if tokio::fs::metadata(&metadata_path).await.is_ok() {
-            IoFormat::Json.from_slice(&tokio::fs::read(&metadata_path).await.with_ctx(|_| {
-                (
-                    crate::ErrorKind::Filesystem,
-                    metadata_path.display().to_string(),
-                )
-            })?)?
+            read_json_file_bounded(&metadata_path, MAX_BACKUP_TARGET_METADATA_BYTES).await?
         } else {
             Default::default()
         };

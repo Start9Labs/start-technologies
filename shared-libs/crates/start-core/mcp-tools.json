@@ -283,6 +283,24 @@
     }
   },
   {
+    "name": "backup.activity.list",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
+    }
+  },
+  {
     "name": "backup.create",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -333,6 +351,2737 @@
       },
       "required": ["targetId", "password"],
       "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.history.delete-archived-snapshots",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "DeleteArchivedSnapshotsParams": {
+          "type": "object",
+          "properties": {
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "snapshotIds": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Guid" }
+            },
+            "password": { "type": "string" },
+            "oldPassword": {
+              "description": "Password that encrypted the existing backup location.",
+              "type": ["string", "null"]
+            }
+          },
+          "required": ["targetId", "packageId", "snapshotIds", "password"],
+          "additionalProperties": true
+        },
+        "BackupTargetId": { "type": "string" },
+        "PackageId": { "type": "string" },
+        "Guid": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "packageId": { "$ref": "#/$defs/PackageId" },
+        "snapshotIds": { "type": "array", "items": { "$ref": "#/$defs/Guid" } },
+        "password": { "type": "string" },
+        "oldPassword": {
+          "description": "Password that encrypted the existing backup location.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["targetId", "packageId", "snapshotIds", "password"],
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "ServiceTargetHistory": {
+          "type": "object",
+          "properties": {
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "targetInstanceId": { "type": "string" },
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "timezone": { "type": "string" },
+            "policy": { "$ref": "#/$defs/RetentionPolicy" },
+            "feedingJobs": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Guid" }
+            },
+            "snapshots": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/ServiceSnapshot" }
+            },
+            "archived": { "type": "boolean" }
+          },
+          "required": [
+            "targetId",
+            "targetInstanceId",
+            "packageId",
+            "timezone",
+            "policy",
+            "feedingJobs",
+            "snapshots",
+            "archived"
+          ],
+          "additionalProperties": true
+        },
+        "BackupTargetId": { "type": "string" },
+        "PackageId": { "type": "string" },
+        "RetentionPolicy": {
+          "type": "object",
+          "properties": {
+            "tiers": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/RetentionTier" },
+              "description": "An empty tier list is the latest-only policy."
+            }
+          },
+          "required": ["tiers"],
+          "additionalProperties": true
+        },
+        "RetentionTier": {
+          "type": "object",
+          "properties": {
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Width of one local-time retention bucket."
+            },
+            "coverageSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "How far back from the newest successful snapshot this tier covers."
+            }
+          },
+          "required": ["intervalSeconds", "coverageSeconds"],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" },
+        "ServiceSnapshot": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/Guid" },
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "packageVersion": { "type": "string" },
+            "source": { "$ref": "#/$defs/BackupSource" },
+            "jobId": { "$ref": "#/$defs/Guid" },
+            "jobName": { "type": "string" },
+            "runId": { "$ref": "#/$defs/Guid" },
+            "completedAt": { "type": "string" },
+            "logicalSize": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "physicalSize": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "changedBytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "measuredAt": { "type": "string" },
+            "archived": { "type": "boolean" }
+          },
+          "required": [
+            "id",
+            "packageId",
+            "packageVersion",
+            "source",
+            "jobId",
+            "jobName",
+            "runId",
+            "completedAt",
+            "logicalSize",
+            "physicalSize",
+            "changedBytes",
+            "measuredAt",
+            "archived"
+          ],
+          "additionalProperties": true
+        },
+        "BackupSource": { "type": "string", "enum": ["manual", "scheduled"] }
+      },
+      "type": "object",
+      "properties": {
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "targetInstanceId": { "type": "string" },
+        "packageId": { "$ref": "#/$defs/PackageId" },
+        "timezone": { "type": "string" },
+        "policy": { "$ref": "#/$defs/RetentionPolicy" },
+        "feedingJobs": { "type": "array", "items": { "$ref": "#/$defs/Guid" } },
+        "snapshots": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ServiceSnapshot" }
+        },
+        "archived": { "type": "boolean" }
+      },
+      "required": [
+        "targetId",
+        "targetInstanceId",
+        "packageId",
+        "timezone",
+        "policy",
+        "feedingJobs",
+        "snapshots",
+        "archived"
+      ],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.history.delete-archived-snapshots-bulk",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "DeleteArchivedSnapshotsBulkParams": {
+          "type": "object",
+          "properties": {
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "snapshots": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/ArchivedSnapshotSelection" }
+            },
+            "password": { "type": "string" },
+            "oldPassword": {
+              "description": "Password that encrypted the existing backup location.",
+              "type": ["string", "null"]
+            }
+          },
+          "required": ["targetId", "snapshots", "password"],
+          "additionalProperties": true
+        },
+        "BackupTargetId": { "type": "string" },
+        "ArchivedSnapshotSelection": {
+          "type": "object",
+          "properties": {
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "snapshotIds": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Guid" }
+            }
+          },
+          "required": ["packageId", "snapshotIds"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" },
+        "Guid": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "snapshots": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ArchivedSnapshotSelection" }
+        },
+        "password": { "type": "string" },
+        "oldPassword": {
+          "description": "Password that encrypted the existing backup location.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["targetId", "snapshots", "password"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.history.discover",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/DiscoverScheduledBackupsParams" }
+      ],
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "DiscoverScheduledBackupsParams": {
+          "type": "object",
+          "properties": {
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "serverId": { "type": "string" },
+            "password": { "type": "string" }
+          },
+          "required": ["targetId", "serverId", "password"],
+          "additionalProperties": true
+        },
+        "BackupTargetId": { "type": "string" }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "backup.history.list",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
+    }
+  },
+  {
+    "name": "backup.history.refresh",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RefreshScheduledBackupHistoriesParams": {
+          "type": "object",
+          "properties": { "targetId": { "$ref": "#/$defs/BackupTargetId" } },
+          "required": ["targetId"],
+          "additionalProperties": true
+        },
+        "BackupTargetId": { "type": "string" }
+      },
+      "type": "object",
+      "properties": { "targetId": { "$ref": "#/$defs/BackupTargetId" } },
+      "required": ["targetId"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.job.create",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "CreateBackupJobParams": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "services": { "$ref": "#/$defs/BackupServiceScope" },
+            "schedule": { "$ref": "#/$defs/Schedule" },
+            "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+            "retentionOverrides": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+            },
+            "password": { "$ref": "#/$defs/PasswordType" },
+            "oldPassword": {
+              "description": "Password that encrypted the existing backup location.",
+              "anyOf": [{ "$ref": "#/$defs/PasswordType" }, { "type": "null" }]
+            },
+            "enabled": { "type": "boolean" },
+            "runNow": {
+              "description": "Queue the job's first run after creation.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "name",
+            "targetId",
+            "services",
+            "schedule",
+            "defaultRetention",
+            "retentionOverrides",
+            "password"
+          ],
+          "additionalProperties": true
+        },
+        "BackupTargetId": { "type": "string" },
+        "BackupServiceScope": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "type": { "type": "string", "const": "all" } },
+              "required": ["type"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "allExcept" },
+                "excludedPackageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                }
+              },
+              "required": ["type", "excludedPackageIds"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "selected" },
+                "packageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                },
+                "includeSystem": { "type": ["boolean", "null"] }
+              },
+              "required": ["type", "packageIds"]
+            }
+          ]
+        },
+        "PackageId": { "type": "string" },
+        "Schedule": {
+          "type": "object",
+          "properties": {
+            "cron": {
+              "type": "string",
+              "description": "Validated five-field cron expression."
+            },
+            "timezone": {
+              "type": "string",
+              "description": "Selected IANA timezone."
+            }
+          },
+          "required": ["cron", "timezone"],
+          "additionalProperties": true,
+          "description": "A validated five-field cron schedule tied to an IANA timezone."
+        },
+        "RetentionPolicy": {
+          "type": "object",
+          "properties": {
+            "tiers": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/RetentionTier" },
+              "description": "An empty tier list is the latest-only policy."
+            }
+          },
+          "required": ["tiers"],
+          "additionalProperties": true
+        },
+        "RetentionTier": {
+          "type": "object",
+          "properties": {
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Width of one local-time retention bucket."
+            },
+            "coverageSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "How far back from the newest successful snapshot this tier covers."
+            }
+          },
+          "required": ["intervalSeconds", "coverageSeconds"],
+          "additionalProperties": true
+        },
+        "PasswordType": {
+          "anyOf": [{ "$ref": "#/$defs/EncryptedWire" }, { "type": "string" }]
+        },
+        "EncryptedWire": {
+          "type": "object",
+          "properties": { "encrypted": {} },
+          "required": ["encrypted"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "services": { "$ref": "#/$defs/BackupServiceScope" },
+        "schedule": { "$ref": "#/$defs/Schedule" },
+        "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+        "retentionOverrides": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+        },
+        "password": { "$ref": "#/$defs/PasswordType" },
+        "oldPassword": {
+          "description": "Password that encrypted the existing backup location.",
+          "anyOf": [{ "$ref": "#/$defs/PasswordType" }, { "type": "null" }]
+        },
+        "enabled": { "type": "boolean" },
+        "runNow": {
+          "description": "Queue the job's first run after creation.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "targetId",
+        "services",
+        "schedule",
+        "defaultRetention",
+        "retentionOverrides",
+        "password"
+      ],
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "BackupJob": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/Guid" },
+            "name": { "type": "string" },
+            "enabled": { "type": "boolean" },
+            "pause": {
+              "anyOf": [
+                { "$ref": "#/$defs/BackupJobPause" },
+                { "type": "null" }
+              ]
+            },
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "targetInstanceId": { "type": "string" },
+            "services": { "$ref": "#/$defs/BackupServiceScope" },
+            "schedule": { "$ref": "#/$defs/Schedule" },
+            "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+            "retentionOverrides": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+            },
+            "status": { "$ref": "#/$defs/BackupJobStatus" },
+            "createdAt": { "type": "string" },
+            "updatedAt": { "type": "string" }
+          },
+          "required": [
+            "id",
+            "name",
+            "enabled",
+            "pause",
+            "targetId",
+            "targetInstanceId",
+            "services",
+            "schedule",
+            "defaultRetention",
+            "retentionOverrides",
+            "status",
+            "createdAt",
+            "updatedAt"
+          ],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" },
+        "BackupJobPause": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "reason": { "type": "string", "const": "user" } },
+              "required": ["reason"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": { "type": "string", "const": "targetUnavailable" },
+                "failures": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["reason", "failures"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string",
+                  "const": "targetIdentityMismatch"
+                }
+              },
+              "required": ["reason"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": { "type": "string", "const": "targetUnreadable" }
+              },
+              "required": ["reason"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string",
+                  "const": "reauthenticationRequired"
+                }
+              },
+              "required": ["reason"],
+              "additionalProperties": true
+            }
+          ]
+        },
+        "BackupTargetId": { "type": "string" },
+        "BackupServiceScope": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "type": { "type": "string", "const": "all" } },
+              "required": ["type"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "allExcept" },
+                "excludedPackageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                }
+              },
+              "required": ["type", "excludedPackageIds"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "selected" },
+                "packageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                },
+                "includeSystem": { "type": ["boolean", "null"] }
+              },
+              "required": ["type", "packageIds"]
+            }
+          ]
+        },
+        "PackageId": { "type": "string" },
+        "Schedule": {
+          "type": "object",
+          "properties": {
+            "cron": {
+              "type": "string",
+              "description": "Validated five-field cron expression."
+            },
+            "timezone": {
+              "type": "string",
+              "description": "Selected IANA timezone."
+            }
+          },
+          "required": ["cron", "timezone"],
+          "additionalProperties": true,
+          "description": "A validated five-field cron schedule tied to an IANA timezone."
+        },
+        "RetentionPolicy": {
+          "type": "object",
+          "properties": {
+            "tiers": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/RetentionTier" },
+              "description": "An empty tier list is the latest-only policy."
+            }
+          },
+          "required": ["tiers"],
+          "additionalProperties": true
+        },
+        "RetentionTier": {
+          "type": "object",
+          "properties": {
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Width of one local-time retention bucket."
+            },
+            "coverageSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "How far back from the newest successful snapshot this tier covers."
+            }
+          },
+          "required": ["intervalSeconds", "coverageSeconds"],
+          "additionalProperties": true
+        },
+        "BackupJobStatus": {
+          "type": "object",
+          "properties": {
+            "lastScheduledAt": { "type": ["string", "null"] },
+            "lastAttemptedAt": { "type": ["string", "null"] },
+            "lastSucceededAt": { "type": ["string", "null"] },
+            "nextRunAt": { "type": ["string", "null"] },
+            "runRequested": {
+              "description": "A durable one-shot request consumed once the backup coordinator is free.",
+              "type": "boolean"
+            },
+            "consecutiveFailures": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "lastResult": {
+              "anyOf": [
+                { "$ref": "#/$defs/BackupRunState" },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": [
+            "lastScheduledAt",
+            "lastAttemptedAt",
+            "lastSucceededAt",
+            "nextRunAt",
+            "runRequested",
+            "consecutiveFailures",
+            "lastResult"
+          ],
+          "additionalProperties": true
+        },
+        "BackupRunState": {
+          "type": "string",
+          "enum": ["running", "succeeded", "partiallyFailed", "failed"]
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/Guid" },
+        "name": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "pause": {
+          "anyOf": [{ "$ref": "#/$defs/BackupJobPause" }, { "type": "null" }]
+        },
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "targetInstanceId": { "type": "string" },
+        "services": { "$ref": "#/$defs/BackupServiceScope" },
+        "schedule": { "$ref": "#/$defs/Schedule" },
+        "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+        "retentionOverrides": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+        },
+        "status": { "$ref": "#/$defs/BackupJobStatus" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": [
+        "id",
+        "name",
+        "enabled",
+        "pause",
+        "targetId",
+        "targetInstanceId",
+        "services",
+        "schedule",
+        "defaultRetention",
+        "retentionOverrides",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.job.delete",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "DeleteBackupJobParams": {
+          "type": "object",
+          "properties": { "id": { "$ref": "#/$defs/Guid" } },
+          "required": ["id"],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" }
+      },
+      "type": "object",
+      "properties": { "id": { "$ref": "#/$defs/Guid" } },
+      "required": ["id"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.job.delete-with-backups",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "DeleteBackupJobWithBackupsParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/Guid" },
+            "password": { "type": "string" },
+            "oldPassword": { "type": ["string", "null"] }
+          },
+          "required": ["id", "password"],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/Guid" },
+        "password": { "type": "string" },
+        "oldPassword": { "type": ["string", "null"] }
+      },
+      "required": ["id", "password"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.job.list",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
+    }
+  },
+  {
+    "name": "backup.job.reassign-target",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/ReassignBackupTargetParams" }
+      ],
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "ReassignBackupTargetParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/Guid" },
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "password": { "$ref": "#/$defs/PasswordType" },
+            "oldPassword": {
+              "anyOf": [{ "$ref": "#/$defs/PasswordType" }, { "type": "null" }]
+            },
+            "waitForSchedule": { "type": "boolean" }
+          },
+          "required": ["id", "targetId", "password"],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" },
+        "BackupTargetId": { "type": "string" },
+        "PasswordType": {
+          "anyOf": [{ "$ref": "#/$defs/EncryptedWire" }, { "type": "string" }]
+        },
+        "EncryptedWire": {
+          "type": "object",
+          "properties": { "encrypted": {} },
+          "required": ["encrypted"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object"
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "BackupJob": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/Guid" },
+            "name": { "type": "string" },
+            "enabled": { "type": "boolean" },
+            "pause": {
+              "anyOf": [
+                { "$ref": "#/$defs/BackupJobPause" },
+                { "type": "null" }
+              ]
+            },
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "targetInstanceId": { "type": "string" },
+            "services": { "$ref": "#/$defs/BackupServiceScope" },
+            "schedule": { "$ref": "#/$defs/Schedule" },
+            "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+            "retentionOverrides": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+            },
+            "status": { "$ref": "#/$defs/BackupJobStatus" },
+            "createdAt": { "type": "string" },
+            "updatedAt": { "type": "string" }
+          },
+          "required": [
+            "id",
+            "name",
+            "enabled",
+            "pause",
+            "targetId",
+            "targetInstanceId",
+            "services",
+            "schedule",
+            "defaultRetention",
+            "retentionOverrides",
+            "status",
+            "createdAt",
+            "updatedAt"
+          ],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" },
+        "BackupJobPause": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "reason": { "type": "string", "const": "user" } },
+              "required": ["reason"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": { "type": "string", "const": "targetUnavailable" },
+                "failures": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["reason", "failures"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string",
+                  "const": "targetIdentityMismatch"
+                }
+              },
+              "required": ["reason"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": { "type": "string", "const": "targetUnreadable" }
+              },
+              "required": ["reason"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string",
+                  "const": "reauthenticationRequired"
+                }
+              },
+              "required": ["reason"],
+              "additionalProperties": true
+            }
+          ]
+        },
+        "BackupTargetId": { "type": "string" },
+        "BackupServiceScope": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "type": { "type": "string", "const": "all" } },
+              "required": ["type"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "allExcept" },
+                "excludedPackageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                }
+              },
+              "required": ["type", "excludedPackageIds"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "selected" },
+                "packageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                },
+                "includeSystem": { "type": ["boolean", "null"] }
+              },
+              "required": ["type", "packageIds"]
+            }
+          ]
+        },
+        "PackageId": { "type": "string" },
+        "Schedule": {
+          "type": "object",
+          "properties": {
+            "cron": {
+              "type": "string",
+              "description": "Validated five-field cron expression."
+            },
+            "timezone": {
+              "type": "string",
+              "description": "Selected IANA timezone."
+            }
+          },
+          "required": ["cron", "timezone"],
+          "additionalProperties": true,
+          "description": "A validated five-field cron schedule tied to an IANA timezone."
+        },
+        "RetentionPolicy": {
+          "type": "object",
+          "properties": {
+            "tiers": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/RetentionTier" },
+              "description": "An empty tier list is the latest-only policy."
+            }
+          },
+          "required": ["tiers"],
+          "additionalProperties": true
+        },
+        "RetentionTier": {
+          "type": "object",
+          "properties": {
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Width of one local-time retention bucket."
+            },
+            "coverageSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "How far back from the newest successful snapshot this tier covers."
+            }
+          },
+          "required": ["intervalSeconds", "coverageSeconds"],
+          "additionalProperties": true
+        },
+        "BackupJobStatus": {
+          "type": "object",
+          "properties": {
+            "lastScheduledAt": { "type": ["string", "null"] },
+            "lastAttemptedAt": { "type": ["string", "null"] },
+            "lastSucceededAt": { "type": ["string", "null"] },
+            "nextRunAt": { "type": ["string", "null"] },
+            "runRequested": {
+              "description": "A durable one-shot request consumed once the backup coordinator is free.",
+              "type": "boolean"
+            },
+            "consecutiveFailures": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "lastResult": {
+              "anyOf": [
+                { "$ref": "#/$defs/BackupRunState" },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": [
+            "lastScheduledAt",
+            "lastAttemptedAt",
+            "lastSucceededAt",
+            "nextRunAt",
+            "runRequested",
+            "consecutiveFailures",
+            "lastResult"
+          ],
+          "additionalProperties": true
+        },
+        "BackupRunState": {
+          "type": "string",
+          "enum": ["running", "succeeded", "partiallyFailed", "failed"]
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/Guid" },
+        "name": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "pause": {
+          "anyOf": [{ "$ref": "#/$defs/BackupJobPause" }, { "type": "null" }]
+        },
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "targetInstanceId": { "type": "string" },
+        "services": { "$ref": "#/$defs/BackupServiceScope" },
+        "schedule": { "$ref": "#/$defs/Schedule" },
+        "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+        "retentionOverrides": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+        },
+        "status": { "$ref": "#/$defs/BackupJobStatus" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": [
+        "id",
+        "name",
+        "enabled",
+        "pause",
+        "targetId",
+        "targetInstanceId",
+        "services",
+        "schedule",
+        "defaultRetention",
+        "retentionOverrides",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.job.retry-target",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/RetryBackupTargetParams" }
+      ],
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "RetryBackupTargetParams": {
+          "type": "object",
+          "properties": {
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "password": { "$ref": "#/$defs/PasswordType" },
+            "oldPassword": {
+              "anyOf": [{ "$ref": "#/$defs/PasswordType" }, { "type": "null" }]
+            }
+          },
+          "required": ["targetId", "password"],
+          "additionalProperties": true
+        },
+        "BackupTargetId": { "type": "string" },
+        "PasswordType": {
+          "anyOf": [{ "$ref": "#/$defs/EncryptedWire" }, { "type": "string" }]
+        },
+        "EncryptedWire": {
+          "type": "object",
+          "properties": { "encrypted": {} },
+          "required": ["encrypted"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "backup.job.run-now",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/RunBackupJobNowParams" }
+      ],
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "RunBackupJobNowParams": {
+          "type": "object",
+          "properties": { "id": { "$ref": "#/$defs/Guid" } },
+          "required": ["id"],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" }
+      },
+      "type": "object"
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "BackupRun": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/Guid" },
+            "jobId": { "$ref": "#/$defs/Guid" },
+            "jobName": { "type": "string" },
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "trigger": { "$ref": "#/$defs/BackupRunTrigger" },
+            "state": { "$ref": "#/$defs/BackupRunState" },
+            "startedAt": { "type": "string" },
+            "completedAt": { "type": ["string", "null"] },
+            "intendedServices": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/PackageId" }
+            },
+            "services": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/PackageBackupReport" }
+            },
+            "error": { "type": ["string", "null"] }
+          },
+          "required": [
+            "id",
+            "jobId",
+            "jobName",
+            "targetId",
+            "trigger",
+            "state",
+            "startedAt",
+            "completedAt",
+            "intendedServices",
+            "services",
+            "error"
+          ],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" },
+        "BackupTargetId": { "type": "string" },
+        "BackupRunTrigger": {
+          "type": "string",
+          "enum": ["scheduled", "catchUp", "runNow"]
+        },
+        "BackupRunState": {
+          "type": "string",
+          "enum": ["running", "succeeded", "partiallyFailed", "failed"]
+        },
+        "PackageId": { "type": "string" },
+        "PackageBackupReport": {
+          "type": "object",
+          "properties": {
+            "error": { "type": ["string", "null"] },
+            "duration_ms": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "logical_size": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "physical_size": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "changed_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "measured_at": { "type": ["string", "null"] }
+          },
+          "required": [
+            "error",
+            "duration_ms",
+            "logical_size",
+            "physical_size",
+            "changed_bytes",
+            "measured_at"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/Guid" },
+        "jobId": { "$ref": "#/$defs/Guid" },
+        "jobName": { "type": "string" },
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "trigger": { "$ref": "#/$defs/BackupRunTrigger" },
+        "state": { "$ref": "#/$defs/BackupRunState" },
+        "startedAt": { "type": "string" },
+        "completedAt": { "type": ["string", "null"] },
+        "intendedServices": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PackageId" }
+        },
+        "services": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/PackageBackupReport" }
+        },
+        "error": { "type": ["string", "null"] }
+      },
+      "required": [
+        "id",
+        "jobId",
+        "jobName",
+        "targetId",
+        "trigger",
+        "state",
+        "startedAt",
+        "completedAt",
+        "intendedServices",
+        "services",
+        "error"
+      ],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.job.set-enabled",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SetBackupJobEnabledParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/Guid" },
+            "enabled": { "type": "boolean" }
+          },
+          "required": ["id", "enabled"],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/Guid" },
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["id", "enabled"],
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "BackupJob": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/Guid" },
+            "name": { "type": "string" },
+            "enabled": { "type": "boolean" },
+            "pause": {
+              "anyOf": [
+                { "$ref": "#/$defs/BackupJobPause" },
+                { "type": "null" }
+              ]
+            },
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "targetInstanceId": { "type": "string" },
+            "services": { "$ref": "#/$defs/BackupServiceScope" },
+            "schedule": { "$ref": "#/$defs/Schedule" },
+            "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+            "retentionOverrides": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+            },
+            "status": { "$ref": "#/$defs/BackupJobStatus" },
+            "createdAt": { "type": "string" },
+            "updatedAt": { "type": "string" }
+          },
+          "required": [
+            "id",
+            "name",
+            "enabled",
+            "pause",
+            "targetId",
+            "targetInstanceId",
+            "services",
+            "schedule",
+            "defaultRetention",
+            "retentionOverrides",
+            "status",
+            "createdAt",
+            "updatedAt"
+          ],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" },
+        "BackupJobPause": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "reason": { "type": "string", "const": "user" } },
+              "required": ["reason"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": { "type": "string", "const": "targetUnavailable" },
+                "failures": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["reason", "failures"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string",
+                  "const": "targetIdentityMismatch"
+                }
+              },
+              "required": ["reason"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": { "type": "string", "const": "targetUnreadable" }
+              },
+              "required": ["reason"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string",
+                  "const": "reauthenticationRequired"
+                }
+              },
+              "required": ["reason"],
+              "additionalProperties": true
+            }
+          ]
+        },
+        "BackupTargetId": { "type": "string" },
+        "BackupServiceScope": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "type": { "type": "string", "const": "all" } },
+              "required": ["type"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "allExcept" },
+                "excludedPackageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                }
+              },
+              "required": ["type", "excludedPackageIds"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "selected" },
+                "packageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                },
+                "includeSystem": { "type": ["boolean", "null"] }
+              },
+              "required": ["type", "packageIds"]
+            }
+          ]
+        },
+        "PackageId": { "type": "string" },
+        "Schedule": {
+          "type": "object",
+          "properties": {
+            "cron": {
+              "type": "string",
+              "description": "Validated five-field cron expression."
+            },
+            "timezone": {
+              "type": "string",
+              "description": "Selected IANA timezone."
+            }
+          },
+          "required": ["cron", "timezone"],
+          "additionalProperties": true,
+          "description": "A validated five-field cron schedule tied to an IANA timezone."
+        },
+        "RetentionPolicy": {
+          "type": "object",
+          "properties": {
+            "tiers": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/RetentionTier" },
+              "description": "An empty tier list is the latest-only policy."
+            }
+          },
+          "required": ["tiers"],
+          "additionalProperties": true
+        },
+        "RetentionTier": {
+          "type": "object",
+          "properties": {
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Width of one local-time retention bucket."
+            },
+            "coverageSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "How far back from the newest successful snapshot this tier covers."
+            }
+          },
+          "required": ["intervalSeconds", "coverageSeconds"],
+          "additionalProperties": true
+        },
+        "BackupJobStatus": {
+          "type": "object",
+          "properties": {
+            "lastScheduledAt": { "type": ["string", "null"] },
+            "lastAttemptedAt": { "type": ["string", "null"] },
+            "lastSucceededAt": { "type": ["string", "null"] },
+            "nextRunAt": { "type": ["string", "null"] },
+            "runRequested": {
+              "description": "A durable one-shot request consumed once the backup coordinator is free.",
+              "type": "boolean"
+            },
+            "consecutiveFailures": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "lastResult": {
+              "anyOf": [
+                { "$ref": "#/$defs/BackupRunState" },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": [
+            "lastScheduledAt",
+            "lastAttemptedAt",
+            "lastSucceededAt",
+            "nextRunAt",
+            "runRequested",
+            "consecutiveFailures",
+            "lastResult"
+          ],
+          "additionalProperties": true
+        },
+        "BackupRunState": {
+          "type": "string",
+          "enum": ["running", "succeeded", "partiallyFailed", "failed"]
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/Guid" },
+        "name": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "pause": {
+          "anyOf": [{ "$ref": "#/$defs/BackupJobPause" }, { "type": "null" }]
+        },
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "targetInstanceId": { "type": "string" },
+        "services": { "$ref": "#/$defs/BackupServiceScope" },
+        "schedule": { "$ref": "#/$defs/Schedule" },
+        "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+        "retentionOverrides": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+        },
+        "status": { "$ref": "#/$defs/BackupJobStatus" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": [
+        "id",
+        "name",
+        "enabled",
+        "pause",
+        "targetId",
+        "targetInstanceId",
+        "services",
+        "schedule",
+        "defaultRetention",
+        "retentionOverrides",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.job.set-enabled-bulk",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SetBackupJobsEnabledParams": {
+          "type": "object",
+          "properties": {
+            "ids": { "type": "array", "items": { "$ref": "#/$defs/Guid" } },
+            "enabled": { "type": "boolean" }
+          },
+          "required": ["ids", "enabled"],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "ids": { "type": "array", "items": { "$ref": "#/$defs/Guid" } },
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["ids", "enabled"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.job.update",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "UpdateBackupJobParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/Guid" },
+            "name": { "type": "string" },
+            "services": { "$ref": "#/$defs/BackupServiceScope" },
+            "schedule": { "$ref": "#/$defs/Schedule" },
+            "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+            "retentionOverrides": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "services",
+            "schedule",
+            "defaultRetention",
+            "retentionOverrides"
+          ],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" },
+        "BackupServiceScope": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "type": { "type": "string", "const": "all" } },
+              "required": ["type"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "allExcept" },
+                "excludedPackageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                }
+              },
+              "required": ["type", "excludedPackageIds"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "selected" },
+                "packageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                },
+                "includeSystem": { "type": ["boolean", "null"] }
+              },
+              "required": ["type", "packageIds"]
+            }
+          ]
+        },
+        "PackageId": { "type": "string" },
+        "Schedule": {
+          "type": "object",
+          "properties": {
+            "cron": {
+              "type": "string",
+              "description": "Validated five-field cron expression."
+            },
+            "timezone": {
+              "type": "string",
+              "description": "Selected IANA timezone."
+            }
+          },
+          "required": ["cron", "timezone"],
+          "additionalProperties": true,
+          "description": "A validated five-field cron schedule tied to an IANA timezone."
+        },
+        "RetentionPolicy": {
+          "type": "object",
+          "properties": {
+            "tiers": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/RetentionTier" },
+              "description": "An empty tier list is the latest-only policy."
+            }
+          },
+          "required": ["tiers"],
+          "additionalProperties": true
+        },
+        "RetentionTier": {
+          "type": "object",
+          "properties": {
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Width of one local-time retention bucket."
+            },
+            "coverageSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "How far back from the newest successful snapshot this tier covers."
+            }
+          },
+          "required": ["intervalSeconds", "coverageSeconds"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/Guid" },
+        "name": { "type": "string" },
+        "services": { "$ref": "#/$defs/BackupServiceScope" },
+        "schedule": { "$ref": "#/$defs/Schedule" },
+        "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+        "retentionOverrides": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "services",
+        "schedule",
+        "defaultRetention",
+        "retentionOverrides"
+      ],
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "BackupJob": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/Guid" },
+            "name": { "type": "string" },
+            "enabled": { "type": "boolean" },
+            "pause": {
+              "anyOf": [
+                { "$ref": "#/$defs/BackupJobPause" },
+                { "type": "null" }
+              ]
+            },
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "targetInstanceId": { "type": "string" },
+            "services": { "$ref": "#/$defs/BackupServiceScope" },
+            "schedule": { "$ref": "#/$defs/Schedule" },
+            "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+            "retentionOverrides": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+            },
+            "status": { "$ref": "#/$defs/BackupJobStatus" },
+            "createdAt": { "type": "string" },
+            "updatedAt": { "type": "string" }
+          },
+          "required": [
+            "id",
+            "name",
+            "enabled",
+            "pause",
+            "targetId",
+            "targetInstanceId",
+            "services",
+            "schedule",
+            "defaultRetention",
+            "retentionOverrides",
+            "status",
+            "createdAt",
+            "updatedAt"
+          ],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" },
+        "BackupJobPause": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "reason": { "type": "string", "const": "user" } },
+              "required": ["reason"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": { "type": "string", "const": "targetUnavailable" },
+                "failures": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["reason", "failures"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string",
+                  "const": "targetIdentityMismatch"
+                }
+              },
+              "required": ["reason"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": { "type": "string", "const": "targetUnreadable" }
+              },
+              "required": ["reason"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string",
+                  "const": "reauthenticationRequired"
+                }
+              },
+              "required": ["reason"],
+              "additionalProperties": true
+            }
+          ]
+        },
+        "BackupTargetId": { "type": "string" },
+        "BackupServiceScope": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "type": { "type": "string", "const": "all" } },
+              "required": ["type"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "allExcept" },
+                "excludedPackageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                }
+              },
+              "required": ["type", "excludedPackageIds"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "selected" },
+                "packageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                },
+                "includeSystem": { "type": ["boolean", "null"] }
+              },
+              "required": ["type", "packageIds"]
+            }
+          ]
+        },
+        "PackageId": { "type": "string" },
+        "Schedule": {
+          "type": "object",
+          "properties": {
+            "cron": {
+              "type": "string",
+              "description": "Validated five-field cron expression."
+            },
+            "timezone": {
+              "type": "string",
+              "description": "Selected IANA timezone."
+            }
+          },
+          "required": ["cron", "timezone"],
+          "additionalProperties": true,
+          "description": "A validated five-field cron schedule tied to an IANA timezone."
+        },
+        "RetentionPolicy": {
+          "type": "object",
+          "properties": {
+            "tiers": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/RetentionTier" },
+              "description": "An empty tier list is the latest-only policy."
+            }
+          },
+          "required": ["tiers"],
+          "additionalProperties": true
+        },
+        "RetentionTier": {
+          "type": "object",
+          "properties": {
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Width of one local-time retention bucket."
+            },
+            "coverageSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "How far back from the newest successful snapshot this tier covers."
+            }
+          },
+          "required": ["intervalSeconds", "coverageSeconds"],
+          "additionalProperties": true
+        },
+        "BackupJobStatus": {
+          "type": "object",
+          "properties": {
+            "lastScheduledAt": { "type": ["string", "null"] },
+            "lastAttemptedAt": { "type": ["string", "null"] },
+            "lastSucceededAt": { "type": ["string", "null"] },
+            "nextRunAt": { "type": ["string", "null"] },
+            "runRequested": {
+              "description": "A durable one-shot request consumed once the backup coordinator is free.",
+              "type": "boolean"
+            },
+            "consecutiveFailures": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "lastResult": {
+              "anyOf": [
+                { "$ref": "#/$defs/BackupRunState" },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": [
+            "lastScheduledAt",
+            "lastAttemptedAt",
+            "lastSucceededAt",
+            "nextRunAt",
+            "runRequested",
+            "consecutiveFailures",
+            "lastResult"
+          ],
+          "additionalProperties": true
+        },
+        "BackupRunState": {
+          "type": "string",
+          "enum": ["running", "succeeded", "partiallyFailed", "failed"]
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/Guid" },
+        "name": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "pause": {
+          "anyOf": [{ "$ref": "#/$defs/BackupJobPause" }, { "type": "null" }]
+        },
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "targetInstanceId": { "type": "string" },
+        "services": { "$ref": "#/$defs/BackupServiceScope" },
+        "schedule": { "$ref": "#/$defs/Schedule" },
+        "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+        "retentionOverrides": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+        },
+        "status": { "$ref": "#/$defs/BackupJobStatus" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": [
+        "id",
+        "name",
+        "enabled",
+        "pause",
+        "targetId",
+        "targetInstanceId",
+        "services",
+        "schedule",
+        "defaultRetention",
+        "retentionOverrides",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.job.validate",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "ValidateBackupJobParams": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "description": "Existing job being replaced, or `None` for a new job.",
+              "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+            },
+            "services": { "$ref": "#/$defs/BackupServiceScope" },
+            "schedule": { "$ref": "#/$defs/Schedule" },
+            "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+            "retentionOverrides": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+            }
+          },
+          "required": [
+            "services",
+            "schedule",
+            "defaultRetention",
+            "retentionOverrides"
+          ],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" },
+        "BackupServiceScope": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "type": { "type": "string", "const": "all" } },
+              "required": ["type"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "allExcept" },
+                "excludedPackageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                }
+              },
+              "required": ["type", "excludedPackageIds"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "selected" },
+                "packageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                },
+                "includeSystem": { "type": ["boolean", "null"] }
+              },
+              "required": ["type", "packageIds"]
+            }
+          ]
+        },
+        "PackageId": { "type": "string" },
+        "Schedule": {
+          "type": "object",
+          "properties": {
+            "cron": {
+              "type": "string",
+              "description": "Validated five-field cron expression."
+            },
+            "timezone": {
+              "type": "string",
+              "description": "Selected IANA timezone."
+            }
+          },
+          "required": ["cron", "timezone"],
+          "additionalProperties": true,
+          "description": "A validated five-field cron schedule tied to an IANA timezone."
+        },
+        "RetentionPolicy": {
+          "type": "object",
+          "properties": {
+            "tiers": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/RetentionTier" },
+              "description": "An empty tier list is the latest-only policy."
+            }
+          },
+          "required": ["tiers"],
+          "additionalProperties": true
+        },
+        "RetentionTier": {
+          "type": "object",
+          "properties": {
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Width of one local-time retention bucket."
+            },
+            "coverageSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "How far back from the newest successful snapshot this tier covers."
+            }
+          },
+          "required": ["intervalSeconds", "coverageSeconds"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Existing job being replaced, or `None` for a new job.",
+          "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+        },
+        "services": { "$ref": "#/$defs/BackupServiceScope" },
+        "schedule": { "$ref": "#/$defs/Schedule" },
+        "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+        "retentionOverrides": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+        }
+      },
+      "required": [
+        "services",
+        "schedule",
+        "defaultRetention",
+        "retentionOverrides"
+      ],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.policy.estimate",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "EstimateBackupCapacityParams": {
+          "type": "object",
+          "properties": {
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "services": { "$ref": "#/$defs/BackupServiceScope" },
+            "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+            "retentionOverrides": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+            },
+            "preserveExistingPolicies": {
+              "description": "Preserves established history policies when estimating a new schedule.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "targetId",
+            "services",
+            "defaultRetention",
+            "retentionOverrides"
+          ],
+          "additionalProperties": true
+        },
+        "BackupTargetId": { "type": "string" },
+        "BackupServiceScope": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "type": { "type": "string", "const": "all" } },
+              "required": ["type"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "allExcept" },
+                "excludedPackageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                }
+              },
+              "required": ["type", "excludedPackageIds"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "selected" },
+                "packageIds": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/PackageId" }
+                },
+                "includeSystem": { "type": ["boolean", "null"] }
+              },
+              "required": ["type", "packageIds"]
+            }
+          ]
+        },
+        "PackageId": { "type": "string" },
+        "RetentionPolicy": {
+          "type": "object",
+          "properties": {
+            "tiers": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/RetentionTier" },
+              "description": "An empty tier list is the latest-only policy."
+            }
+          },
+          "required": ["tiers"],
+          "additionalProperties": true
+        },
+        "RetentionTier": {
+          "type": "object",
+          "properties": {
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Width of one local-time retention bucket."
+            },
+            "coverageSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "How far back from the newest successful snapshot this tier covers."
+            }
+          },
+          "required": ["intervalSeconds", "coverageSeconds"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "services": { "$ref": "#/$defs/BackupServiceScope" },
+        "defaultRetention": { "$ref": "#/$defs/RetentionPolicy" },
+        "retentionOverrides": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/RetentionPolicy" }
+        },
+        "preserveExistingPolicies": {
+          "description": "Preserves established history policies when estimating a new schedule.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "targetId",
+        "services",
+        "defaultRetention",
+        "retentionOverrides"
+      ],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.policy.preview",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "PreviewRetentionPolicyParams": {
+          "type": "object",
+          "properties": {
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "policy": { "$ref": "#/$defs/RetentionPolicy" }
+          },
+          "required": ["targetId", "packageId", "policy"],
+          "additionalProperties": true
+        },
+        "BackupTargetId": { "type": "string" },
+        "PackageId": { "type": "string" },
+        "RetentionPolicy": {
+          "type": "object",
+          "properties": {
+            "tiers": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/RetentionTier" },
+              "description": "An empty tier list is the latest-only policy."
+            }
+          },
+          "required": ["tiers"],
+          "additionalProperties": true
+        },
+        "RetentionTier": {
+          "type": "object",
+          "properties": {
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Width of one local-time retention bucket."
+            },
+            "coverageSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "How far back from the newest successful snapshot this tier covers."
+            }
+          },
+          "required": ["intervalSeconds", "coverageSeconds"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "packageId": { "$ref": "#/$defs/PackageId" },
+        "policy": { "$ref": "#/$defs/RetentionPolicy" }
+      },
+      "required": ["targetId", "packageId", "policy"],
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RetentionPolicyChangePreview": {
+          "type": "object",
+          "properties": {
+            "removed": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/ServiceSnapshot" }
+            },
+            "estimatedReclaimedBytes": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "affectedJobs": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["removed", "estimatedReclaimedBytes", "affectedJobs"],
+          "additionalProperties": true
+        },
+        "ServiceSnapshot": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/Guid" },
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "packageVersion": { "type": "string" },
+            "source": { "$ref": "#/$defs/BackupSource" },
+            "jobId": { "$ref": "#/$defs/Guid" },
+            "jobName": { "type": "string" },
+            "runId": { "$ref": "#/$defs/Guid" },
+            "completedAt": { "type": "string" },
+            "logicalSize": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "physicalSize": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "changedBytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "measuredAt": { "type": "string" },
+            "archived": { "type": "boolean" }
+          },
+          "required": [
+            "id",
+            "packageId",
+            "packageVersion",
+            "source",
+            "jobId",
+            "jobName",
+            "runId",
+            "completedAt",
+            "logicalSize",
+            "physicalSize",
+            "changedBytes",
+            "measuredAt",
+            "archived"
+          ],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" },
+        "PackageId": { "type": "string" },
+        "BackupSource": { "type": "string", "enum": ["manual", "scheduled"] }
+      },
+      "type": "object",
+      "properties": {
+        "removed": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ServiceSnapshot" }
+        },
+        "estimatedReclaimedBytes": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "affectedJobs": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["removed", "estimatedReclaimedBytes", "affectedJobs"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.policy.update",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "UpdateRetentionPolicyParams": {
+          "type": "object",
+          "properties": {
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "policy": { "$ref": "#/$defs/RetentionPolicy" },
+            "confirmedRemovals": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Guid" }
+            }
+          },
+          "required": ["targetId", "packageId", "policy", "confirmedRemovals"],
+          "additionalProperties": true
+        },
+        "BackupTargetId": { "type": "string" },
+        "PackageId": { "type": "string" },
+        "RetentionPolicy": {
+          "type": "object",
+          "properties": {
+            "tiers": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/RetentionTier" },
+              "description": "An empty tier list is the latest-only policy."
+            }
+          },
+          "required": ["tiers"],
+          "additionalProperties": true
+        },
+        "RetentionTier": {
+          "type": "object",
+          "properties": {
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Width of one local-time retention bucket."
+            },
+            "coverageSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "How far back from the newest successful snapshot this tier covers."
+            }
+          },
+          "required": ["intervalSeconds", "coverageSeconds"],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "packageId": { "$ref": "#/$defs/PackageId" },
+        "policy": { "$ref": "#/$defs/RetentionPolicy" },
+        "confirmedRemovals": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Guid" }
+        }
+      },
+      "required": ["targetId", "packageId", "policy", "confirmedRemovals"],
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "ServiceTargetHistory": {
+          "type": "object",
+          "properties": {
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "targetInstanceId": { "type": "string" },
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "timezone": { "type": "string" },
+            "policy": { "$ref": "#/$defs/RetentionPolicy" },
+            "feedingJobs": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Guid" }
+            },
+            "snapshots": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/ServiceSnapshot" }
+            },
+            "archived": { "type": "boolean" }
+          },
+          "required": [
+            "targetId",
+            "targetInstanceId",
+            "packageId",
+            "timezone",
+            "policy",
+            "feedingJobs",
+            "snapshots",
+            "archived"
+          ],
+          "additionalProperties": true
+        },
+        "BackupTargetId": { "type": "string" },
+        "PackageId": { "type": "string" },
+        "RetentionPolicy": {
+          "type": "object",
+          "properties": {
+            "tiers": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/RetentionTier" },
+              "description": "An empty tier list is the latest-only policy."
+            }
+          },
+          "required": ["tiers"],
+          "additionalProperties": true
+        },
+        "RetentionTier": {
+          "type": "object",
+          "properties": {
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Width of one local-time retention bucket."
+            },
+            "coverageSeconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "How far back from the newest successful snapshot this tier covers."
+            }
+          },
+          "required": ["intervalSeconds", "coverageSeconds"],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" },
+        "ServiceSnapshot": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/Guid" },
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "packageVersion": { "type": "string" },
+            "source": { "$ref": "#/$defs/BackupSource" },
+            "jobId": { "$ref": "#/$defs/Guid" },
+            "jobName": { "type": "string" },
+            "runId": { "$ref": "#/$defs/Guid" },
+            "completedAt": { "type": "string" },
+            "logicalSize": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "physicalSize": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "changedBytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "measuredAt": { "type": "string" },
+            "archived": { "type": "boolean" }
+          },
+          "required": [
+            "id",
+            "packageId",
+            "packageVersion",
+            "source",
+            "jobId",
+            "jobName",
+            "runId",
+            "completedAt",
+            "logicalSize",
+            "physicalSize",
+            "changedBytes",
+            "measuredAt",
+            "archived"
+          ],
+          "additionalProperties": true
+        },
+        "BackupSource": { "type": "string", "enum": ["manual", "scheduled"] }
+      },
+      "type": "object",
+      "properties": {
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "targetInstanceId": { "type": "string" },
+        "packageId": { "$ref": "#/$defs/PackageId" },
+        "timezone": { "type": "string" },
+        "policy": { "$ref": "#/$defs/RetentionPolicy" },
+        "feedingJobs": { "type": "array", "items": { "$ref": "#/$defs/Guid" } },
+        "snapshots": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ServiceSnapshot" }
+        },
+        "archived": { "type": "boolean" }
+      },
+      "required": [
+        "targetId",
+        "targetInstanceId",
+        "packageId",
+        "timezone",
+        "policy",
+        "feedingJobs",
+        "snapshots",
+        "archived"
+      ],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.review.list",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
+    }
+  },
+  {
+    "name": "backup.review.resolve",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "ResolveNewServiceBackupReviewParams": {
+          "type": "object",
+          "properties": {
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "decisions": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "type": "boolean" },
+              "description": "Every current job requires an inclusion decision."
+            }
+          },
+          "required": ["packageId", "decisions"],
+          "additionalProperties": true,
+          "description": "Complete inclusion decisions for one newly installed service."
+        },
+        "PackageId": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "packageId": { "$ref": "#/$defs/PackageId" },
+        "decisions": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "type": "boolean" },
+          "description": "Every current job requires an inclusion decision."
+        }
+      },
+      "required": ["packageId", "decisions"],
+      "additionalProperties": true,
+      "description": "Complete inclusion decisions for one newly installed service."
     }
   },
   {
@@ -467,9 +3216,20 @@
             "hostname": { "$ref": "#/$defs/ServerHostname" },
             "version": { "type": "string" },
             "timestamp": { "type": "string" },
+            "scheduled": { "type": "boolean" },
+            "serverId": { "type": ["string", "null"] },
+            "hasSystemBackup": { "type": ["boolean", "null"] },
             "formatStatus": { "$ref": "#/$defs/FormatStatus" }
           },
-          "required": ["hostname", "version", "timestamp", "formatStatus"],
+          "required": [
+            "hostname",
+            "version",
+            "timestamp",
+            "scheduled",
+            "serverId",
+            "hasSystemBackup",
+            "formatStatus"
+          ],
           "additionalProperties": true,
           "description": "The public view of a backup found on a target: enough to identify it, and none of\n[`BackupUnencryptedMetadata`]'s key material."
         },
@@ -671,9 +3431,20 @@
             "hostname": { "$ref": "#/$defs/ServerHostname" },
             "version": { "type": "string" },
             "timestamp": { "type": "string" },
+            "scheduled": { "type": "boolean" },
+            "serverId": { "type": ["string", "null"] },
+            "hasSystemBackup": { "type": ["boolean", "null"] },
             "formatStatus": { "$ref": "#/$defs/FormatStatus" }
           },
-          "required": ["hostname", "version", "timestamp", "formatStatus"],
+          "required": [
+            "hostname",
+            "version",
+            "timestamp",
+            "scheduled",
+            "serverId",
+            "hasSystemBackup",
+            "formatStatus"
+          ],
           "additionalProperties": true,
           "description": "The public view of a backup found on a target: enough to identify it, and none of\n[`BackupUnencryptedMetadata`]'s key material."
         },
@@ -980,9 +3751,20 @@
             "hostname": { "$ref": "#/$defs/ServerHostname" },
             "version": { "type": "string" },
             "timestamp": { "type": "string" },
+            "scheduled": { "type": "boolean" },
+            "serverId": { "type": ["string", "null"] },
+            "hasSystemBackup": { "type": ["boolean", "null"] },
             "formatStatus": { "$ref": "#/$defs/FormatStatus" }
           },
-          "required": ["hostname", "version", "timestamp", "formatStatus"],
+          "required": [
+            "hostname",
+            "version",
+            "timestamp",
+            "scheduled",
+            "serverId",
+            "hasSystemBackup",
+            "formatStatus"
+          ],
           "additionalProperties": true,
           "description": "The public view of a backup found on a target: enough to identify it, and none of\n[`BackupUnencryptedMetadata`]'s key material."
         },
@@ -1085,6 +3867,189 @@
         }
       },
       "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.targets",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "propertyNames": { "type": "string" },
+      "additionalProperties": { "$ref": "#/$defs/BackupTarget" },
+      "$defs": {
+        "BackupTarget": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": { "type": "string", "const": "disk" }
+                  },
+                  "required": ["type"],
+                  "additionalProperties": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "vendor": { "type": ["string", "null"] },
+                    "model": { "type": ["string", "null"] }
+                  },
+                  "required": ["vendor", "model"],
+                  "additionalProperties": true
+                },
+                { "$ref": "#/$defs/PartitionInfo" }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": { "type": "string", "const": "cifs" }
+                  },
+                  "required": ["type"],
+                  "additionalProperties": true
+                },
+                { "$ref": "#/$defs/CifsBackupTarget" }
+              ]
+            }
+          ]
+        },
+        "PartitionInfo": {
+          "type": "object",
+          "properties": {
+            "logicalname": { "type": "string" },
+            "stablePath": { "type": "string" },
+            "label": { "type": ["string", "null"] },
+            "capacity": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "used": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "available": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "startOs": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/StartOsRecoveryInfo" }
+            },
+            "legacyBackup": { "type": "boolean" },
+            "guid": { "type": ["string", "null"] },
+            "filesystem": { "type": ["string", "null"] }
+          },
+          "required": [
+            "logicalname",
+            "stablePath",
+            "label",
+            "capacity",
+            "used",
+            "available",
+            "startOs",
+            "legacyBackup",
+            "guid",
+            "filesystem"
+          ],
+          "additionalProperties": true
+        },
+        "StartOsRecoveryInfo": {
+          "type": "object",
+          "properties": {
+            "hostname": { "$ref": "#/$defs/ServerHostname" },
+            "version": { "type": "string" },
+            "timestamp": { "type": "string" },
+            "scheduled": { "type": "boolean" },
+            "serverId": { "type": ["string", "null"] },
+            "hasSystemBackup": { "type": ["boolean", "null"] },
+            "formatStatus": { "$ref": "#/$defs/FormatStatus" }
+          },
+          "required": [
+            "hostname",
+            "version",
+            "timestamp",
+            "scheduled",
+            "serverId",
+            "hasSystemBackup",
+            "formatStatus"
+          ],
+          "additionalProperties": true,
+          "description": "The public view of a backup found on a target: enough to identify it, and none of\n[`BackupUnencryptedMetadata`]'s key material."
+        },
+        "ServerHostname": { "type": "string" },
+        "FormatStatus": {
+          "type": "string",
+          "enum": ["legacy", "current", "interrupted", "unknown"],
+          "description": "Unauthenticated discovery hints; opening the store validates its actual state."
+        },
+        "CifsBackupTarget": {
+          "type": "object",
+          "properties": {
+            "hostname": { "type": "string" },
+            "path": { "type": "string" },
+            "username": { "type": "string" },
+            "mountable": { "type": "boolean" },
+            "available": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "startOs": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/StartOsRecoveryInfo" }
+            },
+            "legacyBackup": { "type": "boolean" }
+          },
+          "required": [
+            "hostname",
+            "path",
+            "username",
+            "mountable",
+            "available",
+            "startOs",
+            "legacyBackup"
+          ],
+          "additionalProperties": true
+        }
+      }
     }
   },
   {
@@ -3190,6 +6155,91 @@
         "serverId": { "type": ["string", "null"] }
       },
       "required": ["targetId", "password", "ids"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "package.backup.restore-scheduled",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RestoreScheduledPackagesParams": {
+          "type": "object",
+          "properties": {
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "snapshots": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/Guid" }
+            },
+            "serverId": { "type": ["string", "null"] },
+            "password": { "type": ["string", "null"] }
+          },
+          "required": ["targetId", "snapshots"],
+          "additionalProperties": true
+        },
+        "BackupTargetId": { "type": "string" },
+        "Guid": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "snapshots": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/Guid" }
+        },
+        "serverId": { "type": ["string", "null"] },
+        "password": { "type": ["string", "null"] }
+      },
+      "required": ["targetId", "snapshots"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "package.backup.restore-selection",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RestoreSelectionParams": {
+          "type": "object",
+          "properties": {
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "manualIds": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/PackageId" }
+            },
+            "snapshots": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/Guid" }
+            },
+            "serverId": { "type": ["string", "null"] },
+            "password": { "type": ["string", "null"] }
+          },
+          "required": ["targetId"],
+          "additionalProperties": true
+        },
+        "BackupTargetId": { "type": "string" },
+        "PackageId": { "type": "string" },
+        "Guid": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "manualIds": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PackageId" }
+        },
+        "snapshots": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/Guid" }
+        },
+        "serverId": { "type": ["string", "null"] },
+        "password": { "type": ["string", "null"] }
+      },
+      "required": ["targetId"],
       "additionalProperties": true
     }
   },

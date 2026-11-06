@@ -23,6 +23,7 @@ export type RecoverySource =
           }
       serverId: string
       password: string // Plaintext until `executeSetup` encrypts it.
+      scheduled: boolean
     }
 
 @Injectable({
@@ -88,6 +89,7 @@ export class StateService {
               : target,
           serverId: this.recoverySource.serverId,
           password: await this.api.encrypt(this.recoverySource.password),
+          scheduled: this.recoverySource.scheduled,
         }
       }
     }

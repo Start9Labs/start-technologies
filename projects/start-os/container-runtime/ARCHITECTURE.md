@@ -45,7 +45,7 @@ This runtime lives at `projects/start-os/container-runtime` and is a Node.js pac
 
 ## RPC protocol
 
-The runtime listens on `/media/startos/rpc/service.sock` and exposes a JSON-RPC API for the host (`init`, `exit`, `start`, `stop`, `execute`, `callback`, …). Effects flowing the other way (filesystem, network, store, dependency calls) reach the host over `host.sock`. The full method list and parameter types live in [`RPCSpec.md`](RPCSpec.md).
+The runtime listens on `/media/startos/rpc/service.sock` and exposes a JSON-RPC API for the host (`init`, `exit`, `start`, `stop`, `execute`, `callback`, …). Effects flowing the other way (filesystem, network, store, dependency calls) reach the host over `host.sock`. Backup execution returns optional transfer measurements from the package to the host. The full method list and parameter types live in [`RPCSpec.md`](RPCSpec.md).
 
 ## Image build
 

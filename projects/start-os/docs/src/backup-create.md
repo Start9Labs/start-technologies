@@ -5,6 +5,8 @@ Back up your server's data to a physical drive or a network folder.
 > [!IMPORTANT]
 > Creating backups is an essential responsibility of self-hosting. If you do not make backups, you _will_ eventually lose your data.
 
+Existing links to the manual-backup page open the manual backup controls directly.
+
 ## Watch The Video
 
 <div class="yt-video" data-id="omHymkqroRk" data-title="Creating Backups"></div>
@@ -25,7 +27,7 @@ Back up your server's data to a physical drive or a network folder.
 
 1. Wait for the `Backup Complete` notification before unplugging a backup drive. StartOS writes out the last of the backup and unmounts the drive before raising that notification, so the drive is safe to remove once it appears. The `Backup Progress` card reads `Complete` first, while StartOS is still finishing — the notification is the one to wait for.
 
-1. Each backup updates the current state on its target. Keep backups on multiple targets for protection against loss of a drive or network share.
+1. A manual backup replaces the previous manual checkpoint for each selected service. Automatic backups are stored separately and can retain additional checkpoints according to the version-history setting.
 
 1. The backup targets list shows the free space available on each drive and network folder, so you can confirm your backup will fit before you start.
 
@@ -34,7 +36,7 @@ Back up your server's data to a physical drive or a network folder.
 1. The backup format changed. New backups are written to a `StartOSBackupsV2` folder on the target, replacing the older `StartOSBackups` (V1) format written by StartOS 0.4 betas. A backup made on StartOS 0.3.5.1 is a different, older backup: it is not removed by the **Delete old backup** button, and StartOS 0.4 never touches it. To free that space, delete it yourself from the drive. StartOS helps you clean up the obsolete V1 data:
    - When you select a target that still holds a V1 backup for this server, StartOS warns you before backing up and shows how much free space remains on the target (see below).
    - After a backup completes, if the target still contains this server's V1 backup, StartOS raises a notification reminding you it is no longer needed.
-   - On the `Create Backup` page, any target holding this server's V1 backup shows a **Delete old backup** button — whether or not a new (V2) backup exists yet. After you confirm, StartOS removes this server's old V1 backup from the target immediately and reclaims the space it occupied in the background, raising a notification once the space has been fully freed (on a large backup this can take a while); your current `StartOSBackupsV2` backup — and any backups belonging to other servers that share the target — are untouched. If this server has no current (V2) backup on that target, StartOS asks for an extra confirmation first, since deleting the old backup would leave this server with no backup there.
+   - Under `System > Backups > Manage backup locations`, any target holding this server's V1 backup shows a **Delete old backup** button — whether or not a new (V2) backup exists yet. After you confirm, StartOS removes this server's old V1 backup from the target immediately and reclaims the space it occupied in the background, raising a notification once the space has been fully freed (on a large backup this can take a while); your current `StartOSBackupsV2` backup — and any backups belonging to other servers that share the target — are untouched. If this server has no current (V2) backup on that target, StartOS asks for an extra confirmation first, since deleting the old backup would leave this server with no backup there.
 
    > [!WARNING]
    > Before backing up, check the free space remaining on the target and make sure your selected services will fit. If space is tight, use the **Delete old backup** button to reclaim the space this server's old backup occupies, or choose another drive. A backup started while that space is still being reclaimed in the background waits for the reclamation to finish first, shown as an initial `Reclaiming Space` phase in the backup's progress.
@@ -43,7 +45,7 @@ Back up your server's data to a physical drive or a network folder.
 
 Existing backups remain usable for backups and restores with their original filesystem encryption/checksum format until explicitly converted. Normal mounts do not start conversion. The folder remains `StartOSBackupsV2`; this is separate from the older `StartOSBackups` folder cleanup described above.
 
-In **System → Create Backup**, select **Update format** beside a target to convert this server's backup. Review the downtime and compatibility warning and enter the selected backup's master password. Selecting a target to create a backup also offers **Update format** or **Skip** when this server's backup uses the older format. Skipping continues backup creation using the existing format.
+In **System → Backups → Manage backup locations**, select **Update format** beside a target to convert this server's backup. Review the downtime and compatibility warning and enter the selected backup's master password. Selecting a target to create a backup also offers **Update format** or **Skip** when this server's backup uses the older format. Skipping continues backup creation using the existing format.
 
 Conversion runs in the background. Reopen the target's conversion control to view weighted overall progress, all conversion phases, and byte/object counts. The completion notification names the target and reports success or the failure's error message. A failed attempt offers **Retry conversion**, or **Resume conversion** when discovery reports it interrupted. An interrupted backup remains unavailable until resumption finishes. **Resume conversion** revalidates the password and continues from durable migration state. Closing the dialog does not cancel the operation. This control is separate from **Delete old backup**, which removes the pre-V2 backup folder.
 
@@ -93,11 +95,21 @@ Even with proper backups the risk of data corruption is always non-zero. Therefo
 - If backing up to multiple targets make sure all backups are up to date.
 - Set up [continuous backups](/bitcoin-guides/continuous-backups.html) where a service offers them. A StartOS backup holds LND's channel backup only as of the moment it was taken, and leaves Bark Wallet's database out entirely; a continuous backup keeps a current, encrypted copy on storage you choose.
 
+## Automatic Backups
+
+Automatic backups protect selected services on hourly, daily, weekly, or
+monthly schedules. They support future-service selection, version history,
+capacity estimates, archived checkpoints, target recovery, and per-service
+restore choices while keeping the latest manual checkpoint separate.
+
+See [Automatic Backups](./backup-automatic.md) for schedules, retention,
+storage, failure recovery, and command-line administration.
+
 ## Physical Drive
 
 `Btrfs` is the recommended format of your backup drive. Existing `EXT4` backup drives remain supported. `fat32` and `exFAT` are _not_ recommended and may not work.
 
-A new drive, or one formatted for another system, can be prepared from StartOS: in `System > Create Backup`, click "Format a drive", choose the drive, and confirm. This erases everything on the drive and leaves a single `Btrfs` partition. The drive must be at least 1 GiB.
+A new drive, or one formatted for another system, can be prepared from StartOS: in `System > Backups > Manage backup locations`, click "Format a drive", choose the drive, and confirm. This erases everything on the drive and leaves a single `Btrfs` partition. The drive must be at least 1 GiB.
 
 > [!WARNING]
 > Backing up to USB thumb drives or SD card media is not recommended unless you are using high-endurance, high-quality storage. Low-quality flash memory is prone to corruption and failure over time.
@@ -106,7 +118,7 @@ A new drive, or one formatted for another system, can be prepared from StartOS: 
 
 1. Plug the drive into your server.
 
-1. In StartOS, go to `System > Create Backup`. The drive appears under `Physical Drives`; if it doesn't, click "Refresh".
+1. In StartOS, go to `System > Backups` and open **Create a manual backup**. If the drive does not appear, refresh the page.
 
 1. Click the drive.
 
@@ -411,7 +423,7 @@ A network folder backup sends your encrypted backup over the LAN to a shared fol
 
 The **Hostname** field accepts an IP address, a DNS name containing a dot (such as `nas.home.arpa`), a `.local` mDNS name, or a bare NetBIOS computer name. For DNS, enter the full name rather than a bare name such as `nas`.
 
-1. In StartOS, go to `System > Create Backup`.
+1. In StartOS, go to `System > Backups` and open **Manage backup locations**.
 
 1. Under `Network Folders`, click "New".
 
@@ -500,11 +512,13 @@ The **Hostname** field accepts an IP address, a DNS name containing a dot (such 
 {{#endtabs}}
 
 > [!WARNING]
-> If you receive `Filesystem I/O Error mount error(13): Permission denied`, ensure you have entered the correct values in the Username and Password fields.
+> If StartOS cannot connect, it identifies whether the network folder rejected
+> the credentials or could not be reached. Check the hostname, path, sharing
+> permissions, and credentials.
 
 ### Step 3. Back Up
 
-1. Click the folder under `Network Folders`.
+1. Open **Create a manual backup** and select the network folder.
 
 1. Select the services to back up, or click "Toggle all", then click "Done".
 

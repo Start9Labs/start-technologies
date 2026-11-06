@@ -46,6 +46,7 @@ pub async fn cleanup(ctx: &RpcContext, id: &PackageId, soft: bool) -> Result<(),
                             )?;
                         }
                     }
+                    crate::backup::scheduled::pause_empty_selected_jobs(d)?;
                     Ok(Some(pde))
                 } else {
                     Ok(None)

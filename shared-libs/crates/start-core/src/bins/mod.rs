@@ -125,13 +125,6 @@ pub fn translate_cli(mut cmd: clap::Command) -> clap::Command {
     cmd
 }
 
-#[cfg(test)]
-pub(crate) fn with_manifest_version(command: clap::Command, product: &Path) -> clap::Command {
-    let manifest = std::fs::read_to_string(product.join("Cargo.toml")).unwrap();
-    let manifest: serde_toml::Table = serde_toml::from_str(&manifest).unwrap();
-    command.version(manifest["package"]["version"].as_str().unwrap().to_owned())
-}
-
 #[derive(Default)]
 pub struct MultiExecutable {
     default: Option<&'static str>,
@@ -304,17 +297,42 @@ pub(crate) fn assert_no_shadowed_args(root: clap::Command) {
 }
 
 #[cfg(test)]
-fn export_manpages(command: clap::Command, dir: &str) {
-    std::fs::create_dir_all(dir).unwrap();
-    clap_mangen::generate_to(command, dir).unwrap();
-    for entry in std::fs::read_dir(dir).unwrap() {
+fn manifest_version(product: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join("projects")
+        .join(product)
+        .join("Cargo.toml");
+    let manifest: serde_toml::Table =
+        serde_toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    manifest["package"]["version"].as_str().unwrap().to_owned()
+}
+
+#[cfg(test)]
+fn export_manpages(command: clap::Command, product: &str, version: &str) {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join("projects")
+        .join(product)
+        .join("man");
+    std::fs::create_dir_all(&dir).unwrap();
+    clap_mangen::generate_to(command.version(version.to_owned()), &dir).unwrap();
+    let normalize = |contents: &str| {
+        format!(
+            "{}\n",
+            contents
+                .lines()
+                .map(str::trim_end)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    };
+    for entry in std::fs::read_dir(&dir).unwrap() {
         let path = entry.unwrap().path();
-        let page = std::fs::read_to_string(&path).unwrap();
-        let page = page
-            .lines()
-            .map(str::trim_end)
-            .collect::<Vec<_>>()
-            .join("\n");
-        std::fs::write(path, format!("{page}\n")).unwrap();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("1") {
+            continue;
+        }
+        let contents = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(path, normalize(&contents)).unwrap();
     }
 }

@@ -40,7 +40,8 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 - `src/update/signer_files.rs` — Mirrors OS-update trust to PEM files in the config overlay at `/etc/startos/os-signers`, reconciled from the database during RPC initialization after database migrations. Trust-changing RPCs serialize database mutations and await filesystem persistence. Diagnostic updates read that selection without the data drive, falling back to the image's three production keys only before a selection has been saved. Regular `LocalAuth` verifies its protected cookie, strips caller-supplied `__Auth_local` claims, and injects its authentication result when `get_local_auth` metadata requests it. The diagnostic update endpoint uses that injected result to authorize trust overrides.
 - `src/registry/` — Package registry server and management. `SignerInfo` retains canonical keys and full OpenPGP exports. `FullIndex.trust_signers` selects signer IDs; `registry.info.trustSigners` projects those existing signer records into the public trust proposal.
 - `src/tunnel/` — StartTunnel server logic
-- `src/backup/`, `src/sign/` — Backup and signing
+- `src/backup/`, `src/sign/` — Backup and signing; automatic schedule-to-history ownership and
+  archive state are isolated in `src/backup/scheduled/association.rs`
 - `src/os_install/`, `src/init.rs`, `src/setup.rs` — OS install, init, and first-run setup
 - `src/util/` — Shared utilities (process invocation, IO, guards — see `core-rust-patterns.md`)
 - `src/version/` — Migrations and version logic (see `VERSION_BUMP.md`, `exver.md`)
@@ -126,7 +127,7 @@ Until both steps run, a changed `ts_export!` type is out of sync with everything
 ## Further reading
 
 - [README.md](README.md) — what this crate is and how to use it
-- [AGENTS.md](AGENTS.md) — build, test, format, and operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import)
+- [AGENTS.md](AGENTS.md) — build, test, format, and contribution workflow (`CLAUDE.md` is a one-line `@AGENTS.md` import)
 - [rpc-toolkit.md](rpc-toolkit.md) — JSON-RPC handler patterns
 - [patchdb.md](patchdb.md) — Patch-DB watch patterns and TypedDbWatch
 - [i18n-patterns.md](i18n-patterns.md) — Internationalization conventions

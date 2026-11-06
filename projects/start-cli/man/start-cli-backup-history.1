@@ -1,0 +1,23 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-backup-history 1  "history "
+.SH NAME
+start\-cli\-backup\-history \- Commands to inspect automatic backup checkpoint history
+.SH SYNOPSIS
+\fBstart\-cli backup history\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Commands to inspect automatic backup checkpoint history
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+start\-cli\-backup\-history\-delete\-archived(1)
+Delete selected archived automatic backup checkpoints
+.TP
+start\-cli\-backup\-history\-discover(1)
+Discover automatic backup history stored on a backup target
+.TP
+start\-cli\-backup\-history\-list(1)
+List automatic backup checkpoint history

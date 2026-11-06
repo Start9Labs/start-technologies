@@ -3,6 +3,7 @@ import { ActivatedRoute } from '@angular/router'
 import { ConvertBytesPipe, DialogService, i18nPipe } from '@start9labs/shared'
 import { TuiButton, TuiNotificationService } from '@taiga-ui/core'
 import { filter } from 'rxjs'
+import { TuiButtonLoading } from '@taiga-ui/kit'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { DiskBackupTarget } from 'src/app/services/api/api.types'
@@ -17,7 +18,7 @@ import { BackupStatusComponent } from './status.component'
   template: `
     <header>
       {{ 'Physical Drives' | i18n }}
-      @if (type === 'create') {
+      @if (type !== 'restore') {
         <button
           tuiButton
           size="xs"
@@ -43,8 +44,8 @@ import { BackupStatusComponent } from './status.component'
             <span [backupStatus]="target.hasAnyBackup" [physical]="true"></span>
           </td>
           <td class="name">{{ target.entry.logicalname }}</td>
-          <td>{{ driveName(target.entry) }}</td>
-          <td>{{ formatCapacity(target.entry.capacity) }}</td>
+          <td class="location">{{ driveName(target.entry) }}</td>
+          <td>{{ target.entry.capacity | convertBytes }}</td>
           <td>
             @if (target.entry.available !== null) {
               {{ target.entry.available | convertBytes }}
@@ -55,7 +56,7 @@ import { BackupStatusComponent } from './status.component'
           <td class="actions">
             <div class="controls">
               @if (
-                type === 'create' &&
+                type !== 'restore' &&
                   (target.entry.startOs
                     | backupConversionLabel
                       : service.conversions()[target.id]
@@ -68,7 +69,7 @@ import { BackupStatusComponent } from './status.component'
                   [label]="label"
                 ></button>
               }
-              @if (type === 'create' && target.entry.legacyBackup) {
+              @if (type !== 'restore' && target.entry.legacyBackup) {
                 <backup-legacy-warning
                   [id]="target.id"
                   [hasCurrentBackup]="target.hasCurrentBackup"
@@ -78,13 +79,14 @@ import { BackupStatusComponent } from './status.component'
           </td>
         </tr>
       } @empty {
-        <tr>
-          <td colspan="6">
+        <tr class="empty-row">
+          <td class="empty-state" colspan="6">
             <app-placeholder icon="@tui.save-off">
               {{ 'No drives detected' | i18n }}
               <button
                 tuiButton
                 iconStart="@tui.refresh-cw"
+                [loading]="service.loading()"
                 (click)="service.getBackupTargets()"
               >
                 {{ 'Refresh' | i18n }}
@@ -109,6 +111,12 @@ import { BackupStatusComponent } from './status.component'
       }
     }
 
+    :host {
+      container-type: inline-size;
+      inline-size: 100%;
+      min-inline-size: 0;
+    }
+
     .controls {
       display: inline-flex;
       align-items: center;
@@ -120,27 +128,98 @@ import { BackupStatusComponent } from './status.component'
       white-space: nowrap;
     }
 
-    :host-context(tui-root._mobile) {
+    table {
+      inline-size: 100%;
+      table-layout: fixed;
+    }
+
+    td:first-child:not(.empty-state) {
+      inline-size: 15rem;
+    }
+
+    td:last-child:not(.empty-state),
+    .actions {
+      inline-size: 3.5rem;
+      white-space: nowrap;
+      text-align: end;
+    }
+
+    .name,
+    .location {
+      justify-self: start;
+      text-align: start;
+    }
+
+    .empty-state {
+      display: table-cell;
+      block-size: 7rem;
+      vertical-align: middle;
+      text-align: center;
+    }
+
+    .empty-state app-placeholder {
+      inline-size: min(100%, 16rem);
+      margin-inline: auto;
+      box-sizing: border-box;
+    }
+
+    @container (max-inline-size: 48rem) {
+      table {
+        --app-table-header-display: none;
+
+        min-inline-size: 0;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        table-layout: auto;
+        color: var(--tui-text-secondary);
+      }
+
       tr {
-        grid-template-columns: min-content 1fr 7rem;
-        white-space: nowrap;
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(7rem, 45%);
+        inline-size: 100%;
+        min-inline-size: 0;
+        padding-block: 0.75rem;
+        box-shadow: inset 0 -1px var(--tui-background-neutral-1);
+        white-space: normal;
+      }
+
+      tr:last-child {
+        box-shadow: none;
       }
 
       td {
+        position: static;
+        min-inline-size: 0;
+        padding: 0;
+        border: none;
         grid-column: span 2;
+        overflow-wrap: anywhere;
 
-        &:first-child {
-          font-size: 0;
-          width: auto;
-          grid-area: 1 / 2;
-          place-content: center;
-          margin: 0 0.5rem;
+        &:first-child:not(.empty-state) {
+          inline-size: auto;
+          grid-area: 3 / 1 / 4 / -1;
+          justify-self: start;
+          margin-block-start: 0.25rem;
         }
 
-        &:last-child {
-          grid-area: 1 / 3 / 4 / 3;
-          align-self: center;
-          justify-self: end;
+        &:nth-child(3) {
+          grid-area: 2 / 1;
+        }
+
+        &:nth-child(4) {
+          grid-area: 1 / 2;
+        }
+
+        &:nth-child(5) {
+          grid-area: 2 / 2;
+        }
+
+        &:last-child:not(.empty-state) {
+          grid-column: 1 / -1;
+          inline-size: auto;
         }
       }
 
@@ -148,14 +227,29 @@ import { BackupStatusComponent } from './status.component'
         color: var(--tui-text-primary);
         font: var(--tui-typography-body-m);
         font-weight: bold;
-        grid-column: 1;
-        max-width: 12rem;
+        grid-area: 1 / 1;
+        justify-self: start;
+        max-inline-size: 100%;
+        text-align: start;
+      }
+
+      .empty-state {
+        display: grid;
+        grid-column: 1 / -1;
+        block-size: auto;
+        min-block-size: 7rem;
+        place-items: center;
+        justify-self: center;
+        inline-size: 100%;
+        white-space: normal;
+        text-align: center;
       }
     }
   `,
   host: { class: 'g-card' },
   imports: [
     TuiButton,
+    TuiButtonLoading,
     PlaceholderComponent,
     BackupStatusComponent,
     BackupLegacyWarningComponent,
@@ -169,29 +263,20 @@ import { BackupStatusComponent } from './status.component'
 export class BackupPhysicalComponent {
   private readonly dialog = inject(DialogService)
   private readonly alerts = inject(TuiNotificationService)
-  protected readonly type = inject(ActivatedRoute).snapshot.data['type']
 
   private readonly i18n = inject(i18nPipe)
 
-  readonly service = inject(BackupService)
-  readonly physicalFolders = output<MappedBackupTarget<DiskBackupTarget>>()
+  protected readonly type = inject(ActivatedRoute).snapshot.data['type']
+  protected readonly service = inject(BackupService)
 
-  driveName(entry: DiskBackupTarget): string {
+  public readonly physicalFolders =
+    output<MappedBackupTarget<DiskBackupTarget>>()
+
+  protected driveName(entry: DiskBackupTarget): string {
     return (
       [entry.vendor, entry.model].filter(Boolean).join(' ') ||
       this.i18n.transform('Unknown Drive')
     )
-  }
-
-  formatCapacity(bytes: number): string {
-    const gb = bytes / 1e9
-    if (gb >= 1000) {
-      return `${(gb / 1000).toFixed(1)} TB`
-    }
-    if (gb < 1) {
-      return `${(bytes / 1e6).toFixed(0)} MB`
-    }
-    return `${gb.toFixed(0)} GB`
   }
 
   format() {
@@ -211,7 +296,7 @@ export class BackupPhysicalComponent {
       })
   }
 
-  select(target: MappedBackupTarget<DiskBackupTarget>) {
+  protected select(target: MappedBackupTarget<DiskBackupTarget>) {
     if (this.type === 'restore' && !target.hasAnyBackup) {
       this.dialog
         .openAlert('Drive partition does not contain a valid backup')

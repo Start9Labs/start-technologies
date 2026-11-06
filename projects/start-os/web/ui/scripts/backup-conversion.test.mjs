@@ -3,6 +3,7 @@ import test from 'node:test'
 import { setImmediate } from 'node:timers/promises'
 import '@angular/compiler'
 import { createEnvironmentInjector, runInInjectionContext } from '@angular/core'
+import { TuiNotificationService } from '@taiga-ui/core'
 import { BehaviorSubject, EMPTY, of } from 'rxjs'
 import { PatchDB } from 'patch-db-client'
 import { loadTypeScript } from './typescript-loader.mjs'
@@ -15,13 +16,16 @@ loadTypeScript(
     export class DialogService {}
     export class ErrorService {}
     export class TaskService {}
+    export class i18nPipe {}
+    export class RpcError extends Error {}
+    export const convertBytes = value => String(value);
     export const getErrorMessage = error => error.message;
   `,
     ],
     ['src/app/services/api/embassy-api.service', 'export class ApiService {}'],
   ]),
 )
-const { DialogService, ErrorService, TaskService } =
+const { DialogService, ErrorService, TaskService, i18nPipe } =
   await import('@start9labs/shared')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
 const { BackupService } =
@@ -76,6 +80,8 @@ function fixture(t, { confirm = of(true), password = of('secret') } = {}) {
     },
   }
   const injector = createEnvironmentInjector([
+    { provide: i18nPipe, useValue: { transform: value => value } },
+    { provide: TuiNotificationService, useValue: { open: () => EMPTY } },
     { provide: ApiService, useValue: api },
     {
       provide: PatchDB,
@@ -183,6 +189,32 @@ test('legacy discovery preserves backup/restore eligibility and never starts con
   assert.equal(f.service.cifs()[0].hasCurrentBackup, true)
   assert.deepEqual(f.submissions, [])
   assert.equal(f.service.loading(), false)
+})
+
+test('awaiting discovery makes targets available for automatic setup', async t => {
+  const f = fixture(t)
+  const loading = f.service.getBackupTargets()
+  let settled = false
+  Promise.resolve(loading).then(() => (settled = true))
+  await setImmediate()
+  assert.equal(settled, false)
+  f.requests[0].resolve({ destination: target('current') })
+  await loading
+  assert.equal(f.service.locations()[0].id, 'destination')
+  assert.equal(f.service.targets()[0].id, 'destination')
+})
+
+test('overlapping discovery callers wait for the latest target view', async t => {
+  const f = fixture(t)
+  let settled = false
+  const first = f.service.getBackupTargets().then(() => (settled = true))
+  const latest = f.service.getBackupTargets()
+  f.requests[0].resolve({ stale: target('legacy') })
+  await setImmediate()
+  assert.equal(settled, false)
+  f.requests[1].resolve({ latest: target('current') })
+  await Promise.all([first, latest])
+  assert.equal(f.service.locations()[0].id, 'latest')
 })
 
 test('a late discovery response cannot replace a newer target view; failures retain the view', async t => {

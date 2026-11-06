@@ -1,10 +1,17 @@
-import { DatePipe, KeyValuePipe } from '@angular/common'
-import { Component, inject } from '@angular/core'
-import { DialogService, i18nPipe, TaskService } from '@start9labs/shared'
-import { TuiButton } from '@taiga-ui/core'
+import { DatePipe } from '@angular/common'
+import { Component, inject, signal } from '@angular/core'
+import { FormsModule } from '@angular/forms'
+import {
+  DialogService,
+  getErrorMessage,
+  i18nPipe,
+  TaskService,
+} from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
+import { TuiButton, TuiInput, TuiTitle } from '@taiga-ui/core'
 import { TuiBadge } from '@taiga-ui/kit'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
-import { filter, switchMap, take } from 'rxjs'
+
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { BackupContext } from './backup.types'
@@ -12,37 +19,107 @@ import { RECOVER } from './recover.component'
 
 @Component({
   template: `
-    <table [appTable]="['Hostname', 'StartOS Version', 'Created', null]">
-      @for (server of target.entry.startOs | keyvalue; track server.key) {
-        <tr>
-          <td class="name">
-            {{ server.value.hostname }}.local
-            @if (server.value.formatStatus === 'legacy') {
-              <button
-                tuiBadge
-                type="button"
-                appearance="warning"
-                size="m"
-                (click)="explainOldFormat()"
-              >
-                {{ 'Old format' | i18n }}
+    @if (!serverId) {
+      <table [appTable]="['Hostname', 'StartOS Version', 'Created', null]">
+        @for (server of servers; track server[0]) {
+          <tr>
+            <td class="name">
+              {{ server[1].hostname }}.local
+              @if (server[1].formatStatus === 'legacy') {
+                <button
+                  tuiBadge
+                  type="button"
+                  appearance="warning"
+                  size="m"
+                  (click)="explainOldFormat()"
+                >
+                  {{ 'Old format' | i18n }}
+                </button>
+              }
+            </td>
+            <td>{{ server[1].version }}</td>
+            <td>{{ server[1].timestamp | date: 'medium' }}</td>
+            <td>
+              <button tuiButton size="s" (click)="serverId = server[0]">
+                {{ 'Select' | i18n }}
               </button>
-            }
-          </td>
-          <td>{{ server.value.version }}</td>
-          <td>{{ server.value.timestamp | date: 'medium' }}</td>
-          <td>
-            <button tuiButton size="s" (click)="onClick(server.key)">
-              {{ 'Select' | i18n }}
+            </td>
+          </tr>
+        }
+      </table>
+    } @else {
+      <section class="unlock-flow">
+        @if (target.entry.startOs[serverId]?.formatStatus === 'legacy') {
+          <button
+            tuiBadge
+            type="button"
+            appearance="warning"
+            size="m"
+            (click)="explainOldFormat()"
+          >
+            {{ 'Old format' | i18n }}
+          </button>
+        }
+        <span tuiTitle>
+          <b>{{ 'Password' | i18n }}</b>
+          <span tuiSubtitle>
+            {{ selectedServerName() }} ·
+            {{
+              'Enter the master password that was used to encrypt this backup.'
+                | i18n
+            }}
+          </span>
+        </span>
+        <tui-textfield>
+          <label tuiLabel>{{ 'Password' | i18n }}</label>
+          <input
+            tuiInput
+            required
+            autocomplete="current-password"
+            [type]="passwordMasked ? 'password' : 'text'"
+            [(ngModel)]="password"
+            (keyup.enter)="decrypt()"
+          />
+          <button
+            tuiIconButton
+            type="button"
+            size="xs"
+            appearance="icon"
+            [iconStart]="passwordMasked ? '@tui.eye' : '@tui.eye-off'"
+            [attr.aria-label]="
+              (passwordMasked ? 'Show password' : 'Hide password') | i18n
+            "
+            (click)="passwordMasked = !passwordMasked"
+          >
+            {{ (passwordMasked ? 'Show password' : 'Hide password') | i18n }}
+          </button>
+        </tui-textfield>
+        <footer class="g-buttons">
+          @if (servers.length > 1) {
+            <button
+              tuiButton
+              type="button"
+              appearance="flat"
+              (click)="serverId = ''"
+            >
+              {{ 'Back' | i18n }}
             </button>
-          </td>
-        </tr>
-      }
-    </table>
+          }
+          <button tuiButton [disabled]="!password()" (click)="decrypt()">
+            {{ 'Continue' | i18n }}
+          </button>
+        </footer>
+      </section>
+    }
   `,
   styles: `
     td:last-child {
-      text-align: right;
+      text-align: end;
+    }
+
+    .unlock-flow {
+      display: grid;
+      gap: 1rem;
     }
 
     :host-context(tui-root._mobile) {
@@ -63,9 +140,11 @@ import { RECOVER } from './recover.component'
     }
   `,
   imports: [
-    KeyValuePipe,
     DatePipe,
+    FormsModule,
     TuiButton,
+    TuiInput,
+    TuiTitle,
     TuiBadge,
     TableComponent,
     i18nPipe,
@@ -76,50 +155,103 @@ export class BackupRestoreComponent {
   private readonly tasks = inject(TaskService)
   private readonly api = inject(ApiService)
   private readonly context = injectContext<BackupContext>()
+  private readonly i18n = inject(i18nPipe)
 
-  readonly target = this.context.data
+  protected readonly target = this.context.data
+  protected readonly servers = this.serverEntries()
+  protected serverId = this.servers.length === 1 ? this.servers[0]![0] : ''
+  protected readonly password = signal('')
+  protected passwordMasked = true
 
   protected explainOldFormat(): void {
     this.dialog
       .openAlert(
-        'This backup uses an old format. It remains usable for restores. To enable stronger tamper detection and read-only snapshots, update it on the Create Backup page of the server this backup belongs to. Conversion may take a long time, and this backup is unavailable until it finishes.',
+        'This backup uses an old format. It remains usable for restores. To enable stronger tamper detection and read-only snapshots, update it under Backups → Manage backup locations on the server this backup belongs to. Conversion may take a long time, and this backup is unavailable until it finishes.',
         { label: 'Old format' },
       )
       .subscribe()
   }
 
-  onClick(serverId: string) {
-    this.dialog
-      .openPrompt<string>({
-        label: 'Password required',
-        data: {
-          message:
-            'Enter the master password that was used to encrypt this backup. On the next screen, you will select the individual services you want to restore.',
-          label: 'Master Password',
-          placeholder: 'Enter master password',
-          useMask: true,
-        },
-      })
-      .pipe(
-        filter(Boolean),
-        switchMap(password => this.decrypt(serverId, password)),
-        filter(Boolean), // a password the server rejects leaves the prompt open to retry
-        take(1),
-      )
-      .subscribe()
+  protected selectedServerName(): string {
+    const server = this.servers.find(([id]) => id === this.serverId)?.[1]
+    return server ? `${server.hostname}.local` : this.serverId
   }
 
-  private decrypt(serverId: string, password: string) {
-    return this.tasks.run(async () => {
-      const params = { targetId: this.target.id, serverId, password }
-      const backupInfo = await this.api.rpc.backup.target.info(params)
-      const data = { targetId: this.target.id, serverId, backupInfo, password }
+  protected async decrypt() {
+    const password = this.password()
+    if (!this.serverId || !password) return
+    await this.tasks.run(async () => {
+      const params = {
+        targetId: this.target.id,
+        serverId: this.serverId,
+        password,
+      }
+      const [manual, automatic] = await Promise.allSettled([
+        this.api.rpc.backup.target.info(params),
+        this.api.rpc.backup.history.discover(params),
+      ])
+
+      if (manual.status === 'rejected' && automatic.status === 'rejected') {
+        throw manual.reason
+      }
+
+      const backupInfo =
+        manual.status === 'fulfilled'
+          ? manual.value
+          : { version: '', timestamp: null, packageBackups: {} }
+      const scheduledHistories =
+        automatic.status === 'fulfilled' ? automatic.value : []
+
+      if (
+        !Object.keys(backupInfo.packageBackups).length &&
+        !scheduledHistories.length
+      ) {
+        throw new Error(
+          this.i18n.transform('No restorable checkpoints were found'),
+        )
+      }
+
+      const data = {
+        targetId: this.target.id,
+        serverId: this.serverId,
+        backupInfo,
+        scheduledHistories,
+        password,
+        unavailableSources: [
+          manual.status === 'rejected' && this.hasSource(false)
+            ? `${this.i18n.transform('Manual backups could not be opened')}: ${getErrorMessage(manual.reason)}`
+            : '',
+          automatic.status === 'rejected' && this.hasSource(true)
+            ? `${this.i18n.transform('Automatic backups could not be opened')}: ${getErrorMessage(automatic.reason)}`
+            : '',
+        ].filter(Boolean),
+      }
 
       this.context.$implicit.complete()
       this.dialog
         .openComponent(RECOVER, { label: 'Select services', data })
         .subscribe()
     }, 'Decrypting drive')
+  }
+
+  private hasSource(scheduled: boolean): boolean {
+    return Object.entries(this.target.entry.startOs).some(
+      ([key, server]) =>
+        (server.serverId || key) === this.serverId &&
+        !!server.scheduled === scheduled,
+    )
+  }
+
+  private serverEntries(): [string, T.StartOsRecoveryInfo][] {
+    const servers = new Map<string, T.StartOsRecoveryInfo>()
+    for (const [key, server] of Object.entries(this.target.entry.startOs)) {
+      const id = server.serverId || key
+      const current = servers.get(id)
+      if (!current || current.timestamp < server.timestamp) {
+        servers.set(id, server)
+      }
+    }
+    return [...servers]
   }
 }
 

@@ -7,12 +7,16 @@ import {
 } from '@angular/core'
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop'
 import {
+  convertBytes,
   DialogService,
   ErrorService,
   getErrorMessage,
+  i18nPipe,
+  RpcError,
   TaskService,
 } from '@start9labs/shared'
 import { T, Version } from '@start9labs/start-core'
+import { TuiNotificationService } from '@taiga-ui/core'
 import { PatchDB } from 'patch-db-client'
 import {
   catchError,
@@ -25,6 +29,7 @@ import {
   pairwise,
   Subject,
   switchMap,
+  tap,
 } from 'rxjs'
 
 import {
@@ -41,15 +46,24 @@ export interface MappedBackupTarget<E> {
   entry: E
 }
 
-@Injectable({ providedIn: 'root' })
+export function formatCifsLocation(target: CifsBackupTarget): string {
+  const share = target.path.replace(/^\/+/, '')
+  return share ? `${target.hostname}/${share}` : target.hostname
+}
+
+@Injectable({
+  providedIn: 'root',
+})
 export class BackupService {
   private readonly api = inject(ApiService)
   private readonly dialogs = inject(DialogService)
   private readonly errorService = inject(ErrorService)
+  private readonly i18n = inject(i18nPipe)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly tasks = inject(TaskService)
   private readonly reload = new Subject<void>()
-  private readonly targets = toSignal(
+  private readonly discoverySettled = new Subject<void>()
+  private readonly listedTargets = toSignal(
     this.reload.pipe(
       switchMap(() =>
         defer(() => {
@@ -60,6 +74,7 @@ export class BackupService {
               return EMPTY
             }),
             finalize(() => this.loading.set(false)),
+            tap({ complete: () => this.discoverySettled.next() }),
           )
         }),
       ),
@@ -67,7 +82,7 @@ export class BackupService {
     { initialValue: {} as Record<string, T.BackupTarget> },
   )
   private readonly mapped = computed(() =>
-    Object.entries(this.targets()).map(([id, entry]) => ({
+    Object.entries(this.listedTargets()).map(([id, entry]) => ({
       id,
       entry,
       hasAnyBackup: this.hasAnyBackup(entry),
@@ -110,10 +125,53 @@ export class BackupService {
         target.entry.type === 'disk' && target.entry.capacity > 0,
     ),
   )
+  private readonly alerts = inject(TuiNotificationService)
+  readonly locations = computed(() => [
+    ...this.cifs().map(location => ({
+      id: location.id,
+      location,
+      name: location.entry.path.split('/').pop() || location.entry.path,
+      detail: formatCifsLocation(location.entry),
+      icon: '@tui.network',
+      available: location.entry.mountable,
+      capacity: null as number | null,
+      used: null as number | null,
+    })),
+    ...this.drives().map(location => ({
+      id: location.id,
+      location,
+      name:
+        [location.entry.vendor, location.entry.model]
+          .filter(Boolean)
+          .join(' ') || location.entry.logicalname,
+      detail: `${location.entry.logicalname} · ${convertBytes(location.entry.capacity)}`,
+      icon: '@tui.hard-drive',
+      available: location.entry.capacity > 0,
+      capacity: location.entry.capacity,
+      used: location.entry.used,
+    })),
+  ])
+
+  readonly targets = computed(() =>
+    this.locations().map(location => ({
+      id: location.id,
+      name:
+        location.location.entry.type === 'cifs'
+          ? location.detail
+          : location.name,
+    })),
+  )
+
+  targetName(id: string): string {
+    return this.targets().find(target => target.id === id)?.name || id
+  }
+
   public readonly loading = signal(true)
 
-  getBackupTargets(): void {
+  getBackupTargets(): Promise<void> {
+    const settled = firstValueFrom(this.discoverySettled)
     this.reload.next()
+    return settled
   }
 
   hasAnyBackup({ startOs }: T.BackupTarget): boolean {
@@ -209,5 +267,49 @@ export class BackupService {
         this.api.rpc.backup.target.convert({ targetId, serverId, password }),
       'Starting backup conversion',
     )
+  }
+
+  showQueuedNotification(job: T.BackupJob): void {
+    if (!job.status.runRequested) return
+
+    this.alerts
+      .open(
+        this.i18n.transform(
+          'The first backup is queued and will start automatically when no backup or restore is in progress.',
+        ),
+        {
+          appearance: 'info',
+          label: this.i18n.transform('Automatic backup'),
+        },
+      )
+      .subscribe()
+  }
+
+  async withOriginalPassword<Result>(
+    action: (oldPassword?: string) => Promise<Result>,
+  ): Promise<Result | null> {
+    let oldPassword: string | undefined
+    for (;;) {
+      try {
+        return await action(oldPassword)
+      } catch (error) {
+        if (!(error instanceof RpcError) || error.code !== 81) throw error
+      }
+      oldPassword = await firstValueFrom(
+        this.dialogs.openPrompt<string>({
+          label: 'Original password needed',
+          data: {
+            message:
+              'This backup was created with a different password. Enter the original password that was used to encrypt this backup.',
+            label: 'Password',
+            placeholder: 'Enter original password',
+            useMask: true,
+            buttonText: 'Retry',
+          },
+        }),
+        { defaultValue: '' },
+      )
+      if (!oldPassword) return null
+    }
   }
 }
