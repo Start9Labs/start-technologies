@@ -17,19 +17,7 @@ else
 	fi
 fi
 
-if [ -z "$ARCH" ]; then
-	ARCH=$(uname -m)
-fi
-if [ "$ARCH" = "arm64" ]; then
-	ARCH="aarch64"
-fi
-
-# Mount the monorepo root (the cargo workspace root) so startwrt-core's path-deps
-# into shared-libs/ resolve; the builder alias mounts $(pwd) as /workdir.
 cd ../../..
 
-# No --features: start-wrt crates define none, and start-core's `test` feature is
-# for start-core's own tests, not start-wrt's (the one deliberate deviation from
-# start-core/run-tests.sh).
 rust-zig-builder cargo test --manifest-path=./Cargo.toml $BUILD_FLAGS -p startwrt-core -p uciedit -p uciedit_macros --locked --lib
 rust-zig-builder sh -c "chown -R $UID:$UID target && chown -R $UID:$UID /usr/local/cargo"

@@ -18,6 +18,9 @@ printf '%s\n' '---' "$@" >> "$DOCKER_LOG"
 if [[ "$*" == *'/verify/binary'* ]]; then
     printf '00000000 <probe>:\n    0: addi a0, a0, 1\n'
 fi
+if [[ "$*" == *' cargo run '* ]]; then
+    exit "${MOCK_CARGO_EXIT:-0}"
+fi
 MOCK
 cat > "$scratch/bin/objdump" <<'MOCK'
 #!/bin/bash
@@ -71,6 +74,43 @@ for alias_file in build/builder-alias.sh projects/start-wrt/build/builder-alias.
     bash -ec 'RUST_BUILDER_IMAGE=$2; shopt -s expand_aliases; source "$1"; eval "rust-zig-builder cargo --version"' -- "$repo_root/$alias_file" "$custom"
     assert_log_contains "$custom"
 done
+
+for arch in x86_64 arm64 riscv64; do
+    : > "$DOCKER_LOG"
+    ARCH="$arch" START9_RVA23=1 bash -ec 'shopt -s expand_aliases; source projects/start-wrt/build/builder-alias.sh; eval "rust-zig-builder cargo --version"'
+    assert_log_contains START9_RVA23=0
+    assert_log_contains "PKG_CONFIG_SYSROOT_DIR=/opt/sysroot/${arch/arm64/aarch64}"
+done
+
+bindings=(projects/start-wrt/web/src/app/services/api/{bindings.ts,bindings.schemas.ts,events.ts,events.schemas.ts})
+for selected_image in "$image" "$custom"; do
+    : > "$DOCKER_LOG"
+    RUST_BUILDER_IMAGE="$selected_image" bash projects/start-wrt/build/generate-bindings.sh "${bindings[@]}"
+    assert_log_contains "$selected_image"
+    assert_log_contains /workdir
+    assert_log_contains START9_RVA23=0
+    assert_log_contains cargo
+    assert_log_contains run
+    assert_log_contains --profile
+    assert_log_contains bindings
+    assert_log_contains generate_rpc_bindings
+    assert_log_contains --locked
+    assert_log_contains chown
+    assert_log_contains "$UID:$UID"
+    assert_log_contains target
+    assert_log_contains /usr/local/cargo
+    for binding in "${bindings[@]}"; do
+        assert_log_contains "$binding"
+    done
+done
+: > "$DOCKER_LOG"
+if MOCK_CARGO_EXIT=19 bash projects/start-wrt/build/generate-bindings.sh "${bindings[@]}"; then
+    printf 'A failed bindings generator unexpectedly succeeds\n' >&2
+    exit 1
+else
+    test "$?" = 19
+fi
+assert_log_contains chown
 
 : > "$DOCKER_LOG"
 bash shared-libs/crates/start-core/run-tests.sh
@@ -133,4 +173,4 @@ RISCV_OBJDUMP="$scratch/bin/objdump" bash projects/start-wrt/build/verify-isa.sh
 test ! -s "$DOCKER_LOG"
 grep -Fxq -- "$scratch/probe.o" "$OBJDUMP_LOG"
 
-printf 'Builder selection, RVA23 opt-out, overrides, derived images, and K1 disassembly checks passed.\n'
+printf 'Builder selection, RVA23 opt-out, containerized bindings, overrides, derived images, and K1 disassembly checks passed.\n'
