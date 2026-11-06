@@ -100,9 +100,9 @@ Display StartOS system logs. These are also readable and downloadable in the web
 - `-B, --before` — Show logs before cursor
 - `-b, --boot <ID>` — Filter by boot ID
 
-### `start-cli server set-trace <ENABLED>`
+### `start-cli server set-log-level <LEVEL>`
 
-Set the running daemon's process-wide trace logging override. Pass `true` to enable all trace output, or `false` to restore the startup filter. The override clears when the daemon restarts and does not change saved configuration. Trace output may include sensitive details; see [Trace Logging](logs.md#trace-logging).
+Set the running daemon's verbosity for `start-core`/`start-os` code to `error`, `warn`, `info`, `debug`, or `trace`. Dependency logs are excluded while this override is active. Restarting the daemon restores the startup filter without changing saved configuration. Trace output may include sensitive details; see [Log Level](logs.md#log-level).
 
 ### `start-cli server kernel-logs`
 

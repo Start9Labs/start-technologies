@@ -33,7 +33,7 @@ use crate::util::sync::Watch;
 use crate::{MAIN_DATA, PACKAGE_DATA};
 
 mod disk_health;
-pub(crate) mod trace;
+pub(crate) mod log_level;
 pub(crate) mod trust_ca;
 
 pub fn experimental<C: Context>() -> ParentHandler<C> {

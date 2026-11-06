@@ -3,6 +3,7 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use lazy_static::lazy_static;
+use serde::{Deserialize, Serialize};
 use tracing::Subscriber;
 use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard};
 use tracing_subscriber::util::SubscriberInitExt;
@@ -43,26 +44,62 @@ impl Write for TeeWriter {
     }
 }
 
+const LOG_TARGETS: [&str; 2] = [env!("CARGO_CRATE_NAME"), "start_os"];
+
+/// Verbosity accepted by the server's runtime logging control.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    clap::ValueEnum,
+    visit_rs::VisitVariants,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+rpc_toolkit::reflect_ts!(LogLevel);
+
+impl From<LogLevel> for tracing::Level {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Error => Self::ERROR,
+            LogLevel::Warn => Self::WARN,
+            LogLevel::Info => Self::INFO,
+            LogLevel::Debug => Self::DEBUG,
+            LogLevel::Trace => Self::TRACE,
+        }
+    }
+}
+
 #[derive(Clone)]
-struct TraceFilter {
-    startup: EnvFilter,
+struct LogFilter {
     reload: reload::Handle<EnvFilter, Registry>,
 }
 
-impl TraceFilter {
-    fn set_trace(&self, enabled: bool) -> Result<(), reload::Error> {
-        self.reload.reload(if enabled {
-            EnvFilter::new("trace")
-        } else {
-            self.startup.clone()
-        })
+impl LogFilter {
+    fn set_level(&self, level: LogLevel) -> Result<(), reload::Error> {
+        let level = tracing::Level::from(level);
+        let directives = LOG_TARGETS
+            .map(|target| format!("{target}={level}"))
+            .join(",");
+        self.reload.reload(EnvFilter::new(directives))
     }
 }
 
 #[derive(Clone)]
 pub struct StartOSLogger {
     logfile: SharedLogFile,
-    filter: TraceFilter,
+    filter: LogFilter,
     _guard: Arc<Mutex<Option<WorkerGuard>>>,
 }
 
@@ -73,17 +110,17 @@ impl StartOSLogger {
         *self.logfile.0.lock().unwrap() = logfile;
     }
 
-    /// Enables process-wide trace output; disabling restores the startup filter.
-    pub fn set_trace(&self, enabled: bool) -> Result<(), reload::Error> {
-        self.filter.set_trace(enabled)
+    /// Sets StartOS backend verbosity until the daemon restarts.
+    pub fn set_log_level(&self, level: LogLevel) -> Result<(), reload::Error> {
+        self.filter.set_level(level)
     }
 
-    fn base_subscriber(writer: NonBlocking, startup: EnvFilter) -> (impl Subscriber, TraceFilter) {
+    fn base_subscriber(writer: NonBlocking, startup: EnvFilter) -> (impl Subscriber, LogFilter) {
         use tracing_error::ErrorLayer;
         use tracing_subscriber::fmt;
         use tracing_subscriber::prelude::*;
 
-        let (filter, reload) = reload::Layer::new(startup.clone());
+        let (filter, reload) = reload::Layer::new(startup);
         let fmt_layer = fmt::layer()
             .with_writer(writer)
             .with_line_number(true)
@@ -100,7 +137,7 @@ impl StartOSLogger {
 
         let sub = sub.with(ErrorLayer::default());
 
-        (sub, TraceFilter { startup, reload })
+        (sub, LogFilter { reload })
     }
 
     fn init() -> Self {
@@ -113,11 +150,7 @@ impl StartOSLogger {
                 file: logfile.clone(),
             });
         let startup = EnvFilter::builder()
-            .with_default_directive(
-                format!("{}=info", std::module_path!().split("::").next().unwrap())
-                    .parse()
-                    .unwrap(),
-            )
+            .with_default_directive(format!("{}=info", LOG_TARGETS[0]).parse().unwrap())
             .from_env_lossy();
         let (subscriber, filter) = Self::base_subscriber(writer, startup);
         subscriber.init();

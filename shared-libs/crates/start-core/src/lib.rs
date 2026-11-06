@@ -357,10 +357,10 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .with_about("about.display-os-logs"),
         )
         .subcommand(
-            "set-trace",
-            from_fn(system::trace::set_trace)
+            "set-log-level",
+            from_fn(system::log_level::set_log_level)
                 .no_display()
-                .with_about("about.set-trace-logging")
+                .with_about("about.set-log-level")
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(

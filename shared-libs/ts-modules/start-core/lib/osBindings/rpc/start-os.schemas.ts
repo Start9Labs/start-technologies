@@ -942,6 +942,20 @@ export const LogEntry: z.ZodObject<{
 }).meta({
   id: 'LogEntry',
 })
+
+/**
+ * Verbosity accepted by the server's runtime logging control.
+ */
+export const LogLevel: z.ZodEnum<{
+  error: 'error'
+  warn: 'warn'
+  info: 'info'
+  debug: 'debug'
+  trace: 'trace'
+}> = /* @__PURE__ */ z.enum(['error', 'warn', 'info', 'debug', 'trace']).meta({
+  id: 'LogLevel',
+  description: "Verbosity accepted by the server's runtime logging control.",
+})
 export const LogoutParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'LogoutParams',
 })
@@ -1315,26 +1329,6 @@ export const SetServerHostnameParams: z.ZodObject<{
   }),
 }).meta({
   id: 'SetServerHostnameParams',
-})
-
-/**
- * Controls the running daemon's process-wide trace override.
- */
-export const SetTraceParams: z.ZodObject<{
-  /**
-   * Disabling restores the filter selected at daemon startup.
-   */
-  enabled: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  /**
-   * Disabling restores the filter selected at daemon startup.
-   */
-  enabled: z.boolean().meta({
-    description: 'Disabling restores the filter selected at daemon startup.',
-  }),
-}).meta({
-  id: 'SetTraceParams',
-  description: "Controls the running daemon's process-wide trace override.",
 })
 export const SetWifiEnabledParams: z.ZodObject<{ enabled: z.ZodBoolean }> =
   /* @__PURE__ */ object({ enabled: z.boolean() }).meta({
@@ -3277,6 +3271,26 @@ export const SetIconParams: z.ZodObject<{
   icon: z.ZodNullable<typeof DataUrl>
 }> = /* @__PURE__ */ object({ icon: DataUrl.nullable() }).meta({
   id: 'SetIconParams',
+})
+
+/**
+ * Sets verbosity for StartOS backend code in the running daemon.
+ */
+export const SetLogLevelParams: z.ZodObject<{
+  /**
+   * Applies to start-core/start-os until the daemon restarts.
+   */
+  level: typeof LogLevel
+}> = /* @__PURE__ */ object({
+  /**
+   * Applies to start-core/start-os until the daemon restarts.
+   */
+  level: LogLevel.meta({
+    description: 'Applies to start-core/start-os until the daemon restarts.',
+  }),
+}).meta({
+  id: 'SetLogLevelParams',
+  description: 'Sets verbosity for StartOS backend code in the running daemon.',
 })
 export const SetOsUpdateSignerParams: z.ZodObject<{
   key: typeof AnyVerifyingKey
@@ -6747,12 +6761,12 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ SetLanguageParams,
           _RETURN: /* @__PURE__ */ z.null(),
         },
-        'set-smtp': {
-          _PARAMS: /* @__PURE__ */ SmtpValue,
+        'set-log-level': {
+          _PARAMS: /* @__PURE__ */ SetLogLevelParams,
           _RETURN: /* @__PURE__ */ z.null(),
         },
-        'set-trace': {
-          _PARAMS: /* @__PURE__ */ SetTraceParams,
+        'set-smtp': {
+          _PARAMS: /* @__PURE__ */ SmtpValue,
           _RETURN: /* @__PURE__ */ z.null(),
         },
         shutdown: {

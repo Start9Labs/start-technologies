@@ -75,24 +75,40 @@ fn no_shadowed_args_start_cli() {
 }
 
 #[test]
-fn trace_override_requires_an_explicit_boolean() {
-    for (value, expected) in [("true", true), ("false", false)] {
+fn log_level_requires_one_of_the_named_levels() {
+    use crate::util::logger::LogLevel;
+
+    for (value, expected) in [
+        ("error", LogLevel::Error),
+        ("warn", LogLevel::Warn),
+        ("info", LogLevel::Info),
+        ("debug", LogLevel::Debug),
+        ("trace", LogLevel::Trace),
+    ] {
         let matches = app()
             .into_command()
-            .try_get_matches_from(["start-cli", "server", "set-trace", value])
+            .try_get_matches_from(["start-cli", "server", "set-log-level", value])
             .unwrap();
         let params = matches
             .subcommand_matches("server")
             .unwrap()
-            .subcommand_matches("set-trace")
+            .subcommand_matches("set-log-level")
             .unwrap();
-        assert_eq!(params.get_one::<bool>("enabled"), Some(&expected));
+        assert_eq!(params.get_one::<LogLevel>("level"), Some(&expected));
     }
-    for args in [
-        vec!["start-cli", "server", "set-trace"],
-        vec!["start-cli", "server", "set-trace", "invalid"],
-    ] {
-        assert!(app().into_command().try_get_matches_from(args).is_err());
+    assert!(
+        app()
+            .into_command()
+            .try_get_matches_from(["start-cli", "server", "set-log-level"])
+            .is_err()
+    );
+    for value in ["invalid", "off", "5", "true", "TRACE"] {
+        assert!(
+            app()
+                .into_command()
+                .try_get_matches_from(["start-cli", "server", "set-log-level", value])
+                .is_err()
+        );
     }
 }
 

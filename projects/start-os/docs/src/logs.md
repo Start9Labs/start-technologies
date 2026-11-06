@@ -37,18 +37,18 @@ start-cli server kernel-logs
 
 In **Diagnostic Mode**, where StartOS has failed to start normally, the diagnostic page offers **View logs**. There is no download button there, so `start-cli diagnostic logs` is how to capture those. See the [FAQ](faq.md#startos-boots-into-diagnostic-mode).
 
-## Trace Logging
+## Log Level
 
-Client and service connection failures, including refused backend ports and TLS errors, are logged at trace level rather than filling normal OS logs. Enable temporary trace output on a running server with:
-
-```bash
-start-cli server set-trace true
-```
-
-Read the output in **System → OS Logs** or with `start-cli server logs --follow`. Trace output covers the entire daemon, including its dependencies, and can contain sensitive details and substantial volume. Disable the override after diagnosis:
+Client and service connection failures, including refused backend ports and TLS errors, are logged at trace level rather than filling normal OS logs. Set the running daemon's verbosity with `start-cli server set-log-level <LEVEL>`, choosing `error`, `warn`, `info`, `debug`, or `trace`:
 
 ```bash
-start-cli server set-trace false
+start-cli server set-log-level trace
 ```
 
-Disabling restores the filter selected at daemon startup, including any explicit `RUST_LOG` settings. Restarting the daemon also clears the override. The command requires the same authentication as other server commands and changes no saved configuration.
+Read the output in **System → OS Logs** or with `start-cli server logs --follow`. The selected level applies only to `start-core`/`start-os` code. Dependency logs are excluded while the override is active, preventing the HTTP/WebSocket transport from feeding its own diagnostics back into followed logs. Trace output can still contain sensitive details and substantial volume. Return to normal verbosity after diagnosis:
+
+```bash
+start-cli server set-log-level info
+```
+
+The setting lasts until the daemon restarts, when its startup filter, including any explicit `RUST_LOG` settings, is restored. The command requires the same authentication as other server commands and changes no saved configuration.
