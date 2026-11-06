@@ -45,10 +45,10 @@ Client and service connection failures, including refused backend ports and TLS 
 start-cli server set-log-level trace
 ```
 
-Read the output in **System → OS Logs** or with `start-cli server logs --follow`. The selected level applies only to `start-core`/`start-os` code. Dependency logs are excluded while the override is active, preventing the HTTP/WebSocket transport from feeding its own diagnostics back into followed logs. Trace output can still contain sensitive details and substantial volume. Return to normal verbosity after diagnosis:
+Read the output in **System → OS Logs** or with `start-cli server logs --follow`. The selected level applies only to `start-core`/`start-os` code. Dependency logs keep their startup filter, which shows warnings and errors by default. Trace output can still contain sensitive details and substantial volume. Return to the packaged backend default after diagnosis:
 
 ```bash
-start-cli server set-log-level info
+start-cli server set-log-level debug
 ```
 
-The setting lasts until the daemon restarts, when its startup filter, including any explicit `RUST_LOG` settings, is restored. The command requires the same authentication as other server commands and changes no saved configuration.
+The setting lasts until the daemon restarts, when its startup filter, including any explicit `RUST_LOG` settings, is restored. More-specific startup directives retain their usual precedence. Explicit `debug`/`trace` directives for HTTP/WebSocket dependencies can feed their diagnostics back into followed logs. The command requires the same authentication as other server commands and changes no saved configuration.

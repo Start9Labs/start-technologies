@@ -151,7 +151,7 @@ fn followed_log_transport_does_not_generate_journal_entries() {
         entries: entries.clone(),
     });
     let (subscriber, filter) =
-        StartOSLogger::base_subscriber(writer, EnvFilter::new("start_core=info"));
+        StartOSLogger::base_subscriber(writer, EnvFilter::new(packaged_filter()));
     subscriber.init();
     filter.set_level(LogLevel::Trace).unwrap();
     assert_eq!(log::max_level(), log::LevelFilter::Trace);

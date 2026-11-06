@@ -34,6 +34,16 @@ fn emit_events() {
     tracing::error!(target: "dependency", "dependency error");
 }
 
+fn packaged_filter() -> &'static str {
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../projects/start-os/startd.service"
+    ))
+    .lines()
+    .find_map(|line| line.strip_prefix("Environment=RUST_LOG="))
+    .unwrap()
+}
+
 fn capture(startup: &str, run: impl FnOnce(&LogFilter)) -> String {
     let logs = Logs::default();
     let (writer, guard) = NonBlockingBuilder::default().finish(logs.clone());
@@ -44,9 +54,9 @@ fn capture(startup: &str, run: impl FnOnce(&LogFilter)) -> String {
 }
 
 #[test]
-fn runtime_levels_apply_live_to_both_startos_targets_and_exclude_dependencies() {
+fn runtime_levels_apply_live_to_both_startos_targets_and_preserve_dependency_warnings() {
     let mut expected = Vec::new();
-    let text = capture("trace", |filter| {
+    let text = capture(packaged_filter(), |filter| {
         for (level, events) in [
             (LogLevel::Error, vec!["core error", "os error"]),
             (
@@ -59,19 +69,6 @@ fn runtime_levels_apply_live_to_both_startos_targets_and_exclude_dependencies() 
                     "core info",
                     "core warn",
                     "core error",
-                    "os info",
-                    "os warn",
-                    "os error",
-                ],
-            ),
-            (
-                LogLevel::Debug,
-                vec![
-                    "core debug",
-                    "core info",
-                    "core warn",
-                    "core error",
-                    "os debug",
                     "os info",
                     "os warn",
                     "os error",
@@ -92,10 +89,24 @@ fn runtime_levels_apply_live_to_both_startos_targets_and_exclude_dependencies() 
                     "os error",
                 ],
             ),
+            (
+                LogLevel::Debug,
+                vec![
+                    "core debug",
+                    "core info",
+                    "core warn",
+                    "core error",
+                    "os debug",
+                    "os info",
+                    "os warn",
+                    "os error",
+                ],
+            ),
         ] {
             filter.set_level(level).unwrap();
             emit_events();
             expected.extend(events);
+            expected.extend(["dependency warn", "dependency error"]);
         }
     });
     let lines: Vec<_> = text.lines().collect();
@@ -106,15 +117,55 @@ fn runtime_levels_apply_live_to_both_startos_targets_and_exclude_dependencies() 
 }
 
 #[test]
+fn runtime_level_preserves_explicit_dependency_directives() {
+    let text = capture(
+        "warn,tungstenite=trace,h2=debug,dependency=info",
+        |filter| {
+            filter.set_level(LogLevel::Error).unwrap();
+            emit_events();
+        },
+    );
+    let expected = [
+        "core error",
+        "os error",
+        "transport trace",
+        "transport debug",
+        "dependency info",
+        "dependency warn",
+        "dependency error",
+    ];
+    let lines: Vec<_> = text.lines().collect();
+    assert_eq!(lines.len(), expected.len(), "{text}");
+    for (line, message) in lines.iter().zip(expected) {
+        assert!(line.contains(message), "{text}");
+    }
+}
+
+#[test]
+fn runtime_level_preserves_an_active_dependency_span() {
+    let text = capture("warn,dependency[request]=debug", |filter| {
+        let span = tracing::info_span!(target: "dependency", "request");
+        let _entered = span.enter();
+        tracing::debug!(target: "dependency", "before level change");
+        filter.set_level(LogLevel::Trace).unwrap();
+        tracing::debug!(target: "dependency", "after level change");
+    });
+    assert_eq!(text.lines().count(), 2, "{text}");
+    assert!(text.contains("before level change"), "{text}");
+    assert!(text.contains("after level change"), "{text}");
+}
+
+#[test]
 fn a_new_logger_uses_the_startup_filter_instead_of_the_previous_runtime_level() {
     let selected = capture("start_core=error,dependency=warn", |filter| {
         filter.set_level(LogLevel::Info).unwrap();
         emit_events();
     });
-    assert_eq!(selected.lines().count(), 6, "{selected}");
+    assert_eq!(selected.lines().count(), 8, "{selected}");
     assert!(selected.contains("core info"), "{selected}");
     assert!(selected.contains("os info"), "{selected}");
-    assert!(!selected.contains("dependency"), "{selected}");
+    assert!(selected.contains("dependency warn"), "{selected}");
+    assert!(!selected.contains("dependency info"), "{selected}");
     let restarted = capture("start_core=error,dependency=warn", |_| emit_events());
     assert_eq!(restarted.lines().count(), 3, "{restarted}");
     assert!(restarted.contains("core error"), "{restarted}");

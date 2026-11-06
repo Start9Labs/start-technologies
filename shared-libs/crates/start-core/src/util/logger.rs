@@ -89,10 +89,13 @@ struct LogFilter {
 impl LogFilter {
     fn set_level(&self, level: LogLevel) -> Result<(), reload::Error> {
         let level = tracing::Level::from(level);
-        let directives = LOG_TARGETS
-            .map(|target| format!("{target}={level}"))
-            .join(",");
-        self.reload.reload(EnvFilter::new(directives))
+        self.reload.modify(|filter| {
+            *filter = LOG_TARGETS
+                .iter()
+                .fold(std::mem::take(filter), |filter, target| {
+                    filter.add_directive(format!("{target}={level}").parse().unwrap())
+                });
+        })
     }
 }
 

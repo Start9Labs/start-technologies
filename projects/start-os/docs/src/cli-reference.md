@@ -102,7 +102,7 @@ Display StartOS system logs. These are also readable and downloadable in the web
 
 ### `start-cli server set-log-level <LEVEL>`
 
-Set the running daemon's verbosity for `start-core`/`start-os` code to `error`, `warn`, `info`, `debug`, or `trace`. Dependency logs are excluded while this override is active. Restarting the daemon restores the startup filter without changing saved configuration. Trace output may include sensitive details; see [Log Level](logs.md#log-level).
+Set the running daemon's verbosity for `start-core`/`start-os` code to `error`, `warn`, `info`, `debug`, or `trace`. Dependency logs keep their startup filter. Restarting the daemon restores the startup filter without changing saved configuration. Trace output may include sensitive details; see [Log Level](logs.md#log-level).
 
 ### `start-cli server kernel-logs`
 
