@@ -58,6 +58,13 @@ import { MarketplaceControlsComponent } from './components/controls.component'
           manageRegistriesLink="/system/registries"
         />
         <a marketplacePackageLink actions></a>
+        <ng-template let-pkg>
+          <button [marketplaceTile]="pkg">
+            <ng-template let-resolved>
+              <marketplace-controls [pkg]="resolved" />
+            </ng-template>
+          </button>
+        </ng-template>
         @if (isRegistrySaved()) {
           <button
             actions
@@ -68,13 +75,6 @@ import { MarketplaceControlsComponent } from './components/controls.component'
             {{ 'Refresh registry' | i18n }}
           </button>
         }
-        <ng-template let-pkg>
-          <button [marketplaceTile]="pkg">
-            <ng-template let-resolved>
-              <marketplace-controls [pkg]="resolved" />
-            </ng-template>
-          </button>
-        </ng-template>
       </marketplace>
     }
   `,
