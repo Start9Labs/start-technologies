@@ -460,6 +460,16 @@ export type Ssid = z.output<typeof schemas.Ssid>
 export type SsidInput = z.input<typeof schemas.Ssid>
 export type StartStop = z.output<typeof schemas.StartStop>
 export type StartStopInput = z.input<typeof schemas.StartStop>
+
+/**
+ * RPC reply metadata for live database synchronization.
+ */
+export type SyncDbMetadata = z.output<typeof schemas.SyncDbMetadata>
+
+/**
+ * RPC reply metadata for live database synchronization.
+ */
+export type SyncDbMetadataInput = z.input<typeof schemas.SyncDbMetadata>
 export type TaskCondition = z.output<typeof schemas.TaskCondition>
 export type TaskConditionInput = z.input<typeof schemas.TaskCondition>
 export type TaskInputRepr = z.output<typeof schemas.TaskInputRepr>

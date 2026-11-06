@@ -1,0 +1,57 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { withLegacyPatchSequence } from '../src/services/rpc-response.ts'
+
+test('JSON metadata is authoritative, including sequence zero', () => {
+  for (const patchSequence of [0, 17]) {
+    const response = {
+      jsonrpc: '2.0',
+      id: 1,
+      result: null,
+      meta: { patchSequence, trace: 'keep' },
+    }
+    assert.equal(withLegacyPatchSequence(response, '42'), response)
+  }
+})
+
+test('old HTTP sequences join existing metadata without mutating the response', () => {
+  const response = {
+    jsonrpc: '2.0',
+    id: null,
+    result: { saved: true },
+    meta: { trace: 'keep' },
+  }
+  const normalized = withLegacyPatchSequence(response, '42')
+  assert.deepEqual(normalized, {
+    ...response,
+    meta: { trace: 'keep', patchSequence: 42 },
+  })
+  assert.deepEqual(response.meta, { trace: 'keep' })
+  assert.equal(normalized.result, response.result)
+})
+
+test('missing HTTP headers do not invent metadata', () => {
+  const response = { jsonrpc: '2.0', id: 2, result: 'done' }
+  assert.equal(withLegacyPatchSequence(response, null), response)
+})
+
+test('nullable sequences have the same compatibility behavior as omitted fields', () => {
+  const response = {
+    jsonrpc: '2.0',
+    id: 2,
+    result: 'done',
+    meta: { patchSequence: null },
+  }
+  assert.equal(withLegacyPatchSequence(response, null), response)
+  assert.equal(withLegacyPatchSequence(response, '17').meta.patchSequence, 17)
+})
+
+test('compatibility preserves errors and can carry sequence zero', () => {
+  const error = { code: 1, message: 'failed' }
+  const response = { jsonrpc: '2.0', id: 3, error }
+  assert.deepEqual(withLegacyPatchSequence(response, '0'), {
+    ...response,
+    meta: { patchSequence: 0 },
+  })
+  assert.equal(withLegacyPatchSequence(response, '8').error, error)
+})

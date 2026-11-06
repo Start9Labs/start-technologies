@@ -113,11 +113,7 @@ fn serialize<T: Serialize>(value: T) -> Result<Value, RpcError> {
 
 #[cfg(feature = "websocket")]
 pub(crate) fn stream_event(id: Id, result: Result<Value, RpcError>, end: bool) -> Value {
-    let mut value = imbl_value::to_value(&RpcResponse {
-        id: Some(id),
-        result,
-    })
-    .unwrap();
+    let mut value = imbl_value::to_value(&RpcResponse::new(Some(id), result)).unwrap();
     let object = value.as_object_mut().unwrap();
     object.remove("jsonrpc");
     object.insert("rpcstream".into(), RPCSTREAM_VERSION.into());

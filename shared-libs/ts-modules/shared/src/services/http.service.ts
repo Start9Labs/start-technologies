@@ -19,6 +19,7 @@ import {
   LocalHttpResponse,
 } from '../types/http.types'
 import { RPCOptions, RPCResponse } from '../types/rpc.types'
+import { withLegacyPatchSequence } from './rpc-response'
 
 @Service()
 export class HttpService {
@@ -32,13 +33,19 @@ export class HttpService {
   ): Promise<LocalHttpResponse<RPCResponse<T>>> {
     const { method, headers, params, timeout } = opts
 
-    return this.httpRequest<RPCResponse<T>>({
+    const response = await this.httpRequest<RPCResponse<T>>({
       method: 'POST',
       url: fullUrl || this.relativeUrl,
       headers,
       body: { method, params },
       timeout,
     })
+    return response.clone({
+      body: withLegacyPatchSequence(
+        response.body,
+        response.headers.get('x-patch-sequence'),
+      ),
+    }) as LocalHttpResponse<RPCResponse<T>>
   }
 
   async httpRequest<T>(opts: HttpOptions): Promise<LocalHttpResponse<T>> {
@@ -85,7 +92,7 @@ function hasParams(
 
 function withTimeout<U>(req: Observable<U>, timeout: number): Observable<U> {
   return race(
-    from(lastValueFrom(req)), // this guarantees it only emits on completion, intermediary emissions are suppressed.
+    from(lastValueFrom(req)),
     interval(timeout).pipe(
       take(1),
       map(() => {

@@ -139,7 +139,10 @@ middleware state and runs the existing RPC middleware pipeline. Per-call state
 mutations do not leak to other calls or batch members. Middleware response
 rewrites apply to the initiating result; stream event payloads follow their own
 handler-defined contract. HTTP-response middleware runs on the upgrade response,
-not on later WebSocket frames.
+not on later WebSocket frames. RPC response middleware can add per-call fields with
+`RpcResponse::add_meta`; initiating replies carry them in a top-level `meta` object on both
+HTTP and WebSocket transports. Stream events and terminal replies retain their handler-defined
+contract and do not rerun RPC response middleware.
 
 Applications own authentication, authorization, origin policy, and revocation.
 Authentication of an upgrade must authorize the connection, not merely an

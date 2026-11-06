@@ -290,7 +290,7 @@ impl<C: Context> Connection<C> {
                         .send(&RpcResponse::from(invalid_request(
                             "stream closure requires a request ID",
                         )))
-                        .await
+                        .await;
                 }
             };
             return self.close_stream(id).await;
@@ -324,9 +324,11 @@ impl<C: Context> Connection<C> {
             let responses: Vec<_> = requests
                 .into_iter()
                 .filter_map(|request| match request {
-                    Ok((request, _)) => request.id.map(|id| RpcResponse {
-                        id: Some(id),
-                        result: Err(limit_error("WebSocket request limit reached")),
+                    Ok((request, _)) => request.id.map(|id| {
+                        RpcResponse::new(
+                            Some(id),
+                            Err(limit_error("WebSocket request limit reached")),
+                        )
                     }),
                     Err(response) => Some(response),
                 })
@@ -387,10 +389,7 @@ impl<C: Context> Connection<C> {
                 .complete(CompletedCall {
                     group,
                     id: None,
-                    response: RpcResponse {
-                        id,
-                        result: Err(error),
-                    },
+                    response: RpcResponse::new(id, Err(error)),
                     respond: true,
                     source: None,
                 })
@@ -499,10 +498,7 @@ impl<C: Context> Connection<C> {
             self.complete(CompletedCall {
                 group,
                 id: Some(id.clone()),
-                response: RpcResponse {
-                    id: Some(id),
-                    result: Err(RPCSTREAM_CANCELLED_ERROR),
-                },
+                response: RpcResponse::new(Some(id), Err(RPCSTREAM_CANCELLED_ERROR)),
                 respond: true,
                 source: None,
             })
@@ -541,17 +537,12 @@ fn decode_request(mut value: Value) -> Result<(RpcRequest, bool), RpcResponse> {
         }
         Ok(opted_in)
     };
-    let opted_in = parse().map_err(|error| RpcResponse {
-        id: id.clone(),
-        result: Err(error),
-    })?;
+    let opted_in = parse().map_err(|error| RpcResponse::new(id.clone(), Err(error)))?;
     if value.get("params").is_none() {
         value["params"] = imbl_value::json!({});
     }
-    let request = imbl_value::from_value(value).map_err(|error| RpcResponse {
-        id,
-        result: Err(invalid_request(error)),
-    })?;
+    let request = imbl_value::from_value(value)
+        .map_err(|error| RpcResponse::new(id, Err(invalid_request(error))))?;
     Ok((request, opted_in))
 }
 

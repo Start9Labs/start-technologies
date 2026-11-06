@@ -227,10 +227,10 @@ export class LiveApiService extends ApiService {
       throw new RpcError(body.error)
     }
 
-    const patchSequence = res.headers.get('x-patch-sequence')
-    if (patchSequence)
+    const patchSequence = body.meta?.patchSequence
+    if (patchSequence != null)
       await firstValueFrom(
-        this.cache$.pipe(filter(({ id }) => id >= Number(patchSequence))),
+        this.cache$.pipe(filter(({ id }) => id >= patchSequence)),
       )
 
     return body.result

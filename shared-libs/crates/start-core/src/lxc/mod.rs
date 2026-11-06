@@ -757,7 +757,7 @@ pub async fn connect(ctx: &RpcContext, container: &LxcContainer) -> Result<Guid,
                                     }
                                     .await;
                                     ws.send(Message::Text(
-                                        serde_json::to_string(&RpcResponse { id, result })
+                                        serde_json::to_string(&RpcResponse::new(id, result))
                                             .with_kind(ErrorKind::Serialization)?
                                             .into(),
                                     ))

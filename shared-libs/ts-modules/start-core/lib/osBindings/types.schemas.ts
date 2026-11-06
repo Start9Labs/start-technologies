@@ -1770,6 +1770,27 @@ export const StartStop: z.ZodEnum<{ start: 'start'; stop: 'stop' }> =
   /* @__PURE__ */ z.enum(['start', 'stop']).meta({
     id: 'StartStop',
   })
+
+/**
+ * RPC reply metadata for live database synchronization.
+ */
+export const SyncDbMetadata: z.ZodObject<{
+  /**
+   * Database revision the caller must observe before using the result.
+   */
+  patchSequence: z.ZodOptional<z.ZodNullable<z.ZodInt>>
+}> = /* @__PURE__ */ object({
+  /**
+   * Database revision the caller must observe before using the result.
+   */
+  patchSequence: z.int().nullable().optional().meta({
+    description:
+      'Database revision the caller must observe before using the result.',
+  }),
+}).meta({
+  id: 'SyncDbMetadata',
+  description: 'RPC reply metadata for live database synchronization.',
+})
 export const TaskCondition: z.ZodEnum<{
   'input-not-matches': 'input-not-matches'
 }> = /* @__PURE__ */ z.enum(['input-not-matches']).meta({

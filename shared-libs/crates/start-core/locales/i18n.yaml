@@ -3635,14 +3635,6 @@ middleware.auth.unknown-content-type:
   fr_FR: "type de contenu inconnu"
   pl_PL: "nieznany typ zawartości"
 
-# middleware/db.rs
-middleware.db.error-writing-patch-sequence-header:
-  en_US: "error writing X-Patch-Sequence header: %{error}"
-  de_DE: "Fehler beim Schreiben des X-Patch-Sequence Headers: %{error}"
-  es_ES: "error al escribir el encabezado X-Patch-Sequence: %{error}"
-  fr_FR: "erreur lors de l'écriture de l'en-tête X-Patch-Sequence : %{error}"
-  pl_PL: "błąd zapisu nagłówka X-Patch-Sequence: %{error}"
-
 # ssh.rs
 ssh.key-not-found:
   en_US: "SSH Key Not Found"

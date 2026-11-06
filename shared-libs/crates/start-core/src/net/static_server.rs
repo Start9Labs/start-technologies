@@ -35,7 +35,7 @@ use crate::hostname::ServerHostname;
 use crate::middleware::auth::Auth;
 use crate::middleware::auth::signature::verify_request_signature;
 use crate::middleware::cors::Cors;
-use crate::middleware::db::SyncDb;
+use crate::middleware::db::{SyncDb, SyncDbHeaderCompat};
 use crate::middleware::json::RequireJson;
 use crate::net::http::request_authority;
 use crate::prelude::*;
@@ -98,6 +98,7 @@ impl UiContext for RpcContext {
                     .with_signature_auth(),
             )
             .middleware(SyncDb::new())
+            .middleware(SyncDbHeaderCompat::default())
     }
     fn rpc_server_routes(self, server: HttpServer<Self>) -> Router {
         crate::mcp::router(self, server).unwrap_or_else(|e| {

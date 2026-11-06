@@ -157,14 +157,14 @@ impl Middleware<Ctx> for Auth {
         request: &mut RpcRequest,
     ) -> Result<(), RpcResponse> {
         if metadata["guarded"] == Value::Bool(true) && self.user.as_deref() != Some("admin") {
-            return Err(RpcResponse {
-                id: request.id.clone(),
-                result: Err(RpcError {
+            return Err(RpcResponse::new(
+                request.id.clone(),
+                Err(RpcError {
                     code: 34,
                     message: "forbidden".into(),
                     data: None,
                 }),
-            });
+            ));
         }
         Ok(())
     }
@@ -284,6 +284,57 @@ impl Client {
         let response = self.send(method, params).await;
         assert_eq!(response.status(), StatusCode::OK);
         body(response).await
+    }
+}
+
+#[tokio::test]
+async fn rpc_response_metadata_maps_to_mcp_result_metadata_on_success_and_error() {
+    #[derive(Clone)]
+    struct ReplyMetadata;
+    impl Middleware<Ctx> for ReplyMetadata {
+        type Metadata = rpc_toolkit::Empty;
+        async fn process_rpc_response(&mut self, _: &Ctx, response: &mut RpcResponse) {
+            response.add_meta(json!({"patchSequence": 7})).unwrap();
+        }
+    }
+    let service = McpServer::new(
+        Server::new(|| async { Ok(Ctx) }, tree())
+            .middleware(Auth::default())
+            .middleware(ReplyMetadata),
+        catalog(),
+        Policy,
+        Implementation::new("test", "0.0.0"),
+    )
+    .unwrap()
+    .service(
+        StreamableHttpServerConfig::default()
+            .with_legacy_session_mode(false)
+            .with_json_response(true),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, Router::new().route("/mcp", any(service)))
+            .await
+            .unwrap();
+    });
+    let client = Client {
+        addr,
+        token: Some("user"),
+        http: reqwest::Client::new(),
+    };
+    for (name, arguments, error) in [
+        ("greet", json!({"name":"mcp"}), false),
+        ("fail", json!({}), true),
+    ] {
+        let response = client
+            .call("tools/call", json!({"name":name, "arguments":arguments}))
+            .await;
+        assert_eq!(response["result"]["_meta"], json!({"patchSequence":7}));
+        assert_eq!(response["result"]["isError"] == true, error);
+        assert!(response["result"]["structuredContent"]
+            .get("meta")
+            .is_none());
     }
 }
 

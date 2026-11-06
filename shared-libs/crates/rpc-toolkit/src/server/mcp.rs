@@ -202,7 +202,14 @@ impl<Context: crate::Context> ServerHandler for McpServer<Context> {
             .http
             .process_rpc_request(&http_request.context, &mut middleware, rpc_request)
             .await;
-        Ok(Self::tool_result(tool, response.result).into())
+        let mut result = Self::tool_result(tool, response.result);
+        if !response.meta.is_empty() {
+            result.meta = Some(
+                imbl_value::from_value(Value::Object(response.meta))
+                    .map_err(|error| McpError::internal_error(error.to_string(), None))?,
+            );
+        }
+        Ok(result.into())
     }
 }
 

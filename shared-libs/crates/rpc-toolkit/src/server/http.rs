@@ -276,12 +276,9 @@ impl<Context: crate::Context> HttpServer<Context> {
         let limit = self.request_body_limit;
         req.extensions_mut().insert(limit);
         buffer_request_body(req, limit).await?;
-        let ctx = (self.inner.make_ctx)().await.map_err(|e| {
-            json_http_response(&RpcResponse {
-                id: None,
-                result: Err(e),
-            })
-        })?;
+        let ctx = (self.inner.make_ctx)()
+            .await
+            .map_err(|e| json_http_response(&RpcResponse::from(e)))?;
         let mut mid = self.middleware.clone();
         for middleware in mid.iter_mut().rev() {
             middleware.process_http_request(&ctx, req).await?;
@@ -348,10 +345,7 @@ impl<Context: crate::Context> HttpServer<Context> {
         .await
         {
             Ok(a) => a,
-            Err(e) => json_http_response(&RpcResponse {
-                id: None,
-                result: Err(e),
-            }),
+            Err(e) => json_http_response(&RpcResponse::from(e)),
         }
     }
     /// Runs one call through the RPC middleware and the handler tree.
@@ -383,10 +377,7 @@ impl<Context: crate::Context> HttpServer<Context> {
                     {
                         Some(a) => a,
                         None => {
-                            return RpcResponse {
-                                id: req.id,
-                                result: Err(yajrc::METHOD_NOT_FOUND_ERROR),
-                            }
+                            return RpcResponse::new(req.id, Err(yajrc::METHOD_NOT_FOUND_ERROR));
                         }
                     },
                 )

@@ -48,6 +48,11 @@ context factory plus the root `ParentHandler`, and exposes:
 - `handle(request)` — decode and run a single or batch JSON-RPC request.
 - `stream(requests)` — drive a stream of requests concurrently via `JobRunner`.
 
+`server/response.rs` owns `RpcResponse`, composing yajrc's response validation with an optional
+`meta` object. Middleware adds typed metadata through `add_meta`, which rejects duplicate fields;
+`read_meta` applies the owner's serde schema. JSON, CBOR, and WebSocket initiating replies retain
+these fields; MCP maps them to tool-result `_meta`. Empty metadata preserves the legacy wire shape.
+
 Transports wrap a `Server`:
 
 - **HTTP** (`server/http.rs`): `HttpServer` on `axum`, with content-negotiated CBOR/JSON encoding
