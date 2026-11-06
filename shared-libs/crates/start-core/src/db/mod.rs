@@ -20,7 +20,7 @@ use tracing::instrument;
 
 use crate::context::{CliContext, RpcContext};
 use crate::prelude::*;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
 
 lazy_static::lazy_static! {
@@ -226,6 +226,7 @@ pub async fn subscribe(
             RpcContinuation::ws_authed(
                 &ctx,
                 signer,
+                WebSocketPolicy::Authenticated,
                 |mut ws| async move {
                     if let Err(e) = async {
                         loop {

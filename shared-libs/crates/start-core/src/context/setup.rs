@@ -24,7 +24,7 @@ use crate::net::gateway::WildcardListener;
 use crate::net::web_server::{WebServer, WebServerAcceptorSetter};
 use crate::prelude::*;
 use crate::progress::FullProgressTracker;
-use crate::rpc_continuations::{Guid, RpcContinuation, RpcContinuations};
+use crate::rpc_continuations::{Guid, RpcContinuation, RpcContinuations, WebSocketPolicy};
 use crate::setup::{SetupInfo, SetupProgress};
 use crate::shutdown::Shutdown;
 use crate::system::KeyboardOptions;
@@ -165,6 +165,7 @@ impl SetupContext {
             .add(
                 guid.clone(),
                 RpcContinuation::ws(
+                    WebSocketPolicy::Public,
                     |mut ws| async move {
                         if let Err(e) = async {
                             let mut stream =

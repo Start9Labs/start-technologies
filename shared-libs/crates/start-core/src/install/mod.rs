@@ -26,7 +26,7 @@ use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, PhasedProgressBar};
 use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::registry::package::get::GetPackageResponse;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::s9pk::manifest::PackageId;
 use crate::s9pk::v2::SIG_CONTEXT;
 use crate::sign::SignatureMap;
@@ -251,6 +251,7 @@ pub async fn sideload(
             RpcContinuation::ws_authed(
                 &ctx,
                 signer,
+                WebSocketPolicy::Authenticated,
                 |mut ws| async move {
                     if let Err(e) = async {
                         loop {

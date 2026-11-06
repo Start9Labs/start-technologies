@@ -37,7 +37,7 @@ use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::registry::os::SIG_CONTEXT;
 use crate::registry::os::index::OsVersionInfo;
 use crate::registry::signer::AcceptSigners;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::sign::commitment::Commitment;
 use crate::sign::commitment::blake3::Blake3Commitment;
@@ -128,6 +128,7 @@ pub async fn update_system(
             .add(
                 guid.clone(),
                 RpcContinuation::ws(
+                    WebSocketPolicy::Authenticated,
                     |mut ws| async move {
                         if let Err(e) = async {
                             let mut sub = ctx

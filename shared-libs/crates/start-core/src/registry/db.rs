@@ -20,7 +20,7 @@ use crate::registry::RegistryDatabase;
 use crate::registry::context::RegistryContext;
 use crate::registry::mirror::{IndexMirror, index_mirror, mirror_key};
 use crate::registry::package::index::ReaderParams;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
 
 lazy_static::lazy_static! {
@@ -213,6 +213,7 @@ pub async fn subscribe(
         .add(
             guid.clone(),
             RpcContinuation::ws(
+                WebSocketPolicy::Public,
                 |mut ws| async move {
                     let _mirror = mirror;
                     if let Err(e) = async {

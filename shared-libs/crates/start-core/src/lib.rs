@@ -347,7 +347,8 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "logs",
-            system::logs::<RpcContext>().with_about("about.display-os-logs"),
+            system::logs::<RpcContext>(rpc_continuations::WebSocketPolicy::Authenticated)
+                .with_about("about.display-os-logs"),
         )
         .subcommand(
             "logs",
@@ -358,7 +359,8 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "kernel-logs",
-            system::kernel_logs::<RpcContext>().with_about("about.display-kernel-logs"),
+            system::kernel_logs::<RpcContext>(rpc_continuations::WebSocketPolicy::Authenticated)
+                .with_about("about.display-kernel-logs"),
         )
         .subcommand(
             "kernel-logs",

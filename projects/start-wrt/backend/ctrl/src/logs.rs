@@ -9,7 +9,7 @@ use startos::util::net::WebSocket;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-use crate::continuations::{Guid, RpcContinuation};
+use crate::continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::invoke::Invoke;
 use crate::prelude::*;
 use crate::ServerContext;
@@ -70,7 +70,13 @@ pub async fn follow_logs(
     ctx.continuations
         .add(
             guid.clone(),
-            RpcContinuation::ws_authed(ctx.clone(), signer, stream_logs, Duration::from_secs(30)),
+            RpcContinuation::ws_authed(
+                ctx.clone(),
+                signer,
+                WebSocketPolicy::Authenticated,
+                stream_logs,
+                Duration::from_secs(30),
+            ),
         )
         .await;
     Ok(FollowLogsRes { guid })

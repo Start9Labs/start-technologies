@@ -33,7 +33,7 @@ use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
 use crate::lxc::ContainerId;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::s9pk::S9pk;
 use crate::service::action::update_tasks;
 use crate::service::rpc::{ExitParams, InitKind};
@@ -1067,6 +1067,7 @@ pub async fn attach(
             RpcContinuation::ws_authed(
                 &ctx,
                 signer,
+                WebSocketPolicy::Authenticated,
                 move |mut ws| async move {
                     if let Err(e) = handler(&mut ws, cmd).await {
                         if !crate::util::net::is_ws_reset_without_close(&e) {

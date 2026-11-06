@@ -10,7 +10,7 @@ use startos::util::io::create_file;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-use crate::continuations::{Guid, RpcContinuation};
+use crate::continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::error::Error;
 use crate::progress::{FullProgressTracker, ProgressUnits};
 use crate::registry::device_info::DeviceInfo;
@@ -134,6 +134,7 @@ pub async fn update_system(
         .add(
             guid.clone(),
             RpcContinuation::ws(
+                WebSocketPolicy::Authenticated,
                 move |mut ws| async move {
                     let stream = tracker_for_ws.stream(Some(Duration::from_millis(300)));
                     tokio::pin!(stream);

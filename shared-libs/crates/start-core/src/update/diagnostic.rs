@@ -21,7 +21,7 @@ use crate::middleware::auth::signature;
 use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, PhasedProgressBar, ProgressUnits};
 use crate::registry::os::index::OsVersionInfo;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::update::{UpdateProgressHandles, UpdateSystemRes, do_update};
 use crate::version::{Current, VersionT};
 
@@ -166,6 +166,7 @@ async fn run_update(
             .add(
                 guid.clone(),
                 RpcContinuation::ws(
+                    WebSocketPolicy::Public,
                     move |ws| async move {
                         if let Err(e) = stream_progress(ws, tracker, done_rx).await {
                             tracing::error!(

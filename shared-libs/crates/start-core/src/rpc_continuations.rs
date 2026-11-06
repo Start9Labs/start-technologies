@@ -121,24 +121,35 @@ impl Future for WebSocketFuture {
 }
 type WebSocketCallback = Box<dyn FnOnce(WebSocket) -> WebSocketFuture + Send>;
 
+/// Resource policy of the RPC issuing a WebSocket continuation.
+#[derive(Clone, Copy, Debug)]
+pub enum WebSocketPolicy {
+    /// Available without caller authentication, including optional signed browsing.
+    Public,
+    /// Requires caller authentication before issuing the continuation.
+    Authenticated,
+}
+
 pub struct WebSocketHandler {
     callback: WebSocketCallback,
-    unauthenticated: bool,
+    policy: WebSocketPolicy,
 }
 impl WebSocketHandler {
     pub fn on_upgrade(self, ws: WebSocketUpgrade) -> Response {
-        let ws = if self.unauthenticated {
-            ws.read_buffer_size(2048)
-                .write_buffer_size(0)
-                .max_message_size(1024)
-                .max_frame_size(1024)
-        } else {
-            ws
+        let (ws, send_timeout) = match self.policy {
+            WebSocketPolicy::Public => (
+                ws.read_buffer_size(2048)
+                    .write_buffer_size(0)
+                    .max_message_size(1024)
+                    .max_frame_size(1024),
+                Some(Duration::from_secs(15)),
+            ),
+            WebSocketPolicy::Authenticated => (ws, None),
         };
         ws.on_upgrade(move |socket: AxumWebSocket| {
             let mut socket = WebSocket::new(socket);
-            if self.unauthenticated {
-                socket.set_send_timeout(Duration::from_secs(15));
+            if let Some(timeout) = send_timeout {
+                socket.set_send_timeout(timeout);
             }
             (self.callback)(socket)
         })
@@ -163,7 +174,7 @@ impl RpcContinuation {
             timeout,
         ))
     }
-    pub fn ws<F, Fut>(handler: F, timeout: Duration) -> Self
+    pub fn ws<F, Fut>(policy: WebSocketPolicy, handler: F, timeout: Duration) -> Self
     where
         F: FnOnce(WebSocket) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
@@ -174,7 +185,7 @@ impl RpcContinuation {
                     kill: None,
                     fut: handler(ws).boxed(),
                 }),
-                unauthenticated: true,
+                policy,
             },
             timeout,
         ))
@@ -195,7 +206,13 @@ impl RpcContinuation {
             timeout,
         ))
     }
-    pub fn ws_authed<Ctx, T, F, Fut>(ctx: Ctx, session: T, handler: F, timeout: Duration) -> Self
+    pub fn ws_authed<Ctx, T, F, Fut>(
+        ctx: Ctx,
+        session: T,
+        policy: WebSocketPolicy,
+        handler: F,
+        timeout: Duration,
+    ) -> Self
     where
         Ctx: AsRef<OpenAuthedContinuations<T>>,
         T: Eq + Ord,
@@ -209,7 +226,7 @@ impl RpcContinuation {
                     kill,
                     fut: handler(ws).boxed(),
                 }),
-                unauthenticated: false,
+                policy,
             },
             timeout,
         ))
@@ -407,7 +424,12 @@ mod websocket_tests {
 
     #[tokio::test]
     async fn unauthenticated_frame_limit_and_one_shot_upgrade() {
-        let (url, _server) = serve(RpcContinuation::ws(echo, Duration::from_secs(30))).await;
+        let (url, _server) = serve(RpcContinuation::ws(
+            WebSocketPolicy::Public,
+            echo,
+            Duration::from_secs(30),
+        ))
+        .await;
         let (mut socket, _) = connect_async(&url).await.unwrap();
         assert!(connect_async(&url).await.is_err());
         socket
@@ -424,7 +446,12 @@ mod websocket_tests {
 
     #[tokio::test]
     async fn unauthenticated_message_limit_covers_fragmented_frames() {
-        let (url, _server) = serve(RpcContinuation::ws(echo, Duration::from_secs(30))).await;
+        let (url, _server) = serve(RpcContinuation::ws(
+            WebSocketPolicy::Public,
+            echo,
+            Duration::from_secs(30),
+        ))
+        .await;
         let (mut socket, _) = connect_async(&url).await.unwrap();
         for (opcode, last) in [
             (OpCode::Data(Data::Text), false),
@@ -448,6 +475,7 @@ mod websocket_tests {
         let (url, _server) = serve(RpcContinuation::ws_authed(
             open.clone(),
             None::<&str>,
+            WebSocketPolicy::Authenticated,
             echo,
             Duration::from_secs(30),
         ))
@@ -467,8 +495,53 @@ mod websocket_tests {
     }
 
     #[tokio::test]
+    async fn authenticated_nonrevocable_continuations_retain_bulk_frames() {
+        let (url, _server) = serve(RpcContinuation::ws(
+            WebSocketPolicy::Authenticated,
+            echo,
+            Duration::from_secs(30),
+        ))
+        .await;
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        let data = "x".repeat(2 * 1024 * 1024);
+        socket
+            .send(Message::Text(data.clone().into()))
+            .await
+            .unwrap();
+        assert_eq!(
+            socket.next().await.unwrap().unwrap().into_text().unwrap(),
+            data
+        );
+    }
+
+    #[tokio::test]
+    async fn revocation_tracking_does_not_exempt_public_continuations_from_limits() {
+        let open = Arc::new(OpenAuthedContinuations::new());
+        let (url, _server) = serve(RpcContinuation::ws_authed(
+            open.clone(),
+            "public",
+            WebSocketPolicy::Public,
+            echo,
+            Duration::from_secs(30),
+        ))
+        .await;
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        socket
+            .send(Message::Text("x".repeat(1024).into()))
+            .await
+            .unwrap();
+        assert_eq!(socket.next().await.unwrap().unwrap().len(), 1024);
+        socket
+            .send(Message::Text("x".repeat(1025).into()))
+            .await
+            .unwrap();
+        assert!(!matches!(socket.next().await, Some(Ok(Message::Text(_)))));
+    }
+
+    #[tokio::test]
     async fn unauthenticated_outbound_bulk_remains_allowed() {
         let (url, _server) = serve(RpcContinuation::ws(
+            WebSocketPolicy::Public,
             |mut socket| async move {
                 socket
                     .send(axum::extract::ws::Message::Text(
@@ -490,6 +563,7 @@ mod websocket_tests {
             let (pending_send, pending_recv) = oneshot::channel();
             let (done_send, done_recv) = oneshot::channel();
             let (url, _server) = serve(RpcContinuation::ws(
+                WebSocketPolicy::Public,
                 move |mut socket| async move {
                     let message =
                         axum::extract::ws::Message::Binary(vec![0; 16 * 1024 * 1024].into());
@@ -533,6 +607,7 @@ mod websocket_tests {
         let (started_send, started_recv) = oneshot::channel();
         let (done_send, mut done_recv) = oneshot::channel();
         let (url, _server) = serve(RpcContinuation::ws(
+            WebSocketPolicy::Public,
             move |mut socket| async move {
                 let mut receive = Box::pin(socket.recv());
                 assert!(futures::poll!(&mut receive).is_pending());
@@ -569,6 +644,7 @@ mod websocket_tests {
     async fn unauthenticated_successful_send_resets_deadline() {
         let (next_send, next_recv) = oneshot::channel();
         let (url, _server) = serve(RpcContinuation::ws(
+            WebSocketPolicy::Public,
             move |mut socket| async move {
                 socket
                     .send(axum::extract::ws::Message::Text("first".into()))
@@ -607,6 +683,7 @@ mod websocket_tests {
         let (url, _server) = serve(RpcContinuation::ws_authed(
             open.clone(),
             Some("key"),
+            WebSocketPolicy::Authenticated,
             move |mut socket| async move {
                 let _dropped = dropped_send;
                 let mut send = Box::pin(socket.send(axum::extract::ws::Message::Binary(
@@ -637,6 +714,7 @@ mod websocket_tests {
         let (started_send, started_recv) = oneshot::channel();
         let (done_send, done_recv) = oneshot::channel();
         let (url, _server) = serve(RpcContinuation::ws(
+            WebSocketPolicy::Public,
             move |socket| async move {
                 let mut close = Box::pin(socket.normal_close("complete"));
                 assert!(futures::poll!(&mut close).is_pending());
@@ -665,7 +743,7 @@ mod websocket_tests {
         continuations
             .add(
                 guid.clone(),
-                RpcContinuation::ws(echo, Duration::from_secs(1)),
+                RpcContinuation::ws(WebSocketPolicy::Public, echo, Duration::from_secs(1)),
             )
             .await;
         tokio::task::yield_now().await;

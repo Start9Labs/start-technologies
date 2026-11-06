@@ -55,6 +55,8 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 
 The API is JSON-RPC (not REST). All endpoints are RPC methods organized in a hierarchical command structure using [rpc-toolkit](https://github.com/Start9Labs/start-technologies/tree/master/shared-libs/crates/rpc-toolkit). Handlers are registered in a tree of `ParentHandler` nodes, with four handler types: `from_fn_async` (standard), `from_fn_async_local` (non-Send), `from_fn` (sync), and `from_fn_blocking` (blocking). Metadata like `.with_about()` drives middleware and documentation.
 
+Legacy GUID WebSocket continuations carry an explicit `WebSocketPolicy` from their issuing API. Anonymously available streams use bounded input and write deadlines; authenticated container, terminal and runtime streams retain bulk input. Revocation tracking is independent of that resource policy; `ws` and `ws_authed` do not classify authentication.
+
 See [rpc-toolkit.md](rpc-toolkit.md) for full handler patterns and configuration.
 
 ## Patch-DB Patterns

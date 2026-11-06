@@ -27,7 +27,7 @@ use crate::prelude::*;
 use crate::progress::{
     FullProgress, FullProgressTracker, PhaseProgressTrackerHandle, PhasedProgressBar, ProgressUnits,
 };
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::ssh::SSH_DIR;
 use crate::system::{get_mem_info, sync_kiosk};
 use crate::util::io::{IOHook, dir_copy, open_file};
@@ -478,7 +478,8 @@ pub fn init_api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand(
             "logs",
-            crate::system::logs::<InitContext>().with_about("about.display-os-logs"),
+            crate::system::logs::<InitContext>(WebSocketPolicy::Public)
+                .with_about("about.display-os-logs"),
         )
         .subcommand(
             "logs",
@@ -489,7 +490,8 @@ pub fn init_api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "kernel-logs",
-            crate::system::kernel_logs::<InitContext>().with_about("about.display-kernel-logs"),
+            crate::system::kernel_logs::<InitContext>(WebSocketPolicy::Public)
+                .with_about("about.display-kernel-logs"),
         )
         .subcommand(
             "kernel-logs",
@@ -526,6 +528,7 @@ pub async fn init_progress(ctx: InitContext) -> Result<InitProgressRes, Error> {
         .add(
             guid.clone(),
             RpcContinuation::ws(
+                WebSocketPolicy::Public,
                 |mut ws| async move {
                     let res = tokio::try_join!(
                         async {
