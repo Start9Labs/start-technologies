@@ -266,6 +266,30 @@ fn read_body(fields: &[UciField], struc: Ident, ty: String, crat: Path) -> Token
 }
 
 fn write_body(fields: &[UciField], _struc: Ident, ty: String, crat: Path) -> TokenStream {
+    let discard_overridden = fields.iter().filter(|field| field.accept_list).map(|field| {
+        let name = &field.name;
+        quote! {
+            {
+                let last_option = lines.iter().enumerate().skip(index + 1)
+                    .take_while(|(_, line)| !matches!(line, #crat::Line::Section { .. }))
+                    .filter_map(|(index, line)| match line {
+                        #crat::Line::Option { option, .. } if option.as_str() == #name => Some(index),
+                        _ => None,
+                    })
+                    .last();
+                if let Some(last_option) = last_option {
+                    for line in &mut lines[index + 1..last_option] {
+                        if matches!(line,
+                            #crat::Line::Option { option, .. } | #crat::Line::List { list: option, .. }
+                                if option.as_str() == #name)
+                        {
+                            *line = #crat::Line::Skip;
+                        }
+                    }
+                }
+            }
+        }
+    });
     let decl = fields.iter().map(UciField::write_decl);
     let option_arm = fields.iter().map(UciField::write_option_arm);
     let list_arm = fields.iter().map(UciField::write_list_arm);
@@ -282,6 +306,7 @@ fn write_body(fields: &[UciField], _struc: Ident, ty: String, crat: Path) -> Tok
             return Err(#crat::Error::ExpectedSectionType { src: index.into(), expected: (#ty).into(), found: ty.as_str().into(), })
         }
 
+        #(#discard_overridden)*
         #(#decl)*
 
         let mut insert_after = index;
