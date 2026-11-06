@@ -33,7 +33,7 @@ test('maximum text length reports a grammatical error message', () => {
   assert.equal(validate(new FormControl('abc')), null)
 })
 
-test('duplicate-entry messages use plain-text displayAs labels', () => {
+test('duplicate-entry messages HTML-escape displayAs labels', () => {
   const validate = listUnique({
     spec: {
       type: 'object',
@@ -45,13 +45,13 @@ test('duplicate-entry messages use plain-text displayAs labels', () => {
   assert.deepEqual(
     validate(
       new FormControl([
-        { name: "DrBoneZ's & Friends Registry" },
-        { name: "DrBoneZ's & Friends Registry" },
+        { name: "<img src=x> DrBoneZ's & Friends" },
+        { name: "<img src=x> DrBoneZ's & Friends" },
       ]),
     ),
     {
       listNotUnique:
-        '"DrBoneZ\'s & Friends Registry" and "DrBoneZ\'s & Friends Registry" are not unique. Must be unique by: Registry Name',
+        '"&lt;img src&#x3D;x&gt; DrBoneZ&#39;s &amp; Friends" and "&lt;img src&#x3D;x&gt; DrBoneZ&#39;s &amp; Friends" are not unique. Must be unique by: Registry Name',
     },
   )
   assert.equal(

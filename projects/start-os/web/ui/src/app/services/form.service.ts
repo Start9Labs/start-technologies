@@ -12,8 +12,7 @@ import {
 } from '@angular/forms'
 import { IST, utils } from '@start9labs/start-core'
 import { tuiCreateFileFormatValidator } from '@taiga-ui/kit'
-
-import { renderDisplayAs } from 'src/app/utils/display-as'
+import Mustache from 'mustache'
 
 @Injectable({
   providedIn: 'root',
@@ -366,8 +365,9 @@ export function listUnique(spec: IST.ValueSpecList): ValidatorFn {
             : ''
 
           if (isListObject(objSpec) && objSpec.displayAs) {
-            display1 = `"${renderDisplayAs(objSpec.displayAs, list[idx])}"`
-            display2 = `"${renderDisplayAs(objSpec.displayAs, list[idx2])}"`
+            // tui-error renders validation messages through innerHTML.
+            display1 = `"${Mustache.render(objSpec.displayAs, list[idx])}"`
+            display2 = `"${Mustache.render(objSpec.displayAs, list[idx2])}"`
           } else {
             display1 = `Entry ${idx + 1}`
             display2 = `Entry ${idx2 + 1}`
