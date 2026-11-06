@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -24,7 +23,7 @@ use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::v2::SIG_CONTEXT;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
-use crate::sign::{AnySignature, AnyVerifyingKey};
+use crate::sign::{AnySignature, AnyVerifyingKey, SignatureMap};
 use crate::util::VersionString;
 use crate::util::io::TrackingIO;
 use crate::util::serde::Base64;
@@ -39,7 +38,7 @@ pub struct AddPackageParams {
     pub commitment: MerkleArchiveCommitment,
     pub signature: AnySignature,
     #[serde(default)]
-    pub signatures: HashMap<AnyVerifyingKey, AnySignature>,
+    pub signatures: SignatureMap,
 }
 
 rpc_toolkit::reflect_ts!(AddPackageParams);
@@ -119,7 +118,7 @@ fn merge_submitted_signatures(
     info: &mut PackageVersionInfo,
     uploader: &AnyVerifyingKey,
     signature: &AnySignature,
-    signatures: HashMap<AnyVerifyingKey, AnySignature>,
+    signatures: SignatureMap,
 ) -> Result<(), Error> {
     for (_, asset) in &mut info.s9pks {
         let verified = signatures
@@ -136,7 +135,7 @@ fn merge_submitted_signatures(
                     )?,
                 ))
             })
-            .collect::<Result<HashMap<_, _>, Error>>()?;
+            .collect::<Result<SignatureMap, Error>>()?;
         let commitment = asset.commitment;
         asset.merge_signatures(&commitment, verified);
     }
@@ -392,7 +391,7 @@ pub struct AddMirrorParams {
     pub commitment: MerkleArchiveCommitment,
     pub signature: AnySignature,
     #[serde(default)]
-    pub signatures: HashMap<AnyVerifyingKey, AnySignature>,
+    pub signatures: SignatureMap,
 }
 
 rpc_toolkit::reflect_ts!(AddMirrorParams);
