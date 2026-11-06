@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::panic::UnwindSafe;
 use std::path::PathBuf;
 
@@ -18,12 +18,11 @@ use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
 use crate::registry::os::SIG_CONTEXT;
 use crate::registry::os::index::OsVersionInfo;
-use crate::s9pk::merkle_archive::hash::VerifyingWriter;
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::sign::commitment::blake3::Blake3Commitment;
-use crate::sign::{AnySignature, AnyVerifyingKey};
+use crate::sign::{AnySignature, AnyVerifyingKey, SignatureMap};
 use crate::util::io::open_file;
 use crate::util::serde::Base64;
 
@@ -88,7 +87,7 @@ pub struct AddAssetParams {
     pub signer: AnyVerifyingKey,
     pub signature: AnySignature,
     #[serde(default)]
-    pub signatures: HashMap<AnyVerifyingKey, AnySignature>,
+    pub signatures: SignatureMap,
     pub commitment: Blake3Commitment,
 }
 
@@ -145,7 +144,7 @@ async fn add_asset(
                         published_at: Utc::now(),
                         urls: vec![url.clone()],
                         commitment: commitment.clone(),
-                        signatures: HashMap::new(),
+                        signatures: SignatureMap::new(),
                     })
                 })?
                 .mutate(|s| {
@@ -267,10 +266,7 @@ pub async fn cli_add_asset(
         verify_phase.set_total(size);
     }
     verify_phase.set_units(Some(ProgressUnits::Bytes));
-    let mut writer = verify_phase.writer(VerifyingWriter::new(
-        tokio::io::sink(),
-        Some((blake3::Hash::from_bytes(*commitment.hash), commitment.size)),
-    ));
+    let mut writer = verify_phase.writer(commitment.verifying_writer(tokio::io::sink()));
     src.copy_all_to(&mut writer).await?;
     let (verifier, mut verify_phase) = writer.into_inner();
     verifier.verify().await?;

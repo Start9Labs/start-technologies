@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use ed25519_dalek::{Signer as _, SigningKey};
 
 use super::test_utils::{context, registry_server};
@@ -15,7 +13,9 @@ use crate::registry::os::version::{AddVersionParams, add_version};
 use crate::rpc_continuations::Guid;
 use crate::sign::commitment::blake3::Blake3Commitment;
 use crate::sign::ed25519::Ed25519ph;
-use crate::sign::{AnySignature, COMMITMENT_SIG_TAG, SignatureScheme, signing_message};
+use crate::sign::{
+    AnySignature, COMMITMENT_SIG_TAG, SignatureMap, SignatureScheme, signing_message,
+};
 use crate::util::serde::Base64;
 
 fn commitment() -> Blake3Commitment {
@@ -33,10 +33,7 @@ fn signature(key: &SigningKey, commitment: &Blake3Commitment) -> AnySignature {
     )
 }
 
-fn params(
-    uploader: &SigningKey,
-    signatures: HashMap<AnyVerifyingKey, AnySignature>,
-) -> AddAssetParams {
+fn params(uploader: &SigningKey, signatures: SignatureMap) -> AddAssetParams {
     let commitment = commitment();
     AddAssetParams {
         version: "0.4.0.5".parse().unwrap(),
@@ -68,7 +65,7 @@ async fn os_promotion_preserves_all_asset_signatures_and_destination_endorsement
                 "https://mirror.example.com/os.iso".parse().unwrap(),
             ],
             commitment: commitment.clone(),
-            signatures: HashMap::from([
+            signatures: SignatureMap::from([
                 (
                     AnyVerifyingKey::Ed25519(first.verifying_key()),
                     AnySignature::Ed25519(first.sign(
@@ -210,7 +207,7 @@ async fn os_asset_ingestion_defaults_old_requests_and_verifies_signatures_atomic
     )
     .await
     .unwrap();
-    let mut old_request = to_value(&params(&uploader, HashMap::new())).unwrap();
+    let mut old_request = to_value(&params(&uploader, SignatureMap::new())).unwrap();
     old_request.as_object_mut().unwrap().remove("signatures");
     let old_params: AddAssetParams = from_value(old_request).unwrap();
     assert!(old_params.signatures.is_empty());
@@ -233,7 +230,7 @@ async fn os_asset_ingestion_defaults_old_requests_and_verifies_signatures_atomic
     let mut same_signer = params(&uploader, [(uploader_key.clone(), pure.clone())].into());
     same_signer.platform = "riscv64".into();
     add_iso(ctx.clone(), same_signer).await.unwrap();
-    let mut repeated_signer = params(&uploader, HashMap::new());
+    let mut repeated_signer = params(&uploader, SignatureMap::new());
     repeated_signer.platform = "riscv64".into();
     repeated_signer.signature = pure;
     add_iso(ctx.clone(), repeated_signer).await.unwrap();
@@ -287,7 +284,7 @@ async fn os_asset_ingestion_defaults_old_requests_and_verifies_signatures_atomic
     assert!(add_iso(ctx.clone(), invalid_same_key).await.is_err());
     assert_eq!(snapshot(&ctx).await, before);
 
-    let mut different_commitment = params(&uploader, HashMap::new());
+    let mut different_commitment = params(&uploader, SignatureMap::new());
     different_commitment.commitment = different_size;
     different_commitment.signature = signature(&uploader, &different_commitment.commitment);
     assert!(add_iso(ctx.clone(), different_commitment).await.is_err());

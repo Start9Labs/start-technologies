@@ -1,11 +1,9 @@
 //! Compatibility with clients and registries that label Ed25519ph signatures `id-Ed25519`.
 
-use std::collections::HashMap;
-
 use crate::prelude::*;
 use crate::sign::commitment::SignedCommitment;
 use crate::sign::ed25519::Ed25519ph;
-use crate::sign::{AnySignature, AnyVerifyingKey, SignatureScheme};
+use crate::sign::{AnySignature, AnyVerifyingKey, SignatureMap, SignatureScheme};
 
 /// Returns a verified signature with its canonical algorithm tag.
 pub fn verify_commitment<C: SignedCommitment>(
@@ -29,10 +27,10 @@ pub fn verify_commitment<C: SignedCommitment>(
 pub fn verify_signatures<C: SignedCommitment>(
     commitment: &C,
     context: &str,
-    signatures: &HashMap<AnyVerifyingKey, AnySignature>,
+    signatures: &SignatureMap,
     uploader: &AnyVerifyingKey,
     signature: &AnySignature,
-) -> Result<HashMap<AnyVerifyingKey, AnySignature>, Error> {
+) -> Result<SignatureMap, Error> {
     signatures
         .iter()
         .chain(std::iter::once((uploader, signature)))

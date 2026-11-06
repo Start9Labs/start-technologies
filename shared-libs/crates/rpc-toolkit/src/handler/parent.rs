@@ -162,6 +162,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         let cmd = method.pop_front();
@@ -174,6 +175,7 @@ where
                     method,
                     params: raw_params,
                     inherited: Flat(params, inherited_params),
+                    rpc_stream,
                 })
             } else {
                 Err(yajrc::METHOD_NOT_FOUND_ERROR)
@@ -186,6 +188,7 @@ where
                     method,
                     params: raw_params,
                     inherited: inherited_params,
+                    rpc_stream,
                 })
             } else {
                 Err(yajrc::METHOD_NOT_FOUND_ERROR)
@@ -201,6 +204,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         let cmd = method.pop_front();
@@ -214,6 +218,7 @@ where
                         method,
                         params: raw_params,
                         inherited: Flat(params, inherited_params),
+                        rpc_stream,
                     })
                     .await
             } else {
@@ -228,6 +233,7 @@ where
                         method,
                         params: raw_params,
                         inherited: inherited_params,
+                        rpc_stream,
                     })
                     .await
             } else {
@@ -351,6 +357,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
@@ -369,6 +376,7 @@ where
                         method,
                         params: raw_params,
                         inherited: Flat(params, inherited_params),
+                        rpc_stream,
                     },
                     result,
                 )
@@ -384,6 +392,7 @@ where
                         method,
                         params: raw_params,
                         inherited: inherited_params,
+                        rpc_stream,
                     },
                     result,
                 )
