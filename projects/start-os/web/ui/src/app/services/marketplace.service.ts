@@ -47,9 +47,13 @@ export class MarketplaceService extends AbstractMarketplaceService {
     .watch$('ui', 'registries')
     .pipe(
       map(registries =>
-        Object.entries(registries).map(([url, name]) =>
-          toStoreIdentity(url, name),
-        ),
+        Object.entries(registries).flatMap(([url, name]) => {
+          try {
+            return [toStoreIdentity(url, name)]
+          } catch {
+            return []
+          }
+        }),
       ),
     )
 

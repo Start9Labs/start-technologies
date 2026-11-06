@@ -2568,6 +2568,34 @@ function marketplaceFixture(t, entries = {}) {
   }
 }
 
+test('malformed saved registries do not terminate valid registry listings or cache updates', async t => {
+  const entry = registryEntry()
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+  const page = f.makePage()
+  const saved = f.watch(f.service.registries$)
+  const stores = f.watch(f.service.currentRegistry$)
+  f.replace('/ui/registries', {
+    'https://user@invalid.test': 'Legacy URL',
+    'ftp://invalid.test': 'Invalid scheme',
+    'https://registry.test': 'Saved name',
+  })
+  await tick()
+  assert.deepEqual(saved.at(-1), [
+    { url: 'https://registry.test/', name: 'Saved name' },
+  ])
+  assert.equal(page.isRegistrySaved(), true)
+  assert.equal(stores.at(-1).packages.length, 1)
+
+  f.replace('/ui/registries', { 'https://registry.test': 'Renamed' })
+  f.replace('/registryCache', {
+    'https://registry.test/': registryEntry('2.0.0:0'),
+  })
+  await tick()
+  assert.equal(saved.at(-1)[0].name, 'Renamed')
+  assert.equal(stores.at(-1).packages[0].version, '2.0.0:0')
+  assert.deepEqual(f.queries, [])
+})
+
 test('the visible refresh action retries failed icons when the refreshed cache arrives and shares successful loads', async t => {
   const entry = registryEntry()
   const icon = 'blake3/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png'

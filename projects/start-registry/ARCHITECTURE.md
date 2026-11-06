@@ -73,7 +73,8 @@ is unsigned. Response messages and frames each permit 64 MiB independently of re
 Package queries and registry information use the backend cache; browser sessions observe projected
 package and OS metadata through PatchDB. Subscriptions reconnect with jittered backoff and a fresh
 dump. Cached metadata remains available offline, with connection availability reported separately
-from registry configuration. This client requires `db.watch`; upgrade registries before deploying it.
+from registry configuration. Malformed saved source URLs are skipped independently without
+rewriting configured intent. This client requires `db.watch`; upgrade registries before deploying it.
 The legacy `db.subscribe` endpoint remains available for older clients.
 
 Both subscription methods read filtered in-memory mirrors and use bounded, 32-revision JSON
@@ -111,7 +112,9 @@ Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hol
 `readers` defaults to an empty signer-ID set. The flattened policy deserializes independently of
 version metadata, including existing rows without either field. One visibility primitive admits
 public packages, admins, authorized publishers, and listed readers. Browsing endpoints, mirrors,
-and stored-icon references use it. Admin-only `package.access` commands manage the policy.
+and stored-icon references use it. Browsing and subscription projections redact reader lists for
+non-admins. Admin-only `package.access` commands manage the policy. Invalid resource proofs
+retain anonymous access to public icons; inaccessible private-only icons return 404.
 Signed public browsing retains the verified identity without adding admin audit records.
 
 OS versions use the shared `LocaleString` for `releaseNotes`, as package metadata does:

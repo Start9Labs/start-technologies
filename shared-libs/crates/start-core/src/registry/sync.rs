@@ -86,15 +86,22 @@ impl Subscription {
     }
 }
 
-fn subscriptions(ui: &Value) -> Result<BTreeSet<Subscription>, Error> {
-    let mut subscriptions = BTreeSet::new();
-    for url in connected_registry_urls(ui) {
-        subscriptions.insert(Subscription::Index(url?));
-    }
-    if let Some(url) = ui.get("startosRegistry").and_then(Value::as_str) {
-        subscriptions.insert(Subscription::Os(registry_url(url)?));
-    }
-    Ok(subscriptions)
+fn subscriptions(ui: &Value) -> BTreeSet<Subscription> {
+    let indexes = connected_registry_urls(ui).map(|url| url.map(Subscription::Index));
+    let os = ui
+        .get("startosRegistry")
+        .and_then(Value::as_str)
+        .map(|url| registry_url(url).map(Subscription::Os));
+    indexes
+        .chain(os)
+        .filter_map(|subscription| match subscription {
+            Ok(subscription) => Some(subscription),
+            Err(error) => {
+                tracing::warn!(?error, "Skipping invalid saved registry source");
+                None
+            }
+        })
+        .collect()
 }
 
 fn connections(subscriptions: &BTreeSet<Subscription>) -> BTreeSet<BTreeSet<Subscription>> {
@@ -139,7 +146,7 @@ pub async fn watch_registries(
         let desired = watch
             .peek_and_mark_seen()
             .with_kind(ErrorKind::Database)
-            .and_then(|ui| subscriptions(&ui));
+            .map(|ui| subscriptions(&ui));
         match desired {
             Ok(desired) => {
                 let connections = connections(&desired);

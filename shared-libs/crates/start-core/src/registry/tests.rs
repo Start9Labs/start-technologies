@@ -356,7 +356,7 @@ async fn browsing_and_access_commands_use_verified_visibility() {
     let (_temp, ctx, admin, reader, _) = fixture().await;
     let (url, _task) = server(ctx.clone()).await;
     let forged = json!({"__Auth_signer": admin.verifying_key().await.unwrap()});
-    for key in [None, Some(&reader), Some(&admin)] {
+    for (key, is_admin) in [(None, false), (Some(&reader), false), (Some(&admin), true)] {
         let visible = key.is_some();
         let index = rpc(&url, "index", forged.clone(), key).await;
         assert!(index.get("error").is_none(), "{index}");
@@ -366,12 +366,30 @@ async fn browsing_and_access_commands_use_verified_visibility() {
                 .is_some(),
             visible
         );
+        if visible {
+            assert_eq!(
+                index["result"]["package"]["packages"]["secret"]["readers"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                usize::from(is_admin)
+            );
+        }
         let index = rpc(&url, "package.index", forged.clone(), key).await;
         assert_eq!(
             index["result"]["packages"].get("secret").is_some(),
             visible,
             "{index}"
         );
+        if visible {
+            assert_eq!(
+                index["result"]["packages"]["secret"]["readers"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                usize::from(is_admin)
+            );
+        }
         let packages = rpc(&url, "package.get", forged.clone(), key).await;
         assert_eq!(
             packages["result"].get("secret").is_some(),
@@ -468,6 +486,7 @@ async fn legacy_subscriptions_filter_initial_dumps_and_live_revisions() {
         view["package"]["packages"].get("secret").is_some(),
         "{private}"
     );
+    assert_eq!(view["package"]["packages"]["secret"]["readers"], json!([]));
     let guid: Guid = from_value(private["result"]["guid"].clone()).unwrap();
     let websocket = url
         .join(&format!("ws/rpc/{guid}"))
@@ -577,6 +596,48 @@ async fn private_dependency_icons_require_a_current_reader_and_disable_caching()
 }
 
 #[tokio::test]
+async fn rejected_icon_proofs_fall_back_to_anonymous_access() {
+    let (_temp, ctx, _admin, reader, path) = fixture().await;
+    let (url, _task) = server(ctx.clone()).await;
+    let icon = url.join(&format!("icons/{path}")).unwrap();
+    let client = reqwest::Client::new();
+    let wrong_identity = || async {
+        SignatureHeader::sign(&reader, b"", "other.test")
+            .await
+            .unwrap()
+            .to_header()
+    };
+    let response = client
+        .get(icon.clone())
+        .header(AUTH_SIG_HEADER, wrong_identity().await)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+    ctx.db
+        .mutate(|db| {
+            db.as_index_mut()
+                .as_package_mut()
+                .as_packages_mut()
+                .as_idx_mut(&"secret".parse().unwrap())
+                .unwrap()
+                .as_access_mut()
+                .as_private_mut()
+                .ser(&false)
+        })
+        .await
+        .result
+        .unwrap();
+    let response = client
+        .get(icon)
+        .header(AUTH_SIG_HEADER, wrong_identity().await)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+}
+
+#[tokio::test]
 async fn watches_multiplex_with_ordinary_calls_and_revoke_private_packages() {
     let (_temp, ctx, _admin, reader, _) = fixture().await;
     let (url, _task) = server(ctx.clone()).await;
@@ -614,6 +675,7 @@ async fn watches_multiplex_with_ordinary_calls_and_revoke_private_packages() {
     }
     let mut view = dumps.remove(&41).unwrap();
     assert!(view["package"]["packages"].get("secret").is_some());
+    assert_eq!(view["package"]["packages"]["secret"]["readers"], json!([]));
     assert_eq!(dumps[&42], json!({"versions": {}}));
     ctx.db
         .mutate(|db| {

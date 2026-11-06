@@ -126,9 +126,18 @@ impl Model<PackageIndex> {
         Ok(false)
     }
 
+    /// Filters package visibility and redacts reader lists for non-admins.
     pub fn retain_visible(&mut self, reader: Option<&Reader>) -> Result<(), Error> {
         self.as_packages_mut()
-            .retain(|_, info| info.is_visible_to(reader))
+            .retain(|_, info| info.is_visible_to(reader))?;
+        if !reader.is_some_and(|reader| reader.admin) {
+            for (_, info) in self.as_packages_mut().as_entries_mut()? {
+                info.as_access_mut()
+                    .as_readers_mut()
+                    .ser(&BTreeSet::new())?;
+            }
+        }
+        Ok(())
     }
 
     pub fn de_visible_to(&self, reader: Option<&Reader>) -> Result<PackageIndex, Error> {
@@ -462,7 +471,7 @@ mod tests {
         let publisher = Guid::new();
         let index: Model<PackageIndex> = imbl_value::json!({
             "categories": {}, "packages": {
-                "public": {"authorized": {}, "categories": [], "versions": {}},
+                "public": {"authorized": {}, "categories": [], "versions": {}, "readers": [reader]},
                 "secret": {"authorized": {publisher.as_ref(): "*"}, "categories": [],
                     "versions": {}, "private": true, "readers": [reader]}
             }
@@ -471,6 +480,17 @@ mod tests {
         let visible =
             |reader: Option<Reader>| index.de_visible_to(reader.as_ref()).unwrap().packages;
         assert_eq!(visible(None).len(), 1);
+        let listed = |admin| {
+            visible(Some(Reader {
+                signer: reader.clone(),
+                admin,
+            }))["secret"]
+                .access
+                .readers
+                .len()
+        };
+        assert_eq!(listed(false), 0);
+        assert_eq!(listed(true), 1);
         assert_eq!(
             visible(Some(Reader {
                 signer: Guid::new(),
@@ -493,8 +513,16 @@ mod tests {
                 admin: true,
             },
         ] {
-            assert_eq!(visible(Some(reader)).len(), 2);
+            let packages = visible(Some(reader.clone()));
+            assert_eq!(packages.len(), 2);
+            for package in packages.values() {
+                assert_eq!(package.access.readers.len(), usize::from(reader.admin));
+            }
         }
+        assert_eq!(
+            index.de().unwrap().packages["public"].access.readers.len(),
+            1
+        );
         let public = &visible(None)["public"];
         assert!(!public.access.private);
         assert!(public.access.readers.is_empty());

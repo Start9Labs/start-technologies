@@ -103,12 +103,32 @@ async fn refreshing_a_registry_cancels_its_group_without_cancelling_other_regist
 }
 
 #[test]
+fn invalid_saved_registry_does_not_block_the_others() {
+    let desired = subscriptions(&json!({
+        "registries": {"https://user@invalid.test":null, "https://registry.test/catalog":null},
+        "startosRegistry": url(),
+    }));
+    assert_eq!(
+        desired,
+        BTreeSet::from([Subscription::Index(url()), Subscription::Os(url())])
+    );
+}
+
+#[test]
+fn invalid_os_source_does_not_stop_package_subscriptions() {
+    let desired = subscriptions(&json!({
+        "registries": {url().as_str(): null},
+        "startosRegistry": "https://user@invalid.test",
+    }));
+    assert_eq!(desired, BTreeSet::from([Subscription::Index(url())]));
+}
+
+#[test]
 fn canonical_configuration_has_one_subscription_per_registry_plus_the_os_source() {
     let desired = subscriptions(&json!({
         "registries": {"https://REGISTRY.test/catalog/":null,"https://registry.test/catalog":null,
             "https://other.test":null}, "startosRegistry":"https://registry.test/catalog/"
-    }))
-    .unwrap();
+    }));
     assert_eq!(desired.len(), 3);
     let connections = connections(&desired);
     assert_eq!(connections.len(), 2);
@@ -312,8 +332,7 @@ fn first_connection_failure_publishes_availability_and_does_not_fetch_on_cache_q
     .unwrap();
     reconcile(
         &mut db,
-        &subscriptions(&json!({"registries":{url().as_str():null},"startosRegistry":url()}))
-            .unwrap(),
+        &subscriptions(&json!({"registries":{url().as_str():null},"startosRegistry":url()})),
         true,
     )
     .unwrap();
@@ -359,7 +378,7 @@ fn removal_and_os_switch_reject_in_flight_snapshots_and_prune_old_caches() {
     )
     .unwrap();
     assert_eq!(db.as_value(), &before);
-    let desired = subscriptions(&db.as_public().as_ui().de().unwrap()).unwrap();
+    let desired = subscriptions(&db.as_public().as_ui().de().unwrap());
     reconcile(&mut db, &desired, false).unwrap();
     assert!(db.as_public().as_registry_cache().de().unwrap().is_empty());
     assert!(

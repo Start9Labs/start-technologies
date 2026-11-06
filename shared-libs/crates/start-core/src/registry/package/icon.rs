@@ -10,7 +10,7 @@ use new_mime_guess::MimeGuess;
 use serde::{Deserialize, Serialize};
 
 use crate::middleware::auth::signature::{AUTH_SIG_HEADER, verify_request_signature};
-use crate::net::static_server::{bad_request, not_found, server_error, unauthorized};
+use crate::net::static_server::{bad_request, not_found, server_error};
 use crate::prelude::*;
 use crate::registry::context::RegistryContext;
 use crate::registry::package::index::{PackageIndex, PackageInfo, Reader};
@@ -135,11 +135,9 @@ pub async fn stored_icon(ctx: &RegistryContext, path: &str, mut request: Request
     if !is_stored_path(path) {
         return bad_request();
     }
+    // Public icons remain available when signature verification fails.
     let key = if request.headers().contains_key(AUTH_SIG_HEADER) {
-        match verify_request_signature(ctx, &mut request).await {
-            Ok(key) => Some(key),
-            Err(e) => return unauthorized(e, request.uri().path()),
-        }
+        verify_request_signature(ctx, &mut request).await.ok()
     } else {
         None
     };
