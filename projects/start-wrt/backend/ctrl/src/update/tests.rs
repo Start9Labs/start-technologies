@@ -127,6 +127,7 @@ async fn mirror() -> (reqwest::Url, NonDetachingJoinHandle<()>) {
             post(
                 |headers: axum::http::HeaderMap,
                  axum::Json(request): axum::Json<serde_json::Value>| async move {
+                    assert_eq!(request["jsonrpc"], "2.0");
                     assert_eq!(request["method"], "os.version.get");
                     assert_eq!(
                         request["params"],
@@ -144,9 +145,15 @@ async fn mirror() -> (reqwest::Url, NonDetachingJoinHandle<()>) {
                         squashfs: BTreeMap::from([(PLATFORM.into(), asset(Vec::new()).await)]),
                         ..Default::default()
                     };
-                    axum::Json(json!({
-                        "jsonrpc": "2.0", "id": request["id"], "result": { "1.4.1": info },
-                    }))
+                    (
+                        [(
+                            axum::http::header::CONTENT_TYPE,
+                            "application/json; charset=utf-8",
+                        )],
+                        axum::Json(json!({
+                            "jsonrpc": "2.0", "id": request["id"], "result": { "1.4.1": info },
+                        })),
+                    )
                 },
             ),
         );
