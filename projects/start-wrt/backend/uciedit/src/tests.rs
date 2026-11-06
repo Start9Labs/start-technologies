@@ -749,7 +749,7 @@ fn test_option_after_list_replaces_it() {
 #[test]
 fn test_accept_list_option_wins_over_list_items() {
     let arena = Arena::new();
-    let text = "config rule\n\tlist ipaddr '10.0.1.1/24'\n\toption ipaddr '10.0.0.1'\n";
+    let text = "config rule\n\tlist ipaddr '10.0.1.1/24'\n\tlist ipaddr '10.0.4.1/24'\n\toption ipaddr '10.0.0.1'\n\tlist ipaddr '10.0.3.1/24'\n";
     let mut config = Config::parse_str(&arena, text).unwrap();
     let rule: ListedRule = config.sections[0].get().unwrap();
     assert_eq!(rule.ipaddr.as_deref(), Some("10.0.0.1"));
@@ -761,7 +761,7 @@ fn test_accept_list_option_wins_over_list_items() {
         .unwrap();
     assert_eq!(
         config.dump_str(),
-        "config rule\n\toption ipaddr '10.0.2.1'\n"
+        "config rule\n\toption ipaddr '10.0.2.1'\n\tlist ipaddr '10.0.3.1/24'\n"
     );
 }
 
