@@ -567,4 +567,5 @@ export default {
   599: 'Urządzenia na {port} przejdą do profilu {profile}. Większość połączy się ponownie w ciągu kilku sekund. Jeśli urządzenie nie ma potem dostępu do internetu lub nie może połączyć się z innymi urządzeniami, co często zdarza się za przełącznikiem, odłącz i ponownie podłącz jego kabel albo uruchom ponownie urządzenie lub przełącznik. W przeciwnym razie połączy się samo w ciągu 12 godzin.',
   600: 'Zmienić profil bezpieczeństwa?',
   601: 'Zmień profil',
+  602: 'To urządzenie próbuje opublikować rekordy DNS. Zezwól na publikowanie rekordów DNS, aby były rozpoznawane w Twojej sieci.',
 } satisfies i18n

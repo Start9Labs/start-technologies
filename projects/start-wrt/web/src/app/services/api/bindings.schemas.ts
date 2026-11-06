@@ -1546,6 +1546,11 @@ export const Device: z.ZodObject<{
    */
   allow_dns_injection: z.ZodBoolean
   /**
+   * Whether the router refused this device's DNS records for lack of that
+   * permission in the last half hour.
+   */
+  dns_injection_requested: z.ZodBoolean
+  /**
    * Whether the router forwards this device's IPv6 router advertisements
    * to the rest of the LAN (`devices set-router-advertisements`). Always
    * false for a VPN peer.
@@ -1613,6 +1618,14 @@ export const Device: z.ZodObject<{
   allow_dns_injection: z.boolean().meta({
     description:
       "Whether this device may publish DNS records into the router's resolver\n(`devices set-dns-injection`; `vpn-server peer-set-dns-injection` for a\nVPN peer).",
+  }),
+  /**
+   * Whether the router refused this device's DNS records for lack of that
+   * permission in the last half hour.
+   */
+  dns_injection_requested: z.boolean().meta({
+    description:
+      "Whether the router refused this device's DNS records for lack of that\npermission in the last half hour.",
   }),
   /**
    * Whether the router forwards this device's IPv6 router advertisements
