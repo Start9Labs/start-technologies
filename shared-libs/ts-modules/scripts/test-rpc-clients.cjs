@@ -37,11 +37,13 @@ function harness(moduleOverrides = new Map()) {
       'HttpService',
       'AuthKeyService',
       'AuthService',
+      'i18nPipe',
       'StaleUiService',
       'PATCH_CACHE',
       'RELATIVE_URL',
     ].map(name => [name, Symbol(name)]),
   )
+  dependencies.set(tokens.i18nPipe, { transform: value => value })
   const modules = new Map()
   const angular = {
     DOCUMENT: tokens.DOCUMENT,
