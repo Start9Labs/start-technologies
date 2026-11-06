@@ -350,7 +350,12 @@ impl Drop for ActionFiles {
 }
 impl ActionFiles {
     fn insert(self: &Arc<Self>, id: Guid, event: Guid, transfer: Transfer) {
-        let deadline = Instant::now() + self.ttl;
+        let ttl = match &transfer {
+            // Receipts must outlive pending and active sibling uploads.
+            Transfer::Uploaded(_) => self.ttl + self.active_timeout,
+            _ => self.ttl,
+        };
+        let deadline = Instant::now() + ttl;
         let expiry = CancellationToken::new();
         self.entries.lock().unwrap().insert(
             id.clone(),
@@ -366,10 +371,17 @@ impl ActionFiles {
             tokio::select! {
                 _ = expiry.cancelled() => (),
                 _ = tokio::time::sleep_until(deadline) => {
-                    if let Some(store) = weak.upgrade() { store.entries.lock().unwrap().remove(&id); }
+                    if let Some(store) = weak.upgrade() { store.expire_entry(&id); }
                 }
             }
         });
+    }
+
+    fn expire_entry(&self, id: &Guid) {
+        let mut entries = self.entries.lock().unwrap();
+        if entries.get(id).is_some_and(Entry::is_expired) {
+            entries.remove(id);
+        }
     }
 
     pub async fn prepare_upload(
@@ -1661,7 +1673,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn receipt_and_prepared_upload_expire_without_truncating_files() {
+    async fn receipt_survives_preparation_expiry_and_eventually_expires_without_truncation() {
         let temp = tempfile::tempdir().unwrap();
         let store = store();
         let rpc = RpcContinuations::new();
@@ -1673,13 +1685,73 @@ mod tests {
         tokio::time::pause();
         let pending = prepare(&store, &rpc, &event, temp.path(), "pending").await;
         expire(Duration::from_secs(11)).await;
-        assert!(store.resolve_upload(&event, &id).is_err());
+        store.expire_entry(&id);
+        assert!(store.resolve_upload(&event, &id).is_ok());
         assert!(rpc.get_rest_handler(&pending).await.is_none());
+        expire(Duration::from_secs(20)).await;
+        assert!(store.resolve_upload(&event, &id).is_err());
         assert_eq!(
             std::fs::read(temp.path().join("uploaded")).unwrap(),
             b"bytes"
         );
         assert!(!temp.path().join("pending").exists());
+    }
+
+    #[tokio::test]
+    async fn completed_receipt_outlives_a_late_slow_sibling_upload() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = ActionFiles::default();
+        state.ttl = Duration::from_secs(100);
+        state.active_timeout = Duration::from_secs(200);
+        let store = Arc::new(state);
+        let rpc = RpcContinuations::new();
+        let event = Guid::new();
+        let small = prepare(&store, &rpc, &event, temp.path(), "small").await;
+        let large = prepare(&store, &rpc, &event, temp.path(), "large").await;
+        request(&rpc, &small, upload(Body::from("small")))
+            .await
+            .unwrap();
+
+        tokio::time::pause();
+        expire(Duration::from_secs(90)).await;
+        tokio::time::resume();
+        let (started, receive_started) = tokio::sync::oneshot::channel();
+        let (finish, receive_finish) = tokio::sync::oneshot::channel();
+        let body = async_stream::stream! {
+            yield Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"first"));
+            started.send(()).unwrap();
+            receive_finish.await.unwrap();
+            yield Ok(bytes::Bytes::from_static(b"last"));
+        };
+        let handler = rpc.get_rest_handler(&large).await.unwrap();
+        let sibling = tokio::spawn(handler(upload(Body::from_stream(body))));
+        receive_started.await.unwrap();
+        tokio::time::pause();
+        expire(Duration::from_secs(190)).await;
+        assert!(!sibling.is_finished());
+        assert_eq!(
+            store
+                .resolve_upload(&event, &small)
+                .unwrap()
+                .commitment
+                .size,
+            5
+        );
+        tokio::time::resume();
+        finish.send(()).unwrap();
+        assert_eq!(
+            sibling.await.unwrap().unwrap().status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            store
+                .resolve_upload(&event, &large)
+                .unwrap()
+                .commitment
+                .size,
+            9
+        );
+        assert!(store.resolve_upload(&event, &small).is_ok());
     }
 
     #[tokio::test]

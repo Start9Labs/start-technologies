@@ -402,7 +402,7 @@ The file is already at the prepared volume path when the handler receives this v
 
 Uploads atomically replace an existing destination only after the complete file is written and synced. A failed upload leaves the previous file intact. Parents must already exist; paths are volume-relative and cannot contain symlinks or parent traversal. Keep the selected directory or file parent stable during upload and coordinate service writers around the destination. Omitted permissions default to mode `0600`, UID `0`, GID `0`; ownership uses the IDs visible to the service. A successfully installed upload remains service-owned even if the action later fails or is cancelled.
 
-Prepared IDs expire after 30 minutes, and an active upload times out after one hour. On a transfer or action error, the UI obtains a fresh form and preserves the selected files for another submission. Custom clients submit the prepared ID string (or `null`) as the field value after POSTing the bytes to `/rest/rpc/<id>`, with a percent-encoded `X-File-Name` header and optional `Content-Type`. IDs are one-shot bearer capabilities, not reusable upload URLs.
+Prepared IDs expire after 30 minutes, and an active upload times out after one hour. Completed upload receipts remain available for 90 minutes after installation, allowing sibling uploads to finish before action validation. On a transfer or action error, the UI obtains a fresh form and preserves the selected files for another submission. Custom clients submit the prepared ID string (or `null`) as the field value after POSTing the bytes to `/rest/rpc/<id>`, with a percent-encoded `X-File-Name` header and optional `Content-Type`. IDs are one-shot bearer capabilities, not reusable upload URLs.
 
 ### Validating Input
 
