@@ -103,6 +103,33 @@ fn rejected_before_dispatch(context: &TestContext) {
 }
 
 #[tokio::test]
+async fn floating_point_parameters_retain_binary64_roundtrip_precision() {
+    let server = Server::new(
+        || async { Ok(TestContext::default()) },
+        ParentHandler::new().subcommand(
+            "bits",
+            from_fn_async(|_: TestContext, params: imbl_value::Value| async move {
+                Ok::<_, yajrc::RpcError>(params["number"].as_f64().unwrap().to_bits())
+            })
+            .no_cli()
+            .no_ts(),
+        ),
+    )
+    .for_http();
+    let response = server
+        .handle(request(Body::from(
+            r#"{"id":1,"method":"bits","params":{"number":51.248178375505404}}"#,
+        )))
+        .await;
+    let response: Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(
+        response["result"].as_u64(),
+        Some(51.248178375505404_f64.to_bits())
+    );
+}
+
+#[tokio::test]
 async fn exact_limit_preserves_bytes_through_body_reading_middleware() {
     let context = TestContext::default();
     let bytes = body("boundary");

@@ -132,6 +132,13 @@ Metadata tags are processed by different middleware. Group them logically:
 | ------------ | ------- | ------------------------------------------------------- |
 | `get_signer` | `false` | Inject signer public key into params as `__Auth_signer` |
 
+`signature::rpc::rpc_signing_body` and TypeScript `auth.rpcSigningBody` encode the complete
+request object except its root `signature` field. The signing body uses length-first
+deterministic CBOR: integers remain integers; floating-point values become eight big-endian
+IEEE-754 bytes. This retains numeric type distinctions and signed zero. The TypeScript helper
+accepts raw JSON and requires source-aware `JSON.parse` to retain full-u64 integers. These
+helpers encode the signing body only; they do not authenticate requests.
+
 ### Registry Auth (extends Signature Auth)
 
 | Metadata          | Default | Description                                             |

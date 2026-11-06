@@ -2,6 +2,8 @@ import { ed25519 } from '@noble/curves/ed25519'
 import { blake3 } from '@noble/hashes/blake3'
 import { concatBytes, hexToBytes } from '@noble/hashes/utils'
 
+export { rpcSigningBody } from './rpc'
+
 /**
  * Client side of the server's signature auth (`X-Start-Auth-Sig`).
  *

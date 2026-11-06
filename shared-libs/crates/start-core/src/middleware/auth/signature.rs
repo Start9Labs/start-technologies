@@ -32,6 +32,8 @@ use crate::sign::{AnySignature, AnyVerifyingKey, Signer};
 use crate::util::serde::{Base64, DerEncoding};
 use crate::util::sync::SyncMutex;
 
+pub mod rpc;
+
 pub const AUTH_SIG_HEADER: &str = "X-Start-Auth-Sig";
 
 /// RPC-metadata fields understood by [`SignatureAuth`] when layered over an
