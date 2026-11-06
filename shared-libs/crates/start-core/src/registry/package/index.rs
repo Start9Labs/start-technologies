@@ -126,9 +126,18 @@ impl Model<PackageIndex> {
         Ok(false)
     }
 
+    /// Also clears reader lists for non-admins.
     pub fn retain_visible(&mut self, reader: Option<&Reader>) -> Result<(), Error> {
         self.as_packages_mut()
-            .retain(|_, info| info.is_visible_to(reader))
+            .retain(|_, info| info.is_visible_to(reader))?;
+        if !reader.is_some_and(|reader| reader.admin) {
+            for (_, info) in self.as_packages_mut().as_entries_mut()? {
+                info.as_access_mut()
+                    .as_readers_mut()
+                    .ser(&BTreeSet::new())?;
+            }
+        }
+        Ok(())
     }
 
     pub fn de_visible_to(&self, reader: Option<&Reader>) -> Result<PackageIndex, Error> {
@@ -471,6 +480,17 @@ mod tests {
         let visible =
             |reader: Option<Reader>| index.de_visible_to(reader.as_ref()).unwrap().packages;
         assert_eq!(visible(None).len(), 1);
+        let listed = |admin| {
+            visible(Some(Reader {
+                signer: reader.clone(),
+                admin,
+            }))["secret"]
+                .access
+                .readers
+                .len()
+        };
+        assert_eq!(listed(false), 0);
+        assert_eq!(listed(true), 1);
         assert_eq!(
             visible(Some(Reader {
                 signer: Guid::new(),

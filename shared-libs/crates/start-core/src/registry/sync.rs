@@ -89,7 +89,12 @@ impl Subscription {
 fn subscriptions(ui: &Value) -> Result<BTreeSet<Subscription>, Error> {
     let mut subscriptions = BTreeSet::new();
     for url in connected_registry_urls(ui) {
-        subscriptions.insert(Subscription::Index(url?));
+        match url {
+            Ok(url) => {
+                subscriptions.insert(Subscription::Index(url));
+            }
+            Err(error) => tracing::warn!(?error, "Skipping invalid saved registry"),
+        }
     }
     if let Some(url) = ui.get("startosRegistry").and_then(Value::as_str) {
         subscriptions.insert(Subscription::Os(registry_url(url)?));

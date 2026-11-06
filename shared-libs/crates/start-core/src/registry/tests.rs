@@ -577,6 +577,48 @@ async fn private_dependency_icons_require_a_current_reader_and_disable_caching()
 }
 
 #[tokio::test]
+async fn rejected_icon_proofs_fall_back_to_anonymous_access() {
+    let (_temp, ctx, _admin, reader, path) = fixture().await;
+    let (url, _task) = server(ctx.clone()).await;
+    let icon = url.join(&format!("icons/{path}")).unwrap();
+    let client = reqwest::Client::new();
+    let wrong_identity = || async {
+        SignatureHeader::sign(&reader, b"", "other.test")
+            .await
+            .unwrap()
+            .to_header()
+    };
+    let response = client
+        .get(icon.clone())
+        .header(AUTH_SIG_HEADER, wrong_identity().await)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+    ctx.db
+        .mutate(|db| {
+            db.as_index_mut()
+                .as_package_mut()
+                .as_packages_mut()
+                .as_idx_mut(&"secret".parse().unwrap())
+                .unwrap()
+                .as_access_mut()
+                .as_private_mut()
+                .ser(&false)
+        })
+        .await
+        .result
+        .unwrap();
+    let response = client
+        .get(icon)
+        .header(AUTH_SIG_HEADER, wrong_identity().await)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+}
+
+#[tokio::test]
 async fn watches_multiplex_with_ordinary_calls_and_revoke_private_packages() {
     let (_temp, ctx, _admin, reader, _) = fixture().await;
     let (url, _task) = server(ctx.clone()).await;

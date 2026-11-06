@@ -103,6 +103,15 @@ async fn refreshing_a_registry_cancels_its_group_without_cancelling_other_regist
 }
 
 #[test]
+fn invalid_saved_registry_does_not_block_the_others() {
+    let desired = subscriptions(&json!({
+        "registries": {"https://user@invalid.test":null, "https://registry.test/catalog":null}
+    }))
+    .unwrap();
+    assert_eq!(desired, BTreeSet::from([Subscription::Index(url())]));
+}
+
+#[test]
 fn canonical_configuration_has_one_subscription_per_registry_plus_the_os_source() {
     let desired = subscriptions(&json!({
         "registries": {"https://REGISTRY.test/catalog/":null,"https://registry.test/catalog":null,
