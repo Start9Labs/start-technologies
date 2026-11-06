@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use axum::Router;
-use axum::http::{HeaderMap, StatusCode, Uri, header};
+use axum::extract::Request;
+use axum::http::{StatusCode, Uri};
 use axum::response::Redirect;
 use futures::future::ready;
 use imbl_value::InternedString;
@@ -11,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::context::CliContext;
 use crate::middleware::auth::Auth;
 use crate::middleware::cors::Cors;
+use crate::net::http::request_authority;
 use crate::net::static_server::{bad_request, not_found, server_error};
 use crate::prelude::*;
 use crate::registry::context::RegistryContext;
@@ -114,29 +116,19 @@ pub fn registry_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-async fn marketplace_redirect(headers: HeaderMap, uri: Uri) -> Result<Redirect, StatusCode> {
-    let scheme = headers
+async fn marketplace_redirect(req: Request) -> Result<Redirect, StatusCode> {
+    let scheme = req
+        .headers()
         .get("x-forwarded-proto")
         .map(|value| value.to_str())
         .transpose()
         .map_err(|_| StatusCode::BAD_REQUEST)?
-        .or(uri.scheme_str())
+        .or(req.uri().scheme_str())
         .unwrap_or("http");
     if !matches!(scheme, "http" | "https") {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let authority = uri
-        .authority()
-        .cloned()
-        .or_else(|| {
-            headers
-                .get(header::HOST)?
-                .to_str()
-                .ok()?
-                .parse::<http::uri::Authority>()
-                .ok()
-        })
-        .ok_or(StatusCode::BAD_REQUEST)?;
+    let authority = request_authority(&req).ok_or(StatusCode::BAD_REQUEST)?;
     let registry = Uri::builder()
         .scheme(scheme)
         .authority(authority)
