@@ -19,7 +19,6 @@ use startos::net::tls::TlsListener;
 use startos::net::web_server::{Accept, Acceptor, DynAccept, MetadataVisitor, WebServer};
 use tokio::signal::unix::SignalKind;
 use tokio::sync::mpsc;
-use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
 use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::instrument;
 use visit_rs::Visit;
@@ -401,19 +400,10 @@ async fn inner_main() -> Result<(), Error> {
             .expect("failed to build proxy HTTP client"),
     );
 
-    // Firmware build stamp on every RPC response. The UI checks it against its
-    // baked-in config.json gitHash on each response, so an open tab notices a
-    // firmware update within one background poll (~5s) even when the daemon
-    // restart was too quick to drop any request (e.g. a CLI deploy). Exposed
-    // through CORS for the cross-origin dev serve.
+    // The UI detects firmware changes through this CORS-exposed header.
     let git_hash_header = header::HeaderName::from_static("x-startwrt-git-hash");
 
-    let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::mirror_request())
-        .allow_methods(AllowMethods::mirror_request())
-        .allow_headers(AllowHeaders::mirror_request())
-        .expose_headers([git_hash_header.clone()])
-        .allow_credentials(true);
+    let cors = startos::middleware::cors::layer().expose_headers([git_hash_header.clone()]);
 
     let app = Router::new()
         // RPC API at /rpc/v1 (matches frontend's RELATIVE_URL)

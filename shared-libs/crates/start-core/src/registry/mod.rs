@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::context::CliContext;
 use crate::middleware::auth::Auth;
-use crate::middleware::cors::Cors;
+use crate::middleware::cors;
 use crate::net::static_server::{bad_request, not_found, server_error};
 use crate::prelude::*;
 use crate::registry::context::RegistryContext;
@@ -131,12 +131,11 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
     use axum::routing::{any, get};
     let rpc_context = ctx.clone();
     let server = Server::new(move || ready(Ok(rpc_context.clone())), registry_api())
-        .middleware(Cors::new())
         .middleware(Auth::new().with_local_auth().with_signature_auth())
         .middleware(DeviceInfoMiddleware::new());
     Router::new()
-        .route("/rpc/{*path}", any(server.clone()))
-        .route("/ws/rpc", get(server.for_websocket()))
+        .route("/rpc/{*path}", any(server.clone()).layer(cors::layer()))
+        .route("/ws/rpc", get(server.for_websocket()).layer(cors::layer()))
         .route(
             &format!("/{}/{{*path}}", package::icon::ICON_PATH),
             get({

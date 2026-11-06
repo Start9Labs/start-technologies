@@ -9,7 +9,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::extract::{self as x, Request};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get};
+use axum::routing::{MethodRouter, any, get};
 use base64::Engine;
 use base64::display::Base64Display;
 use digest::Digest;
@@ -37,7 +37,7 @@ use crate::middleware::auth::signature::{
     AUTH_SIG_HEADER, LoginMetadata, SignatureAuthContext, SignatureHeader, SigningContext,
     verify_request_signature,
 };
-use crate::middleware::cors::Cors;
+use crate::middleware::cors;
 use crate::middleware::db::{SyncDb, SyncDbHeaderCompat};
 use crate::middleware::json::RequireJson;
 use crate::net::http::request_authority;
@@ -74,10 +74,9 @@ pub trait UiContext: Context + AsRef<RpcContinuations> + Clone + Sized {
     fn extend_router(self, router: Router) -> Router {
         router
     }
-    /// Routes served by the context's RPC server.
-    #[allow(unused_variables)]
+    /// RPC, continuation, and optional protocol routes, before UI resources.
     fn rpc_server_routes(self, server: HttpServer<Self>) -> Router {
-        Router::new()
+        rpc_router(self, any(server))
     }
     /// Applies layers after the UI fallback is installed.
     fn apply_outer_layers(self, router: Router) -> Router {
@@ -96,7 +95,6 @@ impl UiContext for RpcContext {
     }
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
         server
-            .middleware(Cors::new())
             .middleware(
                 Auth::new()
                     .with_local_auth()
@@ -107,11 +105,14 @@ impl UiContext for RpcContext {
             .middleware(SyncDbHeaderCompat::default())
     }
     fn rpc_server_routes(self, server: HttpServer<Self>) -> Router {
-        crate::mcp::router(self, server).unwrap_or_else(|e| {
-            tracing::error!("MCP endpoint unavailable: {e}");
-            tracing::debug!("{e:?}");
-            Router::new()
-        })
+        let mcp = crate::mcp::router(self.clone(), server.clone())
+            .unwrap_or_else(|e| {
+                tracing::error!("MCP endpoint unavailable: {e}");
+                tracing::debug!("{e:?}");
+                Router::new()
+            })
+            .layer(cors::layer());
+        rpc_router(self, any(server).layer(cors::layer())).merge(mcp)
     }
     fn extend_router(self, router: Router) -> Router {
         router
@@ -252,10 +253,10 @@ fn is_local_host(host: &str) -> bool {
 
 pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
     ctx: C,
-    server: HttpServer<C>,
+    rpc: MethodRouter,
 ) -> Router {
     Router::new()
-        .route("/rpc/{*path}", any(server))
+        .route("/rpc/{*path}", rpc)
         .route(
             "/ws/rpc/{guid}",
             any({
@@ -359,8 +360,7 @@ pub fn ui_router<C: UiContext>(ctx: C) -> Router {
     ));
     let router = ctx
         .clone()
-        .extend_router(rpc_router(ctx.clone(), server.clone()))
-        .merge(ctx.clone().rpc_server_routes(server))
+        .extend_router(ctx.clone().rpc_server_routes(server))
         .fallback(any(|request: Request| async move {
             serve_ui(request, C::ui_dir()).unwrap_or_else(server_error)
         }));

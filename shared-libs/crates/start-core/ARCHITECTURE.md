@@ -57,6 +57,8 @@ The API is JSON-RPC (not REST). All endpoints are RPC methods organized in a hie
 
 Legacy GUID WebSocket continuations carry an explicit `WebSocketPolicy` from their issuing API. Anonymously available streams use bounded input and write deadlines; authenticated container, terminal and runtime streams retain bulk input. Revocation tracking is independent of that resource policy; `ws` and `ws_authed` do not classify authentication.
 
+`middleware/cors.rs` owns the shared `tower-http` CORS layer. StartOS, registry and Tunnel apply it at their HTTP RPC routes, before body limits, context construction and authentication; StartOS also covers MCP. WRT retains its daemon-wide scope and exposed firmware hash. The platform owns mirrored preflight permissions and `Vary` handling. UI resource routes retain their independent policies.
+
 See [rpc-toolkit.md](rpc-toolkit.md) for full handler patterns and configuration.
 
 ## Patch-DB Patterns
