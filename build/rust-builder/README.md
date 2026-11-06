@@ -12,7 +12,7 @@ The final image contains the replacement executable and its verification script,
 
 ## RISC-V profile
 
-RVA23 is enabled by default for `riscv64gc`. Pass `docker run -e START9_RVA23=0 …` to disable both the entrypoint's default Rust flags and cargo-zigbuild's default C/C++ profile. Cargo-zigbuild then uses upstream's baseline `riscv64gc` C/C++ profile, including its generated CMake toolchains. Explicit caller-supplied Rust flags, compiler wrappers and CPU overrides still apply. The explicit `riscv64a23` target retains its required profile.
+RVA23 is enabled by default for `riscv64gc`. Pass `docker run -e DISABLE_RVA23=1 …` to disable both the entrypoint's default Rust flags and cargo-zigbuild's default C/C++ profile. Cargo-zigbuild then uses upstream's baseline `riscv64gc` C/C++ profile, including its generated CMake toolchains. Explicit caller-supplied Rust flags, compiler wrappers and CPU overrides still apply. The explicit `riscv64a23` target retains its required profile.
 
 The entrypoint executes the requested command directly. Replacing it with Docker's `--entrypoint` bypasses the default Rust flags; the cargo-zigbuild profile switch still applies.
 
