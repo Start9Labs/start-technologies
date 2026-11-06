@@ -53,6 +53,10 @@ Transports wrap a `Server`:
 - **HTTP** (`server/http.rs`): `HttpServer` on `axum`, with content-negotiated CBOR/JSON encoding
   and a `Middleware` pipeline (`process_http_request`, `process_rpc_request`, `process_rpc_response`,
   `process_http_response`, all defaulting to no-ops) erased through `DynMiddleware`.
+  `begin_http_request` bounds and buffers the body before context creation or middleware. The
+  default is 1 MiB, configurable through `with_max_request_body_size`; oversized bodies return
+  HTTP 413. `RequestBodyLimit` in the request extensions exposes that limit to middleware.
+  MCP and WebSocket upgrades reuse this preparation. Outgoing bodies are independent.
 - **WebSocket** (`server/websocket.rs`, opt-in `websocket` feature): `WebSocketServer` accepts JSON
   text requests and batches through the existing RPC middleware pipeline. HTTP middleware prepares
   the upgrade; each call clones that prepared middleware state. The connection owns pending call

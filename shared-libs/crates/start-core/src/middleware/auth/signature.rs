@@ -34,9 +34,6 @@ use crate::util::sync::SyncMutex;
 
 pub const AUTH_SIG_HEADER: &str = "X-Start-Auth-Sig";
 
-/// Maximum initial allocation from an untrusted commitment size.
-const MAX_BODY_PREALLOC: u64 = 16 * 1024 * 1024;
-
 /// RPC-metadata fields understood by [`SignatureAuth`] when layered over an
 /// [`RpcContext`]. `login` marks the enrollment endpoint: the request must
 /// still be signed (proving possession of the key being enrolled), but the
@@ -454,6 +451,18 @@ async fn verify_request_signature_with_address<C: SignatureAuthContext>(
             .with_kind(ErrorKind::InvalidRequest)?,
     )?;
 
+    let limit = request
+        .extensions()
+        .get::<rpc_toolkit::RequestBodyLimit>()
+        .copied()
+        .unwrap_or_default();
+    ensure_code!(
+        header.commitment.size <= limit.0.get() as u64,
+        ErrorKind::InvalidRequest,
+        "{}",
+        t!("middleware.auth.request-body-too-large")
+    );
+
     let address = {
         let identities = request_identities(context, request).await?;
         let address = verified_address(&header, identities.iter().map(|c| &**c));
@@ -491,7 +500,7 @@ async fn verify_request_signature_with_address<C: SignatureAuthContext>(
     };
     context.mutate_nonce_cache(|n| n.handle_nonce(commitment.nonce, commitment.timestamp, now))?;
 
-    let mut body = Vec::with_capacity(commitment.size.min(MAX_BODY_PREALLOC) as usize);
+    let mut body = Vec::with_capacity(commitment.size as usize);
     commitment.copy_to(request, &mut body).await?;
     *request.body_mut() = Body::from(body);
 

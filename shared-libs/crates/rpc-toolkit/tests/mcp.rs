@@ -186,6 +186,35 @@ impl Middleware<Ctx> for Auth {
     }
 }
 
+#[tokio::test]
+async fn request_body_limit_rejects_streamed_input_before_auth_or_mcp_decoding() {
+    let service = McpServer::new(
+        Server::new(|| async { Ok(Ctx) }, tree())
+            .for_http()
+            .with_max_request_body_size(std::num::NonZeroUsize::new(32).unwrap())
+            .middleware(Auth::default()),
+        catalog(),
+        Policy,
+        Implementation::new("test", "0.0.0"),
+    )
+    .unwrap()
+    .service(StreamableHttpServerConfig::default());
+    let chunks = futures::stream::iter([
+        Ok::<_, std::io::Error>(axum::body::Bytes::from_static(b"[[[[[[[[[[[[[[[[")),
+        Ok(axum::body::Bytes::from_static(b"[[[[[[[[[[[[[[[[[[")),
+    ]);
+    let response = service
+        .handle(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .body(axum::body::Body::from_stream(chunks))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
 async fn serve() -> SocketAddr {
     serve_with_config(
         StreamableHttpServerConfig::default()

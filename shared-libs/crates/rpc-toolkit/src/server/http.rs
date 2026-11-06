@@ -1,11 +1,15 @@
-use axum::body::Body;
+use std::error::Error;
+use std::num::NonZeroUsize;
+
+use axum::body::{Body, HttpBody};
 use axum::extract::Request;
 use axum::handler::Handler;
 use axum::response::Response;
 use futures::future::{join_all, BoxFuture};
 use futures::{Future, FutureExt};
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
-use http_body_util::BodyExt;
+use http::StatusCode;
+use http_body_util::{BodyExt, LengthLimitError};
 use imbl_value::imbl::Vector;
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
@@ -17,6 +21,46 @@ use crate::util::{internal_error, parse_error};
 use crate::{Context, HandleAny, Server};
 
 const FALLBACK_ERROR: &str = "{\"error\":{\"code\":-32603,\"message\":\"Internal error\",\"data\":\"Failed to serialize rpc response\"}}";
+
+/// Maximum request-body bytes, installed in HTTP request extensions before middleware runs.
+#[derive(Clone, Copy, Debug)]
+pub struct RequestBodyLimit(pub NonZeroUsize);
+
+impl Default for RequestBodyLimit {
+    fn default() -> Self {
+        Self(NonZeroUsize::new(1024 * 1024).unwrap())
+    }
+}
+
+fn payload_too_large() -> Response {
+    Response::builder()
+        .status(StatusCode::PAYLOAD_TOO_LARGE)
+        .body(Body::empty())
+        .unwrap()
+}
+
+async fn buffer_request_body(req: &mut Request, limit: RequestBodyLimit) -> Result<(), Response> {
+    if req.body().size_hint().lower() > limit.0.get() as u64 {
+        return Err(payload_too_large());
+    }
+    let body = axum::body::to_bytes(
+        std::mem::replace(req.body_mut(), Body::empty()),
+        limit.0.get(),
+    )
+    .await
+    .map_err(|error| {
+        if error
+            .source()
+            .is_some_and(|cause| cause.is::<LengthLimitError>())
+        {
+            payload_too_large()
+        } else {
+            json_http_response(&RpcResponse::from(internal_error(error)))
+        }
+    })?;
+    *req.body_mut() = Body::from(body);
+    Ok(())
+}
 
 pub fn fallback_rpc_error_response() -> Response {
     Response::builder()
@@ -189,12 +233,14 @@ impl<Context> Clone for DynMiddleware<Context> {
 pub struct HttpServer<Context: crate::Context> {
     pub(crate) inner: Server<Context>,
     middleware: Vector<DynMiddleware<Context>>,
+    request_body_limit: RequestBodyLimit,
 }
 impl<Context: crate::Context> Clone for HttpServer<Context> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
             middleware: self.middleware.clone(),
+            request_body_limit: self.request_body_limit,
         }
     }
 }
@@ -203,6 +249,7 @@ impl<Context: crate::Context> Server<Context> {
         HttpServer {
             inner: self,
             middleware: Vector::new(),
+            request_body_limit: RequestBodyLimit::default(),
         }
     }
     pub fn middleware<T: Middleware<Context>>(self, middleware: T) -> HttpServer<Context> {
@@ -214,12 +261,21 @@ impl<Context: crate::Context> HttpServer<Context> {
         self.middleware.push_back(DynMiddleware::new(middleware));
         self
     }
-    /// Builds the request's context and runs every middleware's
-    /// `process_http_request`; an `Err` is the response to send instead.
+    /// Caps the HTTP body before context creation, middleware, and JSON parsing.
+    /// Applies to JSON-RPC, MCP, and WebSocket upgrade requests. Defaults to 1 MiB.
+    pub fn with_max_request_body_size(mut self, max_bytes: NonZeroUsize) -> Self {
+        self.request_body_limit = RequestBodyLimit(max_bytes);
+        self
+    }
+
+    /// Bounds the request body, builds its context, and runs HTTP request middleware.
     pub(crate) async fn begin_http_request(
         &self,
         req: &mut Request,
     ) -> Result<(Context, Vector<DynMiddleware<Context>>), Response> {
+        let limit = self.request_body_limit;
+        req.extensions_mut().insert(limit);
+        buffer_request_body(req, limit).await?;
         let ctx = (self.inner.make_ctx)().await.map_err(|e| {
             json_http_response(&RpcResponse {
                 id: None,
@@ -230,6 +286,7 @@ impl<Context: crate::Context> HttpServer<Context> {
         for middleware in mid.iter_mut().rev() {
             middleware.process_http_request(&ctx, req).await?;
         }
+        buffer_request_body(req, limit).await?;
         Ok((ctx, mid))
     }
     pub(crate) async fn finish_http_response(

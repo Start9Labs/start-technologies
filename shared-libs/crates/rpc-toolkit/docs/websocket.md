@@ -123,7 +123,13 @@ streams, queued events per stream, inbound message/frame size, and stalled sends
 Defaults are 64 in-flight calls, 64 streams, 16 queued events per stream plus its
 terminal slot, 1 MiB inbound messages/frames, and a 15-second send deadline. The
 buffer limit counts serialized values, not bytes, and must fit Tokio's bounded
-channel capacity. These are resource limits, not authentication decisions.
+channel capacity. These are resource limits, not authentication decisions. The message/frame byte limit is
+server-inbound: outgoing dumps, results, and events may be larger. Native receiving clients must
+configure both their own message and frame limits for the expected response size; a large dump
+can exceed a client's frame limit even when it fits its message limit.
+
+HTTP upgrade bodies use the separate `HttpServer` request-body limit (1 MiB by default),
+enforced before upgrade middleware runs. `with_max_request_body_size` configures that HTTP limit.
 
 A batch larger than the in-flight limit closes the connection with policy code 1008. Capacity rejection does not execute rejected calls. Receivers are polled
 fairly; a stalled network write ends the connection after its send deadline.

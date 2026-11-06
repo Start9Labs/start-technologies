@@ -94,6 +94,56 @@ async fn rpc(url: &Url, method: &str, params: Value, signer: Option<&Signer>) ->
 }
 
 #[tokio::test]
+async fn legacy_signature_body_limits_apply_before_reads_and_honor_transport_configuration() {
+    use std::num::NonZeroUsize;
+
+    use crate::middleware::auth::signature::verify_request_signature;
+
+    let temp = tempfile::tempdir().unwrap();
+    let key = signer(73);
+    let expected = key.verifying_key().await.unwrap();
+    let ctx = test_context(temp.path().into(), expected.clone()).await;
+    let payload = vec![b'x'; rpc_toolkit::RequestBodyLimit::default().0.get() + 1];
+    let signature = SignatureHeader::sign(&key, &payload, "127.0.0.1")
+        .await
+        .unwrap()
+        .to_header();
+    let body = axum::body::Body::from_stream(futures::stream::poll_fn(
+        |_| -> std::task::Poll<Option<Result<axum::body::Bytes, std::io::Error>>> {
+            panic!("oversized declared bodies must be rejected before polling")
+        },
+    ));
+    let mut request = http::Request::builder()
+        .header(AUTH_SIG_HEADER, signature.clone())
+        .body(body)
+        .unwrap();
+    let error = verify_request_signature(&ctx, &mut request)
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::InvalidRequest);
+
+    let mut request = http::Request::builder()
+        .header(AUTH_SIG_HEADER, signature)
+        .body(axum::body::Body::from(payload.clone()))
+        .unwrap();
+    request
+        .extensions_mut()
+        .insert(rpc_toolkit::RequestBodyLimit(
+            NonZeroUsize::new(payload.len()).unwrap(),
+        ));
+    assert_eq!(
+        verify_request_signature(&ctx, &mut request).await.unwrap(),
+        expected
+    );
+    assert_eq!(
+        axum::body::to_bytes(request.into_body(), payload.len())
+            .await
+            .unwrap(),
+        payload
+    );
+}
+
+#[tokio::test]
 async fn browsing_and_access_commands_use_verified_visibility() {
     let (_temp, ctx, admin, reader, _) = fixture().await;
     let (url, _task) = server(ctx.clone()).await;

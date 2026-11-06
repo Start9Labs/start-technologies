@@ -3614,6 +3614,13 @@ middleware.auth.invalid-request-signature:
   fr_FR: "signature de requête invalide : invalide pour toute identité reconnue par ce serveur (nom d'hôte, domaine ou adresse IP) ; la requête a probablement été signée pour une identité de serveur différente ou par un client incompatible"
   pl_PL: "nieprawidłowy podpis żądania: nieważny dla żadnej tożsamości rozpoznawanej przez ten serwer (nazwa hosta, domena lub adres IP); żądanie zostało prawdopodobnie podpisane dla innej tożsamości serwera lub przez niezgodnego klienta"
 
+middleware.auth.request-body-too-large:
+  en_US: "Request body exceeds the configured size limit"
+  de_DE: "Der Anfragekörper überschreitet die konfigurierte Größenbegrenzung"
+  es_ES: "El cuerpo de la solicitud supera el límite de tamaño configurado"
+  fr_FR: "Le corps de la requête dépasse la taille maximale configurée"
+  pl_PL: "Treść żądania przekracza skonfigurowany limit rozmiaru"
+
 middleware.auth.timestamp-not-within-30s:
   en_US: "timestamp not within 30s of now; check this device's clock and the server's clock"
   de_DE: "Zeitstempel nicht innerhalb von 30s der aktuellen Zeit; prüfen Sie die Uhr dieses Geräts und die des Servers"
