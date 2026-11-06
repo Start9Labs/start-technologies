@@ -175,8 +175,37 @@ async fn wait_for(db: &TypedPatchDb<Database>, predicate: impl Fn(&DatabaseModel
 }
 
 #[tokio::test]
-async fn signed_client_caches_private_packages_and_live_revocation_from_the_registry() {
+async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation() {
     let (_registry_temp, registry, _admin, reader, _) = crate::registry::tests::fixture().await;
+    let secret = "secret".parse().unwrap();
+    let readers = registry
+        .db
+        .peek()
+        .await
+        .as_index()
+        .as_package()
+        .as_packages()
+        .as_idx(&secret)
+        .unwrap()
+        .as_access()
+        .as_readers()
+        .de()
+        .unwrap();
+    registry
+        .db
+        .mutate(|db| {
+            db.as_index_mut()
+                .as_package_mut()
+                .as_packages_mut()
+                .as_idx_mut(&secret)
+                .unwrap()
+                .as_access_mut()
+                .as_readers_mut()
+                .ser(&BTreeSet::new())
+        })
+        .await
+        .result
+        .unwrap();
     let (url, _server) = crate::registry::tests::server(registry.clone()).await;
     let url = registry_url(url.as_str()).unwrap();
     let temp = tempfile::tempdir().unwrap();
@@ -190,17 +219,18 @@ async fn signed_client_caches_private_packages_and_live_revocation_from_the_regi
         .ser(&json!({"registries":{url.as_str():"Registry"},"startosRegistry":url}))
         .unwrap();
     db.put(&ROOT, model.as_value()).await.unwrap();
-    let (socket, _) = tokio_tungstenite::connect_async_with_config(
-        websocket_url(&url).unwrap(),
-        Some(response_config()),
-        false,
-    )
-    .await
-    .unwrap();
-    let receiver: NonDetachingJoinHandle<Result<(), Error>> = {
+    let subscribe = || -> NonDetachingJoinHandle<Result<(), Error>> {
         let db = db.clone();
         let url = url.clone();
+        let reader = reader.clone();
         tokio::spawn(async move {
+            let (socket, _) = tokio_tungstenite::connect_async_with_config(
+                websocket_url(&url).unwrap(),
+                Some(response_config()),
+                false,
+            )
+            .await
+            .unwrap();
             receive_updates(
                 socket,
                 &db,
@@ -213,7 +243,54 @@ async fn signed_client_caches_private_packages_and_live_revocation_from_the_regi
         })
         .into()
     };
-    let secret = "secret".parse().unwrap();
+    let receiver = subscribe();
+    wait_for(&db, |db| {
+        db.as_public()
+            .as_os_update_cache()
+            .de()
+            .unwrap()
+            .is_some_and(|cache| cache.connected)
+    })
+    .await;
+    registry
+        .db
+        .mutate(|db| {
+            db.as_index_mut()
+                .as_package_mut()
+                .as_packages_mut()
+                .as_idx_mut(&secret)
+                .unwrap()
+                .as_access_mut()
+                .as_readers_mut()
+                .ser(&readers)?;
+            db.as_index_mut()
+                .as_name_mut()
+                .ser(&Some("Grant barrier".into()))
+        })
+        .await
+        .result
+        .unwrap();
+    wait_for(&db, |db| {
+        db.as_private()
+            .as_registry_indexes()
+            .as_idx(&url)
+            .is_some_and(|index| index.as_name().as_value() == &json!("Grant barrier"))
+    })
+    .await;
+    assert!(
+        db.peek()
+            .await
+            .as_private()
+            .as_registry_indexes()
+            .as_idx(&url)
+            .unwrap()
+            .as_package()
+            .as_packages()
+            .as_idx(&secret)
+            .is_none()
+    );
+    let _ = receiver.wait_for_abort().await;
+    let receiver = subscribe();
     wait_for(&db, |db| {
         db.as_public()
             .as_os_update_cache()

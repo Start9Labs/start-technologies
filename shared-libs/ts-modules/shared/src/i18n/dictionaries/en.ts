@@ -957,4 +957,9 @@ export const ENGLISH: Record<string, number> = {
   'Checking package signatures': 1104,
   'Enabled for service packages': 1105,
   'Enabled for StartOS updates': 1106,
+  'Invalid registry URL': 1107,
+  'Registry URLs must use HTTP or HTTPS and cannot contain credentials, a query, or a fragment.': 1108,
+  'Connect this registry to browse its catalog. New signing keys from this registry will be trusted for packages.': 1109,
+  'Refresh registry': 1110,
+  'Connect this registry before refreshing it.': 1111,
 }

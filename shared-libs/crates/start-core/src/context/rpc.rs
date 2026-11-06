@@ -16,7 +16,7 @@ use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{CallRemote, Context, Empty};
 use tokio::net::TcpStream;
 use tokio::process::Command;
-use tokio::sync::{RwLock, broadcast, oneshot, watch};
+use tokio::sync::{RwLock, broadcast, mpsc, oneshot, watch};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -68,6 +68,7 @@ pub struct RpcContextSeed {
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
     pub db: TypedPatchDb<Database>,
     pub sync_db: watch::Sender<u64>,
+    registry_refresh: mpsc::Sender<Url>,
     pub account: SyncRwLock<AccountInfo>,
     pub os_net_service: NetService,
     pub net_controller: Arc<NetController>,
@@ -447,6 +448,7 @@ impl RpcContext {
             });
         }
 
+        let (registry_refresh, registry_refreshes) = mpsc::channel(8);
         let seed = Arc::new(RpcContextSeed {
             is_closed: AtomicBool::new(false),
             closed: watch::Sender::new(false),
@@ -455,6 +457,7 @@ impl RpcContext {
             ephemeral_auth_keys: SyncMutex::new(AuthKeys::new()),
             auth_sig_nonce_cache: SyncMutex::new(Default::default()),
             sync_db: watch::Sender::new(db.sequence().await),
+            registry_refresh,
             db,
             account: SyncRwLock::new(account),
             callbacks: net_controller.callbacks.clone(),
@@ -497,9 +500,11 @@ impl RpcContext {
         crate::version::post_init(&res, run_migrations).await?;
         let weak = Arc::downgrade(&seed);
         let db = res.db.clone();
-        res.add_cron(crate::registry::sync::watch_registries(db, move || {
-            weak.upgrade().map(Self)
-        }));
+        res.add_cron(crate::registry::sync::watch_registries(
+            db,
+            registry_refreshes,
+            move || weak.upgrade().map(Self),
+        ));
         tracing::info!("{}", t!("context.rpc.completed-migrations"));
         let weak = Arc::downgrade(&res.0);
         let db = res.db.clone();
@@ -522,6 +527,15 @@ impl RpcContext {
             }
         });
         Ok(res)
+    }
+
+    pub(crate) async fn request_registry_refresh(&self, registry: Url) -> Result<(), Error> {
+        self.registry_refresh.send(registry).await.map_err(|_| {
+            Error::new(
+                eyre!("{}", t!("context.rpc.registry-sync-unavailable")),
+                ErrorKind::Network,
+            )
+        })
     }
 
     #[instrument(skip_all)]

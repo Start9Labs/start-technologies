@@ -956,4 +956,9 @@ export default {
   1104: 'Paketsignaturen werden geprüft',
   1105: 'Für Dienstpakete aktiviert',
   1106: 'Für StartOS-Updates aktiviert',
+  1107: 'Ungültige Registry-URL',
+  1108: 'Registry-URLs müssen HTTP oder HTTPS verwenden und dürfen keine Zugangsdaten, Abfrage oder Fragmentkennung enthalten.',
+  1109: 'Verbinde diese Registry, um ihren Katalog zu durchsuchen. Neuen Signaturschlüsseln dieser Registry wird für Pakete vertraut.',
+  1110: 'Registry aktualisieren',
+  1111: 'Verbinde diese Registry, bevor sie aktualisiert wird.',
 } satisfies i18n

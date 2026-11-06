@@ -60,6 +60,48 @@ fn index() -> FullIndex {
     }"#).unwrap()
 }
 
+#[tokio::test]
+async fn refreshing_a_registry_cancels_its_group_without_cancelling_other_registries() {
+    let registry = url();
+    let sibling = Url::parse("https://other.test/").unwrap();
+    let waiting = || {
+        let (sender, receiver) = tokio::sync::oneshot::channel::<()>();
+        let task = tokio::spawn(async move {
+            let _sender = sender;
+            std::future::pending::<()>().await;
+        });
+        (NonDetachingJoinHandle::from(task), receiver)
+    };
+    let (task, cancelled) = waiting();
+    let (other, mut retained) = waiting();
+    let group = BTreeSet::from([
+        Subscription::Index(registry.clone()),
+        Subscription::Os(registry.clone()),
+    ]);
+    let other_group = BTreeSet::from([Subscription::Index(sibling)]);
+    let mut tasks = RegistryTasks::from([(group, task), (other_group.clone(), other)]);
+
+    cancel_registry_connection(&mut tasks, &registry).await;
+    assert_eq!(tasks.keys().collect::<Vec<_>>(), vec![&other_group]);
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), cancelled)
+            .await
+            .unwrap()
+            .is_err()
+    );
+    assert!(matches!(
+        retained.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+    drop(tasks);
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), retained)
+            .await
+            .unwrap()
+            .is_err()
+    );
+}
+
 #[test]
 fn canonical_configuration_has_one_subscription_per_registry_plus_the_os_source() {
     let desired = subscriptions(&json!({

@@ -46,6 +46,7 @@ pub struct OsUpdateCache {
 rpc_toolkit::reflect_ts!(OsUpdateCache);
 
 type ContextProvider = Arc<dyn Fn() -> Option<RpcContext> + Send + Sync>;
+type RegistryTasks = BTreeMap<BTreeSet<Subscription>, NonDetachingJoinHandle<()>>;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Subscription {
@@ -107,13 +108,33 @@ fn connections(subscriptions: &BTreeSet<Subscription>) -> BTreeSet<BTreeSet<Subs
     connections.into_values().collect()
 }
 
+async fn stop_registry_connections(tasks: &mut RegistryTasks, groups: Vec<BTreeSet<Subscription>>) {
+    for group in groups {
+        let _ = tasks.remove(&group).unwrap().wait_for_abort().await;
+    }
+}
+
+async fn cancel_registry_connection(tasks: &mut RegistryTasks, registry: &Url) {
+    let groups = tasks
+        .keys()
+        .filter(|subscriptions| {
+            subscriptions
+                .iter()
+                .any(|subscription| subscription.registry() == registry)
+        })
+        .cloned()
+        .collect();
+    stop_registry_connections(tasks, groups).await;
+}
+
 pub async fn watch_registries(
     db: TypedPatchDb<Database>,
+    mut refreshes: tokio::sync::mpsc::Receiver<Url>,
     context: impl Fn() -> Option<RpcContext> + Send + Sync + 'static,
 ) {
     let context: ContextProvider = Arc::new(context);
     let mut watch = db.watch("/public/ui".parse().unwrap()).await;
-    let mut tasks: BTreeMap<BTreeSet<Subscription>, NonDetachingJoinHandle<()>> = BTreeMap::new();
+    let mut tasks = RegistryTasks::new();
     loop {
         let desired = watch
             .peek_and_mark_seen()
@@ -122,7 +143,12 @@ pub async fn watch_registries(
         match desired {
             Ok(desired) => {
                 let connections = connections(&desired);
-                tasks.retain(|subscriptions, _| connections.contains(subscriptions));
+                let removed = tasks
+                    .keys()
+                    .filter(|subscriptions| !connections.contains(*subscriptions))
+                    .cloned()
+                    .collect();
+                stop_registry_connections(&mut tasks, removed).await;
                 let result = db
                     .mutate(|db| {
                         reconcile(db, &desired, tasks.is_empty())?;
@@ -159,8 +185,12 @@ pub async fn watch_registries(
             }
             Err(error) => tracing::warn!(?error, "Invalid registry configuration"),
         }
-        if watch.changed().await.is_err() {
-            return;
+        tokio::select! {
+            changed = watch.changed() => if changed.is_err() { return; },
+            refresh = refreshes.recv() => match refresh {
+                Some(registry) => cancel_registry_connection(&mut tasks, &registry).await,
+                None => return,
+            },
         }
     }
 }

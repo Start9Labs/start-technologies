@@ -80,8 +80,9 @@ Both subscription methods read filtered in-memory mirrors and use bounded, 32-re
 queues. Slow subscribers close rather than skip patches. Public-only callers share one mirror;
 registered admins and signers with private-package access receive a mirror keyed by their verified
 request key. Every source revision rechecks key enrollment, admin status, and package permissions.
-A public-mirror subscriber must resubscribe after receiving a private-access grant. Weak mirror
-entries share work across subscribers; dropping the last subscriber cancels that mirror's task.
+A public-mirror subscriber must resubscribe after receiving a private-access grant. StartOS's
+marketplace refresh action restarts that registry's grouped watches without changing signing-key
+trust or discarding cached listings. Weak mirror entries share work across subscribers; dropping the last subscriber cancels that mirror's task.
 
 StartOS derives security notifications from the selected source's OS metadata, filtering by source
 version, platform, and installed build. Delivery history remains keyed by registry URL, version, and

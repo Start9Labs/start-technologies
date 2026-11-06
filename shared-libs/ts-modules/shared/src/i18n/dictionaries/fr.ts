@@ -956,4 +956,9 @@ export default {
   1104: 'Vérification des signatures du paquet',
   1105: 'Activée pour les paquets de services',
   1106: 'Activée pour les mises à jour de StartOS',
+  1107: 'URL de registre invalide',
+  1108: 'Les URL des registres doivent utiliser HTTP ou HTTPS et ne peuvent contenir ni identifiants, ni paramètres de requête, ni fragment.',
+  1109: 'Connectez ce registre pour parcourir son catalogue. Les nouvelles clés de signature de ce registre seront approuvées pour les paquets.',
+  1110: 'Actualiser le registre',
+  1111: 'Connectez ce registre avant de le rafraîchir.',
 } satisfies i18n

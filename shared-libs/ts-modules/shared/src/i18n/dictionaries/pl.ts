@@ -956,4 +956,9 @@ export default {
   1104: 'Sprawdzanie podpisów pakietu',
   1105: 'Włączony dla pakietów usług',
   1106: 'Włączony dla aktualizacji StartOS',
+  1107: 'Nieprawidłowy URL rejestru',
+  1108: 'Adresy URL rejestrów muszą używać HTTP lub HTTPS i nie mogą zawierać danych logowania, zapytania ani fragmentu.',
+  1109: 'Połącz ten rejestr, aby przeglądać jego katalog. Nowe klucze podpisujące z tego rejestru będą zaufane dla pakietów.',
+  1110: 'Odśwież rejestr',
+  1111: 'Połącz ten rejestr przed jego odświeżeniem.',
 } satisfies i18n

@@ -4,3 +4,4 @@ release-notes: false
 
 - Keep connected registries synchronized over one automatically signed WebSocket per registry for package listings, signing-key changes, and StartOS updates. Cached listings remain available when a registry is offline. Registries must support `db.watch`; deploy updated registries before this client.
 - Retrieve private package and dependency icons using the server's registry identity, limited to saved registries' content-addressed icon endpoints.
+- Refresh a saved registry to discover later private-access grants without changing signing-key trust; retry failed icons when refreshed listings arrive. Unsaved registry links offer an explicit connection action rather than waiting for a catalog that is not being synchronized.

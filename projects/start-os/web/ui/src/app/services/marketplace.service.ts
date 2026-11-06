@@ -279,6 +279,10 @@ export class MarketplaceService extends AbstractMarketplaceService {
     return this.api.rpc.server.trustedKeys.connectRegistry({ url, name: null })
   }
 
+  async refreshRegistry(url: string): Promise<void> {
+    await this.api.rpc.server.trustedKeys.refreshRegistry({ url })
+  }
+
   async add(rawUrl: string): Promise<string> {
     const url = registryUrl(rawUrl)
     await this.connectRegistry(url)

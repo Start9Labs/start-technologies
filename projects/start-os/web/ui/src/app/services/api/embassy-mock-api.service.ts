@@ -9,6 +9,7 @@ import {
 } from '@start9labs/marketplace'
 import {
   FullKeyboard,
+  i18nPipe,
   pauseFor,
   registryUrl,
   sameUrl,
@@ -129,6 +130,7 @@ const INIT_PROGRESS: T.FullProgress = {
 @Injectable()
 export class MockApiService extends ApiService {
   readonly mockWsSource$ = new Subject<Revision>()
+  private readonly i18n = inject(i18nPipe)
   private readonly storage = inject(WA_SESSION_STORAGE)
   private readonly cache = inject(PATCH_CACHE)
   private readonly revertTime = 1800
@@ -316,6 +318,23 @@ export class MockApiService extends ApiService {
       mockPatchData.ui.registries[normalized] = name ?? info.name
       await this.publishTrust()
       return added
+    },
+    'server.trusted-keys.refresh-registry': async ({ url }) => {
+      await pauseFor(2000)
+      const normalized = registryUrl(url)
+      if (
+        !Object.keys(mockPatchData.ui.registries).some(saved =>
+          sameUrl(saved, normalized),
+        )
+      )
+        throw new Error(
+          this.i18n.transform('Connect this registry before refreshing it.'),
+        )
+      const info = this.mockRegistryInfo(normalized)
+      mockPatchData.registryCache[normalized] = mockRegistryCache(info)
+      this.importRegistryKeys(normalized, info)
+      await this.publishTrust()
+      return null
     },
     'server.trusted-keys.remove-registry': async ({ url }) => {
       await pauseFor(2000)

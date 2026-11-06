@@ -3471,6 +3471,13 @@ context.cli.not-logged-in:
   pl_PL: "Nie zalogowano do %{host}; wprowadź hasło serwera, aby się zalogować."
 
 # context/rpc.rs
+context.rpc.registry-sync-unavailable:
+  en_US: "Registry synchronization is unavailable"
+  de_DE: "Die Synchronisierung der Registry ist nicht verfügbar"
+  es_ES: "La sincronización del registro no está disponible"
+  fr_FR: "La synchronisation du registre est indisponible"
+  pl_PL: "Synchronizacja rejestru jest niedostępna"
+
 context.rpc.rpc-context-dropped:
   en_US: "RpcContext is dropped"
   de_DE: "RpcContext wurde verworfen"
@@ -8009,11 +8016,11 @@ trusted-keys.protected:
   pl_PL: "Kluczy oferowanych przez połączone rejestry nie można usunąć; zamiast tego cofnij zaufanie do nich"
 
 trusted-keys.registry-not-connected:
-  en_US: "Add this registry before using it for StartOS updates"
-  de_DE: "Fügen Sie diese Registry hinzu, bevor Sie sie für StartOS-Updates verwenden"
-  es_ES: "Añada este registro antes de usarlo para las actualizaciones de StartOS"
-  fr_FR: "Ajoutez ce registre avant de l’utiliser pour les mises à jour de StartOS"
-  pl_PL: "Dodaj ten rejestr, zanim użyjesz go dla aktualizacji StartOS"
+  en_US: "Connect this registry before using it."
+  de_DE: "Verbinden Sie diese Registry, bevor Sie sie verwenden."
+  es_ES: "Conecte este registro antes de utilizarlo."
+  fr_FR: "Connectez ce registre avant de l’utiliser."
+  pl_PL: "Połącz ten rejestr, zanim go użyjesz."
 
 version.http-auth-downgrade-requires-tls:
   en_US: "Cannot downgrade: an HTTP authentication policy has no TLS wrapper. Add TLS to this binding before downgrading."

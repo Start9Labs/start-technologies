@@ -344,6 +344,10 @@ pub fn api<C: Context>() -> ParentHandler<C> {
                 .no_cli(),
         )
         .subcommand(
+            "refresh-registry",
+            from_fn_async(connection::refresh).no_cli(),
+        )
+        .subcommand(
             "set-os-registry",
             from_fn_async(connection::set_os_registry)
                 .with_metadata("sync_db", Value::Bool(true))

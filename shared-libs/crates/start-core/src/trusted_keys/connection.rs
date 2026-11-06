@@ -110,6 +110,18 @@ pub async fn connect(
         .result
 }
 
+/// Returns after queueing resubscription, not after receiving the refreshed catalog.
+pub async fn refresh(ctx: RpcContext, params: TrustedRegistryParams) -> Result<(), Error> {
+    let url = registry_url(&params.url)?;
+    if !is_connected(&ctx.db.peek().await.as_public().as_ui().de()?, url.as_str()) {
+        return Err(Error::new(
+            eyre!("{}", t!("trusted-keys.registry-not-connected")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    ctx.request_registry_refresh(url).await
+}
+
 pub(crate) fn refresh_registry(
     db: &mut crate::db::model::DatabaseModel,
     url: &Url,

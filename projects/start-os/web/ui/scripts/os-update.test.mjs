@@ -10,7 +10,14 @@ import {
   signal,
 } from '@angular/core'
 import { FormBuilder, NonNullableFormBuilder } from '@angular/forms'
-import { BehaviorSubject, EMPTY, firstValueFrom, of, Subject } from 'rxjs'
+import {
+  BehaviorSubject,
+  EMPTY,
+  firstValueFrom,
+  of,
+  Subject,
+  switchMap,
+} from 'rxjs'
 
 const boundaries = new Map()
 function boundary(specifier, names, extra = '') {
@@ -82,7 +89,14 @@ boundary(
   ['TuiAnimated', 'TuiMapperPipe', 'TuiValidator'],
   'export const tuiMarkControlAsTouchedAndValidate = () => {}; export const tuiProvide = () => []; export const tuiIsString = value => typeof value === "string";',
 )
-boundary('@taiga-ui/layout', ['TuiCardLarge', 'TuiHeader', 'TuiForm'])
+boundary('@taiga-ui/layout', [
+  'TuiCardLarge',
+  'TuiHeader',
+  'TuiForm',
+  'TuiBlockStatus',
+  'TuiNavigation',
+])
+boundary('./components/controls.component', ['MarketplaceControlsComponent'])
 boundary('@taiga-ui/addon-table', ['TuiTable', 'TuiTableDirective'])
 boundary('@taiga-ui/addon-mobile', ['TuiResponsiveDialog'])
 boundary(
@@ -146,6 +160,7 @@ boundaries.set(
     'key-identity.ts',
     'types.ts',
     'services/abstract-marketplace.service.ts',
+    'util/icon.ts',
   ]
     .map(
       file =>
@@ -156,7 +171,8 @@ boundaries.set(
 )
 loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
-const { Router } = await import('@angular/router')
+const { ActivatedRoute, convertToParamMap, Router } =
+  await import('@angular/router')
 const { RefreshAlertComponent } =
   await import('src/app/components/refresh-alert.component')
 const { PatchDB } = await import('patch-db-client')
@@ -2413,6 +2429,10 @@ const { Exver } = await import('@start9labs/shared')
 const { StorageService } = await import('src/app/services/storage.service')
 const { PackageIconService } =
   await import('src/app/services/package-icon.service')
+const { PackageIconService: ProductionPackageIconService } =
+  await import('../src/app/services/package-icon.service.ts')
+const { default: MarketplacePage } =
+  await import('../src/app/routes/portal/routes/marketplace/marketplace.component.ts')
 
 const registryEntry = (version = '1.0.0:0', connected = true) => ({
   connected,
@@ -2443,15 +2463,65 @@ function marketplaceFixture(t, entries = {}) {
   patch.start()
   const queries = []
   const responses = []
+  const refreshes = []
+  const connections = []
+  const iconRequests = []
+  const iconResponses = []
+  const storage = new Map()
+  const routeParams = new BehaviorSubject(
+    convertToParamMap({ registry: 'https://registry.test' }),
+  )
   const injector = createEnvironmentInjector([
     { provide: PatchDB, useValue: patch },
     { provide: Exver, useValue: { getFlavor: () => null } },
-    { provide: StorageService, useValue: { set: () => {} } },
-    { provide: PackageIconService, useValue: {} },
+    {
+      provide: StorageService,
+      useValue: {
+        set: (key, value) => storage.set(key, value),
+        get: key => storage.get(key),
+      },
+    },
+    {
+      provide: ConfigService,
+      useValue: { defaultRegistry: 'https://registry.test' },
+    },
+    { provide: Router, useValue: { navigate: () => {} } },
+    { provide: ActivatedRoute, useValue: { queryParamMap: routeParams } },
+    {
+      provide: TaskService,
+      useValue: {
+        run: async task => {
+          await task()
+          return true
+        },
+      },
+    },
+    {
+      provide: PackageIconService,
+      useFactory: () => new ProductionPackageIconService(),
+    },
+    { provide: MarketplaceService, useFactory: () => new MarketplaceService() },
     {
       provide: ApiService,
       useValue: {
+        getStaticObjectUrl(url) {
+          iconRequests.push(url)
+          const response = deferred()
+          iconResponses.push(response)
+          return response.promise
+        },
         rpc: {
+          server: {
+            trustedKeys: {
+              refreshRegistry: async params => {
+                refreshes.push(params)
+              },
+              connectRegistry: async params => {
+                connections.push(params)
+                return []
+              },
+            },
+          },
           registry: {
             info: () => assert.fail('Registry info must come from PatchDB'),
             package: {
@@ -2467,10 +2537,7 @@ function marketplaceFixture(t, entries = {}) {
       },
     },
   ])
-  const service = runInInjectionContext(
-    injector,
-    () => new MarketplaceService(),
-  )
+  const service = injector.get(MarketplaceService)
   let revision = 1
   const subscriptions = []
   t.after(() => {
@@ -2482,6 +2549,14 @@ function marketplaceFixture(t, entries = {}) {
     service,
     queries,
     responses,
+    refreshes,
+    connections,
+    iconRequests,
+    iconResponses,
+    storage,
+    routeParams,
+    makePage: () =>
+      runInInjectionContext(injector, () => new MarketplacePage()),
     watch(observable) {
       const values = []
       subscriptions.push(observable.subscribe(value => values.push(value)))
@@ -2492,6 +2567,84 @@ function marketplaceFixture(t, entries = {}) {
     },
   }
 }
+
+test('the visible refresh action retries failed icons when the refreshed cache arrives and shares successful loads', async t => {
+  const entry = registryEntry()
+  const icon = 'blake3/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png'
+  entry.packages.example.best['1.0.0:0'].icon = icon
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+  const page = f.makePage()
+  const visible = f.watch(
+    f.service.currentRegistry$.pipe(
+      switchMap(store =>
+        f.service.fetchIcon$(store.url, store.packages[0].icon),
+      ),
+    ),
+  )
+  assert.equal(f.iconRequests.length, 1)
+  f.iconResponses[0].reject(new Error('Icon temporarily unavailable'))
+  await tick()
+  assert.equal(visible.at(-1), 'fallback.png')
+  await page.refreshRegistry()
+  assert.deepEqual(f.refreshes, [{ url: 'https://registry.test/' }])
+  assert.deepEqual(f.connections, [])
+  assert.equal(f.iconRequests.length, 1)
+
+  f.replace('/registryCache', {
+    'https://registry.test/': { ...entry, connected: false },
+  })
+  assert.equal(f.iconRequests.length, 2)
+  assert.equal(f.iconRequests[1], f.iconRequests[0])
+  f.iconResponses[1].resolve('blob:recovered-icon')
+  await tick()
+  assert.equal(visible.at(-1), 'blob:recovered-icon')
+  f.replace('/registryCache', {
+    'https://registry.test/': { ...entry, connected: true },
+  })
+  await tick()
+  assert.equal(visible.at(-1), 'blob:recovered-icon')
+  assert.equal(f.iconRequests.length, 2)
+  assert.deepEqual(f.queries, [])
+})
+
+test('unsaved registry navigation requires explicit connection and malformed URLs do not end route updates', async t => {
+  const f = marketplaceFixture(t)
+  f.routeParams.next(
+    convertToParamMap({ registry: 'https://unsaved.test/catalog' }),
+  )
+  const page = f.makePage()
+  assert.equal(page.invalidRegistry(), false)
+  assert.equal(page.isRegistrySaved(), false)
+  assert.equal(page.selectedRegistry(), 'https://unsaved.test/catalog/')
+  assert.deepEqual(f.connections, [])
+  assert.deepEqual(f.queries, [])
+  await page.connectRegistry()
+  assert.deepEqual(f.connections, [
+    { url: 'https://unsaved.test/catalog/', name: null },
+  ])
+  assert.equal(page.isRegistrySaved(), false)
+  assert.equal(
+    f.storage.get('selectedRegistry'),
+    'https://unsaved.test/catalog/',
+  )
+  f.replace('/ui/registries', { 'https://unsaved.test/catalog/': 'Saved' })
+  assert.equal(page.isRegistrySaved(), true)
+
+  for (const registry of [
+    'https://user:password@bad.test/',
+    'ftp://bad.test',
+    'https://bad.test/?query',
+  ]) {
+    f.routeParams.next(convertToParamMap({ registry }))
+    assert.equal(page.invalidRegistry(), true)
+  }
+  f.routeParams.next(
+    convertToParamMap({ registry: 'https://unsaved.test/catalog' }),
+  )
+  assert.equal(page.invalidRegistry(), false)
+  assert.equal(page.isRegistrySaved(), true)
+  assert.equal(f.connections.length, 1)
+})
 
 test('marketplace lists and metadata stream from canonical cache keys without navigation fetches', async t => {
   const f = marketplaceFixture(t)
