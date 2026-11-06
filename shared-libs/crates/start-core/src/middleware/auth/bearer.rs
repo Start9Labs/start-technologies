@@ -90,7 +90,7 @@ impl<C: LoginContext> Middleware<C> for BearerAuth {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::BTreeSet;
     use std::sync::Arc;
 
@@ -115,12 +115,12 @@ mod tests {
     #[derive(Default, Deserialize, Serialize, HasModel)]
     #[serde(rename_all = "camelCase")]
     #[model = "Model<Self>"]
-    struct TestDb {
+    pub(crate) struct TestDb {
         sessions: Sessions,
     }
 
     #[derive(Clone)]
-    struct TestCtx(Arc<TestState>);
+    pub(crate) struct TestCtx(Arc<TestState>);
     struct TestState {
         db: TypedPatchDb<TestDb>,
         nonces: SyncMutex<NonceCache>,
@@ -193,7 +193,7 @@ mod tests {
         signer: Option<InternedString>,
     }
 
-    async fn context() -> TestCtx {
+    pub(crate) async fn context() -> TestCtx {
         TestCtx(Arc::new(TestState {
             db: TypedPatchDb::load_or_init(patch_db::PatchDb::in_memory(), || async {
                 Ok(TestDb::default())

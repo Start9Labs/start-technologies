@@ -33,6 +33,7 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 - `src/service/` — Service lifecycle management with actor pattern (`service_actor.rs`)
 - `src/db/model/` — Patch-DB models (`public.rs` synced to frontend, `private.rs` backend-only)
 - `src/net/` — Networking (DNS, ACME, WiFi, Tor, WireGuard, gateway/NAT)
+- `src/net/static_server.rs` — UI and authenticated archive/icon resources. Resource signatures reuse `SignatureAuthContext::check_pubkey` for enrollment. The registry-icon proxy signs exact content-addressed icon URLs under saved registries with the server developer key, using the shared icon path validator and canonical registry enumeration. Signed upstream GETs refuse redirects; other images and archive download hosts retain their existing transport policy. Upstream status, content type and cache policy pass through; unrelated response headers do not.
 - `src/s9pk/` — S9PK package format (merkle archive)
 - `src/lxc/` — LXC container management for packages
 - `src/install/`, `src/update/` — Package install and OS/package update flows

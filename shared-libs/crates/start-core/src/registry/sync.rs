@@ -15,7 +15,7 @@ use crate::registry::info::RegistryInfo;
 use crate::registry::os::index::{OsIndex, OsVersionInfo};
 use crate::registry::package::get::{GetPackageParams, GetPackagesResponse, select_packages};
 use crate::trusted_keys::connection::{
-    is_connected, refresh_registry, registry_url, same_registry,
+    connected_registry_urls, is_connected, refresh_registry, registry_url, same_registry,
 };
 use crate::util::future::NonDetachingJoinHandle;
 
@@ -87,10 +87,8 @@ impl Subscription {
 
 fn subscriptions(ui: &Value) -> Result<BTreeSet<Subscription>, Error> {
     let mut subscriptions = BTreeSet::new();
-    if let Some(registries) = ui.get("registries").and_then(Value::as_object) {
-        for url in registries.keys() {
-            subscriptions.insert(Subscription::Index(registry_url(url)?));
-        }
+    for url in connected_registry_urls(ui) {
+        subscriptions.insert(Subscription::Index(url?));
     }
     if let Some(url) = ui.get("startosRegistry").and_then(Value::as_str) {
         subscriptions.insert(Subscription::Os(registry_url(url)?));

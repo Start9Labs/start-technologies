@@ -37,7 +37,7 @@ pub mod signer;
 pub mod sync;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel)]
 #[serde(rename_all = "camelCase")]
@@ -138,7 +138,7 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
         .route("/rpc/{*path}", any(server.clone()))
         .route("/ws/rpc", get(server.for_websocket()))
         .route(
-            "/icons/{*path}",
+            &format!("/{}/{{*path}}", package::icon::ICON_PATH),
             get({
                 let ctx = ctx.clone();
                 move |x::Path(path): x::Path<String>, request: x::Request| async move {

@@ -33,19 +33,25 @@ use url::Url;
 use crate::context::{DiagnosticContext, InitContext, RpcContext, SetupContext};
 use crate::hostname::ServerHostname;
 use crate::middleware::auth::Auth;
-use crate::middleware::auth::signature::verify_request_signature;
+use crate::middleware::auth::signature::{
+    AUTH_SIG_HEADER, LoginMetadata, SignatureAuthContext, SignatureHeader, SigningContext,
+    verify_request_signature,
+};
 use crate::middleware::cors::Cors;
 use crate::middleware::db::{SyncDb, SyncDbHeaderCompat};
 use crate::middleware::json::RequireJson;
 use crate::net::http::request_authority;
 use crate::prelude::*;
+use crate::registry::package::icon::is_icon_url;
 use crate::rpc_continuations::{Guid, RpcContinuations};
 use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::file_contents::FileContents;
 use crate::s9pk::merkle_archive::source::FileSource;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
+use crate::sign::Signer;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
+use crate::trusted_keys::connection::connected_registry_urls;
 use crate::util::io::{maybe_open_file, open_file};
 use crate::util::serde::BASE64;
 use crate::{PackageId, main_api};
@@ -114,7 +120,13 @@ impl UiContext for RpcContext {
                 let ctx = self.clone();
                 get(|x::Path(url): x::Path<Url>, request: Request| async move {
                     if_authorized(&ctx, request, |_| async {
-                        registry_icon_response(ctx.client.get(), url).await
+                        let ui = ctx.db.peek().await.as_public().as_ui().de()?;
+                        let (client, signer) = if is_registry_icon(&ui, &url) {
+                            (ctx.client.get_without_redirects(), Some(ctx.signing_key()?))
+                        } else {
+                            (ctx.client.get(), None)
+                        };
+                        registry_icon_response(client, url, signer.as_ref()).await
                     })
                     .await
                     .unwrap_or_else(server_error)
@@ -525,8 +537,31 @@ fn installed_file_cache_control(installed: &Path, query: Option<&str>) -> &'stat
     }
 }
 
-async fn registry_icon_response(client: reqwest::Client, url: Url) -> Result<Response, Error> {
-    let upstream = client.get(url).send().await.with_kind(ErrorKind::Network)?;
+fn is_registry_icon(ui: &Value, target: &Url) -> bool {
+    connected_registry_urls(ui)
+        .filter_map(Result::ok)
+        .any(|registry| is_icon_url(&registry, target))
+}
+
+async fn registry_icon_response(
+    client: reqwest::Client,
+    url: Url,
+    signer: Option<&Signer>,
+) -> Result<Response, Error> {
+    let mut request = client.get(url.clone());
+    if let Some(signer) = signer {
+        request = request.header(
+            AUTH_SIG_HEADER,
+            SignatureHeader::sign(
+                signer,
+                b"",
+                url.host_str().or_not_found("registry hostname")?,
+            )
+            .await?
+            .to_header(),
+        );
+    }
+    let upstream = request.send().await.with_kind(ErrorKind::Network)?;
     let mut response = Response::builder().status(upstream.status());
     for name in [CONTENT_TYPE, CACHE_CONTROL] {
         if let Some(value) = upstream.headers().get(&name) {
@@ -539,35 +574,22 @@ async fn registry_icon_response(client: reqwest::Client, url: Url) -> Result<Res
 }
 
 async fn if_authorized<
+    C: SignatureAuthContext<AdditionalMetadata = LoginMetadata>,
     F: FnOnce(Request) -> Fut,
     Fut: Future<Output = Result<Response, Error>> + Send,
 >(
-    ctx: &RpcContext,
+    ctx: &C,
     mut request: Request,
     f: F,
 ) -> Result<Response, Error> {
     let path = request.uri().path().to_owned();
     match async {
         let signer = verify_request_signature(ctx, &mut request).await?;
-        let key = signer.interned_der64();
-        let enrolled = ctx
-            .ephemeral_auth_keys
-            .peek(|keys| keys.0.contains_key(&*key))
-            || ctx
-                .db
-                .peek()
-                .await
-                .as_private()
-                .as_sessions()
-                .as_pubkeys()
-                .as_idx(&key)
-                .is_some();
-        if !enrolled {
-            return Err(Error::new(
-                eyre!("{}", t!("middleware.auth.unauthorized")),
-                ErrorKind::Authorization,
-            ));
-        }
+        ctx.check_pubkey(
+            &ctx.db().peek().await,
+            Some(&signer),
+            LoginMetadata { login: false },
+        )?;
         Ok(signer)
     }
     .await
@@ -1049,6 +1071,9 @@ fn e_tag(path: &Path, modified: SystemTime, encoding: Option<&str>) -> String {
 }
 
 #[cfg(test)]
+mod icon_tests;
+
+#[cfg(test)]
 mod tests {
     use std::time::Duration;
 
@@ -1185,7 +1210,9 @@ mod tests {
                     .await
                     .unwrap();
             });
-            let response = registry_icon_response(client.clone(), url).await.unwrap();
+            let response = registry_icon_response(client.clone(), url, None)
+                .await
+                .unwrap();
             assert_eq!(response.status().as_u16().to_string(), &status[..3]);
             assert_eq!(header(&response, CONTENT_TYPE), content_type);
             assert_eq!(header(&response, CACHE_CONTROL), cache_control);

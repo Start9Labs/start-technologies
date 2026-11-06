@@ -16,6 +16,7 @@ use crate::registry::context::RegistryContext;
 use crate::registry::package::index::{PackageIndex, PackageInfo, Reader};
 use crate::util::DataUrl;
 
+pub(crate) const ICON_PATH: &str = "icons";
 const ICON_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const BLAKE3_DIR: &str = "blake3";
 const HASH_LEN: usize = 52;
@@ -49,6 +50,19 @@ fn is_blake3_file_name(name: &str) -> bool {
 fn is_stored_path(path: &str) -> bool {
     path.split_once('/')
         .is_some_and(|(scheme, name)| scheme == BLAKE3_DIR && is_blake3_file_name(name))
+}
+
+pub(crate) fn is_icon_url(registry: &url::Url, target: &url::Url) -> bool {
+    let mut prefix = registry.clone();
+    let Ok(mut path) = prefix.path_segments_mut() else {
+        return false;
+    };
+    path.pop_if_empty().push(ICON_PATH).push("");
+    drop(path);
+    target
+        .as_str()
+        .strip_prefix(prefix.as_str())
+        .is_some_and(is_stored_path)
 }
 
 fn icon_mime(path: &str) -> String {

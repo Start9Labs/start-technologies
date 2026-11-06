@@ -52,10 +52,19 @@ pub(crate) fn same_registry(first: &str, second: &str) -> bool {
     }
 }
 
-pub(crate) fn is_connected(ui: &Value, url: &str) -> bool {
+pub(crate) fn connected_registry_urls(ui: &Value) -> impl Iterator<Item = Result<Url, Error>> + '_ {
     ui.get("registries")
         .and_then(Value::as_object)
-        .is_some_and(|registries| registries.keys().any(|saved| same_registry(saved, url)))
+        .into_iter()
+        .flat_map(|registries| registries.keys())
+        .map(|url| registry_url(url))
+}
+
+pub(crate) fn is_connected(ui: &Value, url: &str) -> bool {
+    let Ok(url) = registry_url(url) else {
+        return false;
+    };
+    connected_registry_urls(ui).any(|saved| saved.is_ok_and(|saved| saved == url))
 }
 
 fn offered_keys(public: &Public, url: &str) -> BTreeSet<AnyVerifyingKey> {
