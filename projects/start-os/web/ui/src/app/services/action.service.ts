@@ -63,7 +63,7 @@ export class ActionService {
         eventId,
       })) as ActionRes
 
-      if (!res) return true
+      if (!res) return
 
       if (res.result || res.message) {
         this.dialog
@@ -74,12 +74,10 @@ export class ActionService {
           })
           .subscribe()
       }
-      return true
     } catch (e: any) {
       this.dialog
         .openAlert(getErrorMessage(e) as i18nKey, { label: 'Error' })
         .subscribe()
-      return false
     } finally {
       loader.unsubscribe()
     }

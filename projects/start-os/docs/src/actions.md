@@ -15,7 +15,7 @@ Actions vary by service. Common examples include:
 
 Click an action in the sidebar to run it. Some actions execute immediately and display a result. Others present a form for you to fill out before submitting.
 
-A form can ask you to select files. Uploads start after you submit, with a progress bar for each file; the action runs once every upload finishes. If an upload or the action fails, the form keeps your selections for another submission.
+A form can ask you to select files. After submission, progress bars for each upload replace the form. Once every upload finishes, the dialog closes and the action runs. If an upload fails, the form returns with your selections for another submission. If the action fails, StartOS shows an error; start the action again and re-enter your input, including selecting files.
 
 An action can also return a file to download. Click **Download** in its result. Download links are single-use and expire after 30 minutes; run the action again if you need another link.
 

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import '@angular/compiler'
 import { createEnvironmentInjector, runInInjectionContext } from '@angular/core'
+import { Observable, of } from 'rxjs'
 import { loadTypeScript } from './typescript-loader.mjs'
 
 const boundaries = new Map([
@@ -23,10 +24,13 @@ const boundaries = new Map([
     '@taiga-ui/core',
     'export class TuiButton {}; export class TuiLoader {}; export class TuiNotification {};',
   ],
-  ['@taiga-ui/kit', 'export class TuiProgress {};'],
+  [
+    '@taiga-ui/kit',
+    'export class TuiProgress {}; export class TuiNotificationMiddleService {};',
+  ],
   [
     '@taiga-ui/polymorpheus',
-    'export const injectContext = () => globalThis.actionContext;',
+    'export const injectContext = () => globalThis.actionContext; export class PolymorpheusComponent {};',
   ],
   ['patch-db-client', 'export class PatchDB {};'],
   [
@@ -41,7 +45,19 @@ const boundaries = new Map([
     'src/app/routes/portal/components/pkg-icon',
     'export class PkgIconDirective {};',
   ],
+  [
+    'src/app/routes/portal/routes/services/modals/action-confirm.component',
+    'export const ACTION_CONFIRM_MODAL = {};',
+  ],
+  [
+    'src/app/routes/portal/routes/services/modals/action-success/action-success.page',
+    'export class ActionSuccessPage {};',
+  ],
   ['src/app/services/action.service', 'export class ActionService {};'],
+  [
+    'src/app/services/form-dialog.service',
+    'export class FormDialogService {};',
+  ],
   ['src/app/services/api/embassy-api.service', 'export class ApiService {};'],
   [
     'src/app/utils/get-package-data',
@@ -57,6 +73,11 @@ const { ActionInputModal } =
   await import('../src/app/routes/portal/routes/services/modals/action-input.component.ts')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
 const { ActionService } = await import('src/app/services/action.service')
+const { ActionService: ActionRunner } =
+  await import('../src/app/services/action.service.ts')
+const { FormDialogService } =
+  await import('src/app/services/form-dialog.service')
+const { TuiNotificationMiddleService } = await import('@taiga-ui/kit')
 const { DialogService, TaskService, i18nPipe } =
   await import('@start9labs/shared')
 const { PatchDB } = await import('patch-db-client')
@@ -73,6 +94,7 @@ function deferred() {
 async function modal(options = {}) {
   const events = []
   const errors = []
+  const alerts = []
   let forms = 0
   globalThis.actionContext = {
     data: {
@@ -93,6 +115,10 @@ async function modal(options = {}) {
         rpc: {
           package: {
             action: {
+              run: async () => {
+                events.push(['run'])
+                return options.run?.()
+              },
               getInput: async () => {
                 forms++
                 events.push(['form', forms])
@@ -125,7 +151,7 @@ async function modal(options = {}) {
       useValue: {
         execute: async (...args) => {
           events.push(['execute', ...args])
-          return options.execute?.(...args) ?? options.actionResult ?? true
+          await options.execute?.(...args)
         },
       },
     },
@@ -144,12 +170,32 @@ async function modal(options = {}) {
       },
     },
     { provide: i18nPipe, useValue: { transform: key => key } },
-    { provide: DialogService, useValue: {} },
+    {
+      provide: DialogService,
+      useValue: {
+        openAlert: message => {
+          alerts.push(message)
+          events.push(['alert'])
+          return of(undefined)
+        },
+      },
+    },
+    {
+      provide: TuiNotificationMiddleService,
+      useValue: {
+        open: () =>
+          new Observable(() => {
+            events.push(['loading'])
+            return () => events.push(['loaded'])
+          }),
+      },
+    },
+    { provide: FormDialogService, useValue: {} },
     { provide: PatchDB, useValue: {} },
   ])
   const instance = runInInjectionContext(injector, () => new ActionInputModal())
   await Promise.resolve()
-  return { instance, injector, events, errors, forms: () => forms }
+  return { instance, injector, events, errors, alerts, forms: () => forms }
 }
 
 test('submitting uploads every selected file before executing with tokens', async () => {
@@ -210,7 +256,6 @@ test('upload completion closes and destroys the form before a pending action run
     execute: async () => {
       started.resolve()
       await response.promise
-      return true
     },
   }
   const { instance, injector, events, errors } = await modal(options)
@@ -275,18 +320,38 @@ test('a failed upload gets fresh capabilities while preserving selected files an
 })
 
 test('failed action execution does not reload the dismissed form', async () => {
-  const { instance, injector, events, forms } = await modal({
-    actionResult: false,
-  })
+  const failure = new Error('Action failed')
+  const options = {
+    run: async () => {
+      throw failure
+    },
+  }
+  const { instance, injector, events, errors, alerts, forms } =
+    await modal(options)
+  const runner = runInInjectionContext(injector, () => new ActionRunner())
+  options.execute = async (...args) => {
+    assert.equal(await runner.execute(...args), undefined)
+  }
   try {
     await instance.execute({
       first: new File(['certificate'], 'cert.pem'),
       second: null,
     })
     assert.equal(forms(), 1)
+    assert.deepEqual(alerts, [failure.message])
+    assert.deepEqual(errors, [])
     assert.deepEqual(
       events.map(([kind]) => kind),
-      ['form', 'upload', 'closed', 'execute'],
+      [
+        'form',
+        'upload',
+        'closed',
+        'execute',
+        'loading',
+        'run',
+        'alert',
+        'loaded',
+      ],
     )
   } finally {
     injector.destroy()
