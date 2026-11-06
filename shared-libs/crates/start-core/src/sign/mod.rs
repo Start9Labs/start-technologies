@@ -19,6 +19,7 @@ pub mod compat;
 pub mod ed25519;
 pub(crate) mod gpg;
 pub mod gpg_agent;
+pub mod noise;
 
 /// Signatures serialized in signer order.
 pub type SignatureMap = std::collections::BTreeMap<AnyVerifyingKey, AnySignature>;
