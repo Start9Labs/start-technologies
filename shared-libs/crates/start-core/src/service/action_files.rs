@@ -93,7 +93,7 @@ fn open_at(parent: &File, name: &CStr, flags: libc::c_int, mode: u32) -> std::io
             parent.as_raw_fd(),
             name.as_ptr(),
             flags | libc::O_CLOEXEC | libc::O_NOFOLLOW,
-            mode as libc::mode_t,
+            mode as libc::c_uint,
         )
     })?;
     Ok(unsafe { File::from_raw_fd(fd) })
