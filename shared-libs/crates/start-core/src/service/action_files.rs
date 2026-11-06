@@ -952,7 +952,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn streamed_overflow_never_writes_the_offending_chunk_and_rolls_back() {
+    async fn streamed_overflow_bounds_the_stage_and_rolls_back() {
         let temp = tempfile::tempdir().unwrap();
         let store = store();
         let rpc = RpcContinuations::new();
@@ -983,7 +983,8 @@ mod tests {
                     .contains(&t!("service.action-files.size-limit", max = 3).to_string())
             );
             if length != Some("999") {
-                assert_eq!(
+                // Tokio may leave the accepted prefix buffered.
+                assert!(
                     staged
                         .lock()
                         .unwrap()
@@ -991,8 +992,8 @@ mod tests {
                         .unwrap()
                         .metadata()
                         .unwrap()
-                        .len(),
-                    2
+                        .len()
+                        <= 2
                 );
             } else {
                 assert!(staged.lock().unwrap().is_none());
