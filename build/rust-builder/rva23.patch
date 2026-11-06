@@ -5,7 +5,7 @@
                      }
                  }
 +                "riscv64gc"
-+                    if env::var_os("START9_RVA23").as_deref() != Some(OsStr::new("0")) =>
++                    if env::var_os("DISABLE_RVA23").as_deref() != Some(OsStr::new("1")) =>
 +                {
 +                    "generic_rv64+rva23u64"
 +                }

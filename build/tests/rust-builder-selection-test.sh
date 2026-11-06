@@ -35,15 +35,15 @@ assert_log_contains() {
 
 entrypoint="$repo_root/build/rust-builder/entrypoint.sh"
 profile_flags=CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS
-default_flags=$(env -u START9_RVA23 -u "$profile_flags" bash "$entrypoint" printenv "$profile_flags")
+default_flags=$(env -u DISABLE_RVA23 -u "$profile_flags" bash "$entrypoint" printenv "$profile_flags")
 [[ "$default_flags" == *'target-cpu=generic-rv64'* ]]
 [[ "$default_flags" == *'+v,'* ]]
 [[ "$default_flags" == *'+supm'* ]]
-test "$(env -u "$profile_flags" START9_RVA23=1 bash "$entrypoint" printenv "$profile_flags")" = "$default_flags"
-env -u "$profile_flags" START9_RVA23=0 bash "$entrypoint" bash -c 'test ! -v "$1"' -- "$profile_flags"
-for profile in 0 1; do
+test "$(env -u "$profile_flags" DISABLE_RVA23=0 bash "$entrypoint" printenv "$profile_flags")" = "$default_flags"
+env -u "$profile_flags" DISABLE_RVA23=1 bash "$entrypoint" bash -c 'test ! -v "$1"' -- "$profile_flags"
+for disable_rva23 in 0 1; do
     for flags in '' '-C target-cpu=sifive-u74'; do
-        test "$(env START9_RVA23="$profile" "$profile_flags=$flags" bash "$entrypoint" printenv "$profile_flags")" = "$flags"
+        test "$(env DISABLE_RVA23="$disable_rva23" "$profile_flags=$flags" bash "$entrypoint" printenv "$profile_flags")" = "$flags"
     done
 done
 test "$(bash "$entrypoint" printf '%s\n' 'argument with spaces' '*')" = $'argument with spaces\n*'
