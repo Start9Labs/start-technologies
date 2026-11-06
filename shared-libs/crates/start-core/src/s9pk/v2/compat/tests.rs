@@ -162,10 +162,11 @@ async fn legacy_sideload_checks_original_signer_before_resigning() {
     let original = ed25519_dalek::SigningKey::from_bytes(&[19; 32]);
     let host = ed25519_dalek::SigningKey::from_bytes(&[23; 32]);
     assert!(
-        crate::s9pk::load_with_signers(
+        crate::s9pk::load_for_sideload(
             source.clone(),
             || panic!("untrusted legacy archive must not reach conversion"),
             None,
+            &Default::default(),
             crate::trusted_keys::signer_policy(Some(vec![AnyVerifyingKey::Ed25519(
                 host.verifying_key()
             )])),
@@ -175,10 +176,11 @@ async fn legacy_sideload_checks_original_signer_before_resigning() {
     );
     use crate::registry::signer::AcceptSigners;
     assert!(
-        crate::s9pk::load_with_signers(
+        crate::s9pk::load_for_sideload(
             source.clone(),
             || panic!("conversion key cannot satisfy request pins"),
             None,
+            &Default::default(),
             Some(AcceptSigners::All(vec![
                 AcceptSigners::Signer(AnyVerifyingKey::Ed25519(original.verifying_key())),
                 AcceptSigners::Signer(AnyVerifyingKey::Ed25519(host.verifying_key()))
@@ -187,10 +189,11 @@ async fn legacy_sideload_checks_original_signer_before_resigning() {
         .await
         .is_err()
     );
-    let converted = crate::s9pk::load_with_signers(
+    let converted = crate::s9pk::load_for_sideload(
         source,
         || Ok(host.clone()),
         None,
+        &Default::default(),
         crate::trusted_keys::signer_policy(Some(vec![AnyVerifyingKey::Ed25519(
             original.verifying_key(),
         )])),

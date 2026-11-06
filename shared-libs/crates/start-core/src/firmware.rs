@@ -12,6 +12,8 @@ use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::open_file;
 
+pub(crate) const LIBREM_MINI_V2: &str = "librem_mini_v2";
+
 /// Part of the Firmware, look there for more about
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
