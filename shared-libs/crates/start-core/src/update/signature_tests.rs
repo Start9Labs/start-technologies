@@ -1,11 +1,9 @@
-use std::collections::HashMap;
-
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
 
 use super::*;
 use crate::sign::ed25519::Ed25519ph;
-use crate::sign::{AnySignature, AnyVerifyingKey, SignatureScheme};
+use crate::sign::{AnySignature, AnyVerifyingKey, SignatureMap, SignatureScheme};
 use crate::util::serde::Base64;
 
 fn signed_asset(key: &SigningKey) -> RegistryAsset<Blake3Commitment> {
@@ -21,7 +19,7 @@ fn signed_asset(key: &SigningKey) -> RegistryAsset<Blake3Commitment> {
         urls: Vec::new(),
         torrent: None,
         commitment,
-        signatures: HashMap::from([(
+        signatures: SignatureMap::from([(
             AnyVerifyingKey::Ed25519(key.verifying_key()),
             AnySignature::Ed25519ph(signature),
         )]),

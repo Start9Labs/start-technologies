@@ -43,6 +43,7 @@ use tokio::time::{Instant, interval};
 use crate::GatewayId;
 use crate::db::model::public::{
     CapabilityVerdict, GatewayPortMapCapabilities, GatewayType, NetworkInterfaceInfo,
+    NetworkInterfaceType,
 };
 use crate::net::port_map::pcp::hostname::OPTION_HOSTNAME;
 use crate::net::port_map::pcp::portset::{OPTION_PORT_SET, PortSet};
@@ -132,6 +133,10 @@ pub fn candidate_gateways(info: &NetworkInterfaceInfo) -> Vec<(IpAddr, Option<u3
             }
             IpAddr::V6(v6) => {
                 if ipv6_is_link_local(*v6) {
+                    // A WireGuard peer owns no link-local address.
+                    if ip_info.device_type != Some(NetworkInterfaceType::Wireguard) {
+                        push(&mut out, *ip, Some(ip_info.scope_id));
+                    }
                     continue;
                 }
                 if ip_info.subnets.iter().any(|s| s.contains(ip)) {
@@ -1368,6 +1373,14 @@ mod tests {
         }
     }
 
+    fn wg_iface(subnets: &[&str], lan_ip: &[&str]) -> NetworkInterfaceInfo {
+        let mut info = iface(subnets, lan_ip, GatewayType::InboundOutbound);
+        if let Some(ip_info) = info.ip_info.as_mut() {
+            std::sync::Arc::make_mut(ip_info).device_type = Some(NetworkInterfaceType::Wireguard);
+        }
+        info
+    }
+
     // A StartTunnel gateway has no NM gateway (on-link), so we fall back to the
     // subnet's first host per family: v4 `.1` and the v6 that host maps to under
     // the delegated /prefix the client now carries.
@@ -1443,10 +1456,9 @@ mod tests {
     // the subnet-derived server v6 fills the slot (else every v6 map times out).
     #[test]
     fn tunnel_skips_link_local_nm_gateway() {
-        let gws = candidate_gateways(&iface(
+        let gws = candidate_gateways(&wg_iface(
             &["10.59.0.2/24", "2001:db8:abcd:1::f2/124"],
             &["fe80::a3b:1"],
-            GatewayType::InboundOutbound,
         ));
         assert!(!gws.iter().any(|(g, _)| match g {
             IpAddr::V6(v6) => ipv6_is_link_local(*v6),
@@ -1456,19 +1468,16 @@ mod tests {
         assert!(gws.iter().any(|(g, _)| *g == server_v6), "got {gws:?}");
     }
 
-    // A link-local v6 gateway is never a reachable PCP server, so it's skipped
-    // regardless of gateway_type — a home router still keeps its v4 gateway.
     #[test]
-    fn link_local_v6_gateway_is_always_skipped() {
+    fn router_link_local_gateway_is_kept() {
         let gws = candidate_gateways(&iface(
-            &["192.168.1.5/24"],
+            &["192.168.1.5/24", "2001:db8::5/64"],
             &["192.168.1.1", "fe80::1"],
             GatewayType::InboundOutbound,
         ));
         assert!(
-            !gws.iter()
-                .any(|(g, _)| matches!(g, IpAddr::V6(v6) if ipv6_is_link_local(*v6))),
-            "link-local v6 gateway must be skipped: {gws:?}"
+            gws.contains(&("fe80::1".parse().unwrap(), Some(42))),
+            "got {gws:?}"
         );
         assert!(gws.contains(&(Ipv4Addr::new(192, 168, 1, 1).into(), None)));
     }
@@ -1480,14 +1489,13 @@ mod tests {
     // host_v6-derived server (`.1` of the routed prefix) fills the v6 slot.
     #[test]
     fn tunnel_rejects_link_local_gateway_even_when_a_subnet_contains_it() {
-        let gws = candidate_gateways(&iface(
+        let gws = candidate_gateways(&wg_iface(
             &[
                 "10.59.0.2/24",
                 "2604:a880:4:1d0::a3b:2/64",
                 "fe80::1234:5678:9abc:def0/64",
             ],
             &["fe80::a3b:1"],
-            GatewayType::InboundOutbound,
         ));
         assert!(
             !gws.iter().any(|(g, _)| match g {

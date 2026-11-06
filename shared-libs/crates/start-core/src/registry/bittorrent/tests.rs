@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::Router;
@@ -10,6 +9,7 @@ use tokio::net::TcpListener;
 use super::*;
 use crate::progress::FullProgressTracker;
 use crate::registry::asset::RegistryAsset;
+use crate::sign::SignatureMap;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::serde::Base64;
 
@@ -219,7 +219,7 @@ impl Swarm {
                 hash: Base64(*blake3::hash(&self.content).as_bytes()),
                 size: self.content.len() as u64,
             },
-            signatures: HashMap::new(),
+            signatures: SignatureMap::new(),
         }
     }
 
@@ -818,7 +818,7 @@ async fn package_download_parses_and_verifies_the_committed_torrent_archive() ->
         urls: vec![swarm.url.join("asset")?],
         torrent: Some(swarm.url.join("metadata.torrent")?),
         commitment,
-        signatures: HashMap::new(),
+        signatures: SignatureMap::new(),
     };
     let dest = TmpDir::new().await?;
     let progress = FullProgressTracker::new().add_phase("Downloading".into(), Some(100));

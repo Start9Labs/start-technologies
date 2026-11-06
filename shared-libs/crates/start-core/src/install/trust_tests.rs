@@ -1,12 +1,10 @@
-use std::collections::HashMap;
-
 use ed25519_dalek::SigningKey;
 
 use super::*;
 use crate::registry::asset::RegistryAsset;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::sign::ed25519::Ed25519ph;
-use crate::sign::{AnySignature, AnyVerifyingKey, SignatureScheme};
+use crate::sign::{AnySignature, AnyVerifyingKey, SignatureMap, SignatureScheme};
 use crate::trusted_keys::{TrustedKey, TrustedKeys, enabled_keys};
 use crate::util::serde::Base64;
 
@@ -26,7 +24,7 @@ fn package_commitment_requires_an_enabled_marketplace_signer() {
         urls: vec![],
         torrent: None,
         commitment,
-        signatures: HashMap::from([(public.clone(), AnySignature::Ed25519ph(signature))]),
+        signatures: SignatureMap::from([(public.clone(), AnySignature::Ed25519ph(signature))]),
     };
     let id = public.interned_der64();
     let mut keys = TrustedKeys::from([(
@@ -128,12 +126,24 @@ fn cli_override_is_explicit_for_registry_and_sideload() {
 #[tokio::test]
 async fn package_request_pins_use_update_policy_and_remain_required_with_override() {
     use crate::registry::signer::AcceptSigners;
-    use crate::s9pk::load_with_signers;
+    use crate::s9pk::load_for_sideload;
 
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("testdata/s9pk-trailer/endorsed.s9pk");
     let package = crate::s9pk::S9pk::open(&path, None).await.unwrap();
     let signatures = package.signatures().await.unwrap();
+    let request = local_sideload_params(&path, false).await.unwrap();
+    let wire = serde_json::to_value(request).unwrap();
+    assert_eq!(
+        wire["signatures"],
+        serde_json::to_value(&signatures).unwrap()
+    );
+    for signature in wire["signatures"].as_object().unwrap().values() {
+        let signature = signature.as_str().unwrap();
+        assert!(!signature.contains("-----BEGIN"));
+        assert!(!signature.chars().any(char::is_whitespace));
+    }
+    let request: SideloadParams = serde_json::from_value(wire).unwrap();
     let embedded = AnyVerifyingKey::Ed25519(SigningKey::from_bytes(&[7; 32]).verifying_key());
     let endorsement = AnyVerifyingKey::Ed25519(SigningKey::from_bytes(&[8; 32]).verifying_key());
     let unrelated = AnyVerifyingKey::Ed25519(SigningKey::from_bytes(&[1; 32]).verifying_key());
@@ -175,9 +185,15 @@ async fn package_request_pins_use_update_policy_and_remain_required_with_overrid
             (server, client) => server.or(client),
         };
         assert_eq!(
-            load_with_signers(source.clone(), || panic!("v2"), None, policy)
-                .await
-                .is_ok(),
+            load_for_sideload(
+                source.clone(),
+                || panic!("v2"),
+                None,
+                &request.signatures,
+                policy
+            )
+            .await
+            .is_ok(),
             expected
         );
     }
@@ -187,6 +203,7 @@ async fn package_request_pins_use_update_policy_and_remain_required_with_overrid
     ] {
         let params: SideloadParams = serde_json::from_value(value).unwrap();
         assert!(params.accept_signers.is_none());
+        assert!(params.signatures.is_empty());
         assert!(!params.trust);
     }
     let wire = serde_json::json!({"trust":true,"acceptSigners":{"any":[{"signer":endorsement}]}});
@@ -196,8 +213,11 @@ async fn package_request_pins_use_update_policy_and_remain_required_with_overrid
         serde_json::to_value(params.accept_signers).unwrap(),
         wire["acceptSigners"]
     );
-    let pins = local_sideload_policy(&path).await.unwrap().unwrap();
-    asset.validate(SIG_CONTEXT, pins).unwrap();
+    assert!(!request.trust);
+    asset
+        .validate(SIG_CONTEXT, request.accept_signers.unwrap())
+        .unwrap();
+    assert!(local_sideload_params(&path, true).await.unwrap().trust);
     let mut install = wire;
     install["registry"] = serde_json::json!("https://example.com");
     install["id"] = serde_json::json!("trust-fixture");

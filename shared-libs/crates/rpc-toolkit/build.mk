@@ -13,6 +13,7 @@ rpc-toolkit-test: node_modules/.package-lock.json
 	$(VISIT_RS_TEST_COMMANDS)
 	cargo test -p rpc-toolkit --locked
 	cargo test -p rpc-toolkit --no-default-features --locked
+	cargo test -p rpc-toolkit --no-default-features --features websocket --locked
 	cargo test -p rpc-toolkit --features ts --locked
 	cargo test -p rpc-toolkit --no-default-features --features ts --locked
 	cargo test -p rpc-toolkit --no-default-features --features mcp --locked

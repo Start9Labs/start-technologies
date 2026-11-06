@@ -3,6 +3,7 @@ import {
   ed25519PublicKeyDer64,
   parseEd25519PublicKey,
 } from '../auth/signature'
+import { SideloadParams } from '../osBindings'
 import { MerkleArchive } from './merkleArchive'
 import { s9pkHeaderSize } from '.'
 
@@ -17,15 +18,22 @@ export async function readTrailer(
   archive: MerkleArchive,
 ): Promise<{
   signers: readonly string[]
+  signatures: Readonly<SideloadParams['signatures']>
   diagnostics: readonly S9pkDiagnostic[]
 }> {
-  const signers = new Set([ed25519PublicKeyDer64(archive.signer.pubkey)])
+  const signatures: SideloadParams['signatures'] = {}
   const diagnostics: S9pkDiagnostic[] = []
   const diagnose = (kind: string, message: string, offset: number) => {
     diagnostics.push(Object.freeze({ kind, message, offset }))
   }
   const result = () => ({
-    signers: Object.freeze([...signers]),
+    signers: Object.freeze([
+      ...new Set([
+        ed25519PublicKeyDer64(archive.signer.pubkey),
+        ...Object.keys(signatures),
+      ]),
+    ]),
+    signatures: Object.freeze(signatures),
     diagnostics: Object.freeze(diagnostics),
   })
   const read = async (
@@ -111,7 +119,7 @@ export async function readTrailer(
       const keyEnd = value + 8 + Number(keyLength)
       const signer = bytesToBase64(raw.subarray(value + 8, keyEnd))
       parseEd25519PublicKey(signer)
-      signers.add(signer)
+      signatures[signer] = bytesToBase64(raw.subarray(keyEnd, record.end))
     } catch {
       diagnose(
         'invalid-record',

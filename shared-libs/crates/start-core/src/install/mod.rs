@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::ws;
@@ -27,6 +28,7 @@ use crate::registry::package::get::GetPackageResponse;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::s9pk::manifest::PackageId;
 use crate::s9pk::v2::SIG_CONTEXT;
+use crate::sign::SignatureMap;
 use crate::trusted_keys::{self, TrustContext};
 use crate::upload::upload;
 use crate::util::io::open_file;
@@ -204,6 +206,9 @@ pub async fn install(
 #[serde(rename_all = "camelCase")]
 pub struct SideloadParams {
     pub accept_signers: Option<crate::registry::signer::AcceptSigners>,
+    /// DER64 supplemental signatures for the uploaded archive.
+    #[serde(default)]
+    pub signatures: SignatureMap,
     /// Accepts an untrusted signer without skipping signature or integrity verification.
     #[serde(default)]
     trust: bool,
@@ -232,10 +237,11 @@ pub async fn sideload(
         signer,
         trust,
         accept_signers,
+        signatures,
     }: SideloadParams,
 ) -> Result<SideloadResponse, Error> {
     let (err_send, err_recv) = oneshot::channel::<Error>();
-    // fused: the select! loop below re-polls this, which panics on a bare oneshot once resolved
+    // The progress loop can poll a resolved receiver again.
     let mut err_recv = err_recv.fuse();
     let progress = Guid::new();
     let progress_tracker = FullProgressTracker::new();
@@ -282,7 +288,7 @@ pub async fn sideload(
                                         ws.close_result(Err::<&str, _>(e.clone_output())).await?;
                                         return Err(e)
                                     }
-                                    // Err = sender dropped, install succeeded; keep streaming
+                                    // A dropped sender means installation succeeded.
                                 }
                             }
                         }
@@ -316,10 +322,11 @@ pub async fn sideload(
                 .install(
                     ctx.clone(),
                     || {
-                        crate::s9pk::load_with_signers(
+                        crate::s9pk::load_for_sideload(
                             file.clone(),
                             || Ok(key.de()?.0),
                             Some(&progress_tracker),
+                            &signatures,
                             accepted,
                         )
                     },
@@ -488,7 +495,7 @@ pub async fn cli_install(
     let method = parent_method.into_iter().chain(method).collect_vec();
     match params {
         CliInstallParams::Sideload { path, trust } => {
-            let accept_signers = local_sideload_policy(&path).await?;
+            let params = local_sideload_params(&path, trust).await?;
             let file = open_file(path).await?;
 
             let SideloadResponse { upload, progress } = from_value::<SideloadResponse>(
@@ -497,7 +504,7 @@ pub async fn cli_install(
                         .into_iter()
                         .chain(std::iter::once(&"sideload"))
                         .join("."),
-                    imbl_value::json!({ "trust": trust, "acceptSigners": accept_signers }),
+                    to_value(&params)?,
                 )
                 .await?,
             )?;
@@ -631,26 +638,31 @@ pub async fn cli_install(
     Ok(())
 }
 
-async fn local_sideload_policy(
-    path: &PathBuf,
-) -> Result<Option<crate::registry::signer::AcceptSigners>, Error> {
-    use tokio::io::AsyncReadExt;
-
+async fn local_sideload_params(path: &PathBuf, trust: bool) -> Result<SideloadParams, Error> {
     use crate::registry::signer::AcceptSigners;
-    let mut magic = [0; 3];
-    open_file(path).await?.read_exact(&mut magic).await?;
-    if magic == crate::s9pk::v2::compat::MAGIC_AND_VERSION {
-        return Ok(None);
+    use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
+
+    let mut params = SideloadParams {
+        accept_signers: None,
+        signatures: SignatureMap::new(),
+        trust,
+        signer: None,
+    };
+    let source = Arc::new(MultiCursorFile::from(open_file(path).await?));
+    if crate::s9pk::is_v1(&source).await? {
+        return Ok(params);
     }
-    let package = crate::s9pk::S9pk::open(path, None).await?;
-    Ok(Some(AcceptSigners::Any(
-        package
-            .signatures()
-            .await?
-            .into_keys()
+    let package = crate::s9pk::S9pk::deserialize_local(&source, None).await?;
+    let signatures = package.signatures().await?;
+    params.accept_signers = Some(AcceptSigners::Any(
+        signatures
+            .keys()
+            .cloned()
             .map(AcceptSigners::Signer)
             .collect(),
-    )))
+    ));
+    params.signatures = signatures;
+    Ok(params)
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
