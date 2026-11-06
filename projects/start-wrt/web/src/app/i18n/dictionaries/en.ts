@@ -572,6 +572,8 @@ export const ENGLISH: Record<string, number> = {
   'Devices on {port} will move to the {profile} profile. Most reconnect within a few seconds. If a device then has no Internet access or cannot reach other devices, which is common behind a switch, unplug and replug its cable, or restart the device or the switch. Otherwise it reconnects on its own within 12 hours.': 599,
   'Change Security Profile?': 600,
   'Change Profile': 601,
-  'Changing this password may briefly disconnect all Wi-Fi devices. Devices using the old password must reconnect with the new one.': 602,
-  'This Wi-Fi password was changed or deleted. Your changes were not saved.': 603,
+  'Enter your admin password to encrypt this backup.': 602,
+  'All current settings will be overwritten and the device will reboot. Enter the admin password in effect when this backup was created.': 603,
+  'Changing this password may briefly disconnect all Wi-Fi devices. Devices using the old password must reconnect with the new one.': 604,
+  'This Wi-Fi password was changed or deleted. Your changes were not saved.': 605,
 }

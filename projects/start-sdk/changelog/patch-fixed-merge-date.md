@@ -1,5 +1,0 @@
----
-release-notes: false
----
-
-- Fixed `merge()` keeping a file model's stored date when given a new `Date`. Rebuild packages with this SDK version to receive the fix.
