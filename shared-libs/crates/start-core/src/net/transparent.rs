@@ -5,9 +5,7 @@
 
 use std::net::SocketAddr;
 
-#[cfg(target_os = "linux")]
-use tokio::net::TcpSocket;
-use tokio::net::TcpStream;
+use tokio::net::{TcpSocket, TcpStream};
 use tokio::process::Command;
 
 #[cfg(target_os = "linux")]
@@ -86,17 +84,13 @@ fn divert_mark_rule_family(family: &str) -> String {
     )
 }
 
-/// Opens an upstream connection bound to the client source address.
+/// Opens an unbound socket configured for source-preserving egress.
 /// Both addresses must use the same IP family.
 #[cfg(target_os = "linux")]
-pub async fn transparent_connect(
-    client: SocketAddr,
-    target: SocketAddr,
-) -> std::io::Result<TcpStream> {
+pub fn transparent_socket(client: SocketAddr, target: SocketAddr) -> std::io::Result<TcpSocket> {
     let sock = match (client, target) {
         (SocketAddr::V4(_), SocketAddr::V4(_)) => {
             let sock = TcpSocket::new_v4()?;
-            // IP_TRANSPARENT must precede bind.
             socket2::SockRef::from(&sock).set_ip_transparent_v4(true)?;
             sock
         }
@@ -119,20 +113,26 @@ pub async fn transparent_connect(
             tracing::debug!("transparent egress keepalive: {e}");
         }
     }
-    sock.bind(client)?;
-    sock.connect(target).await
+    Ok(sock)
 }
 
-/// Unsupported non-Linux implementation for cross-platform builds.
 #[cfg(not(target_os = "linux"))]
-pub async fn transparent_connect(
-    _client: SocketAddr,
-    _target: SocketAddr,
-) -> std::io::Result<TcpStream> {
+pub fn transparent_socket(_client: SocketAddr, _target: SocketAddr) -> std::io::Result<TcpSocket> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "IP_TRANSPARENT transparent egress is Linux-only",
     ))
+}
+
+/// Opens an upstream connection bound to the client source address.
+/// Both addresses must use the same IP family.
+pub async fn transparent_connect(
+    client: SocketAddr,
+    target: SocketAddr,
+) -> std::io::Result<TcpStream> {
+    let sock = transparent_socket(client, target)?;
+    sock.bind(client)?;
+    sock.connect(target).await
 }
 
 /// Whether installed diversion covers IPv6. `None` until installed.

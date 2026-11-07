@@ -1,10 +1,10 @@
 import { Component, inject, Input } from '@angular/core'
 import { ReactiveFormsModule } from '@angular/forms'
-import { DialogService, i18nPipe } from '@start9labs/shared'
+import { convertBytes, DialogService, i18nPipe } from '@start9labs/shared'
 import { IST } from '@start9labs/start-core'
 import { tuiAsControl, TuiControl } from '@taiga-ui/cdk'
 import { TUI_VALIDATION_ERRORS, TuiError } from '@taiga-ui/core'
-import { TUI_FORMAT_ERROR } from '@taiga-ui/kit'
+import { TUI_FORMAT_ERROR, TUI_SIZE_ERROR } from '@taiga-ui/kit'
 import { PolymorpheusOutlet } from '@taiga-ui/polymorpheus'
 
 import { ControlSpec } from '../controls/control'
@@ -13,6 +13,8 @@ import { FootnotePipe } from '../pipes/footnote.pipe'
 import { ControlDirective } from './control.directive'
 
 export const ERRORS = [
+  TUI_FORMAT_ERROR,
+  TUI_SIZE_ERROR,
   'required',
   'pattern',
   'notNumber',
@@ -37,13 +39,18 @@ export const ERRORS = [
     {
       provide: TUI_VALIDATION_ERRORS,
       deps: [FormControlComponent],
-      useFactory: (control: FormControlComponent<ControlSpec, string>) => ({
-        [TUI_FORMAT_ERROR]: 'Invalid file format',
-        required: 'Required',
-        pattern: (context: any) =>
-          'patterns' in control.spec &&
-          getText(control.spec, String(context.requiredPattern)),
-      }),
+      useFactory: (control: FormControlComponent<ControlSpec, string>) => {
+        const i18n = inject(i18nPipe)
+        return {
+          [TUI_FORMAT_ERROR]: i18n.transform('Invalid file format'),
+          [TUI_SIZE_ERROR]: ({ size }: { size: number }) =>
+            `${i18n.transform('Maximum file size')}: ${convertBytes(size)}`,
+          required: i18n.transform('Required'),
+          pattern: (context: any) =>
+            'patterns' in control.spec &&
+            getText(control.spec, String(context.requiredPattern)),
+        }
+      },
     },
   ],
   hostDirectives: [ControlDirective],

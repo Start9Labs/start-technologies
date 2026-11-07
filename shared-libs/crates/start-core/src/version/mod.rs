@@ -1005,8 +1005,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn maintenance_revisions_migrate_and_roll_back_without_changing_service_data() {
-        for (from, to, revision) in [("0.4.0.3", "0.4.0.4", 0), ("0.4.0.4", "0.4.0.5", 3)] {
+    async fn releases_migrate_and_roll_back_without_changing_service_data() {
+        for (from, to, revision) in [
+            ("0.4.0.3", "0.4.0.4", 0),
+            ("0.4.0.4", "0.4.0.5", 3),
+            ("0.4.1.2", "0.4.1.3", 0),
+            ("0.4.1.3", "0.4.2", 0),
+        ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
                 .as_version_t()
