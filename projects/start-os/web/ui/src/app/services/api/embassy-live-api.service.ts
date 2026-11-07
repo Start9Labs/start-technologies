@@ -9,10 +9,11 @@ import {
   RpcError,
   RPCOptions,
   rpcRequestBody,
+  waitForPatchSequence,
 } from '@start9labs/shared'
 import { createRpcClient } from '@start9labs/start-core'
 import { Dump } from 'patch-db-client'
-import { filter, firstValueFrom, Observable } from 'rxjs'
+import type { Observable } from 'rxjs'
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { AuthService } from '../auth.service'
@@ -146,11 +147,7 @@ export class LiveApiService extends ApiService {
       throw new RpcError(body.error)
     }
 
-    const patchSequence = body.meta?.patchSequence
-    if (patchSequence != null)
-      await firstValueFrom(
-        this.cache$.pipe(filter(({ id }) => id >= patchSequence)),
-      )
+    if (!urlOverride) await waitForPatchSequence(this.cache$, body.meta)
 
     return body.result
   }

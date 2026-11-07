@@ -9,10 +9,8 @@ import { DOCUMENT, inject, Service } from '@angular/core'
 import {
   filter,
   firstValueFrom,
-  from,
   fromEvent,
   interval,
-  lastValueFrom,
   map,
   Observable,
   race,
@@ -132,9 +130,13 @@ function hasParams(
   return !!params
 }
 
-function withTimeout<U>(req: Observable<U>, timeout: number): Observable<U> {
+/** Unsubscribes the source when the response deadline wins. */
+export function withTimeout<U>(
+  req: Observable<U>,
+  timeout: number,
+): Observable<U> {
   return race(
-    from(lastValueFrom(req)),
+    req,
     interval(timeout).pipe(
       take(1),
       map(() => {

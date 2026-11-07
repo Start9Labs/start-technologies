@@ -24,10 +24,11 @@ Apps import the libs via the root `tsconfig.json` path aliases `@start9labs/shar
 
 ## API Layer (JSON-RPC)
 
-All backend communication uses JSON-RPC, not REST.
+Backend commands use JSON-RPC; prepared transfers and static resources retain HTTP.
 
 - **`HttpService`** (`shared/src/services/http.service.ts`) — HTTP transport. `rpcRequest()` prepares an unsigned request; `rpcMessage()` sends an already serialized message unchanged. Both use the shared JSON headers and response-compatibility adapter.
-- **`AuthKeyService`** (`shared/src/services/auth-key.service.ts`) — Owns the browser's enrolled device key. `signRpcBody()` captures the shared request serialization before asynchronous key lookup/signing and adds the JSON proof without reparsing numeric tokens. StartOS and Tunnel pass that body to `rpcMessage()`; StartWRT retains its separate aborting HTTP transport. Resource requests keep legacy header signing.
+- **`AuthKeyService`** (`shared/src/services/auth-key.service.ts`) — Owns the browser's enrolled, nonextractable device key and its cancellation lifetime. Replacement, rollback and logout invalidate active leases. StartOS still uses `signRpcBody()` for HTTP RPC; StartWRT retains its separate aborting HTTP transport. Resource requests keep header signing.
+- **`RpcSocketService`** (`shared/src/services/rpc-socket.service.ts`) — Tunnel's authenticated RPC and PatchDB continuation transport. Active RPC calls share an RxJS WebSocket subject; its last unsubscribe closes the socket. A completed Noise exchange precedes application traffic, without per-message proofs or plaintext fallback. Public bootstrap without a device key retains explicit HTTP transport. Request serialization precedes asynchronous identity lookup; JSON response metadata remains authoritative. Maintained `@libp2p/noise` lives only in Angular infrastructure, not the SDK. The binding generator emits its shared wire profile from Rust owners.
 - **`ApiService`** (`ui/src/app/services/api/embassy-api.service.ts`) — Abstract contract over the generated typed RPC client and product-specific operations. Two implementations:
   - `LiveApiService` — Production, calls the real backend
   - `MockApiService` — Development with mocks
@@ -39,7 +40,7 @@ All backend communication uses JSON-RPC, not REST.
 private readonly api = inject(ApiService)
 
 async doSomething() {
-  await this.api.someMethod({ param: value })
+  await this.api.rpc.echo({ message: 'ping' })
 }
 ```
 

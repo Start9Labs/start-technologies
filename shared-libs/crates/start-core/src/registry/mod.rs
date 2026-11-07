@@ -170,7 +170,7 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
     Router::new()
         .route("/", get(marketplace_redirect))
         .route("/rpc/{*path}", any(server.clone()).layer(cors::layer()))
-        .route("/ws/rpc", get(server.for_websocket().with_upgrader(RpcSessionUpgrader)).layer(cors::layer()))
+        .route(RpcSessionUpgrader::PATH, RpcSessionUpgrader::route(server))
         .route(
             &format!("/{}/{{*path}}", package::icon::ICON_PATH),
             get({
@@ -181,7 +181,7 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
             }),
         )
         .route(
-            "/ws/rpc/{*path}",
+            &format!("{}/{{*path}}", RpcSessionUpgrader::PATH),
             get({
                 let ctx = ctx.clone();
                 move |x::Path(path): x::Path<String>,

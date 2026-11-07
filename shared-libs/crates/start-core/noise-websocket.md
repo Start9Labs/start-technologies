@@ -42,7 +42,7 @@ running live `check_pubkey`, `post_auth_hook` and password-enrollment rate limit
 Request-supplied proofs cannot switch the identity of an encrypted connection.
 Local/bearer authentication retains its separate precedence and policy.
 
-Registry registers the upgrader on `/ws/rpc`. The native registry client uses
+Registry and Tunnel register the shared upgrader route on `/ws/rpc`. The native registry client uses
 `session_url` to serialize the shared negotiation type and version, then binds
 the same selected hostname through `prologue`. Configured registry hostnames must
 cover that name. Other product routes opt into the upgrader explicitly.
@@ -53,6 +53,39 @@ the existing SOCKS routing, remote DNS, heartbeat, retry and cancellation owner.
 Identity preparation precedes the 30-second connection/exchange deadline. No RPC
 initiation is sent before admission completes; failed negotiation does not retry
 as plaintext. Package signatures remain the StartOS trust anchor.
+
+## Browser transport
+
+The binding generator emits `noise-profile.ts` from the native identity, session
+and framing owners. It carries the negotiation template, prologue prefix, endpoint,
+kind values, framing limits and allowed close-code ranges. Angular infrastructure
+imports this data and maintained `@libp2p/noise` 17.0.7; the SDK has no Noise
+dependency. The library owns DH, transcript, nonces, certificates and AEAD. An
+opaque WebCrypto signer supplies a prepared standard identity signature without
+exporting its Ed25519 private key. Preparation precedes connection/exchange and
+RPC-response deadlines. Prepared DH identities live with the active device-key
+lease, independently of persistent enrollment and per-exchange ephemeral keys.
+
+`RpcSocketService` multiplexes active calls through the existing RxJS WebSocket
+subject and redeems encrypted continuations through fresh exchanges. The last
+unsubscribe closes the subject's socket; no separate heartbeat or reconnect
+manager is added. Device-key replacement, rollback and logout cancel active
+channels. Captured request bytes are not reparsed to add correlation IDs. Tunnel
+uses this transport when a device key exists; missing keys retain public HTTP
+bootstrap, never negotiation-failure fallback. Its PatchDB source subscribes only
+after authentication. StartOS's mixed initialization/diagnostic boundary,
+StartWRT, CLI migration and browser/administrator TOFU warnings remain unfinished.
+
+The browser adapter composes libp2p's message stream and length-prefixed stream
+with a WebSocket-compatible facade. Its logical receive and queued-write payload
+allowances are 64 MiB, with 15-second writes. Bounded raw chunks also avoid the
+maintained Noise decoder's fixed 16 MiB ciphertext-buffer limit. DOM WebSockets
+provide neither read pausing nor a drain event; a libp2p repeating task observes
+`bufferedAmount` only while backpressured and stops on close. The maintained
+WebSocket transport does not export its URL-level stream adapter; constructing
+its multiaddr transport would introduce unrelated dialing/upgrading ownership.
+Application close status/reasons remain encrypted, and physical close events
+cannot fabricate authenticated success.
 
 ## Admission
 
@@ -70,8 +103,8 @@ application responsibilities, using the admitted connection context.
 
 ## Wire framing
 
-All lengths are big-endian. `tokio_util::codec::LengthDelimitedCodec` owns both
-framing layers.
+All lengths are big-endian. `tokio_util::codec::LengthDelimitedCodec` owns native
+framing; the browser uses libp2p's length-prefixed stream with generated widths.
 
 | Layer                                   | Length field | Content                                                         |
 | --------------------------------------- | ------------ | --------------------------------------------------------------- |

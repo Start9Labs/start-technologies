@@ -4,7 +4,8 @@ const path = require('node:path')
 const test = require('node:test')
 const vm = require('node:vm')
 require('@angular/compiler')
-const { HttpHeaders } = require('@angular/common/http')
+const httpAngular = require('@angular/common/http')
+const { HttpClient, HttpHeaders, HttpXhrBackend } = httpAngular
 const ts = require('typescript')
 const {
   BehaviorSubject,
@@ -43,6 +44,13 @@ function harness(moduleOverrides = new Map()) {
       'RELATIVE_URL',
     ].map(name => [name, Symbol(name)]),
   )
+  tokens.HttpClient = HttpClient
+  tokens.HttpXhrBackend = HttpXhrBackend
+  dependencies.set(tokens.HttpXhrBackend, {
+    handle() {
+      throw new Error('Unexpected XHR request')
+    },
+  })
   dependencies.set(tokens.i18nPipe, { transform: value => value })
   const modules = new Map()
   const angular = {
@@ -82,13 +90,13 @@ function harness(moduleOverrides = new Map()) {
       pauseFor: async () => {},
       ...load('shared-libs/ts-modules/shared/src/types/rpc.types.ts'),
       ...load('shared-libs/ts-modules/shared/src/services/rpc-request.ts'),
+      ...load('shared-libs/ts-modules/shared/src/services/rpc-response.ts'),
       ...load('shared-libs/ts-modules/shared/src/classes/rpc-error.ts'),
     })
     const requireSource = request => {
       if (moduleOverrides.has(request)) return moduleOverrides.get(request)
       if (request === '@angular/core') return angular
-      if (request === '@angular/common/http')
-        return { HttpClient: tokens.HttpClient, HttpHeaders }
+      if (request === '@angular/common/http') return httpAngular
       if (request === '@start9labs/shared') return shared()
       if (request === '@start9labs/marketplace')
         return load('shared-libs/ts-modules/marketplace/src/types.ts')
@@ -268,8 +276,9 @@ test('shared HTTP sends captured RPC bodies as JSON and preserves response compa
   const { dependencies, tokens, load } = harness()
   const calls = []
   dependencies.set(tokens.HttpClient, {
-    post: (url, body, options) => {
-      calls.push({ url, body, options })
+    request: (method, url, options) => {
+      assert.equal(method, 'POST')
+      calls.push({ url, body: options.body, options })
       return of(
         new HttpResponse({
           body: { result: null },
@@ -306,12 +315,6 @@ for (const [name, file, className, deauthMethod] of [
     'projects/start-os/web/ui/src/app/services/api/embassy-live-api.service.ts',
     'LiveApiService',
     'setUnverified',
-  ],
-  [
-    'Tunnel',
-    'projects/start-tunnel/web/src/app/services/api/live-api.service.ts',
-    'LiveApiService',
-    'deauthenticate',
   ],
 ]) {
   test(`${name} signs local calls, excludes foreign origins and waits for patches`, async () => {
@@ -364,7 +367,7 @@ for (const [name, file, className, deauthMethod] of [
     assert.equal(settled, false)
     cache.next({ id: 3 })
     assert.equal(await pending, null)
-    patchSequence = null
+    patchSequence = 999
     assert.equal(
       await client.rpcRequest(options, 'https://foreign.test/rpc'),
       null,

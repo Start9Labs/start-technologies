@@ -1,0 +1,138 @@
+import { DOCUMENT, inject, Service } from '@angular/core'
+import { NOISE_PROFILE } from '@start9labs/start-core/osBindings/noise-profile'
+import { catchError, filter, firstValueFrom, throwError } from 'rxjs'
+import { webSocket } from 'rxjs/webSocket'
+import type { WebSocketSubject, WebSocketSubjectConfig } from 'rxjs/webSocket'
+
+import { RELATIVE_URL } from '../tokens/relative-url'
+import type { RPCOptions, RPCResponse } from '../types/rpc.types'
+import { AUTH_SIGNING_HOST, AuthKeyService } from './auth-key.service'
+import type { AuthKeyLease } from './auth-key.service'
+import { withTimeout } from './http.service'
+import { prepareNoiseIdentity } from './noise-identity'
+import type { PreparedNoiseIdentity } from './noise-identity'
+import { noiseWebSocketConstructor } from './noise-websocket'
+
+@Service()
+export class RpcSocketService {
+  private readonly document = inject(DOCUMENT)
+  private readonly relativeUrl = inject(RELATIVE_URL)
+  private readonly context = inject(AUTH_SIGNING_HOST)
+  private readonly authKeys = inject(AuthKeyService)
+  private readonly identities = new WeakMap<
+    AbortSignal,
+    Promise<PreparedNoiseIdentity>
+  >()
+  private session?: {
+    signal: AbortSignal
+    socket: WebSocketSubject<unknown>
+  }
+
+  /** Adds a correlation ID without reparsing the serialized RPC request. */
+  async message<T>(
+    body: string,
+    options: Pick<RPCOptions, 'timeout'>,
+    lease: AuthKeyLease,
+  ): Promise<RPCResponse<T>> {
+    const prepared = await this.prepare(lease)
+    lease.signal.throwIfAborted()
+    if (this.session?.signal !== lease.signal) {
+      const socket = webSocket<unknown>({
+        url: this.url(),
+        WebSocketCtor: noiseWebSocketConstructor(
+          async () => prepared,
+          this.context,
+        ),
+        serializer: value =>
+          typeof value === 'string' ? value : JSON.stringify(value),
+      })
+      this.session = { signal: lease.signal, socket }
+      lease.signal.addEventListener(
+        'abort',
+        () => {
+          if (this.session?.signal === lease.signal) this.session = undefined
+        },
+        { once: true },
+      )
+    }
+    const id = this.document.defaultView!.crypto.randomUUID()
+    const request = `{"jsonrpc":"2.0","id":${JSON.stringify(id)},${body.slice(1)}`
+    let response = this.session.socket
+      .multiplex(
+        () => request,
+        () => ({ rpcstream: '1.0', close: id }),
+        value =>
+          value !== null &&
+          typeof value === 'object' &&
+          'id' in value &&
+          value.id === id,
+      )
+      .pipe(
+        filter(
+          (value): value is RPCResponse<T> =>
+            value !== null &&
+            typeof value === 'object' &&
+            ('result' in value || 'error' in value),
+        ),
+        catchError(cause =>
+          throwError(() =>
+            Object.assign(
+              new Error('Encrypted RPC transport failed', { cause }),
+              { code: 0 },
+            ),
+          ),
+        ),
+      )
+    if (options.timeout) response = withTimeout(response, options.timeout)
+    return firstValueFrom(response)
+  }
+
+  /** Redeems a continuation through encrypted admission. */
+  open<T>(
+    guid: string,
+    config: Omit<WebSocketSubjectConfig<T>, 'url' | 'WebSocketCtor'> = {},
+  ): WebSocketSubject<T> {
+    return webSocket<T>({
+      ...config,
+      url: this.url(guid),
+      WebSocketCtor: this.constructorFor(() => this.authKeys.lease()),
+    })
+  }
+
+  private url(guid?: string): string {
+    const url = new URL(this.relativeUrl, this.document.location.origin)
+    url.protocol = url.protocol === 'http:' ? 'ws:' : 'wss:'
+    url.pathname =
+      NOISE_PROFILE.rpcPath +
+      (guid === undefined ? '' : `/${encodeURIComponent(guid)}`)
+    return url.href
+  }
+
+  private constructorFor(lease: () => Promise<AuthKeyLease | null>) {
+    return noiseWebSocketConstructor(async () => {
+      const current = await lease()
+      if (!current) throw new Error('No active device identity')
+      return this.prepare(current)
+    }, this.context)
+  }
+
+  private async prepare(current: AuthKeyLease) {
+    current.signal.throwIfAborted()
+    let identity = this.identities.get(current.signal)
+    if (!identity) {
+      identity = prepareNoiseIdentity(current.key).catch(error => {
+        this.identities.delete(current.signal)
+        throw error
+      })
+      this.identities.set(current.signal, identity)
+      current.signal.addEventListener(
+        'abort',
+        () => this.identities.delete(current.signal),
+        { once: true },
+      )
+    }
+    const prepared = await identity
+    current.signal.throwIfAborted()
+    return { identity: prepared, signal: current.signal }
+  }
+}

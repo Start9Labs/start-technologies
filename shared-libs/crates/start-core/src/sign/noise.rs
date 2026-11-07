@@ -26,6 +26,13 @@ struct Certificate {
     signature: Vec<u8>,
 }
 
+pub(crate) fn wire_profile() -> serde_json::Value {
+    serde_json::json!({
+        "protocol": PROTOCOL,
+        "signaturePrefix": STATIC_KEY_SIGNATURE_PREFIX,
+    })
+}
+
 fn protocol() -> NoiseParams {
     PROTOCOL
         .parse()

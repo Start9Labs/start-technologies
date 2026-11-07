@@ -936,7 +936,11 @@ impl UiContext for TunnelContext {
             .middleware(SyncDb::new())
     }
     fn rpc_server_routes(self, server: rpc_toolkit::HttpServer<Self>) -> axum::Router {
+        use crate::middleware::auth::session::RpcSessionUpgrader;
+
+        let websocket = RpcSessionUpgrader::route(server.clone());
         crate::net::static_server::rpc_router(self, axum::routing::any(server).layer(cors::layer()))
+            .route(RpcSessionUpgrader::PATH, websocket)
     }
 }
 

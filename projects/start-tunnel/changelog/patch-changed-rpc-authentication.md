@@ -2,6 +2,6 @@
 release-notes: false
 ---
 
-- Bind browser RPC credentials to each serialized JSON message while preserving resource-header and legacy-client authentication.
+- Encrypt browser RPC and PatchDB WebSocket traffic after signature-authenticated Noise admission, preserving public HTTP bootstrap, resource headers and legacy clients.
 - Bound replay-cache memory when clock synchronization is unavailable.
 - Preserve request IDs on middleware errors.

@@ -1,6 +1,38 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { withLegacyPatchSequence } from '../src/services/rpc-response.ts'
+import { BehaviorSubject } from 'rxjs'
+import {
+  withLegacyPatchSequence,
+  waitForPatchSequence,
+} from '../src/services/rpc-response.ts'
+
+test('patch sequence fences preserve zero and skip absent metadata', async () => {
+  const cache = new BehaviorSubject({ id: 0 })
+  for (const meta of [
+    undefined,
+    {},
+    { patchSequence: null },
+    { patchSequence: 0 },
+  ]) {
+    await waitForPatchSequence(cache, meta)
+    assert.equal(cache.observed, false)
+  }
+})
+
+test('patch sequence fences wait for the committed revision and release their subscription', async () => {
+  const cache = new BehaviorSubject({ id: 1 })
+  let completed = false
+  const pending = waitForPatchSequence(cache, { patchSequence: 3 }).then(() => {
+    completed = true
+  })
+  assert.equal(cache.observed, true)
+  cache.next({ id: 2 })
+  await Promise.resolve()
+  assert.equal(completed, false)
+  cache.next({ id: 3 })
+  await pending
+  assert.equal(cache.observed, false)
+})
 
 test('JSON metadata is authoritative, including sequence zero', () => {
   for (const patchSequence of [0, 17]) {

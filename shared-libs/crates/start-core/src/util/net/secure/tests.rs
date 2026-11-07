@@ -12,6 +12,51 @@ use rpc_toolkit::{
 use serde_json::{Value, json};
 
 use super::*;
+
+#[test]
+fn browser_profile_preserves_native_framing_and_close_validation() {
+    let profile = browser_profile();
+    assert_eq!(profile["recordHeaderBytes"], 2);
+    assert_eq!(profile["messageHeaderBytes"], 4);
+    assert_eq!(profile["maxWireChunkBytes"], 65537);
+    assert_eq!(
+        profile["kinds"],
+        serde_json::json!({"text": 0, "binary": 1, "close": 2})
+    );
+    let ranges: Vec<[u16; 2]> = serde_json::from_value(profile["closeCodes"].clone()).unwrap();
+    for code in [
+        0,
+        999,
+        1000,
+        1003,
+        1004,
+        1005,
+        1006,
+        1007,
+        1013,
+        1014,
+        1015,
+        2999,
+        3000,
+        3999,
+        4000,
+        4999,
+        5000,
+        u16::MAX,
+    ] {
+        let frame = CloseFrame {
+            code,
+            reason: "".into(),
+        };
+        assert_eq!(
+            ranges
+                .iter()
+                .any(|[start, end]| (*start..=*end).contains(&code)),
+            validate_close(&frame).is_ok(),
+            "{code}",
+        );
+    }
+}
 use crate::sign::{AnySigningKey, Signer};
 
 const PROLOGUE: &[u8] = b"Start-RPC-Noise test v1\0";

@@ -33,6 +33,47 @@ enum MessageKind {
     Close = 2,
 }
 
+pub(crate) fn browser_profile() -> serde_json::Value {
+    use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+
+    let logical = NonZeroUsize::new(64 * 1024 * 1024).unwrap();
+    let mut close_codes: Vec<[u16; 2]> = Vec::new();
+    for code in 0..=u16::MAX {
+        if !CloseCode::from(code).is_allowed() {
+            continue;
+        }
+        match close_codes.last_mut() {
+            Some([_, end]) if end.checked_add(1) == Some(code) => *end = code,
+            _ => close_codes.push([code, code]),
+        }
+    }
+    serde_json::json!({
+        "recordHeaderBytes": RECORD_HEADER,
+        "messageHeaderBytes": MESSAGE_HEADER,
+        "messageKindBytes": MESSAGE_KIND,
+        "maxRecordBytes": MAX_RECORD,
+        "maxPlaintextBytes": MAX_PLAINTEXT,
+        "maxHandshakeRecordBytes": MAX_HANDSHAKE_RECORD,
+        "handshakeTimeoutMs": HANDSHAKE_TIMEOUT.as_millis(),
+        "writeTimeoutMs": Duration::from_secs(15).as_millis(),
+        "maxIncomingBytes": logical.get(),
+        "maxWireBytes": wire_message_size(logical).get(),
+        "maxWireChunkBytes": wire_chunk_size(logical).get(),
+        "closeStatusBytes": std::mem::size_of::<u16>(),
+        "normalCloseCode": u16::from(CloseCode::Normal),
+        "noStatusCloseCode": u16::from(CloseCode::Status),
+        "abnormalCloseCode": u16::from(CloseCode::Abnormal),
+        "maxClosePayloadBytes": MAX_CLOSE_PAYLOAD_BYTES,
+        "maxCloseReasonBytes": MAX_CLOSE_REASON_BYTES,
+        "closeCodes": close_codes,
+        "kinds": {
+            "text": u8::from(MessageKind::Text),
+            "binary": u8::from(MessageKind::Binary),
+            "close": u8::from(MessageKind::Close),
+        },
+    })
+}
+
 fn validate_close(frame: &CloseFrame) -> Result<(), Error> {
     use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 

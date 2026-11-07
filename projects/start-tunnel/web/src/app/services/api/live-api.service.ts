@@ -1,25 +1,24 @@
-import { DOCUMENT, inject, Injectable } from '@angular/core'
+import { inject, Service } from '@angular/core'
 import {
   AuthKeyService,
   HttpService,
   isRpcError,
   RpcError,
   RPCOptions,
+  RpcSocketService,
   rpcRequestBody,
+  waitForPatchSequence,
 } from '@start9labs/shared'
 import { createRpcClient } from '@start9labs/start-core'
-import { filter, firstValueFrom, Observable } from 'rxjs'
-import { webSocket } from 'rxjs/webSocket'
+import type { Observable } from 'rxjs'
 import { AuthService } from '../auth.service'
 import { PATCH_CACHE } from '../patch-db/patch-db-source'
 import { ApiClient, ApiService } from './api.service'
 
-@Injectable({
-  providedIn: 'root',
-})
+@Service()
 export class LiveApiService extends ApiService {
   private readonly http = inject(HttpService)
-  private readonly document = inject(DOCUMENT)
+  private readonly sockets = inject(RpcSocketService)
   private readonly auth = inject(AuthService)
   private readonly authKeys = inject(AuthKeyService)
   private readonly cache$ = inject(PATCH_CACHE)
@@ -37,24 +36,18 @@ export class LiveApiService extends ApiService {
   }
 
   openWebsocket$<T>(guid: string): Observable<T> {
-    const { location } = this.document.defaultView!
-    const host = location.host
-
-    return webSocket({
-      url: `wss://${host}/ws/rpc/${guid}`,
-    })
+    return this.sockets.open<T>(guid)
   }
 
   private async rpcRequest<T>(
     options: RPCOptions<Record<string, unknown>, string>,
     urlOverride?: string,
   ): Promise<T> {
-    // An endpoint override must not receive the local device proof.
-    const request = urlOverride
-      ? rpcRequestBody(options)
-      : await this.authKeys.signRpcBody(options)
-    const res = await this.http.rpcMessage<T>(request, options, urlOverride)
-    const body = res.body
+    const request = rpcRequestBody(options)
+    const lease = urlOverride ? null : await this.authKeys.lease()
+    const body = lease
+      ? await this.sockets.message<T>(request, options, lease)
+      : (await this.http.rpcMessage<T>(request, options, urlOverride)).body
 
     if (isRpcError(body)) {
       if (body.error.code === 34) {
@@ -64,11 +57,7 @@ export class LiveApiService extends ApiService {
       throw new RpcError(body.error)
     }
 
-    const patchSequence = body.meta?.patchSequence
-    if (patchSequence != null)
-      await firstValueFrom(
-        this.cache$.pipe(filter(({ id }) => id >= patchSequence)),
-      )
+    if (!urlOverride) await waitForPatchSequence(this.cache$, body.meta)
 
     return body.result
   }

@@ -21,6 +21,12 @@ export const AUTH_SIGNING_HOST = new InjectionToken<string>(
   { factory: () => inject(WA_WINDOW).location.hostname },
 )
 
+/** The active device identity and its cancellation lifetime. */
+export interface AuthKeyLease {
+  readonly key: auth.AuthKey
+  readonly signal: AbortSignal
+}
+
 const DB_NAME = 'startos-auth'
 const STORE = 'keys'
 
@@ -37,20 +43,28 @@ export class AuthKeyService {
   private readonly storageKey = inject(AUTH_KEY_STORAGE_KEY)
   private readonly host = inject(AUTH_SIGNING_HOST)
   private cached: auth.AuthKey | null | undefined
+  private lifetime = new AbortController()
   /** Preserves another tab's displaced key across a failed login. */
   private displaced: auth.AuthKey | null = null
 
   async get(): Promise<auth.AuthKey | null> {
     if (this.cached === undefined) {
       try {
-        this.cached =
-          (await this.idb('readonly', s => s.get(this.storageKey))) ?? null
+        const stored = await this.idb('readonly', s => s.get(this.storageKey))
+        if (this.cached === undefined) this.cached = stored ?? null
       } catch {
-        this.cached = null
-        await this.delete().catch(() => {})
+        if (this.cached === undefined) await this.delete().catch(() => {})
       }
     }
     return this.cached ?? null
+  }
+
+  /** Invalidated when the active device identity changes. */
+  async lease(): Promise<AuthKeyLease | null> {
+    await this.get()
+    return this.cached
+      ? { key: this.cached, signal: this.lifetime.signal }
+      : null
   }
 
   async create(): Promise<auth.AuthKey> {
@@ -106,11 +120,14 @@ export class AuthKeyService {
   }
 
   private async put(key: auth.AuthKey): Promise<void> {
+    this.lifetime.abort()
+    this.lifetime = new AbortController()
     this.cached = key
     await this.idb('readwrite', s => s.put(key, this.storageKey))
   }
 
   private async delete(): Promise<void> {
+    this.lifetime.abort()
     this.cached = null
     await this.idb('readwrite', s => s.delete(this.storageKey))
   }

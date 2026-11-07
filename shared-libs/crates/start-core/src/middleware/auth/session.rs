@@ -87,6 +87,20 @@ pub fn session_url(mut url: Url, address: &str) -> Result<Url, Error> {
     Ok(url)
 }
 
+/// Browser transport settings generated from the native protocol owners.
+pub fn browser_profile() -> serde_json::Value {
+    serde_json::json!({
+        "identity": crate::sign::noise::wire_profile(),
+        "transport": crate::util::net::secure::browser_profile(),
+        "negotiation": Negotiation {
+            noise: Some(VERSION),
+            context: Some("".into()),
+        },
+        "prologuePrefix": String::from_utf8(prologue("")).unwrap(),
+        "rpcPath": RpcSessionUpgrader::PATH,
+    })
+}
+
 #[derive(Deserialize, Serialize)]
 struct Negotiation {
     noise: Option<u8>,
@@ -95,6 +109,19 @@ struct Negotiation {
 
 /// Opts into encrypted admission with `noise=1&context=<server-name>`; missing opt-in stays legacy.
 pub struct RpcSessionUpgrader;
+
+impl RpcSessionUpgrader {
+    /// The shared encrypted RPC endpoint.
+    pub const PATH: &'static str = "/ws/rpc";
+
+    /// WebSocket RPC admission with optional encrypted peer authentication.
+    pub fn route<C: SecureRpcContext>(
+        server: rpc_toolkit::HttpServer<C>,
+    ) -> axum::routing::MethodRouter {
+        axum::routing::get(server.for_websocket().with_upgrader(Self))
+            .layer(crate::middleware::cors::layer())
+    }
+}
 
 #[cfg(test)]
 mod tests;

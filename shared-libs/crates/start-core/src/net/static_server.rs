@@ -258,7 +258,10 @@ pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
     Router::new()
         .route("/rpc/{*path}", rpc)
         .route(
-            "/ws/rpc/{guid}",
+            &format!(
+                "{}/{{guid}}",
+                crate::middleware::auth::session::RpcSessionUpgrader::PATH,
+            ),
             any({
                 let ctx = ctx.clone();
                 move |x::Path(guid): x::Path<Guid>,

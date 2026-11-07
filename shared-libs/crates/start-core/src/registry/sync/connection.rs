@@ -8,7 +8,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 use super::*;
 use crate::context::rpc::ReloadableHttpClient;
-use crate::middleware::auth::session::{prologue, session_url};
+use crate::middleware::auth::session::{RpcSessionUpgrader, prologue, session_url};
 use crate::middleware::auth::signature::SigningContext;
 use crate::sign::noise::NoiseIdentity;
 use crate::util::net::secure::{EncryptedSocket, wire_message_size};
@@ -21,8 +21,7 @@ pub(super) fn websocket_url(registry: &Url) -> Result<Url, Error> {
     url.path_segments_mut()
         .map_err(|_| Error::new(eyre!("invalid registry URL"), ErrorKind::ParseUrl))?
         .pop_if_empty()
-        .push("ws")
-        .push("rpc");
+        .extend(RpcSessionUpgrader::PATH.trim_start_matches('/').split('/'));
     let scheme = match url.scheme() {
         "https" => "wss",
         "http" => "ws",
