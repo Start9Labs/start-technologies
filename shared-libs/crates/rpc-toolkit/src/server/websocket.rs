@@ -9,7 +9,7 @@ use axum::handler::Handler;
 use axum::response::{IntoResponse, Response};
 use futures::future::{AbortHandle, Abortable, BoxFuture};
 use futures::stream::FuturesUnordered;
-use futures::{FutureExt, SinkExt, StreamExt};
+use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt};
 use imbl_value::imbl::Vector;
 use imbl_value::Value;
 use serde::Serialize;
@@ -34,7 +34,7 @@ pub struct WebSocketOptions {
     /// Queued non-terminal events per stream; must fit Tokio's bounded-channel capacity.
     /// Terminal results have a separate reserved slot.
     pub stream_buffer_capacity: NonZeroUsize,
-    /// Maximum inbound message and frame size in bytes.
+    /// Maximum inbound logical message size; also bounds raw frames without an upgrader.
     pub max_message_size: NonZeroUsize,
     /// Deadline for each socket write or flush.
     pub send_timeout: Duration,
@@ -52,6 +52,50 @@ impl Default for WebSocketOptions {
     }
 }
 
+/// A message transport retaining WebSocket data and control frame semantics.
+pub trait WebSocketTransport:
+    Stream<Item = Result<Message, axum::Error>> + Sink<Message, Error = axum::Error> + Send + Unpin
+{
+}
+
+impl<T> WebSocketTransport for T where
+    T: Stream<Item = Result<Message, axum::Error>>
+        + Sink<Message, Error = axum::Error>
+        + Send
+        + Unpin
+{
+}
+
+/// A connection-owned transport supplied by a WebSocket upgrader.
+pub type BoxWebSocket = Box<dyn WebSocketTransport>;
+
+/// The context and message transport admitted after a successful handshake.
+pub struct UpgradedWebSocket<C: Context> {
+    /// Connection-scoped state made available to RPC middleware and handlers.
+    pub context: Arc<C>,
+    /// Carries logical messages and WebSocket control frames after admission.
+    pub socket: BoxWebSocket,
+}
+
+/// Establishes a transport before any RPC request is dispatched.
+/// Implementations own handshake deadlines and return authenticated context only after verification.
+pub trait WebSocketUpgrader<C: Context>: Send + Sync + 'static {
+    /// Converts the logical byte budget into the required inbound wire budget.
+    fn max_wire_message_size(&self, logical: NonZeroUsize) -> NonZeroUsize;
+
+    /// Creates owned handler context from the admitted connection context.
+    fn request_context(&self, context: &C) -> C;
+
+    /// Returns admitted context and transport; an error closes the connection.
+    fn upgrade(
+        &self,
+        context: Arc<C>,
+        request: axum::http::request::Parts,
+        socket: WebSocket,
+        options: WebSocketOptions,
+    ) -> BoxFuture<'static, Result<UpgradedWebSocket<C>, axum::Error>>;
+}
+
 /// JSON-RPC calls and opted-in response streams on one WebSocket.
 ///
 /// HTTP middleware runs during the upgrade. Each call receives its own clone of
@@ -59,6 +103,7 @@ impl Default for WebSocketOptions {
 pub struct WebSocketServer<C: Context> {
     server: HttpServer<C>,
     options: WebSocketOptions,
+    upgrader: Option<Arc<dyn WebSocketUpgrader<C>>>,
 }
 
 impl<C: Context> Clone for WebSocketServer<C> {
@@ -66,6 +111,7 @@ impl<C: Context> Clone for WebSocketServer<C> {
         Self {
             server: self.server.clone(),
             options: self.options.clone(),
+            upgrader: self.upgrader.clone(),
         }
     }
 }
@@ -83,6 +129,7 @@ impl<C: Context> HttpServer<C> {
         WebSocketServer {
             server: self,
             options: WebSocketOptions::default(),
+            upgrader: None,
         }
     }
 }
@@ -95,6 +142,12 @@ impl<C: Context> WebSocketServer<C> {
     /// Sets resource limits for each accepted connection.
     pub fn with_options(mut self, options: WebSocketOptions) -> Self {
         self.options = options;
+        self
+    }
+
+    /// Installs a connection handshake and transport adapter before RPC dispatch.
+    pub fn with_upgrader(mut self, upgrader: impl WebSocketUpgrader<C>) -> Self {
+        self.upgrader = Some(Arc::new(upgrader));
         self
     }
 
@@ -117,16 +170,44 @@ impl<C: Context> WebSocketServer<C> {
             let socket_context = context.clone();
             let socket_middleware = middleware.clone();
             let options = server.options.clone();
+            let wire_limit = server
+                .upgrader
+                .as_ref()
+                .map_or(options.max_message_size, |upgrader| {
+                    upgrader.max_wire_message_size(options.max_message_size)
+                });
             let mut response = upgrade
                 .read_buffer_size(2048)
                 .write_buffer_size(0)
-                .max_message_size(options.max_message_size.get())
-                .max_frame_size(options.max_message_size.get())
+                .max_message_size(wire_limit.get())
+                .max_frame_size(wire_limit.get())
                 .on_upgrade(move |socket| async move {
+                    let mut connection_server = server.server;
+                    let admitted = match server.upgrader {
+                        Some(upgrader) => {
+                            let admitted = match upgrader
+                                .upgrade(socket_context, parts, socket, options.clone())
+                                .await
+                            {
+                                Ok(admitted) => admitted,
+                                Err(_) => return,
+                            };
+                            let context = admitted.context.clone();
+                            connection_server.inner.make_ctx = Arc::new(move || {
+                                futures::future::ready(Ok(upgrader.request_context(&context)))
+                                    .boxed()
+                            });
+                            admitted
+                        }
+                        None => UpgradedWebSocket {
+                            context: socket_context,
+                            socket: Box::new(socket),
+                        },
+                    };
                     let mut connection = Connection::new(
-                        socket,
-                        server.server,
-                        socket_context,
+                        admitted.socket,
+                        connection_server,
+                        admitted.context,
                         socket_middleware,
                         options,
                     );
@@ -173,7 +254,7 @@ struct TrackedCall {
 }
 
 struct Connection<C: Context> {
-    socket: WebSocket,
+    socket: BoxWebSocket,
     server: HttpServer<C>,
     context: Arc<C>,
     middleware: Vector<DynMiddleware<C>>,
@@ -187,7 +268,7 @@ struct Connection<C: Context> {
 
 impl<C: Context> Connection<C> {
     fn new(
-        socket: WebSocket,
+        socket: BoxWebSocket,
         server: HttpServer<C>,
         context: Arc<C>,
         middleware: Vector<DynMiddleware<C>>,
@@ -213,8 +294,20 @@ impl<C: Context> Connection<C> {
         let mut last_received = Instant::now();
         loop {
             tokio::select! {
-                message = self.socket.recv() => {
+                message = self.socket.next() => {
                     last_received = Instant::now();
+                    let bytes = match &message {
+                        Some(Ok(Message::Text(text))) => text.len(),
+                        Some(Ok(Message::Binary(data))) => data.len(),
+                        _ => 0,
+                    };
+                    if bytes > self.options.max_message_size.get() {
+                        self.send_message(Message::Close(Some(CloseFrame {
+                            code: 1009,
+                            reason: "RPC message limit exceeded".into(),
+                        }))).await?;
+                        return Err(());
+                    }
                     match message {
                         Some(Ok(Message::Text(text))) => self.receive_text(&text).await?,
                         Some(Ok(Message::Ping(_))) => {

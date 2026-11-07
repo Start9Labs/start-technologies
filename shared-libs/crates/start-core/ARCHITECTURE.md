@@ -44,7 +44,7 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 - `src/tunnel/` — StartTunnel server logic
 - `src/backup/`, `src/sign/` — Backup and signing. `sign/noise.rs` certifies fresh in-memory Noise static keys through `Signer::sign_message`, verifies [standard libp2p identity payloads](https://github.com/libp2p/specs/blob/master/noise/README.md) against the remote static key, and delegates the XX state machine to Snow.
 - `src/os_install/`, `src/init.rs`, `src/setup.rs` — OS install, init, and first-run setup
-- `src/util/` — Shared utilities (process invocation, IO, guards — see `core-rust-patterns.md`)
+- `src/util/` — Shared utilities (process invocation, IO, guards — see `core-rust-patterns.md`). `util/net.rs::WebSocket` retains one generic message-transport lifecycle for keepalive, send deadlines and close handling. `util/net/secure.rs::EncryptedSocket` adds completed Noise exchange admission, typed encrypted data framing and independent logical/wire limits without a second socket manager; see [Noise WebSocket adapter](noise-websocket.md).
 - `src/version/` — Migrations and version logic (see `VERSION_BUMP.md`, `exver.md`)
 
 ## DNS lifecycle
@@ -134,6 +134,7 @@ Until both steps run, a changed `ts_export!` type is out of sync with everything
 - [README.md](README.md) — what this crate is and how to use it
 - [AGENTS.md](AGENTS.md) — build, test, format, and operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import)
 - [rpc-toolkit.md](rpc-toolkit.md) — JSON-RPC handler patterns
+- [noise-websocket.md](noise-websocket.md) — Encrypted message transport, admission and framing
 - [patchdb.md](patchdb.md) — Patch-DB watch patterns and TypedDbWatch
 - [i18n-patterns.md](i18n-patterns.md) — Internationalization conventions
 - [core-rust-patterns.md](core-rust-patterns.md) — Common Rust utilities

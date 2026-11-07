@@ -1,5 +1,8 @@
 #![cfg(feature = "websocket")]
 
+#[path = "websocket/upgrade.rs"]
+mod upgrade;
+
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -259,7 +262,7 @@ fn rpc_server(context: TestContext) -> Server<TestContext> {
     )
 }
 
-async fn serve(server: rpc_toolkit::WebSocketServer<TestContext>) -> (String, ServerGuard) {
+async fn serve<C: Context>(server: rpc_toolkit::WebSocketServer<C>) -> (String, ServerGuard) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}/rpc", listener.local_addr().unwrap());
     let router = Router::new().route("/rpc", get(server));

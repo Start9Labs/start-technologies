@@ -4031,6 +4031,20 @@ util.rpc.unknown-scheme:
   pl_PL: "nieznany schemat: %{scheme}"
 
 # util/net.rs
+util.net.secure.invalid-message:
+  en_US: "Invalid encrypted WebSocket message"
+  de_DE: "Ungültige verschlüsselte WebSocket-Nachricht"
+  es_ES: "Mensaje WebSocket cifrado no válido"
+  fr_FR: "Message WebSocket chiffré invalide"
+  pl_PL: "Nieprawidłowa zaszyfrowana wiadomość WebSocket"
+
+util.net.secure.unexpected-peer:
+  en_US: "Encrypted connection authenticated an unexpected identity"
+  de_DE: "Die verschlüsselte Verbindung hat eine unerwartete Identität authentifiziert"
+  es_ES: "La conexión cifrada autenticó una identidad inesperada"
+  fr_FR: "La connexion chiffrée a authentifié une identité inattendue"
+  pl_PL: "Szyfrowane połączenie uwierzytelniło nieoczekiwaną tożsamość"
+
 util.net.websocket-ping-timeout:
   en_US: "Timeout: WebSocket did not respond to ping within %{timeout}"
   de_DE: "Zeitüberschreitung: WebSocket hat nicht innerhalb von %{timeout} auf Ping geantwortet"

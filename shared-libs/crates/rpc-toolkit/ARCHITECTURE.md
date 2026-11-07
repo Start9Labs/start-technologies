@@ -66,7 +66,11 @@ Transports wrap a `Server`:
   dispatch restores the caller's ID after response hooks, including middleware rejections.
 - **WebSocket** (`server/websocket.rs`, opt-in `websocket` feature): `WebSocketServer` accepts JSON
   text requests and batches through the existing RPC middleware pipeline. HTTP middleware prepares
-  the upgrade; each call clones that prepared middleware state. The connection owns pending call
+  the upgrade; each call clones that prepared middleware state. An optional `WebSocketUpgrader`
+  completes application admission and returns a connection-scoped context plus a boxed message
+  transport before dispatch starts. Its `request_context` supplies owned handler contexts through
+  the connection's private server factory. Raw wire allowances and post-adaptation logical limits
+  are separate; the default remains a plain socket. The connection owns pending call
   futures, buffered initiating replies, and directly polled event receivers, with resource limits
   and send deadlines. `server/rpcstream.rs` owns the single-owner `RpcStream` producer: a bounded
   event channel and a reserved terminal slot. Explicit close carries a result; dropping without

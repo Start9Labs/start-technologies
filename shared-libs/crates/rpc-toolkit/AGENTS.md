@@ -14,7 +14,9 @@ root and `shared-libs/` guidance first. `CLAUDE.md` imports this file.
   remote calls. `output.rs` owns stdout/stderr broken-pipe handling; callers must
   not apply that policy to network or filesystem errors. `server/mcp.rs` (`mcp` feature) owns the MCP tool surface and
   reuses `HttpServer`'s middleware steps rather than reimplementing them.
-  `server/websocket.rs` (`websocket` feature) owns the shared WebSocket connection;
+  `server/websocket.rs` (`websocket` feature) owns the shared WebSocket connection.
+  Its `WebSocketUpgrader` admits a connection-scoped context and adapted message
+  transport before RPC dispatch; wire allowances do not change logical RPC limits.
   `server/rpcstream.rs` owns single-owner producers, bounded event queues, terminal
   results, drop cancellation, and shared event encoding/decoding (`RpcStreamResponse`).
   Forward `HandlerArgs::rpc_stream` through adapters; initialize it to `None` for

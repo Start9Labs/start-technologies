@@ -10,6 +10,27 @@ complete out of order; notifications execute without response messages. Missing
 `params` means an empty object. Binary RPC messages are rejected. WebSocket
 Ping/Pong frames provide keepalive.
 
+## Connection upgraders
+
+`WebSocketServer::with_upgrader` installs an application-owned `WebSocketUpgrader`.
+After the HTTP upgrade middleware, it receives the connection context, request
+parts, raw socket, and logical limits. No RPC is dispatched until it returns `UpgradedWebSocket`;
+an error drops the connection. The upgrader owns its handshake deadline and returns
+both a connection-scoped `Arc<Context>` and a `BoxWebSocket` message transport.
+RPC middleware reads that context; `request_context` creates owned handler context
+from it for each call. The connection's private server clone uses this factory,
+while HTTP response middleware retains its pre-handshake context. Context changes
+do not affect the original server's factory or another connection.
+
+`WebSocketTransport` retains text, binary and control-frame semantics. An adapter
+can authenticate or transform wire data without replacing RPC dispatch, stream
+ownership, cancellation or heartbeat handling. `max_wire_message_size` supplies
+the raw frame/message allowance for the configured logical budget. The RPC actor
+also enforces the logical data-message limit after adaptation and before parsing;
+wire overhead must not expand the RPC payload budget. Adapters must bound partial
+message buffering and preserve control frames. Without an upgrader, the raw socket
+and its original context are used directly.
+
 ## Opting into a response stream
 
 A client adds `rpcstream: "1.0"` to an ordinary request with a non-null ID:
@@ -125,7 +146,9 @@ Applications must also bound upstream queues such as database subscriptions.
 `WebSocketOptions` bounds in-flight calls/buffered initiating responses, active
 streams, queued events per stream, inbound message/frame size, and stalled sends.
 Defaults are 64 in-flight calls, 64 streams, 16 queued events per stream plus its
-terminal slot, 1 MiB inbound messages/frames, and a 15-second send deadline. The
+terminal slot, 1 MiB inbound logical messages, and a 15-second send deadline. Plain
+connections apply that same byte limit to raw messages/frames; an upgrader derives
+the raw allowance for its wire format. The
 buffer limit counts serialized values, not bytes, and must fit Tokio's bounded
 channel capacity. These are resource limits, not authentication decisions. The message/frame byte limit is
 server-inbound: outgoing dumps, results, and events may be larger. Native receiving clients must

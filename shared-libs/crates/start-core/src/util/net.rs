@@ -10,6 +10,8 @@ use tokio::time::{Instant, Sleep};
 
 use crate::prelude::*;
 
+pub mod secure;
+
 const PING_INTERVAL: Duration = Duration::from_secs(30);
 const PING_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_CLOSE_REASON_BYTES: usize = 125 - std::mem::size_of::<u16>();
@@ -33,8 +35,8 @@ fn truncate_close_reason(reason: impl Into<Utf8Bytes>) -> Utf8Bytes {
 /// HTTP/2 streams can timeout if idle, even when the underlying connection
 /// has keep-alive enabled. This wrapper sends a ping frame if no data has
 /// been sent within the ping interval while waiting to receive a message.
-pub struct WebSocket {
-    inner: AxumWebSocket,
+pub struct WebSocket<S = AxumWebSocket> {
+    inner: S,
     ping_state: Option<(bool, u64)>,
     next_ping: Pin<Box<Sleep>>,
     send_timeout: Option<Duration>,
@@ -42,8 +44,8 @@ pub struct WebSocket {
     fused: bool,
 }
 
-impl WebSocket {
-    pub fn new(ws: AxumWebSocket) -> Self {
+impl<S: rpc_toolkit::WebSocketTransport> WebSocket<S> {
+    pub fn new(ws: S) -> Self {
         Self {
             inner: ws,
             ping_state: None,
@@ -54,7 +56,7 @@ impl WebSocket {
         }
     }
 
-    pub fn into_inner(self) -> AxumWebSocket {
+    pub fn into_inner(self) -> S {
         self.inner
     }
 
@@ -175,7 +177,7 @@ impl WebSocket {
                 .with_kind(ErrorKind::Network)?;
             while !matches!(
                 self.inner
-                    .recv()
+                    .next()
                     .await
                     .transpose()
                     .with_kind(ErrorKind::Network)?,
@@ -199,7 +201,7 @@ impl From<AxumWebSocket> for WebSocket {
     }
 }
 
-impl Stream for WebSocket {
+impl<S: rpc_toolkit::WebSocketTransport> Stream for WebSocket<S> {
     type Item = Result<Message, axum::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -207,7 +209,7 @@ impl Stream for WebSocket {
     }
 }
 
-impl Sink<Message> for WebSocket {
+impl<S: rpc_toolkit::WebSocketTransport> Sink<Message> for WebSocket<S> {
     type Error = axum::Error;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
