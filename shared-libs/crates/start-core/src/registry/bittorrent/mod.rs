@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt};
 use tokio::sync::{OnceCell, RwLock};
 use tokio::time::{Instant, timeout};
-use tokio_util::sync::DropGuard;
+use tokio_util::sync::{CancellationToken, DropGuard};
 use url::Url;
 
 use crate::prelude::*;
@@ -25,9 +25,12 @@ use crate::sign::commitment::Commitment;
 use crate::sign::commitment::blake3::Blake3Commitment;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::util::io::{TmpDir, open_file};
+use crate::util::sync::SyncMutex;
 
+mod preferences;
 mod seeds;
 mod stored_file;
+pub use preferences::TorrentPreferences;
 pub use seeds::TorrentSeedConfig;
 pub(crate) mod discovery;
 #[cfg(test)]
@@ -169,6 +172,12 @@ impl TorrentTransfer {
         let mut last_progress = 0;
         let mut last_change = Instant::now();
         loop {
+            ensure_code!(
+                !self.workspace.session.0.cancellation_token().is_cancelled(),
+                ErrorKind::Network,
+                "{}",
+                t!("registry.bittorrent.cancelled")
+            );
             let stats = self.torrent.stats();
             if let Some(error) = stats.error {
                 return Err(Error::new(eyre!("{error}"), ErrorKind::Network));
@@ -250,7 +259,7 @@ impl ResolvedTorrent {
 struct TorrentSession(Arc<Session>);
 impl TorrentSession {
     async fn new(directory: PathBuf, mut options: SessionOptions) -> Result<Self, Error> {
-        let token = tokio_util::sync::CancellationToken::new();
+        let token = options.cancellation_token.take().unwrap_or_default();
         let guard = token.clone().drop_guard();
         options.cancellation_token = Some(token);
         let session = Self(
@@ -282,7 +291,8 @@ fn session_options() -> SessionOptions {
 
 /// Registry downloads and optional sharing of stored artifacts.
 pub struct TorrentClient {
-    enabled: bool,
+    available: bool,
+    downloads: SyncMutex<Option<CancellationToken>>,
     disable_upload: bool,
     seed: Option<TorrentSeedConfig>,
     catalog: OnceCell<Arc<seeds::SeedCatalog>>,
@@ -292,7 +302,7 @@ pub struct TorrentClient {
 impl std::fmt::Debug for TorrentClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TorrentClient")
-            .field("enabled", &self.enabled)
+            .field("available", &self.available)
             .field("disable_upload", &self.disable_upload)
             .field("seed", &self.seed)
             .finish()
@@ -303,7 +313,8 @@ impl TorrentClient {
     /// Never uploads asset data or retains completed torrents.
     pub fn download_only(config: TorrentDownloadConfig, proxy: bool) -> Self {
         Self {
-            enabled: config.enabled() && !proxy,
+            available: config.enabled() && !proxy,
+            downloads: SyncMutex::new(Some(CancellationToken::new())),
             disable_upload: true,
             seed: None,
             catalog: OnceCell::new(),
@@ -313,11 +324,16 @@ impl TorrentClient {
 
     /// Allows uploads during downloads; stored-artifact sharing starts disabled.
     pub fn for_server(config: TorrentDownloadConfig, seed: Option<TorrentSeedConfig>) -> Self {
-        let enabled = config.enabled();
+        let available = config.enabled();
         Self {
-            enabled,
+            available,
+            downloads: SyncMutex::new(
+                TorrentPreferences::default()
+                    .downloads
+                    .then(CancellationToken::new),
+            ),
             disable_upload: false,
-            seed: enabled.then(|| seed.unwrap_or_default()),
+            seed: available.then(|| seed.unwrap_or_default()),
             catalog: OnceCell::new(),
             seeds: RwLock::new(None),
         }
@@ -325,61 +341,105 @@ impl TorrentClient {
 
     /// None for `.onion` sources or disabled BitTorrent.
     pub fn for_source(&self, source: &Url) -> Option<&Self> {
-        (self.enabled
+        (self.downloads_enabled()
             && !source
                 .host_str()
                 .is_some_and(|host| host.ends_with(".onion")))
         .then_some(self)
     }
 
-    pub(crate) fn downloads_enabled(&self) -> bool {
-        self.enabled
+    pub(crate) fn available(&self) -> bool {
+        self.available
     }
 
-    pub(crate) async fn maintain_seeding<F, Fut>(
+    pub(crate) fn downloads_enabled(&self) -> bool {
+        self.available && self.downloads.peek(Option::is_some)
+    }
+
+    pub(crate) fn set_downloads_enabled(&self, enabled: bool) {
+        self.downloads.mutate(|current| {
+            if enabled {
+                current.get_or_insert_with(CancellationToken::new);
+            } else if let Some(token) = current.take() {
+                token.cancel();
+            }
+        });
+    }
+
+    fn download_token(&self) -> Option<CancellationToken> {
+        self.available
+            .then(|| {
+                self.downloads
+                    .peek(|current| current.as_ref().map(CancellationToken::child_token))
+            })
+            .flatten()
+    }
+
+    pub(crate) async fn maintain_preferences<F, Fut, G, Incoming>(
         &self,
-        mut enabled: patch_db::TypedDbWatch<bool>,
+        mut preferences: patch_db::TypedDbWatch<TorrentPreferences>,
+        configure_incoming: G,
         discover: F,
     ) -> Result<(), Error>
     where
         F: Fn() -> Fut + Send + Sync,
         Fut: std::future::Future<Output = Result<(), Error>> + Send,
+        G: Fn(bool) -> Incoming + Send + Sync,
+        Incoming:
+            std::future::Future<Output = Result<Option<librqbit::ListenerOptions>, Error>> + Send,
     {
         loop {
-            let should_seed: bool = from_value(enabled.as_mut().peek_and_mark_seen()?)?;
+            let current: TorrentPreferences =
+                from_value(preferences.as_mut().peek_and_mark_seen()?)?;
+            self.set_downloads_enabled(current.downloads);
+            let should_seed = self.available && current.seeding;
             let changed = tokio::select! {
                 biased;
-                result = enabled.changed() => result,
-                result = async {
-                    if should_seed {
-                        let maintenance = async {
-                            loop {
-                                let service = self.seeds.read().await.clone();
-                                let result = match service {
-                                    Some(service) => service.refresh().await,
-                                    None => self.resume_seeding().await,
-                                };
-                                if let Err(error) = result {
-                                    tracing::warn!(%error, "Cannot refresh stored-artifact sharing");
+                result = preferences.changed() => result,
+                _ = async {
+                    let maintenance = async {
+                        loop {
+                            let result = async {
+                                let listener = configure_incoming(should_seed && current.incoming).await?;
+                                if should_seed {
+                                    let service = self.seeds.read().await.clone();
+                                    match service {
+                                        Some(service) if service.matches_listener(listener.as_ref()) => {
+                                            service.refresh().await?;
+                                        }
+                                        _ => {
+                                            self.stop_seeding().await;
+                                            self.resume_seeding(listener).await?;
+                                        }
+                                    }
                                 }
-                                tokio::time::sleep(Duration::from_secs(30)).await;
+                                Ok::<_, Error>(())
+                            }.await;
+                            if let Err(error) = result {
+                                self.stop_seeding().await;
+                                tracing::warn!(%error, "Cannot refresh stored-artifact sharing");
                             }
-                        };
-                        let discovery = async {
+                            tokio::time::sleep(Duration::from_secs(30)).await;
+                        }
+                    };
+                    let discovery = async {
+                        if should_seed {
                             loop {
                                 if let Err(error) = discover().await {
                                     tracing::warn!(%error, "Cannot discover stored software advertisements");
                                 }
                                 tokio::time::sleep(DISCOVERY_INTERVAL).await;
                             }
-                        };
-                        futures::future::join(maintenance, discovery).await;
-                    }
-                    std::future::pending::<Result<(), patch_db::Error>>().await
-                } => result,
+                        }
+                        std::future::pending::<()>().await
+                    };
+                    futures::future::join(maintenance, discovery).await;
+                } => unreachable!(),
             };
-            self.shutdown().await;
             changed?;
+            let next: TorrentPreferences = from_value(preferences.as_mut().peek()?)?;
+            self.set_downloads_enabled(next.downloads);
+            self.stop_seeding().await;
         }
     }
 
@@ -408,18 +468,25 @@ impl TorrentClient {
         Ok(())
     }
 
-    async fn resume_seeding(&self) -> Result<(), Error> {
-        if let (Some(config), Some(catalog)) = (&self.seed, self.catalog().await?) {
-            let service =
-                Arc::new(seeds::SeedService::start(catalog.clone(), config.listen).await?);
+    async fn resume_seeding(
+        &self,
+        listener: Option<librqbit::ListenerOptions>,
+    ) -> Result<(), Error> {
+        if let Some(catalog) = self.catalog().await? {
+            let service = Arc::new(seeds::SeedService::start(catalog.clone(), listener).await?);
             *self.seeds.write().await = Some(service.clone());
             service.refresh().await?;
         }
         Ok(())
     }
 
-    /// Stops sharing without deleting stored artifacts or their metadata.
+    /// Stops peer transfers without deleting stored artifacts or their metadata.
     pub async fn shutdown(&self) {
+        self.set_downloads_enabled(false);
+        self.stop_seeding().await;
+    }
+
+    async fn stop_seeding(&self) {
         let service = self.seeds.write().await.take();
         if let Some(service) = service {
             service.stop().await;
@@ -431,6 +498,7 @@ impl TorrentClient {
         url: &Url,
         commitment: &ContentCommitment,
         client: Client,
+        cancellation: Option<CancellationToken>,
     ) -> Result<Option<ResolvedTorrent>, Error> {
         if self.for_source(url).is_none() {
             return Ok(None);
@@ -440,7 +508,7 @@ impl TorrentClient {
         let bytes = match url.scheme() {
             "http" | "https" => metadata(client, url).await?,
             "magnet" => {
-                let resolver = self.workspace().await?;
+                let resolver = self.workspace(cancellation).await?;
                 let response = timeout(
                     METADATA_TIMEOUT,
                     resolver.session.0.add_torrent(
@@ -480,7 +548,7 @@ impl TorrentClient {
         client: Client,
     ) -> Result<Option<SharingMetadata>, Error> {
         Ok(self
-            .resolve(url, &commitment, client)
+            .resolve(url, &commitment, client, None)
             .await?
             .map(|resolved| resolved.sharing_metadata(commitment)))
     }
@@ -504,11 +572,17 @@ impl TorrentClient {
         commitment: ContentCommitment,
         client: Client,
     ) -> Result<Option<TorrentAttempt<Arc<TorrentTransfer>>>, Error> {
-        let Some(resolved) = self.resolve(url, &commitment, client).await? else {
+        let Some(token) = self.download_token() else {
+            return Ok(None);
+        };
+        let Some(resolved) = self
+            .resolve(url, &commitment, client, Some(token.clone()))
+            .await?
+        else {
             return Ok(None);
         };
         let metadata = resolved.sharing_metadata(commitment.clone());
-        let source = match self.start_transfer(resolved, commitment).await {
+        let source = match self.start_transfer(resolved, commitment, token).await {
             Ok(transfer) => Some(Arc::new(transfer)),
             Err(error) => {
                 tracing::warn!(%error, "Cannot start BitTorrent payload; falling back to HTTP mirrors");
@@ -525,7 +599,10 @@ impl TorrentClient {
         }))
     }
 
-    async fn workspace(&self) -> Result<TorrentWorkspace, Error> {
+    async fn workspace(
+        &self,
+        cancellation_token: Option<CancellationToken>,
+    ) -> Result<TorrentWorkspace, Error> {
         let directory = Arc::new(TmpDir::new().await?);
         let output = directory.join("data");
         tokio::fs::create_dir(&output).await?;
@@ -533,6 +610,7 @@ impl TorrentClient {
             output.clone(),
             SessionOptions {
                 disable_upload: self.disable_upload,
+                cancellation_token,
                 ..session_options()
             },
         )
@@ -548,10 +626,11 @@ impl TorrentClient {
         &self,
         mut resolved: ResolvedTorrent,
         commitment: ContentCommitment,
+        cancellation: CancellationToken,
     ) -> Result<TorrentTransfer, Error> {
         let workspace = match resolved.workspace.take() {
             Some(workspace) => workspace,
-            None => self.workspace().await?,
+            None => self.workspace(Some(cancellation)).await?,
         };
         let path = workspace.output.join(file_name(&resolved.meta)?);
         let length = resolved.meta.info.data.length.unwrap();

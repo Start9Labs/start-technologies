@@ -1811,6 +1811,23 @@ export const TimeInfo: z.ZodObject<{ now: z.ZodString; uptime: z.ZodInt }> =
   /* @__PURE__ */ object({ now: z.string(), uptime: z.int() }).meta({
     id: 'TimeInfo',
   })
+
+/**
+ * Downloads start enabled; seeding and incoming connections start disabled.
+ */
+export const TorrentPreferences: z.ZodObject<{
+  downloads: z.ZodBoolean
+  seeding: z.ZodBoolean
+  incoming: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  downloads: z.boolean(),
+  seeding: z.boolean(),
+  incoming: z.boolean(),
+}).meta({
+  id: 'TorrentPreferences',
+  description:
+    'Downloads start enabled; seeding and incoming connections start disabled.',
+})
 export const TrustContext: z.ZodEnum<{ marketplace: 'marketplace'; os: 'os' }> =
   /* @__PURE__ */ z.enum(['marketplace', 'os']).meta({
     id: 'TrustContext',
@@ -5656,6 +5673,21 @@ export const BindingSetGuaWanParams: z.ZodObject<{
 }).meta({
   id: 'BindingSetGuaWanParams',
 })
+
+/**
+ * Configured transport availability and the native incoming peer interface.
+ */
+export const BitTorrentConfig: z.ZodObject<{
+  available: z.ZodBoolean
+  interface: typeof ServiceInterface
+}> = /* @__PURE__ */ object({
+  available: z.boolean(),
+  interface: ServiceInterface,
+}).meta({
+  id: 'BitTorrentConfig',
+  description:
+    'Configured transport availability and the native incoming peer interface.',
+})
 export const CreateTaskParams: z.ZodIntersection<
   z.ZodObject<{ replayId: typeof ReplayId }>,
   typeof Task
@@ -6574,10 +6606,10 @@ export const ServerInfo: z.ZodObject<{
   caFingerprint: z.ZodString
   ntpSynced: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   zram: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  /**
-   * Persisted intent to share compatible installed S9PKs and stored OS images.
-   */
-  registrySeeding: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  bittorrent: z.ZodCodec<
+    z.ZodOptional<typeof TorrentPreferences>,
+    typeof TorrentPreferences
+  >
   governor: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof Governor>>,
     z.ZodNullable<typeof Governor>
@@ -6636,13 +6668,7 @@ export const ServerInfo: z.ZodObject<{
   caFingerprint: z.string(),
   ntpSynced: wire(z.boolean().optional(), z.boolean()),
   zram: wire(z.boolean().optional(), z.boolean()),
-  /**
-   * Persisted intent to share compatible installed S9PKs and stored OS images.
-   */
-  registrySeeding: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Persisted intent to share compatible installed S9PKs and stored OS images.',
-  }),
+  bittorrent: wire(TorrentPreferences.optional(), TorrentPreferences),
   governor: wire(Governor.nullable().optional(), Governor.nullable()),
   epp: wire(Epp.nullable().optional(), Epp.nullable()),
   smtp: wire(SmtpValue.nullable().optional(), SmtpValue.nullable()),

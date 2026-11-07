@@ -424,6 +424,19 @@ impl RpcContext {
             });
         }
 
+        let torrents = crate::registry::bittorrent::TorrentClient::for_server(
+            config.torrent_downloads.clone(),
+            config.bittorrent_seed.clone(),
+        );
+        let preferences: crate::registry::bittorrent::TorrentPreferences = db
+            .peek()
+            .await
+            .as_public()
+            .as_server_info()
+            .as_bittorrent()
+            .de()?;
+        torrents.set_downloads_enabled(preferences.downloads);
+
         let seed = Arc::new(RpcContextSeed {
             is_closed: AtomicBool::new(false),
             closed: watch::Sender::new(false),
@@ -463,10 +476,7 @@ impl RpcContext {
                 })?,
             ),
             client: ReloadableHttpClient::new(socks_proxy_url)?,
-            torrents: Arc::new(crate::registry::bittorrent::TorrentClient::for_server(
-                config.torrent_downloads.clone(),
-                config.bittorrent_seed.clone(),
-            )),
+            torrents: Arc::new(torrents),
             start_time: Instant::now(),
             crons,
         });
@@ -477,25 +487,41 @@ impl RpcContext {
         tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
 
         crate::version::post_init(&res, run_migrations).await?;
-        let seeding = res
+        let preferences = res
             .db
-            .watch("/public/serverInfo/registrySeeding".parse().unwrap())
+            .watch("/public/serverInfo/bittorrent".parse().unwrap())
             .await
-            .typed::<bool>();
+            .typed::<crate::registry::bittorrent::TorrentPreferences>();
         let torrents = res.torrents.clone();
         let weak = Arc::downgrade(&seed);
+        let incoming_context = weak.clone();
         res.add_cron(async move {
             if let Err(error) = torrents
-                .maintain_seeding(seeding, || {
-                    let context = weak.upgrade().map(Self);
-                    async move {
-                        if let Some(context) = context {
-                            crate::registry::bittorrent::discovery::register_existing(&context)
-                                .await?;
+                .maintain_preferences(
+                    preferences,
+                    |enabled| {
+                        let context = incoming_context.upgrade().map(Self);
+                        async move {
+                            match context {
+                                Some(context) => {
+                                    crate::system::bittorrent::configure_incoming(&context, enabled)
+                                        .await
+                                }
+                                None => Ok(None),
+                            }
                         }
-                        Ok(())
-                    }
-                })
+                    },
+                    || {
+                        let context = weak.upgrade().map(Self);
+                        async move {
+                            if let Some(context) = context {
+                                crate::registry::bittorrent::discovery::register_existing(&context)
+                                    .await?;
+                            }
+                            Ok(())
+                        }
+                    },
+                )
                 .boxed()
                 .await
             {

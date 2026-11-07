@@ -398,17 +398,14 @@ mod tests {
     }
 
     #[test]
-    fn sharing_metadata_defaults_to_the_package_data_mount_and_accepts_listener_only_configuration()
-    {
-        let listener_only: ServerConfig =
-            serde_json::from_value(serde_json::json!({"bittorrent-seed": {"listen": "[::]:6882"}}))
-                .unwrap();
-        let seed = listener_only.bittorrent_seed.unwrap();
+    fn sharing_metadata_configuration_does_not_activate_peer_connections() {
+        let configured: ServerConfig =
+            serde_json::from_value(serde_json::json!({"bittorrent-seed": {}})).unwrap();
+        let seed = configured.bittorrent_seed.unwrap();
         assert_eq!(
             seed.directory,
             Path::new("/media/startos/data/package-data/registry-torrents")
         );
-        assert_eq!(seed.listen, Some("[::]:6882".parse().unwrap()));
         let server: ServerConfig = serde_json::from_value(
             serde_json::json!({"bittorrent-seed": {"directory": "/custom-metadata"}}),
         )

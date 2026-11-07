@@ -16,21 +16,18 @@ use crate::util::io::AtomicFile;
 
 const METADATA_EXTENSION: &str = "json";
 
-/// Torrent metadata storage and an optional incoming peer listener.
+/// Torrent metadata storage; native interfaces own incoming peer connections.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct TorrentSeedConfig {
     /// Stores torrent descriptors, never artifact payloads.
     pub directory: PathBuf,
-    /// Unset accepts no incoming peer connections.
-    pub listen: Option<std::net::SocketAddr>,
 }
 
 impl Default for TorrentSeedConfig {
     fn default() -> Self {
         Self {
             directory: Path::new(crate::PACKAGE_DATA).join("registry-torrents"),
-            listen: None,
         }
     }
 }
@@ -105,15 +102,12 @@ pub(super) struct SeedService {
 impl SeedService {
     pub(super) async fn start(
         catalog: Arc<SeedCatalog>,
-        listen: Option<std::net::SocketAddr>,
+        listen: Option<ListenerOptions>,
     ) -> Result<Self, Error> {
         let session = TorrentSession::new(
             catalog.directory.clone(),
             librqbit::SessionOptions {
-                listen: listen.map(|listen_addr| ListenerOptions {
-                    listen_addr,
-                    ..Default::default()
-                }),
+                listen,
                 ..session_options()
             },
         )
@@ -123,6 +117,16 @@ impl SeedService {
             catalog,
             checked: Mutex::new(HashMap::new()),
         })
+    }
+
+    pub(super) fn matches_listener(&self, listener: Option<&ListenerOptions>) -> bool {
+        match listener {
+            Some(listener) => {
+                self.session.0.listen_addr() == Some(listener.listen_addr)
+                    && self.session.0.announce_port() == listener.announce_port
+            }
+            None => self.session.0.listen_addr().is_none(),
+        }
     }
 
     pub(super) async fn stop(&self) {
@@ -294,6 +298,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn listener_matching_tracks_the_assigned_announce_port() -> Result<(), Error> {
+        let directory = TmpDir::new().await?;
+        let catalog = Arc::new(SeedCatalog::open(directory.to_path_buf()).await?);
+        let mut listener = ListenerOptions {
+            listen_addr: "127.0.0.1:0".parse()?,
+            announce_port: Some(45678),
+            ..Default::default()
+        };
+        let incoming = SeedService::start(catalog.clone(), Some(listener.clone())).await?;
+        listener.listen_addr = incoming.session.0.listen_addr().unwrap();
+        assert!(incoming.matches_listener(Some(&listener)));
+        assert!(!incoming.matches_listener(None));
+        listener.announce_port = Some(45679);
+        assert!(!incoming.matches_listener(Some(&listener)));
+        incoming.stop().await;
+        let outgoing = SeedService::start(catalog, None).await?;
+        assert!(outgoing.matches_listener(None));
+        assert!(!outgoing.matches_listener(Some(&listener)));
+        outgoing.stop().await;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn stored_artifact_resumes_without_payload_copy_and_follows_deletion() -> Result<(), Error>
     {
         let source = TmpDir::new().await?;
@@ -309,7 +336,14 @@ mod tests {
         catalog.register(&path, &metadata).await?;
         let mut listen = Some("127.0.0.1:0".parse()?);
         for _ in 0..2 {
-            let service = SeedService::start(catalog.clone(), listen).await?;
+            let service = SeedService::start(
+                catalog.clone(),
+                listen.map(|listen_addr| ListenerOptions {
+                    listen_addr,
+                    ..Default::default()
+                }),
+            )
+            .await?;
             listen = service.session.0.listen_addr();
             assert!(listen.is_some());
             service.refresh().await?;
@@ -334,7 +368,14 @@ mod tests {
                     .is_some_and(|extension| extension == "json" || extension == "lock")
             );
         }
-        let service = SeedService::start(catalog, listen).await?;
+        let service = SeedService::start(
+            catalog,
+            listen.map(|listen_addr| ListenerOptions {
+                listen_addr,
+                ..Default::default()
+            }),
+        )
+        .await?;
         service.refresh().await?;
         let before = service.session.0.get(meta.info_hash.into()).unwrap();
         service.catalog.register(&path, &metadata).await?;

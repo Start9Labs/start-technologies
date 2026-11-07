@@ -1295,10 +1295,26 @@ export const SetNameParams: z.ZodObject<{ name: z.ZodString }> =
   /* @__PURE__ */ object({ name: z.string() }).meta({
     id: 'SetNameParams',
   })
-export const SetSeedingParams: z.ZodObject<{ enabled: z.ZodBoolean }> =
-  /* @__PURE__ */ object({ enabled: z.boolean() }).meta({
-    id: 'SetSeedingParams',
-  })
+export const SetPreferencesParams: z.ZodObject<{
+  downloads: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+    z.ZodNullable<z.ZodBoolean>
+  >
+  seeding: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+    z.ZodNullable<z.ZodBoolean>
+  >
+  incoming: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+    z.ZodNullable<z.ZodBoolean>
+  >
+}> = /* @__PURE__ */ object({
+  downloads: wire(z.boolean().nullable().optional(), z.boolean().nullable()),
+  seeding: wire(z.boolean().nullable().optional(), z.boolean().nullable()),
+  incoming: wire(z.boolean().nullable().optional(), z.boolean().nullable()),
+}).meta({
+  id: 'SetPreferencesParams',
+})
 export const SetServerHostnameParams: z.ZodObject<{
   /**
    * The server's `.local` hostname: up to 32 lowercase letters, numbers, and
@@ -1415,6 +1431,23 @@ export const TimeInfo: z.ZodObject<{ now: z.ZodString; uptime: z.ZodInt }> =
   /* @__PURE__ */ object({ now: z.string(), uptime: z.int() }).meta({
     id: 'TimeInfo',
   })
+
+/**
+ * Downloads start enabled; seeding and incoming connections start disabled.
+ */
+export const TorrentPreferences: z.ZodObject<{
+  downloads: z.ZodBoolean
+  seeding: z.ZodBoolean
+  incoming: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  downloads: z.boolean(),
+  seeding: z.boolean(),
+  incoming: z.boolean(),
+}).meta({
+  id: 'TorrentPreferences',
+  description:
+    'Downloads start enabled; seeding and incoming connections start disabled.',
+})
 export const TrustCaParams: z.ZodObject<{ cert: typeof literal_0 }> =
   /* @__PURE__ */ object({ cert: literal_0 }).meta({
     id: 'TrustCaParams',
@@ -4448,6 +4481,21 @@ export const BindingSetGuaWanParams: z.ZodObject<{
 }).meta({
   id: 'BindingSetGuaWanParams',
 })
+
+/**
+ * Configured transport availability and the native incoming peer interface.
+ */
+export const BitTorrentConfig: z.ZodObject<{
+  available: z.ZodBoolean
+  interface: typeof ServiceInterface
+}> = /* @__PURE__ */ object({
+  available: z.boolean(),
+  interface: ServiceInterface,
+}).meta({
+  id: 'BitTorrentConfig',
+  description:
+    'Configured transport availability and the native incoming peer interface.',
+})
 export const DerivedAddressInfo: z.ZodObject<{
   /**
    * User override: enable these addresses (only for public IP & port)
@@ -6481,7 +6529,7 @@ export const Api = {
         bittorrent: {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {
-            enabled: {
+            config: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
                   object({
@@ -6494,11 +6542,22 @@ export const Api = {
                 ),
                 empty,
               ),
-              _RETURN: /* @__PURE__ */ z.boolean(),
+              _RETURN: /* @__PURE__ */ BitTorrentConfig,
             },
-            'set-seeding': {
-              _PARAMS: /* @__PURE__ */ SetSeedingParams,
-              _RETURN: /* @__PURE__ */ z.null(),
+            'set-preferences': {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                SetPreferencesParams,
+              ),
+              _RETURN: /* @__PURE__ */ TorrentPreferences,
             },
           },
         },

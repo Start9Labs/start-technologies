@@ -73,13 +73,19 @@ An MCP client authenticates with the same token to use the server's API as tools
 
 Restart, shut down, update, and configure the server.
 
-### `start-cli server bittorrent enabled`
+### `start-cli server bittorrent config`
 
-Show whether the server's configuration permits BitTorrent downloads and software sharing.
+Show whether the administrator’s configuration permits BitTorrent and describe the native incoming peer interface. Saved preferences are available at `/public/serverInfo/bittorrent` in the server database.
 
-### `start-cli server bittorrent set-seeding --enabled <true|false>`
+### `start-cli server bittorrent set-preferences`
 
-Enable or disable sharing of compatible installed S9PKs and OS images already stored by StartOS. Disabled by default; changes apply live and persist across restarts. Sharing creates no extra payload copies or extended retention. This controls the server, not local CLI transfers, and leaves uploads during active server downloads unchanged. See [Software Sharing](marketplace.md#software-sharing) for compatibility, storage and peer visibility.
+Update the server’s persisted preferences without restarting. Omitted flags keep their current values:
+
+- `--downloads <true|false>` — Prefer BitTorrent with HTTP fallback; enabled by default. Disabling it stops active peer transfers and clears seeding and incoming intent.
+- `--seeding <true|false>` — Share compatible installed S9PKs and OS images already stored by StartOS; disabled by default. Requires downloads and clears incoming intent when disabled.
+- `--incoming <true|false>` — Allow incoming TCP peer connections through the native interface; disabled by default and requires seeding. Configure addresses and inspect **Address Requirements** on **System → Software sharing**.
+
+Turning a parent back on does not restore its children. Sharing creates no extra payload copies or extended retention. These flags control the server, not local CLI transfers; active server downloads can upload while sharing stored software is off. See [Software Sharing](marketplace.md#software-sharing) for compatibility, forwarding, storage and peer visibility.
 
 ### `start-cli server restart`
 

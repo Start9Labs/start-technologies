@@ -282,7 +282,9 @@ export type SetEchoipUrlsParamsInput = z.input<
 >
 export type SetLanguageParamsInput = z.input<typeof schemas.SetLanguageParams>
 export type SetNameParamsInput = z.input<typeof schemas.SetNameParams>
-export type SetSeedingParamsInput = z.input<typeof schemas.SetSeedingParams>
+export type SetPreferencesParamsInput = z.input<
+  typeof schemas.SetPreferencesParams
+>
 export type SetServerHostnameParamsInput = z.input<
   typeof schemas.SetServerHostnameParams
 >
@@ -307,6 +309,11 @@ export type Ssid = z.output<typeof schemas.Ssid>
 export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type TermSizeInput = z.input<typeof schemas.TermSize>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
+
+/**
+ * Downloads start enabled; seeding and incoming connections start disabled.
+ */
+export type TorrentPreferences = z.output<typeof schemas.TorrentPreferences>
 export type TrustCaParamsInput = z.input<typeof schemas.TrustCaParams>
 export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedCa = z.output<typeof schemas.TrustedCa>
@@ -619,6 +626,11 @@ export type BindingSetAddressEnabledParamsInput = z.input<
 export type BindingSetGuaWanParamsInput = z.input<
   typeof schemas.BindingSetGuaWanParams
 >
+
+/**
+ * Configured transport availability and the native incoming peer interface.
+ */
+export type BitTorrentConfig = z.output<typeof schemas.BitTorrentConfig>
 export type DerivedAddressInfo = z.output<typeof schemas.DerivedAddressInfo>
 export type DeviceInfo = z.output<typeof schemas.DeviceInfo>
 export type DiskInfo = z.output<typeof schemas.DiskInfo>

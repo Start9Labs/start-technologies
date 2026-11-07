@@ -9349,7 +9349,7 @@
     }
   },
   {
-    "name": "server.bittorrent.enabled",
+    "name": "server.bittorrent.config",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -9364,24 +9364,144 @@
           "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
         }
       }
-    }
-  },
-  {
-    "name": "server.bittorrent.set-seeding",
-    "inputSchema": {
+    },
+    "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$defs": {
-        "SetSeedingParams": {
+        "BitTorrentConfig": {
           "type": "object",
-          "properties": { "enabled": { "type": "boolean" } },
-          "required": ["enabled"],
+          "properties": {
+            "available": { "type": "boolean" },
+            "interface": { "$ref": "#/$defs/ServiceInterface" }
+          },
+          "required": ["available", "interface"],
+          "additionalProperties": true,
+          "description": "Configured transport availability and the native incoming peer interface."
+        },
+        "ServiceInterface": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/ServiceInterfaceId" },
+            "name": { "type": "string" },
+            "description": { "type": "string" },
+            "masked": { "type": "boolean" },
+            "addressInfo": { "$ref": "#/$defs/AddressInfo" },
+            "type": { "$ref": "#/$defs/ServiceInterfaceType" },
+            "preferredLauncherAddress": {
+              "description": "The interface address Open UI should prefer.",
+              "type": ["string", "null"]
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "description",
+            "masked",
+            "addressInfo",
+            "type",
+            "preferredLauncherAddress"
+          ],
           "additionalProperties": true
+        },
+        "ServiceInterfaceId": { "type": "string" },
+        "AddressInfo": {
+          "type": "object",
+          "properties": {
+            "username": { "type": ["string", "null"] },
+            "hostId": { "$ref": "#/$defs/HostId" },
+            "internalPort": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "scheme": { "type": ["string", "null"] },
+            "sslScheme": { "type": ["string", "null"] },
+            "suffix": { "type": "string" }
+          },
+          "required": [
+            "username",
+            "hostId",
+            "internalPort",
+            "scheme",
+            "sslScheme",
+            "suffix"
+          ],
+          "additionalProperties": true
+        },
+        "HostId": { "type": "string" },
+        "ServiceInterfaceType": {
+          "type": "string",
+          "enum": ["ui", "p2p", "api"]
         }
       },
       "type": "object",
-      "properties": { "enabled": { "type": "boolean" } },
-      "required": ["enabled"],
-      "additionalProperties": true
+      "properties": {
+        "available": { "type": "boolean" },
+        "interface": { "$ref": "#/$defs/ServiceInterface" }
+      },
+      "required": ["available", "interface"],
+      "additionalProperties": true,
+      "description": "Configured transport availability and the native incoming peer interface."
+    }
+  },
+  {
+    "name": "server.bittorrent.set-preferences",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/SetPreferencesParams" }
+      ],
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "SetPreferencesParams": {
+          "type": "object",
+          "properties": {
+            "downloads": { "type": ["boolean", "null"] },
+            "seeding": { "type": ["boolean", "null"] },
+            "incoming": { "type": ["boolean", "null"] }
+          },
+          "additionalProperties": true
+        }
+      },
+      "type": "object"
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "TorrentPreferences": {
+          "type": "object",
+          "properties": {
+            "downloads": { "type": "boolean" },
+            "seeding": { "type": "boolean" },
+            "incoming": { "type": "boolean" }
+          },
+          "required": ["downloads", "seeding", "incoming"],
+          "additionalProperties": true,
+          "description": "Downloads start enabled; seeding and incoming connections start disabled."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "downloads": { "type": "boolean" },
+        "seeding": { "type": "boolean" },
+        "incoming": { "type": "boolean" }
+      },
+      "required": ["downloads", "seeding", "incoming"],
+      "additionalProperties": true,
+      "description": "Downloads start enabled; seeding and incoming connections start disabled."
     }
   },
   {

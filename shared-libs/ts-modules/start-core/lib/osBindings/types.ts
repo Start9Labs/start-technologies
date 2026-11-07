@@ -458,6 +458,16 @@ export type TaskSeverity = z.output<typeof schemas.TaskSeverity>
 export type TaskSeverityInput = z.input<typeof schemas.TaskSeverity>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TimeInfoInput = z.input<typeof schemas.TimeInfo>
+
+/**
+ * Downloads start enabled; seeding and incoming connections start disabled.
+ */
+export type TorrentPreferences = z.output<typeof schemas.TorrentPreferences>
+
+/**
+ * Downloads start enabled; seeding and incoming connections start disabled.
+ */
+export type TorrentPreferencesInput = z.input<typeof schemas.TorrentPreferences>
 export type TrustContext = z.output<typeof schemas.TrustContext>
 export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedOsUpdateSigner = z.output<
@@ -1250,6 +1260,16 @@ export type BindingSetGuaWanParams = z.output<
 export type BindingSetGuaWanParamsInput = z.input<
   typeof schemas.BindingSetGuaWanParams
 >
+
+/**
+ * Configured transport availability and the native incoming peer interface.
+ */
+export type BitTorrentConfig = z.output<typeof schemas.BitTorrentConfig>
+
+/**
+ * Configured transport availability and the native incoming peer interface.
+ */
+export type BitTorrentConfigInput = z.input<typeof schemas.BitTorrentConfig>
 export type CreateTaskParams = z.output<typeof schemas.CreateTaskParams>
 export type CreateTaskParamsInput = z.input<typeof schemas.CreateTaskParams>
 export type CurrentDependencies = z.output<typeof schemas.CurrentDependencies>

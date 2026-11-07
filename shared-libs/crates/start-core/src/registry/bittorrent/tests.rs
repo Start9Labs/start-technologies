@@ -496,7 +496,7 @@ async fn torrent_metadata_download_is_preferred_to_http() -> Result<(), Error> {
     );
     assert_eq!(swarm.http_hits.load(Ordering::SeqCst), 0);
     assert!(client.disable_upload);
-    client.resume_seeding().await?;
+    client.resume_seeding(None).await?;
     assert!(client.catalog.get().is_none());
     assert!(client.seeds.read().await.is_none());
     Ok(())
@@ -605,6 +605,7 @@ async fn existing_artifact_metadata_lookup_does_not_download_a_payload() -> Resu
             asset.torrent.as_ref().unwrap(),
             &asset.commitment.clone().into(),
             Client::new(),
+            None,
         )
         .await?
         .unwrap();
@@ -634,35 +635,38 @@ async fn slow_metadata_discovery_does_not_block_sharing_or_disable() -> Result<(
         TorrentDownloadConfig::default(),
         Some(TorrentSeedConfig {
             directory: catalog.to_path_buf(),
-            listen: None,
         }),
     ));
     let db = patch_db::PatchDb::in_memory();
-    db.put(&patch_db::json_ptr::ROOT, &imbl_value::json!(false))
+    db.put(&patch_db::json_ptr::ROOT, &sharing_preferences(false))
         .await?;
     let watch = db
         .watch(patch_db::json_ptr::ROOT.to_owned())
         .await
-        .typed::<bool>();
+        .typed::<TorrentPreferences>();
     let started = Arc::new(AtomicUsize::new(0));
     let cancelled = Arc::new(AtomicUsize::new(0));
     let owner = client.clone();
     let (began, ended) = (started.clone(), cancelled.clone());
     let task: NonDetachingJoinHandle<_> = tokio::spawn(async move {
         owner
-            .maintain_seeding(watch, move || {
-                let (started, cancelled) = (began.clone(), ended.clone());
-                async move {
-                    let _guard = DiscoveryGuard(cancelled);
-                    started.fetch_add(1, Ordering::SeqCst);
-                    std::future::pending::<Result<(), Error>>().await
-                }
-            })
+            .maintain_preferences(
+                watch,
+                |_| async { Ok(None) },
+                move || {
+                    let (started, cancelled) = (began.clone(), ended.clone());
+                    async move {
+                        let _guard = DiscoveryGuard(cancelled);
+                        started.fetch_add(1, Ordering::SeqCst);
+                        std::future::pending::<Result<(), Error>>().await
+                    }
+                },
+            )
             .await
     })
     .into();
     assert_eq!(started.load(Ordering::SeqCst), 0);
-    db.put(&patch_db::json_ptr::ROOT, &imbl_value::json!(true))
+    db.put(&patch_db::json_ptr::ROOT, &sharing_preferences(true))
         .await?;
     wait_for_seeding(&client, true).await;
     timeout(Duration::from_secs(10), async {
@@ -672,7 +676,7 @@ async fn slow_metadata_discovery_does_not_block_sharing_or_disable() -> Result<(
     })
     .await
     .unwrap();
-    db.put(&patch_db::json_ptr::ROOT, &imbl_value::json!(false))
+    db.put(&patch_db::json_ptr::ROOT, &sharing_preferences(false))
         .await?;
     wait_for_seeding(&client, false).await;
     assert_eq!(cancelled.load(Ordering::SeqCst), 1);
@@ -852,7 +856,6 @@ async fn stored_hybrid_registration_keeps_metadata_only_and_waits_for_opt_in() -
         TorrentDownloadConfig::default(),
         Some(TorrentSeedConfig {
             directory: catalog.to_path_buf(),
-            listen: None,
         }),
     );
     let asset = swarm.asset(swarm.url.join("metadata.torrent")?);
@@ -878,13 +881,20 @@ async fn stored_hybrid_registration_keeps_metadata_only_and_waits_for_opt_in() -
     );
     assert!(!catalog.join(meta.info_hash.as_string()).exists());
     for _ in 0..2 {
-        client.resume_seeding().await?;
+        client.resume_seeding(None).await?;
         assert!(client.seeds.read().await.is_some());
         client.shutdown().await;
         assert!(client.seeds.read().await.is_none());
     }
     assert_eq!(tokio::fs::read(path).await?, swarm.content);
     Ok(())
+}
+
+fn sharing_preferences(seeding: bool) -> TorrentPreferences {
+    TorrentPreferences {
+        seeding,
+        ..Default::default()
+    }
 }
 
 async fn wait_for_seeding(client: &TorrentClient, enabled: bool) {
@@ -905,37 +915,33 @@ async fn seeding_follows_persisted_intent_and_can_restart_with_an_old_service_re
         TorrentDownloadConfig::default(),
         Some(TorrentSeedConfig {
             directory: cache.to_path_buf(),
-            listen: None,
         }),
     ));
     let db = patch_db::PatchDb::in_memory();
-    let ptr: patch_db::json_ptr::JsonPointer = "/enabled".parse().unwrap();
-    db.put(
-        &patch_db::json_ptr::ROOT,
-        &imbl_value::json!({"enabled": false}),
-    )
-    .await?;
-    let watch = db.watch(ptr.clone()).await.typed::<bool>();
+    let ptr = patch_db::json_ptr::ROOT.to_owned();
+    db.put(&ptr, &sharing_preferences(false)).await?;
+    let watch = db.watch(ptr.clone()).await.typed::<TorrentPreferences>();
     let owner = client.clone();
-    let task: NonDetachingJoinHandle<_> =
-        tokio::spawn(
-            async move { Box::pin(owner.maintain_seeding(watch, || async { Ok(()) })).await },
-        )
-        .into();
-    db.put(&ptr, &true).await?;
+    let task: NonDetachingJoinHandle<_> = tokio::spawn(async move {
+        owner
+            .maintain_preferences(watch, |_| async { Ok(None) }, || async { Ok(()) })
+            .await
+    })
+    .into();
+    db.put(&ptr, &sharing_preferences(true)).await?;
     wait_for_seeding(&client, true).await;
     let old = client.seeds.read().await.clone().unwrap();
     let lease = client.catalog.get().unwrap().clone();
-    db.put(&ptr, &false).await?;
+    db.put(&ptr, &sharing_preferences(false)).await?;
     wait_for_seeding(&client, false).await;
-    db.put(&ptr, &true).await?;
+    db.put(&ptr, &sharing_preferences(true)).await?;
     wait_for_seeding(&client, true).await;
     assert!(Arc::ptr_eq(&lease, client.catalog.get().unwrap()));
     assert!(!Arc::ptr_eq(
         &old,
         client.seeds.read().await.as_ref().unwrap()
     ));
-    db.put(&ptr, &false).await?;
+    db.put(&ptr, &sharing_preferences(false)).await?;
     wait_for_seeding(&client, false).await;
     drop(task);
     Ok(())
@@ -949,10 +955,9 @@ async fn registration_while_disabled_does_not_revive_a_stopped_service() -> Resu
         TorrentDownloadConfig::default(),
         Some(TorrentSeedConfig {
             directory: catalog.to_path_buf(),
-            listen: None,
         }),
     );
-    client.resume_seeding().await?;
+    client.resume_seeding(None).await?;
     let old = client.seeds.read().await.clone().unwrap();
     client.shutdown().await;
     let metadata = SharingMetadata {
@@ -964,7 +969,7 @@ async fn registration_while_disabled_does_not_revive_a_stopped_service() -> Resu
         .await?;
     old.refresh().await?;
     assert!(client.seeds.read().await.is_none());
-    client.resume_seeding().await?;
+    client.resume_seeding(None).await?;
     assert!(!Arc::ptr_eq(
         &old,
         client.seeds.read().await.as_ref().unwrap()
@@ -980,18 +985,18 @@ async fn cancelling_the_seeding_worker_prevents_late_service_publication() -> Re
         TorrentDownloadConfig::default(),
         Some(TorrentSeedConfig {
             directory: cache.to_path_buf(),
-            listen: None,
         }),
     ));
     let db = patch_db::PatchDb::in_memory();
-    db.put(&patch_db::json_ptr::ROOT, &imbl_value::json!(true))
+    db.put(&patch_db::json_ptr::ROOT, &sharing_preferences(true))
         .await?;
     let watch = db
         .watch(patch_db::json_ptr::ROOT.to_owned())
         .await
-        .typed::<bool>();
+        .typed::<TorrentPreferences>();
     let publication = client.seeds.write().await;
-    let mut worker = Box::pin(client.maintain_seeding(watch, || async { Ok(()) }));
+    let mut worker =
+        Box::pin(client.maintain_preferences(watch, |_| async { Ok(None) }, || async { Ok(()) }));
     assert!(futures::poll!(&mut worker).is_pending());
     drop(worker);
     drop(publication);
@@ -1008,10 +1013,62 @@ async fn http_only_server_cannot_start_retained_seeding() -> Result<(), Error> {
         },
         None,
     );
-    client.resume_seeding().await?;
+    client.resume_seeding(None).await?;
     assert!(!client.downloads_enabled());
     assert!(client.seeds.read().await.is_none());
     assert!(client.catalog.get().is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn disabling_downloads_stops_live_readers_and_falls_back_to_http() -> Result<(), Error> {
+    let swarm = Swarm::new().await?;
+    swarm._seed.0.stop().await;
+    let asset = swarm.asset(swarm.url.join("metadata.torrent")?);
+    let client = cli_client();
+    let pending = client
+        .begin(
+            asset.torrent.as_ref().unwrap(),
+            asset.commitment.clone().into(),
+            Client::new(),
+        )
+        .await?
+        .unwrap();
+    let source = pending.source.as_ref().unwrap().clone();
+    let token = source.workspace.session.0.cancellation_token().clone();
+    let _reader = source.fetch(0, 1).await?;
+    client.set_downloads_enabled(false);
+    assert!(token.is_cancelled());
+    assert!(!client.downloads_enabled());
+    let mut phase = FullProgressTracker::new().add_phase("Downloading".into(), Some(1));
+    let completed = timeout(Duration::from_secs(2), pending.complete(&mut phase))
+        .await
+        .unwrap();
+    assert!(completed.source.is_none());
+    assert_eq!(completed.metadata.torrent.0, swarm.torrent);
+    assert_eq!(swarm.download(&asset, &client).await?, swarm.content);
+    client.set_downloads_enabled(true);
+    let next = client
+        .begin(
+            asset.torrent.as_ref().unwrap(),
+            asset.commitment.clone().into(),
+            Client::new(),
+        )
+        .await?
+        .unwrap();
+    let next_token = next
+        .source
+        .as_ref()
+        .unwrap()
+        .workspace
+        .session
+        .0
+        .cancellation_token()
+        .clone();
+    drop(pending);
+    assert!(!next_token.is_cancelled());
+    drop(next);
+    assert!(next_token.is_cancelled());
     Ok(())
 }
 

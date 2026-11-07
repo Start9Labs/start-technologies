@@ -497,12 +497,17 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
   assert.equal(data.serverInfo.trustedKeys[ids[2]].os, true)
 })
 
-test('StartOS seeding mock changes persisted intent through PatchDB revisions', async () => {
+test('StartOS BitTorrent mock cascades preferences through PatchDB revisions', async () => {
   const { applyPatch } = require('fast-json-patch')
   const storage = Symbol('session storage')
   const data = {
     ui: { registries: {} },
-    serverInfo: { registrySeeding: false, trustedKeys: {}, registryKeys: {} },
+    serverInfo: {
+      bittorrent: { downloads: true, seeding: false, incoming: false },
+      network: { host: { bindings: {} } },
+      trustedKeys: {},
+      registryKeys: {},
+    },
   }
   const { dependencies, tokens, load } = harness(
     new Map([
@@ -522,14 +527,31 @@ test('StartOS seeding mock changes persisted intent through PatchDB revisions', 
   const subscription = client.mockWsSource$.subscribe(revision => {
     applyPatch(data, revision.patch)
   })
-  assert.equal(await client.rpc.server.bittorrent.enabled({}), true)
-  assert.equal(data.serverInfo.registrySeeding, false)
-  for (const enabled of [true, false]) {
-    assert.equal(
-      await client.rpc.server.bittorrent.setSeeding({ enabled }),
-      null,
+  const config = await client.rpc.server.bittorrent.config({})
+  assert.equal(config.available, true)
+  assert.equal(config.interface.type, 'p2p')
+  for (const [patch, expected] of [
+    [{ incoming: true }, { downloads: true, seeding: false, incoming: false }],
+    [{ seeding: true }, { downloads: true, seeding: true, incoming: false }],
+    [{ incoming: true }, { downloads: true, seeding: true, incoming: true }],
+    [{ seeding: false }, { downloads: true, seeding: false, incoming: false }],
+    [{ seeding: true }, { downloads: true, seeding: true, incoming: false }],
+    [
+      { downloads: false },
+      { downloads: false, seeding: false, incoming: false },
+    ],
+    [{ downloads: true }, { downloads: true, seeding: false, incoming: false }],
+  ]) {
+    assert.deepEqual(
+      { ...(await client.rpc.server.bittorrent.setPreferences(patch)) },
+      expected,
     )
-    assert.equal(data.serverInfo.registrySeeding, enabled)
+    assert.deepEqual({ ...data.serverInfo.bittorrent }, expected)
+    const binding =
+      data.serverInfo.network.host.bindings[
+        config.interface.addressInfo.internalPort
+      ]
+    if (binding) assert.equal(binding.enabled, expected.incoming)
   }
   subscription.unsubscribe()
 })
