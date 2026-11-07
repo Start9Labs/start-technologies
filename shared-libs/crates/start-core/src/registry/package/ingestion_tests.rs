@@ -145,7 +145,7 @@ async fn registry_server(
 #[tokio::test]
 async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserves_mirror_and_promotion()
  {
-    use crate::context::config::ClientConfig;
+    use crate::context::config::{ClientConfig, Profiles};
     use crate::developer::write_signing_key;
     use crate::registry::package::add::cli_add_package_impl;
     use crate::registry::package::promote::{CliPromoteParams, cli_promote};
@@ -164,11 +164,17 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     )
     .await;
     let (registry, registry_task) = registry_server(ctx.clone()).await;
+    let target = context(temp.path().join("second"), uploader.clone()).await;
+    let (destination, destination_task) = registry_server(target.clone()).await;
     let key_path = temp.path().join("identity.pem");
     write_signing_key(&uploader_key, &key_path).await.unwrap();
     let cli = CliContext::init(ClientConfig {
         id_key_path: Some(key_path.clone()),
-        registry: Some(registry.to_string().parse().unwrap()),
+        registry: Some(Profiles(BTreeMap::from([
+            ("default".into(), registry.to_string()),
+            ("source".into(), registry.to_string()),
+            ("destination".into(), destination.to_string()),
+        ]))),
         ..Default::default()
     })
     .unwrap();
@@ -212,13 +218,11 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     assert_eq!(mirrored.signatures, asset.signatures);
     assert_eq!(mirrored.urls.len(), 2);
 
-    let target = context(temp.path().join("second"), uploader.clone()).await;
-    let (destination, destination_task) = registry_server(target.clone()).await;
     cli_promote(
         cli.clone(),
         CliPromoteParams {
-            from: Some(registry),
-            to: Some(destination),
+            from: Some("source".into()),
+            to: Some("destination".into()),
             id: "trust-fixture".parse().unwrap(),
             version: version.clone(),
         },

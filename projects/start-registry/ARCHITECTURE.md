@@ -35,6 +35,7 @@ Defined in `shared-libs/crates/start-core/src/bins/registry.rs`:
 
 Defined in `shared-libs/crates/start-core/src/registry/mod.rs`:
 
+- `GET /` — HTTP 307 to `https://marketplace.start9.com/?registry=<encoded-origin>`, using the request authority and `X-Forwarded-Proto` (plain HTTP by default).
 - `POST /rpc/{*path}` — JSON-RPC, wrapped in `Cors`, `Auth` (local + signature auth), and `DeviceInfoMiddleware`.
 - `GET /ws/rpc` — multiplexed JSON-RPC and opt-in `rpcstream` responses, using the HTTP route's middleware. Each JSON message carries its own optional root `signature` proof; an upgrade-body signature does not authenticate subsequent messages.
 - `GET /ws/rpc/{*path}` — WebSocket RPC continuations, keyed by a `Guid`.

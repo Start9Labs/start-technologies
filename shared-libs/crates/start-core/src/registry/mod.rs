@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use axum::Router;
+use axum::extract::Request;
+use axum::http::{StatusCode, Uri};
+use axum::response::Redirect;
 use futures::future::ready;
 use imbl_value::InternedString;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, Server, from_fn_async};
@@ -9,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::context::CliContext;
 use crate::middleware::auth::Auth;
 use crate::middleware::cors;
+use crate::net::http::request_authority;
 use crate::net::static_server::{bad_request, not_found, server_error};
 use crate::prelude::*;
 use crate::registry::context::RegistryContext;
@@ -132,11 +136,38 @@ pub(crate) fn registry_server(ctx: RegistryContext) -> rpc_toolkit::HttpServer<R
         .middleware(DeviceInfoMiddleware::new())
 }
 
+async fn marketplace_redirect(req: Request) -> Result<Redirect, StatusCode> {
+    let scheme = req
+        .headers()
+        .get("x-forwarded-proto")
+        .map(|value| value.to_str())
+        .transpose()
+        .map_err(|_| StatusCode::BAD_REQUEST)?
+        .or(req.uri().scheme_str())
+        .unwrap_or("http");
+    if !matches!(scheme, "http" | "https") {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let authority = request_authority(&req).ok_or(StatusCode::BAD_REQUEST)?;
+    let registry = Uri::builder()
+        .scheme(scheme)
+        .authority(authority)
+        .path_and_query("/")
+        .build()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let mut marketplace = url::Url::parse("https://marketplace.start9.com/").unwrap();
+    marketplace
+        .query_pairs_mut()
+        .append_pair("registry", &registry.to_string());
+    Ok(Redirect::temporary(marketplace.as_str()))
+}
+
 pub fn registry_router(ctx: RegistryContext) -> Router {
     use axum::extract as x;
     use axum::routing::{any, get};
     let server = registry_server(ctx.clone());
     Router::new()
+        .route("/", get(marketplace_redirect))
         .route("/rpc/{*path}", any(server.clone()).layer(cors::layer()))
         .route("/ws/rpc", get(server.for_websocket()).layer(cors::layer()))
         .route(
