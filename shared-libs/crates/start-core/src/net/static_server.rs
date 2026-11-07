@@ -1603,7 +1603,7 @@ mod tests {
             ParentHandler::new(),
         )
         .for_http();
-        (continuations, rpc_router(context, server))
+        (continuations, rpc_router(context, any(server)))
     }
 
     #[tokio::test]
