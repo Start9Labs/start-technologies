@@ -52,11 +52,11 @@ Install (root `Makefile`) copies the binary to `/usr/bin/start-registrybox` and 
 
 ```bash
 cargo build -p start-registry --bin registrybox
-./target/debug/registrybox start-registryd --listen 127.0.0.1:5959 --datadir ./registry-data
+./target/debug/registrybox start-registryd --listen 127.0.0.1:5959 --hostname localhost --datadir ./registry-data
 ./target/debug/registrybox start-registry --help
 ```
 
-Defaults: listen `127.0.0.1:5959`, datadir `/var/lib/startos` (state in `<datadir>/registry.db` + a SQLite metrics DB + hosted assets). Useful flags: `-l/--listen`, `-H/--hostname`, `-p/--tor-proxy`, `-d/--datadir`, `-c/--config`.
+At least one `--hostname` is required. Defaults: listen `127.0.0.1:5959`, datadir `/var/lib/startos` (state in `<datadir>/registry.db` + a SQLite metrics DB + hosted assets). Useful flags: `-l/--listen`, `-H/--hostname`, `-p/--tor-proxy`, `-d/--datadir`, `-c/--config`.
 
 ## Documentation
 

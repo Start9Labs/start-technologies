@@ -1,0 +1,1 @@
+- Paket-Workflows warnen bei fehlgeschlagenen Registry-Abfragen und setzen die Veröffentlichung fort, statt davor abzubrechen. Fehler bei der Abfrage der Referenz-Registry melden ihren Fehler vor dem Abbruch.
