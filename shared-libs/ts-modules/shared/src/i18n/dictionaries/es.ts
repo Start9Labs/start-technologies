@@ -965,4 +965,10 @@ export default {
   1113: 'Conecta este registro para explorar su catálogo. Se confiará en las nuevas claves de firma de este registro para los paquetes.',
   1114: 'Actualizar registro',
   1115: 'Conecta este registro antes de actualizarlo.',
+  1116: 'La identidad del servidor ha cambiado',
+  1117: 'Este servidor utiliza una clave de identidad distinta de la que recuerda este navegador.',
+  1118: 'Esto puede ocurrir al reemplazar o restaurar un servidor, pero también podría indicar una interceptación. Verifica los cambios inesperados por un canal de confianza.',
+  1119: 'La conexión continúa. La nueva identidad ya está guardada.',
+  1120: 'Huella anterior',
+  1121: 'Huella actual',
 } satisfies i18n

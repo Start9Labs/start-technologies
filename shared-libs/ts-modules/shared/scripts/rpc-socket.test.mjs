@@ -9,6 +9,8 @@ const { RpcSocketService } =
 const { AuthKeyService, AUTH_SIGNING_HOST } =
   await import('../src/services/auth-key.service.ts')
 const { RELATIVE_URL } = await import('../src/tokens/relative-url.ts')
+const { ServerIdentityService } =
+  await import('../src/services/server-identity.service.ts')
 
 for (const name of ['CloseEvent', 'ErrorEvent'])
   globalThis[name] ??= class extends Event {
@@ -61,6 +63,7 @@ async function fixture(context) {
       { provide: RELATIVE_URL, useValue: '/rpc/v1' },
       { provide: AUTH_SIGNING_HOST, useValue: 'server.test' },
       { provide: AuthKeyService, useValue: { lease: async () => lease } },
+      { provide: ServerIdentityService, useValue: { observe: async () => {} } },
     ],
   })
   const service = injector.get(RpcSocketService)

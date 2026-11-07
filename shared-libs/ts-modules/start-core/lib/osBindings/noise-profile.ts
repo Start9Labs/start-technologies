@@ -5,6 +5,10 @@ export const NOISE_PROFILE = {
       110, 111, 105, 115, 101, 45, 108, 105, 98, 112, 50, 112, 45, 115, 116, 97,
       116, 105, 99, 45, 107, 101, 121, 58,
     ],
+    fingerprint: {
+      algorithm: 'SHA-256',
+      prefix: 'SHA256:',
+    },
   },
   transport: {
     recordHeaderBytes: 2,

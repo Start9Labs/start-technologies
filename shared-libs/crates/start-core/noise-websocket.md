@@ -113,14 +113,13 @@ results, stdout or exit status. Registration/permissions remain live and separat
 The registry-specific CLI flow observes the peer after completed admission and
 before sending the RPC, including calls subsequently denied authorization. Normal
 OS/Tunnel/WRT native calls, OS registry discovery/subscriptions, local-token and
-anonymous HTTP calls do not own these records or warnings. Browser own-server
-TOFU remains unfinished.
+anonymous HTTP calls do not own these records or warnings.
 
 ## Browser transport
 
 The binding generator emits `noise-profile.ts` from the native identity, session
 and framing owners. It carries the negotiation template, prologue prefix, endpoint,
-kind values, framing limits and allowed close-code ranges. Angular infrastructure
+kind values, framing limits, allowed close-code ranges and identity-fingerprint profile. Angular infrastructure
 imports this data and maintained `@libp2p/noise` 17.0.7; the SDK has no Noise
 dependency. The library owns DH, transcript, nonces, certificates and AEAD. An
 opaque WebCrypto signer supplies a prepared standard identity signature without
@@ -145,9 +144,20 @@ OS route. Setup/init/diagnostic contexts remain unscoped. StartWRT uses the same
 transport for keyed RPC and DOM-style GUID sockets. Its existing reconnect/update
 owners abort a stalled shared session before bounded recovery probes; anonymous
 bootstrap retains aborting HTTP. Typed firmware metadata and the retained HTTP
-header feed its existing stale-UI detector. Remaining CLI contexts and browser/administrator
-TOFU warnings still require migration. Maintained Noise/stream modules load lazily;
+header feed its existing stale-UI detector. Maintained Noise/stream modules load lazily;
 identity signing still finishes before native connection and RPC-response deadlines.
+
+Completed browser admission carries the verified raw public key in `NoiseOpenEvent`.
+`ServerIdentityService` fingerprints it using the Rust-generated profile and atomically
+compares/replaces one record in the existing identity IndexedDB store, separately from
+the device key. The app's key namespace and same-origin API path scope this record;
+logout removes only the device key. First contact and unchanged keys are silent. A
+rotation lazily opens a nonblocking Taiga notice with verification advice and fingerprint
+details; it remembers the newly verified key rather than pinning the old one. RPC and
+continuation open observers keep their existing ownership. Storage failure does not
+reject RPC or claim that the key was remembered. Foreign API targets, startup and
+registry listings never become own-server history. This warning does not protect
+replacement JavaScript delivered through a compromised origin.
 
 The browser adapter composes libp2p's message stream and length-prefixed stream
 with a WebSocket-compatible facade. Its logical receive and queued-write payload

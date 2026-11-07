@@ -965,4 +965,10 @@ export default {
   1113: 'Connectez ce registre pour parcourir son catalogue. Les nouvelles clés de signature de ce registre seront approuvées pour les paquets.',
   1114: 'Actualiser le registre',
   1115: 'Connectez ce registre avant de le rafraîchir.',
+  1116: 'L’identité du serveur a changé',
+  1117: 'Ce serveur utilise une clé d’identité différente de celle mémorisée par ce navigateur.',
+  1118: 'Cela peut se produire après le remplacement ou la restauration d’un serveur, mais peut aussi signaler une interception. Vérifiez les changements inattendus par un canal de confiance.',
+  1119: 'La connexion continue. La nouvelle identité est maintenant mémorisée.',
+  1120: 'Empreinte précédente',
+  1121: 'Empreinte actuelle',
 } satisfies i18n

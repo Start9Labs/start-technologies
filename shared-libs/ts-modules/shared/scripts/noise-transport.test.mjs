@@ -159,18 +159,27 @@ async function framedSocket(context) {
       signal: new AbortController().signal,
       identity: async () => ({
         connection: client,
-        remotePeer: { publicKey: { type: 'Ed25519' } },
+        remotePeer: {
+          publicKey: { type: 'Ed25519', raw: new Uint8Array(32).fill(7) },
+        },
       }),
     }),
     'server.test',
     Open,
   )
   const socket = new Constructor('ws://server.test')
-  await new Promise(resolve =>
+  const opened = await new Promise(resolve =>
     socket.addEventListener('open', resolve, { once: true }),
   )
-  return { socket, server }
+  return { socket, server, opened }
 }
+
+test('open carries the verified identity returned by completed admission', async context => {
+  const { socket, opened } = await framedSocket(context)
+  assert.deepEqual(opened.peer, new Uint8Array(32).fill(7))
+  assert.equal(socket.readyState, socket.OPEN)
+  socket.close()
+})
 
 test('logical text retains its leading UTF-8 BOM', async context => {
   const { socket, server } = await framedSocket(context)

@@ -10,7 +10,8 @@ import type { AuthKeyLease } from './auth-key.service'
 import { withTimeout } from './http.service'
 import { prepareNoiseIdentity } from './noise-identity'
 import type { PreparedNoiseIdentity } from './noise-identity'
-import { noiseWebSocketConstructor } from './noise-websocket'
+import { NoiseOpenEvent, noiseWebSocketConstructor } from './noise-websocket'
+import { ServerIdentityService } from './server-identity.service'
 import { rpcWebSocketUrl } from './rpc-request'
 
 @Service()
@@ -19,6 +20,10 @@ export class RpcSocketService {
   private readonly relativeUrl = inject(RELATIVE_URL)
   private readonly context = inject(AUTH_SIGNING_HOST)
   private readonly authKeys = inject(AuthKeyService)
+  private readonly serverIdentity = inject(ServerIdentityService)
+  private readonly opened = (event: Event) => {
+    void this.serverIdentity.observe((event as NoiseOpenEvent).peer)
+  }
   private readonly identities = new WeakMap<
     AbortSignal,
     Promise<PreparedNoiseIdentity>
@@ -42,6 +47,7 @@ export class RpcSocketService {
       const signal = AbortSignal.any([prepared.signal, abort.signal])
       const socket = webSocket<unknown>({
         url: this.url(),
+        openObserver: { next: this.opened },
         WebSocketCtor: noiseWebSocketConstructor(
           async () => ({ ...prepared, signal }),
           this.context,
@@ -99,7 +105,9 @@ export class RpcSocketService {
   /** Opens an encrypted continuation with the DOM event/lifetime contract. */
   openSocket(guid: string): WebSocket {
     const Constructor = this.constructorFor(() => this.authKeys.lease())
-    return new Constructor(this.url(guid))
+    const socket = new Constructor(this.url(guid))
+    socket.addEventListener('open', this.opened, { once: true })
+    return socket
   }
 
   /** Redeems a continuation through encrypted admission. */
@@ -109,6 +117,12 @@ export class RpcSocketService {
   ): WebSocketSubject<T> {
     return webSocket<T>({
       ...config,
+      openObserver: {
+        next: event => {
+          this.opened(event)
+          config.openObserver?.next(event)
+        },
+      },
       url: this.url(guid),
       WebSocketCtor: this.constructorFor(() => this.authKeys.lease()),
     })

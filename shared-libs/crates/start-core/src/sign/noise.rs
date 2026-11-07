@@ -10,6 +10,7 @@ const PROTOCOL: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
 const STATIC_KEY_SIGNATURE_PREFIX: &[u8] = b"noise-libp2p-static-key:";
 const ED25519_KEY_TYPE: i32 = 1;
 const FINGERPRINT_PREFIX: &str = "SHA256:";
+const FINGERPRINT_ALGORITHM: &str = "SHA-256";
 
 /// SHA-256 fingerprint of the raw Ed25519 identity public key.
 pub fn fingerprint(key: &AnyVerifyingKey) -> String {
@@ -41,6 +42,7 @@ pub(crate) fn wire_profile() -> serde_json::Value {
     serde_json::json!({
         "protocol": PROTOCOL,
         "signaturePrefix": STATIC_KEY_SIGNATURE_PREFIX,
+        "fingerprint": { "algorithm": FINGERPRINT_ALGORITHM, "prefix": FINGERPRINT_PREFIX },
     })
 }
 

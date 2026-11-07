@@ -13,6 +13,15 @@ export interface NoiseSocketIdentity {
   signal: AbortSignal
 }
 
+export class NoiseOpenEvent extends Event {
+  readonly peer: Uint8Array
+
+  constructor(peer: Uint8Array) {
+    super('open')
+    this.peer = peer.slice()
+  }
+}
+
 function validateCloseCode(code: number) {
   if (
     !profile.closeCodes.some(([start, end]) => code >= start! && code <= end!)
@@ -132,6 +141,7 @@ export function noiseWebSocketConstructor(
       const raw = new NoiseWebSocketStream(socket)
       const abort = () => raw.abort(new Error('Encrypted WebSocket aborted'))
       signal.addEventListener('abort', abort, { once: true })
+      let peer: Uint8Array
       try {
         await pEvent(socket, 'open', {
           signal,
@@ -141,6 +151,7 @@ export function noiseWebSocketConstructor(
         signal.throwIfAborted()
         if (secured.remotePeer.publicKey?.type !== 'Ed25519')
           throw new Error('Unsupported server identity')
+        peer = secured.remotePeer.publicKey.raw
         this.messages = lpStream(secured.connection, {
           maxDataLength: profile.maxIncomingBytes + profile.messageKindBytes,
           maxBufferSize:
@@ -161,7 +172,7 @@ export function noiseWebSocketConstructor(
       }
       this.lifetime.signal.addEventListener('abort', abort, { once: true })
       this.readyState = this.OPEN
-      this.dispatchEvent(new Event('open'))
+      this.dispatchEvent(new NoiseOpenEvent(peer))
       while (this.readyState < this.CLOSED) {
         const bytes = (
           await this.messages!.read({ signal: this.lifetime.signal })

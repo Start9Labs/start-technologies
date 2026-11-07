@@ -966,4 +966,10 @@ export const ENGLISH: Record<string, number> = {
   'Connect this registry to browse its catalog. New signing keys from this registry will be trusted for packages.': 1113,
   'Refresh registry': 1114,
   'Connect this registry before refreshing it.': 1115,
+  'Server identity changed': 1116,
+  'This server is using a different identity key than the one this browser remembers.': 1117,
+  'This can happen after replacing or restoring a server, but could also indicate interception. Verify unexpected changes through a trusted channel.': 1118,
+  'The connection continues. The new identity is now remembered.': 1119,
+  'Previous fingerprint': 1120,
+  'Current fingerprint': 1121,
 }

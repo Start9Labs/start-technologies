@@ -965,4 +965,10 @@ export default {
   1113: 'Verbinde diese Registry, um ihren Katalog zu durchsuchen. Neuen Signaturschlüsseln dieser Registry wird für Pakete vertraut.',
   1114: 'Registry aktualisieren',
   1115: 'Verbinde diese Registry, bevor sie aktualisiert wird.',
+  1116: 'Serveridentität geändert',
+  1117: 'Dieser Server verwendet einen anderen Identitätsschlüssel als den, den dieser Browser gespeichert hat.',
+  1118: 'Dies kann nach dem Austausch oder der Wiederherstellung eines Servers auftreten, aber auch auf ein Abfangen der Verbindung hindeuten. Bestätigen Sie unerwartete Änderungen über einen vertrauenswürdigen Kanal.',
+  1119: 'Die Verbindung wird fortgesetzt. Die neue Identität ist jetzt gespeichert.',
+  1120: 'Vorheriger Fingerabdruck',
+  1121: 'Aktueller Fingerabdruck',
 } satisfies i18n

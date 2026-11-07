@@ -6,6 +6,7 @@ import { auth } from '@start9labs/start-core'
 import type { HttpOptions } from '../types/http.types'
 import type { RPCOptions } from '../types/rpc.types'
 import { rpcRequestBody } from './rpc-request'
+import { identityStore } from './identity-store'
 
 /** IndexedDB record key for the device key. Override per app so two apps
  *  served from one origin (dev servers, a re-pointed forward) can't clobber
@@ -26,9 +27,6 @@ export interface AuthKeyLease {
   readonly key: auth.AuthKey
   readonly signal: AbortSignal
 }
-
-const DB_NAME = 'startos-auth'
-const STORE = 'keys'
 
 /**
  * Holds the device key this browser enrolled at login: a non-extractable
@@ -136,27 +134,6 @@ export class AuthKeyService {
     mode: IDBTransactionMode,
     op: (store: IDBObjectStore) => IDBRequest<T>,
   ): Promise<T> {
-    return new Promise((resolve, reject) => {
-      const open = this.win.indexedDB.open(DB_NAME, 1)
-      open.onupgradeneeded = () => open.result.createObjectStore(STORE)
-      open.onerror = () => reject(open.error)
-      open.onsuccess = () => {
-        const db = open.result
-        const tx = db.transaction(STORE, mode)
-        const req = op(tx.objectStore(STORE))
-        tx.oncomplete = () => {
-          db.close()
-          resolve(req.result)
-        }
-        tx.onerror = () => {
-          db.close()
-          reject(tx.error)
-        }
-        tx.onabort = () => {
-          db.close()
-          reject(tx.error)
-        }
-      }
-    })
+    return identityStore(this.win, mode, op)
   }
 }
