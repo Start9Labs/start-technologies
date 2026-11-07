@@ -4474,6 +4474,13 @@ help.arg.log-follow:
   fr_FR: "Suivre la sortie des journaux en temps réel"
   pl_PL: "Śledź wyjście logów w czasie rzeczywistym"
 
+help.arg.log-level:
+  en_US: "Verbosity for start-core/start-os until the daemon restarts"
+  de_DE: "Protokollierungsstufe für start-core/start-os bis zum Neustart des Daemons"
+  es_ES: "Nivel de registro para start-core/start-os hasta que se reinicie el daemon"
+  fr_FR: "Niveau de journalisation de start-core/start-os jusqu'au redémarrage du démon"
+  pl_PL: "Poziom logowania start-core/start-os do ponownego uruchomienia demona"
+
 help.arg.log-limit:
   en_US: "Maximum number of log entries"
   de_DE: "Maximale Anzahl von Log-Einträgen"
@@ -7453,6 +7460,13 @@ about.set-listen-address-for-webserver:
   es_ES: "Establecer la dirección de escucha del servidor web"
   fr_FR: "Définir l'adresse d'écoute du serveur web"
   pl_PL: "Ustaw adres nasłuchiwania serwera internetowego"
+
+about.set-log-level:
+  en_US: "Set the running daemon's StartOS backend log level"
+  de_DE: "Protokollierungsstufe des StartOS-Backends im laufenden Daemon festlegen"
+  es_ES: "Establecer el nivel de registro del backend de StartOS en el daemon en ejecución"
+  fr_FR: "Définir le niveau de journalisation du backend StartOS du démon en cours d'exécution"
+  pl_PL: "Ustaw poziom logowania backendu StartOS w uruchomionym demonie"
 
 about.set-outbound-gateway-package:
   en_US: "Set the outbound gateway for a package"

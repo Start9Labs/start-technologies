@@ -942,6 +942,20 @@ export const LogEntry: z.ZodObject<{
 }).meta({
   id: 'LogEntry',
 })
+
+/**
+ * Verbosity accepted by the server's runtime logging control.
+ */
+export const LogLevel: z.ZodEnum<{
+  error: 'error'
+  warn: 'warn'
+  info: 'info'
+  debug: 'debug'
+  trace: 'trace'
+}> = /* @__PURE__ */ z.enum(['error', 'warn', 'info', 'debug', 'trace']).meta({
+  id: 'LogLevel',
+  description: "Verbosity accepted by the server's runtime logging control.",
+})
 export const LogoutParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'LogoutParams',
 })
@@ -3257,6 +3271,26 @@ export const SetIconParams: z.ZodObject<{
   icon: z.ZodNullable<typeof DataUrl>
 }> = /* @__PURE__ */ object({ icon: DataUrl.nullable() }).meta({
   id: 'SetIconParams',
+})
+
+/**
+ * Sets verbosity for StartOS backend code in the running daemon.
+ */
+export const SetLogLevelParams: z.ZodObject<{
+  /**
+   * Applies to start-core/start-os until the daemon restarts.
+   */
+  level: typeof LogLevel
+}> = /* @__PURE__ */ object({
+  /**
+   * Applies to start-core/start-os until the daemon restarts.
+   */
+  level: LogLevel.meta({
+    description: 'Applies to start-core/start-os until the daemon restarts.',
+  }),
+}).meta({
+  id: 'SetLogLevelParams',
+  description: 'Sets verbosity for StartOS backend code in the running daemon.',
 })
 export const SetOsUpdateSignerParams: z.ZodObject<{
   key: typeof AnyVerifyingKey
@@ -6725,6 +6759,10 @@ export const Api = {
         },
         'set-language': {
           _PARAMS: /* @__PURE__ */ SetLanguageParams,
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        'set-log-level': {
+          _PARAMS: /* @__PURE__ */ SetLogLevelParams,
           _RETURN: /* @__PURE__ */ z.null(),
         },
         'set-smtp': {
