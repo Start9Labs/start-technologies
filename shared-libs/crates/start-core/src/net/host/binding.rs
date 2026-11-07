@@ -100,6 +100,9 @@ fn mdns_covers(mdns: &HostnameInfo, ip: &HostnameInfo) -> bool {
 }
 
 impl DerivedAddressInfo {
+    /// The UI and direct forwarding must agree on enabled/public address exposure.
+    /// An enabled plain-port public domain publishes its gateway GUAs in that state.
+    /// Public forwarding behind a Local or Disabled row is a correctness defect.
     pub(super) fn update_available(&mut self, available: BTreeSet<HostnameInfo>) {
         let established_domains: BTreeSet<_> = self
             .enabled()
@@ -2158,7 +2161,7 @@ mod test {
     }
 
     #[test]
-    fn refreshed_gua_inherits_an_enabled_plain_public_domain() {
+    fn public_domain_exposure_keeps_refreshed_gua_rows_enabled_and_public() {
         let domain = HostnameInfo {
             ssl: false,
             public: true,
