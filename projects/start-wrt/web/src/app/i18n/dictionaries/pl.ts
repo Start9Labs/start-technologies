@@ -567,4 +567,6 @@ export default {
   599: 'Urządzenia na {port} przejdą do profilu {profile}. Większość połączy się ponownie w ciągu kilku sekund. Jeśli urządzenie nie ma potem dostępu do internetu lub nie może połączyć się z innymi urządzeniami, co często zdarza się za przełącznikiem, odłącz i ponownie podłącz jego kabel albo uruchom ponownie urządzenie lub przełącznik. W przeciwnym razie połączy się samo w ciągu 12 godzin.',
   600: 'Zmienić profil bezpieczeństwa?',
   601: 'Zmień profil',
+  602: 'Wprowadź hasło administratora, aby zaszyfrować tę kopię zapasową.',
+  603: 'Wszystkie bieżące ustawienia zostaną nadpisane, a urządzenie uruchomi się ponownie. Wprowadź hasło administratora obowiązujące w chwili utworzenia tej kopii zapasowej.',
 } satisfies i18n

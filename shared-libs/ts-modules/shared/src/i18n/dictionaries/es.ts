@@ -956,4 +956,8 @@ export default {
   1104: 'Verificando las firmas del paquete',
   1105: 'Habilitada para paquetes de servicios',
   1106: 'Habilitada para actualizaciones de StartOS',
+  1107: 'Cada archivo debe tener su propio destino de carga.',
+  1108: 'Formato de archivo no válido',
+  1109: 'Respuesta del servidor no válida',
+  1110: 'Tamaño máximo del archivo',
 } satisfies i18n

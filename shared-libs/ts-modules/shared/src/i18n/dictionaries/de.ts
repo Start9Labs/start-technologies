@@ -956,4 +956,8 @@ export default {
   1104: 'Paketsignaturen werden geprüft',
   1105: 'Für Dienstpakete aktiviert',
   1106: 'Für StartOS-Updates aktiviert',
+  1107: 'Jede Datei muss ein eigenes Upload-Ziel haben.',
+  1108: 'Ungültiges Dateiformat',
+  1109: 'Ungültige Antwort vom Server',
+  1110: 'Maximale Dateigröße',
 } satisfies i18n

@@ -2064,7 +2064,7 @@ test('registry signing-key identities keep GPG metadata under the key label', ()
   })
 })
 
-test('key identities are GPG user IDs, or the emails registries publish for a plain key', () => {
+test('key identities include GPG user IDs and registry contact emails', () => {
   const id = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
   const contact = [{ email: 'dev@example.com' }, { matrix: '@dev:example.com' }]
   assert.deepEqual(
@@ -2076,11 +2076,23 @@ test('key identities are GPG user IDs, or the emails registries publish for a pl
         { identities: { [id]: ['A <a@example.com>'], other: ['C'] } },
       ],
     }),
-    ['A <a@example.com>', 'B <b@example.com>'],
+    ['A <a@example.com>', 'B <b@example.com>', 'dev@example.com'],
   )
   assert.deepEqual(keyIdentities({ publicKey: id, contact, gpgExports: [] }), [
     'dev@example.com',
   ])
+  assert.deepEqual(
+    keyIdentities({
+      publicKey: id,
+      contact: [...contact, ...contact],
+      gpgExports: [{ identities: { [id]: ['dev@example.com'] } }],
+    }),
+    ['dev@example.com'],
+  )
+  assert.deepEqual(
+    keyIdentities({ publicKey: id, contact: [], gpgExports: [] }),
+    [],
+  )
 })
 
 function registriesFixture({
