@@ -38,7 +38,7 @@ pub trait CtrlContext: Context + Clone {
 - **`ServerContext`**: always reads `/etc/config/`, always reloads services. Holds `start-core`'s `RpcContinuations` for long-running operations and the auth state (enrolled keys, nonce cache). `ServerContext::default()` carries an in-memory auth state that enrolls nothing; only the daemon opens `/etc/startwrt/auth.db`.
 - **`CliContext`**: configurable root (`--config-root`), calls server via HTTP when needed. Signs each request with the identity key at `~/.startwrt/id.key.pem` once one exists, and sends the local auth token from `/run/startwrt/rpc.authcookie` as `Authorization: Bearer` to loopback hosts only.
 
-The single binary `startwrt` uses `MultiExecutable` to dispatch based on the symlink name (`startwrt-ctrld` or `startwrt-cli`) or the first argument.
+The single binary `startwrt` uses `MultiExecutable` to dispatch based on the symlink name (`startwrt-ctrld`, `startwrt-cli`, or `startwrt-fdl-reset`) or the first argument.
 
 ### CLI Arguments
 
@@ -219,6 +219,7 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 | `sign/`                           | ed25519 signature + commitment verification                                                                                                                                                                                                                  |
 | `progress.rs`                     | Progress reporting, wire-compatible with start-os                                                                                                                                                                                                            |
 | `eeprom.rs`                       | EEPROM TLV read (ONIE blob; WiFi PMK in tag 0x2F)                                                                                                                                                                                                            |
+| `fdl_button.rs`                   | Factory reset from the FDL button, watched for the life of the system; runs as `startwrt startwrt-fdl-reset`                                                                                                                                                 |
 | `wg.rs`                           | WireGuard key management types                                                                                                                                                                                                                               |
 | `device_names.rs`                 | Persistent cache of auto-learned device hostnames                                                                                                                                                                                                            |
 | `verify.rs`                       | Factory QC checks (firmware integrity, EEPROM password, SSID broadcast)                                                                                                                                                                                      |

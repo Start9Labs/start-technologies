@@ -1,6 +1,6 @@
 # Factory Reset
 
-A factory reset restores StartWRT to its default state at unboxing. There are two ways to reset: from the web interface (soft reset) or from a microSD card (reflash).
+A factory reset restores StartWRT to its default state at unboxing. You can reset from the web interface or the factory-reset button (soft reset), or from a microSD card (reflash).
 
 ## Soft Reset (Web Interface)
 
@@ -20,6 +20,23 @@ The router will reboot. After reboot:
 
 > [!WARNING]
 > A factory reset cannot be undone. Create a [backup](backups.md) first if you want to preserve your settings.
+
+## Soft Reset (Factory-Reset Button)
+
+The four-port Start9 Router has two pinhole buttons. The one next to the power jack is the factory-reset button. The one next to the USB-A port is the reset button, which only restarts the router. The single LAN port Start9 Router has no buttons.
+
+The factory-reset button is a last resort for when you cannot reach the web interface. It performs the same soft reset as the web interface: every setting is erased and the router returns to its factory state. It works at any time while the router is on.
+
+> [!WARNING]
+> Use the factory-reset button only when nothing else works. It wipes the entire router configuration and cannot be undone. If you can still log in, create a [backup](backups.md) first.
+
+1. With the router on, press and hold the factory-reset button with a paperclip or similar. The red light keeps pulsing slowly at first.
+
+1. Keep holding for 10-15 seconds, until the red light changes to a rapid blink.
+
+1. Release the button. The router erases its settings and reboots. It comes back in the state described above, with the red light pulsing slowly again.
+
+Letting go before the red light blinks rapidly cancels the reset.
 
 ## Reflash (microSD)
 

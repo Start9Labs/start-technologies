@@ -67,6 +67,24 @@ start() {
 DNSINJEOF
 chmod +x "${FILES_DIR}/etc/init.d/startwrt-dnsinject"
 
+cat > "${FILES_DIR}/etc/init.d/startwrt-fdl-reset" << 'FDLEOF'
+#!/bin/sh /etc/rc.common
+
+START=11
+
+USE_PROCD=1
+
+start_service() {
+    procd_open_instance
+    procd_set_param command /usr/bin/startwrt startwrt-fdl-reset
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_set_param respawn
+    procd_close_instance
+}
+FDLEOF
+chmod +x "${FILES_DIR}/etc/init.d/startwrt-fdl-reset"
+
 # Custom SmartDNS init script — uses our generated config instead of the
 # stock UCI-generated one. The stock init script generates its own config
 # from UCI at /var/etc/smartdns/smartdns.conf, ignoring ours.

@@ -19,6 +19,7 @@ pub mod eeprom;
 pub mod embedded_web;
 pub mod ethernet;
 pub mod exec;
+pub mod fdl_button;
 pub mod files;
 pub mod flash;
 pub mod http_redirect;
