@@ -972,6 +972,17 @@ export const QueryDnsRes: z.ZodObject<{
   description:
     "What a public domain currently resolves to, per address family. A public\ndomain is DualStack: the operator points an `A` record at the gateway's WAN\nIPv4 and an `AAAA` at the box's IPv6 GUA. Either may be absent.",
 })
+export const ReassignPortParams: z.ZodObject<{
+  internalPort: z.ZodInt
+  externalPort: z.ZodInt
+  ssl: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  internalPort: z.int(),
+  externalPort: z.int(),
+  ssl: wire(z.boolean().optional(), z.boolean()),
+}).meta({
+  id: 'ReassignPortParams',
+})
 
 /**
  * A registry asset with a caller-selected commitment representation.
@@ -5707,6 +5718,13 @@ export const Api = {
                   ),
                   _RETURN: /* @__PURE__ */ Bindings,
                 },
+                'reassign-port': {
+                  _PARAMS: /* @__PURE__ */ z.intersection(
+                    z.intersection(RequiresPackageId, RequiresHostId),
+                    ReassignPortParams,
+                  ),
+                  _RETURN: /* @__PURE__ */ z.null(),
+                },
                 'set-address-enabled': {
                   _PARAMS: /* @__PURE__ */ z.intersection(
                     z.intersection(RequiresPackageId, RequiresHostId),
@@ -6652,6 +6670,10 @@ export const Api = {
                     empty,
                   ),
                   _RETURN: /* @__PURE__ */ Bindings,
+                },
+                'reassign-port': {
+                  _PARAMS: /* @__PURE__ */ ReassignPortParams,
+                  _RETURN: /* @__PURE__ */ z.null(),
                 },
                 'set-address-enabled': {
                   _PARAMS: /* @__PURE__ */ BindingSetAddressEnabledParams,

@@ -478,7 +478,7 @@ impl Model<Host> {
         let bindings: Bindings = this.bindings.de()?;
         let public_domains = this.public_domains.de()?;
         let mut port_forwards = BTreeSet::new();
-        for bind in bindings.values() {
+        for bind in bindings.values().filter(|bind| bind.enabled) {
             for addr in bind.enabled_addresses() {
                 if !addr.public {
                     continue;
@@ -816,6 +816,7 @@ pub trait HostApiKind: 'static {
     type InheritedParams: Send + Sync + 'static;
     type Inheritance: RefUnwindSafe + OrEmpty<Self::Inheritance> + Send + Sync + 'static;
     fn inheritance(params: Self::Params, inherited: Self::InheritedParams) -> Self::Inheritance;
+    fn privileged(inheritance: &Self::Inheritance) -> bool;
     fn host_for<'a>(
         inheritance: &Self::Inheritance,
         db: &'a mut DatabaseModel,
@@ -831,6 +832,9 @@ impl HostApiKind for ForPackage {
     type Params = RequiresHostId;
     type InheritedParams = PackageId;
     type Inheritance = (PackageId, HostId);
+    fn privileged((package, _): &Self::Inheritance) -> bool {
+        package.is_start_os()
+    }
     fn inheritance(
         RequiresHostId { host }: Self::Params,
         package: Self::InheritedParams,
@@ -871,6 +875,9 @@ impl HostApiKind for ForServer {
     type Params = Empty;
     type InheritedParams = Empty;
     type Inheritance = Empty;
+    fn privileged(_: &Self::Inheritance) -> bool {
+        true
+    }
     fn inheritance(_: Self::Params, _: Self::InheritedParams) -> Self::Inheritance {
         Empty {}
     }
