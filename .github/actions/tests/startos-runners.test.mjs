@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { chmodSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
 import yaml from 'js-yaml'
+import { fixture } from '../../../scripts/tests/fixtures.mjs'
 
 const workflow = yaml.load(
   readFileSync(
@@ -17,11 +20,89 @@ const [standard, fast] = Array.from(
 const architectures = yaml.load(
   image.env.ARCH.match(/fromJson\('([\s\S]*?)'\)/)[1],
 )
+const bootstrap = image.steps.find(
+  step => step.name === 'Update RISC-V action runtime',
+)
 
 for (const platform of ['riscv64', 'riscv64-nonfree']) {
-  test(`${platform} assembles on supported Node hosts without changing the target`, () => {
-    assert.equal(standard[platform], 'ubuntu-24.04-arm')
+  test(`${platform} retains native assembly and the fast-runner alternative`, () => {
+    assert.equal(standard[platform], 'ubuntu-24.04-riscv')
     assert.equal(fast[platform], 'amd64-fast')
     assert.equal(architectures[platform], 'riscv64')
+  })
+}
+
+test('the native runtime bootstrap precedes every JavaScript action', () => {
+  assert.ok(bootstrap)
+  assert.ok(image.steps.indexOf(bootstrap) < image.steps.findIndex(s => s.uses))
+  assert.equal(
+    bootstrap.if,
+    "${{ env.ARCH == 'riscv64' && github.event.inputs.runner != 'fast' }}",
+  )
+})
+
+for (const validChecksum of [true, false]) {
+  test(`runtime bootstrap ${validChecksum ? 'replaces the action host and exposes shell Node' : 'preserves the action host after checksum failure'}`, t => {
+    const f = fixture(t)
+    const version = bootstrap.env.ACTIONS_NODE_VERSION
+    const nodeDir = `node-v${version}-linux-riscv64`
+    const nodeSource = `#!/bin/sh\nprintf 'v${version}\\n'\n`
+    chmodSync(f.write(`archive/${nodeDir}/bin/node`, nodeSource), 0o755)
+    const tarball = `${nodeDir}.tar.xz`
+    const packed = f.run('tar', ['-cJf', tarball, '-C', 'archive', nodeDir])
+    assert.equal(packed.status, 0, String(packed.stderr))
+    const checksum = validChecksum
+      ? createHash('sha256')
+          .update(readFileSync(join(f.root, tarball)))
+          .digest('hex')
+      : '0'.repeat(64)
+    f.write('SHASUMS256.txt', `${checksum}  ${tarball}\n`)
+    const oldNode = '#!/bin/sh\nprintf "v24.7.0\\n"\n'
+    const runnerNode = f.write(
+      'runner cache/externals/node24/bin/node',
+      oldNode,
+    )
+    chmodSync(runnerNode, 0o755)
+    const worker = f.write('runner cache/bin/Runner.Worker', '')
+    f.nodeExecutable('readlink', `console.log(${JSON.stringify(worker)})`)
+    f.nodeExecutable(
+      'curl',
+      `import { copyFileSync, readFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
+const name = basename(process.argv.at(-1))
+const source = join(${JSON.stringify(f.root)}, name)
+if (process.argv.includes('-fsSLO')) copyFileSync(source, name)
+else process.stdout.write(readFileSync(source))`,
+    )
+    const temp = join(f.root, 'runner temp')
+    f.write('runner temp/.keep', '')
+    const pathFile = f.write('path', '/existing/bin\n')
+    const result = f.run('bash', ['-c', bootstrap.run], {
+      env: {
+        ...f.env,
+        ...bootstrap.env,
+        PATH: `${f.root}:${f.env.PATH}`,
+        RUNNER_TEMP: temp,
+        GITHUB_PATH: pathFile,
+      },
+      encoding: 'utf8',
+    })
+    assert.equal(
+      result.status === 0,
+      validChecksum,
+      result.stdout + result.stderr,
+    )
+    assert.equal(
+      readFileSync(runnerNode, 'utf8'),
+      validChecksum ? nodeSource : oldNode,
+    )
+    assert.equal(
+      readFileSync(pathFile, 'utf8'),
+      `/existing/bin\n${validChecksum ? `${temp}/${nodeDir}/bin\n` : ''}`,
+    )
+    if (validChecksum) {
+      assert.match(result.stdout, /Bundled action runtime: v24\.7\.0/)
+      assert.ok(result.stdout.includes(`Updated action runtime: v${version}`))
+    }
   })
 }
