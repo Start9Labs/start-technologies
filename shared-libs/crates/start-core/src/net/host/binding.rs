@@ -134,7 +134,7 @@ impl DerivedAddressInfo {
             // `gua_wan` is current; a GUA's `public` flag waits for `set_available`.
             let public = address.gua().map_or_else(
                 || enabled.contains(address),
-                |gua| previous.gua_wan.contains(&gua),
+                |gua| previous.gua_wan.contains(&gua) && previous.public_ip_on(address),
             );
             for gateway in address.metadata.gateways() {
                 *all_public
@@ -1238,11 +1238,13 @@ fn set_address_enabled_on(
         } else {
             addresses.enabled.remove(&sa);
         }
-        // Non-SSL Ipv4: a dual-stack public domain links this to the co-located
-        // GUA, so when one is present move the whole {IPv4, domain, GUA} group
-        // together (no domain => v4 and gua stay independent).
+        // Non-SSL: a dual-stack public domain links IPv4 and GUA, so when one is
+        // present move the whole {IPv4, domain, GUA} group together (no domain =>
+        // v4 and gua stay independent).
         if !address.ssl {
-            if let HostnameMetadata::Ipv4 { gateway } = &address.metadata {
+            if let HostnameMetadata::Ipv4 { gateway } | HostnameMetadata::Ipv6 { gateway, .. } =
+                &address.metadata
+            {
                 let port = sa.port();
                 if has_nonssl_public_domain(addresses, gateway, port) {
                     set_nonssl_wan_group(addresses, gateway, port, enabled);
@@ -2554,6 +2556,31 @@ mod test {
     }
 
     #[test]
+    fn a_disabled_public_gua_keeps_a_tls_to_plain_group_off() {
+        let gua = HostnameInfo {
+            public: true,
+            ..ipv6_addr("2001:db8::1", 5223)
+        };
+        let mut info = DerivedAddressInfo::default();
+        info.available
+            .extend([domain_row("smp.example.com", true, 5223), gua.clone()]);
+        info.gua_wan.insert(gua.gua().unwrap());
+        set_address_enabled_on(&mut info, &gua, true).unwrap();
+        set_address_enabled_on(&mut info, &gua, false).unwrap();
+        assert!(info.gua_wan.contains(&gua.gua().unwrap()));
+        assert!(!info.enabled().contains(&gua));
+
+        refresh(
+            &mut info,
+            BTreeSet::from([
+                domain_row("smp.example.com", false, 5223),
+                HostnameInfo { ssl: false, ..gua },
+            ]),
+        );
+        assert_wan_group_off(&info);
+    }
+
+    #[test]
     fn a_domain_enabled_over_tls_stays_on_a_plain_port_with_public_bare_ips() {
         let plain = domain_row("smp.example.com", false, 5223);
         let tls_bare = "203.0.113.1:5224".parse().unwrap();
@@ -2582,6 +2609,33 @@ mod test {
         assert!(info.enabled().contains(&plain));
         assert!(info.enabled.contains(&"203.0.113.1:5223".parse().unwrap()));
         assert_eq!(info.gua_wan.len(), 1);
+    }
+
+    #[test]
+    fn toggling_any_plain_group_member_moves_the_whole_group() {
+        let plain = domain_row("smp.example.com", false, 5223);
+        let [v4, gua] = plain_wan_rows(5223);
+        let gua = HostnameInfo {
+            public: true,
+            ..gua
+        };
+        let gateway = GatewayId::from(InternedString::intern("eth0"));
+        for member in [&plain, &v4, &gua] {
+            let mut info = DerivedAddressInfo::default();
+            info.available
+                .extend([plain.clone(), v4.clone(), gua.clone()]);
+            set_nonssl_wan_group(&mut info, &gateway, 5223, false);
+
+            set_address_enabled_on(&mut info, member, true).unwrap();
+            assert!(info.enabled().contains(&plain));
+            assert!(info.enabled.contains(&v4.to_socket_addr().unwrap()));
+            assert!(info.gua_wan.contains(&gua.gua().unwrap()));
+
+            set_address_enabled_on(&mut info, member, false).unwrap();
+            assert!(!info.enabled().contains(&plain));
+            assert!(!info.enabled.contains(&v4.to_socket_addr().unwrap()));
+            assert!(!info.gua_wan.contains(&gua.gua().unwrap()));
+        }
     }
 
     #[test]
