@@ -510,5 +510,9 @@ mod tests {
 mod ingestion_tests;
 
 #[cfg(test)]
+#[path = "redirect_tests.rs"]
+mod redirect_tests;
+
+#[cfg(test)]
 #[path = "os/asset/sign_tests.rs"]
 mod os_asset_sign_tests;

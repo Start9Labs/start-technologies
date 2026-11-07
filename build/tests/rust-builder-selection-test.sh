@@ -18,13 +18,24 @@ printf '%s\n' '---' "$@" >> "$DOCKER_LOG"
 if [[ "$*" == *'/verify/binary'* ]]; then
     printf '00000000 <probe>:\n    0: addi a0, a0, 1\n'
 fi
+if [[ "$*" == *' cargo run '* ]]; then
+    exit "${MOCK_CARGO_EXIT:-0}"
+fi
 MOCK
 cat > "$scratch/bin/objdump" <<'MOCK'
 #!/bin/bash
 printf '%s\n' "$@" >> "$OBJDUMP_LOG"
 printf '00000000 <probe>:\n    0: addi a0, a0, 1\n'
 MOCK
-chmod +x "$scratch/bin/docker" "$scratch/bin/objdump"
+cat > "$scratch/bin/uname" <<'MOCK'
+#!/bin/bash
+if [ "$1" = -m ] && [ -n "${MOCK_UNAME_ARCH:-}" ]; then
+    printf '%s\n' "$MOCK_UNAME_ARCH"
+else
+    exec /usr/bin/uname "$@"
+fi
+MOCK
+chmod +x "$scratch/bin/docker" "$scratch/bin/objdump" "$scratch/bin/uname"
 
 assert_log_contains() {
     if ! grep -Fxq -- "$1" "$DOCKER_LOG"; then
@@ -72,6 +83,44 @@ for alias_file in build/builder-alias.sh projects/start-wrt/build/builder-alias.
     assert_log_contains "$custom"
 done
 
+for arch in x86_64 aarch64 arm64; do
+    : > "$DOCKER_LOG"
+    ARCH=riscv64 MOCK_UNAME_ARCH="$arch" DISABLE_RVA23=0 bash -ec 'shopt -s expand_aliases; source projects/start-wrt/build/builder-alias.sh; ARCH=$(native_arch); eval "rust-zig-builder cargo --version"'
+    assert_log_contains DISABLE_RVA23=1
+    assert_log_contains "PKG_CONFIG_SYSROOT_DIR=/opt/sysroot/${arch/arm64/aarch64}"
+done
+
+bindings=(projects/start-wrt/web/src/app/services/api/{bindings.ts,bindings.schemas.ts,events.ts,events.schemas.ts})
+for selected_image in "$image" "$custom"; do
+    : > "$DOCKER_LOG"
+    ARCH=riscv64 MOCK_UNAME_ARCH=arm64 RUST_BUILDER_IMAGE="$selected_image" bash projects/start-wrt/build/generate-bindings.sh "${bindings[@]}"
+    assert_log_contains "$selected_image"
+    assert_log_contains PKG_CONFIG_SYSROOT_DIR=/opt/sysroot/aarch64
+    assert_log_contains /workdir
+    assert_log_contains DISABLE_RVA23=1
+    assert_log_contains cargo
+    assert_log_contains run
+    assert_log_contains --profile
+    assert_log_contains bindings
+    assert_log_contains generate_rpc_bindings
+    assert_log_contains --locked
+    assert_log_contains chown
+    assert_log_contains "$UID:$UID"
+    assert_log_contains target
+    assert_log_contains /usr/local/cargo
+    for binding in "${bindings[@]}"; do
+        assert_log_contains "$binding"
+    done
+done
+: > "$DOCKER_LOG"
+if MOCK_CARGO_EXIT=19 bash projects/start-wrt/build/generate-bindings.sh "${bindings[@]}"; then
+    printf 'A failed bindings generator unexpectedly succeeds\n' >&2
+    exit 1
+else
+    test "$?" = 19
+fi
+assert_log_contains chown
+
 : > "$DOCKER_LOG"
 bash shared-libs/crates/start-core/run-tests.sh
 assert_log_contains "RUST_BUILDER_IMAGE=$image"
@@ -92,8 +141,9 @@ if grep -Fxq buildx "$DOCKER_LOG"; then
 fi
 
 : > "$DOCKER_LOG"
-bash projects/start-wrt/build/run-tests.sh
+ARCH=riscv64 MOCK_UNAME_ARCH=x86_64 bash projects/start-wrt/build/run-tests.sh
 assert_log_contains "$image"
+assert_log_contains PKG_CONFIG_SYSROOT_DIR=/opt/sysroot/x86_64
 assert_log_contains startwrt-core
 assert_log_contains uciedit_macros
 
@@ -133,4 +183,4 @@ RISCV_OBJDUMP="$scratch/bin/objdump" bash projects/start-wrt/build/verify-isa.sh
 test ! -s "$DOCKER_LOG"
 grep -Fxq -- "$scratch/probe.o" "$OBJDUMP_LOG"
 
-printf 'Builder selection, RVA23 opt-out, overrides, derived images, and K1 disassembly checks passed.\n'
+printf 'Builder selection, RVA23 opt-out, containerized bindings, overrides, derived images, and K1 disassembly checks passed.\n'
