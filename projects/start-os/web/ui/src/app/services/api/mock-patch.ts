@@ -72,6 +72,7 @@ function mockStart9Key(
 }
 
 export const mockPatchData: DataModel = {
+  disks: structuredClone(Mock.Disks),
   sharedVolumes: {},
   ui: {
     registries: {

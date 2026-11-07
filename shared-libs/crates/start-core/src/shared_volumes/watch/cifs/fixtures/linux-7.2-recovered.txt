@@ -1,0 +1,45 @@
+Display Internal CIFS Data Structures for Debugging
+---------------------------------------------------
+CIFS Version 2.61
+Features: DFS,FSCACHE,STATS2,DEBUG,ALLOW_INSECURE_LEGACY,CIFS_POSIX,UPCALL(SPNEGO),XATTR,ACL
+CIFSMaxBufSize: 16384
+Active VFS Requests: 0
+
+Servers:
+1) ConnectionId: 0x1 Hostname: 192.0.2.10
+ClientGUID: 11111111-1111-1111-1111-111111111111
+Number of credits: 265,1,1 Dialect 0x311
+Server capabilities: 0x30006f
+TCP status: 1 Instance: 2
+Local Users To Server: 1 SecMode: 0x1 Req On Wire: 0 Net namespace: 4026530000
+In Send: 0 In MaxReq Wait: 0
+Compression: no built-in support
+Encryption: Negotiated cipher (AES128-GCM)
+
+	Sessions:
+	1) Address: 192.0.2.10 Uses: 1 Capability: 0x30006f	Session Status: 1
+	Security type: RawNTLMSSP  SessionId: 0x1
+	User: 100000 Cred User: 0
+
+	Shares:
+	0) IPC: \\192.0.2.10\IPC$ Mounts: 1 DevInfo: 0x0 Attributes: 0x0
+	PathComponentMax: 0 Status: 1 type: 0 Serial Number: 0x3
+	Share Capabilities: None	Share Flags: 0x0
+	tid: 0x2	Maximal Access: 0x1f00a9
+
+	1) \\192.0.2.10\volume Mounts: 1 DevInfo: 0x20 Attributes: 0x1006f
+	PathComponentMax: 255 Status: 1 type: DISK Serial Number: 0x3
+	Share Capabilities: None Aligned, Partition Aligned,	Share Flags: 0x0
+	tid: 0x2	Optimal sector size: 0x200	Maximal Access: 0x1f01ff
+
+
+	Server interfaces: 1	Last updated: 33 seconds ago
+	1)	Speed: 10Gbps
+		Capabilities: None
+		IPv4: 192.0.2.20
+		Weight (cur,total): (0,1)
+		Allocated channels: 0
+
+
+	MIDs:
+--

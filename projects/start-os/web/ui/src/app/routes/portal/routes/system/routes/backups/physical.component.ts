@@ -1,7 +1,6 @@
 import { Component, inject, output } from '@angular/core'
 import { ActivatedRoute } from '@angular/router'
 import { ConvertBytesPipe, DialogService, i18nPipe } from '@start9labs/shared'
-import { TuiButton } from '@taiga-ui/core'
 import { FormatDrive } from 'src/app/routes/portal/components/format-drive'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
@@ -22,7 +21,6 @@ import { BackupStatusComponent } from './status.component'
           formatDrive
           size="xs"
           [style.margin-inline-start]="'auto'"
-          (formatted)="service.getBackupTargets()"
         ></button>
       }
     </header>
@@ -79,13 +77,6 @@ import { BackupStatusComponent } from './status.component'
           <td colspan="6">
             <app-placeholder icon="@tui.save-off">
               {{ 'No drives detected' | i18n }}
-              <button
-                tuiButton
-                iconStart="@tui.refresh-cw"
-                (click)="service.getBackupTargets()"
-              >
-                {{ 'Refresh' | i18n }}
-              </button>
             </app-placeholder>
           </td>
         </tr>
@@ -152,7 +143,6 @@ import { BackupStatusComponent } from './status.component'
   `,
   host: { class: 'g-card' },
   imports: [
-    TuiButton,
     FormatDrive,
     PlaceholderComponent,
     BackupStatusComponent,

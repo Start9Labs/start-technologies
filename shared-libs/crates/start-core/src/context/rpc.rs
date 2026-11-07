@@ -68,6 +68,7 @@ pub struct RpcContextSeed {
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
     pub db: TypedPatchDb<Database>,
     pub sync_db: watch::Sender<u64>,
+    pub disk_updates: watch::Sender<()>,
     pub account: SyncRwLock<AccountInfo>,
     pub os_net_service: NetService,
     pub net_controller: Arc<NetController>,
@@ -231,14 +232,16 @@ impl RpcContext {
             TypedPatchDb::<Database>::load(config.db().await?).await?
         };
         db.mutate(|db| {
+            db.as_public_mut().as_disks_mut().ser(&Vec::new())?;
             for (_, volume) in db
                 .as_public_mut()
                 .as_shared_volumes_mut()
                 .as_entries_mut()?
             {
-                volume
-                    .as_availability_mut()
-                    .ser(&crate::shared_volumes::SharedVolumeAvailability::default())?;
+                volume.mutate(|volume| {
+                    volume.inspection = crate::shared_volumes::SharedVolumeInspection::default();
+                    Ok(())
+                })?;
             }
             Ok(())
         })
@@ -442,6 +445,7 @@ impl RpcContext {
             ephemeral_auth_keys: SyncMutex::new(AuthKeys::new()),
             auth_sig_nonce_cache: SyncMutex::new(Default::default()),
             sync_db: watch::Sender::new(db.sequence().await),
+            disk_updates: watch::Sender::new(()),
             db,
             account: SyncRwLock::new(account),
             callbacks: net_controller.callbacks.clone(),
@@ -478,6 +482,13 @@ impl RpcContext {
         });
 
         let res = Self(seed.clone());
+        #[cfg(target_os = "linux")]
+        {
+            let weak = Arc::downgrade(&seed);
+            res.add_cron(crate::shared_volumes::watch::run(move || {
+                weak.upgrade().map(Self)
+            }));
+        }
         crate::update::signer_files::initialize(&res.db).await?;
         res.cleanup_and_initialize(cleanup_init).await?;
         tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));

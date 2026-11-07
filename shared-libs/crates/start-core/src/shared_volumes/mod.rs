@@ -9,6 +9,8 @@ use crate::PackageId;
 
 pub mod mounts;
 pub mod source;
+#[cfg(target_os = "linux")]
+pub(crate) mod watch;
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::prelude::*;
@@ -115,14 +117,14 @@ pub struct SharedVolume {
     pub name: String,
     pub source: SharedVolumeSource,
     pub grants: BTreeMap<PackageId, SharedVolumeGrant>,
-    #[serde(default)]
-    pub availability: SharedVolumeAvailability,
+    #[serde(flatten)]
+    pub inspection: SharedVolumeInspection,
 }
 
 rpc_toolkit::reflect_ts!(SharedVolume);
 rpc_toolkit::ts_export!(SharedVolume, namespaces = [""]);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SharedVolumeCredentials {
     pub username: String,
@@ -256,7 +258,7 @@ pub async fn create(
                     name,
                     source,
                     grants: BTreeMap::new(),
-                    availability: SharedVolumeAvailability::default(),
+                    inspection: SharedVolumeInspection::default(),
                 },
             )?;
             Ok(())
@@ -457,12 +459,37 @@ async fn delete_retained_data(ctx: &RpcContext, id: &SharedVolumeId) -> Result<(
         .result
 }
 
-#[derive(Serialize, Deserialize, VisitFields)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, HasModel, VisitFields)]
+#[serde(default, rename_all = "camelCase")]
+#[model = "Model<Self>"]
 pub struct SharedVolumeInspection {
     pub availability: SharedVolumeAvailability,
     pub available: Option<u64>,
     pub error: Option<String>,
+    pub checked_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl SharedVolumeInspection {
+    pub(crate) fn observed(
+        availability: SharedVolumeAvailability,
+        available: Option<u64>,
+        error: Option<String>,
+    ) -> Self {
+        Self {
+            availability,
+            available,
+            error,
+            checked_at: Some(chrono::Utc::now()),
+        }
+    }
+
+    pub(crate) fn available(bytes: Option<u64>) -> Self {
+        Self::observed(SharedVolumeAvailability::Available, bytes, None)
+    }
+
+    pub(crate) fn unavailable(error: String) -> Self {
+        Self::observed(SharedVolumeAvailability::Unavailable, None, Some(error))
+    }
 }
 
 rpc_toolkit::reflect_ts!(SharedVolumeInspection);
@@ -473,39 +500,18 @@ pub async fn inspect(
 ) -> Result<SharedVolumeInspection, Error> {
     use crate::disk::mount::filesystem::ReadOnly;
     use crate::disk::mount::guard::GenericMountGuard;
-    match source::open_source(&ctx, &id, ReadOnly).await {
-        Ok(guard) => {
-            let available = tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                crate::disk::util::get_available(guard.path()),
-            )
-            .await
-            .with_kind(ErrorKind::Timeout)
-            .and_then(|result| result);
-            guard.unmount().await?;
-            match available {
-                Ok(available) => Ok(SharedVolumeInspection {
-                    availability: SharedVolumeAvailability::Available,
-                    available: Some(available),
-                    error: None,
-                }),
-                Err(_) => {
-                    source::record_availability(&ctx, &id, SharedVolumeAvailability::Unavailable)
-                        .await?;
-                    Ok(SharedVolumeInspection {
-                        availability: SharedVolumeAvailability::Unavailable,
-                        available: None,
-                        error: Some(t!("shared-volumes.source-unavailable").to_string()),
-                    })
-                }
-            }
-        }
-        Err(error) => Ok(SharedVolumeInspection {
-            availability: SharedVolumeAvailability::Unavailable,
-            available: None,
-            error: Some(error.to_string()),
-        }),
+    if let Ok(guard) = source::open_source(&ctx, &id, ReadOnly).await {
+        guard.unmount().await?;
     }
+    ctx.db
+        .peek()
+        .await
+        .as_public()
+        .as_shared_volumes()
+        .as_idx(&id)
+        .or_not_found(&id)?
+        .as_inspection()
+        .de()
 }
 
 #[cfg(test)]
@@ -612,7 +618,7 @@ mod tests {
             name: "Photos".into(),
             source: SharedVolumeSource::Local,
             grants: BTreeMap::new(),
-            availability: SharedVolumeAvailability::Unknown,
+            inspection: SharedVolumeInspection::default(),
         };
         assert!(volume.authorize(true, &package, true).is_err());
         volume

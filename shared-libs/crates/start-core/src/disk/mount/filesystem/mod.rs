@@ -95,6 +95,10 @@ pub trait FileSystem: Send + Sync {
     fn source(&self) -> impl Future<Output = Result<Option<impl AsRef<Path>>, Error>> + Send {
         async { Ok(None::<&Path>) }
     }
+    /// The block-device path available for mount retirement.
+    fn device(&self) -> impl Future<Output = Result<Option<std::path::PathBuf>, Error>> + Send {
+        async { Ok(None) }
+    }
     fn pre_mount(
         &self,
         mountpoint: &Path,

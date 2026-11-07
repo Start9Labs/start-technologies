@@ -43,7 +43,7 @@ fn granted_volumes(
                 id,
                 name: volume.name,
                 readonly: grant.readonly,
-                availability: volume.availability,
+                availability: volume.inspection.availability,
             })
         })
         .collect())
@@ -241,7 +241,10 @@ mod tests {
                 name: "Photos".into(),
                 source: SharedVolumeSource::Local,
                 grants: [(package.clone(), SharedVolumeGrant { readonly: true })].into(),
-                availability: SharedVolumeAvailability::Unavailable,
+                inspection: crate::shared_volumes::SharedVolumeInspection {
+                    availability: SharedVolumeAvailability::Unavailable,
+                    ..Default::default()
+                },
             },
         );
         catalog.insert(
@@ -250,7 +253,10 @@ mod tests {
                 name: "Private".into(),
                 source: SharedVolumeSource::Local,
                 grants: BTreeMap::new(),
-                availability: SharedVolumeAvailability::Available,
+                inspection: crate::shared_volumes::SharedVolumeInspection {
+                    availability: SharedVolumeAvailability::Available,
+                    ..Default::default()
+                },
             },
         );
         assert!(granted_volumes(false, &package, catalog.clone()).is_err());

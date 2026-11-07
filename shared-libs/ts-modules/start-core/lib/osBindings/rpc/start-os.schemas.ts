@@ -920,10 +920,6 @@ export const PackageVersionCount: z.ZodObject<{
 }).meta({
   id: 'PackageVersionCount',
 })
-export const PartitionTable: z.ZodEnum<{ mbr: 'mbr'; gpt: 'gpt' }> =
-  /* @__PURE__ */ z.enum(['mbr', 'gpt']).meta({
-    id: 'PartitionTable',
-  })
 export const Percentage: typeof literal_6 = /* @__PURE__ */ literal_6.meta({
   id: 'Percentage',
 })
@@ -3414,7 +3410,10 @@ export const SetTrustSignersParams: z.ZodObject<{
   id: 'SetTrustSignersParams',
 })
 export const SharedVolumeInspection: z.ZodObject<{
-  availability: typeof SharedVolumeAvailability
+  availability: z.ZodCodec<
+    z.ZodOptional<typeof SharedVolumeAvailability>,
+    typeof SharedVolumeAvailability
+  >
   available: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodInt>>,
     z.ZodNullable<z.ZodInt>
@@ -3423,10 +3422,18 @@ export const SharedVolumeInspection: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  checkedAt: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
 }> = /* @__PURE__ */ object({
-  availability: SharedVolumeAvailability,
+  availability: wire(
+    SharedVolumeAvailability.optional(),
+    SharedVolumeAvailability,
+  ),
   available: wire(z.int().nullable().optional(), z.int().nullable()),
   error: wire(z.string().nullable().optional(), z.string().nullable()),
+  checkedAt: wire(z.string().nullable().optional(), z.string().nullable()),
 }).meta({
   id: 'SharedVolumeInspection',
 })
@@ -4753,47 +4760,6 @@ export const DeviceInfo: z.ZodObject<{
 }).meta({
   id: 'DeviceInfo',
 })
-export const DiskInfo: z.ZodObject<{
-  logicalname: z.ZodString
-  stablePath: z.ZodString
-  partitionTable: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PartitionTable>>,
-    z.ZodNullable<typeof PartitionTable>
-  >
-  vendor: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  model: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  partitions: z.ZodArray<typeof PartitionInfo>
-  capacity: z.ZodInt
-  guid: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  filesystem: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  logicalname: z.string(),
-  stablePath: z.string(),
-  partitionTable: wire(
-    PartitionTable.nullable().optional(),
-    PartitionTable.nullable(),
-  ),
-  vendor: wire(z.string().nullable().optional(), z.string().nullable()),
-  model: wire(z.string().nullable().optional(), z.string().nullable()),
-  partitions: z.array(PartitionInfo),
-  capacity: z.int(),
-  guid: wire(z.string().nullable().optional(), z.string().nullable()),
-  filesystem: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'DiskInfo',
-})
 export const MetricsFollowResponse: z.ZodObject<{
   guid: typeof Guid
   metrics: typeof Metrics
@@ -5329,21 +5295,6 @@ export const Api = {
             FormatDiskParams,
           ),
           _RETURN: /* @__PURE__ */ z.string(),
-        },
-        list: {
-          _PARAMS: /* @__PURE__ */ z.intersection(
-            z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
-              empty,
-            ),
-            empty,
-          ),
-          _RETURN: /* @__PURE__ */ z.array(DiskInfo),
         },
         repair: {
           _PARAMS: /* @__PURE__ */ empty,

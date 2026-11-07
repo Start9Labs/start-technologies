@@ -62,9 +62,14 @@ pub async fn format(
     })?;
 
     // Detached from the request: a dropped connection does not stop it mid-way.
-    tokio::spawn(erase_and_partition(disk, capacity, block_size, label))
-        .await
-        .with_kind(ErrorKind::Unknown)?
+    let disk_updates = ctx.disk_updates.clone();
+    tokio::spawn(async move {
+        let result = erase_and_partition(disk, capacity, block_size, label).await;
+        disk_updates.send_replace(());
+        result
+    })
+    .await
+    .with_kind(ErrorKind::Unknown)?
 }
 
 async fn erase_and_partition(

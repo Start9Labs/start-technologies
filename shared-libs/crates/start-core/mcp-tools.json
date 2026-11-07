@@ -1421,24 +1421,6 @@
     }
   },
   {
-    "name": "disk.list",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "format": {
-          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
-        }
-      },
-      "$defs": {
-        "IoFormat": {
-          "type": "string",
-          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
-        }
-      }
-    }
-  },
-  {
     "name": "disk.repair",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -12429,9 +12411,10 @@
                 { "type": "null" }
               ]
             },
-            "error": { "type": ["string", "null"] }
+            "error": { "type": ["string", "null"] },
+            "checkedAt": { "type": ["string", "null"] }
           },
-          "required": ["availability", "available", "error"],
+          "required": ["availability", "available", "error", "checkedAt"],
           "additionalProperties": true
         },
         "SharedVolumeAvailability": {
@@ -12452,9 +12435,10 @@
             { "type": "null" }
           ]
         },
-        "error": { "type": ["string", "null"] }
+        "error": { "type": ["string", "null"] },
+        "checkedAt": { "type": ["string", "null"] }
       },
-      "required": ["availability", "available", "error"],
+      "required": ["availability", "available", "error", "checkedAt"],
       "additionalProperties": true
     }
   },

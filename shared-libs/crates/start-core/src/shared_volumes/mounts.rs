@@ -63,6 +63,10 @@ pub struct PreparedSource {
 }
 
 impl PreparedSource {
+    pub(super) fn mount(&self) -> &TmpMountGuard {
+        &self.guard
+    }
+
     fn from_directory(guard: TmpMountGuard, directory: OwnedFd) -> Self {
         let path = PathBuf::from(format!(
             "/proc/{}/fd/{}",

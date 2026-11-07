@@ -3829,6 +3829,13 @@ shared-volumes.access-denied:
   fr_FR: "Ce service ne dispose pas de l'accès requis au volume"
   pl_PL: "Ta usługa nie ma wymaganego dostępu do woluminu"
 
+shared-volumes.availability-watch-failed:
+  en_US: "Storage availability tracking failed: %{error}"
+  de_DE: "Die Überwachung der Speicherverfügbarkeit ist fehlgeschlagen: %{error}"
+  es_ES: "Falló el seguimiento de disponibilidad del almacenamiento: %{error}"
+  fr_FR: "Échec du suivi de disponibilité du stockage : %{error}"
+  pl_PL: "Śledzenie dostępności pamięci masowej nie powiodło się: %{error}"
+
 shared-volumes.backup-isolation:
   en_US: "Volumes are inaccessible during service backup and restore"
   de_DE: "Volumes sind während der Sicherung und Wiederherstellung eines Dienstes nicht zugänglich"
@@ -6117,11 +6124,11 @@ about.commands-diagnostic:
   pl_PL: "Polecenia wyświetlania logów, restartu serwera itp."
 
 about.commands-disk:
-  en_US: "Commands for listing disk info and repairing"
-  de_DE: "Befehle zum Auflisten von Festplatteninfo und Reparieren"
-  es_ES: "Comandos para listar información de disco y reparar"
-  fr_FR: "Commandes pour lister les informations de disque et réparer"
-  pl_PL: "Polecenia wyświetlania informacji o dysku i naprawy"
+  en_US: "Commands for formatting and repairing drives"
+  de_DE: "Befehle zum Formatieren und Reparieren von Laufwerken"
+  es_ES: "Comandos para formatear y reparar unidades"
+  fr_FR: "Commandes de formatage et de réparation des disques"
+  pl_PL: "Polecenia formatowania i naprawy dysków"
 
 about.commands-display-file-paths-contents-manifest:
   en_US: "Commands to display file paths, file contents, or manifest"

@@ -1,6 +1,145 @@
 use super::*;
 
 #[test]
+fn observations_are_flattened_and_preserve_the_volume_definition() {
+    let id = SharedVolumeId::new();
+    let mut db = crate::db::model::DatabaseModel::from(
+        to_value(&serde_json::json!({
+            "public": { "sharedVolumes": {
+                id.to_string(): {
+                    "name": "Photos",
+                    "source": {"kind": "local"},
+                    "grants": {"consumer": {"readonly": true}},
+                    "availability": "unknown"
+                }
+            }}
+        }))
+        .unwrap(),
+    );
+    let before = db
+        .as_public()
+        .as_shared_volumes()
+        .as_idx(&id)
+        .unwrap()
+        .de()
+        .unwrap();
+    assert_eq!(before.inspection, SharedVolumeInspection::default());
+    let inspection = SharedVolumeInspection::available(Some(1234));
+    write_inspection(&mut db, &id, inspection.clone()).unwrap();
+    let after = db
+        .as_public()
+        .as_shared_volumes()
+        .as_idx(&id)
+        .unwrap()
+        .de()
+        .unwrap();
+    assert_eq!(after.name, before.name);
+    assert_eq!(after.source, before.source);
+    assert_eq!(after.grants, before.grants);
+    assert_eq!(after.inspection, inspection);
+    let encoded = serde_json::to_value(after).unwrap();
+    assert_eq!(encoded["available"], 1234);
+    assert!(encoded["error"].is_null());
+    assert!(encoded["checkedAt"].is_string());
+    assert!(encoded.get("inspection").is_none());
+    let unavailable = SharedVolumeInspection::unavailable("source disconnected".into());
+    write_inspection(&mut db, &id, unavailable.clone()).unwrap();
+    assert_eq!(
+        db.as_public()
+            .as_shared_volumes()
+            .as_idx(&id)
+            .unwrap()
+            .as_inspection()
+            .de()
+            .unwrap(),
+        unavailable
+    );
+}
+
+#[test]
+fn a_finished_check_does_not_resurrect_a_removed_volume() {
+    let mut db = crate::db::model::DatabaseModel::from(
+        to_value(&serde_json::json!({
+            "public": {"sharedVolumes": {}}
+        }))
+        .unwrap(),
+    );
+    write_inspection(
+        &mut db,
+        &SharedVolumeId::new(),
+        SharedVolumeInspection::available(None),
+    )
+    .unwrap();
+    assert!(db.as_public().as_shared_volumes().de().unwrap().is_empty());
+}
+
+#[test]
+fn credential_changes_reject_checks_of_the_previous_source() {
+    let id = SharedVolumeId::new();
+    let mut db = crate::db::model::DatabaseModel::from(to_value(&serde_json::json!({
+        "public": {"sharedVolumes": { id.to_string(): {
+            "name": "Remote", "source": {"kind": "cifs", "hostname": "nas.local", "path": "/share"},
+            "grants": {}, "availability": "unknown"
+        }}},
+        "private": {"sharedVolumeCredentials": { id.to_string(): {
+            "username": "user", "password": "old-password"
+        }}}
+    })).unwrap());
+    let old = SourceDefinition::read(&db, &id).unwrap();
+    db.as_private_mut()
+        .as_shared_volume_credentials_mut()
+        .as_idx_mut(&id)
+        .unwrap()
+        .mutate(|credentials| {
+            credentials.password = Some("new-password".into());
+            Ok(())
+        })
+        .unwrap();
+    assert!(
+        !write_checked(
+            &mut db,
+            &id,
+            &old,
+            None,
+            SharedVolumeInspection::available(Some(42))
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        db.as_public()
+            .as_shared_volumes()
+            .as_idx(&id)
+            .unwrap()
+            .as_inspection()
+            .de()
+            .unwrap(),
+        SharedVolumeInspection::default()
+    );
+    let current = SourceDefinition::read(&db, &id).unwrap();
+    assert!(
+        write_checked(
+            &mut db,
+            &id,
+            &current,
+            None,
+            SharedVolumeInspection::available(Some(42))
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        db.as_public()
+            .as_shared_volumes()
+            .as_idx(&id)
+            .unwrap()
+            .as_inspection()
+            .de()
+            .unwrap()
+            .available,
+        Some(42)
+    );
+}
+
+#[test]
 fn source_failures_keep_their_reason_kind_and_metadata() {
     for (kind, reason) in [
         (ErrorKind::Network, "DNS could not resolve the server"),
@@ -8,8 +147,10 @@ fn source_failures_keep_their_reason_kind_and_metadata() {
         (ErrorKind::Timeout, "mount deadline elapsed"),
     ] {
         let info = imbl_value::json!({ "operation": "source" });
-        let error = source_result(Err(Error::new(eyre!(reason), kind).with_info(info.clone())))
-            .unwrap_err();
+        let error = source_result::<PreparedSource>(Err(
+            Error::new(eyre!(reason), kind).with_info(info.clone())
+        ))
+        .unwrap_err();
         assert_eq!(error.kind, kind);
         assert_eq!(error.info, info);
         assert!(error.to_string().contains(reason));
@@ -39,7 +180,7 @@ fn stored_folder_failures_are_source_errors_without_recreating_paths() {
         let cause = error.source.downcast_ref::<std::io::Error>().unwrap();
         let reason = cause.to_string();
         let errno = cause.raw_os_error();
-        let error = source_result(Err(error)).unwrap_err();
+        let error = source_result::<PreparedSource>(Err(error)).unwrap_err();
         assert_eq!(error.kind, ErrorKind::Filesystem);
         assert!(error.to_string().contains(&reason));
         assert_eq!(
