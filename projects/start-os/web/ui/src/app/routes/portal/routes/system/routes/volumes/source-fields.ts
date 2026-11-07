@@ -27,7 +27,8 @@ export function sourceEdit(entry: Signal<SourceEntry | undefined>) {
     const source = entry()?.source
     return source?.kind === 'cifs' ? source : null
   })
-  const name = linkedSignal(() => entry()?.name ?? '')
+  const storedName = computed(() => entry()?.name ?? '')
+  const name = linkedSignal(storedName)
   const hostname = linkedSignal(() => cifs()?.hostname ?? '')
   const path = linkedSignal(() => cifs()?.path ?? '')
   const username = linkedSignal(() => cifs()?.username ?? '')

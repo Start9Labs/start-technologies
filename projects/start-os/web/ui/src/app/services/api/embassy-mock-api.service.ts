@@ -2956,7 +2956,7 @@ export class MockApiService extends ApiService {
           kind: 'cifs',
           hostname: source.hostname,
           path: `/${source.path.replace(/^\/+/, '')}`,
-          username: source.username,
+          username: source.username ?? '',
         }
       case 'disk':
         return {

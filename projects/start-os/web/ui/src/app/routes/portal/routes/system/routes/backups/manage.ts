@@ -1,17 +1,13 @@
 import { Component, computed, effect, inject } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import {
-  CopyService,
-  DialogService,
-  i18nPipe,
-  TaskService,
-} from '@start9labs/shared'
+import { CopyService, i18nPipe, TaskService } from '@start9labs/shared'
 import { TuiButton, TuiDialogContext, TuiIcon, TuiInput } from '@taiga-ui/core'
 import { TuiConfirmService } from '@taiga-ui/kit'
 import { TuiForm } from '@taiga-ui/layout'
 import { injectContext } from '@taiga-ui/polymorpheus'
-import { firstValueFrom } from 'rxjs'
 
+import { FormDialogService } from 'src/app/services/form-dialog.service'
+import { SOURCE_MANAGE_STYLES } from 'src/app/routes/portal/routes/system/routes/volumes/manage.styles'
 import {
   SourceFields,
   sourceEdit,
@@ -60,7 +56,7 @@ import { BackupService } from './backup.service'
             tuiButton
             type="button"
             appearance="flat-grayscale"
-            (click)="cancel()"
+            (click)="formDialog.close(context.$implicit)"
           >
             {{ 'Cancel' | i18n }}
           </button>
@@ -76,36 +72,7 @@ import { BackupService } from './backup.service'
       </div>
     }
   `,
-  styles: `
-    .context {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      margin-block-end: 1.5rem;
-      font-weight: bold;
-
-      tui-icon {
-        font-size: 1.25rem;
-      }
-    }
-
-    footer {
-      position: sticky;
-      bottom: 0;
-      z-index: 10;
-      display: flex;
-      justify-content: flex-end;
-      gap: 1rem;
-      padding: 1rem 0;
-      margin: 1rem -1px -1rem;
-      background: var(--tui-background-elevation-1);
-      box-shadow: inset 0 1px var(--tui-background-neutral-1);
-    }
-
-    .remove {
-      margin-inline-end: auto;
-    }
-  `,
+  styles: SOURCE_MANAGE_STYLES,
   imports: [
     FormsModule,
     SourceFields,
@@ -120,7 +87,7 @@ export class BackupTargetManage {
   protected readonly types = VOLUME_TYPES
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
-  private readonly dialogs = inject(DialogService)
+  protected readonly formDialog = inject(FormDialogService)
   private readonly confirm = inject(TuiConfirmService, { optional: true })
 
   protected readonly service = inject(BackupService)
@@ -142,27 +109,6 @@ export class BackupTargetManage {
         ? this.confirm?.markAsDirty()
         : this.confirm?.markAsPristine(),
     )
-  }
-
-  protected async cancel() {
-    if (
-      this.edit.changed() &&
-      !(await firstValueFrom(
-        this.dialogs.openConfirm({
-          label: 'Unsaved changes',
-          size: 's',
-          data: {
-            content:
-              'You have unsaved changes. Are you sure you want to leave?',
-            yes: 'Leave',
-            no: 'Cancel',
-          },
-        }),
-        { defaultValue: false },
-      ))
-    )
-      return
-    this.context.$implicit.complete()
   }
 
   protected async save() {

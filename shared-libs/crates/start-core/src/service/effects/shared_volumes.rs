@@ -96,7 +96,7 @@ pub async fn get_shared_volumes(
         .seed
         .ctx
         .db
-        .watch("".parse().unwrap())
+        .watch(patch_db::json_ptr::ROOT.to_owned())
         .await
         .typed::<DatabaseModel>();
     let db = DatabaseModel::from(watch.as_mut().peek_and_mark_seen()?);
@@ -274,7 +274,7 @@ pub async fn mount_shared_volume(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared_volumes::{SharedVolumeGrant, SharedVolumeSource};
+    use crate::shared_volumes::{SharedVolumeCredentials, SharedVolumeGrant, SharedVolumeSource};
 
     #[test]
     fn consumers_are_notified_only_when_their_mount_inputs_change() {
@@ -404,6 +404,95 @@ mod tests {
             &inputs,
             mount_inputs(&package, &database(&catalog)).unwrap()
         ));
+    }
+
+    #[test]
+    fn password_only_edits_invalidate_consumers_without_disclosing_credentials() {
+        let package: PackageId = "consumer".parse().unwrap();
+        let id = SharedVolumeId::new();
+        let other = SharedVolumeId::new();
+        let catalog = BTreeMap::from([
+            (
+                id.clone(),
+                SharedVolume {
+                    name: "Music".into(),
+                    source: SharedVolumeSource::Cifs {
+                        hostname: "nas".into(),
+                        path: "/music".into(),
+                        username: "reader".into(),
+                    },
+                    grants: [(package.clone(), SharedVolumeGrant { readonly: true })].into(),
+                    inspection: crate::shared_volumes::SharedVolumeInspection::available(None),
+                },
+            ),
+            (
+                other.clone(),
+                SharedVolume {
+                    name: "Private".into(),
+                    source: SharedVolumeSource::Cifs {
+                        hostname: "other-nas".into(),
+                        path: "/private".into(),
+                        username: "owner".into(),
+                    },
+                    grants: BTreeMap::new(),
+                    inspection: crate::shared_volumes::SharedVolumeInspection::available(None),
+                },
+            ),
+        ]);
+        let mut db = DatabaseModel::from(imbl_value::json!({
+            "public": { "sharedVolumes": to_value(&catalog).unwrap() },
+            "private": { "sharedVolumeCredentials": to_value(&BTreeMap::from([
+                (id.clone(), SharedVolumeCredentials { password: Some("old-secret".into()) }),
+                (other.clone(), SharedVolumeCredentials { password: Some("other-old-secret".into()) }),
+            ])).unwrap() }
+        }));
+        let previous = mount_inputs(&package, &db).unwrap();
+        db.as_private_mut()
+            .as_shared_volume_credentials_mut()
+            .insert(
+                &other,
+                &SharedVolumeCredentials {
+                    password: Some("unrelated-secret".into()),
+                },
+            )
+            .unwrap();
+        assert!(!mount_inputs_changed(
+            &previous,
+            mount_inputs(&package, &db).unwrap()
+        ));
+        db.as_private_mut()
+            .as_shared_volume_credentials_mut()
+            .insert(
+                &id,
+                &SharedVolumeCredentials {
+                    password: Some("replacement-secret".into()),
+                },
+            )
+            .unwrap();
+        db.as_public_mut()
+            .as_shared_volumes_mut()
+            .as_idx_mut(&id)
+            .unwrap()
+            .mutate(|volume| {
+                volume.inspection = Default::default();
+                Ok(())
+            })
+            .unwrap();
+        assert!(mount_inputs_changed(
+            &previous,
+            mount_inputs(&package, &db).unwrap()
+        ));
+        let listed = granted_volumes(
+            true,
+            &package,
+            db.as_public().as_shared_volumes().de().unwrap(),
+        )
+        .unwrap();
+        let public = to_value(&listed).unwrap();
+        assert_eq!(public[0]["id"], to_value(&id).unwrap());
+        assert!(public[0].get("source").is_none());
+        assert!(public[0].get("password").is_none());
+        assert!(!serde_json::to_string(&public).unwrap().contains("secret"));
     }
 
     #[test]
