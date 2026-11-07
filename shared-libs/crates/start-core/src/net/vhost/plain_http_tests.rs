@@ -97,6 +97,34 @@ async fn proxy(
     )
 }
 
+#[test]
+fn plaintext_listener_does_not_bind_its_backend_endpoint() {
+    let backend: SocketAddr = "127.0.0.1:6881".parse().unwrap();
+    let bridge = "10.0.3.1".parse().unwrap();
+    let target = ProxyTarget {
+        public_v4: BTreeSet::new(),
+        public_v6: BTreeSet::new(),
+        public_v6_gateways: BTreeSet::new(),
+        private: BTreeSet::from([backend.ip(), bridge]),
+        acme: None,
+        addr: backend,
+        addr_v6: None,
+        proxy: Some(ProxyOptions::Tcp),
+        connect_ssl: None,
+        alpn: None,
+        passthrough: false,
+        preserve_source_ip: false,
+    };
+    assert_eq!(
+        PlaintextProxy::requirements(6881, &target).private_ips,
+        BTreeSet::from([bridge])
+    );
+    assert_eq!(
+        PlaintextProxy::requirements(6882, &target).private_ips,
+        target.private
+    );
+}
+
 #[tokio::test]
 async fn tcp_listener_relays_binary_streams_and_closes_them_on_drop() {
     tokio::time::timeout(Duration::from_secs(10), async {

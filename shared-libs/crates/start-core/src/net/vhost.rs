@@ -1720,17 +1720,24 @@ impl PlaintextProxy {
         target: ProxyTarget,
         max_connections: usize,
     ) -> Self {
-        let (public_gateways, private_ips) =
-            VHostTarget::<VHostBindListener>::bind_requirements(&target);
-        let requirements = Watch::new(VHostBindRequirements {
-            public_gateways,
-            private_ips,
-        });
+        let requirements = Watch::new(Self::requirements(port, &target));
         Self::serve(
             VHostBindListener::new(interfaces, port, requirements),
             target,
             max_connections,
         )
+    }
+
+    fn requirements(port: u16, target: &ProxyTarget) -> VHostBindRequirements {
+        let (public_gateways, mut private_ips) =
+            VHostTarget::<VHostBindListener>::bind_requirements(target);
+        if target.addr.port() == port {
+            private_ips.remove(&target.addr.ip());
+        }
+        VHostBindRequirements {
+            public_gateways,
+            private_ips,
+        }
     }
 
     fn serve(mut listener: VHostBindListener, target: ProxyTarget, max_connections: usize) -> Self {
