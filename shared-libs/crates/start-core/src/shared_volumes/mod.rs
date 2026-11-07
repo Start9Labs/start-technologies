@@ -470,22 +470,25 @@ pub struct SharedVolumeInspection {
 }
 
 impl SharedVolumeInspection {
-    pub(crate) fn available(bytes: Option<u64>) -> Self {
+    pub(crate) fn observed(
+        availability: SharedVolumeAvailability,
+        available: Option<u64>,
+        error: Option<String>,
+    ) -> Self {
         Self {
-            availability: SharedVolumeAvailability::Available,
-            available: bytes,
-            error: None,
+            availability,
+            available,
+            error,
             checked_at: Some(chrono::Utc::now()),
         }
     }
 
+    pub(crate) fn available(bytes: Option<u64>) -> Self {
+        Self::observed(SharedVolumeAvailability::Available, bytes, None)
+    }
+
     pub(crate) fn unavailable(error: String) -> Self {
-        Self {
-            availability: SharedVolumeAvailability::Unavailable,
-            available: None,
-            error: Some(error),
-            checked_at: Some(chrono::Utc::now()),
-        }
+        Self::observed(SharedVolumeAvailability::Unavailable, None, Some(error))
     }
 }
 

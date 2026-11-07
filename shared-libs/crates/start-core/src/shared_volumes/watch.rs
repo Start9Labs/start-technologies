@@ -11,12 +11,14 @@ use crate::util::future::NonDetachingJoinHandle;
 
 mod cifs;
 mod events;
+mod mounted;
 
 #[derive(Debug)]
 enum Event {
     Disks,
     RescanDisks,
     Network,
+    Probe(mounted::ProbeUpdate),
 }
 
 struct Retry {
@@ -78,11 +80,13 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
     let mut disk_updates = ctx.disk_updates.subscribe();
     drop(ctx);
     let (send, mut recv) = mpsc::channel(64);
+    let mut mounted = mounted::MountedChecks::new(send.clone());
     let _listeners = events::subscribe(send);
     let mut catalog = db.watch("/public/sharedVolumes".parse().unwrap()).await;
     let mut running: BTreeMap<SharedVolumeId, NonDetachingJoinHandle<()>> = BTreeMap::new();
     let mut retries = BTreeMap::<SharedVolumeId, Retry>::new();
     let mut disk_scan: Option<NonDetachingJoinHandle<()>> = None;
+    let mut retire_at: Option<Instant> = None;
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let mut startup = true;
     loop {
@@ -97,10 +101,40 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
             }
         };
         let Some(ctx) = context() else { break };
+        let event = match event {
+            Some(Event::Probe(update)) => {
+                mounted.publish(&ctx, update).await;
+                None
+            }
+            event => event,
+        };
         let volumes: BTreeMap<SharedVolumeId, SharedVolume> =
             db.peek().await.as_public().as_shared_volumes().de()?;
         running.retain(|id, job| volumes.contains_key(id) && !job.is_finished());
         retries.retain(|id, _| volumes.get(id).is_some_and(retryable));
+        if matches!(event, Some(Event::Disks))
+            || retire_at.is_some_and(|deadline| deadline <= Instant::now())
+        {
+            let (retired, pending) =
+                crate::disk::mount::guard::TmpMountGuard::retire_changed_devices().await;
+            retire_at = pending.then(|| Instant::now() + Duration::from_secs(1));
+            for (id, volume) in &volumes {
+                if let SharedVolumeSource::Disk { logicalname, .. } = &volume.source {
+                    if retired.contains(logicalname) {
+                        running.remove(id);
+                        source::record_availability(
+                            &ctx,
+                            id,
+                            super::SharedVolumeInspection::unavailable(
+                                t!("shared-volumes.source-unavailable").to_string(),
+                            ),
+                        )
+                        .await?;
+                    }
+                }
+            }
+        }
+        mounted.tick(&ctx, &volumes).await;
         if startup || matches!(event, Some(Event::Disks | Event::RescanDisks)) {
             if let Some(scan) = disk_scan.take() {
                 let _ = scan.wait_for_abort().await;
@@ -125,6 +159,19 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
             let full = startup
                 || event_matches
                 || volume.inspection.availability == SharedVolumeAvailability::Unknown;
+            if matches!(volume.source, SharedVolumeSource::Cifs { .. })
+                && (full || retryable(&volume))
+                && source::existing_source(&ctx, &id)
+                    .await
+                    .log_err()
+                    .flatten()
+                    .is_some()
+            {
+                if volume.inspection.availability == SharedVolumeAvailability::Unknown {
+                    mounted.invalidate();
+                }
+                continue;
+            }
             if event_matches {
                 running.remove(&id);
             }

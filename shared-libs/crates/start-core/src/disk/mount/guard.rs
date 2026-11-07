@@ -416,6 +416,38 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn existing_lookup_does_not_mount_an_unseen_filesystem() {
+        use digest::Digest;
+        struct UnmountedFilesystem {
+            id: String,
+            attempted: AtomicBool,
+        }
+        impl FileSystem for UnmountedFilesystem {
+            async fn mount<P: AsRef<Path> + Send>(&self, _: P, _: MountType) -> Result<(), Error> {
+                self.attempted.store(true, Ordering::Release);
+                Err(Error::new(
+                    color_eyre::eyre::eyre!("unavailable"),
+                    crate::ErrorKind::Filesystem,
+                ))
+            }
+            async fn source_hash(&self) -> Result<digest::Output<sha2::Sha256>, Error> {
+                Ok(sha2::Sha256::digest(self.id.as_bytes()))
+            }
+        }
+        let filesystem = UnmountedFilesystem {
+            id: crate::shared_volumes::SharedVolumeId::new().to_string(),
+            attempted: AtomicBool::new(false),
+        };
+        assert!(
+            TmpMountGuard::existing(&filesystem)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(!filesystem.attempted.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
     async fn source_identity_detects_removal_and_replacement_at_the_same_path() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("node");

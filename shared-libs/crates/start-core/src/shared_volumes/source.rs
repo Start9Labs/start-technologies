@@ -122,6 +122,21 @@ pub(super) struct MountedSource {
     pub(super) mount: WeakMountGuard,
 }
 impl MountedSource {
+    pub(super) fn id(&self) -> &SharedVolumeId {
+        &self.id
+    }
+
+    pub(super) async fn record_connection(
+        &self,
+        ctx: &RpcContext,
+        healthy: bool,
+    ) -> Result<(), Error> {
+        ctx.db
+            .mutate(|db| write_connection(db, &self.id, &self.definition, &self.mount, healthy))
+            .await
+            .result
+    }
+
     pub(super) async fn record(
         &self,
         ctx: &RpcContext,
@@ -199,6 +214,25 @@ pub async fn open_source(
     result.map(|_| prepared.unwrap())
 }
 
+fn write_connection(
+    db: &mut crate::db::model::DatabaseModel,
+    id: &SharedVolumeId,
+    definition: &SourceDefinition,
+    mount: &WeakMountGuard,
+    healthy: bool,
+) -> Result<(), Error> {
+    let Some(volume) = db.as_public().as_shared_volumes().as_idx(id) else {
+        return Ok(());
+    };
+    let previous = volume.as_inspection().de()?;
+    let inspection = if healthy {
+        SharedVolumeInspection::available(previous.available)
+    } else {
+        SharedVolumeInspection::unavailable(t!("shared-volumes.source-unavailable").to_string())
+    };
+    write_checked(db, id, definition, Some(mount), inspection).map(|_| ())
+}
+
 fn write_checked(
     db: &mut crate::db::model::DatabaseModel,
     id: &SharedVolumeId,
@@ -257,14 +291,13 @@ fn write_inspection(
     Ok(())
 }
 
+pub(super) const SPACE_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 pub(crate) async fn measure_mount(path: &Path) -> Result<u64, Error> {
-    tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        crate::disk::util::get_available(path),
-    )
-    .await
-    .with_kind(ErrorKind::Timeout)
-    .and_then(|result| result)
+    tokio::time::timeout(SPACE_QUERY_TIMEOUT, crate::disk::util::get_available(path))
+        .await
+        .with_kind(ErrorKind::Timeout)
+        .and_then(|result| result)
 }
 
 pub(super) fn external_partition(
