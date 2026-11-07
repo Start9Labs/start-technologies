@@ -310,6 +310,21 @@ impl CallRemote<RegistryContext> for CliContext {
     }
 }
 
+pub(crate) async fn call(
+    client: &crate::context::rpc::ReloadableHttpClient,
+    signer: &crate::sign::Signer,
+    registry: &Url,
+    headers: HeaderMap,
+    method: &str,
+    params: Value,
+) -> Result<Value, RpcError> {
+    use crate::middleware::auth::session::client as session_client;
+    let body = session_client::request_body(method, params)?;
+    let identity = crate::sign::noise::NoiseIdentity::new(signer).await?;
+    let mut socket = super::sync::connection::connect(client, registry, identity, headers).await?;
+    session_client::request(&mut socket, body).await
+}
+
 impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
     async fn call_remote(
         &self,
@@ -338,18 +353,11 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
             return Ok(result);
         }
 
-        let registry = registry_rpc_url(&registry)?;
-
         let is_onion = registry.host_str().map_or(false, |h| h.ends_with(".onion"));
-
-        let identity = registry
-            .host_str()
-            .or_not_found("registry hostname")?
-            .to_owned();
-        let mut res = match crate::middleware::auth::signature::call_remote_with_client(
-            Some((self.signing_key()?, &identity)),
-            self.client.get_without_redirects(),
-            registry,
+        let mut res = match call(
+            &self.client,
+            &self.signing_key()?,
+            &registry,
             headers,
             method,
             params.clone(),
@@ -369,11 +377,7 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
     }
 }
 
-/// Reaching a `.onion` registry requires the host to proxy through the Tor
-/// service's SOCKS proxy (`tor.startos:9050`). When that service is missing or
-/// stopped, the request fails with reqwest's opaque "error sending request" —
-/// replace it with actionable guidance. If Tor is up, the failure belongs to the
-/// onion service itself, so the original error is preserved.
+/// Onion registries require the Tor service's SOCKS proxy.
 async fn onion_tor_hint(ctx: &RpcContext, original: RpcError) -> RpcError {
     let running = async {
         let tor_id = "tor".parse::<crate::PackageId>().ok()?;
@@ -574,4 +578,8 @@ mod os_asset_sign_tests;
 mod os_ingestion_tests;
 #[cfg(test)]
 #[path = "test_utils.rs"]
-mod test_utils;
+pub(crate) mod test_utils;
+
+#[cfg(test)]
+#[path = "query_tests.rs"]
+mod query_tests;

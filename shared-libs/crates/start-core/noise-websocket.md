@@ -54,6 +54,14 @@ Identity preparation precedes the 30-second connection/exchange deadline. No RPC
 initiation is sent before admission completes; failed negotiation does not retry
 as plaintext. Package signatures remain the StartOS trust anchor.
 
+Uncached backend registry RPC and initial registry-info/trust discovery share
+`registry::context::call`, using the same SOCKS-aware upgrade as subscriptions.
+Device-info headers accompany the upgrade for existing compatibility projection.
+`session::client::{admit,request_body,request}` own admission deadlines, captured
+request bytes and single-response exchange for both Reqwest and SOCKS transports.
+Initial package-trust grants, refresh discovery and cache projections retain their
+distinct owners; no transport identity is persisted in the registry cache.
+
 ## Native CLI transport
 
 Normal keyed StartOS, registry, Tunnel and WRT CLI calls, including registry promotion, use

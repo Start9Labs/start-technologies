@@ -82,15 +82,39 @@ pub async fn connect(
     headers: HeaderMap,
 ) -> Result<EncryptedSocket, Error> {
     let url = session_url(url, address)?;
+    admit(
+        identity,
+        address,
+        upgrade(
+            client,
+            url,
+            headers,
+            wire_message_size(NonZeroUsize::new(DEFAULT_RPC_RESPONSE_LIMIT).unwrap()).get(),
+        ),
+    )
+    .await
+}
+
+pub(crate) async fn admit(
+    identity: NoiseIdentity,
+    address: &str,
+    upgrade: impl Future<Output = Result<BoxWebSocket, Error>>,
+) -> Result<EncryptedSocket, Error> {
     let limit = NonZeroUsize::new(DEFAULT_RPC_RESPONSE_LIMIT).unwrap();
     tokio::time::timeout(CONNECT_TIMEOUT, async {
-        let socket = upgrade(client, url, headers, wire_message_size(limit).get()).await?;
+        let socket = upgrade.await?;
         let (_, socket) =
             EncryptedSocket::initiate(socket, identity, &prologue(address), limit).await?;
         Ok::<_, Error>(socket)
     })
     .await
     .with_kind(ErrorKind::Network)?
+}
+
+pub(crate) fn request_body(method: &str, params: Value) -> Result<String, RpcError> {
+    let mut body = rpc_request_body(method, params)?;
+    body.insert_str(1, "\"jsonrpc\":\"2.0\",");
+    Ok(body)
 }
 
 /// Calls an encrypted RPC using an HTTP/1-only client with the caller's network policy.
@@ -103,10 +127,13 @@ pub async fn call(
     method: &str,
     params: Value,
 ) -> Result<Value, RpcError> {
-    let mut body = rpc_request_body(method, params)?;
-    body.insert_str(1, "\"jsonrpc\":\"2.0\",");
+    let body = request_body(method, params)?;
     let identity = NoiseIdentity::new(signer).await?;
     let mut socket = connect(client, identity, websocket_url, address, headers).await?;
+    request(&mut socket, body).await
+}
+
+pub(crate) async fn request(socket: &mut EncryptedSocket, body: String) -> Result<Value, RpcError> {
     tokio::time::timeout(WRITE_TIMEOUT, socket.send(Message::Text(body.into())))
         .await
         .with_kind(ErrorKind::Network)?

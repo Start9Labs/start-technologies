@@ -18,6 +18,7 @@ use tokio::net::TcpStream;
 use tokio::process::Command;
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot, watch};
 use tokio::time::Instant;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::instrument;
@@ -211,9 +212,13 @@ impl ReloadableHttpClient {
 
     pub async fn websocket(
         &self,
-        url: Url,
+        request: impl IntoClientRequest + Send,
         config: WebSocketConfig,
     ) -> Result<WebSocketStream<MaybeTlsStream<Socks5Stream<TcpStream>>>, Error> {
+        let request = request
+            .into_client_request()
+            .with_kind(ErrorKind::Network)?;
+        let url: Url = request.uri().to_string().parse()?;
         let proxy: Url = self.socks_proxy_url.parse()?;
         let stream = Socks5Stream::connect(
             (
@@ -227,7 +232,7 @@ impl ReloadableHttpClient {
         .await
         .with_kind(ErrorKind::Network)?;
         let (socket, _) =
-            tokio_tungstenite::client_async_tls_with_config(url, stream, Some(config), None)
+            tokio_tungstenite::client_async_tls_with_config(request, stream, Some(config), None)
                 .await
                 .with_kind(ErrorKind::Network)?;
         Ok(socket)
@@ -853,7 +858,7 @@ mod tests {
             Duration::from_secs(5),
             client.websocket(
                 "ws://registry.invalid:5959/ws/rpc/test-continuation"
-                    .parse()
+                    .parse::<Url>()
                     .unwrap(),
                 WebSocketConfig::default().read_buffer_size(4096),
             ),

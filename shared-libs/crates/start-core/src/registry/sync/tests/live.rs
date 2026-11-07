@@ -1,5 +1,4 @@
 use super::*;
-use crate::context::rpc::ReloadableHttpClient;
 use crate::middleware::auth::session::{prologue, session_url};
 use crate::middleware::auth::signature::AUTH_SIG_HEADER;
 use crate::sign::noise::NoiseIdentity;
@@ -37,38 +36,11 @@ pub(super) async fn native_connection(
     registry: &Url,
     signer: &Signer,
 ) -> (Result<EncryptedSocket, Error>, NonDetachingJoinHandle<()>) {
-    use fast_socks5::server::Socks5ServerProtocol;
-    use fast_socks5::util::target_addr::TargetAddr;
-
-    let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client =
-        ReloadableHttpClient::new(format!("socks5h://{}", proxy.local_addr().unwrap())).unwrap();
-    let port = registry.port_or_known_default().unwrap();
-    let host = registry.host_str().unwrap().to_owned();
-    let task = tokio::spawn(async move {
-        let (stream, _) = proxy.accept().await.unwrap();
-        let (protocol, _, target) = Socks5ServerProtocol::accept_no_auth(stream)
-            .await
-            .unwrap()
-            .read_command()
-            .await
-            .unwrap();
-        if host == "registry.test" {
-            assert_eq!(target, TargetAddr::Domain(host, port));
-        }
-        let mut upstream = tokio::net::TcpStream::connect(("127.0.0.1", port))
-            .await
-            .unwrap();
-        let mut stream = protocol
-            .reply_success("127.0.0.1:0".parse().unwrap())
-            .await
-            .unwrap();
-        let _ = tokio::io::copy_bidirectional(&mut stream, &mut upstream).await;
-    })
-    .into();
+    let (client, task) = crate::registry::context::test_utils::socks_client(registry).await;
     let identity = NoiseIdentity::new(signer).await.unwrap();
     (
-        super::super::connection::connect(&client, registry, identity).await,
+        super::super::connection::connect(&client, registry, identity, http::HeaderMap::new())
+            .await,
         task,
     )
 }

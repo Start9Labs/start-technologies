@@ -19,7 +19,7 @@ use crate::trusted_keys::connection::{
 };
 use crate::util::future::NonDetachingJoinHandle;
 
-mod connection;
+pub(crate) mod connection;
 
 /// Last synchronized package listings and registry trust proposals.
 #[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]

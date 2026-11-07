@@ -4,11 +4,12 @@ use axum::extract::ws::Message;
 use futures::{SinkExt, StreamExt};
 use patch_db::{Dump, Revision};
 use rpc_toolkit::{RPCSTREAM_VERSION, RpcResponse, RpcStreamResponse};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 use super::*;
 use crate::context::rpc::ReloadableHttpClient;
-use crate::middleware::auth::session::{RpcSessionUpgrader, prologue, session_url};
+use crate::middleware::auth::session::{RpcSessionUpgrader, client as session_client, session_url};
 use crate::middleware::auth::signature::SigningContext;
 use crate::sign::noise::NoiseIdentity;
 use crate::util::net::secure::{
@@ -40,26 +41,21 @@ pub(super) fn subscription_request(
     })
 }
 
-pub(super) async fn connect(
+pub(crate) async fn connect(
     client: &ReloadableHttpClient,
     registry: &Url,
     identity: NoiseIdentity,
+    headers: http::HeaderMap,
 ) -> Result<EncryptedSocket, Error> {
     let address = registry.host_str().or_not_found("registry hostname")?;
     let url = session_url(websocket_url(registry)?, address)?;
-    tokio::time::timeout(Duration::from_secs(30), async {
-        let socket = client.websocket(url, response_config()).await?;
-        let (_, socket) = EncryptedSocket::initiate(
-            transport(socket),
-            identity,
-            &prologue(address),
-            NonZeroUsize::new(MAX_RESPONSE_SIZE).unwrap(),
-        )
-        .await?;
-        Ok(socket)
+    let mut request = url.into_client_request().with_kind(ErrorKind::Network)?;
+    request.headers_mut().extend(headers);
+    session_client::admit(identity, address, async {
+        let socket = client.websocket(request, response_config()).await?;
+        Ok(transport(socket))
     })
     .await
-    .with_kind(ErrorKind::Network)?
 }
 
 pub(super) async fn subscribe(
@@ -73,7 +69,7 @@ pub(super) async fn subscribe(
         let registry = subscriptions.first().unwrap().registry();
         let device = DeviceInfo::load(&ctx).await?;
         let identity = NoiseIdentity::new(&ctx.signing_key()?).await?;
-        let socket = connect(&ctx.client, registry, identity).await?;
+        let socket = connect(&ctx.client, registry, identity, http::HeaderMap::new()).await?;
         (socket, device)
     };
     receive_updates(socket, db, subscriptions, &device, backoff).await
