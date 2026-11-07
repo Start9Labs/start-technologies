@@ -169,6 +169,12 @@ impl FileSystem for BackupTargetFS {
             BackupTargetFS::Cifs(a) => a.source_hash().await,
         }
     }
+    async fn mount_hash(&self, mount_type: MountType) -> Result<digest::Output<Sha256>, Error> {
+        match self {
+            Self::Disk(disk) => disk.mount_hash(mount_type).await,
+            Self::Cifs(cifs) => cifs.mount_hash(mount_type).await,
+        }
+    }
 }
 
 pub fn target<C: Context>() -> ParentHandler<C> {
@@ -603,6 +609,30 @@ mod tests {
                 .refresh_disks_on_drop(updates.clone()),
         );
         assert!(observed.has_changed().unwrap());
+    }
+
+    #[tokio::test]
+    async fn backup_cifs_mounts_keep_the_requested_cache_policy() {
+        let target = BackupTargetFS::Cifs(Cifs {
+            hostname: "nas.local".into(),
+            path: "/backup".into(),
+            username: "owner".into(),
+            password: None,
+        });
+        assert_eq!(
+            target
+                .mount_hash(crate::disk::mount::filesystem::ReadOnly)
+                .await
+                .unwrap(),
+            target.mount_hash(ReadWrite).await.unwrap()
+        );
+        assert_ne!(
+            target.mount_hash(ReadWrite).await.unwrap(),
+            target
+                .mount_hash(crate::disk::mount::filesystem::BackupWrite)
+                .await
+                .unwrap()
+        );
     }
 
     #[test]

@@ -147,12 +147,26 @@ pub async fn mount_cifs(
         .await
 }
 
-fn access_options(mount_type: MountType) -> &'static str {
+fn cache_mode(mount_type: MountType) -> &'static str {
     match mount_type {
-        ReadOnly => "ro,cache=strict",
-        ReadWrite => "cache=strict",
-        BackupWrite => "cache=none",
+        BackupWrite => "none",
+        ReadOnly | ReadWrite => "strict",
     }
+}
+
+fn access_options(mount_type: MountType) -> String {
+    format!(
+        "{}cache={}",
+        if mount_type == ReadOnly { "ro," } else { "" },
+        cache_mode(mount_type)
+    )
+}
+
+fn policy_hash(source: digest::Output<Sha256>, mount_type: MountType) -> digest::Output<Sha256> {
+    let mut sha = Sha256::new();
+    sha.update(source);
+    sha.update(cache_mode(mount_type));
+    sha.finalize()
 }
 
 #[cfg(test)]
@@ -427,6 +441,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mount_identity_preserves_read_caching_and_isolates_uncached_backup_writes() {
+        let source = Cifs {
+            hostname: "nas.lan".into(),
+            path: "/share".into(),
+            username: "reader".into(),
+            password: Some("secret".into()),
+        };
+        let read = source.mount_hash(ReadOnly).await.unwrap();
+        assert_eq!(read, source.mount_hash(ReadWrite).await.unwrap());
+        assert_ne!(read, source.mount_hash(BackupWrite).await.unwrap());
+        let shared = SharedCifs(source);
+        assert_ne!(read, shared.mount_hash(ReadOnly).await.unwrap());
+        assert_eq!(
+            shared.mount_hash(ReadOnly).await.unwrap(),
+            shared.mount_hash(ReadWrite).await.unwrap()
+        );
+        assert_ne!(
+            shared.mount_hash(ReadOnly).await.unwrap(),
+            shared.mount_hash(BackupWrite).await.unwrap()
+        );
+        assert_eq!(access_options(ReadOnly), "ro,cache=strict");
+        assert_eq!(access_options(ReadWrite), "cache=strict");
+        assert_eq!(access_options(BackupWrite), "cache=none");
+    }
+
+    #[tokio::test]
     async fn ip_literals_bypass_name_lookup() {
         for hostname in ["192.0.2.10", "2001:db8::10"] {
             assert_eq!(
@@ -615,6 +655,9 @@ impl FileSystem for Cifs {
         );
         Ok(sha.finalize())
     }
+    async fn mount_hash(&self, mount_type: MountType) -> Result<digest::Output<Sha256>, Error> {
+        Ok(policy_hash(self.source_hash().await?, mount_type))
+    }
 }
 
 pub struct SharedCifs(pub Cifs);
@@ -636,5 +679,8 @@ impl FileSystem for SharedCifs {
         sha.update("SharedCifs");
         sha.update(self.0.source_hash().await?);
         Ok(sha.finalize())
+    }
+    async fn mount_hash(&self, mount_type: MountType) -> Result<digest::Output<Sha256>, Error> {
+        Ok(policy_hash(self.source_hash().await?, mount_type))
     }
 }

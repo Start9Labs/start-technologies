@@ -75,6 +75,30 @@ fn cifs_preparation_separates_private_password_and_preserves_connection_details(
     );
 }
 
+#[tokio::test]
+async fn shared_cifs_mounts_delegate_their_cache_policy() {
+    let (source, credentials) = prepare_cifs_source(Cifs {
+        hostname: "nas.local".into(),
+        path: "/shared".into(),
+        username: "owner".into(),
+        password: None,
+    })
+    .unwrap();
+    let source =
+        SourceDefinition::new(source, Some(credentials)).filesystem(&SharedVolumeId::new());
+    assert_eq!(
+        source.mount_hash(ReadOnly).await.unwrap(),
+        source.mount_hash(ReadWrite).await.unwrap()
+    );
+    assert_ne!(
+        source.mount_hash(ReadWrite).await.unwrap(),
+        source
+            .mount_hash(crate::disk::mount::filesystem::BackupWrite)
+            .await
+            .unwrap()
+    );
+}
+
 #[test]
 fn password_edits_preserve_omissions_and_clear_explicit_empty_values() {
     let mut credentials = SharedVolumeCredentials {

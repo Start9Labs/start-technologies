@@ -155,6 +155,15 @@ impl FileSystem for SourceFilesystem {
             Self::Cifs(filesystem) => filesystem.source_hash().await,
         }
     }
+    async fn mount_hash(
+        &self,
+        mount_type: MountType,
+    ) -> Result<digest::Output<sha2::Sha256>, Error> {
+        match self {
+            Self::Cifs(filesystem) => filesystem.mount_hash(mount_type).await,
+            _ => self.source_hash().await,
+        }
+    }
 }
 
 pub(super) struct MountedSource {
@@ -204,7 +213,7 @@ pub(super) async fn existing_source(
     id: &SharedVolumeId,
 ) -> Result<Option<MountedSource>, Error> {
     let definition = SourceDefinition::read(&ctx.db.peek().await, id)?;
-    let mount = TmpMountGuard::existing(&definition.filesystem(id)).await?;
+    let mount = TmpMountGuard::existing(&definition.filesystem(id), ReadWrite).await?;
     Ok(mount.map(|mount| MountedSource {
         id: id.clone(),
         definition,

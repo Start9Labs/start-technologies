@@ -117,4 +117,11 @@ pub trait FileSystem: Send + Sync {
         default_mount_impl(self, mountpoint, mount_type)
     }
     fn source_hash(&self) -> impl Future<Output = Result<digest::Output<Sha256>, Error>> + Send;
+    /// Temporary-mount identity, including immutable mount policy.
+    fn mount_hash(
+        &self,
+        #[allow(unused_variables)] mount_type: MountType,
+    ) -> impl Future<Output = Result<digest::Output<Sha256>, Error>> + Send {
+        self.source_hash()
+    }
 }

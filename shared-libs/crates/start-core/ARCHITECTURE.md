@@ -94,6 +94,8 @@ See [patchdb.md](patchdb.md) for `TypedDbWatch<T>` construction, API, and usage 
 
 Backup-FS mount caching and trash sweeps use actual directory identity, including through pinned descriptors and aliases; a replacement at the same pathname does not reuse an old encrypted mount. Public source errors redact private cache identities.
 
+`FileSystem::mount_hash` owns temporary-mount compatibility. CIFS keys include the caching policy used by the mount command: strict-cache readers and ordinary writers share a slot, while backup writers use a separate uncached mount. Compatible access upgrades preserve block-device sharing. Shared-service CIFS and backup CIFS retain separate runtime-policy identities.
+
 ## Backup conversion
 
 `backup.target.convert` authenticates the selected target/server backup's existing credential and starts a background conversion. `PreparedConversion` owns the mount, data path and zeroizing credential; the worker retains only the database and shutdown receiver, not the full RPC context. The filesystem helper takes its existing exclusive store lock. Server shutdown cancels the helper before releasing the mount. Backup acceptance shares the per-target/server running-conversion check before publishing progress; the helper lock still arbitrates races, reversed starts and externally launched operations. Conversion reuses the authenticated pending marker and durable migration pointers on the backup, rather than trusting progress counters.

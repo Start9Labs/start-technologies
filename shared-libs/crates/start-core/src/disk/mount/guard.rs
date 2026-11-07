@@ -230,10 +230,10 @@ impl GenericMountGuard for MountGuard {
     }
 }
 
-async fn tmp_mountpoint(source: &impl FileSystem) -> Result<PathBuf, Error> {
+async fn tmp_mountpoint(source: &impl FileSystem, mount_type: MountType) -> Result<PathBuf, Error> {
     Ok(Path::new(TMP_MOUNTPOINT).join(base32::encode(
         base32::Alphabet::Rfc4648 { padding: false },
-        &source.source_hash().await?[0..20],
+        &source.mount_hash(mount_type).await?[0..20],
     )))
 }
 
@@ -266,7 +266,7 @@ impl TmpMountGuard {
     #[instrument(skip_all)]
     pub async fn mount(filesystem: &impl FileSystem, mount_type: MountType) -> Result<Self, Error> {
         let device = capture_device(filesystem).await?;
-        let mountpoint = tmp_mountpoint(filesystem).await?;
+        let mountpoint = tmp_mountpoint(filesystem, mount_type).await?;
         let slot_handle = mount_slot(mountpoint.clone(), mount_type);
         let mut slot = slot_handle.lock().await;
         let (prev_mt, weak_slot) = &mut *slot;
@@ -306,8 +306,9 @@ impl TmpMountGuard {
 
     pub(crate) async fn reserve_unmounted(
         filesystem: &impl FileSystem,
+        mount_type: MountType,
     ) -> Result<UnusedMountSource, Error> {
-        let slot = mount_slot(tmp_mountpoint(filesystem).await?, ReadOnly)
+        let slot = mount_slot(tmp_mountpoint(filesystem, mount_type).await?, mount_type)
             .lock_owned()
             .await;
         if slot.1.upgrade().is_some() {
@@ -321,8 +322,9 @@ impl TmpMountGuard {
 
     pub(crate) async fn existing(
         filesystem: &impl FileSystem,
+        mount_type: MountType,
     ) -> Result<Option<WeakMountGuard>, Error> {
-        let path = tmp_mountpoint(filesystem).await?;
+        let path = tmp_mountpoint(filesystem, mount_type).await?;
         let slot = TMP_MOUNTS.mutate(|mounts| mounts.get(&path).cloned());
         let Some(slot) = slot else { return Ok(None) };
         let Ok(slot) = slot.try_lock() else {
@@ -462,7 +464,7 @@ mod tests {
             attempted: AtomicBool::new(false),
         };
         assert!(
-            TmpMountGuard::existing(&filesystem)
+            TmpMountGuard::existing(&filesystem, ReadOnly)
                 .await
                 .unwrap()
                 .is_none()
@@ -476,18 +478,38 @@ mod tests {
             id: crate::shared_volumes::SharedVolumeId::new().to_string(),
             attempted: AtomicBool::new(false),
         };
-        let reservation = TmpMountGuard::reserve_unmounted(&filesystem).await.unwrap();
+        let reservation = TmpMountGuard::reserve_unmounted(&filesystem, ReadOnly)
+            .await
+            .unwrap();
         {
             let mount = TmpMountGuard::mount(&filesystem, ReadOnly);
             tokio::pin!(mount);
             assert!(futures::poll!(&mut mount).is_pending());
         }
-        let next = TmpMountGuard::reserve_unmounted(&filesystem);
+        let next = TmpMountGuard::reserve_unmounted(&filesystem, ReadOnly);
         tokio::pin!(next);
         assert!(futures::poll!(&mut next).is_pending());
         drop(reservation);
         let _reservation = next.await.unwrap();
         assert!(!filesystem.attempted.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn ordinary_mounts_share_a_slot_across_access_upgrades() {
+        let filesystem = UnmountedFilesystem {
+            id: crate::shared_volumes::SharedVolumeId::new().to_string(),
+            attempted: AtomicBool::new(false),
+        };
+        assert_eq!(
+            tmp_mountpoint(&filesystem, ReadOnly).await.unwrap(),
+            tmp_mountpoint(&filesystem, ReadWrite).await.unwrap()
+        );
+        assert_eq!(
+            tmp_mountpoint(&filesystem, ReadWrite).await.unwrap(),
+            tmp_mountpoint(&filesystem, super::super::filesystem::BackupWrite)
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]

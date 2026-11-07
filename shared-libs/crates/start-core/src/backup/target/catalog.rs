@@ -296,7 +296,7 @@ pub async fn remove(ctx: RpcContext, TargetParams { id }: TargetParams) -> Resul
     let local = matches!(source, None | Some(SharedVolumeSource::Local));
     let path = local_path(crate::DATA_DIR, &id);
     let _unused = if local {
-        Some(TmpMountGuard::reserve_unmounted(&Bind::new(&path)).await?)
+        Some(TmpMountGuard::reserve_unmounted(&Bind::new(&path), ReadOnly).await?)
     } else {
         None
     };
