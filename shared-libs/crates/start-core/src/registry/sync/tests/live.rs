@@ -1,7 +1,11 @@
 use super::*;
-use crate::middleware::auth::signature::rpc::{RPC_SIGNATURE_FIELD, rpc_signing_body};
-use crate::middleware::auth::signature::{AUTH_SIG_HEADER, SignatureHeader};
+use crate::context::rpc::ReloadableHttpClient;
+use crate::middleware::auth::session::{prologue, session_url};
+use crate::middleware::auth::signature::AUTH_SIG_HEADER;
+use crate::sign::noise::NoiseIdentity;
 use crate::sign::{AnySigningKey, Signer};
+use crate::util::net::secure::EncryptedSocket;
+use crate::util::net::tungstenite::transport;
 
 fn signer() -> Signer {
     Signer::Key(AnySigningKey::Ed25519(
@@ -9,58 +13,80 @@ fn signer() -> Signer {
     ))
 }
 
-async fn verify_watch(request: &Value, signer: &Signer, context: &str) -> SignatureHeader {
-    let proof = SignatureHeader::from_header(
-        &http::HeaderValue::from_str(request[RPC_SIGNATURE_FIELD].as_str().unwrap()).unwrap(),
-    )
+pub(super) async fn encrypted_server(
+    socket: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+) -> EncryptedSocket {
+    let identity = NoiseIdentity::new(&Signer::Key(AnySigningKey::Ed25519(
+        ed25519_dalek::SigningKey::from_bytes(&[72; 32]),
+    )))
+    .await
     .unwrap();
-    assert_eq!(proof.signer, signer.verifying_key().await.unwrap());
-    proof.verify_rpc_commitment(context).unwrap();
-    proof
-        .commitment
-        .verify_bytes(&rpc_signing_body(request).unwrap())
-        .await
-        .unwrap();
-    proof
+    let (_, socket) = EncryptedSocket::accept(
+        transport(socket),
+        identity,
+        &prologue("registry.test"),
+        std::num::NonZeroUsize::new(1024 * 1024).unwrap(),
+        Some(signer().verifying_key().await.unwrap()),
+    )
+    .await
+    .unwrap();
+    socket
 }
 
-#[tokio::test]
-async fn watch_proofs_bind_each_projection_and_use_distinct_nonces() {
-    let signer = signer();
+pub(super) async fn native_connection(
+    registry: &Url,
+    signer: &Signer,
+) -> (Result<EncryptedSocket, Error>, NonDetachingJoinHandle<()>) {
+    use fast_socks5::server::Socks5ServerProtocol;
+    use fast_socks5::util::target_addr::TargetAddr;
+
+    let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let client =
+        ReloadableHttpClient::new(format!("socks5h://{}", proxy.local_addr().unwrap())).unwrap();
+    let port = registry.port_or_known_default().unwrap();
+    let host = registry.host_str().unwrap().to_owned();
+    let task = tokio::spawn(async move {
+        let (stream, _) = proxy.accept().await.unwrap();
+        let (protocol, _, target) = Socks5ServerProtocol::accept_no_auth(stream)
+            .await
+            .unwrap()
+            .read_command()
+            .await
+            .unwrap();
+        if host == "registry.test" {
+            assert_eq!(target, TargetAddr::Domain(host, port));
+        }
+        let mut upstream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        let mut stream = protocol
+            .reply_success("127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
+        let _ = tokio::io::copy_bidirectional(&mut stream, &mut upstream).await;
+    })
+    .into();
+    let identity = NoiseIdentity::new(signer).await.unwrap();
+    (
+        super::super::connection::connect(&client, registry, identity).await,
+        task,
+    )
+}
+
+#[test]
+fn channel_authenticated_watches_keep_distinct_ids_and_projection_versions() {
     let version = device().os.version;
-    let index = subscription_request(&Subscription::Index(url()), &version, &signer)
-        .await
-        .unwrap();
-    let os = subscription_request(&Subscription::Os(url()), &version, &signer)
-        .await
-        .unwrap();
-    let first = verify_watch(&index, &signer, "registry.test").await;
-    let second = verify_watch(&os, &signer, "registry.test").await;
-    assert_ne!(first.commitment.nonce, second.commitment.nonce);
+    let index = subscription_request(&Subscription::Index(url()), &version);
+    let os = subscription_request(&Subscription::Os(url()), &version);
     assert_ne!(index["id"], os["id"]);
     assert_eq!(index["params"]["pointer"], json!("/index"));
     assert_eq!(os["params"]["pointer"], json!("/index/os"));
-    assert_eq!(index["method"], json!("db.subscribe"));
-    assert_eq!(os["method"], json!("db.subscribe"));
-    assert_eq!(index["params"]["osVersion"], json!(version));
-    assert_eq!(os["params"]["osVersion"], json!(version));
-    let mut changed = index.clone();
-    changed["params"]["osVersion"] = json!("0.4.0.2");
-    assert!(
-        first
-            .commitment
-            .verify_bytes(&rpc_signing_body(&changed).unwrap())
-            .await
-            .is_err()
-    );
-    assert!(first.verify_rpc_commitment("another.test").is_err());
-    assert!(
-        first
-            .commitment
-            .verify_bytes(&rpc_signing_body(&os).unwrap())
-            .await
-            .is_err()
-    );
+    for request in [index, os] {
+        assert_eq!(request["method"], json!("db.subscribe"));
+        assert_eq!(request["rpcstream"], json!(rpc_toolkit::RPCSTREAM_VERSION));
+        assert_eq!(request["params"]["osVersion"], json!(version));
+        assert!(request.get("signature").is_none());
+    }
 }
 
 #[tokio::test]
@@ -92,23 +118,37 @@ async fn one_socket_demultiplexes_large_dumps_and_interleaved_revisions() {
     );
     let os_revision = os_source.put(&ROOT, &os).await.unwrap().unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let socket_url = format!("ws://{}", listener.local_addr().unwrap());
+    let registry_url = format!(
+        "http://registry.test:{}/catalog",
+        listener.local_addr().unwrap().port()
+    )
+    .parse()
+    .unwrap();
     let server: NonDetachingJoinHandle<()> = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
-        let mut socket = tokio_tungstenite::accept_hdr_async(
+        let socket = tokio_tungstenite::accept_hdr_async(
             stream,
             |request: &tokio_tungstenite::tungstenite::handshake::server::Request, response| {
                 assert!(!request.headers().contains_key(AUTH_SIG_HEADER));
+                assert_eq!(request.uri().path(), "/catalog/ws/rpc");
+                let query: BTreeMap<String, String> =
+                    serde_urlencoded::from_str(request.uri().query().unwrap()).unwrap();
+                assert_eq!(query["noise"], "1");
+                assert_eq!(query["context"], "registry.test");
                 Ok(response)
             },
         )
         .await
         .unwrap();
+        let mut socket = encrypted_server(socket).await;
         let mut ids = BTreeMap::new();
         for _ in 0..2 {
             let message = socket.next().await.unwrap().unwrap();
-            let request: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
-            verify_watch(&request, &signer(), "registry.test").await;
+            let Message::Text(text) = message else {
+                panic!("expected encrypted JSON request")
+            };
+            let request: Value = serde_json::from_str(&text).unwrap();
+            assert!(request.get("signature").is_none());
             ids.insert(
                 request["params"]["pointer"].as_str().unwrap().to_owned(),
                 request["id"].clone(),
@@ -133,10 +173,8 @@ async fn one_socket_demultiplexes_large_dumps_and_interleaved_revisions() {
         socket.send(Message::Close(None)).await.unwrap();
     })
     .into();
-    let (socket, _) =
-        tokio_tungstenite::connect_async_with_config(socket_url, Some(response_config()), false)
-            .await
-            .unwrap();
+    let (socket, _proxy) = native_connection(&registry_url, &signer()).await;
+    let socket = socket.unwrap();
     let mut backoff = 300;
     tokio::time::timeout(
         Duration::from_secs(30),
@@ -145,7 +183,6 @@ async fn one_socket_demultiplexes_large_dumps_and_interleaved_revisions() {
             &db,
             &BTreeSet::from([Subscription::Index(url()), Subscription::Os(url())]),
             &device(),
-            &signer(),
             &mut backoff,
         ),
     )
@@ -172,6 +209,71 @@ async fn one_socket_demultiplexes_large_dumps_and_interleaved_revisions() {
         .unwrap();
     assert!(os_cache.connected);
     assert!(os_cache.versions.contains_key(&"0.4.0.6".parse().unwrap()));
+}
+
+#[tokio::test]
+async fn native_connection_rejects_plaintext_registry_without_fallback() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let registry = format!(
+        "http://registry.test:{}/catalog",
+        listener.local_addr().unwrap().port()
+    )
+    .parse()
+    .unwrap();
+    let server: NonDetachingJoinHandle<()> = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+        assert!(matches!(
+            socket.next().await.unwrap().unwrap(),
+            tokio_tungstenite::tungstenite::Message::Binary(_)
+        ));
+        socket
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                r#"{"jsonrpc":"2.0","id":1,"result":{"id":0,"value":{}}}"#.into(),
+            ))
+            .await
+            .unwrap();
+    })
+    .into();
+    let (result, _proxy) = tokio::time::timeout(
+        Duration::from_secs(5),
+        native_connection(&registry, &signer()),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        result,
+        Err(Error {
+            kind: ErrorKind::InvalidRequest,
+            ..
+        })
+    ));
+    server.await.unwrap();
+}
+
+#[test]
+fn session_negotiation_preserves_endpoints_and_binds_the_shared_profile() {
+    let target = session_url(
+        "wss://registry.test:8443/catalog/ws/rpc?keep=value"
+            .parse()
+            .unwrap(),
+        "registry.test",
+    )
+    .unwrap();
+    assert_eq!(
+        target.as_str(),
+        "wss://registry.test:8443/catalog/ws/rpc?keep=value&noise=1&context=registry.test"
+    );
+    assert_eq!(
+        prologue("registry.test"),
+        b"Start-RPC-Noise v1\0registry.test"
+    );
+    let target = session_url("ws://[::1]:5959/ws/rpc".parse().unwrap(), "[::1]").unwrap();
+    let query: BTreeMap<String, String> = target
+        .query_pairs()
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    assert_eq!(query["context"], "[::1]");
 }
 
 async fn wait_for(db: &TypedPatchDb<Database>, predicate: impl Fn(&DatabaseModel) -> bool) {
@@ -238,19 +340,13 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
         let url = url.clone();
         let reader = reader.clone();
         tokio::spawn(async move {
-            let (socket, _) = tokio_tungstenite::connect_async_with_config(
-                websocket_url(&url).unwrap(),
-                Some(response_config()),
-                false,
-            )
-            .await
-            .unwrap();
+            let (socket, _proxy) = native_connection(&url, &reader).await;
+            let socket = socket.unwrap();
             receive_updates(
                 socket,
                 &db,
                 &BTreeSet::from([Subscription::Index(url.clone()), Subscription::Os(url)]),
                 &device(),
-                &reader,
                 &mut 300,
             )
             .await

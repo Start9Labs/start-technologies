@@ -169,7 +169,7 @@ struct HttpClients {
     without_redirects: Client,
 }
 impl ReloadableHttpClient {
-    fn new(socks_proxy_url: String) -> Result<Self, Error> {
+    pub(crate) fn new(socks_proxy_url: String) -> Result<Self, Error> {
         let clients = Self::build_clients(&socks_proxy_url)?;
         Ok(Self {
             clients: SyncRwLock::new(clients),

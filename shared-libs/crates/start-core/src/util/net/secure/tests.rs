@@ -10,7 +10,6 @@ use rpc_toolkit::{
     UpgradedWebSocket, WebSocketOptions, WebSocketUpgrader,
 };
 use serde_json::{Value, json};
-use tokio_tungstenite::tungstenite::Message as ClientMessage;
 
 use super::*;
 use crate::sign::{AnySigningKey, Signer};
@@ -472,37 +471,6 @@ impl WebSocketUpgrader<PeerContext> for SecureUpgrade {
     }
 }
 
-fn to_client(message: Message) -> ClientMessage {
-    match message {
-        Message::Text(text) => ClientMessage::Text(text.to_string().into()),
-        Message::Binary(bytes) => ClientMessage::Binary(bytes),
-        Message::Ping(bytes) => ClientMessage::Ping(bytes),
-        Message::Pong(bytes) => ClientMessage::Pong(bytes),
-        Message::Close(frame) => ClientMessage::Close(frame.map(|frame| {
-            tokio_tungstenite::tungstenite::protocol::CloseFrame {
-                code: frame.code.into(),
-                reason: frame.reason.to_string().into(),
-            }
-        })),
-    }
-}
-
-fn to_server(message: ClientMessage) -> Message {
-    match message {
-        ClientMessage::Text(text) => Message::Text(text.to_string().into()),
-        ClientMessage::Binary(bytes) => Message::Binary(bytes),
-        ClientMessage::Ping(bytes) => Message::Ping(bytes),
-        ClientMessage::Pong(bytes) => Message::Pong(bytes),
-        ClientMessage::Close(frame) => {
-            Message::Close(frame.map(|frame| axum::extract::ws::CloseFrame {
-                code: frame.code.into(),
-                reason: frame.reason.to_string().into(),
-            }))
-        }
-        ClientMessage::Frame(_) => unreachable!("WebSocketStream yields decoded messages"),
-    }
-}
-
 struct ServerGuard(tokio::task::JoinHandle<()>);
 impl Drop for ServerGuard {
     fn drop(&mut self) {
@@ -703,15 +671,7 @@ pub(crate) async fn raw_socket(url: &str) -> BoxWebSocket {
     let (socket, _) = tokio_tungstenite::connect_async_with_config(url, Some(limits), false)
         .await
         .unwrap();
-    let raw = socket
-        .with(|message| {
-            futures::future::ready(Ok::<_, tokio_tungstenite::tungstenite::Error>(to_client(
-                message,
-            )))
-        })
-        .sink_map_err(axum::Error::new)
-        .map(|result| result.map(to_server).map_err(axum::Error::new));
-    Box::new(raw)
+    crate::util::net::tungstenite::transport(socket)
 }
 
 async fn connect(url: &str, seed: u8) -> EncryptedSocket {

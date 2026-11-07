@@ -39,8 +39,8 @@ start-registry package access remove-reader <PACKAGE_ID> <SIGNER_ID>
 ```
 
 `set-private` creates a package entry when needed, allowing restriction before publication.
-Existing packages default to public. Readers authenticate with signed requests; revocations update
-active subscriptions. A subscriber using the public mirror must reconnect after receiving a private
+Existing packages default to public. Readers authenticate through encrypted sessions or signed
+requests; revocations update active subscriptions. A subscriber using the public mirror must reconnect after receiving a private
 access grant. Archive URLs remain governed by their download host.
 
 ## Package endorsements
@@ -77,15 +77,15 @@ cargo build -p start-registry --bin registrybox
 
 Configuration is read from CLI flags and a config file (`-c <path>`; default search includes the standard StartOS config path). Key flags:
 
-| Flag                    | Purpose                                         |
-| ----------------------- | ----------------------------------------------- |
-| `-l, --listen <addr>`   | listen address (default `127.0.0.1:5959`)       |
-| `-H, --hostname <host>` | public hostname(s) used in generated asset URLs |
-| `-p, --tor-proxy <url>` | SOCKS proxy for outbound (e.g. Tor) requests    |
-| `-d, --datadir <path>`  | data directory (default `/var/lib/startos`)     |
-| `-c, --config <path>`   | config file                                     |
+| Flag                    | Purpose                                                 |
+| ----------------------- | ------------------------------------------------------- |
+| `-l, --listen <addr>`   | listen address (default `127.0.0.1:5959`)               |
+| `-H, --hostname <host>` | public hostname(s) for asset URLs and authenticated RPC |
+| `-p, --tor-proxy <url>` | SOCKS proxy for outbound (e.g. Tor) requests            |
+| `-d, --datadir <path>`  | data directory (default `/var/lib/startos`)             |
+| `-c, --config <path>`   | config file                                             |
 
-Clients synchronize registry metadata through `db.subscribe`: `rpcstream` opt-in uses the shared `/ws/rpc` socket, while ordinary requests retain the GUID WebSocket continuation. A subscription's optional `osVersion` selects a lazily shared backward-compatible index view; omitted versions retain the canonical format. StartOS maintains package, signer, and OS-update caches independently of open browser sessions. OS releases marked `security` generate notifications on compatible StartOS servers using that registry for updates.
+Clients synchronize registry metadata through `db.subscribe`: `rpcstream` opt-in uses the shared `/ws/rpc` socket, while ordinary requests retain the GUID WebSocket continuation. StartOS authenticates and encrypts this shared connection with Noise; the registry must support both Noise admission and `rpcstream`, and its configured hostnames must include the URL host used by clients. A subscription's optional `osVersion` selects a lazily shared backward-compatible index view; omitted versions retain the canonical format. StartOS maintains package, signer, and OS-update caches independently of open browser sessions. OS releases marked `security` generate notifications on compatible StartOS servers using that registry for updates.
 
 Server state lives in `<datadir>/registry.db` (PatchDB) plus a SQLite metrics database and hosted asset files.
 

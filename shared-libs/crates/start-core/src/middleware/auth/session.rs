@@ -6,7 +6,8 @@ use axum::extract::Request;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use rpc_toolkit::{UpgradedWebSocket, WebSocketOptions, WebSocketUpgrader};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use url::Url;
 
 use super::signature::{SignatureAuthContext, request_identities};
 use crate::prelude::*;
@@ -14,7 +15,7 @@ use crate::sign::noise::NoiseIdentity;
 use crate::sign::{AnyVerifyingKey, Signer};
 use crate::util::net::secure::{EncryptedSocket, wire_message_size};
 
-const PROLOGUE: &[u8] = b"Start-RPC-Noise v1\0";
+const VERSION: u8 = 1;
 
 /// Immutable provenance of a completed encrypted exchange, without cached enrollment or roles.
 #[derive(Clone)]
@@ -68,10 +69,25 @@ pub trait SecureRpcContext: SignatureAuthContext + Clone {
 
 /// Binds the Noise transcript to the selected, ingress-validated server name.
 pub fn prologue(address: &str) -> Vec<u8> {
-    [PROLOGUE, address.as_bytes()].concat()
+    format!("Start-RPC-Noise v{VERSION}\0{address}").into_bytes()
 }
 
-#[derive(Deserialize)]
+/// Selects encrypted admission while preserving other endpoint parameters.
+pub fn session_url(mut url: Url, address: &str) -> Result<Url, Error> {
+    let query = serde_urlencoded::to_string(Negotiation {
+        noise: Some(VERSION),
+        context: Some(address.into()),
+    })
+    .with_kind(ErrorKind::Serialization)?;
+    let query = match url.query() {
+        Some(existing) => format!("{existing}&{query}"),
+        None => query,
+    };
+    url.set_query(Some(&query));
+    Ok(url)
+}
+
+#[derive(Deserialize, Serialize)]
 struct Negotiation {
     noise: Option<u8>,
     context: Option<InternedString>,
@@ -109,7 +125,7 @@ impl<C: SecureRpcContext> WebSocketUpgrader<C> for RpcSessionUpgrader {
                         socket: Box::new(socket),
                     });
                 }
-                Some(1) => (),
+                Some(VERSION) => (),
                 _ => {
                     return Err(axum::Error::new(std::io::Error::from(
                         std::io::ErrorKind::InvalidInput,

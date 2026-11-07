@@ -1,15 +1,18 @@
+use std::num::NonZeroUsize;
+
+use axum::extract::ws::Message;
 use futures::{SinkExt, StreamExt};
 use patch_db::{Dump, Revision};
 use rpc_toolkit::{RPCSTREAM_VERSION, RpcResponse, RpcStreamResponse};
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 use super::*;
-use crate::middleware::auth::signature::rpc::RPC_SIGNATURE_FIELD;
-use crate::middleware::auth::signature::{SignatureHeader, SigningContext};
-use crate::sign::Signer;
+use crate::context::rpc::ReloadableHttpClient;
+use crate::middleware::auth::session::{prologue, session_url};
+use crate::middleware::auth::signature::SigningContext;
+use crate::sign::noise::NoiseIdentity;
+use crate::util::net::secure::{EncryptedSocket, wire_message_size};
+use crate::util::net::tungstenite::transport;
 
 const MAX_RESPONSE_SIZE: usize = 64 * 1024 * 1024;
 
@@ -36,35 +39,45 @@ pub(super) fn websocket_url(registry: &Url) -> Result<Url, Error> {
 }
 
 pub(super) fn response_config() -> WebSocketConfig {
+    let wire_limit = wire_message_size(NonZeroUsize::new(MAX_RESPONSE_SIZE).unwrap()).get();
     WebSocketConfig::default()
         .read_buffer_size(4096)
         .write_buffer_size(0)
         .max_write_buffer_size(4096)
-        .max_message_size(Some(MAX_RESPONSE_SIZE))
-        .max_frame_size(Some(MAX_RESPONSE_SIZE))
+        .max_message_size(Some(wire_limit))
+        .max_frame_size(Some(wire_limit))
 }
 
-pub(super) async fn subscription_request(
+pub(super) fn subscription_request(
     subscription: &Subscription,
     os_version: &exver::Version,
-    signer: &Signer,
-) -> Result<Value, Error> {
-    let mut request = imbl_value::json!({
+) -> Value {
+    imbl_value::json!({
         "jsonrpc": "2.0", "rpcstream": RPCSTREAM_VERSION, "id": subscription.request_id(),
         "method": "db.subscribe", "params": { "pointer": subscription.pointer(), "osVersion": os_version }
-    });
-    let proof = SignatureHeader::sign_rpc(
-        signer,
-        &request,
-        subscription
-            .registry()
-            .host_str()
-            .or_not_found("registry hostname")?,
-    )
-    .await?
-    .to_header();
-    request[RPC_SIGNATURE_FIELD] = Value::from(proof.to_str().with_kind(ErrorKind::Serialization)?);
-    Ok(request)
+    })
+}
+
+pub(super) async fn connect(
+    client: &ReloadableHttpClient,
+    registry: &Url,
+    identity: NoiseIdentity,
+) -> Result<EncryptedSocket, Error> {
+    let address = registry.host_str().or_not_found("registry hostname")?;
+    let url = session_url(websocket_url(registry)?, address)?;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let socket = client.websocket(url, response_config()).await?;
+        let (_, socket) = EncryptedSocket::initiate(
+            transport(socket),
+            identity,
+            &prologue(address),
+            NonZeroUsize::new(MAX_RESPONSE_SIZE).unwrap(),
+        )
+        .await?;
+        Ok(socket)
+    })
+    .await
+    .with_kind(ErrorKind::Network)?
 }
 
 pub(super) async fn subscribe(
@@ -73,21 +86,15 @@ pub(super) async fn subscribe(
     context: &ContextProvider,
     backoff: &mut u64,
 ) -> Result<(), Error> {
-    let (socket, device, signer) = {
+    let (socket, device) = {
         let Some(ctx) = context() else { return Ok(()) };
         let registry = subscriptions.first().unwrap().registry();
         let device = DeviceInfo::load(&ctx).await?;
-        let signer = ctx.signing_key()?;
-        let socket = tokio::time::timeout(
-            Duration::from_secs(30),
-            ctx.client
-                .websocket(websocket_url(registry)?, response_config()),
-        )
-        .await
-        .with_kind(ErrorKind::Network)??;
-        (socket, device, signer)
+        let identity = NoiseIdentity::new(&ctx.signing_key()?).await?;
+        let socket = connect(&ctx.client, registry, identity).await?;
+        (socket, device)
     };
-    receive_updates(socket, db, subscriptions, &device, &signer, backoff).await
+    receive_updates(socket, db, subscriptions, &device, backoff).await
 }
 
 struct WatchState {
@@ -127,18 +134,17 @@ fn update_dump(state: &mut WatchState, message: Value) -> Result<bool, Error> {
     Ok(true)
 }
 
-pub(super) async fn receive_updates<S: AsyncRead + AsyncWrite + Unpin>(
-    mut socket: WebSocketStream<S>,
+pub(super) async fn receive_updates(
+    mut socket: EncryptedSocket,
     db: &TypedPatchDb<Database>,
     subscriptions: &BTreeSet<Subscription>,
     device: &DeviceInfo,
-    signer: &Signer,
     backoff: &mut u64,
 ) -> Result<(), Error> {
     let mut watches = BTreeMap::new();
     for subscription in subscriptions {
         let id = subscription.request_id();
-        let request = subscription_request(subscription, &device.os.version, signer).await?;
+        let request = subscription_request(subscription, &device.os.version);
         tokio::time::timeout(
             Duration::from_secs(15),
             socket.send(Message::Text(request.to_string().into())),

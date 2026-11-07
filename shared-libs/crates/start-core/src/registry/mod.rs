@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::context::CliContext;
 use crate::middleware::auth::Auth;
+use crate::middleware::auth::session::RpcSessionUpgrader;
 use crate::middleware::cors;
 use crate::net::http::request_authority;
 use crate::net::static_server::{bad_request, not_found, server_error};
@@ -169,7 +170,7 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
     Router::new()
         .route("/", get(marketplace_redirect))
         .route("/rpc/{*path}", any(server.clone()).layer(cors::layer()))
-        .route("/ws/rpc", get(server.for_websocket()).layer(cors::layer()))
+        .route("/ws/rpc", get(server.for_websocket().with_upgrader(RpcSessionUpgrader)).layer(cors::layer()))
         .route(
             &format!("/{}/{{*path}}", package::icon::ICON_PATH),
             get({

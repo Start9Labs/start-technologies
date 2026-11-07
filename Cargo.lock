@@ -8500,6 +8500,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sha-crypt",
  "sha2 0.11.1",
  "sha3 0.12.0",

@@ -11,6 +11,7 @@ use tokio::time::{Instant, Sleep};
 use crate::prelude::*;
 
 pub mod secure;
+pub mod tungstenite;
 
 const PING_INTERVAL: Duration = Duration::from_secs(30);
 const PING_TIMEOUT: Duration = Duration::from_secs(300);

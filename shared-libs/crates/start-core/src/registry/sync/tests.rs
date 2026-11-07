@@ -1,9 +1,9 @@
+use axum::extract::ws::Message;
 use futures::{SinkExt, StreamExt};
 use imbl_value::json;
 use patch_db::json_ptr::ROOT;
-use tokio_tungstenite::tungstenite::Message;
 
-use super::connection::{receive_updates, response_config, subscription_request, websocket_url};
+use super::connection::{receive_updates, subscription_request, websocket_url};
 use super::*;
 use crate::account::AccountInfo;
 use crate::db::model::public::Public;
@@ -439,13 +439,21 @@ async fn watch_applies_scoped_revisions_and_answers_heartbeats_on_reconnect() {
     for attempt in 0..2 {
         let dump = source.dump(&ROOT).await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let socket_url = format!("ws://{}", listener.local_addr().unwrap());
+        let registry_url = format!(
+            "http://registry.test:{}/catalog",
+            listener.local_addr().unwrap().port()
+        )
+        .parse()
+        .unwrap();
         let source = source.clone();
         let server: NonDetachingJoinHandle<()> = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
-            let request = socket.next().await.unwrap().unwrap();
-            let request: Value = serde_json::from_str(request.to_text().unwrap()).unwrap();
+            let socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let mut socket = live::encrypted_server(socket).await;
+            let Message::Text(request) = socket.next().await.unwrap().unwrap() else {
+                panic!("expected encrypted request")
+            };
+            let request: Value = serde_json::from_str(&request).unwrap();
             assert_eq!(request["method"].as_str(), Some("db.subscribe"));
             assert_eq!(request["params"]["osVersion"], json!(device().os.version));
             assert_eq!(request["params"]["pointer"].as_str(), Some("/index"));
@@ -486,7 +494,11 @@ async fn watch_applies_scoped_revisions_and_answers_heartbeats_on_reconnect() {
             socket.send(Message::Close(None)).await.unwrap();
         })
         .into();
-        let (socket, _) = tokio_tungstenite::connect_async(socket_url).await.unwrap();
+        let signer = crate::sign::Signer::Key(crate::sign::AnySigningKey::Ed25519(
+            ed25519_dalek::SigningKey::from_bytes(&[71; 32]),
+        ));
+        let (socket, _proxy) = live::native_connection(&registry_url, &signer).await;
+        let socket = socket.unwrap();
         let mut backoff = 300;
         tokio::time::timeout(
             Duration::from_secs(5),
@@ -495,9 +507,6 @@ async fn watch_applies_scoped_revisions_and_answers_heartbeats_on_reconnect() {
                 &db,
                 &BTreeSet::from([Subscription::Index(url())]),
                 &device(),
-                &crate::sign::Signer::Key(crate::sign::AnySigningKey::Ed25519(
-                    ed25519_dalek::SigningKey::from_bytes(&[71; 32]),
-                )),
                 &mut backoff,
             ),
         )

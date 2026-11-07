@@ -42,8 +42,17 @@ running live `check_pubkey`, `post_auth_hook` and password-enrollment rate limit
 Request-supplied proofs cannot switch the identity of an encrypted connection.
 Local/bearer authentication retains its separate precedence and policy.
 
-Product routes opt into this upgrader explicitly; the adapter and scope alone do
-not change an existing route.
+Registry registers the upgrader on `/ws/rpc`. The native registry client uses
+`session_url` to serialize the shared negotiation type and version, then binds
+the same selected hostname through `prologue`. Configured registry hostnames must
+cover that name. Other product routes opt into the upgrader explicitly.
+
+`util/net/tungstenite.rs` adapts native socket messages to the shared transport;
+Noise and test clients use that same bridge. Native registry connections retain
+the existing SOCKS routing, remote DNS, heartbeat, retry and cancellation owner.
+Identity preparation precedes the 30-second connection/exchange deadline. No RPC
+initiation is sent before admission completes; failed negotiation does not retry
+as plaintext. Package signatures remain the StartOS trust anchor.
 
 ## Admission
 
