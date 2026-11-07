@@ -324,7 +324,7 @@ export function datetimeMax(max: string): ValidatorFn {
     const date = new Date(value.length === 5 ? `2000-01-01T${value}` : value)
     const maxDate = new Date(max.length === 5 ? `2000-01-01T${max}` : max)
 
-    return date > maxDate ? { datetimeMin: `Maximum is ${max}` } : null
+    return date > maxDate ? { datetimeMax: `Maximum is ${max}` } : null
   }
 }
 
@@ -340,7 +340,9 @@ export function textLengthInRange(
     if (minLength && length < minLength)
       return { listNotInRange: `Must be at least ${minLength} characters` }
     if (maxLength && length > maxLength)
-      return { listNotInRange: `Cannot be great than ${maxLength} characters` }
+      return {
+        listNotInRange: `Cannot be greater than ${maxLength} characters`,
+      }
     return null
   }
 }
@@ -371,6 +373,7 @@ export function listUnique(spec: IST.ValueSpecList): ValidatorFn {
             : ''
 
           if (isListObject(objSpec) && objSpec.displayAs) {
+            // tui-error renders validation messages through innerHTML.
             display1 = `"${Mustache.render(objSpec.displayAs, list[idx])}"`
             display2 = `"${Mustache.render(objSpec.displayAs, list[idx2])}"`
           } else {
@@ -507,7 +510,6 @@ function uniqueByMessage(
 function isListObject(
   spec: IST.ListValueSpecOf<any>,
 ): spec is IST.ListValueSpecObject {
-  // only lists of objects have uniqueBy
   return 'uniqueBy' in spec
 }
 
