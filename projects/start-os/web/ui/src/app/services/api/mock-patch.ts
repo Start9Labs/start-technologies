@@ -443,6 +443,7 @@ export const mockPatchData: DataModel = {
     postInitMigrationTodos: {},
     latestMigrationRevision: 0,
     statusInfo: {
+      diskRevision: 0,
       updateProgress: null,
       backupConversions: {},
       restarting: false,

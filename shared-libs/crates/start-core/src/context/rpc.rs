@@ -478,6 +478,13 @@ impl RpcContext {
         });
 
         let res = Self(seed.clone());
+        #[cfg(target_os = "linux")]
+        {
+            let weak = Arc::downgrade(&seed);
+            res.add_cron(crate::shared_volumes::watch::run(move || {
+                weak.upgrade().map(Self)
+            }));
+        }
         crate::update::signer_files::initialize(&res.db).await?;
         res.cleanup_and_initialize(cleanup_init).await?;
         tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));

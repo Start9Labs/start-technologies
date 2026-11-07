@@ -130,6 +130,7 @@ impl Public {
                 status_info: ServerStatus {
                     backup_progress: None,
                     backup_conversions: Default::default(),
+                    disk_revision: 0,
                     update_progress: None,
                     shutting_down: false,
                     restarting: false,
@@ -494,6 +495,9 @@ pub struct ServerStatus {
     pub backup_progress: Option<FullProgress>,
     #[serde(default)]
     pub backup_conversions: crate::backup::target::conversion::ConversionJobs,
+    /// Invalidates cached drive discovery across daemon restarts.
+    #[serde(default)]
+    pub disk_revision: u64,
     pub update_progress: Option<FullProgress>,
     #[serde(default)]
     pub shutting_down: bool,

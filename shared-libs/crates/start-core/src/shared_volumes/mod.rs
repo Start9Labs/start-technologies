@@ -9,6 +9,8 @@ use crate::PackageId;
 
 pub mod mounts;
 pub mod source;
+#[cfg(target_os = "linux")]
+pub(crate) mod watch;
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::prelude::*;

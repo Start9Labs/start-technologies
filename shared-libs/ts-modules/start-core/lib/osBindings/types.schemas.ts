@@ -6048,6 +6048,10 @@ export const ServerStatus: z.ZodObject<{
     >,
     z.ZodRecord<z.ZodString, z.ZodRecord<z.ZodString, typeof ConversionJob>>
   >
+  /**
+   * Invalidates cached drive discovery across daemon restarts.
+   */
+  diskRevision: z.ZodCodec<z.ZodOptional<z.ZodInt>, z.ZodInt>
   updateProgress: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof FullProgress>>,
     z.ZodNullable<typeof FullProgress>
@@ -6067,6 +6071,12 @@ export const ServerStatus: z.ZodObject<{
     z.record(z.string(), z.record(z.string(), ConversionJob)).optional(),
     z.record(z.string(), z.record(z.string(), ConversionJob)),
   ),
+  /**
+   * Invalidates cached drive discovery across daemon restarts.
+   */
+  diskRevision: wire(z.int().optional(), z.int()).meta({
+    description: 'Invalidates cached drive discovery across daemon restarts.',
+  }),
   updateProgress: wire(
     FullProgress.nullable().optional(),
     FullProgress.nullable(),

@@ -16,13 +16,17 @@ import { T, Version } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
   catchError,
+  debounceTime,
   defer,
+  distinctUntilChanged,
   EMPTY,
   filter,
   finalize,
   firstValueFrom,
   from,
+  merge,
   pairwise,
+  skip,
   Subject,
   switchMap,
 } from 'rxjs'
@@ -50,7 +54,12 @@ export class BackupService {
   private readonly tasks = inject(TaskService)
   private readonly reload = new Subject<void>()
   private readonly targets = toSignal(
-    this.reload.pipe(
+    merge(
+      this.reload,
+      this.patch
+        .watch$('serverInfo', 'statusInfo', 'diskRevision')
+        .pipe(distinctUntilChanged(), skip(1), debounceTime(250)),
+    ).pipe(
       switchMap(() =>
         defer(() => {
           this.loading.set(true)

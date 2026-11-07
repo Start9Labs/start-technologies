@@ -190,6 +190,8 @@ const { LocalizePipe: ProductionLocalizePipe } =
 const { I18N } =
   await import('../../../../../shared-libs/ts-modules/shared/src/i18n/i18n.providers.ts')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
+const { BackupService } =
+  await import('src/app/routes/portal/routes/system/routes/backups/backup.service')
 const {
   TaskService,
   CopyService,
@@ -212,6 +214,63 @@ const { default: General } =
   await import('src/app/routes/portal/routes/system/routes/general/general.component')
 const { SystemUpdateModal, UPDATE } =
   await import('src/app/routes/portal/routes/system/routes/general/update.component')
+
+test('backup drives react to coalesced device revisions without accepting stale lists', async t => {
+  const revisions = new BehaviorSubject(0)
+  const requests = []
+  const injector = createEnvironmentInjector([
+    {
+      provide: PatchDB,
+      useValue: {
+        watch$: (...path) =>
+          path.at(-1) === 'diskRevision'
+            ? revisions
+            : of(path.at(-1) === 'id' ? 'server-id' : {}),
+      },
+    },
+    {
+      provide: ApiService,
+      useValue: {
+        rpc: {
+          backup: {
+            target: {
+              list: () => {
+                const request = deferred()
+                requests.push(request)
+                return request.promise
+              },
+            },
+          },
+        },
+      },
+    },
+    { provide: TaskService, useValue: {} },
+    { provide: DialogService, useValue: {} },
+    { provide: ErrorService, useValue: { handleError: assert.fail } },
+  ])
+  t.after(() => injector.destroy())
+  const service = runInInjectionContext(injector, () => new BackupService())
+  service.getBackupTargets()
+  assert.equal(requests.length, 1)
+  revisions.next(1)
+  revisions.next(2)
+  await new Promise(resolve => setTimeout(resolve, 300))
+  assert.equal(requests.length, 2)
+  requests[1].resolve({ drive: { type: 'disk', capacity: 1, startOs: {} } })
+  await tick()
+  assert.equal(service.drives().length, 1)
+  requests[0].resolve({})
+  await tick()
+  assert.equal(service.drives().length, 1)
+  revisions.next(2)
+  await new Promise(resolve => setTimeout(resolve, 300))
+  assert.equal(requests.length, 2)
+  revisions.next(3)
+  await new Promise(resolve => setTimeout(resolve, 300))
+  requests[2].resolve({})
+  await tick()
+  assert.equal(service.drives().length, 0)
+})
 
 function deferred() {
   let resolve, reject

@@ -88,6 +88,10 @@ See [patchdb.md](patchdb.md) for `TypedDbWatch<T>` construction, API, and usage 
 
 `backup-fs-protocol` owns the portable helper messages shared by core and the Linux filesystem implementation. Core uses `Invoke::output_to` to consume bounded JSON progress lines and preserves stdin credential transport. The helper throttles progress output and aggregates corruption diagnostics; neither channel contains credentials.
 
+## Storage availability
+
+On Linux, `shared_volumes::watch` runs under the RPC context's existing cron ownership. It subscribes to post-processing udev block events, kernel link/address/route events and Avahi SMB service announcements. Startup and source changes reuse `volumes.inspect`; absent filesystem UUIDs become unavailable without a mount. Unavailable CIFS sources with service grants receive bounded port-445 checks with backoff before a full inspection. PatchDB availability changes use the existing shared-volume service callbacks. `ServerStatus.diskRevision` invalidates the Backups drive list without storing a second disk catalog. Listener and per-volume jobs abort with their owning cron.
+
 ## Notification delivery
 
 `notifications::notify` persists notifications and enqueues push deliveries in the same transaction. `notifications::push` owns authenticated browser subscriptions, the server's VAPID identity, encrypted request construction, and the bounded private outbox. Its sender runs under `RpcContext`'s existing cron ownership, outside database mutations, and uses the reloadable SOCKS-aware HTTP client. Push transport failures do not prevent local notification creation.

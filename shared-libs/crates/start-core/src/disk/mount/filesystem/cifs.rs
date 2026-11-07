@@ -15,6 +15,8 @@ use crate::Error;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::util::Invoke;
 
+const SMB_PORT: u16 = 445;
+
 async fn resolve_hostname(hostname: &str) -> Result<IpAddr, Error> {
     if let Ok(addr) = hostname.parse() {
         return Ok(addr);
@@ -25,7 +27,7 @@ async fn resolve_hostname(hostname: &str) -> Result<IpAddr, Error> {
     resolve_dns_or_netbios(
         hostname,
         async {
-            tokio::net::lookup_host((hostname, 445))
+            tokio::net::lookup_host((hostname, SMB_PORT))
                 .await
                 .map_err(|error| Error::new(error, crate::ErrorKind::Network))?
                 .next()
@@ -53,6 +55,18 @@ async fn resolve_hostname(hostname: &str) -> Result<IpAddr, Error> {
         },
     )
     .await
+}
+
+pub(crate) async fn reachable(hostname: &str) -> bool {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let address = resolve_hostname(hostname).await?;
+        tokio::net::TcpStream::connect((address, SMB_PORT))
+            .await
+            .map_err(|error| Error::new(error, crate::ErrorKind::Network))?;
+        Ok::<_, Error>(())
+    })
+    .await
+    .is_ok_and(|result| result.is_ok())
 }
 
 pub(crate) async fn locations_overlap(

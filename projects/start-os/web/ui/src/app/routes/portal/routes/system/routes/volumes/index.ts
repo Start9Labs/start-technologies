@@ -104,7 +104,11 @@ import { VOLUME_GRANTS } from './grants'
                 />
                 {{ statuses[volume.availability] | i18n }}
               </span>
-              @if (inspections()[id]?.error; as error) {
+              @if (
+                volume.availability === 'unavailable' &&
+                  inspections()[id]?.error;
+                as error
+              ) {
                 <span tuiSubtitle>{{ error }}</span>
               }
             </span>

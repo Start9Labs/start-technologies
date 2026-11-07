@@ -3815,6 +3815,13 @@ shared-volumes.access-denied:
   fr_FR: "Ce service ne dispose pas de l'accès requis au volume"
   pl_PL: "Ta usługa nie ma wymaganego dostępu do woluminu"
 
+shared-volumes.availability-watch-failed:
+  en_US: "Storage availability tracking failed: %{error}"
+  de_DE: "Die Überwachung der Speicherverfügbarkeit ist fehlgeschlagen: %{error}"
+  es_ES: "Falló el seguimiento de disponibilidad del almacenamiento: %{error}"
+  fr_FR: "Échec du suivi de disponibilité du stockage : %{error}"
+  pl_PL: "Śledzenie dostępności pamięci masowej nie powiodło się: %{error}"
+
 shared-volumes.backup-isolation:
   en_US: "Volumes are inaccessible during service backup and restore"
   de_DE: "Volumes sind während der Sicherung und Wiederherstellung eines Dienstes nicht zugänglich"

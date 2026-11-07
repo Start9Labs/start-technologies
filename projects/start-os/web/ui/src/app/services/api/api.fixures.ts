@@ -28,6 +28,7 @@ export namespace Mock {
   export const ServerId = '1234-5678-9876-5432'
 
   export const ServerUpdated: T.ServerStatus = {
+    diskRevision: 0,
     backupConversions: {},
     backupProgress: null,
     updateProgress: null,
