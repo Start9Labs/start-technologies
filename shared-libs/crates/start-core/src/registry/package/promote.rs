@@ -28,14 +28,7 @@ pub struct CliPromoteParams {
 }
 
 pub fn registry_rpc_url(url: &Url) -> Result<Url, Error> {
-    let mut url = url.clone();
-    url.path_segments_mut()
-        .map_err(|_| eyre!("Url cannot be base"))
-        .with_kind(ErrorKind::ParseUrl)?
-        .pop_if_empty()
-        .push("rpc")
-        .push("v0");
-    Ok(url)
+    crate::util::net::rpc_url(url, 0)
 }
 
 pub fn resolve_registry_url(explicit: Option<&str>, ctx: &CliContext) -> Result<Url, Error> {

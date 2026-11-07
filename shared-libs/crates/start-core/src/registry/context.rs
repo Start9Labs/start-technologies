@@ -250,33 +250,7 @@ pub(crate) async fn call_cli(
     mut params: Value,
 ) -> Result<Value, RpcError> {
     super::compat::pem_wire(&mut params);
-    if !headers.contains_key(AUTHORIZATION) {
-        match ctx.signing_key() {
-            Ok(signer) => {
-                return crate::middleware::auth::session::client::call(
-                    &ctx.websocket_client,
-                    &signer,
-                    crate::middleware::auth::session::client::websocket_url(url)?,
-                    address,
-                    headers,
-                    method,
-                    params,
-                )
-                .await;
-            }
-            Err(error) if error.kind == ErrorKind::Uninitialized => (),
-            Err(error) => return Err(error.into()),
-        }
-    }
-    crate::middleware::auth::signature::call_remote_with_client(
-        None,
-        ctx.client.clone(),
-        url,
-        headers,
-        method,
-        params,
-    )
-    .await
+    ctx.call_rpc(url, headers, address, method, params).await
 }
 
 impl CallRemote<RegistryContext> for CliContext {

@@ -56,7 +56,8 @@ as plaintext. Package signatures remain the StartOS trust anchor.
 
 ## Native CLI transport
 
-Keyed registry administration and promotion use `session::client` with the same
+Keyed registry and Tunnel administration, including registry promotion, use
+`session::client` with the same
 opaque signer, session negotiation and encrypted socket as native subscriptions.
 Serialization precedes certificate preparation; GPG-agent unlocking and signing
 finish before connection/exchange deadlines. A refused admission never retries as
@@ -69,7 +70,9 @@ separate HTTP/1-only, nonredirecting upgrade client. `reqwest-websocket` 0.5.0
 retains Reqwest's routing and trust policy while sharing the existing
 Tungstenite 0.26 message conversion. Logical responses use the shared 64 MiB
 limit; framing overhead stays separate. Versioned RPC URL conversion preserves
-deployment prefixes and queries. Other CLI contexts and legacy continuations
+deployment prefixes and queries. `RpcSessionUpgrader::url` owns the common
+WebSocket endpoint derivation; versioned HTTP paths use `util::net::rpc_url`.
+Other CLI contexts and legacy continuations
 retain their existing transport until explicitly migrated.
 
 ## Browser transport

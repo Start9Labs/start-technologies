@@ -114,6 +114,29 @@ impl RpcSessionUpgrader {
     /// The shared encrypted RPC endpoint.
     pub const PATH: &'static str = "/ws/rpc";
 
+    /// RPC WebSocket endpoint under an HTTP deployment base.
+    pub fn url(mut base: Url) -> Result<Url, Error> {
+        let scheme = match base.scheme() {
+            "https" => "wss",
+            "http" => "ws",
+            _ => {
+                return Err(Error::new(
+                    eyre!("{}", t!("context.cli.cannot-parse-scheme-from-base-url")),
+                    ErrorKind::ParseUrl,
+                ));
+            }
+        };
+        base.path_segments_mut()
+            .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))
+            .with_kind(ErrorKind::ParseUrl)?
+            .pop_if_empty()
+            .extend(Self::PATH.trim_start_matches('/').split('/'));
+        base.set_scheme(scheme)
+            .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))
+            .with_kind(ErrorKind::ParseUrl)?;
+        Ok(base)
+    }
+
     /// WebSocket RPC admission with optional encrypted peer authentication.
     pub fn route<C: SecureRpcContext>(
         server: rpc_toolkit::HttpServer<C>,

@@ -17,24 +17,7 @@ use crate::util::net::secure::{
 use crate::util::net::tungstenite::transport;
 
 pub(super) fn websocket_url(registry: &Url) -> Result<Url, Error> {
-    let mut url = registry.clone();
-    url.path_segments_mut()
-        .map_err(|_| Error::new(eyre!("invalid registry URL"), ErrorKind::ParseUrl))?
-        .pop_if_empty()
-        .extend(RpcSessionUpgrader::PATH.trim_start_matches('/').split('/'));
-    let scheme = match url.scheme() {
-        "https" => "wss",
-        "http" => "ws",
-        _ => {
-            return Err(Error::new(
-                eyre!("invalid registry scheme"),
-                ErrorKind::ParseUrl,
-            ));
-        }
-    };
-    url.set_scheme(scheme)
-        .map_err(|_| Error::new(eyre!("invalid registry scheme"), ErrorKind::ParseUrl))?;
-    Ok(url)
+    RpcSessionUpgrader::url(registry.clone())
 }
 
 pub(super) fn response_config() -> WebSocketConfig {

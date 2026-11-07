@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use axum::Router;
 use axum::routing::post;
@@ -52,6 +52,83 @@ fn rpc_endpoint_replacement_retains_prefix_query_and_ipv6() {
             expected
         );
     }
+}
+
+#[test]
+fn http_rpc_urls_share_versioned_prefix_and_query_normalization() {
+    for base in [
+        "https://registry.test/prefix/",
+        "https://registry.test/prefix",
+    ] {
+        let url: Url = format!("{base}?keep=value").parse().unwrap();
+        assert_eq!(
+            crate::registry::package::promote::registry_rpc_url(&url)
+                .unwrap()
+                .as_str(),
+            "https://registry.test/prefix/rpc/v0?keep=value"
+        );
+        let ctx = CliContext::init(ClientConfig {
+            host: Some(url.as_str().parse().unwrap()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            ctx.rpc_url().unwrap().as_str(),
+            "https://registry.test/prefix/rpc/v1?keep=value"
+        );
+        assert_eq!(
+            super::RpcSessionUpgrader::url(url).unwrap().as_str(),
+            "wss://registry.test/prefix/ws/rpc?keep=value"
+        );
+    }
+}
+
+#[tokio::test]
+async fn legacy_cli_continuations_and_resources_keep_prefixed_urls_and_bytes() {
+    use axum::extract::ws::{Message, WebSocketUpgrade};
+    use axum::routing::get;
+    use futures::StreamExt;
+    let app = Router::new()
+        .route(
+            "/ws/rpc/{guid}",
+            get(|upgrade: WebSocketUpgrade| async move {
+                upgrade.on_upgrade(|mut socket| async move {
+                    socket.send(Message::Text("legacy".into())).await.unwrap();
+                })
+            }),
+        )
+        .route(
+            "/rest/rpc/{guid}",
+            post(|headers: HeaderMap, body: bytes::Bytes| async move {
+                assert_eq!(headers.get("x-fixture").unwrap(), "resource");
+                body
+            }),
+        );
+    let (url, _task) = server(app).await;
+    let ctx = CliContext::init(ClientConfig {
+        host: Some(url.as_str().parse().unwrap()),
+        ..Default::default()
+    })
+    .unwrap();
+    let guid = crate::rpc_continuations::Guid::new();
+    let mut socket = ctx.ws_continuation(guid.clone()).await.unwrap();
+    assert_eq!(
+        socket.next().await.unwrap().unwrap().into_text().unwrap(),
+        "legacy"
+    );
+    let mut headers = HeaderMap::new();
+    headers.insert("x-fixture", "resource".parse().unwrap());
+    let captured = b"\xef\xbb\xbf{\"id\":18446744073709551615}";
+    let response = ctx
+        .rest_continuation(
+            guid,
+            reqwest::Body::from(captured.as_slice().to_owned()),
+            headers,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), http::StatusCode::OK);
+    assert_eq!(response.bytes().await.unwrap().as_ref(), captured);
 }
 
 #[test]
@@ -219,6 +296,7 @@ async fn registry_cli_websocket_keeps_socks_remote_dns() {
 #[tokio::test]
 async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordinary_http() {
     use axum::body::Body;
+    use axum::response::IntoResponse;
     use hyper_util::rt::{TokioExecutor, TokioIo};
     use tower_service::Service;
     let (_temp, registry, admin, _, _) = crate::registry::tests::fixture().await;
@@ -230,7 +308,36 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
     let url: Url = format!("https://{}/nested/", listener.local_addr().unwrap())
         .parse()
         .unwrap();
-    let app = Router::new().nest("/nested", crate::registry::registry_router(registry));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = calls.clone();
+    let refuse = Arc::new(AtomicBool::new(false));
+    let refusing = refuse.clone();
+    let root = crate::registry::registry_router(registry);
+    let app = Router::new()
+        .merge(root.clone())
+        .nest("/nested", root)
+        .route(
+            "/rpc/v0",
+            post(move || {
+                let observed = observed.clone();
+                async move {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                    axum::Json(serde_json::json!({"jsonrpc":"2.0","id":0,"result":false}))
+                }
+            }),
+        )
+        .layer(axum::middleware::from_fn(
+            move |request: axum::extract::Request, next: axum::middleware::Next| {
+                let refusing = refusing.clone();
+                async move {
+                    if request.uri().path() == "/ws/rpc" && refusing.load(Ordering::Relaxed) {
+                        http::StatusCode::BAD_REQUEST.into_response()
+                    } else {
+                        next.run(request).await
+                    }
+                }
+            },
+        ));
     let _server: NonDetachingJoinHandle<()> = tokio::spawn(async move {
         let mut connections = tokio::task::JoinSet::new();
         loop {
@@ -270,6 +377,11 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
     let trusted = CliContext::init(ClientConfig {
         root_ca: Some(vec![ca.path().to_owned()]),
         registry: Some(url.as_str().parse().unwrap()),
+        tunnel: Some(
+            format!("127.0.0.1:{}", url.port().unwrap())
+                .parse()
+                .unwrap(),
+        ),
         ..Default::default()
     })
     .unwrap();
@@ -291,6 +403,32 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
         .await
         .unwrap();
     assert!(ordinary.status().is_success());
+    let dump = <CliContext as CallRemote<crate::tunnel::context::TunnelContext>>::call_remote(
+        &trusted,
+        "tunnel.db.dump",
+        Default::default(),
+        imbl_value::json!({}),
+        rpc_toolkit::Empty {},
+    )
+    .await
+    .unwrap();
+    assert!(
+        dump["value"]["index"]["package"]["packages"]
+            .get("secret")
+            .is_some()
+    );
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    refuse.store(true, Ordering::Relaxed);
+    let rejected = <CliContext as CallRemote<crate::tunnel::context::TunnelContext>>::call_remote(
+        &trusted,
+        "tunnel.db.dump",
+        Default::default(),
+        imbl_value::json!({}),
+        rpc_toolkit::Empty {},
+    )
+    .await;
+    assert!(rejected.is_err());
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
     let insecure = CliContext::init(ClientConfig {
         insecure: true,
         ..Default::default()

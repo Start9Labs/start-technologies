@@ -24,29 +24,14 @@ mod tests;
 
 /// Maps a versioned HTTP RPC URL to its sibling encrypted WebSocket endpoint.
 pub fn websocket_url(mut rpc_url: Url) -> Result<Url, Error> {
-    let scheme = match rpc_url.scheme() {
-        "https" => "wss",
-        "http" => "ws",
-        _ => {
-            return Err(Error::new(
-                eyre!("{}", t!("context.cli.cannot-parse-scheme-from-base-url")),
-                ErrorKind::ParseUrl,
-            ));
-        }
-    };
     rpc_url
         .path_segments_mut()
         .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))
         .with_kind(ErrorKind::ParseUrl)?
         .pop_if_empty()
         .pop()
-        .pop()
-        .extend(RpcSessionUpgrader::PATH.trim_start_matches('/').split('/'));
-    rpc_url
-        .set_scheme(scheme)
-        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))
-        .with_kind(ErrorKind::ParseUrl)?;
-    Ok(rpc_url)
+        .pop();
+    RpcSessionUpgrader::url(rpc_url)
 }
 
 /// Calls an encrypted RPC using an HTTP/1-only client with the caller's network policy.

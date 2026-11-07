@@ -25,6 +25,7 @@ use crate::developer::{
     OS_ID_KEY_PATH, default_id_key_path, load_signing_key, migrate_legacy_key_file,
 };
 use crate::middleware::auth::local::local_auth_header_for_url;
+use crate::middleware::auth::signature::SigningContext;
 use crate::net::mdns::pin_mdns_host;
 use crate::prelude::*;
 use crate::registry::package::promote::registry_rpc_url;
@@ -245,42 +246,19 @@ impl CliContext {
 
     /// BLOCKING
     pub fn rpc_url(&self) -> Result<Url, Error> {
-        let mut url = self.base_url.get()?.clone();
-        url.path_segments_mut()
-            .map_err(|_| eyre!("Url cannot be base"))
-            .with_kind(crate::ErrorKind::ParseUrl)?
-            .push("rpc")
-            .push("v1");
-        Ok(url)
+        crate::util::net::rpc_url(self.base_url.get()?, 1)
     }
 
     pub async fn ws_continuation(
         &self,
         guid: Guid,
     ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Error> {
-        let mut url = self.base_url.get()?.clone();
-        let ws_scheme = match url.scheme() {
-            "https" => "wss",
-            "http" => "ws",
-            _ => {
-                return Err(Error::new(
-                    eyre!("{}", t!("context.cli.cannot-parse-scheme-from-base-url")),
-                    crate::ErrorKind::ParseUrl,
-                )
-                .into());
-            }
-        };
-        url.set_scheme(ws_scheme).map_err(|_| {
-            Error::new(
-                eyre!("{}", t!("context.cli.cannot-set-url-scheme")),
-                crate::ErrorKind::ParseUrl,
-            )
-        })?;
+        let mut url = crate::middleware::auth::session::RpcSessionUpgrader::url(
+            self.base_url.get()?.clone(),
+        )?;
         url.path_segments_mut()
             .map_err(|_| eyre!("Url cannot be base"))
             .with_kind(crate::ErrorKind::ParseUrl)?
-            .push("ws")
-            .push("rpc")
             .push(guid.as_ref());
         let connector = self.ws_tls_connector()?;
         let (stream, _) =
@@ -300,6 +278,7 @@ impl CliContext {
         url.path_segments_mut()
             .map_err(|_| eyre!("Url cannot be base"))
             .with_kind(crate::ErrorKind::ParseUrl)?
+            .pop_if_empty()
             .push("rest")
             .push("rpc")
             .push(guid.as_ref());
@@ -310,6 +289,43 @@ impl CliContext {
             .send()
             .await
             .with_kind(ErrorKind::Network)
+    }
+
+    pub(crate) async fn call_rpc(
+        &self,
+        url: Url,
+        headers: HeaderMap,
+        address: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, RpcError> {
+        if !headers.contains_key(AUTHORIZATION) {
+            match self.signing_key() {
+                Ok(signer) => {
+                    return crate::middleware::auth::session::client::call(
+                        &self.websocket_client,
+                        &signer,
+                        crate::middleware::auth::session::client::websocket_url(url)?,
+                        address,
+                        headers,
+                        method,
+                        params,
+                    )
+                    .await;
+                }
+                Err(error) if error.kind == ErrorKind::Uninitialized => (),
+                Err(error) => return Err(error.into()),
+            }
+        }
+        crate::middleware::auth::signature::call_remote_with_client(
+            None,
+            self.client.clone(),
+            url,
+            headers,
+            method,
+            params,
+        )
+        .await
     }
 
     pub async fn call_remote<RemoteContext>(

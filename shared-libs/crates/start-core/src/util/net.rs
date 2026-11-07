@@ -13,6 +13,17 @@ use crate::prelude::*;
 pub mod secure;
 pub mod tungstenite;
 
+/// Versioned HTTP RPC endpoint under a deployment base.
+pub fn rpc_url(base: &url::Url, version: u8) -> Result<url::Url, Error> {
+    let mut url = base.clone();
+    url.path_segments_mut()
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))
+        .with_kind(ErrorKind::ParseUrl)?
+        .pop_if_empty()
+        .extend(["rpc", &format!("v{version}")]);
+    Ok(url)
+}
+
 const PING_INTERVAL: Duration = Duration::from_secs(30);
 const PING_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_CLOSE_PAYLOAD_BYTES: usize = 125;
@@ -31,12 +42,7 @@ fn truncate_close_reason(reason: impl Into<Utf8Bytes>) -> Utf8Bytes {
     reason[..end].to_owned().into()
 }
 
-/// A wrapper around axum's WebSocket that automatically sends ping frames
-/// to keep the connection alive during HTTP/2.
-///
-/// HTTP/2 streams can timeout if idle, even when the underlying connection
-/// has keep-alive enabled. This wrapper sends a ping frame if no data has
-/// been sent within the ping interval while waiting to receive a message.
+/// Keeps idle message streams alive, including HTTP/2 streams.
 pub struct WebSocket<S = AxumWebSocket> {
     inner: S,
     ping_state: Option<(bool, u64)>,

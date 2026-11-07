@@ -893,25 +893,22 @@ impl CallRemote<TunnelContext> for CliContext {
         };
 
         let mut headers = HeaderMap::new();
-        let (url, sig_ctx) = if let Some(auth) = local_auth {
+        let (scheme, sig_ctx) = if let Some(auth) = local_auth {
             headers.insert(AUTHORIZATION, auth);
-            (format!("http://{tunnel_addr}/rpc/v0").parse()?, None)
+            ("http", None)
         } else if addr_from_config {
-            (
-                format!("https://{tunnel_addr}/rpc/v0").parse()?,
-                Some(url_host_str(tunnel_addr.ip())),
-            )
+            ("https", Some(url_host_str(tunnel_addr.ip())))
         } else {
             return Err(Error::new(eyre!("`--tunnel` required"), ErrorKind::InvalidRequest).into());
         };
 
+        let url = crate::util::net::rpc_url(&format!("{scheme}://{tunnel_addr}").parse()?, 0)?;
         method = method.strip_prefix("tunnel.").unwrap_or(method);
 
-        crate::middleware::auth::signature::call_remote(
-            self,
+        self.call_rpc(
             url,
             headers,
-            sig_ctx.as_deref(),
+            sig_ctx.as_deref().unwrap_or_default(),
             method,
             params,
         )

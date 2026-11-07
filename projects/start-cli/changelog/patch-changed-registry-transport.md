@@ -1,1 +1,6 @@
-Keyed registry administration and promotion now require an identity-authenticated encrypted WebSocket session. GPG-agent identities, proxy/TLS settings, and local-token HTTP access are retained.
+---
+release-notes: false
+---
+
+- Encrypt keyed registry and Tunnel administration, including registry promotion, while retaining GPG-agent identities, proxy/TLS settings and local-token HTTP access.
+- Preserve deployment URL prefixes ending in a slash for RPC and continuation calls.

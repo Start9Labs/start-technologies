@@ -49,8 +49,8 @@ are unwrapped from the RPC envelope and printed to stderr; the process exits wit
 
 `main_api()` (in [`shared-libs/crates/start-core/src/lib.rs`](../../shared-libs/crates/start-core/src/lib.rs))
 registers every subcommand once with `with_call_remote::<CliContext>()` — those are dispatched
-over the network through the target context's transport. Keyed registry administration and
-promotion complete an identity-authenticated Noise exchange before sending encrypted RPC.
+over the network through the target context's transport. Keyed registry and Tunnel administration,
+including registry promotion, complete an identity-authenticated Noise exchange before sending encrypted RPC.
 The existing opaque signer supports both local keys and GPG-agent identities; certificate
 preparation precedes transport deadlines. Failed encrypted admission never falls back to HTTP.
 Local authcookies remain Bearer tokens over HTTP, as do public registry calls without an

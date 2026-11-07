@@ -247,15 +247,11 @@ async fn stream_progress(
 
 async fn get_versions(
     client: &Client,
-    mut registry: Url,
+    registry: Url,
     source: &Version,
     target: &VersionRange,
 ) -> Result<BTreeMap<Version, OsVersionInfo>, Error> {
-    registry
-        .path_segments_mut()
-        .map_err(|_| Error::new(eyre!("cannot extend URL path"), ErrorKind::ParseUrl))?
-        .push("rpc")
-        .push("v0");
+    let registry = crate::registry::package::promote::registry_rpc_url(&registry)?;
     let res = signature::call_remote_with_client(
         None,
         client.clone(),
@@ -337,6 +333,36 @@ mod tests {
 
     use super::*;
     use crate::net::static_server::UiContext;
+
+    #[tokio::test]
+    async fn version_queries_keep_public_http_and_deployment_prefixes() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let registry = format!("http://{}/prefix/", listener.local_addr().unwrap())
+            .parse()
+            .unwrap();
+        let app = axum::Router::new().route(
+            "/prefix/rpc/v0",
+            axum::routing::post(
+                |headers: HeaderMap, axum::Json(body): axum::Json<serde_json::Value>| async move {
+                    assert!(headers.get(signature::AUTH_SIG_HEADER).is_none());
+                    assert_eq!(body["method"], "os.version.get");
+                    assert_eq!(body["params"]["sourceVersion"], "0.4.2");
+                    axum::Json(serde_json::json!({"jsonrpc":"2.0","id":0,"result":{}}))
+                },
+            ),
+        );
+        let _server: crate::util::future::NonDetachingJoinHandle<()> =
+            tokio::spawn(async move { axum::serve(listener, app).await.unwrap() }).into();
+        let versions = get_versions(
+            &Client::new(),
+            registry,
+            &"0.4.2".parse().unwrap(),
+            &"*".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(versions.is_empty());
+    }
 
     #[test]
     fn trust_override_requires_injected_local_authentication() {
