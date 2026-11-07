@@ -99,44 +99,52 @@ fn mdns_covers(mdns: &HostnameInfo, ip: &HostnameInfo) -> bool {
         )
 }
 
-fn public_domain_key(address: &HostnameInfo) -> Option<(InternedString, GatewayId)> {
-    match &address.metadata {
-        HostnameMetadata::PublicDomain { gateway } => {
-            Some((address.hostname.clone(), gateway.clone()))
-        }
-        _ => None,
-    }
-}
-
 impl DerivedAddressInfo {
     /// The UI and direct forwarding must agree on enabled/public address exposure.
     /// An enabled plain-port public domain publishes its gateway GUAs in that state.
     /// Public forwarding behind a Local or Disabled row is a correctness defect.
-    /// A domain disabled before its plain row appeared keeps that row's WAN group off.
+    /// A new row of a public domain stays off unless that domain was enabled here
+    /// and no row of it was disabled. Only an operator action enables a domain.
     pub(super) fn update_available(&mut self, available: BTreeSet<HostnameInfo>) {
+        let is_domain =
+            |a: &&HostnameInfo| matches!(a.metadata, HostnameMetadata::PublicDomain { .. });
         let enabled = self.enabled();
         let disabled_domains: BTreeSet<_> = self
             .available
             .iter()
+            .filter(is_domain)
             .filter(|a| !enabled.contains(a))
-            .filter_map(public_domain_key)
+            .map(|a| a.hostname.clone())
             .collect();
-        let established_domains: BTreeSet<_> =
-            enabled.into_iter().filter_map(public_domain_key).collect();
+        let enabled_domains: BTreeSet<_> = enabled
+            .into_iter()
+            .filter(is_domain)
+            .map(|a| a.hostname.clone())
+            .collect();
         let previous = std::mem::replace(&mut self.available, available);
         let enabled = self.enabled();
         let mut wan_groups = BTreeMap::new();
-        for address in self.available.iter().filter(|a| !a.ssl) {
-            let (Some(domain), Some(port)) = (public_domain_key(address), address.port) else {
+        let mut withheld_tls = Vec::new();
+        for address in &self.available {
+            let (HostnameMetadata::PublicDomain { gateway }, Some(port)) =
+                (&address.metadata, address.port)
+            else {
                 continue;
             };
-            if !previous.contains(address) && disabled_domains.contains(&domain) {
-                wan_groups.insert((domain.1, port), false);
-            } else if enabled.contains(address) && established_domains.contains(&domain) {
-                // New bindings and domains reconcile their defaults before inheriting WAN exposure.
-                wan_groups.entry((domain.1, port)).or_insert(true);
+            let withheld = !previous.contains(address)
+                && (disabled_domains.contains(&address.hostname)
+                    || !enabled_domains.contains(&address.hostname));
+            if address.ssl {
+                if withheld {
+                    withheld_tls.push(override_key(address));
+                }
+            } else if withheld {
+                wan_groups.insert((gateway.clone(), port), false);
+            } else if enabled.contains(address) {
+                wan_groups.entry((gateway.clone(), port)).or_insert(true);
             }
         }
+        self.disabled.extend(withheld_tls);
         for ((gateway, port), on) in wan_groups {
             set_nonssl_wan_group(self, &gateway, port, on);
         }
@@ -2322,6 +2330,56 @@ mod test {
 
         info.update_available(BTreeSet::from([tls, plain.clone()]));
         assert!(info.enabled().contains(&plain));
+    }
+
+    #[test]
+    fn a_domain_disabled_on_a_plain_port_stays_off_over_tls() {
+        let plain = domain_row("smp.example.com", false, 5223);
+        let tls = domain_row("smp.example.com", true, 5224);
+        let mut info = DerivedAddressInfo::default();
+        info.available.insert(plain.clone());
+        info.disabled.insert(override_key(&plain));
+
+        info.update_available(BTreeSet::from([tls.clone()]));
+        assert!(!info.enabled().contains(&tls));
+    }
+
+    #[test]
+    fn an_enabled_domain_stays_enabled_when_its_tls_port_moves() {
+        let mut info = DerivedAddressInfo::default();
+        info.available
+            .insert(domain_row("smp.example.com", true, 5224));
+        let moved = domain_row("smp.example.com", true, 5225);
+
+        info.update_available(BTreeSet::from([moved.clone()]));
+        assert!(info.enabled().contains(&moved));
+    }
+
+    #[test]
+    fn a_domain_with_no_earlier_row_stays_off() {
+        let tls = domain_row("smp.example.com", true, 5224);
+        let plain = domain_row("smp.example.com", false, 5223);
+        let mut info = DerivedAddressInfo::default();
+
+        info.update_available(BTreeSet::from([tls.clone(), plain.clone()]));
+        assert!(!info.enabled().contains(&tls));
+        assert!(!info.enabled().contains(&plain));
+    }
+
+    #[test]
+    fn an_enabled_domain_stays_enabled_when_its_gateway_changes() {
+        let mut info = DerivedAddressInfo::default();
+        info.available
+            .insert(domain_row("smp.example.com", true, 5224));
+        let moved = HostnameInfo {
+            metadata: HostnameMetadata::PublicDomain {
+                gateway: GatewayId::from(InternedString::intern("wg1")),
+            },
+            ..domain_row("smp.example.com", true, 5224)
+        };
+
+        info.update_available(BTreeSet::from([moved.clone()]));
+        assert!(info.enabled().contains(&moved));
     }
 
     #[test]

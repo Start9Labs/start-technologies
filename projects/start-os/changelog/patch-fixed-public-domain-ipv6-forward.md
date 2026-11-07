@@ -3,4 +3,4 @@ release-notes: false
 ---
 
 - A public domain on a service port that StartOS forwards without TLS is reachable over IPv6 as well as IPv4.
-- A public domain you disabled stays disabled when its service moves the port from TLS to plain forwarding, and the bare IP and IPv6 addresses sharing that port are turned off with it.
+- A service changing how it binds a port no longer enables a public domain. A domain you disabled stays disabled, and on a plain port the bare IP and IPv6 addresses sharing it are turned off with it.

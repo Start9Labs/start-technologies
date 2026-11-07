@@ -1133,6 +1133,12 @@ mod tests {
             )
             .unwrap();
         host.update_addresses(&server, &gateways, &ports).unwrap();
+        host.as_bindings_mut()
+            .mutate(|bindings| {
+                bindings.get_mut(&5223).unwrap().addresses.disabled.clear();
+                Ok(())
+            })
+            .unwrap();
 
         host.add_binding(&mut ports, 5223, plain(5223), false)
             .unwrap();

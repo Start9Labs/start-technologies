@@ -395,6 +395,14 @@ impl Host {
                 if let Some(port) = nonssl_port {
                     set_nonssl_wan_group(addresses, gateway, port, true);
                 }
+                for address in addresses
+                    .available
+                    .iter()
+                    .filter(|address| address.ssl && &address.hostname == fqdn)
+                {
+                    let Some(port) = address.port else { continue };
+                    addresses.disabled.remove(&(fqdn.clone(), port));
+                }
             } else {
                 reconcile_public_domain_on_sibling(addresses, fqdn, gateway);
             }
