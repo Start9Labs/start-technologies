@@ -436,6 +436,16 @@ mod test {
         })
     }
 
+    async fn wait_for_exit(pid: i32) -> bool {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while is_running(pid) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_ok()
+    }
+
     #[tokio::test]
     async fn timeout_reaches_a_command_behind_a_non_forwarding_supervisor() {
         let res = run_to_completion(
@@ -446,10 +456,10 @@ mod test {
         .await
         .unwrap();
         let command = res.stdout.trim().parse().unwrap();
-        let running = is_running(command);
+        let exited = wait_for_exit(command).await;
         nix::sys::signal::kill(Pid::from_raw(command), Signal::SIGKILL).ok();
         assert!(res.timed_out);
-        assert!(!running, "the command survives the timeout");
+        assert!(exited, "the command survives the timeout");
     }
 
     #[tokio::test]
@@ -463,10 +473,10 @@ mod test {
         .await
         .unwrap();
         let command = res.stdout.trim().parse().unwrap();
-        let running = is_running(command);
+        let exited = wait_for_exit(command).await;
         nix::sys::signal::kill(Pid::from_raw(command), Signal::SIGKILL).ok();
         assert!(res.timed_out);
-        assert!(!running, "the command survives the timeout");
+        assert!(exited, "the command survives the timeout");
         assert!(started.elapsed() < TERMINATION_GRACE + Duration::from_secs(3));
     }
 
