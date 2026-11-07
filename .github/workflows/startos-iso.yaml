@@ -270,6 +270,7 @@ jobs:
               )
             )[(github.event.inputs.platform || 'ALL') == 'ALL']
           }}
+    # RISC-V image assembly stays native; full emulation is too slow.
     runs-on: >-
       ${{
         fromJson(
@@ -344,22 +345,21 @@ jobs:
       # Actions use the runner's bundled Node, not the Node on GITHUB_PATH.
       - name: Update RISC-V action runtime
         if: ${{ env.ARCH == 'riscv64' && github.event.inputs.runner != 'fast' }}
-        env:
-          ACTIONS_NODE_VERSION: '24.22.2'
         run: |
           set -euo pipefail
           worker="$(readlink -f "/proc/$PPID/exe")"
           test "$(basename "$worker")" = Runner.Worker
           runner_node="$(dirname "$worker")/../externals/node24/bin/node"
           echo "Bundled action runtime: $("$runner_node" --version)"
-          base="https://unofficial-builds.nodejs.org/download/release/v${ACTIONS_NODE_VERSION}"
-          tarball="node-v${ACTIONS_NODE_VERSION}-linux-riscv64.tar.xz"
+          base="https://unofficial-builds.nodejs.org/download/release/v${NODEJS_VERSION}"
+          tarball="node-v${NODEJS_VERSION}-linux-riscv64.tar.xz"
           cd "$RUNNER_TEMP"
           curl -fsSLO "$base/$tarball"
           curl -fsSL "$base/SHASUMS256.txt" | grep " $tarball\$" | sha256sum -c -
           tar -xJf "$tarball"
           node_dir="$RUNNER_TEMP/${tarball%.tar.xz}"
-          test "$("$node_dir/bin/node" --version)" = "v${ACTIONS_NODE_VERSION}"
+          test "$("$node_dir/bin/node" --version)" = "v${NODEJS_VERSION}"
+          "$node_dir/bin/node" -e 'require("node:crypto").createHash("sha256").update("action-runtime").digest(); console.log(process.versions)'
           install -m 755 "$node_dir/bin/node" "$runner_node.next"
           mv -f "$runner_node.next" "$runner_node"
           echo "Updated action runtime: $("$runner_node" --version)"

@@ -41,12 +41,22 @@ test('the native runtime bootstrap precedes every JavaScript action', () => {
   )
 })
 
-for (const validChecksum of [true, false]) {
-  test(`runtime bootstrap ${validChecksum ? 'replaces the action host and exposes shell Node' : 'preserves the action host after checksum failure'}`, t => {
+for (const [name, validChecksum, startsJavaScript] of [
+  ['replaces the action host and exposes shell Node', true, true],
+  ['preserves the action host after checksum failure', false, true],
+  ['preserves the action host after JavaScript startup failure', true, false],
+]) {
+  test(`runtime bootstrap ${name}`, t => {
     const f = fixture(t)
-    const version = bootstrap.env.ACTIONS_NODE_VERSION
+    const version = workflow.env.NODEJS_VERSION
     const nodeDir = `node-v${version}-linux-riscv64`
-    const nodeSource = `#!/bin/sh\nprintf 'v${version}\\n'\n`
+    const nodeSource = `#!/bin/sh
+if [ "$1" = --version ]; then
+  printf 'v${version}\\n'
+else
+  ${startsJavaScript ? 'exec "$PROBE_NODE" "$@"' : 'exit 132'}
+fi
+`
     chmodSync(f.write(`archive/${nodeDir}/bin/node`, nodeSource), 0o755)
     const tarball = `${nodeDir}.tar.xz`
     const packed = f.run('tar', ['-cJf', tarball, '-C', 'archive', nodeDir])
@@ -80,27 +90,25 @@ else process.stdout.write(readFileSync(source))`,
     const result = f.run('bash', ['-c', bootstrap.run], {
       env: {
         ...f.env,
-        ...bootstrap.env,
+        NODEJS_VERSION: version,
+        PROBE_NODE: process.execPath,
         PATH: `${f.root}:${f.env.PATH}`,
         RUNNER_TEMP: temp,
         GITHUB_PATH: pathFile,
       },
       encoding: 'utf8',
     })
-    assert.equal(
-      result.status === 0,
-      validChecksum,
-      result.stdout + result.stderr,
-    )
+    const healthy = validChecksum && startsJavaScript
+    assert.equal(result.status === 0, healthy, result.stdout + result.stderr)
     assert.equal(
       readFileSync(runnerNode, 'utf8'),
-      validChecksum ? nodeSource : oldNode,
+      healthy ? nodeSource : oldNode,
     )
     assert.equal(
       readFileSync(pathFile, 'utf8'),
-      `/existing/bin\n${validChecksum ? `${temp}/${nodeDir}/bin\n` : ''}`,
+      `/existing/bin\n${healthy ? `${temp}/${nodeDir}/bin\n` : ''}`,
     )
-    if (validChecksum) {
+    if (healthy) {
       assert.match(result.stdout, /Bundled action runtime: v24\.7\.0/)
       assert.ok(result.stdout.includes(`Updated action runtime: v${version}`))
     }
