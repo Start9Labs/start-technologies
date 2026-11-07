@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use fast_socks5::client::{Config as SocksConfig, Socks5Stream};
+use futures::FutureExt;
 use imbl::OrdMap;
 use imbl_value::InternedString;
 use josekit::jwk::Jwk;
@@ -86,6 +87,7 @@ pub struct RpcContextSeed {
     pub wifi_manager: RwLock<Option<WpaCli>>,
     pub current_secret: Arc<Jwk>,
     pub client: ReloadableHttpClient,
+    pub torrents: Arc<crate::registry::bittorrent::TorrentClient>,
     pub start_time: Instant,
     pub crons: SyncMutex<BTreeMap<Guid, NonDetachingJoinHandle<()>>>,
 }
@@ -422,6 +424,19 @@ impl RpcContext {
             });
         }
 
+        let torrents = crate::registry::bittorrent::TorrentClient::for_server(
+            config.torrent_downloads.clone(),
+            config.bittorrent_seed.clone(),
+        );
+        let preferences: crate::registry::bittorrent::TorrentPreferences = db
+            .peek()
+            .await
+            .as_public()
+            .as_server_info()
+            .as_bittorrent()
+            .de()?;
+        torrents.set_downloads_enabled(preferences.downloads);
+
         let seed = Arc::new(RpcContextSeed {
             is_closed: AtomicBool::new(false),
             closed: watch::Sender::new(false),
@@ -461,6 +476,7 @@ impl RpcContext {
                 })?,
             ),
             client: ReloadableHttpClient::new(socks_proxy_url)?,
+            torrents: Arc::new(torrents),
             start_time: Instant::now(),
             crons,
         });
@@ -471,6 +487,47 @@ impl RpcContext {
         tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
 
         crate::version::post_init(&res, run_migrations).await?;
+        let preferences = res
+            .db
+            .watch("/public/serverInfo/bittorrent".parse().unwrap())
+            .await
+            .typed::<crate::registry::bittorrent::TorrentPreferences>();
+        let torrents = res.torrents.clone();
+        let weak = Arc::downgrade(&seed);
+        let incoming_context = weak.clone();
+        res.add_cron(async move {
+            if let Err(error) = torrents
+                .maintain_preferences(
+                    preferences,
+                    |enabled| {
+                        let context = incoming_context.upgrade().map(Self);
+                        async move {
+                            match context {
+                                Some(context) => {
+                                    crate::system::bittorrent::configure_incoming(&context, enabled)
+                                        .await
+                                }
+                                None => Ok(None),
+                            }
+                        }
+                    },
+                    || {
+                        let context = weak.upgrade().map(Self);
+                        async move {
+                            if let Some(context) = context {
+                                crate::registry::bittorrent::discovery::register_existing(&context)
+                                    .await?;
+                            }
+                            Ok(())
+                        }
+                    },
+                )
+                .boxed()
+                .await
+            {
+                tracing::warn!(%error, "Registry seeding watcher stopped");
+            }
+        });
         let weak = Arc::downgrade(&seed);
         let db = res.db.clone();
         res.add_cron(crate::update::security::watch_updates(db, move || {
@@ -502,7 +559,9 @@ impl RpcContext {
 
     #[instrument(skip_all)]
     pub async fn shutdown(self) -> Result<(), Error> {
-        self.crons.mutate(|c| std::mem::take(c));
+        let crons = self.crons.mutate(std::mem::take);
+        futures::future::join_all(crons.into_values().map(|cron| cron.wait_for_abort())).await;
+        self.torrents.shutdown().await;
         self.services.shutdown_all().await?;
         self.is_closed.store(true, Ordering::SeqCst);
         self.closed.send_replace(true);

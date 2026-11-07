@@ -624,9 +624,11 @@ impl BindInfo {
     }
 }
 
+/// A protocol safe to expose on enabled public addresses.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct Security {
+    /// Whether TLS precedes application bytes.
     pub ssl: bool,
 }
 
@@ -640,7 +642,7 @@ pub struct BindOptions {
     pub preferred_external_port: u16,
     pub add_ssl: Option<AddSslOptions>,
     pub secure: Option<Security>,
-    /// HTTP request policy shared by every exposed leg of this binding.
+    /// Proxy protocol shared by every exposed leg of this binding.
     pub proxy: Option<ProxyOptions>,
 }
 
@@ -651,6 +653,8 @@ pub struct BindOptions {
     tag = "type"
 )]
 pub enum ProxyOptions {
+    /// Relays raw TCP streams without parsing application messages.
+    Tcp,
     Http {
         /// Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
         /// Client-supplied `X-Forwarded-*` headers are stripped on both legs.
@@ -709,7 +713,7 @@ impl TryFrom<CompatibleBindOptions> for BindOptions {
             secure: options.secure,
             proxy,
         };
-        if options.serves_own_tls() && options.proxy.is_some() {
+        if options.serves_own_tls() && matches!(options.proxy, Some(ProxyOptions::Http { .. })) {
             return Err("HTTP proxying requires TLS termination for a TLS container");
         }
         Ok(options)
@@ -1795,6 +1799,21 @@ mod test {
         }))
         .unwrap();
         assert!(raw.proxy.is_none());
+    }
+
+    #[test]
+    fn tcp_proxy_round_trips_plain_and_tls_passthrough_without_http_policy() {
+        for secure in [serde_json::Value::Null, serde_json::json!({"ssl": true})] {
+            let input = serde_json::json!({
+                "preferredExternalPort": 6881,
+                "addSsl": null,
+                "secure": secure,
+                "proxy": {"type": "tcp"},
+            });
+            let options: BindOptions = serde_json::from_value(input.clone()).unwrap();
+            assert_eq!(options.proxy, Some(ProxyOptions::Tcp));
+            assert_eq!(serde_json::to_value(options).unwrap(), input);
+        }
     }
 
     #[test]

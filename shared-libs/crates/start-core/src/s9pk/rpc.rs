@@ -403,7 +403,7 @@ async fn publish(ctx: CliContext, S9pkPath { s9pk: s9pk_path }: S9pkPath) -> Res
         .capture(false)
         .invoke(ErrorKind::Network)
         .await?;
-    crate::registry::package::add::cli_add_package_impl(ctx, s9pk, vec![s3url], false).await
+    crate::registry::package::add::cli_add_package_impl(ctx, s9pk, vec![s3url], None, false).await
 }
 
 #[derive(Deserialize, Serialize, Parser)]

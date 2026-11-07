@@ -32,6 +32,7 @@ use crate::util::serde::{WithIoFormat, display_serializable};
 use crate::util::sync::Watch;
 use crate::{MAIN_DATA, PACKAGE_DATA};
 
+pub(crate) mod bittorrent;
 mod disk_health;
 pub(crate) mod log_level;
 pub(crate) mod trust_ca;

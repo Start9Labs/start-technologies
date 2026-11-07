@@ -162,10 +162,14 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
         ..Default::default()
     })
     .unwrap();
+    let torrent: Url = "magnet:?xt=urn:btih:0123456789012345678901234567890123456789"
+        .parse()
+        .unwrap();
     cli_add_package_impl(
         cli.clone(),
         local_package().await,
         vec![host.join("base").unwrap()],
+        Some(torrent.clone()),
         false,
     )
     .await
@@ -176,6 +180,7 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     let version: crate::util::VersionString = "1.0.0:0".parse().unwrap();
     let asset = &after.package.packages["trust-fixture"].versions[&version].s9pks[0].1;
     assert_eq!(asset.signatures.len(), 5);
+    assert_eq!(asset.torrent, Some(torrent.clone()));
     for (key, signature) in &asset.signatures {
         key.verify_commitment(&asset.commitment, "s9pk", signature)
             .unwrap();
@@ -201,6 +206,7 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     let mirrored = &mirrored.package.packages["trust-fixture"].versions[&version].s9pks[0].1;
     assert_eq!(mirrored.signatures, asset.signatures);
     assert_eq!(mirrored.urls.len(), 2);
+    assert_eq!(mirrored.torrent, Some(torrent.clone()));
 
     cli_promote(
         cli.clone(),
@@ -217,6 +223,7 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     let promoted = &promoted.package.packages["trust-fixture"].versions[&version].s9pks[0].1;
     assert_eq!(promoted.signatures, asset.signatures);
     assert_eq!(promoted.urls, mirrored.urls);
+    assert_eq!(promoted.torrent, Some(torrent));
 
     ctx.db
         .mutate(|db| db.as_admins_mut().ser(&BTreeSet::<Guid>::new()))
@@ -228,6 +235,7 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
             cli,
             local_package().await,
             vec![host.join("base").unwrap()],
+            None,
             true
         )
         .await
@@ -330,6 +338,7 @@ async fn registry_rejects_endorsements_signed_for_a_different_actual_bound() {
                 ctx.clone(),
                 AddPackageParams {
                     urls: vec![url.join(name).unwrap()],
+                    torrent: None,
                     uploader: uploader.clone(),
                     commitment,
                     signature: signature.clone(),
@@ -389,6 +398,7 @@ async fn registry_validates_every_package_url_without_importing_remote_endorseme
                 ctx.clone(),
                 AddPackageParams {
                     urls: vec![url.join("base").unwrap(), url.join(secondary).unwrap()],
+                    torrent: None,
                     uploader: uploader.clone(),
                     commitment,
                     signature: signature.clone(),
@@ -416,6 +426,7 @@ async fn registry_validates_every_package_url_without_importing_remote_endorseme
         ctx.clone(),
         AddPackageParams {
             urls: urls.clone(),
+            torrent: None,
             uploader,
             commitment,
             signature,

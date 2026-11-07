@@ -3728,7 +3728,7 @@
             },
             "proxy": {
               "anyOf": [{ "$ref": "#/$defs/ProxyOptions" }, { "type": "null" }],
-              "description": "HTTP request policy shared by every exposed leg of this binding."
+              "description": "Proxy protocol shared by every exposed leg of this binding."
             }
           },
           "required": ["preferredExternalPort", "addSsl", "secure", "proxy"],
@@ -3796,24 +3796,46 @@
         },
         "Security": {
           "type": "object",
-          "properties": { "ssl": { "type": "boolean" } },
-          "required": ["ssl"],
-          "additionalProperties": true
-        },
-        "ProxyOptions": {
-          "type": "object",
           "properties": {
-            "type": { "type": "string", "const": "http" },
-            "addXForwardedHeaders": {
-              "description": "Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.",
-              "type": "boolean"
-            },
-            "auth": {
-              "description": "Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.",
-              "anyOf": [{ "$ref": "#/$defs/ProxyAuth" }, { "type": "null" }]
+            "ssl": {
+              "type": "boolean",
+              "description": "Whether TLS precedes application bytes."
             }
           },
-          "required": ["type", "addXForwardedHeaders", "auth"]
+          "required": ["ssl"],
+          "additionalProperties": true,
+          "description": "A protocol safe to expose on enabled public addresses."
+        },
+        "ProxyOptions": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tcp",
+                  "description": "Relays raw TCP streams without parsing application messages."
+                }
+              },
+              "required": ["type"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "http" },
+                "addXForwardedHeaders": {
+                  "description": "Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.",
+                  "type": "boolean"
+                },
+                "auth": {
+                  "description": "Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.",
+                  "anyOf": [{ "$ref": "#/$defs/ProxyAuth" }, { "type": "null" }]
+                }
+              },
+              "required": ["type", "addXForwardedHeaders", "auth"]
+            }
+          ]
         },
         "ProxyAuth": {
           "anyOf": [
@@ -5917,6 +5939,7 @@
                             "type": "array",
                             "items": { "type": "string" }
                           },
+                          "torrent": { "type": ["string", "null"] },
                           "commitment": {
                             "$ref": "#/$defs/MerkleArchiveCommitment"
                           },
@@ -6222,6 +6245,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -6241,6 +6265,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -6260,6 +6285,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -7155,7 +7181,12 @@
           "properties": {
             "version": { "type": "string" },
             "platform": { "type": "string" },
-            "url": { "type": "string" },
+            "url": {
+              "description": "@deprecated Use `urls`.",
+              "type": ["string", "null"]
+            },
+            "urls": { "type": "array", "items": { "type": "string" } },
+            "torrent": { "type": ["string", "null"] },
             "signature": { "$ref": "#/$defs/AnySignature" },
             "signatures": {
               "type": "object",
@@ -7164,7 +7195,7 @@
             },
             "commitment": { "$ref": "#/$defs/Blake3Commitment" }
           },
-          "required": ["version", "platform", "url", "signature", "commitment"],
+          "required": ["version", "platform", "signature", "commitment"],
           "additionalProperties": true
         },
         "AnySignature": { "type": "string" },
@@ -7206,7 +7237,12 @@
           "properties": {
             "version": { "type": "string" },
             "platform": { "type": "string" },
-            "url": { "type": "string" },
+            "url": {
+              "description": "@deprecated Use `urls`.",
+              "type": ["string", "null"]
+            },
+            "urls": { "type": "array", "items": { "type": "string" } },
+            "torrent": { "type": ["string", "null"] },
             "signature": { "$ref": "#/$defs/AnySignature" },
             "signatures": {
               "type": "object",
@@ -7215,7 +7251,7 @@
             },
             "commitment": { "$ref": "#/$defs/Blake3Commitment" }
           },
-          "required": ["version", "platform", "url", "signature", "commitment"],
+          "required": ["version", "platform", "signature", "commitment"],
           "additionalProperties": true
         },
         "AnySignature": { "type": "string" },
@@ -7257,7 +7293,12 @@
           "properties": {
             "version": { "type": "string" },
             "platform": { "type": "string" },
-            "url": { "type": "string" },
+            "url": {
+              "description": "@deprecated Use `urls`.",
+              "type": ["string", "null"]
+            },
+            "urls": { "type": "array", "items": { "type": "string" } },
+            "torrent": { "type": ["string", "null"] },
             "signature": { "$ref": "#/$defs/AnySignature" },
             "signatures": {
               "type": "object",
@@ -7266,7 +7307,7 @@
             },
             "commitment": { "$ref": "#/$defs/Blake3Commitment" }
           },
-          "required": ["version", "platform", "url", "signature", "commitment"],
+          "required": ["version", "platform", "signature", "commitment"],
           "additionalProperties": true
         },
         "AnySignature": { "type": "string" },
@@ -7321,6 +7362,7 @@
       "properties": {
         "publishedAt": { "type": "string" },
         "urls": { "type": "array", "items": { "type": "string" } },
+        "torrent": { "type": ["string", "null"] },
         "commitment": { "$ref": "#/$defs/Blake3Commitment" },
         "signatures": {
           "type": "object",
@@ -7382,6 +7424,7 @@
       "properties": {
         "publishedAt": { "type": "string" },
         "urls": { "type": "array", "items": { "type": "string" } },
+        "torrent": { "type": ["string", "null"] },
         "commitment": { "$ref": "#/$defs/Blake3Commitment" },
         "signatures": {
           "type": "object",
@@ -7443,6 +7486,7 @@
       "properties": {
         "publishedAt": { "type": "string" },
         "urls": { "type": "array", "items": { "type": "string" } },
+        "torrent": { "type": ["string", "null"] },
         "commitment": { "$ref": "#/$defs/Blake3Commitment" },
         "signatures": {
           "type": "object",
@@ -7723,6 +7767,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -7742,6 +7787,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -7761,6 +7807,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -7945,6 +7992,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -7964,6 +8012,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -7983,6 +8032,7 @@
                 "properties": {
                   "publishedAt": { "type": "string" },
                   "urls": { "type": "array", "items": { "type": "string" } },
+                  "torrent": { "type": ["string", "null"] },
                   "commitment": { "$ref": "#/$defs/Blake3Commitment" },
                   "signatures": {
                     "type": "object",
@@ -8283,6 +8333,7 @@
           "type": "object",
           "properties": {
             "urls": { "type": "array", "items": { "type": "string" } },
+            "torrent": { "type": ["string", "null"] },
             "commitment": { "$ref": "#/$defs/MerkleArchiveCommitment" },
             "signature": { "$ref": "#/$defs/AnySignature" },
             "signatures": {
@@ -8724,6 +8775,7 @@
                             "type": "array",
                             "items": { "type": "string" }
                           },
+                          "torrent": { "type": ["string", "null"] },
                           "commitment": {
                             "$ref": "#/$defs/MerkleArchiveCommitment"
                           },
@@ -9334,6 +9386,162 @@
     }
   },
   {
+    "name": "server.bittorrent.config",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "BitTorrentConfig": {
+          "type": "object",
+          "properties": {
+            "available": { "type": "boolean" },
+            "interface": { "$ref": "#/$defs/ServiceInterface" }
+          },
+          "required": ["available", "interface"],
+          "additionalProperties": true,
+          "description": "Configured transport availability and the native incoming peer interface."
+        },
+        "ServiceInterface": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/ServiceInterfaceId" },
+            "name": { "type": "string" },
+            "description": { "type": "string" },
+            "masked": { "type": "boolean" },
+            "addressInfo": { "$ref": "#/$defs/AddressInfo" },
+            "type": { "$ref": "#/$defs/ServiceInterfaceType" },
+            "preferredLauncherAddress": {
+              "description": "The interface address Open UI should prefer.",
+              "type": ["string", "null"]
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "description",
+            "masked",
+            "addressInfo",
+            "type",
+            "preferredLauncherAddress"
+          ],
+          "additionalProperties": true
+        },
+        "ServiceInterfaceId": { "type": "string" },
+        "AddressInfo": {
+          "type": "object",
+          "properties": {
+            "username": { "type": ["string", "null"] },
+            "hostId": { "$ref": "#/$defs/HostId" },
+            "internalPort": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "scheme": { "type": ["string", "null"] },
+            "sslScheme": { "type": ["string", "null"] },
+            "suffix": { "type": "string" }
+          },
+          "required": [
+            "username",
+            "hostId",
+            "internalPort",
+            "scheme",
+            "sslScheme",
+            "suffix"
+          ],
+          "additionalProperties": true
+        },
+        "HostId": { "type": "string" },
+        "ServiceInterfaceType": {
+          "type": "string",
+          "enum": ["ui", "p2p", "api"]
+        }
+      },
+      "type": "object",
+      "properties": {
+        "available": { "type": "boolean" },
+        "interface": { "$ref": "#/$defs/ServiceInterface" }
+      },
+      "required": ["available", "interface"],
+      "additionalProperties": true,
+      "description": "Configured transport availability and the native incoming peer interface."
+    }
+  },
+  {
+    "name": "server.bittorrent.set-preferences",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/SetPreferencesParams" }
+      ],
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "SetPreferencesParams": {
+          "type": "object",
+          "properties": {
+            "downloads": { "type": ["boolean", "null"] },
+            "seeding": { "type": ["boolean", "null"] },
+            "incoming": { "type": ["boolean", "null"] }
+          },
+          "additionalProperties": true
+        }
+      },
+      "type": "object"
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "TorrentPreferences": {
+          "type": "object",
+          "properties": {
+            "downloads": { "type": "boolean" },
+            "seeding": { "type": "boolean" },
+            "incoming": { "type": "boolean" }
+          },
+          "required": ["downloads", "seeding", "incoming"],
+          "additionalProperties": true,
+          "description": "Downloads start enabled; seeding and incoming connections start disabled."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "downloads": { "type": "boolean" },
+        "seeding": { "type": "boolean" },
+        "incoming": { "type": "boolean" }
+      },
+      "required": ["downloads", "seeding", "incoming"],
+      "additionalProperties": true,
+      "description": "Downloads start enabled; seeding and incoming connections start disabled."
+    }
+  },
+  {
     "name": "server.clear-smtp",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -9897,7 +10105,7 @@
             },
             "proxy": {
               "anyOf": [{ "$ref": "#/$defs/ProxyOptions" }, { "type": "null" }],
-              "description": "HTTP request policy shared by every exposed leg of this binding."
+              "description": "Proxy protocol shared by every exposed leg of this binding."
             }
           },
           "required": ["preferredExternalPort", "addSsl", "secure", "proxy"],
@@ -9965,24 +10173,46 @@
         },
         "Security": {
           "type": "object",
-          "properties": { "ssl": { "type": "boolean" } },
-          "required": ["ssl"],
-          "additionalProperties": true
-        },
-        "ProxyOptions": {
-          "type": "object",
           "properties": {
-            "type": { "type": "string", "const": "http" },
-            "addXForwardedHeaders": {
-              "description": "Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.",
-              "type": "boolean"
-            },
-            "auth": {
-              "description": "Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.",
-              "anyOf": [{ "$ref": "#/$defs/ProxyAuth" }, { "type": "null" }]
+            "ssl": {
+              "type": "boolean",
+              "description": "Whether TLS precedes application bytes."
             }
           },
-          "required": ["type", "addXForwardedHeaders", "auth"]
+          "required": ["ssl"],
+          "additionalProperties": true,
+          "description": "A protocol safe to expose on enabled public addresses."
+        },
+        "ProxyOptions": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tcp",
+                  "description": "Relays raw TCP streams without parsing application messages."
+                }
+              },
+              "required": ["type"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "http" },
+                "addXForwardedHeaders": {
+                  "description": "Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.",
+                  "type": "boolean"
+                },
+                "auth": {
+                  "description": "Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.",
+                  "anyOf": [{ "$ref": "#/$defs/ProxyAuth" }, { "type": "null" }]
+                }
+              },
+              "required": ["type", "addXForwardedHeaders", "auth"]
+            }
+          ]
         },
         "ProxyAuth": {
           "anyOf": [

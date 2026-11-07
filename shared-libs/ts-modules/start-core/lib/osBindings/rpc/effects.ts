@@ -133,7 +133,15 @@ export type PluginId = z.output<typeof schemas.PluginId>
 export type PreDownloadAlertWhen = z.output<typeof schemas.PreDownloadAlertWhen>
 export type ProgressUnitsInput = z.input<typeof schemas.ProgressUnits>
 export type ReplayIdInput = z.input<typeof schemas.ReplayId>
+
+/**
+ * A protocol safe to expose on enabled public addresses.
+ */
 export type Security = z.output<typeof schemas.Security>
+
+/**
+ * A protocol safe to expose on enabled public addresses.
+ */
 export type SecurityInput = z.input<typeof schemas.Security>
 export type ServiceInterfaceId = z.output<typeof schemas.ServiceInterfaceId>
 export type ServiceInterfaceIdInput = z.input<typeof schemas.ServiceInterfaceId>

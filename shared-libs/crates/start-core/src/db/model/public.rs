@@ -141,6 +141,7 @@ impl Public {
                 ca_fingerprint: x509_sha256_fingerprint(&account.root_ca_cert).unwrap(),
                 ntp_synced: false,
                 zram: false,
+                bittorrent: Default::default(),
                 governor: None,
                 epp: None,
                 smtp: None,
@@ -193,6 +194,8 @@ pub struct ServerInfo {
     pub ntp_synced: bool,
     #[serde(default)]
     pub zram: bool,
+    #[serde(default)]
+    pub bittorrent: crate::registry::bittorrent::TorrentPreferences,
     pub governor: Option<Governor>,
     #[serde(default)]
     pub epp: Option<Epp>,

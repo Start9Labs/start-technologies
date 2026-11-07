@@ -31,7 +31,7 @@ use crate::net::service_interface::{
 };
 use crate::net::socks::SocksController;
 use crate::net::vhost::{
-    AlpnInfo, DynVHostTarget, PlainHttpProxy, ProxyTarget, VHostController, VHostKey,
+    AlpnInfo, DynVHostTarget, PlaintextProxy, ProxyTarget, VHostController, VHostKey,
 };
 use crate::net::web_server::WebServerAcceptorSetter;
 use crate::net::{SERVICE_OUTBOUND_REJECT_RULE_PRIORITY, SERVICE_OUTBOUND_RULE_PRIORITY};
@@ -266,45 +266,28 @@ impl NetController {
             )
             .await?;
 
-        // Sync the OS's own UI as a service interface (idempotent — the OS's
-        // equivalent of a service's setupInterfaces) so the server binding
-        // always has an exported interface. Bindings/ranges without one are
-        // treated as internal-only below.
-        self.db
-            .mutate(|db| {
-                let iface_id = ServiceInterfaceId::from(
+        service
+            .export_interface(ServiceInterface {
+                id: ServiceInterfaceId::from(
                     Id::try_from("admin-ui".to_owned()).expect("valid id"),
-                );
-                let iface = ServiceInterface {
-                    id: iface_id.clone(),
-                    name: "StartOS UI".to_owned(),
-                    description:
-                        "The web user interface for your StartOS server, accessible from any browser."
-                            .to_owned(),
-                    masked: false,
-                    address_info: AddressInfo {
-                        username: None,
-                        host_id: HostId::admin(),
-                        internal_port: 80,
-                        scheme: Some(InternedString::intern("http")),
-                        ssl_scheme: Some(InternedString::intern("https")),
-                        suffix: String::new(),
-                    },
-                    interface_type: ServiceInterfaceType::Ui,
-                    preferred_launcher_address: None,
-                };
-                db.as_public_mut()
-                    .as_server_info_mut()
-                    .as_network_mut()
-                    .as_host_mut()
-                    .as_bindings_mut()
-                    .as_idx_mut(&80)
-                    .or_not_found(80)?
-                    .as_interfaces_mut()
-                    .ser(&[(iface_id, iface)].into_iter().collect::<BTreeMap<_, _>>())
+                ),
+                name: "StartOS UI".to_owned(),
+                description:
+                    "The web user interface for your StartOS server, accessible from any browser."
+                        .to_owned(),
+                masked: false,
+                address_info: AddressInfo {
+                    username: None,
+                    host_id: HostId::admin(),
+                    internal_port: 80,
+                    scheme: Some(InternedString::intern("http")),
+                    ssl_scheme: Some(InternedString::intern("https")),
+                    suffix: String::new(),
+                },
+                interface_type: ServiceInterfaceType::Ui,
+                preferred_launcher_address: None,
             })
-            .await
-            .result?;
+            .await?;
 
         Ok(service)
     }
@@ -448,7 +431,7 @@ fn binding_proxy_target(
     }
 }
 
-fn plaintext_http_target(
+fn plaintext_proxy_target(
     mut target: ProxyTarget,
     external: u16,
     addresses: &BTreeSet<&HostnameInfo>,
@@ -527,7 +510,7 @@ fn retired_hosts<'a>(held: impl Iterator<Item = &'a HostId>, current: &Hosts) ->
 #[derive(Debug)]
 enum ProxyHandle {
     Tls { _owner: Arc<()> },
-    Plaintext { _server: PlainHttpProxy },
+    Plaintext { _server: PlaintextProxy },
 }
 
 #[derive(Default, Debug)]
@@ -568,7 +551,7 @@ impl NetServiceData {
     async fn update(&mut self, ctrl: &NetController, id: HostId, host: Host) -> Result<(), Error> {
         let mut forwards: BTreeMap<u16, (SocketAddrV4, u16, ForwardRequirements)> = BTreeMap::new();
         let mut vhosts: BTreeMap<VHostKey, ProxyTarget> = BTreeMap::new();
-        let mut http_ports = BTreeSet::new();
+        let mut plaintext_proxy_ports = BTreeSet::new();
         let mut private_dns: BTreeMap<InternedString, BTreeSet<GatewayId>> = BTreeMap::new();
         // Non-SSL v6 DNAT forwards to the container — net_controller's concern (no
         // vhost owns them), but the forward controller opens their upstream pinhole
@@ -740,10 +723,10 @@ impl NetServiceData {
                     secure: bind.options.secure.is_some(),
                 };
                 if bind.options.proxy.is_some() {
-                    http_ports.insert(external);
+                    plaintext_proxy_ports.insert(external);
                     vhosts.insert(
                         (None, external, true),
-                        plaintext_http_target(
+                        plaintext_proxy_target(
                             target,
                             external,
                             &enabled_addresses,
@@ -1021,7 +1004,7 @@ impl NetServiceData {
                     } else {
                         (
                             target.clone(),
-                            if http_ports.contains(&key.1) {
+                            if plaintext_proxy_ports.contains(&key.1) {
                                 ProxyHandle::Plaintext {
                                     _server: ctrl.vhost.plaintext_proxy(key.1, target),
                                 }
@@ -1442,6 +1425,73 @@ impl NetService {
                     host.update_addresses(&hostname, &gateways, &ports)?;
                 }
                 db.as_private_mut().as_available_ports_mut().ser(&ports)?;
+                Ok(())
+            })
+            .await
+            .result
+    }
+
+    pub(crate) async fn export_interface(&self, interface: ServiceInterface) -> Result<(), Error> {
+        let (ctrl, pkg_id) = {
+            let data = self.data.lock().await;
+            (
+                data.net_controller()?,
+                data.id.clone().unwrap_or_else(PackageId::start_os),
+            )
+        };
+        ctrl.db
+            .mutate(|db| {
+                let gateways = db
+                    .as_public()
+                    .as_server_info()
+                    .as_network()
+                    .as_gateways()
+                    .de()?;
+                let hostname = ServerHostname::load(db.as_public().as_server_info())?;
+                let ports = db.as_private().as_available_ports().de()?;
+                let host = host_for(db, &pkg_id, &interface.address_info.host_id)?;
+                host.as_bindings_mut()
+                    .as_idx_mut(&interface.address_info.internal_port)
+                    .or_not_found(interface.address_info.internal_port)?
+                    .as_interfaces_mut()
+                    .insert(&interface.id, &interface)?;
+                host.update_addresses(&hostname, &gateways, &ports)?;
+                Ok(())
+            })
+            .await
+            .result
+    }
+
+    pub(crate) async fn disable_binding(
+        &self,
+        id: HostId,
+        internal_port: u16,
+    ) -> Result<(), Error> {
+        let (ctrl, pkg_id) = {
+            let data = self.data.lock().await;
+            (
+                data.net_controller()?,
+                data.id.clone().unwrap_or_else(PackageId::start_os),
+            )
+        };
+        ctrl.db
+            .mutate(|db| {
+                let gateways = db
+                    .as_public()
+                    .as_server_info()
+                    .as_network()
+                    .as_gateways()
+                    .de()?;
+                let hostname = ServerHostname::load(db.as_public().as_server_info())?;
+                let ports = db.as_private().as_available_ports().de()?;
+                let host = host_for(db, &pkg_id, &id)?;
+                if let Some(binding) = host.as_bindings_mut().as_idx_mut(&internal_port) {
+                    binding.mutate(|binding| {
+                        binding.disable();
+                        Ok(())
+                    })?;
+                    host.update_addresses(&hostname, &gateways, &ports)?;
+                }
                 Ok(())
             })
             .await

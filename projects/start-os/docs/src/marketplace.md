@@ -20,6 +20,39 @@ StartOS ships with two [default registries](default-registries.md): the **Start9
 
 Package details include a **Signed by** section listing every key that signed the package: a green check for a key you trust for packages, a red X for a key you know but do not trust, and a gray dash with the key's fingerprint for a key your server does not know. Select a key to see its details and trust or distrust it for packages or StartOS updates; an unknown key needs a label first. Confirm a key's fingerprint through a source you already trust before trusting it. When no trusted signer matches, a warning appears, and installing asks you to confirm the risks first. Manage individual keys and their package and StartOS-update trust under **System → [Trusted Keys](trusted-keys.md)**.
 
+## Download Transports
+
+When a registry advertises a BitTorrent source, StartOS prefers it for package downloads and OS updates, with HTTP fallback if the torrent is unavailable, stalls, or fails verification. Both transports use the same signed content commitments. BitTorrent sources must contain a single asset file. V1/v2 hybrid torrents use their v1-compatible swarm. Recovery-mode OS updates stream over HTTP directly to the image partition.
+
+BitTorrent downloads buffer a complete asset on the data disk before unpacking package files or applying an OS update. Install progress appears once signed package metadata is ready, and the remaining transfer can be cancelled. Metadata can come from advertised HTTP mirrors or BitTorrent peers. Temporary transfer files are cleaned up afterward.
+
+> [!WARNING]
+> HTTP downloads already expose an IP address to the server. BitTorrent widens that audience to trackers and other peers, which can also see the requested torrent. Outgoing BitTorrent connections use the default gateway for StartOS, shown on **System → Software sharing**. When StartTunnel provides that gateway, outgoing peers see its exit IP, not the underlying connection’s public IP. Incoming connections expose whichever addresses are enabled below the controls. Onion registries use HTTP through Tor instead of BitTorrent.
+
+BitTorrent downloads are enabled by default. Turn off **Download using BitTorrent** under **System → Software sharing** to use HTTP exclusively without restarting, or run `start-cli server bittorrent set-preferences --downloads false`. This stops active peer transfers and lets downloads fall back to HTTP.
+
+### Software Sharing
+
+Sharing compatible installed S9PKs and OS images already stored by StartOS is disabled by default. Enable **Share S9PKs and OS images** under **System → Software sharing**, or use:
+
+```sh
+start-cli server bittorrent set-preferences --downloads true --seeding true
+```
+
+The page has three cascading preferences: downloads (on by default), sharing stored software (off by default), and incoming connections (off by default). Turning a preference off clears and disables the preferences below it. Turning it back on does not restore them. Changes apply live and persist across restarts. Active BitTorrent downloads can upload even when sharing stored software is off. Use `--seeding false` to stop sharing stored software, or `--downloads false` to stop all peer transfers.
+
+StartOS discovers advertisements for installed packages from their recorded registry and for stored OS images from the selected update registry. It also remembers torrent metadata from new installations and updates, including downloads that fall back to HTTP. Files without an advertised source are not assigned a swarm.
+
+Sharing requires an exact byte match with the advertised torrent. Installation can filter package architectures and remove supplemental signature trailers, leaving an installed S9PK that cannot join the original swarm. StartOS skips incompatible files without modifying them.
+
+Sharing adds only source-path, commitment and torrent-metadata records under `/media/startos/data/package-data/registry-torrents`. It creates no extra payload copies or extended retention: installation, uninstall and native image cleanup still control the software files. Disabling sharing keeps this ordinary file management unchanged.
+
+Uploads can use outgoing peer connections without an incoming port forward. To accept incoming peers, turn on **Allow incoming peer connections** or use `start-cli server bittorrent set-preferences --incoming true` while sharing is enabled. StartOS manages the TCP listener, external port allocation and forwarding through its existing interface system; librqbit does not create a separate UPnP mapping.
+
+On the same page, enable the gateway addresses peers should use and open their standard **Address Requirements** dialog to check reachability. Native forwarding uses PCP/UPnP where supported. A configured listener or mapping alone does not establish public reachability. Turning incoming connections off closes the listener and disables the native binding, preserving its saved address choices.
+
+The `directory` option under `bittorrent-seed` in `/media/startos/config/config.yaml` overrides the metadata-catalog location, not a payload-storage location. It does not enable sharing. The administrator’s `bittorrent: false` configuration disables peer transport regardless of the saved preferences; changing that configuration requires a restart.
+
 ## Open Ecosystem
 
 Anyone, anywhere can establish their own registry. This open model means no single entity controls which services are available, and no service can be effectively censored. Users choose which signing keys to trust independently of the hosting registry, and services can be distributed through multiple independent registries, direct file transfer, or built from source.

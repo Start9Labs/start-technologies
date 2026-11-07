@@ -332,17 +332,9 @@ export type RecoverySource<Password> = z.output<
 export type RecoverySourceInput<Password> = z.input<
   ReturnType<typeof schemas.RecoverySource<z.ZodType<Password, Password>>>
 >
-
-/**
- * A registry asset with a caller-selected commitment representation.
- */
 export type RegistryAsset<Commitment> = z.output<
   ReturnType<typeof schemas.RegistryAsset<z.ZodType<Commitment, Commitment>>>
 >
-
-/**
- * A registry asset with a caller-selected commitment representation.
- */
 export type RegistryAssetInput<Commitment> = z.input<
   ReturnType<typeof schemas.RegistryAsset<z.ZodType<Commitment, Commitment>>>
 >
@@ -384,7 +376,15 @@ export type RequestCommitment = z.output<typeof schemas.RequestCommitment>
 export type RequestCommitmentInput = z.input<typeof schemas.RequestCommitment>
 export type RestartReason = z.output<typeof schemas.RestartReason>
 export type RestartReasonInput = z.input<typeof schemas.RestartReason>
+
+/**
+ * A protocol safe to expose on enabled public addresses.
+ */
 export type Security = z.output<typeof schemas.Security>
+
+/**
+ * A protocol safe to expose on enabled public addresses.
+ */
 export type SecurityInput = z.input<typeof schemas.Security>
 export type ServerBackupReport = z.output<typeof schemas.ServerBackupReport>
 export type ServerBackupReportInput = z.input<typeof schemas.ServerBackupReport>
@@ -466,6 +466,16 @@ export type TaskSeverity = z.output<typeof schemas.TaskSeverity>
 export type TaskSeverityInput = z.input<typeof schemas.TaskSeverity>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TimeInfoInput = z.input<typeof schemas.TimeInfo>
+
+/**
+ * Downloads start enabled; seeding and incoming connections start disabled.
+ */
+export type TorrentPreferences = z.output<typeof schemas.TorrentPreferences>
+
+/**
+ * Downloads start enabled; seeding and incoming connections start disabled.
+ */
+export type TorrentPreferencesInput = z.input<typeof schemas.TorrentPreferences>
 export type TrustContext = z.output<typeof schemas.TrustContext>
 export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedOsUpdateSigner = z.output<
@@ -1264,6 +1274,16 @@ export type BindingSetGuaWanParams = z.output<
 export type BindingSetGuaWanParamsInput = z.input<
   typeof schemas.BindingSetGuaWanParams
 >
+
+/**
+ * Configured transport availability and the native incoming peer interface.
+ */
+export type BitTorrentConfig = z.output<typeof schemas.BitTorrentConfig>
+
+/**
+ * Configured transport availability and the native incoming peer interface.
+ */
+export type BitTorrentConfigInput = z.input<typeof schemas.BitTorrentConfig>
 export type CreateTaskParams = z.output<typeof schemas.CreateTaskParams>
 export type CreateTaskParamsInput = z.input<typeof schemas.CreateTaskParams>
 export type CurrentDependencies = z.output<typeof schemas.CurrentDependencies>

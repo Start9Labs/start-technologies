@@ -497,6 +497,65 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
   assert.equal(data.serverInfo.trustedKeys[ids[2]].os, true)
 })
 
+test('StartOS BitTorrent mock cascades preferences through PatchDB revisions', async () => {
+  const { applyPatch } = require('fast-json-patch')
+  const storage = Symbol('session storage')
+  const data = {
+    ui: { registries: {} },
+    serverInfo: {
+      bittorrent: { downloads: true, seeding: false, incoming: false },
+      network: { host: { bindings: {} } },
+      trustedKeys: {},
+      registryKeys: {},
+    },
+  }
+  const { dependencies, tokens, load } = harness(
+    new Map([
+      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
+      ['src/app/utils/acme', {}],
+      ['./api.fixures', { Mock: {} }],
+      ['./mock-patch', { mockPatchData: data }],
+      ['./md-sample.md', ''],
+    ]),
+  )
+  dependencies.set(storage, null)
+  dependencies.set(tokens.AuthService, { isVerified$: of(true) })
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: data }))
+  const client = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+  ).MockApiService)()
+  const subscription = client.mockWsSource$.subscribe(revision => {
+    applyPatch(data, revision.patch)
+  })
+  const config = await client.rpc.server.bittorrent.config({})
+  assert.equal(config.available, true)
+  assert.equal(config.interface.type, 'p2p')
+  for (const [patch, expected] of [
+    [{ incoming: true }, { downloads: true, seeding: false, incoming: false }],
+    [{ seeding: true }, { downloads: true, seeding: true, incoming: false }],
+    [{ incoming: true }, { downloads: true, seeding: true, incoming: true }],
+    [{ seeding: false }, { downloads: true, seeding: false, incoming: false }],
+    [{ seeding: true }, { downloads: true, seeding: true, incoming: false }],
+    [
+      { downloads: false },
+      { downloads: false, seeding: false, incoming: false },
+    ],
+    [{ downloads: true }, { downloads: true, seeding: false, incoming: false }],
+  ]) {
+    assert.deepEqual(
+      { ...(await client.rpc.server.bittorrent.setPreferences(patch)) },
+      expected,
+    )
+    assert.deepEqual({ ...data.serverInfo.bittorrent }, expected)
+    const binding =
+      data.serverInfo.network.host.bindings[
+        config.interface.addressInfo.internalPort
+      ]
+    if (binding) assert.equal(binding.enabled, expected.incoming)
+  }
+  subscription.unsubscribe()
+})
+
 test('StartOS DNS mock updates the selected gateway using live gateway state', async () => {
   const storage = Symbol('session storage')
   const { dependencies, tokens, load } = harness(

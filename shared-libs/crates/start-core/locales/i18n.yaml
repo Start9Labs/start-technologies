@@ -454,6 +454,20 @@ setup.password-required:
   pl_PL: "Hasło jest wymagane do nowej konfiguracji"
 
 # system.rs
+system.bittorrent.interface-description:
+  en_US: "Incoming BitTorrent connections for sharing stored software"
+  de_DE: "Eingehende BitTorrent-Verbindungen zum Freigeben gespeicherter Software"
+  es_ES: "Conexiones BitTorrent entrantes para compartir software almacenado"
+  fr_FR: "Connexions BitTorrent entrantes pour partager les logiciels stockés"
+  pl_PL: "Przychodzące połączenia BitTorrent do udostępniania zapisanego oprogramowania"
+
+system.bittorrent.interface-name:
+  en_US: "BitTorrent peers"
+  de_DE: "BitTorrent-Peers"
+  es_ES: "Pares BitTorrent"
+  fr_FR: "Pairs BitTorrent"
+  pl_PL: "Peery BitTorrent"
+
 system.disk-health.check-failed:
   en_US: "Could not check Btrfs allocation"
   de_DE: "Btrfs-Speicherzuweisung konnte nicht geprüft werden"
@@ -2726,13 +2740,40 @@ registry.signer.not-accepted:
   fr_FR: "Signataire(s) non accepté(s)"
   pl_PL: "Sygnatariusz(e) nieakceptowany(i)"
 
-# registry/asset.rs
 registry.asset.failed-to-load-http-url:
   en_US: "Failed to load any HTTP URL"
   de_DE: "Fehler beim Laden einer HTTP-URL"
   es_ES: "Error al cargar cualquier URL HTTP"
   fr_FR: "Échec du chargement de toute URL HTTP"
   pl_PL: "Nie udało się załadować żadnego adresu HTTP"
+
+registry.asset.must-specify-url:
+  en_US: "Must specify at least 1 URL"
+  de_DE: "Mindestens 1 URL muss angegeben werden"
+  es_ES: "Debe especificar al menos 1 URL"
+  fr_FR: "Doit spécifier au moins 1 URL"
+  pl_PL: "Należy podać co najmniej 1 adres URL"
+
+registry.bittorrent.cancelled:
+  en_US: "BitTorrent transfer cancelled"
+  de_DE: "BitTorrent-Übertragung abgebrochen"
+  es_ES: "Transferencia BitTorrent cancelada"
+  fr_FR: "Transfert BitTorrent annulé"
+  pl_PL: "Transfer BitTorrent anulowany"
+
+registry.bittorrent.invalid-metadata:
+  en_US: "Invalid registry torrent: expected a single asset file matching the commitment"
+  de_DE: "Ungültiger Registry-Torrent: Eine einzelne, zur Zusicherung passende Asset-Datei wurde erwartet"
+  es_ES: "Torrent de registro no válido: se esperaba un único archivo que coincida con el compromiso"
+  fr_FR: "Torrent de registre invalide : un fichier unique correspondant à l'engagement est attendu"
+  pl_PL: "Nieprawidłowy torrent rejestru: oczekiwano pojedynczego pliku zgodnego z zobowiązaniem"
+
+registry.bittorrent.stalled:
+  en_US: "BitTorrent download stopped making progress"
+  de_DE: "Der BitTorrent-Download macht keinen Fortschritt mehr"
+  es_ES: "La descarga BitTorrent dejó de avanzar"
+  fr_FR: "Le téléchargement BitTorrent ne progresse plus"
+  pl_PL: "Pobieranie BitTorrent przestało postępować"
 
 # registry/context.rs
 registry.context.missing-hostname:
@@ -2867,13 +2908,6 @@ registry.package.remove-not-exist:
   pl_PL: "%{id}%{version}%{sighash} nie istnieje, więc nie usunięto"
 
 # registry/package/add.rs
-registry.package.add.must-specify-url:
-  en_US: "Must specify at least 1 URL"
-  de_DE: "Mindestens 1 URL muss angegeben werden"
-  es_ES: "Debe especificar al menos 1 URL"
-  fr_FR: "Doit spécifier au moins 1 URL"
-  pl_PL: "Należy podać co najmniej 1 adres URL"
-
 registry.package.add.unauthorized:
   en_US: "Unauthorized"
   de_DE: "Nicht autorisiert"
@@ -4124,6 +4158,27 @@ help.arg.binding-enabled:
   fr_FR: "Activer ou désactiver cette liaison"
   pl_PL: "Włącz lub wyłącz to powiązanie"
 
+help.arg.bittorrent:
+  en_US: "Prefer BitTorrent for registry downloads (peer IP addresses are public); HTTP remains available"
+  de_DE: "BitTorrent für Registry-Downloads bevorzugen (Peer-IP-Adressen sind öffentlich); HTTP bleibt verfügbar"
+  es_ES: "Preferir BitTorrent para las descargas del registro (las IP de los pares son públicas); HTTP sigue disponible"
+  fr_FR: "Préférer BitTorrent pour les téléchargements du registre (les IP des pairs sont publiques) ; HTTP reste disponible"
+  pl_PL: "Preferuj BitTorrent przy pobieraniu z rejestru (adresy IP peerów są publiczne); HTTP pozostaje dostępne"
+
+help.arg.bittorrent-downloads:
+  en_US: "Enable BitTorrent downloads; disabling also disables seeding and incoming connections"
+  de_DE: "BitTorrent-Downloads aktivieren; Deaktivieren schaltet auch Seeding und eingehende Verbindungen aus"
+  es_ES: "Habilitar descargas BitTorrent; al deshabilitar se desactivan también la siembra y las conexiones entrantes"
+  fr_FR: "Activer les téléchargements BitTorrent ; la désactivation coupe aussi le partage et les connexions entrantes"
+  pl_PL: "Włącz pobieranie BitTorrent; wyłączenie wyłącza również wysyłanie i połączenia przychodzące"
+
+help.arg.bittorrent-incoming:
+  en_US: "Accept incoming peer connections through the native network interface"
+  de_DE: "Eingehende Peer-Verbindungen über die native Netzwerkschnittstelle annehmen"
+  es_ES: "Aceptar conexiones de pares entrantes mediante la interfaz de red nativa"
+  fr_FR: "Accepter les connexions entrantes des pairs via l'interface réseau native"
+  pl_PL: "Akceptuj przychodzące połączenia peerów przez natywny interfejs sieciowy"
+
 help.arg.ca-certificate:
   en_US: "PEM-encoded CA certificate"
   de_DE: "PEM-codiertes CA-Zertifikat"
@@ -4811,6 +4866,13 @@ help.arg.revision-cache-size:
   fr_FR: "Nombre maximum de révisions en cache"
   pl_PL: "Maksymalna liczba rewizji w pamięci podręcznej"
 
+help.arg.seeding-enabled:
+  en_US: "Share compatible installed S9PKs and stored OS images"
+  de_DE: "Kompatible installierte S9PKs und gespeicherte OS-Images teilen"
+  es_ES: "Compartir S9PK instalados e imágenes del sistema almacenadas compatibles"
+  fr_FR: "Partager les S9PK installés et les images système stockées compatibles"
+  pl_PL: "Udostępniaj zgodne z torrentem zainstalowane pliki S9PK i zapisane obrazy systemu"
+
 help.arg.server-id:
   en_US: "Unique server identifier"
   de_DE: "Eindeutige Server-Kennung"
@@ -4985,6 +5047,13 @@ help.arg.tor-proxy-url:
   es_ES: "URL del proxy SOCKS de Tor"
   fr_FR: "URL du proxy SOCKS Tor"
   pl_PL: "URL proxy SOCKS Tor"
+
+help.arg.torrent:
+  en_US: "Magnet link or HTTP(S) torrent metadata URL; seed the asset separately"
+  de_DE: "Magnet-Link oder HTTP(S)-URL der Torrent-Metadaten; das Asset separat seeden"
+  es_ES: "Enlace magnet o URL HTTP(S) de metadatos torrent; compartir el archivo por separado"
+  fr_FR: "Lien magnet ou URL HTTP(S) des métadonnées torrent ; partager la ressource séparément"
+  pl_PL: "Link magnet lub adres HTTP(S) metadanych torrenta; udostępniaj zasób osobno"
 
 help.arg.trust:
   en_US: "Install without requiring a trusted signer; signature and integrity checks remain mandatory"
@@ -7706,6 +7775,27 @@ about.ssl-generate-certificate:
   es_ES: "Generar un certificado SSL desde la CA raíz del sistema"
   fr_FR: "Générer un certificat SSL depuis l'autorité racine du système"
   pl_PL: "Wygeneruj certyfikat SSL z głównego CA systemu"
+
+about.system.bittorrent:
+  en_US: "Manage BitTorrent sharing of stored software"
+  de_DE: "BitTorrent-Freigabe gespeicherter Software verwalten"
+  es_ES: "Gestionar el uso compartido de software almacenado mediante BitTorrent"
+  fr_FR: "Gérer le partage BitTorrent des logiciels stockés"
+  pl_PL: "Zarządzaj udostępnianiem zapisanego oprogramowania przez BitTorrent"
+
+about.system.bittorrent-config:
+  en_US: "Show BitTorrent availability and its incoming network interface"
+  de_DE: "BitTorrent-Verfügbarkeit und zugehörige eingehende Netzwerkschnittstelle anzeigen"
+  es_ES: "Mostrar la disponibilidad de BitTorrent y su interfaz de red entrante"
+  fr_FR: "Afficher la disponibilité de BitTorrent et son interface réseau entrante"
+  pl_PL: "Pokaż dostępność BitTorrent i jego przychodzący interfejs sieciowy"
+
+about.system.set-bittorrent-preferences:
+  en_US: "Set downloads, seeding and incoming connections; disabling a parent clears its children"
+  de_DE: "Downloads, Seeding und eingehende Verbindungen einstellen; Deaktivieren einer übergeordneten Option schaltet untergeordnete aus"
+  es_ES: "Configurar descargas, siembra y conexiones entrantes; deshabilitar una opción superior desactiva las inferiores"
+  fr_FR: "Configurer les téléchargements, le partage et les connexions entrantes ; désactiver une option coupe celles qui en dépendent"
+  pl_PL: "Ustaw pobieranie, wysyłanie i połączenia przychodzące; wyłączenie opcji nadrzędnej wyłącza podrzędne"
 
 about.teardown-rebuild-containers:
   en_US: "Teardown and rebuild containers"

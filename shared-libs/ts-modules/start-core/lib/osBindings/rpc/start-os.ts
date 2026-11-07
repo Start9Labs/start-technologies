@@ -252,10 +252,6 @@ export type QueryDnsParamsInput = z.input<typeof schemas.QueryDnsParams>
  * IPv4 and an `AAAA` at the box's IPv6 GUA. Either may be absent.
  */
 export type QueryDnsRes = z.output<typeof schemas.QueryDnsRes>
-
-/**
- * A registry asset with a caller-selected commitment representation.
- */
 export type RegistryAsset<Commitment> = z.output<
   ReturnType<typeof schemas.RegistryAsset<z.ZodType<Commitment, Commitment>>>
 >
@@ -279,6 +275,10 @@ export type RemoveVersionParamsInput = z.input<
 >
 export type ReplayIdInput = z.input<typeof schemas.ReplayId>
 export type RequiresReboot = z.output<typeof schemas.RequiresReboot>
+
+/**
+ * A protocol safe to expose on enabled public addresses.
+ */
 export type Security = z.output<typeof schemas.Security>
 export type ServerHostname = z.output<typeof schemas.ServerHostname>
 export type ServiceInterfaceId = z.output<typeof schemas.ServiceInterfaceId>
@@ -290,6 +290,9 @@ export type SetEchoipUrlsParamsInput = z.input<
 >
 export type SetLanguageParamsInput = z.input<typeof schemas.SetLanguageParams>
 export type SetNameParamsInput = z.input<typeof schemas.SetNameParams>
+export type SetPreferencesParamsInput = z.input<
+  typeof schemas.SetPreferencesParams
+>
 export type SetServerHostnameParamsInput = z.input<
   typeof schemas.SetServerHostnameParams
 >
@@ -314,6 +317,11 @@ export type Ssid = z.output<typeof schemas.Ssid>
 export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type TermSizeInput = z.input<typeof schemas.TermSize>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
+
+/**
+ * Downloads start enabled; seeding and incoming connections start disabled.
+ */
+export type TorrentPreferences = z.output<typeof schemas.TorrentPreferences>
 export type TrustCaParamsInput = z.input<typeof schemas.TrustCaParams>
 export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedCa = z.output<typeof schemas.TrustedCa>
@@ -632,6 +640,11 @@ export type BindingSetAddressEnabledParamsInput = z.input<
 export type BindingSetGuaWanParamsInput = z.input<
   typeof schemas.BindingSetGuaWanParams
 >
+
+/**
+ * Configured transport availability and the native incoming peer interface.
+ */
+export type BitTorrentConfig = z.output<typeof schemas.BitTorrentConfig>
 export type DerivedAddressInfo = z.output<typeof schemas.DerivedAddressInfo>
 export type DeviceInfo = z.output<typeof schemas.DeviceInfo>
 export type DiskInfo = z.output<typeof schemas.DiskInfo>

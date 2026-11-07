@@ -183,6 +183,7 @@ mod tests {
         RegistryAsset {
             published_at: chrono::Utc::now(),
             urls: vec![],
+            torrent: None,
             commitment: Blake3Commitment {
                 hash: Base64([0; 32]),
                 size: 0,

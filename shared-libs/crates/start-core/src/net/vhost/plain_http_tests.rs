@@ -52,7 +52,7 @@ async fn proxy(
     backend: SocketAddr,
     proxy: ProxyOptions,
     max_connections: usize,
-) -> (SocketAddr, PlainHttpProxy) {
+) -> (SocketAddr, PlaintextProxy) {
     let listener = TcpListener::bind((ip, 0)).await.unwrap();
     let addr = listener.local_addr().unwrap();
     let gateway: GatewayId = "lo".parse().unwrap();
@@ -93,8 +93,65 @@ async fn proxy(
     };
     (
         addr,
-        PlainHttpProxy::serve(listener, target, max_connections),
+        PlaintextProxy::serve(listener, target, max_connections),
     )
+}
+
+#[test]
+fn plaintext_listener_does_not_bind_its_backend_endpoint() {
+    let backend: SocketAddr = "127.0.0.1:6881".parse().unwrap();
+    let bridge = "10.0.3.1".parse().unwrap();
+    let target = ProxyTarget {
+        public_v4: BTreeSet::new(),
+        public_v6: BTreeSet::new(),
+        public_v6_gateways: BTreeSet::new(),
+        private: BTreeSet::from([backend.ip(), bridge]),
+        acme: None,
+        addr: backend,
+        addr_v6: None,
+        proxy: Some(ProxyOptions::Tcp),
+        connect_ssl: None,
+        alpn: None,
+        passthrough: false,
+        preserve_source_ip: false,
+    };
+    assert_eq!(
+        PlaintextProxy::requirements(6881, &target).private_ips,
+        BTreeSet::from([bridge])
+    );
+    assert_eq!(
+        PlaintextProxy::requirements(6882, &target).private_ips,
+        target.private
+    );
+}
+
+#[tokio::test]
+async fn tcp_listener_relays_binary_streams_and_closes_them_on_drop() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        for ip in ["127.0.0.1", "::1"] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let upstream = listener.local_addr().unwrap();
+            let backend = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut bytes = [0; 8];
+                stream.read_exact(&mut bytes).await.unwrap();
+                assert_eq!(&bytes, b"\x00\xff\x13\x00peer");
+                stream.write_all(&bytes).await.unwrap();
+                assert_eq!(stream.read(&mut bytes).await.unwrap(), 0);
+            });
+            let (address, owner) = proxy(ip.parse().unwrap(), upstream, ProxyOptions::Tcp, 1).await;
+            let mut peer = TcpStream::connect(address).await.unwrap();
+            peer.write_all(b"\x00\xff\x13\x00peer").await.unwrap();
+            let mut bytes = [0; 8];
+            peer.read_exact(&mut bytes).await.unwrap();
+            assert_eq!(&bytes, b"\x00\xff\x13\x00peer");
+            drop(owner);
+            assert_eq!(peer.read(&mut bytes).await.unwrap(), 0);
+            backend.await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
 }
 
 async fn client(

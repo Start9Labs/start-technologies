@@ -22,9 +22,11 @@ export {
   UpstreamCertValidation,
 }
 
+type HttpProxyOptions = Extract<ProxyOptions, { type: 'http' }>
+
 export type BindOptions = Omit<BindOptionsInput, 'addSsl' | 'proxy'> & {
   addSsl?: AddSslOptions | null
-  proxy?: Partial<ProxyOptions> | null
+  proxy?: Partial<HttpProxyOptions> | null
 }
 
 const defaultHttpProxy = {
@@ -84,9 +86,9 @@ export type BindOptionsByProtocol =
   | (BindOptions & { protocol: null })
 
 function resolveProxyOptions(
-  defaults: ProxyOptions | null,
+  defaults: HttpProxyOptions | null,
   override: BindOptions['proxy'],
-): ProxyOptions | null {
+): HttpProxyOptions | null {
   const proxy = override === undefined ? defaults : override
   return proxy === null ? null : { ...defaultHttpProxy, ...defaults, ...proxy }
 }

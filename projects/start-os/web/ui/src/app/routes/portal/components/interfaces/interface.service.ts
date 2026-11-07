@@ -102,11 +102,8 @@ function getAddressType(h: T.HostnameInfo): string {
 export class InterfaceService {
   private readonly config = inject(ConfigService)
 
-  // The package's service interfaces, mapped for display: single-port
-  // interfaces first (reached host -> binding -> interface), then port ranges
-  // (host -> bindingRange -> interface, carrying a `portRange` span).
   getServiceInterfaces(
-    pkg: PackageDataEntry,
+    pkg: Pick<PackageDataEntry, 'hosts'>,
     gateways: GatewayPlus[],
     allPackageData?: Record<string, PackageDataEntry>,
   ): MappedServiceInterface[] {

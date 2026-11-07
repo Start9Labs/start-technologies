@@ -376,8 +376,8 @@ impl VHostController {
         )
     }
 
-    pub fn plaintext_proxy(&self, port: u16, target: ProxyTarget) -> PlainHttpProxy {
-        PlainHttpProxy::new(
+    pub fn plaintext_proxy(&self, port: u16, target: ProxyTarget) -> PlaintextProxy {
+        PlaintextProxy::new(
             &self.interfaces,
             port,
             target,
@@ -1337,7 +1337,7 @@ impl ProxyTarget {
                     tracing::trace!(backend = %self.addr, ?error, "HTTP proxy connection failed");
                 }
             }
-            None => {
+            None | Some(ProxyOptions::Tcp) => {
                 tokio::io::copy_bidirectional(&mut stream, &mut backend)
                     .await
                     .ok();
@@ -1700,37 +1700,44 @@ impl ProxyContext {
     }
 }
 
-pub struct PlainHttpProxy {
+pub struct PlaintextProxy {
     cancel: CancellationToken,
     _thread: NonDetachingJoinHandle<()>,
 }
 
-impl fmt::Debug for PlainHttpProxy {
+impl fmt::Debug for PlaintextProxy {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("PlainHttpProxy")
+            .debug_struct("PlaintextProxy")
             .finish_non_exhaustive()
     }
 }
 
-impl PlainHttpProxy {
+impl PlaintextProxy {
     pub fn new(
         interfaces: &NetworkInterfaceController,
         port: u16,
         target: ProxyTarget,
         max_connections: usize,
     ) -> Self {
-        let (public_gateways, private_ips) =
-            VHostTarget::<VHostBindListener>::bind_requirements(&target);
-        let requirements = Watch::new(VHostBindRequirements {
-            public_gateways,
-            private_ips,
-        });
+        let requirements = Watch::new(Self::requirements(port, &target));
         Self::serve(
             VHostBindListener::new(interfaces, port, requirements),
             target,
             max_connections,
         )
+    }
+
+    fn requirements(port: u16, target: &ProxyTarget) -> VHostBindRequirements {
+        let (public_gateways, mut private_ips) =
+            VHostTarget::<VHostBindListener>::bind_requirements(target);
+        if target.addr.port() == port {
+            private_ips.remove(&target.addr.ip());
+        }
+        VHostBindRequirements {
+            public_gateways,
+            private_ips,
+        }
     }
 
     fn serve(mut listener: VHostBindListener, target: ProxyTarget, max_connections: usize) -> Self {
@@ -1742,7 +1749,7 @@ impl PlainHttpProxy {
                 let (metadata, stream) = match accepted {
                     Ok(accepted) => accepted,
                     Err(error) => {
-                        tracing::trace!(?error, "HTTP proxy failed to accept connection");
+                        tracing::trace!(?error, "Plaintext proxy failed to accept connection");
                         continue;
                     }
                 };
@@ -1782,7 +1789,7 @@ impl PlainHttpProxy {
     }
 }
 
-impl Drop for PlainHttpProxy {
+impl Drop for PlaintextProxy {
     fn drop(&mut self) {
         self.cancel.cancel();
     }

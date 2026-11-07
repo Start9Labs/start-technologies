@@ -7,10 +7,10 @@ This directory is a thin product wrapper inside the `start-technologies` monorep
 ## What it does
 
 - Serves a **package index** (services, versions, dependency ranges, assets) and an **OS index** (StartOS versions and downloadable images).
-- Hosts `.s9pk` and OS image **assets** with content-addressed (Blake3) commitments.
+- Records HTTP mirrors and optional BitTorrent sources for `.s9pk` and OS image assets, alongside their signed commitments.
 - Redirects visitors at `/` to `https://marketplace.start9.com/` with the registry selected.
 - Exposes a JSON-RPC API over HTTP, WebSocket, and a REST continuation channel.
-- Tracks **admins** and package **signers**, verifies signatures on uploaded content, and proposes administrator-selected signers for Marketplace trust when users connect.
+- Tracks **admins** and package **signers**, verifies signatures on indexed assets, and proposes administrator-selected signers for Marketplace trust when users connect.
 - Records anonymous **metrics** (downloads / users) for admin reporting.
 
 ## Package trust proposals
@@ -60,14 +60,14 @@ cargo build -p start-registry --bin registrybox
 
 Configuration is read from CLI flags and a config file (`-c <path>`; default search includes the standard StartOS config path). Key flags:
 
-| Flag                       | Purpose                                         |
-| -------------------------- | ----------------------------------------------- |
-| `-l, --listen <addr>`      | listen address (default `127.0.0.1:5959`)       |
-| `-H, --hostname <host>`    | public hostname(s) used in generated asset URLs |
-| `-p, --tor-proxy <url>`    | SOCKS proxy for outbound (e.g. Tor) requests    |
-| `-d, --datadir <path>`     | data directory (default `/var/lib/startos`)     |
-| `-c, --config <path>`      | config file                                     |
-| `--security-notifications` | enable the OS security feed (default: false)    |
+| Flag                       | Purpose                                        |
+| -------------------------- | ---------------------------------------------- |
+| `-l, --listen <addr>`      | listen address (default `127.0.0.1:5959`)      |
+| `-H, --hostname <host>`    | public hostname(s) used for request signatures |
+| `-p, --tor-proxy <url>`    | SOCKS proxy for outbound (e.g. Tor) requests   |
+| `-d, --datadir <path>`     | data directory (default `/var/lib/startos`)    |
+| `-c, --config <path>`      | config file                                    |
+| `--security-notifications` | enable the OS security feed (default: false)   |
 
 Security notifications are disabled by default. To opt in, set this in that registry's config file and restart the daemon:
 
@@ -78,7 +78,7 @@ security-notifications: true
 
 Disabled registries refuse `/os/security` upgrades with HTTP 403 and create no security mirror or subscription task. Clients retry with backoff. Leave alpha at the default to suppress its announcements. Release metadata and promotion retain the security flag; previously issued OS notifications are not deleted.
 
-Server state lives in `<datadir>/registry.db` (PatchDB) plus a SQLite metrics database and hosted asset files.
+Server state lives in `<datadir>/registry.db` (PatchDB), a SQLite metrics database, and the package icon store.
 
 > [!NOTE]
 > **Non-StartOS deployments only:** A separately managed reverse proxy must forward `/`, `/rpc/`,
@@ -86,6 +86,24 @@ Server state lives in `<datadir>/registry.db` (PatchDB) plus a SQLite metrics da
 > `X-Forwarded-Proto` to the public scheme (`http` or `https`) for the root redirect. The WebSocket routes also need HTTP/1.1 upgrade forwarding and a
 > long-lived idle timeout. StartOS-hosted registries expose these routes through their exported
 > `protocol: 'http'` interface automatically.
+
+## Publishing BitTorrent sources
+
+Publish an external magnet link or HTTP(S) `.torrent` metadata URL with `--torrent`, alongside the HTTP download URL:
+
+```sh
+start-cli --registry https://registry.example.com registry package add service.s9pk \
+  --url https://downloads.example.com/service.s9pk \
+  --torrent 'magnet:?xt=urn:btih:<v1-infohash>&xt=urn:btmh:1220<v2-infohash>&tr=<tracker-url>'
+```
+
+`registry os asset add` accepts the same `--torrent` option for OS images. The RPC `package.add` and `os.asset.add.*` requests accept an optional `torrent` string. Both publish HTTP mirrors through `urls`; the OS RPC also accepts deprecated scalar `url` input from older publishers. When both appear, canonical mirrors come first, followed by distinct legacy mirrors. Package and OS promotion preserve torrent metadata and the complete HTTP mirror list.
+
+Upgrade registries to 1.5.0 before using start-cli 2.8.0 OS-asset publication or promotion, which sends the canonical `urls` field.
+
+Create a single-file v1/v2 hybrid torrent with the exact bytes of the HTTP asset. Advertise both hashes in a hybrid magnet; StartOS and start-cli use its v1-compatible swarm. Existing v1 torrent sources remain compatible. Registry operators arrange seeding through an external BitTorrent client, with reachable seed peers and tracker or DHT discovery. The registry stores the source metadata; asset storage and seeding belong to those external hosts.
+
+StartOS and local `start-cli` downloads prefer BitTorrent and fall back to HTTP when it is unavailable or fails commitment verification. Existing signature requirements apply to either transport. Older clients ignore the optional metadata and continue using HTTP.
 
 ## Where things are
 

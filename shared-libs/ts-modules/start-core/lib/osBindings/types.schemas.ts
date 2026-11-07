@@ -1223,16 +1223,13 @@ export const RecoverySource = <Password extends z.ZodType>(
   ])
   return self
 }
-
-/**
- * A registry asset with a caller-selected commitment representation.
- */
 export const RegistryAsset = <Commitment extends z.ZodType>(
   Commitment: Commitment,
 ) => {
   const self = object({
     publishedAt: z.string(),
     urls: z.array(z.string()),
+    torrent: z.string().nullable().optional(),
     commitment: Commitment,
     signatures: z.record(z.string(), AnySignature),
   })
@@ -1350,10 +1347,26 @@ export const RestartReason: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['mdns', 'language', 'kiosk', 'update']).meta({
   id: 'RestartReason',
 })
-export const Security: z.ZodObject<{ ssl: z.ZodBoolean }> =
-  /* @__PURE__ */ object({ ssl: z.boolean() }).meta({
-    id: 'Security',
-  })
+
+/**
+ * A protocol safe to expose on enabled public addresses.
+ */
+export const Security: z.ZodObject<{
+  /**
+   * Whether TLS precedes application bytes.
+   */
+  ssl: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  /**
+   * Whether TLS precedes application bytes.
+   */
+  ssl: z.boolean().meta({
+    description: 'Whether TLS precedes application bytes.',
+  }),
+}).meta({
+  id: 'Security',
+  description: 'A protocol safe to expose on enabled public addresses.',
+})
 export const ServerBackupReport: z.ZodObject<{
   attempted: z.ZodBoolean
   error: z.ZodCodec<
@@ -1619,6 +1632,23 @@ export const TimeInfo: z.ZodObject<{ now: z.ZodString; uptime: z.ZodInt }> =
   /* @__PURE__ */ object({ now: z.string(), uptime: z.int() }).meta({
     id: 'TimeInfo',
   })
+
+/**
+ * Downloads start enabled; seeding and incoming connections start disabled.
+ */
+export const TorrentPreferences: z.ZodObject<{
+  downloads: z.ZodBoolean
+  seeding: z.ZodBoolean
+  incoming: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  downloads: z.boolean(),
+  seeding: z.boolean(),
+  incoming: z.boolean(),
+}).meta({
+  id: 'TorrentPreferences',
+  description:
+    'Downloads start enabled; seeding and incoming connections start disabled.',
+})
 export const TrustContext: z.ZodEnum<{ marketplace: 'marketplace'; os: 'os' }> =
   /* @__PURE__ */ z.enum(['marketplace', 'os']).meta({
     id: 'TrustContext',
@@ -2116,7 +2146,18 @@ export const AddAdminParams: z.ZodObject<{ signer: typeof Guid }> =
 export const AddAssetParams: z.ZodObject<{
   version: z.ZodString
   platform: z.ZodString
-  url: z.ZodString
+  /**
+   * @deprecated Use `urls`.
+   */
+  url: z.ZodOptional<z.ZodNullable<z.ZodString>>
+  urls: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
+  torrent: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
   signature: typeof AnySignature
   signatures: z.ZodCodec<
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
@@ -2126,7 +2167,14 @@ export const AddAssetParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   version: z.string(),
   platform: z.string(),
-  url: z.string(),
+  /**
+   * @deprecated Use `urls`.
+   */
+  url: z.string().nullable().optional().meta({
+    description: '@deprecated Use `urls`.',
+  }),
+  urls: wire(z.array(z.string()).optional(), z.array(z.string())),
+  torrent: wire(z.string().nullable().optional(), z.string().nullable()),
   signature: AnySignature,
   signatures: wire(
     z.record(z.string(), AnySignature).optional(),
@@ -2163,6 +2211,10 @@ export const AddMirrorParams: z.ZodObject<{
 })
 export const AddPackageParams: z.ZodObject<{
   urls: z.ZodArray<z.ZodString>
+  torrent: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
   signatures: z.ZodCodec<
@@ -2171,6 +2223,7 @@ export const AddPackageParams: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   urls: z.array(z.string()),
+  torrent: wire(z.string().nullable().optional(), z.string().nullable()),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
   signatures: wire(
@@ -5200,43 +5253,67 @@ export const Progress: z.ZodUnion<
   .meta({
     id: 'Progress',
   })
-export const ProxyOptions: z.ZodIntersection<
-  z.ZodObject<{ type: z.ZodLiteral<'http'> }>,
-  z.ZodObject<{
-    /**
-     * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
-     * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
-     */
-    addXForwardedHeaders: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-    /**
-     * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
-     */
-    auth: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
-      z.ZodNullable<typeof ProxyAuth>
-    >
-  }>
+export const ProxyOptions: z.ZodUnion<
+  readonly [
+    z.ZodObject<{
+      /**
+       * Relays raw TCP streams without parsing application messages.
+       */
+      type: z.ZodLiteral<'tcp'>
+    }>,
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'http'> }>,
+      z.ZodObject<{
+        /**
+         * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+         * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+         */
+        addXForwardedHeaders: z.ZodCodec<
+          z.ZodOptional<z.ZodBoolean>,
+          z.ZodBoolean
+        >
+        /**
+         * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+         */
+        auth: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
+          z.ZodNullable<typeof ProxyAuth>
+        >
+      }>
+    >,
+  ]
 > = /* @__PURE__ */ z
-  .intersection(
-    object({ type: z.literal('http') }),
+  .union([
     object({
       /**
-       * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
-       * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+       * Relays raw TCP streams without parsing application messages.
        */
-      addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()).meta({
+      type: z.literal('tcp').meta({
         description:
-          'Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.',
-      }),
-      /**
-       * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
-       */
-      auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()).meta({
-        description:
-          'Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.',
+          'Relays raw TCP streams without parsing application messages.',
       }),
     }),
-  )
+    z.intersection(
+      object({ type: z.literal('http') }),
+      object({
+        /**
+         * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+         * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+         */
+        addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()).meta({
+          description:
+            'Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.',
+        }),
+        /**
+         * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+         */
+        auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()).meta({
+          description:
+            'Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.',
+        }),
+      }),
+    ),
+  ])
   .meta({
     id: 'ProxyOptions',
   })
@@ -5752,6 +5829,21 @@ export const BindingSetGuaWanParams: z.ZodObject<{
   wan: z.boolean(),
 }).meta({
   id: 'BindingSetGuaWanParams',
+})
+
+/**
+ * Configured transport availability and the native incoming peer interface.
+ */
+export const BitTorrentConfig: z.ZodObject<{
+  available: z.ZodBoolean
+  interface: typeof ServiceInterface
+}> = /* @__PURE__ */ object({
+  available: z.boolean(),
+  interface: ServiceInterface,
+}).meta({
+  id: 'BitTorrentConfig',
+  description:
+    'Configured transport availability and the native incoming peer interface.',
 })
 export const CreateTaskParams: z.ZodIntersection<
   z.ZodObject<{ replayId: typeof ReplayId }>,
@@ -6340,7 +6432,7 @@ export const BindOptions: z.ZodCodec<
     addSsl: z.ZodNullable<typeof AddSslOptions>
     secure: z.ZodNullable<typeof Security>
     /**
-     * HTTP request policy shared by every exposed leg of this binding.
+     * Proxy protocol shared by every exposed leg of this binding.
      */
     proxy: z.ZodNullable<typeof ProxyOptions>
   }>
@@ -6351,11 +6443,11 @@ export const BindOptions: z.ZodCodec<
     addSsl: AddSslOptions.nullable(),
     secure: Security.nullable(),
     /**
-     * HTTP request policy shared by every exposed leg of this binding.
+     * Proxy protocol shared by every exposed leg of this binding.
      */
     proxy: ProxyOptions.nullable().meta({
       description:
-        'HTTP request policy shared by every exposed leg of this binding.',
+        'Proxy protocol shared by every exposed leg of this binding.',
     }),
   }),
 ).meta({
@@ -6671,6 +6763,10 @@ export const ServerInfo: z.ZodObject<{
   caFingerprint: z.ZodString
   ntpSynced: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   zram: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  bittorrent: z.ZodCodec<
+    z.ZodOptional<typeof TorrentPreferences>,
+    typeof TorrentPreferences
+  >
   governor: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof Governor>>,
     z.ZodNullable<typeof Governor>
@@ -6729,6 +6825,7 @@ export const ServerInfo: z.ZodObject<{
   caFingerprint: z.string(),
   ntpSynced: wire(z.boolean().optional(), z.boolean()),
   zram: wire(z.boolean().optional(), z.boolean()),
+  bittorrent: wire(TorrentPreferences.optional(), TorrentPreferences),
   governor: wire(Governor.nullable().optional(), Governor.nullable()),
   epp: wire(Epp.nullable().optional(), Epp.nullable()),
   smtp: wire(SmtpValue.nullable().optional(), SmtpValue.nullable()),

@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
@@ -14,12 +15,14 @@ use crate::PackageId;
 use crate::context::CliContext;
 use crate::prelude::*;
 use crate::progress::{FullProgressTracker, ProgressUnits};
-use crate::registry::context::RegistryContext;
+use crate::registry::asset::RegistryAsset;
+use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::package::index::{PackageIndex, PackageVersionInfo};
 use crate::s9pk::manifest::{HardwareRequirements, LocaleString};
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::v2::SIG_CONTEXT;
+use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::util::VersionString;
 use crate::util::io::{TrackingIO, to_tmp_path};
 use crate::util::serde::{WithIoFormat, display_serializable};
@@ -96,6 +99,82 @@ pub struct GetPackageResponse {
     pub best: BTreeMap<VersionString, PackageVersionInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub other_versions: Option<BTreeMap<VersionString, PackageInfoShort>>,
+}
+
+pub(crate) async fn remote_asset(
+    ctx: &impl rpc_toolkit::CallRemote<RegistryContext, RegistryUrlParams>,
+    registry: &reqwest::Url,
+    id: &PackageId,
+    version: &VersionString,
+) -> Result<Option<RegistryAsset<MerkleArchiveCommitment>>, Error> {
+    let package: GetPackageResponse =
+        from_value(remote_package(ctx, registry, download_query(id, version)).await?)?;
+    Ok(package.best.get(version).and_then(first_asset))
+}
+
+pub(crate) async fn advertised_asset(
+    ctx: &impl rpc_toolkit::CallRemote<RegistryContext, RegistryUrlParams>,
+    registry: &reqwest::Url,
+    id: &PackageId,
+    version: &VersionString,
+) -> Result<Option<RegistryAsset<MerkleArchiveCommitment>>, Error> {
+    let package: GetPackageResponseFull =
+        from_value(remote_package(ctx, registry, advertisement_query(id)).await?)?;
+    Ok(package
+        .best
+        .get(version)
+        .or_else(|| package.other_versions.get(version))
+        .and_then(first_asset))
+}
+
+fn first_asset(info: &PackageVersionInfo) -> Option<RegistryAsset<MerkleArchiveCommitment>> {
+    info.s9pks.first().map(|(_, asset)| asset.clone())
+}
+
+fn package_query(id: &PackageId) -> GetPackageParams {
+    GetPackageParams {
+        id: Some(id.clone()),
+        target_version: None,
+        source_version: None,
+        device_info: None,
+        other_versions: Some(PackageDetailLevel::None),
+        all_revisions: false,
+    }
+}
+
+fn download_query(id: &PackageId, version: &VersionString) -> GetPackageParams {
+    GetPackageParams {
+        target_version: Some(VersionRange::exactly(version.deref().clone())),
+        ..package_query(id)
+    }
+}
+
+// Targeted queries count as package requests in registry metrics.
+fn advertisement_query(id: &PackageId) -> GetPackageParams {
+    GetPackageParams {
+        other_versions: Some(PackageDetailLevel::Full),
+        all_revisions: true,
+        ..package_query(id)
+    }
+}
+
+async fn remote_package(
+    ctx: &impl rpc_toolkit::CallRemote<RegistryContext, RegistryUrlParams>,
+    registry: &reqwest::Url,
+    params: GetPackageParams,
+) -> Result<Value, Error> {
+    Ok(ctx
+        .call_remote(
+            "package.get",
+            [("get_device_info", Value::Bool(true))]
+                .into_iter()
+                .collect(),
+            to_value(&params)?,
+            RegistryUrlParams {
+                registry: registry.clone(),
+            },
+        )
+        .await?)
 }
 
 rpc_toolkit::reflect_ts!(GetPackageResponse);
@@ -656,7 +735,12 @@ pub async fn cli_download(
     let dest = dest.unwrap_or_else(|| Path::new(".").join(id).with_extension("s9pk"));
     let dest_tmp = to_tmp_path(&dest)?;
     let (mut parsed, source) = s9pk
-        .download_to(&dest_tmp, ctx.client.clone(), download_progress)
+        .download_to(
+            &dest_tmp,
+            ctx.client.clone(),
+            ctx.registry_torrents()?,
+            download_progress,
+        )
         .await?;
     if let Some(size) = source.size().await {
         verify_progress.set_total(size);
@@ -682,6 +766,75 @@ pub async fn cli_download(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct RegistryProbe {
+        requests: std::sync::Mutex<Vec<GetPackageParams>>,
+        response: Value,
+    }
+
+    impl rpc_toolkit::Context for RegistryProbe {}
+    impl rpc_toolkit::CallRemote<RegistryContext, RegistryUrlParams> for RegistryProbe {
+        async fn call_remote(
+            &self,
+            method: &str,
+            metadata: imbl::OrdMap<&'static str, Value>,
+            params: Value,
+            extra: RegistryUrlParams,
+        ) -> Result<Value, rpc_toolkit::yajrc::RpcError> {
+            assert_eq!(method, "package.get");
+            assert_eq!(metadata.get("get_device_info"), Some(&Value::Bool(true)));
+            assert_eq!(extra.registry.as_str(), "https://example.com/registry/");
+            self.requests
+                .lock()
+                .unwrap()
+                .push(from_value(params).unwrap());
+            Ok(self.response.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn advertised_assets_browse_historical_revisions_without_request_metrics()
+    -> Result<(), Error> {
+        let mut info = fixture_info();
+        let asset = RegistryAsset {
+            published_at: Utc::now(),
+            urls: vec!["https://example.com/package.s9pk".parse()?],
+            torrent: Some("https://example.com/package.torrent".parse()?),
+            commitment: MerkleArchiveCommitment {
+                root_sighash: crate::util::serde::Base64([7; 32]),
+                root_maxsize: 1024,
+            },
+            signatures: Default::default(),
+        };
+        info.s9pks.push((Default::default(), asset.clone()));
+        let version: VersionString = "1.0.0:0".parse()?;
+        let registry = "https://example.com/registry/".parse()?;
+        let id = "hello-world".parse()?;
+        let probe = RegistryProbe {
+            requests: Default::default(),
+            response: json!({"categories": [], "best": {}, "otherVersions": {"1.0.0:0": info}}),
+        };
+        let found = advertised_asset(&probe, &registry, &id, &version)
+            .await?
+            .unwrap();
+        assert_eq!(found.commitment, asset.commitment);
+        assert_eq!(found.torrent, asset.torrent);
+        assert!(
+            remote_asset(&probe, &registry, &id, &version)
+                .await?
+                .is_none()
+        );
+        let requests = probe.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].id.as_ref(), Some(&id));
+        assert!(requests[0].target_version.is_none());
+        assert_eq!(requests[0].other_versions, Some(PackageDetailLevel::Full));
+        assert!(requests[0].all_revisions);
+        assert!(requests[1].target_version.is_some());
+        assert_eq!(requests[1].other_versions, Some(PackageDetailLevel::None));
+        assert!(!requests[1].all_revisions);
+        Ok(())
+    }
 
     fn versions(entries: &[&str]) -> BTreeMap<VersionString, Model<PackageVersionInfo>> {
         entries.iter().map(|v| version(v, Vec::new())).collect()
@@ -869,15 +1022,15 @@ mod tests {
     }
 }
 
-#[test]
-fn check_matching_info_short() {
+#[cfg(test)]
+fn fixture_info() -> PackageVersionInfo {
     use crate::registry::package::index::PackageMetadata;
     use crate::s9pk::manifest::Description;
 
     let lang_map =
         |s: &str| LocaleString::LanguageMap([("en".into(), s.into())].into_iter().collect());
 
-    let info = PackageVersionInfo {
+    PackageVersionInfo {
         metadata: PackageMetadata {
             title: "Test Package".into(),
             description: Description {
@@ -907,8 +1060,12 @@ fn check_matching_info_short() {
         dependency_metadata: BTreeMap::new(),
         source_version: None,
         s9pks: Vec::new(),
-    };
-    from_value::<PackageInfoShort>(to_value(&info).unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn check_matching_info_short() {
+    from_value::<PackageInfoShort>(to_value(&fixture_info()).unwrap()).unwrap();
 }
 
 #[test]
