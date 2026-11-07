@@ -2,7 +2,7 @@
 release-notes: false
 ---
 
-- Encrypt keyed browser RPC and continuations after signature-authenticated Noise admission while preserving anonymous setup, HTTP/header compatibility and reconnect behavior.
+- Encrypt keyed browser and CLI RPC after signature-authenticated Noise admission, with same-peer admission for secure-origin continuations, while preserving anonymous setup, local-token access, HTTP/header compatibility and reconnect behavior.
 - Detect firmware changes through authenticated reply metadata and verify the requested version before reporting recovery from an interrupted update.
 - Bound replay-cache memory when clock synchronization is unavailable.
 - Preserve request IDs on middleware errors.

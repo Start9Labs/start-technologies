@@ -56,7 +56,7 @@ as plaintext. Package signatures remain the StartOS trust anchor.
 
 ## Native CLI transport
 
-Normal keyed StartOS, registry and Tunnel calls, including registry promotion, use
+Normal keyed StartOS, registry, Tunnel and WRT CLI calls, including registry promotion, use
 `session::client` with the same
 opaque signer, session negotiation and encrypted socket as native subscriptions.
 Serialization precedes certificate preparation; GPG-agent unlocking and signing
@@ -86,8 +86,11 @@ no additional connection task or reconnect loop is added.
 Native result consumers distinguish progress termination from the final application
 Close outcome. Empty close/EOF cannot establish success; an already verified Close
 result survives a failed subsequent acknowledgement. Normal update progress derives
-its outcome from the database's staged-update restart state. WRT CLI migration and
-permitted browser/registry-administrator TOFU warnings remain unfinished.
+its outcome from the database's staged-update restart state. WRT CLI shares the
+signing context's automatic credential selection and returns log/update GUIDs to
+separate consumers. Its selected HTTP target is `/rpc/v1`; the shared converter
+preserves its deployment prefix. Permitted browser/registry-administrator TOFU
+warnings remain unfinished.
 
 ## Browser transport
 

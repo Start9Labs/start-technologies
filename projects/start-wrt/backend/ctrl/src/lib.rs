@@ -122,7 +122,6 @@ fn id_key_path() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("/root/.startwrt/id.key.pem"))
 }
 
-/// CLI arguments parsed by clap
 #[derive(Clone, Parser)]
 #[command(name = "startwrt", version)]
 pub struct CliArgs {
@@ -140,6 +139,7 @@ pub struct CliContextSeed {
     pub configs_only: bool,
     pub host: Url,
     pub client: Client,
+    pub websocket_client: Client,
     pub id_key_path: PathBuf,
     id_key: OnceLock<Signer>,
     runtime: OnceLock<Arc<Runtime>>,
@@ -171,18 +171,27 @@ impl CliContext {
         let on_router = std::fs::read_to_string(crate::auth::LOCAL_AUTH_COOKIE_PATH).is_ok();
         let host = args.host.unwrap_or_else(|| default_host(on_router));
 
-        let client = Client::builder().build().map_err(|e| {
-            Error::new(
-                eyre!("Failed to build HTTP client: {}", e),
-                ErrorKind::Network,
-            )
-        })?;
+        let build_client = |builder: reqwest::ClientBuilder| {
+            builder.build().map_err(|error| {
+                Error::new(
+                    eyre!("Failed to build HTTP client: {error}"),
+                    ErrorKind::Network,
+                )
+            })
+        };
+        let client = build_client(Client::builder())?;
+        let websocket_client = build_client(
+            Client::builder()
+                .http1_only()
+                .redirect(reqwest::redirect::Policy::none()),
+        )?;
 
         Ok(Self(Arc::new(CliContextSeed {
             config_root: args.config_root,
             configs_only: args.configs_only,
             host,
             client,
+            websocket_client,
             id_key_path: id_key_path(),
             id_key: OnceLock::new(),
             runtime: OnceLock::new(),
@@ -216,11 +225,23 @@ impl CliContext {
                 headers.insert(AUTHORIZATION, auth);
             }
         }
-        startos::middleware::auth::signature::call_remote(
-            self,
+        if let Some(signer) = self.rpc_signer(&headers)? {
+            return startos::middleware::auth::session::client::call(
+                &self.websocket_client,
+                &signer,
+                startos::middleware::auth::session::client::websocket_url(self.host.clone())?,
+                self.host.host_str().unwrap_or_default(),
+                headers,
+                method,
+                params,
+            )
+            .await;
+        }
+        startos::middleware::auth::signature::call_remote_with_client(
+            None,
+            self.client.clone(),
             self.host.clone(),
             headers,
-            self.host.host_str(),
             method,
             params,
         )
@@ -294,7 +315,16 @@ impl AsRef<Client> for CliContext {
 
 impl SigningContext for CliContext {
     fn signing_key(&self) -> Result<Signer, startos::Error> {
-        Ok(self.id_key()?.clone())
+        self.id_key().cloned().map_err(|mut error| {
+            if error
+                .source
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+            {
+                error.kind = startos::ErrorKind::Uninitialized;
+            }
+            error
+        })
     }
 }
 
@@ -312,8 +342,7 @@ impl Context for CliContext {
         Some(
             self.runtime
                 .get_or_init(|| {
-                    // Multi-thread runtime with 1 worker so `block_in_place`
-                    // works when handlers call blocking uciedit operations.
+                    // Handlers use `block_in_place`.
                     Arc::new(
                         tokio::runtime::Builder::new_multi_thread()
                             .worker_threads(1)
@@ -407,6 +436,9 @@ impl CtrlContext for ServerContext {
         true
     }
 }
+
+#[cfg(test)]
+mod cli_tests;
 
 #[cfg(test)]
 mod server_identity_tests {

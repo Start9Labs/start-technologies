@@ -37,9 +37,8 @@ pub mod rpc;
 pub const AUTH_SIG_HEADER: &str = "X-Start-Auth-Sig";
 
 /// RPC-metadata fields understood by [`SignatureAuth`] when layered over an
-/// [`RpcContext`]. `login` marks the enrollment endpoint: the request must
-/// still be signed (proving possession of the key being enrolled), but the
-/// key need not be registered yet.
+/// [`RpcContext`]. `login` marks enrollment: Noise admission or a request
+/// signature proves possession of the key, independently of prior registration.
 #[derive(Deserialize)]
 pub struct LoginMetadata {
     #[serde(default)]
@@ -356,6 +355,18 @@ async fn signing_identities<C: SignatureAuthContext>(
 
 pub trait SigningContext {
     fn signing_key(&self) -> Result<Signer, Error>;
+
+    /// Local credentials take precedence; uninitialized identities permit anonymous calls.
+    fn rpc_signer(&self, headers: &http::HeaderMap) -> Result<Option<Signer>, Error> {
+        if headers.contains_key(http::header::AUTHORIZATION) {
+            return Ok(None);
+        }
+        match self.signing_key() {
+            Ok(signer) => Ok(Some(signer)),
+            Err(error) if error.kind == ErrorKind::Uninitialized => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
 }
 
 impl SigningContext for CliContext {
@@ -765,7 +776,7 @@ pub(crate) fn rpc_request_body(method: &str, params: Value) -> Result<String, Rp
 }
 
 /// Signs the request when given a signer and the server identity to bind it to.
-pub(crate) async fn call_remote_with_client(
+pub async fn call_remote_with_client(
     signer: Option<(Signer, &str)>,
     client: Client,
     url: Url,

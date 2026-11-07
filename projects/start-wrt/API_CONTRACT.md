@@ -57,6 +57,8 @@ A request is authorized through a verified Noise peer or a compatibility credent
 - **Request signature** — a root JSON `signature` proof from a key enrolled through `auth.login`. Compatibility clients use `@start9labs/start-core`'s `auth.signRpcRequest` and transmit the captured serialized body with that proof. It binds the complete parsed message except the root proof through the shared type-preserving signing-body codec, a timestamp, a nonce, and the server identity the client addressed (`router.lan`, `router.local`, any non-loopback address on the router's interfaces, or the enabled DDNS hostname; a loopback address only from a loopback peer). `SignatureAuth` also accepts the legacy `X-Start-Auth-Sig` HTTP header over raw body bytes; an explicit JSON proof takes precedence. The browser holds a non-extractable WebCrypto key in IndexedDB. Timestamps must fall within 30 seconds of the router's clock once ntpd reports valid time; a replayed nonce is rejected.
 - **Local auth token** — `Authorization: Bearer <token>`, where the token is the contents of `/run/startwrt/rpc.authcookie` (regenerated at daemon start, mode `0640`, `root:root`). `startwrt-cli` sends it only to loopback hosts.
 
+Keyed CLI calls use the shared Noise transport with `~/.startwrt/id.key.pem`; certificate preparation precedes transport deadlines. Local-token calls and calls without an initialized key retain HTTP. A malformed key or rejected encrypted admission does not fall back to plaintext. CLI log/update commands return GUID responses for separate continuation consumers.
+
 Endpoints registered with `authenticated: false` metadata answer without either. Enrolled keys persist in `/etc/startwrt/auth.db`, which sysupgrade keeps, and stay valid until revoked by `auth.logout`, `auth.session.kill`, or a password change, or until 24 hours after their `loggedIn` time, however recently they were used. The microSD wizard's Keep settings reflash does not carry them over. An expired key is rejected as unauthorized (code 34) on its next request. Before ntpd reports valid time the check judges age alone; afterwards a `loggedIn` more than 5 minutes in the future also counts as expired. The sweep that unenrolls expired keys runs hourly and waits for ntpd to report valid time.
 
 ### `auth.login`
@@ -2268,12 +2270,12 @@ struct InjectedDnsRecord {
 
 ## HTTP Routes
 
-Every RPC method above is a JSON-RPC 2.0 call to a single endpoint: **`POST /rpc/v1`**.
+Every RPC method above uses JSON-RPC 2.0 through **`/ws/rpc`** for keyed browser/CLI sessions, or **`POST /rpc/v1`** for anonymous and compatibility callers.
 The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 
 | Route                                              | Method                                  | Auth                                                                    | Purpose                                                                                       |
 | -------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `/ws/rpc`                                          | WebSocket GET / HTTP/2 extended CONNECT | Noise admission + live authorization (see § 1)                          | Encrypted JSON-RPC for keyed browser calls                                                    |
+| `/ws/rpc`                                          | WebSocket GET / HTTP/2 extended CONNECT | Noise admission + live authorization (see § 1)                          | Encrypted JSON-RPC for keyed browser and CLI calls                                            |
 | `/rpc/v1`                                          | POST                                    | Request signature or local token (see § 1)                              | JSON-RPC 2.0 compatibility/anonymous endpoint                                                 |
 | `/rest/rpc/{guid}`                                 | GET/POST                                | GUID capability (one-shot)                                              | RPC continuation: binary download (backup, diagnostics) / upload (restore); 64 MiB body limit |
 | `/ws/rpc/{guid}`                                   | WebSocket                               | GUID capability; secure origin requires fresh same-peer Noise admission | Streaming: update progress (`system.update`), live logs (`system.logs-follow`)                |

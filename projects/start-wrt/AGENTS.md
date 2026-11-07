@@ -50,8 +50,9 @@ have tested and stop.
 - **Serial console** — `/dev/wrt-console` on this machine: boot output, panics, and hangs, and
   a root shell once `bench.sh console login` answers its `login` prompt. It is the recovery
   path whenever SSH is gone.
-- **Web UI and RPC** — `bench.sh ui rpc <method>` signs each call with a key it enrolled through
-  the daemon's login, exactly as the web UI does, against the router's LAN address. `bench.sh ui tunnel`
+- **Web UI and RPC** — `bench.sh ui rpc <method>` exercises legacy signed HTTP with a key
+  enrolled through the daemon's login. It sends the request through SSH for local execution
+  against the router's LAN address. `bench.sh ui tunnel`
   puts the UI at `https://127.0.0.1:8443/` for a headless browser. Both work whatever Remote
   Access is set to.
 

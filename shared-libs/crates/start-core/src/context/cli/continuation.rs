@@ -9,6 +9,7 @@ use super::CliContext;
 use crate::context::{DiagnosticContext, InitContext, RpcContext, SetupContext};
 use crate::middleware::auth::local::local_auth_header_for_url;
 use crate::middleware::auth::session::{RpcSessionUpgrader, client};
+use crate::middleware::auth::signature::SigningContext;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::sign::noise::NoiseIdentity;

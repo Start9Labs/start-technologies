@@ -247,17 +247,6 @@ impl CliContext {
             .with_kind(ErrorKind::Network)
     }
 
-    fn rpc_signer(&self, headers: &HeaderMap) -> Result<Option<Signer>, Error> {
-        if headers.contains_key(AUTHORIZATION) {
-            return Ok(None);
-        }
-        match self.signing_key() {
-            Ok(signer) => Ok(Some(signer)),
-            Err(error) if error.kind == ErrorKind::Uninitialized => Ok(None),
-            Err(error) => Err(error),
-        }
-    }
-
     pub(crate) async fn call_rpc(
         &self,
         url: Url,

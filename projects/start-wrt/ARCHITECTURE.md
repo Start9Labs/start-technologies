@@ -9,7 +9,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 - **Router OS:** OpenWrt (SpacemiT K1 / BananaPi F3 target)
 - **Config storage:** UCI files (`/etc/config/`) — no separate database
 - **API:** JSON-RPC 2.0 over encrypted WebSocket sessions at `/ws/rpc`, with HTTP compatibility at `/rpc/v1`
-- **Auth:** Password login enrolls a browser-held Ed25519 key used for signature-authenticated Noise admission and live per-call authorization; the CLI on the router retains local-token/legacy-signature compatibility
+- **Auth:** Password login enrolls an Ed25519 key used for signature-authenticated Noise admission and live per-call authorization; keyed CLI calls use the same encrypted transport, while local-token and absent-key calls retain HTTP compatibility
 
 ## Project Structure
 

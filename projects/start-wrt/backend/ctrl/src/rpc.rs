@@ -58,4 +58,4 @@ pub fn router(ctx: ServerContext) -> Router {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

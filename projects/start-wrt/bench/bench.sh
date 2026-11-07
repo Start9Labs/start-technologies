@@ -520,7 +520,6 @@ echo "$out"
 EOF
 )
 
-# Signs as the web UI does: start-core's X-Start-Auth-Sig over the exact request body.
 UI_SIGN=$(
 	cat <<'EOF'
 const crypto = require('node:crypto')

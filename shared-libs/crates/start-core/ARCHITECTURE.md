@@ -55,8 +55,8 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 
 The control API uses JSON-RPC. RPC methods are organized in a hierarchical command structure using [rpc-toolkit](https://github.com/Start9Labs/start-technologies/tree/master/shared-libs/crates/rpc-toolkit). Handlers are registered in a tree of `ParentHandler` nodes, with four handler types: `from_fn_async` (standard), `from_fn_async_local` (non-Send), `from_fn` (sync), and `from_fn_blocking` (blocking). Metadata like `.with_about()` drives middleware and documentation.
 
-`CliContext::call_rpc` owns automatic native key/local-token transport selection. Normal
-keyed StartOS, registry and Tunnel calls use the shared encrypted client; startup CLI
+`SigningContext::rpc_signer` owns native key/local-token precedence and absent-key policy.
+`CliContext::call_rpc` and WRT's CLI reuse the shared encrypted client; startup CLI
 contexts and `state` select HTTP explicitly. `CliWebSocketContext` selects continuation
 admission from the originating context, without per-GUID/global-key security state.
 Configured network policy and the native message conversion are shared; result consumers
