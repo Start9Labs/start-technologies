@@ -63,7 +63,7 @@ export interface FormContext<T> {
               tuiButton
               [appearance]="$last ? 'primary' : 'flat-grayscale'"
               [type]="$last ? 'submit' : 'button'"
-              (click)="onClick(button.handler)"
+              (click.prevent)="onClick(button.handler)"
             >
               {{ button.text }}
             </button>
