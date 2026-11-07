@@ -55,6 +55,13 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 
 The control API uses JSON-RPC. RPC methods are organized in a hierarchical command structure using [rpc-toolkit](https://github.com/Start9Labs/start-technologies/tree/master/shared-libs/crates/rpc-toolkit). Handlers are registered in a tree of `ParentHandler` nodes, with four handler types: `from_fn_async` (standard), `from_fn_async_local` (non-Send), `from_fn` (sync), and `from_fn_blocking` (blocking). Metadata like `.with_about()` drives middleware and documentation.
 
+`CliContext::call_rpc` owns automatic native key/local-token transport selection. Normal
+keyed StartOS, registry and Tunnel calls use the shared encrypted client; startup CLI
+contexts and `state` select HTTP explicitly. `CliWebSocketContext` selects continuation
+admission from the originating context, without per-GUID/global-key security state.
+Configured network policy and the native message conversion are shared; result consumers
+require application completion rather than physical stream loss.
+
 GUID WebSocket continuations carry explicit `WebSocketPolicy` and optional `SecureSession` provenance from their issuing request. Anonymously available streams use bounded input and write deadlines; authenticated container, terminal and runtime streams retain bulk input. Secure-origin GUIDs require a fresh Noise exchange with the same initiating key and server-name context before callback execution; legacy-origin GUIDs remain plaintext-compatible. `WebSocketFuture` owns revocation across admission and callback. Resource policy, revocation and encryption provenance are independent.
 
 `middleware/auth/session.rs` owns the optional `noise=1&context=<server-name>` upgrade and native query serialization, reusing `request_identities` for ingress/loopback validation. Registry registers the upgrader on `/ws/rpc`; the native registry client uses the shared Tungstenite transport bridge and the existing SOCKS-aware client under its connection deadline. Successful exchange installs immutable peer/name/server-key provenance on a context clone, not its shared seed. `SignatureAuth` derives the signer from that scope and still checks live enrollment, permissions and post-auth hooks for every RPC; caller proofs cannot replace an encrypted connection's identity. Product routes register the upgrader explicitly. Setup/init/diagnostic contexts have no session scope, and HTTP resources retain their independent policy.

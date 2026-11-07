@@ -17,7 +17,6 @@ use rpc_toolkit::HandlerArgs;
 use rpc_toolkit::yajrc::RpcError;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tracing::instrument;
 
 use crate::context::{CliContext, RpcContext};
@@ -522,30 +521,18 @@ pub async fn cli_install(
             };
 
             let progress = async {
-                use tokio_tungstenite::tungstenite::Message;
+                let mut bar = PhasedProgressBar::new(&t!("install.sideloading"));
 
-                let mut bar = PhasedProgressBar::new("Sideloading");
-
-                let mut ws = ctx.ws_continuation(progress).await?;
+                let mut ws = ctx.ws_continuation::<RpcContext>(progress).await?;
 
                 let mut progress = FullProgress::new();
 
                 loop {
                     tokio::select! {
-                        msg = ws.next() => {
-                            if let Some(msg) = msg {
-                                match msg.with_kind(ErrorKind::Network)? {
-                                    Message::Text(t) => {
-                                        progress =
-                                            serde_json::from_str::<FullProgress>(&t)
-                                                .with_kind(ErrorKind::Deserialization)?;
-                                        bar.update(&progress);
-                                    }
-                                    Message::Close(Some(c)) if c.code != CloseCode::Normal => {
-                                        return Err(Error::new(eyre!("{}", c.reason), ErrorKind::Network))
-                                    }
-                                    _ => (),
-                                }
+                        msg = crate::util::net::tungstenite::next_text(&mut ws) => {
+                            if let Some(text) = msg? {
+                                progress = serde_json::from_str::<FullProgress>(&text).with_kind(ErrorKind::Deserialization)?;
+                                bar.update(&progress);
                             } else {
                                 break;
                             }

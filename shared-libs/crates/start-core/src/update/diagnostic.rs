@@ -5,7 +5,7 @@ use std::time::Duration;
 use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
 use exver::{Version, VersionRange};
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use http::HeaderMap;
 use imbl_value::json;
 use itertools::Itertools;
@@ -290,24 +290,22 @@ pub async fn cli_update_system(
         None => println!("{}", t!("update.no-updates-available")),
         Some(v) => {
             if let Some(progress) = res.progress {
-                let mut ws = context.ws_continuation(progress).await?;
+                let mut ws = context
+                    .ws_continuation::<DiagnosticContext>(progress)
+                    .await?;
                 let mut bar = PhasedProgressBar::new(&t!(
                     "update.updating-to-version",
                     version = v.to_string()
                 ));
                 let mut prev = None;
-                while let Some(msg) = ws.try_next().await.with_kind(ErrorKind::Network)? {
-                    if let tokio_tungstenite::tungstenite::Message::Text(msg) = msg {
-                        if let Some(snap) = serde_json::from_str::<Option<FullProgress>>(&msg)
-                            .with_kind(ErrorKind::Deserialization)?
-                        {
-                            bar.update(&snap);
-                            prev = Some(snap);
-                        } else {
-                            break;
-                        }
-                    }
+                while let Some(snap) =
+                    crate::util::net::tungstenite::next_json::<Option<FullProgress>, _>(&mut ws)
+                        .await?
+                {
+                    bar.update(&snap);
+                    prev = Some(snap);
                 }
+                crate::util::net::tungstenite::receive_close_result(&mut ws).await?;
                 if let Some(mut prev) = prev {
                     for phase in &mut prev.phases {
                         phase.progress.set_complete();

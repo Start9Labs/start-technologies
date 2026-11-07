@@ -13,9 +13,7 @@ use reqwest::Proxy;
 use rpc_toolkit::reqwest::{Client, Url};
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{CallRemote, Context, Empty};
-use tokio::net::TcpStream;
 use tokio::runtime::Runtime;
-use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use tracing::instrument;
 
 use super::setup::CURRENT_SECRET;
@@ -35,6 +33,9 @@ use crate::s9pk::init::{
 };
 use crate::sign::gpg_agent::GpgAgentKey;
 use crate::sign::{AnySigningKey, Signer};
+
+mod continuation;
+pub use continuation::CliWebSocketContext;
 
 /// A configured target whose `.local` host is resolved on first use, so an
 /// unreachable one never fails a command that doesn't contact it.
@@ -66,10 +67,7 @@ impl From<Url> for LazyUrl {
 pub struct CliContextSeed {
     pub runtime: OnceCell<Arc<Runtime>>,
     pub base_url: LazyUrl,
-    /// The host the user named the server by, captured before `pin_mdns_host`
-    /// rewrites a `.local` host to an address. Request signatures are bound to
-    /// this identity — one of the server's sig contexts — not to the pinned
-    /// transport address, which the server does not necessarily recognize.
+    /// Selected server name before `.local` resolution changes the dial address.
     pub host_identity: Option<InternedString>,
     pub registry_url: Option<LazyUrl>,
     pub registry_profiles: Option<Profiles>,
@@ -84,8 +82,6 @@ pub struct CliContextSeed {
     pub id_key_path: PathBuf,
     pub id_key_gpg: Option<String>,
     pub id_key: OnceCell<Signer>,
-    pub root_ca: Vec<PathBuf>,
-    pub insecure: bool,
 }
 impl Drop for CliContextSeed {
     fn drop(&mut self) {
@@ -148,6 +144,7 @@ impl CliContext {
         let client = client_builder().build().with_kind(ErrorKind::Network)?;
         let websocket_client = client_builder()
             .http1_only()
+            .danger_accept_invalid_hostnames(config.insecure)
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .with_kind(ErrorKind::Network)?;
@@ -171,29 +168,7 @@ impl CliContext {
             id_key_path: config.id_key_path.unwrap_or_else(default_id_key_path),
             id_key_gpg: config.id_key_gpg,
             id_key: OnceCell::new(),
-            root_ca: config.root_ca.unwrap_or_default(),
-            insecure: config.insecure,
         })))
-    }
-
-    fn ws_tls_connector(&self) -> Result<Option<Connector>, Error> {
-        if self.root_ca.is_empty() && !self.insecure {
-            return Ok(None);
-        }
-        let mut builder = native_tls::TlsConnector::builder();
-        if self.insecure {
-            builder.danger_accept_invalid_certs(true);
-            builder.danger_accept_invalid_hostnames(true);
-        }
-        for ca_path in &self.root_ca {
-            let pem = std::fs::read(ca_path)
-                .with_ctx(|_| (crate::ErrorKind::Filesystem, ca_path.display()))?;
-            let cert =
-                native_tls::Certificate::from_pem(&pem).with_kind(crate::ErrorKind::OpenSsl)?;
-            builder.add_root_certificate(cert);
-        }
-        let connector = builder.build().with_kind(crate::ErrorKind::OpenSsl)?;
-        Ok(Some(Connector::NativeTls(connector)))
     }
 
     /// BLOCKING
@@ -249,25 +224,6 @@ impl CliContext {
         crate::util::net::rpc_url(self.base_url.get()?, 1)
     }
 
-    pub async fn ws_continuation(
-        &self,
-        guid: Guid,
-    ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Error> {
-        let mut url = crate::middleware::auth::session::RpcSessionUpgrader::url(
-            self.base_url.get()?.clone(),
-        )?;
-        url.path_segments_mut()
-            .map_err(|_| eyre!("Url cannot be base"))
-            .with_kind(crate::ErrorKind::ParseUrl)?
-            .push(guid.as_ref());
-        let connector = self.ws_tls_connector()?;
-        let (stream, _) =
-            tokio_tungstenite::connect_async_tls_with_config(url, None, false, connector)
-                .await
-                .with_kind(ErrorKind::Network)?;
-        Ok(stream)
-    }
-
     pub async fn rest_continuation(
         &self,
         guid: Guid,
@@ -291,6 +247,17 @@ impl CliContext {
             .with_kind(ErrorKind::Network)
     }
 
+    fn rpc_signer(&self, headers: &HeaderMap) -> Result<Option<Signer>, Error> {
+        if headers.contains_key(AUTHORIZATION) {
+            return Ok(None);
+        }
+        match self.signing_key() {
+            Ok(signer) => Ok(Some(signer)),
+            Err(error) if error.kind == ErrorKind::Uninitialized => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
     pub(crate) async fn call_rpc(
         &self,
         url: Url,
@@ -299,29 +266,39 @@ impl CliContext {
         method: &str,
         params: Value,
     ) -> Result<Value, RpcError> {
-        if !headers.contains_key(AUTHORIZATION) {
-            match self.signing_key() {
-                Ok(signer) => {
-                    return crate::middleware::auth::session::client::call(
-                        &self.websocket_client,
-                        &signer,
-                        crate::middleware::auth::session::client::websocket_url(url)?,
-                        address,
-                        headers,
-                        method,
-                        params,
-                    )
-                    .await;
-                }
-                Err(error) if error.kind == ErrorKind::Uninitialized => (),
-                Err(error) => return Err(error.into()),
-            }
+        if let Some(signer) = self.rpc_signer(&headers)? {
+            return crate::middleware::auth::session::client::call(
+                &self.websocket_client,
+                &signer,
+                crate::middleware::auth::session::client::websocket_url(url)?,
+                address,
+                headers,
+                method,
+                params,
+            )
+            .await;
         }
         crate::middleware::auth::signature::call_remote_with_client(
             None,
             self.client.clone(),
             url,
             headers,
+            method,
+            params,
+        )
+        .await
+    }
+
+    pub(crate) async fn call_startup_rpc(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, RpcError> {
+        crate::middleware::auth::signature::call_remote_with_client(
+            None,
+            self.client.clone(),
+            self.rpc_url()?,
+            HeaderMap::new(),
             method,
             params,
         )
@@ -415,11 +392,10 @@ impl CallRemote<RpcContext> for CliContext {
             headers.insert(AUTHORIZATION, auth);
         }
         let call = || {
-            crate::middleware::auth::signature::call_remote(
-                self,
+            self.call_rpc(
                 rpc_url.clone(),
                 headers.clone(),
-                self.host_identity.as_deref(),
+                self.host_identity.as_deref().unwrap_or_default(),
                 method,
                 params.clone(),
             )
@@ -461,11 +437,11 @@ impl CallRemote<DiagnosticContext> for CliContext {
         if let Some(auth) = local_auth_header_for_url::<DiagnosticContext>(&rpc_url).await {
             headers.insert(AUTHORIZATION, auth);
         }
-        crate::middleware::auth::signature::call_remote(
-            self,
+        crate::middleware::auth::signature::call_remote_with_client(
+            None,
+            self.client.clone(),
             rpc_url,
             headers,
-            self.host_identity.as_deref(),
             method,
             params,
         )
@@ -480,15 +456,7 @@ impl CallRemote<InitContext> for CliContext {
         params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
-        crate::middleware::auth::signature::call_remote(
-            self,
-            self.rpc_url()?,
-            HeaderMap::new(),
-            self.host_identity.as_deref(),
-            method,
-            params,
-        )
-        .await
+        self.call_startup_rpc(method, params).await
     }
 }
 impl CallRemote<SetupContext> for CliContext {
@@ -499,14 +467,6 @@ impl CallRemote<SetupContext> for CliContext {
         params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
-        crate::middleware::auth::signature::call_remote(
-            self,
-            self.rpc_url()?,
-            HeaderMap::new(),
-            self.host_identity.as_deref(),
-            method,
-            params,
-        )
-        .await
+        self.call_startup_rpc(method, params).await
     }
 }

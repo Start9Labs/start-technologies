@@ -5,7 +5,6 @@ use std::time::Duration;
 use clap::{ArgAction, Parser};
 use color_eyre::eyre::{Result, eyre};
 use exver::{Version, VersionRange};
-use futures::TryStreamExt;
 use imbl::OrdMap;
 use imbl_value::json;
 use itertools::Itertools;
@@ -30,7 +29,7 @@ use crate::db::model::public::RestartReason;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::progress::{
-    FullProgressTracker, PhaseProgressTrackerHandle, PhasedProgressBar, ProgressUnits,
+    FullProgress, FullProgressTracker, PhaseProgressTrackerHandle, PhasedProgressBar, ProgressUnits,
 };
 use crate::registry::asset::RegistryAsset;
 use crate::registry::context::{RegistryContext, RegistryUrlParams};
@@ -141,15 +140,9 @@ pub async fn update_system(
                                 )
                                 .await;
                             loop {
-                                let progress = ctx
-                                    .db
-                                    .peek()
-                                    .await
-                                    .into_public()
-                                    .into_server_info()
-                                    .into_status_info()
-                                    .into_update_progress()
-                                    .de()?;
+                                let status = ctx.db.peek().await.into_public().into_server_info().into_status_info();
+                                let progress = status.as_update_progress().de()?;
+                                let restart = status.as_restart().de()?;
                                 ws.send(axum::extract::ws::Message::Text(
                                     serde_json::to_string(&progress)
                                         .with_kind(ErrorKind::Serialization)?
@@ -158,7 +151,7 @@ pub async fn update_system(
                                 .await
                                 .with_kind(ErrorKind::Network)?;
                                 if progress.is_none() {
-                                    return ws.normal_close("complete").await;
+                                    return ws.close_result(progress_outcome(restart)).await;
                                 }
                                 tokio::select! {
                                     _ = sub.recv() => (),
@@ -212,24 +205,20 @@ pub async fn cli_update_system(
         None => println!("{}", t!("update.no-updates-available")),
         Some(v) => {
             if let Some(progress) = res.progress {
-                let mut ws = context.ws_continuation(progress).await?;
+                let mut ws = context.ws_continuation::<RpcContext>(progress).await?;
                 let mut progress = PhasedProgressBar::new(&t!(
                     "update.updating-to-version",
                     version = v.to_string()
                 ));
                 let mut prev = None;
-                while let Some(msg) = ws.try_next().await.with_kind(ErrorKind::Network)? {
-                    if let tokio_tungstenite::tungstenite::Message::Text(msg) = msg {
-                        if let Some(snap) =
-                            serde_json::from_str(&msg).with_kind(ErrorKind::Deserialization)?
-                        {
-                            progress.update(&snap);
-                            prev = Some(snap);
-                        } else {
-                            break;
-                        }
-                    }
+                while let Some(snap) =
+                    crate::util::net::tungstenite::next_json::<Option<FullProgress>, _>(&mut ws)
+                        .await?
+                {
+                    progress.update(&snap);
+                    prev = Some(snap);
                 }
+                crate::util::net::tungstenite::receive_close_result(&mut ws).await?;
                 if let Some(mut prev) = prev {
                     for phase in &mut prev.phases {
                         phase.progress.set_complete();
@@ -248,6 +237,17 @@ pub async fn cli_update_system(
     }
     Ok(())
 }
+
+fn progress_outcome(restart: Option<RestartReason>) -> Result<&'static str, String> {
+    if restart == Some(RestartReason::Update) {
+        Ok("complete")
+    } else {
+        Err(t!("update.failed-title").to_string())
+    }
+}
+
+#[cfg(test)]
+mod continuation_tests;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]

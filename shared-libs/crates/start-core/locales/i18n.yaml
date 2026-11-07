@@ -1502,7 +1502,13 @@ disk.mount.binding:
   fr_FR: "Liaison de %{src} à %{dst}"
   pl_PL: "Wiązanie %{src} do %{dst}"
 
-# install/mod.rs
+install.sideloading:
+  en_US: "Sideloading"
+  de_DE: "Lokales Paket wird geladen"
+  es_ES: "Cargando paquete local"
+  fr_FR: "Chargement du paquet local"
+  pl_PL: "Wczytywanie pakietu lokalnego"
+
 install.version-not-found-on-registry:
   en_US: "No version of %{id} that satisfies %{version} is available from %{registry}"
   de_DE: "Keine Version von %{id}, die %{version} erfüllt, ist bei %{registry} verfügbar"

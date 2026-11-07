@@ -56,7 +56,7 @@ as plaintext. Package signatures remain the StartOS trust anchor.
 
 ## Native CLI transport
 
-Keyed registry and Tunnel administration, including registry promotion, use
+Normal keyed StartOS, registry and Tunnel calls, including registry promotion, use
 `session::client` with the same
 opaque signer, session negotiation and encrypted socket as native subscriptions.
 Serialization precedes certificate preparation; GPG-agent unlocking and signing
@@ -66,14 +66,28 @@ retain HTTP. Malformed keys and failed GPG-agent resolution or signing fail
 closed.
 
 `CliContext` parses proxy and TLS policy once for its ordinary HTTP client and a
-separate HTTP/1-only, nonredirecting upgrade client. `reqwest-websocket` 0.5.0
+separate HTTP/1-only, nonredirecting upgrade client. The upgrade client retains
+legacy WebSocket `--insecure` hostname handling; ordinary HTTP settings are unchanged.
+`reqwest-websocket` 0.5.0
 retains Reqwest's routing and trust policy while sharing the existing
 Tungstenite 0.26 message conversion. Logical responses use the shared 64 MiB
 limit; framing overhead stays separate. Versioned RPC URL conversion preserves
 deployment prefixes and queries. `RpcSessionUpgrader::url` owns the common
 WebSocket endpoint derivation; versioned HTTP paths use `util::net::rpc_url`.
-Other CLI contexts and legacy continuations
-retain their existing transport until explicitly migrated.
+CLI `state`, setup, initialization and diagnostics explicitly retain unsigned HTTP
+and legacy GUIDs independently of stored keys. Diagnostic local-token authorization
+remains separate. `CliWebSocketContext` selects fresh same-peer Noise admission for
+normal keyed GUIDs and legacy admission for startup contexts. Original selected
+names survive `.local` dial-address pinning. Both use the configured upgrade client;
+existing native consumers retain streaming, cancellation and output ownership.
+The existing generic `WebSocket` owns continuation keepalives and 15-second writes;
+no additional connection task or reconnect loop is added.
+
+Native result consumers distinguish progress termination from the final application
+Close outcome. Empty close/EOF cannot establish success; an already verified Close
+result survives a failed subsequent acknowledgement. Normal update progress derives
+its outcome from the database's staged-update restart state. WRT CLI migration and
+permitted browser/registry-administrator TOFU warnings remain unfinished.
 
 ## Browser transport
 

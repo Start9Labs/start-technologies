@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use axum::extract::ws;
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use itertools::Itertools;
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
@@ -597,12 +597,10 @@ pub async fn cli_init_progress(
         )
         .await?,
     )?;
-    let mut ws = ctx.ws_continuation(res.guid).await?;
+    let mut ws = ctx.ws_continuation::<InitContext>(res.guid).await?;
     let mut bar = PhasedProgressBar::new(&t!("init.initializing"));
-    while let Some(msg) = ws.try_next().await.with_kind(ErrorKind::Network)? {
-        if let tokio_tungstenite::tungstenite::Message::Text(msg) = msg {
-            bar.update(&serde_json::from_str(&msg).with_kind(ErrorKind::Deserialization)?);
-        }
+    while let Some(msg) = crate::util::net::tungstenite::next_text(&mut ws).await? {
+        bar.update(&serde_json::from_str(&msg).with_kind(ErrorKind::Deserialization)?);
     }
     Ok(())
 }

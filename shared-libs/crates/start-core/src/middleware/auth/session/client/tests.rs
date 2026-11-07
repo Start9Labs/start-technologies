@@ -111,7 +111,10 @@ async fn legacy_cli_continuations_and_resources_keep_prefixed_urls_and_bytes() {
     })
     .unwrap();
     let guid = crate::rpc_continuations::Guid::new();
-    let mut socket = ctx.ws_continuation(guid.clone()).await.unwrap();
+    let mut socket = ctx
+        .ws_continuation::<crate::context::InitContext>(guid.clone())
+        .await
+        .unwrap();
     assert_eq!(
         socket.next().await.unwrap().unwrap().into_text().unwrap(),
         "legacy"
@@ -163,6 +166,143 @@ async fn configured_client_receives_a_bulk_private_index() {
     .unwrap();
     assert_eq!(result["name"].as_str().unwrap().len(), 17 * 1024 * 1024);
     assert!(result["package"]["packages"].get("secret").is_some());
+}
+
+#[tokio::test]
+async fn normal_cli_rpc_and_guid_stay_encrypted_after_public_startup_reply() {
+    use crate::context::{InitContext, RpcContext};
+    let (_temp, registry, admin, _, _) = crate::registry::tests::fixture().await;
+    let http_calls = Arc::new(AtomicUsize::new(0));
+    let observed = http_calls.clone();
+    let app = crate::registry::registry_router(registry.clone()).route(
+        "/rpc/v1",
+        post(move |axum::Json(body): axum::Json<serde_json::Value>| {
+            let observed = observed.clone();
+            async move {
+                observed.fetch_add(1, Ordering::Relaxed);
+                assert_eq!(body["method"], "state");
+                axum::Json(serde_json::json!({"jsonrpc":"2.0","id":0,"result":"initializing"}))
+            }
+        }),
+    );
+    let (url, _server) = server(app).await;
+    let ctx = CliContext::init(ClientConfig {
+        host: Some(url.as_str().parse().unwrap()),
+        ..Default::default()
+    })
+    .unwrap();
+    ctx.id_key.set(admin).unwrap();
+    let state = ctx
+        .call_remote::<InitContext>("state", imbl_value::json!({}))
+        .await
+        .unwrap();
+    assert_eq!(state.as_str(), Some("initializing"));
+    let dump = ctx
+        .call_remote::<RpcContext>("db.dump", imbl_value::json!({}))
+        .await
+        .unwrap();
+    assert!(
+        dump["value"]["index"]["package"]["packages"]
+            .get("secret")
+            .is_some()
+    );
+    let subscription = ctx
+        .call_remote::<RpcContext>("db.subscribe", imbl_value::json!({"pointer":"/index"}))
+        .await
+        .unwrap();
+    let guid = imbl_value::from_value(subscription["guid"].clone()).unwrap();
+    let mut socket = ctx.ws_continuation::<RpcContext>(guid).await.unwrap();
+    let mut database: crate::registry::RegistryDatabase = registry.db.peek().await.de().unwrap();
+    database.index.name = Some("after-admission".into());
+    registry
+        .db
+        .put(&patch_db::json_ptr::ROOT, &database)
+        .await
+        .unwrap();
+    let message = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        crate::util::net::tungstenite::next_text(&mut socket),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
+    assert!(message.contains("after-admission"));
+    assert_eq!(http_calls.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn all_startup_contexts_ignore_an_unavailable_stored_signer() {
+    use crate::context::{DiagnosticContext, InitContext, SetupContext};
+    let app = Router::new()
+        .route(
+            "/rpc/v1",
+            post(|headers: HeaderMap| async move {
+                assert!(
+                    headers
+                        .get(crate::middleware::auth::signature::AUTH_SIG_HEADER)
+                        .is_none()
+                );
+                axum::Json(serde_json::json!({"jsonrpc":"2.0","id":0,"result":"initializing"}))
+            }),
+        )
+        .route(
+            "/ws/rpc/{guid}",
+            axum::routing::get(|upgrade: axum::extract::ws::WebSocketUpgrade| async move {
+                upgrade.on_upgrade(|mut socket| async move {
+                    socket
+                        .send(axum::extract::ws::Message::Text("legacy".into()))
+                        .await
+                        .unwrap();
+                })
+            }),
+        );
+    let (url, _server) = server(app).await;
+    let ctx = CliContext::init(ClientConfig {
+        host: Some(url.as_str().parse().unwrap()),
+        id_key_gpg: Some("unavailable-startup-fixture".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    for value in [
+        ctx.call_remote::<InitContext>("state", imbl_value::json!({}))
+            .await,
+        ctx.call_remote::<DiagnosticContext>("state", imbl_value::json!({}))
+            .await,
+        ctx.call_remote::<SetupContext>("state", imbl_value::json!({}))
+            .await,
+    ] {
+        assert_eq!(value.unwrap().as_str(), Some("initializing"));
+    }
+    use futures::StreamExt;
+    let guid = crate::rpc_continuations::Guid::new();
+    let mut init = ctx
+        .ws_continuation::<InitContext>(guid.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        init.next().await.unwrap().unwrap().into_text().unwrap(),
+        "legacy"
+    );
+    let mut diagnostic = ctx
+        .ws_continuation::<DiagnosticContext>(guid.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        diagnostic
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .into_text()
+            .unwrap(),
+        "legacy"
+    );
+    let mut setup = ctx.ws_continuation::<SetupContext>(guid).await.unwrap();
+    assert_eq!(
+        setup.next().await.unwrap().unwrap().into_text().unwrap(),
+        "legacy"
+    );
 }
 
 #[tokio::test]
@@ -326,6 +466,17 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
                 }
             }),
         )
+        .route(
+            "/legacy/ws/rpc/{guid}",
+            axum::routing::get(|upgrade: axum::extract::ws::WebSocketUpgrade| async move {
+                upgrade.on_upgrade(|mut socket| async move {
+                    socket
+                        .send(axum::extract::ws::Message::Text("legacy".into()))
+                        .await
+                        .unwrap();
+                })
+            }),
+        )
         .layer(axum::middleware::from_fn(
             move |request: axum::extract::Request, next: axum::middleware::Next| {
                 let refusing = refusing.clone();
@@ -444,6 +595,22 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
     .await
     .unwrap();
     assert_eq!(result["private"].as_bool(), Some(true));
+    let legacy_url = format!("https://localhost:{}/legacy/", url.port().unwrap());
+    let legacy = CliContext::init(ClientConfig {
+        host: Some(legacy_url.parse().unwrap()),
+        insecure: true,
+        ..Default::default()
+    })
+    .unwrap();
+    let mut socket = legacy
+        .ws_continuation::<crate::context::InitContext>(crate::rpc_continuations::Guid::new())
+        .await
+        .unwrap();
+    use futures::StreamExt;
+    assert_eq!(
+        socket.next().await.unwrap().unwrap().into_text().unwrap(),
+        "legacy"
+    );
 }
 
 #[tokio::test]
@@ -550,6 +717,20 @@ async fn actual_gpg_cli_authenticates_without_exporting_the_identity() {
             }
         }),
     );
+    let app = app.route(
+        "/rpc/v1",
+        post(
+            |headers: HeaderMap, axum::Json(body): axum::Json<serde_json::Value>| async move {
+                assert!(
+                    headers
+                        .get(crate::middleware::auth::signature::AUTH_SIG_HEADER)
+                        .is_none()
+                );
+                assert_eq!(body["method"], "state");
+                axum::Json(serde_json::json!({"jsonrpc":"2.0","id":0,"result":"initializing"}))
+            },
+        ),
+    );
     let (url, _task) = server(app).await;
     let output = Command::new(&cli_bin)
         .current_dir(temp.path())
@@ -577,6 +758,56 @@ async fn actual_gpg_cli_authenticates_without_exporting_the_identity() {
     let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(result.as_object().unwrap().len(), 1);
     assert!(result.to_string().contains("Uploader"));
+    let os = Command::new(&cli_bin)
+        .current_dir(temp.path())
+        .env("HOME", temp.path())
+        .env("GNUPGHOME", &home)
+        .args([
+            "--id-key-gpg",
+            uid,
+            "--host",
+            url.as_str(),
+            "db",
+            "dump",
+            "--include-private",
+            "--format",
+            "json",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        os.status.success(),
+        "{}",
+        String::from_utf8_lossy(&os.stderr)
+    );
+    let dump: serde_json::Value = serde_json::from_slice(&os.stdout).unwrap();
+    assert!(dump["value"]["index"].to_string().contains("Uploader"));
+    let state = Command::new(&cli_bin)
+        .current_dir(temp.path())
+        .env("HOME", temp.path())
+        .env("GNUPGHOME", &home)
+        .args([
+            "--id-key-gpg",
+            "missing-key@example.invalid",
+            "--host",
+            url.as_str(),
+            "state",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        state.status.success(),
+        "{}",
+        String::from_utf8_lossy(&state.stderr)
+    );
+    assert!(
+        String::from_utf8(state.stdout)
+            .unwrap()
+            .to_lowercase()
+            .contains("initializing")
+    );
     let failed = Command::new(cli_bin)
         .current_dir(temp.path())
         .env("HOME", temp.path())

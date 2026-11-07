@@ -21,7 +21,6 @@ use service_actor::ServiceActor;
 use termion::raw::IntoRawMode;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use url::Url;
 
 use crate::context::{CliContext, RpcContext};
@@ -1203,7 +1202,7 @@ pub async fn cli_attach(
             }
         },
     )?;
-    let mut ws = context.ws_continuation(guid).await?;
+    let mut ws = context.ws_continuation::<RpcContext>(guid).await?;
 
     print!("\r");
     let (kill, thread_kill) = tokio::sync::oneshot::channel();
@@ -1232,7 +1231,7 @@ pub async fn cli_attach(
         .with_kind(ErrorKind::Network)?;
     let mut stdout = Some(stdout);
     let mut stderr = Some(stderr);
-    loop {
+    let result = loop {
         futures::select_biased! {
             input = stdin.as_mut().map_or(
                 futures::future::Either::Left(futures::future::pending()),
@@ -1259,7 +1258,7 @@ pub async fn cli_attach(
                     stdin.take();
                 }
             }
-            msg = ws.try_next() => {
+            msg = ws.try_next().fuse() => {
                 if let Some(msg) = msg.with_kind(ErrorKind::Network)? {
                     match msg {
                         Message::Text(out_ty) => {
@@ -1301,22 +1300,18 @@ pub async fn cli_attach(
                                 _ => (),
                             }
                         }
-                        Message::Close(Some(close)) => {
-                            if close.code != CloseCode::Normal {
-                                return Err(Error::new(
-                                    color_eyre::eyre::Report::msg(close.reason),
-                                    ErrorKind::Network
-                                ));
-                            }
+                        Message::Close(frame) => {
+                            break crate::util::net::tungstenite::close_result(frame);
                         }
                         _ => ()
                     }
                 } else {
-                    kill.send(()).ok();
-                    stdin_thread.wait_for_abort().await.log_err();
-                    return Ok(())
+                    break Err(Error::new(std::io::Error::from(std::io::ErrorKind::UnexpectedEof), ErrorKind::Network));
                 }
             }
         }
-    }
+    };
+    kill.send(()).ok();
+    stdin_thread.wait_for_abort().await.log_err();
+    result
 }

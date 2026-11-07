@@ -23,7 +23,6 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio_stream::wrappers::LinesStream;
-use tokio_tungstenite::tungstenite::Message;
 use tracing::instrument;
 
 use crate::PackageId;
@@ -413,6 +412,7 @@ pub async fn cli_logs<RemoteContext, Extra>(
 ) -> Result<(), RpcError>
 where
     CliContext: CallRemote<RemoteContext>,
+    RemoteContext: crate::context::cli::CliWebSocketContext,
     Extra: FromArgMatches + Args + Serialize + Send + Sync,
 {
     let method = parent_method
@@ -427,11 +427,9 @@ where
                 .await?,
         )?;
 
-        let mut stream = ctx.ws_continuation(res.guid).await?;
-        while let Some(log) = stream.try_next().await? {
-            if let Message::Text(log) = log {
-                println!("{}", serde_json::from_str::<LogEntry>(&log)?);
-            }
+        let mut stream = ctx.ws_continuation::<RemoteContext>(res.guid).await?;
+        while let Some(log) = crate::util::net::tungstenite::next_text(&mut stream).await? {
+            println!("{}", serde_json::from_str::<LogEntry>(&log)?);
         }
     } else {
         let res = from_value::<LogResponse>(
