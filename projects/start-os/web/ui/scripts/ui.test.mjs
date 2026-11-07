@@ -2375,6 +2375,15 @@ test('production mocks support inspection, independent failed backups and new-lo
     injector.destroy()
   })
   t.mock.timers.enable({ apis: ['setTimeout'] })
+  assert.deepEqual(
+    api.mockSource({ kind: 'cifs', hostname: 'nas', path: 'share' }),
+    {
+      kind: 'cifs',
+      hostname: 'nas',
+      path: '/share',
+      username: '',
+    },
+  )
   const local = await api.rpc.volumes.create({
     name: 'Photos',
     source: { kind: 'local' },

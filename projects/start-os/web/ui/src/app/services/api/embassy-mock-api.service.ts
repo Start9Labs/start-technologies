@@ -2998,22 +2998,24 @@ export class MockApiService extends ApiService {
     return this.mockData('/backupTargets')[id]
   }
 
-  private mockSource(source: Params<'volumes.create'>['source']) {
+  private mockSource(
+    source: Params<'volumes.create'>['source'],
+  ): T.SharedVolumeSource {
     switch (source.kind) {
       case 'cifs':
         return {
           kind: 'cifs',
           hostname: source.hostname,
           path: `/${source.path.replace(/^\/+/, '')}`,
-          username: source.username,
-        } as T.SharedVolumeSource
+          username: source.username ?? '',
+        }
       case 'disk':
         return {
           kind: 'disk',
           logicalname: Mock.driveLink(source.logicalname),
           path: (source.path ?? '').replace(/^\/+/, ''),
           label: this.driveLabels.get(source.logicalname) ?? null,
-        } as T.SharedVolumeSource
+        }
       default:
         return source
     }
