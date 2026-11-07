@@ -1,14 +1,14 @@
 import { Component, inject, output } from '@angular/core'
 import { ActivatedRoute } from '@angular/router'
 import { ConvertBytesPipe, DialogService, i18nPipe } from '@start9labs/shared'
-import { TuiButton, TuiNotificationService } from '@taiga-ui/core'
-import { filter } from 'rxjs'
+import { TuiButton } from '@taiga-ui/core'
+import { FormatDrive } from 'src/app/routes/portal/components/format-drive'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { DiskBackupTarget } from 'src/app/services/api/api.types'
+import { getPartitionName } from 'src/app/utils/get-partition-name'
 import { BackupService, MappedBackupTarget } from './backup.service'
 import { BackupConversion, ConversionLabel } from './conversion'
-import { FORMAT_DRIVE } from './format'
 import { BackupLegacyWarningComponent } from './legacy-warning.component'
 import { BackupStatusComponent } from './status.component'
 
@@ -19,14 +19,11 @@ import { BackupStatusComponent } from './status.component'
       {{ 'Physical Drives' | i18n }}
       @if (type === 'create') {
         <button
-          tuiButton
+          formatDrive
           size="xs"
-          iconStart="@tui.hard-drive"
           [style.margin-inline-start]="'auto'"
-          (click)="format()"
-        >
-          {{ 'Format a drive' | i18n }}
-        </button>
+          (formatted)="service.getBackupTargets()"
+        ></button>
       }
     </header>
 
@@ -43,7 +40,7 @@ import { BackupStatusComponent } from './status.component'
             <span [backupStatus]="target.hasAnyBackup" [physical]="true"></span>
           </td>
           <td class="name">{{ target.entry.logicalname }}</td>
-          <td>{{ driveName(target.entry) }}</td>
+          <td>{{ partitionName(target.entry) }}</td>
           <td>{{ formatCapacity(target.entry.capacity) }}</td>
           <td>
             @if (target.entry.available !== null) {
@@ -156,6 +153,7 @@ import { BackupStatusComponent } from './status.component'
   host: { class: 'g-card' },
   imports: [
     TuiButton,
+    FormatDrive,
     PlaceholderComponent,
     BackupStatusComponent,
     BackupLegacyWarningComponent,
@@ -168,20 +166,12 @@ import { BackupStatusComponent } from './status.component'
 })
 export class BackupPhysicalComponent {
   private readonly dialog = inject(DialogService)
-  private readonly alerts = inject(TuiNotificationService)
   protected readonly type = inject(ActivatedRoute).snapshot.data['type']
 
-  private readonly i18n = inject(i18nPipe)
+  protected readonly partitionName = getPartitionName
 
   readonly service = inject(BackupService)
   readonly physicalFolders = output<MappedBackupTarget<DiskBackupTarget>>()
-
-  driveName(entry: DiskBackupTarget): string {
-    return (
-      [entry.vendor, entry.model].filter(Boolean).join(' ') ||
-      this.i18n.transform('Unknown Drive')
-    )
-  }
 
   formatCapacity(bytes: number): string {
     const gb = bytes / 1e9
@@ -192,23 +182,6 @@ export class BackupPhysicalComponent {
       return `${(bytes / 1e6).toFixed(0)} MB`
     }
     return `${gb.toFixed(0)} GB`
-  }
-
-  format() {
-    this.dialog
-      .openComponent<boolean>(FORMAT_DRIVE, { size: 'm' })
-      .pipe(filter(Boolean))
-      .subscribe(() => {
-        this.alerts
-          .open(
-            this.i18n.transform(
-              'Drive formatted. It is listed under Physical Drives.',
-            ),
-            { appearance: 'positive' },
-          )
-          .subscribe()
-        this.service.getBackupTargets()
-      })
   }
 
   select(target: MappedBackupTarget<DiskBackupTarget>) {

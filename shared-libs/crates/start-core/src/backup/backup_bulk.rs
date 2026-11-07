@@ -17,7 +17,7 @@ use super::target::{BackupTargetId, PackageBackupInfo};
 use crate::PackageId;
 use crate::auth::LoginContext;
 use crate::backup::os::OsBackup;
-use crate::backup::{BackupReport, ServerBackupReport};
+use crate::backup::{BackupReport, ServerBackupReport, volume};
 use crate::context::RpcContext;
 use crate::db::model::{Database, DatabaseModel};
 use crate::disk::mount::backup::BackupMountGuard;
@@ -26,6 +26,7 @@ use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, PhaseProgressTrackerHandle};
+use crate::shared_volumes::SharedVolumeId;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::{AtomicFile, dir_copy};
 use crate::util::serde::IoFormat;
@@ -45,6 +46,8 @@ pub struct BackupParams {
     old_password: Option<crate::auth::PasswordType>,
     #[arg(long = "package-ids", help = "help.arg.package-ids-to-backup")]
     package_ids: Option<Vec<PackageId>>,
+    #[arg(long = "shared-volume-ids", help = "help.arg.volume-ids-to-backup", value_parser = volume::parse_id)]
+    shared_volume_ids: Option<Vec<SharedVolumeId>>,
     #[arg(help = "help.arg.backup-password")]
     password: crate::auth::PasswordType,
 }
@@ -60,7 +63,7 @@ impl BackupStatusGuard {
     async fn handle_result(
         mut self,
         legacy_backup: bool,
-        result: Result<BTreeMap<PackageId, PackageBackupReport>, Error>,
+        result: Result<BackupReport, Error>,
     ) -> Result<(), Error> {
         if let Some(db) = self.0.as_ref() {
             db.mutate(|v| {
@@ -75,44 +78,26 @@ impl BackupStatusGuard {
         }
         if let Some(db) = self.0.take() {
             match result {
-                Ok(report) if report.iter().all(|(_, rep)| rep.error.is_none()) => {
-                    db.mutate(|db| {
-                        notify(
-                            db,
-                            None,
-                            NotificationLevel::Success,
-                            t!("backup.bulk.complete-title").to_string(),
-                            t!("backup.bulk.complete-message").to_string(),
-                            BackupReport {
-                                server: ServerBackupReport {
-                                    attempted: true,
-                                    error: None,
-                                },
-                                packages: report,
-                            },
-                        )?;
-                        if legacy_backup {
-                            notify_legacy_present(db)?;
-                        }
-                        Ok(())
-                    })
-                    .await
-                }
                 Ok(report) => {
+                    let (level, message) = if report.has_failures() {
+                        (
+                            NotificationLevel::Warning,
+                            t!("backup.bulk.complete-with-failures"),
+                        )
+                    } else {
+                        (
+                            NotificationLevel::Success,
+                            t!("backup.bulk.complete-message"),
+                        )
+                    };
                     db.mutate(|db| {
                         notify(
                             db,
                             None,
-                            NotificationLevel::Warning,
+                            level,
                             t!("backup.bulk.complete-title").to_string(),
-                            t!("backup.bulk.complete-with-failures").to_string(),
-                            BackupReport {
-                                server: ServerBackupReport {
-                                    attempted: true,
-                                    error: None,
-                                },
-                                packages: report,
-                            },
+                            message.to_string(),
+                            report,
                         )?;
                         if legacy_backup {
                             notify_legacy_present(db)?;
@@ -138,6 +123,7 @@ impl BackupStatusGuard {
                                     error: Some(err_string),
                                 },
                                 packages: BTreeMap::new(),
+                                shared_volumes: BTreeMap::new(),
                             },
                         )
                     })
@@ -168,9 +154,6 @@ impl Drop for BackupStatusGuard {
     }
 }
 
-/// Warn that the just-backed-up target still holds this server's pre-V2
-/// `StartOSBackups` backup, which is now redundant and can be removed from the
-/// backup create page.
 fn notify_legacy_present(db: &mut DatabaseModel) -> Result<(), Error> {
     notify(
         db,
@@ -189,6 +172,7 @@ pub async fn backup_all(
         target_id,
         old_password,
         package_ids,
+        shared_volume_ids,
         password,
     }: BackupParams,
 ) -> Result<(), Error> {
@@ -199,7 +183,6 @@ pub async fn backup_all(
         .decrypt(&ctx)?;
     let password = password.decrypt(&ctx)?;
 
-    // Initializing covers target mounting before per-package phases exist.
     let progress = FullProgressTracker::new();
     let mut init_phase = progress.add_phase(
         InternedString::intern(&*t!("backup.bulk.initializing")),
@@ -209,7 +192,7 @@ pub async fn backup_all(
     // Watch channels cannot cross Patch-DB's catch_unwind boundary.
     let init_progress = progress.snapshot();
 
-    let ((fs, package_ids, server_id), status_guard) = (
+    let ((fs, package_ids, shared_volume_ids, server_id), status_guard) = (
         ctx.db
             .mutate(|db| {
                 <RpcContext as LoginContext>::check_password(db, &password)?;
@@ -225,9 +208,13 @@ pub async fn backup_all(
                         .map(|(id, _)| id)
                         .collect()
                 };
+                let shared_volume_ids = volume::selected_ids(
+                    shared_volume_ids,
+                    db.as_public().as_shared_volumes().de()?.into_keys(),
+                );
                 let server_id = db.as_public().as_server_info().as_id().de()?;
                 assure_backing_up(db, &init_progress, &target_id, &server_id)?;
-                Ok((fs, package_ids, server_id))
+                Ok((fs, package_ids, shared_volume_ids, server_id))
             })
             .await
             .result?,
@@ -236,12 +223,7 @@ pub async fn backup_all(
 
     let disk_guard = TmpMountGuard::mount(&fs, BackupWrite).await?;
 
-    // `check_password` above already validated the master password, so a rejected
-    // password here can only mean the target's existing backup was encrypted with a
-    // different one. Distinguish it so the client can ask for that password instead of
-    // reporting the master password as wrong. This reads only unencrypted-metadata.json;
-    // the encrypted mount (which replays the whole segment log and can be slow on large
-    // or slow targets) runs in the background task below rather than blocking the request.
+    // The master password is validated; this failure identifies the target's password.
     BackupMountGuard::<TmpMountGuard>::validate_password(
         disk_guard.path(),
         &server_id,
@@ -259,9 +241,6 @@ pub async fn backup_all(
         }
     })?;
 
-    // Stream progress to the db for the rest of the backup, starting now so the
-    // Initializing phase is live during the encrypted mount. The handle lives in
-    // the backup task below, so it is not aborted when this request returns.
     let progress_db_sync = NonDetachingJoinHandle::from(tokio::spawn(progress.clone().sync_to_db(
         ctx.db.clone(),
         |db| {
@@ -300,6 +279,8 @@ pub async fn backup_all(
                     backup_guard,
                     disk_guard,
                     &package_ids,
+                    &shared_volume_ids,
+                    &fs,
                 )
                 .await,
             )
@@ -350,12 +331,16 @@ async fn perform_backup(
     backup_guard: BackupMountGuard<TmpMountGuard>,
     disk_guard: TmpMountGuard,
     package_ids: &OrdSet<PackageId>,
-) -> Result<BTreeMap<PackageId, PackageBackupReport>, Error> {
+    shared_volume_ids: &OrdSet<SharedVolumeId>,
+    destination: &super::target::BackupTargetFS,
+) -> Result<BackupReport, Error> {
     let db = ctx.db.peek().await;
     let mut backup_report = BTreeMap::new();
+    let mut shared_report = BTreeMap::new();
     let backup_guard = Arc::new(backup_guard);
     let mut package_backups: BTreeMap<PackageId, PackageBackupInfo> =
         backup_guard.metadata.package_backups.clone();
+    let mut shared_backups = backup_guard.metadata.shared_volume_backups.clone();
 
     let mut reclaim_phase = if crate::backup::trash::has_trash(disk_guard.path()).await {
         Some(progress.add_phase(
@@ -374,20 +359,27 @@ async fn perform_backup(
             )
         })
         .collect();
+    let mut volume_phases: BTreeMap<_, _> = shared_volume_ids
+        .iter()
+        .map(|id| {
+            let name = db
+                .as_public()
+                .as_shared_volumes()
+                .as_idx(id)
+                .map(|volume| volume.as_name().de())
+                .transpose()?
+                .unwrap_or_else(|| id.to_string());
+            let phase = progress.add_phase(InternedString::intern(&name), Some(100));
+            Ok((id.clone(), (name, phase)))
+        })
+        .collect::<Result<_, Error>>()?;
     let mut os_data_phase = progress.add_phase("OS Data".into(), Some(10));
 
-    // The target is mounted and its store is open; close out the Initializing
-    // phase now that the reclaim/per-package/OS phases exist, so the phase list
-    // is already populated when it flips to complete. The db-sync task (spawned
-    // in backup_all) keeps streaming these phases.
     init_phase.complete();
 
     if let Some(phase) = &mut reclaim_phase {
         phase.start();
-        // pending trash is space freed by a backup deletion but not yet
-        // reclaimed — space this backup may be counting on, so finish (or join)
-        // the sweep before writing. Failure isn't fatal: the backup itself will
-        // surface any real space problem.
+        // Renamed trash still occupies space until the sweep completes.
         if let Err(e) = crate::backup::trash::sweep_until_clear(&disk_guard).await {
             tracing::warn!("{}", t!("backup.bulk.reclaim-failed", error = &e));
             tracing::debug!("{e:?}");
@@ -401,11 +393,14 @@ async fn perform_backup(
         phase.start();
         let started = Instant::now();
         if let Some(service) = &*ctx.services.get(id).await {
-            let backup_result = service
-                .backup(backup_guard.package_backup(id).await?, phase)
-                .await
-                .err()
-                .map(|e| e.to_string());
+            let backup_result = async {
+                service
+                    .backup(backup_guard.package_backup(id).await?, phase)
+                    .await
+            }
+            .await
+            .err()
+            .map(|e: Error| e.to_string());
             let duration_ms = started.elapsed().as_millis() as u64;
             if backup_result.is_none() {
                 let manifest = db
@@ -444,6 +439,20 @@ async fn perform_backup(
                 },
             );
         }
+    }
+    for id in shared_volume_ids {
+        let (name, mut phase) = volume_phases.remove(id).expect("volume phase exists");
+        phase.start();
+        let (info, report) = volume::measure_backup(
+            name,
+            volume::backup_volume(ctx, &backup_guard, id, destination),
+        )
+        .await;
+        if let Some(info) = info {
+            shared_backups.insert(id.clone(), info);
+        }
+        phase.complete();
+        shared_report.insert(id.clone(), report);
     }
     let mut backup_guard = Arc::try_unwrap(backup_guard).map_err(|_| {
         Error::new(
@@ -493,8 +502,18 @@ async fn perform_backup(
         .filter_map(|(id, _)| Some((id.clone(), package_backups.get(id)?.timestamp)))
         .collect();
     backup_guard.metadata.package_backups = package_backups;
+    backup_guard.metadata.shared_volume_backups = shared_backups;
 
-    backup_guard.save_and_unmount().await?;
+    backup_guard.save().await?;
+    crate::disk::mount::util::sync_directory(backup_guard.path()).await?;
+    for id in shared_volume_ids {
+        if let Some(info) = backup_guard.metadata.shared_volume_backups.get(id) {
+            volume::prune_copies(&backup_guard.shared_volume_data(id), info)
+                .await
+                .log_err();
+        }
+    }
+    backup_guard.unmount().await?;
 
     ctx.db
         .mutate(|v| {
@@ -511,5 +530,28 @@ async fn perform_backup(
         .await
         .result?;
 
-    Ok(backup_report)
+    Ok(BackupReport {
+        server: ServerBackupReport {
+            attempted: true,
+            error: None,
+        },
+        packages: backup_report,
+        shared_volumes: shared_report,
+    })
+}
+
+#[cfg(test)]
+mod volume_tests {
+    use super::*;
+
+    #[test]
+    fn volume_selection_wire_distinguishes_omitted_and_empty() {
+        let wire = serde_json::json!({ "targetId": "disk-/dev/test", "password": "test", "packageIds": [] });
+        let omitted: BackupParams = serde_json::from_value(wire.clone()).unwrap();
+        assert!(omitted.shared_volume_ids.is_none());
+        let mut wire = wire;
+        wire["sharedVolumeIds"] = serde_json::json!([]);
+        let explicit: BackupParams = serde_json::from_value(wire).unwrap();
+        assert_eq!(explicit.shared_volume_ids, Some(vec![]));
+    }
 }

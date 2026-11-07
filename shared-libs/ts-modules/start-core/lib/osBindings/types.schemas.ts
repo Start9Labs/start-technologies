@@ -1505,6 +1505,84 @@ export const SetupInfo: z.ZodObject<{
 }).meta({
   id: 'SetupInfo',
 })
+export const SharedVolumeAvailability: z.ZodEnum<{
+  unknown: 'unknown'
+  available: 'available'
+  unavailable: 'unavailable'
+}> = /* @__PURE__ */ z.enum(['unknown', 'available', 'unavailable']).meta({
+  id: 'SharedVolumeAvailability',
+})
+export const SharedVolumeBackupInfo: z.ZodObject<{
+  name: z.ZodString
+  timestamp: z.ZodString
+  /**
+   * Identifies the completed copy beneath the volume's encrypted `data` directory.
+   */
+  generation: z.ZodString
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  timestamp: z.string(),
+  /**
+   * Identifies the completed copy beneath the volume's encrypted `data` directory.
+   */
+  generation: z.string().meta({
+    description:
+      "Identifies the completed copy beneath the volume's encrypted `data` directory.",
+  }),
+}).meta({
+  id: 'SharedVolumeBackupInfo',
+})
+export const SharedVolumeGrant: z.ZodObject<{ readonly: z.ZodBoolean }> =
+  /* @__PURE__ */ object({ readonly: z.boolean() }).meta({
+    id: 'SharedVolumeGrant',
+  })
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export const SharedVolumeId: z.ZodString = /* @__PURE__ */ z.string().meta({
+  id: 'SharedVolumeId',
+  description: 'A 32-character uppercase base32 volume identity.',
+})
+export const SharedVolumeSource: z.ZodUnion<
+  readonly [
+    z.ZodObject<{ kind: z.ZodLiteral<'local'> }>,
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'disk'> }>,
+      z.ZodObject<{
+        logicalname: z.ZodString
+        path: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'cifs'> }>,
+      z.ZodObject<{ hostname: z.ZodString; path: z.ZodString }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    object({ kind: z.literal('local') }),
+    z.intersection(
+      object({ kind: z.literal('disk') }),
+      object({
+        logicalname: z.string(),
+        path: wire(z.string().optional(), z.string()),
+      }),
+    ),
+    z.intersection(
+      object({ kind: z.literal('cifs') }),
+      object({ hostname: z.string(), path: z.string() }),
+    ),
+  ])
+  .meta({
+    id: 'SharedVolumeSource',
+  })
+export const SharedVolumeUnavailableReason: z.ZodEnum<{
+  sourceUnavailable: 'sourceUnavailable'
+  timeout: 'timeout'
+}> = /* @__PURE__ */ z.enum(['sourceUnavailable', 'timeout']).meta({
+  id: 'SharedVolumeUnavailableReason',
+})
 export const ShutdownParams: z.ZodObject<{
   /**
    * Block until graceful teardown completes (default over the CLI; the
@@ -1775,10 +1853,7 @@ export const ActionMetadata: z.ZodObject<{
     typeof ActionVisibility
   >
   /**
-   * One of: "only-stopped", "only-running", "all"
-   *   - "only-stopped" - the action can only be run when the service is stopped
-   *   - "only-running" - the action can only be run when the service is running
-   *   - "any" - the action can only be run regardless of the service's status
+   * Service run states that permit this action.
    */
   allowedStatuses: typeof AllowedStatuses
   hasInput: z.ZodBoolean
@@ -1831,14 +1906,10 @@ export const ActionMetadata: z.ZodObject<{
       'One of: "enabled", "hidden", or { disabled: "" }\n  - "enabled" - the action is available be run\n  - "hidden" - the action cannot be seen or run\n  - { disabled: "example explanation" } means the action is visible but cannot be run. Replace "example explanation" with a reason why the action is disable to prevent user confusion.',
   }),
   /**
-   * One of: "only-stopped", "only-running", "all"
-   *   - "only-stopped" - the action can only be run when the service is stopped
-   *   - "only-running" - the action can only be run when the service is running
-   *   - "any" - the action can only be run regardless of the service's status
+   * Service run states that permit this action.
    */
   allowedStatuses: AllowedStatuses.meta({
-    description:
-      'One of: "only-stopped", "only-running", "all"\n  - "only-stopped" - the action can only be run when the service is stopped\n  - "only-running" - the action can only be run when the service is running\n  - "any" - the action can only be run regardless of the service\'s status',
+    description: 'Service run states that permit this action.',
   }),
   hasInput: z.boolean(),
   /**
@@ -2317,15 +2388,10 @@ export const AuthKeys: z.ZodRecord<z.ZodString, typeof Session> =
     id: 'AuthKeys',
     description: 'Enrolled sign-ins indexed by canonical DER64 SPKI.',
   })
-export const BackupReport: z.ZodObject<{
-  server: typeof ServerBackupReport
-  packages: z.ZodRecord<z.ZodString, typeof PackageBackupReport>
-}> = /* @__PURE__ */ object({
-  server: ServerBackupReport,
-  packages: z.record(z.string(), PackageBackupReport),
-}).meta({
-  id: 'BackupReport',
-})
+export const BackupInitParams: z.ZodObject<{ id: typeof Guid }> =
+  /* @__PURE__ */ object({ id: Guid }).meta({
+    id: 'BackupInitParams',
+  })
 export const BackupTargetFS: z.ZodUnion<
   readonly [
     z.ZodIntersection<
@@ -3035,6 +3101,19 @@ export const GetSystemSmtpParams: z.ZodObject<{
 }).meta({
   id: 'GetSystemSmtpParams',
 })
+export const GrantedSharedVolume: z.ZodObject<{
+  id: typeof SharedVolumeId
+  name: z.ZodString
+  readonly: z.ZodBoolean
+  availability: typeof SharedVolumeAvailability
+}> = /* @__PURE__ */ object({
+  id: SharedVolumeId,
+  name: z.string(),
+  readonly: z.boolean(),
+  availability: SharedVolumeAvailability,
+}).meta({
+  id: 'GrantedSharedVolume',
+})
 export const HardwareRequirements: z.ZodObject<{
   device: z.ZodCodec<
     z.ZodOptional<z.ZodArray<typeof DeviceFilter>>,
@@ -3488,6 +3567,24 @@ export const MetricsSummary: z.ZodObject<{
   byOsVersion: z.array(CountEntry),
 }).meta({
   id: 'MetricsSummary',
+})
+export const MountSharedVolumeParams: z.ZodObject<{
+  id: typeof SharedVolumeId
+  subcontainer: typeof Guid
+  mountpoint: z.ZodString
+  subpath: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  readonly: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  id: SharedVolumeId,
+  subcontainer: Guid,
+  mountpoint: z.string(),
+  subpath: wire(z.string().nullable().optional(), z.string().nullable()),
+  readonly: z.boolean(),
+}).meta({
+  id: 'MountSharedVolumeParams',
 })
 export const MountTarget: z.ZodCodec<
   z.ZodObject<{
@@ -3972,6 +4069,31 @@ export const RestorePackageParams: z.ZodObject<{
 }).meta({
   id: 'RestorePackageParams',
 })
+export const RestoreVolumeParams: z.ZodObject<{
+  targetId: typeof BackupTargetId
+  password: z.ZodString
+  ids: z.ZodArray<typeof SharedVolumeId>
+  serverId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  targetId: BackupTargetId,
+  password: z.string(),
+  ids: z.array(SharedVolumeId),
+  serverId: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'RestoreVolumeParams',
+})
+export const RestoreVolumeResult: z.ZodObject<{
+  restored: z.ZodRecord<z.ZodString, typeof SharedVolumeId>
+  errors: z.ZodRecord<z.ZodString, z.ZodString>
+}> = /* @__PURE__ */ object({
+  restored: z.record(z.string(), SharedVolumeId),
+  errors: z.record(z.string(), z.string()),
+}).meta({
+  id: 'RestoreVolumeResult',
+})
 export const RetireBindingParams: z.ZodObject<{
   id: typeof HostId
   internalPort: z.ZodInt
@@ -4132,6 +4254,44 @@ export const SetupResult: z.ZodObject<{
 }).meta({
   id: 'SetupResult',
 })
+export const SharedVolume: z.ZodObject<{
+  name: z.ZodString
+  source: typeof SharedVolumeSource
+  grants: z.ZodRecord<z.ZodString, typeof SharedVolumeGrant>
+  availability: z.ZodCodec<
+    z.ZodOptional<typeof SharedVolumeAvailability>,
+    typeof SharedVolumeAvailability
+  >
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  source: SharedVolumeSource,
+  grants: z.record(z.string(), SharedVolumeGrant),
+  availability: wire(
+    SharedVolumeAvailability.optional(),
+    SharedVolumeAvailability,
+  ),
+}).meta({
+  id: 'SharedVolume',
+})
+export const SharedVolumeMountResult: z.ZodUnion<
+  readonly [
+    z.ZodObject<{ kind: z.ZodLiteral<'mounted'> }>,
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'unavailable'> }>,
+      z.ZodObject<{ reason: typeof SharedVolumeUnavailableReason }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    object({ kind: z.literal('mounted') }),
+    z.intersection(
+      object({ kind: z.literal('unavailable') }),
+      object({ reason: SharedVolumeUnavailableReason }),
+    ),
+  ])
+  .meta({
+    id: 'SharedVolumeMountResult',
+  })
 export const SideloadResponse: z.ZodObject<{
   upload: typeof Guid
   progress: typeof Guid
@@ -4437,6 +4597,14 @@ export const VersionSignerParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ version: z.string(), signer: Guid }).meta({
   id: 'VersionSignerParams',
 })
+export const VolumeBackupReport: z.ZodIntersection<
+  z.ZodObject<{ name: z.ZodString }>,
+  typeof PackageBackupReport
+> = /* @__PURE__ */ z
+  .intersection(object({ name: z.string() }), PackageBackupReport)
+  .meta({
+    id: 'VolumeBackupReport',
+  })
 export const WifiInfo: z.ZodObject<{
   enabled: z.ZodBoolean
   interface: z.ZodCodec<
@@ -4597,10 +4765,18 @@ export const BackupInfo: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   packageBackups: z.ZodRecord<z.ZodString, typeof PackageBackupInfo>
+  sharedVolumeBackups: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof SharedVolumeBackupInfo>>,
+    z.ZodRecord<z.ZodString, typeof SharedVolumeBackupInfo>
+  >
 }> = /* @__PURE__ */ object({
   version: z.string(),
   timestamp: wire(z.string().nullable().optional(), z.string().nullable()),
   packageBackups: z.record(z.string(), PackageBackupInfo),
+  sharedVolumeBackups: wire(
+    z.record(z.string(), SharedVolumeBackupInfo).optional(),
+    z.record(z.string(), SharedVolumeBackupInfo),
+  ),
 }).meta({
   id: 'BackupInfo',
 })
@@ -4614,6 +4790,10 @@ export const BackupParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodArray<typeof PackageId>>>,
     z.ZodNullable<z.ZodArray<typeof PackageId>>
   >
+  sharedVolumeIds: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof SharedVolumeId>>>,
+    z.ZodNullable<z.ZodArray<typeof SharedVolumeId>>
+  >
   password: typeof PasswordType
 }> = /* @__PURE__ */ object({
   targetId: BackupTargetId,
@@ -4625,9 +4805,30 @@ export const BackupParams: z.ZodObject<{
     z.array(PackageId).nullable().optional(),
     z.array(PackageId).nullable(),
   ),
+  sharedVolumeIds: wire(
+    z.array(SharedVolumeId).nullable().optional(),
+    z.array(SharedVolumeId).nullable(),
+  ),
   password: PasswordType,
 }).meta({
   id: 'BackupParams',
+})
+export const BackupReport: z.ZodObject<{
+  server: typeof ServerBackupReport
+  packages: z.ZodRecord<z.ZodString, typeof PackageBackupReport>
+  sharedVolumes: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof VolumeBackupReport>>,
+    z.ZodRecord<z.ZodString, typeof VolumeBackupReport>
+  >
+}> = /* @__PURE__ */ object({
+  server: ServerBackupReport,
+  packages: z.record(z.string(), PackageBackupReport),
+  sharedVolumes: wire(
+    z.record(z.string(), VolumeBackupReport).optional(),
+    z.record(z.string(), VolumeBackupReport),
+  ),
+}).meta({
+  id: 'BackupReport',
 })
 export const CifsBackupTarget: z.ZodObject<{
   hostname: z.ZodString
@@ -6286,6 +6487,10 @@ export const Manifest: z.ZodIntersection<
     canMigrateFrom: z.ZodString
     images: z.ZodRecord<z.ZodString, typeof ImageConfig>
     volumes: z.ZodArray<typeof VolumeId>
+    /**
+     * Enables user-managed grants to system volumes; grants default to none.
+     */
+    sharedVolumes: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
     dependencies: z.ZodCodec<
       z.ZodOptional<typeof Dependencies>,
       typeof Dependencies
@@ -6305,6 +6510,13 @@ export const Manifest: z.ZodIntersection<
       canMigrateFrom: z.string(),
       images: z.record(z.string(), ImageConfig),
       volumes: z.array(VolumeId),
+      /**
+       * Enables user-managed grants to system volumes; grants default to none.
+       */
+      sharedVolumes: wire(z.boolean().optional(), z.boolean()).meta({
+        description:
+          'Enables user-managed grants to system volumes; grants default to none.',
+      }),
       dependencies: wire(Dependencies.optional(), Dependencies),
       hardwareRequirements: wire(
         HardwareRequirements.optional(),
@@ -6743,10 +6955,18 @@ export const AllPackageData: z.ZodRecord<z.ZodString, typeof PackageDataEntry> =
 export const Public: z.ZodObject<{
   serverInfo: typeof ServerInfo
   packageData: typeof AllPackageData
+  sharedVolumes: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof SharedVolume>>,
+    z.ZodRecord<z.ZodString, typeof SharedVolume>
+  >
   ui: z.ZodUnknown
 }> = /* @__PURE__ */ object({
   serverInfo: ServerInfo,
   packageData: AllPackageData,
+  sharedVolumes: wire(
+    z.record(z.string(), SharedVolume).optional(),
+    z.record(z.string(), SharedVolume),
+  ),
   ui: z.unknown(),
 }).meta({
   id: 'Public',

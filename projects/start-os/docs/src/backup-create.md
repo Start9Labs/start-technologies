@@ -21,11 +21,13 @@ Back up your server's data to a physical drive or a network folder.
 
 1. To back up a service, StartOS first stops it (if it was running), performs the backup, then restarts it — but only if it was running beforehand. A service that was already stopped stays stopped. Consequently a service cannot be used while it is backing up, though you may continue to use your server and other services in the meantime.
 
-1. Upon completion, StartOS issues a backup report, indicating which services were backed up, as well as any errors.
+1. Select [volumes](volumes.md) independently of services. A service backup excludes its attached volume contents; an unavailable volume source fails that volume's item without preventing unrelated service backups.
+
+1. Upon completion, StartOS issues a backup report, indicating which services and volumes were backed up, as well as any errors.
 
 1. Wait for the `Backup Complete` notification before unplugging a backup drive. StartOS writes out the last of the backup and unmounts the drive before raising that notification, so the drive is safe to remove once it appears. The `Backup Progress` card reads `Complete` first, while StartOS is still finishing — the notification is the one to wait for.
 
-1. Each backup updates the current state on its target. Keep backups on multiple targets for protection against loss of a drive or network share.
+1. Each backup updates the current state on its target. Volume backups copy the entire backing folder and retain the previous successful copy until its replacement has been saved, requiring space for the replacement. Keep backups on multiple targets for protection against loss of a drive or network share.
 
 1. The backup targets list shows the free space available on each drive and network folder, so you can confirm your backup will fit before you start.
 
@@ -37,7 +39,7 @@ Back up your server's data to a physical drive or a network folder.
    - On the `Create Backup` page, any target holding this server's V1 backup shows a **Delete old backup** button — whether or not a new (V2) backup exists yet. After you confirm, StartOS removes this server's old V1 backup from the target immediately and reclaims the space it occupied in the background, raising a notification once the space has been fully freed (on a large backup this can take a while); your current `StartOSBackupsV2` backup — and any backups belonging to other servers that share the target — are untouched. If this server has no current (V2) backup on that target, StartOS asks for an extra confirmation first, since deleting the old backup would leave this server with no backup there.
 
    > [!WARNING]
-   > Before backing up, check the free space remaining on the target and make sure your selected services will fit. If space is tight, use the **Delete old backup** button to reclaim the space this server's old backup occupies, or choose another drive. A backup started while that space is still being reclaimed in the background waits for the reclamation to finish first, shown as an initial `Reclaiming Space` phase in the backup's progress.
+   > Before backing up, check the free space remaining on the target and make sure your selected services and volumes will fit. If space is tight, use the **Delete old backup** button to reclaim the space this server's old backup occupies, or choose another drive. A backup started while that space is still being reclaimed in the background waits for the reclamation to finish first, shown as an initial `Reclaiming Space` phase in the backup's progress.
 
 ## Backup Format Upgrades
 
@@ -60,7 +62,7 @@ The discovery date shown before unlocking a backup is editable plaintext. After 
 
 ## Command-Line Passwords
 
-`start-cli backup target mount`, `start-cli backup target info`, and `start-cli package backup restore` prompt for the backup password instead of accepting it as a positional argument. Automation can supply it through `BACKUP_PASSWORD`. CIFS target add/update commands similarly prompt for the share password or read `CIFS_PASSWORD`; an empty password selects passwordless access. The `PASSWORD` variable used for CLI authentication remains separate.
+`start-cli backup target mount`, `start-cli backup target info`, `start-cli package backup restore`, and `start-cli backup volume restore` prompt for the backup password instead of accepting it as a positional argument. Automation can supply it through `BACKUP_PASSWORD`. CIFS target add/update commands similarly prompt for the share password or read `CIFS_PASSWORD`; an empty password selects passwordless access. The `PASSWORD` variable used for CLI authentication remains separate.
 
 Avoid typing secret values into shell commands, where shell history can retain them. The standalone `startos-backup-fs` utility reads its filesystem credential from standard input or `--password-file`; password changes read the replacement credential from `--new-password-file`. It does not accept plaintext password arguments. For StartOS-managed backups, this utility uses the filesystem key managed by StartOS, not the master password accepted by `start-cli`.
 
@@ -110,7 +112,7 @@ A new drive, or one formatted for another system, can be prepared from StartOS: 
 
 1. Click the drive.
 
-1. Select the services to back up, or click "Toggle all", then click "Done".
+1. Select the services and volumes to back up, or click "Toggle all", then click "Done".
 
 1. Enter your master password.
 
@@ -506,6 +508,6 @@ The **Hostname** field accepts an IP address, a DNS name containing a dot (such 
 
 1. Click the folder under `Network Folders`.
 
-1. Select the services to back up, or click "Toggle all", then click "Done".
+1. Select the services and volumes to back up, or click "Toggle all", then click "Done".
 
 1. Enter your master password.

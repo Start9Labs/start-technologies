@@ -210,8 +210,12 @@ impl TmpMountGuard {
             if is_mountpoint(&mountpoint).await? {
                 unmount(&mountpoint, true).await?;
             }
-            let mut mount_guard = MountGuard::mount(filesystem, &mountpoint, mount_type).await?;
-            mount_guard.slot = Some(slot_handle.clone());
+            let mount_guard = MountGuard {
+                mountpoint: mountpoint.clone(),
+                mounted: true,
+                slot: Some(slot_handle.clone()),
+            };
+            filesystem.mount(&mountpoint, mount_type).await?;
             let guard = Arc::new(mount_guard);
             *weak_slot = Arc::downgrade(&guard);
             *prev_mt = mount_type;

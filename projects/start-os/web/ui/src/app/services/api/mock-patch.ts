@@ -72,6 +72,7 @@ function mockStart9Key(
 }
 
 export const mockPatchData: DataModel = {
+  sharedVolumes: {},
   ui: {
     registries: {
       'https://registry.start9.com/': 'Start9 Registry',
@@ -472,6 +473,7 @@ export const mockPatchData: DataModel = {
     // keyboard: null,
   },
   packageData: {
+    'btc-rpc-proxy': structuredClone(Mock.LocalPkgs['btc-rpc-proxy']!),
     lnd: {
       stateInfo: {
         state: 'installed',

@@ -1,7 +1,8 @@
-import { Component, inject } from '@angular/core'
+import { Component, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { FormsModule } from '@angular/forms'
 import { DialogService, i18nPipe, TaskService } from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
 import {
   TuiButton,
   TuiCheckbox,
@@ -9,7 +10,7 @@ import {
   TuiLoader,
   TuiTitle,
 } from '@taiga-ui/core'
-import { TuiBlock } from '@taiga-ui/kit'
+import { TuiAvatar, TuiBlock } from '@taiga-ui/kit'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { PatchDB } from 'patch-db-client'
 import { filter, map, switchMap, take } from 'rxjs'
@@ -19,26 +20,47 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
 import { getManifest } from 'src/app/utils/get-package-data'
 import { BackupContext } from './backup.types'
 
-interface Package {
+type BackupItem = {
   id: string
   title: string
   disabled: boolean
   checked: boolean
-}
+} & (
+  | { kind: 'package' }
+  | { kind: 'volume'; availability: T.SharedVolumeAvailability }
+)
 
 @Component({
   template: `
     <div tuiGroup orientation="vertical" [collapsed]="true">
-      @if (pkgs(); as pkgs) {
-        @for (pkg of pkgs; track $index) {
+      @if (items(); as items) {
+        @for (item of items; track item.kind + ':' + item.id) {
           <label tuiBlock="m">
-            <img [pkgIcon]="pkg.id" />
-            <span tuiTitle>{{ pkg.title }}</span>
+            <span
+              size="m"
+              aria-hidden="true"
+              [tuiAvatar]="item.kind === 'volume' ? '@tui.folder' : ''"
+            >
+              @if (item.kind === 'package') {
+                <img [pkgIcon]="item.id" />
+              }
+            </span>
+            <span tuiTitle>
+              <b>{{ item.title }}</b>
+              @if (item.kind === 'volume') {
+                <span tuiSubtitle>{{ 'Volumes' | i18n }}</span>
+                @if (item.availability === 'unavailable') {
+                  <span tuiSubtitle>
+                    {{ 'Volume source unavailable' | i18n }}
+                  </span>
+                }
+              }
+            </span>
             <input
               type="checkbox"
               tuiCheckbox
-              [disabled]="pkg.disabled"
-              [(ngModel)]="pkg.checked"
+              [disabled]="item.disabled"
+              [(ngModel)]="item.checked"
               (ngModelChange)="handleChange()"
             />
           </label>
@@ -53,7 +75,7 @@ interface Package {
       <button tuiButton appearance="flat-grayscale" (click)="toggleSelectAll()">
         {{ 'Toggle all' | i18n }}
       </button>
-      <button tuiButton [disabled]="!hasSelection" (click)="done()">
+      <button tuiButton [disabled]="!hasSelection()" (click)="done()">
         {{ 'Done' | i18n }}
       </button>
     </footer>
@@ -67,16 +89,12 @@ interface Package {
     [tuiBlock] {
       align-items: center;
     }
-
-    img {
-      width: 2.5rem;
-      border-radius: 100%;
-    }
   `,
   imports: [
     FormsModule,
     TuiButton,
     TuiGroup,
+    TuiAvatar,
     TuiLoader,
     TuiBlock,
     TuiCheckbox,
@@ -93,24 +111,31 @@ export class BackupsBackupComponent {
 
   readonly context = injectContext<BackupContext>()
 
-  hasSelection = false
-  readonly pkgs = toSignal<readonly Package[] | null>(
-    this.patch.watch$('packageData').pipe(
+  protected readonly hasSelection = signal(false)
+  protected readonly items = toSignal(
+    this.patch.watch$().pipe(
       take(1),
-      map(pkgs =>
-        Object.values(pkgs)
-          .map(pkg => {
+      map(({ packageData, sharedVolumes }) =>
+        [
+          ...Object.values(packageData).map<BackupItem>(pkg => {
             const { id, title } = getManifest(pkg)
             return {
+              kind: 'package',
               id,
               title,
               disabled: pkg.stateInfo.state !== 'installed',
               checked: false,
             }
-          })
-          .sort((a, b) =>
-            b.title.toLowerCase() > a.title.toLowerCase() ? -1 : 1,
-          ),
+          }),
+          ...Object.entries(sharedVolumes).map<BackupItem>(([id, volume]) => ({
+            kind: 'volume',
+            id,
+            title: volume.name,
+            availability: volume.availability,
+            disabled: false,
+            checked: false,
+          })),
+        ].sort((a, b) => a.title.localeCompare(b.title)),
       ),
     ),
     { initialValue: null },
@@ -138,12 +163,13 @@ export class BackupsBackupComponent {
   }
 
   handleChange() {
-    this.hasSelection = !!this.pkgs()?.some(p => p.checked)
+    this.hasSelection.set(!!this.items()?.some(item => item.checked))
   }
 
   toggleSelectAll() {
-    this.pkgs()?.forEach(p => (p.checked = !this.hasSelection && !p.disabled))
-    this.hasSelection = !this.hasSelection
+    const checked = !this.hasSelection()
+    this.items()?.forEach(item => (item.checked = checked && !item.disabled))
+    this.handleChange()
   }
 
   private oldPassword(password: string) {
@@ -172,9 +198,13 @@ export class BackupsBackupComponent {
     const params = {
       targetId: this.context.data.id,
       packageIds:
-        this.pkgs()
-          ?.filter(p => p.checked)
-          .map(p => p.id) || [],
+        this.items()
+          ?.filter(item => item.kind === 'package' && item.checked)
+          .map(item => item.id) || [],
+      sharedVolumeIds:
+        this.items()
+          ?.filter(item => item.kind === 'volume' && item.checked)
+          .map(item => item.id) || [],
       oldPassword,
       password,
     }

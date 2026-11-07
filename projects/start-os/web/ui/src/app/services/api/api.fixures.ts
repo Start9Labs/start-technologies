@@ -300,6 +300,7 @@ export namespace Mock {
       },
     },
     volumes: ['main'],
+    sharedVolumes: false,
     hardwareRequirements: {
       device: [],
       arch: null,
@@ -356,6 +357,7 @@ export namespace Mock {
       },
     },
     volumes: ['main'],
+    sharedVolumes: false,
     hardwareRequirements: {
       device: [],
       arch: null,
@@ -398,6 +400,7 @@ export namespace Mock {
       },
     },
     volumes: ['main'],
+    sharedVolumes: false,
     hardwareRequirements: {
       device: [],
       arch: null,
@@ -447,6 +450,7 @@ export namespace Mock {
       },
     },
     volumes: ['main'],
+    sharedVolumes: true,
     hardwareRequirements: {
       device: [],
       arch: null,
@@ -1131,13 +1135,15 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       title: 'Backup Complete',
       message: 'StartOS and services have been successfully backed up.',
       data: {
+        sharedVolumes: {},
         server: {
           attempted: false,
           error: null,
         },
         packages: {
           bitcoind: {
-            error: 'An error ocurred while backing up',
+            error: 'An error occurred while backing up',
+            duration_ms: 1000,
           },
         },
       },
@@ -1456,8 +1462,20 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           guid: null,
           filesystem: null,
         },
+        ...['Server One', 'Server Two', null].map((label, index) => ({
+          logicalname: `/dev/sdc${index + 2}`,
+          stablePath: `/dev/disk/by-path/pci-0000:00:14.0-usb-0:3:1.0-scsi-0:0:0:0-part${index + 2}`,
+          label,
+          capacity: 100000000000,
+          used: 0,
+          available: 100000000000,
+          startOs: {},
+          legacyBackup: false,
+          guid: null,
+          filesystem: 'btrfs',
+        })),
       ],
-      capacity: 1000000000000,
+      capacity: 2000000000000,
       guid: null,
       filesystem: null,
     },
@@ -1536,6 +1554,19 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       },
       legacyBackup: true,
     },
+    ...Object.fromEntries(
+      Disks.flatMap(disk =>
+        disk.partitions.map(partition => [
+          `disk-${partition.logicalname}`,
+          {
+            ...partition,
+            type: 'disk' as const,
+            vendor: disk.vendor,
+            model: disk.model,
+          },
+        ]),
+      ),
+    ),
   }
 
   // @TODO 041
@@ -1668,6 +1699,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
   // ]
 
   export const BackupInfo: T.BackupInfo = {
+    sharedVolumeBackups: {},
     version: '0.4.0',
     timestamp: new Date().toISOString(),
     packageBackups: {

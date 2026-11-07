@@ -258,7 +258,21 @@ pub struct BackupInfo {
     pub version: Version,
     pub timestamp: Option<DateTime<Utc>>,
     pub package_backups: BTreeMap<PackageId, PackageBackupInfo>,
+    #[serde(default)]
+    pub shared_volume_backups:
+        BTreeMap<crate::shared_volumes::SharedVolumeId, SharedVolumeBackupInfo>,
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedVolumeBackupInfo {
+    pub name: String,
+    pub timestamp: DateTime<Utc>,
+    /// Identifies the completed copy beneath the volume's encrypted `data` directory.
+    pub generation: String,
+}
+
+rpc_toolkit::reflect_ts!(SharedVolumeBackupInfo);
 
 rpc_toolkit::reflect_ts!(BackupInfo);
 rpc_toolkit::ts_export!(BackupInfo, namespaces = [""]);
@@ -309,6 +323,14 @@ fn display_backup_info(params: WithIoFormat<InfoParams>, info: BackupInfo) -> Re
         table.add_row(row);
     }
     print_table(&table)?;
+    if !info.shared_volume_backups.is_empty() {
+        let mut volumes = Table::new();
+        volumes.add_row(row![bc => "ID", t!("backup.volume.volumes"), "TIMESTAMP"]);
+        for (id, info) in info.shared_volume_backups {
+            volumes.add_row(row![id.to_string(), info.name, info.timestamp.to_string()]);
+        }
+        print_table(&volumes)?;
+    }
     Ok(())
 }
 
@@ -569,4 +591,17 @@ pub async fn delete_legacy(
             .log_err();
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_metadata_defaults_to_no_volume_backups() {
+        let mut wire = serde_json::to_value(BackupInfo::default()).unwrap();
+        wire.as_object_mut().unwrap().remove("sharedVolumeBackups");
+        let info: BackupInfo = serde_json::from_value(wire).unwrap();
+        assert!(info.shared_volume_backups.is_empty());
+    }
 }

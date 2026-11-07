@@ -125,6 +125,7 @@ Intent-driven guides for common packaging objectives. These are the primary entr
 - [Tasks](./tasks.md) - Prompt users to run actions at the right time
 - [Notifications](./notifications.md) - Post messages to the StartOS notifications panel
 - [File Models](./file-models.md) - Represent and validate configuration files
+- [Volumes](./shared-volumes.md) - Use the shared storage a user grants your service
 - [Dependencies](./dependencies.md) - Declare and configure service dependencies
 - [Makefile](./makefile.md) - Automate build and install workflows
 - [Writing READMEs](./writing-readmes.md) - Write effective service documentation

@@ -94,7 +94,7 @@ export class BackupRestoreComponent {
         label: 'Password required',
         data: {
           message:
-            'Enter the master password that was used to encrypt this backup. On the next screen, you will select the individual services you want to restore.',
+            'Enter the master password that was used to encrypt this backup.',
           label: 'Master Password',
           placeholder: 'Enter master password',
           useMask: true,
@@ -117,7 +117,7 @@ export class BackupRestoreComponent {
 
       this.context.$implicit.complete()
       this.dialog
-        .openComponent(RECOVER, { label: 'Select services', data })
+        .openComponent(RECOVER, { label: 'Select backup items', data })
         .subscribe()
     }, 'Decrypting drive')
   }
