@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::PackageId;
+use crate::db::model::DatabaseModel;
 use crate::prelude::*;
 use crate::service::effects::callbacks::CallbackHandler;
 use crate::service::effects::prelude::*;
@@ -51,49 +52,49 @@ fn granted_volumes(
         .collect())
 }
 
-/// What a consumer's mounts depend on: its granted volumes' access, availability and source.
-fn mount_inputs(
-    package: &PackageId,
-    catalog: &BTreeMap<SharedVolumeId, SharedVolume>,
-) -> Vec<(
-    SharedVolumeId,
-    bool,
-    SharedVolumeAvailability,
-    SharedVolumeSource,
-)> {
-    catalog
-        .iter()
-        .filter_map(|(id, volume)| {
-            let grant = volume.grants.get(package)?;
-            Some((
-                id.clone(),
-                grant.readonly,
-                volume.availability.clone(),
-                volume.source.clone(),
-            ))
-        })
-        .collect()
+#[derive(Clone, PartialEq)]
+struct MountInput {
+    id: SharedVolumeId,
+    readonly: bool,
+    availability: SharedVolumeAvailability,
+    source: SharedVolumeSource,
+    password: Option<String>,
 }
 
-/// Whether a consumer's mount inputs changed; a volume becoming unknown is not a change.
-fn mount_inputs_changed(
-    previous: &[(
-        SharedVolumeId,
-        bool,
-        SharedVolumeAvailability,
-        SharedVolumeSource,
-    )],
-    mut current: Vec<(
-        SharedVolumeId,
-        bool,
-        SharedVolumeAvailability,
-        SharedVolumeSource,
-    )>,
-) -> bool {
+fn mount_snapshot(
+    package: &PackageId,
+    value: Value,
+) -> Result<(BTreeMap<SharedVolumeId, SharedVolume>, Vec<MountInput>), Error> {
+    let db = DatabaseModel::from(value);
+    let catalog = db.as_public().as_shared_volumes().de()?;
+    let mut inputs = Vec::new();
+    for (id, volume) in &catalog {
+        let Some(grant) = volume.grants.get(package) else {
+            continue;
+        };
+        let password = db
+            .as_private()
+            .as_shared_volume_credentials()
+            .as_idx(id)
+            .map(|credentials| credentials.de())
+            .transpose()?
+            .and_then(|credentials| credentials.password);
+        inputs.push(MountInput {
+            id: id.clone(),
+            readonly: grant.readonly,
+            availability: volume.availability.clone(),
+            source: volume.source.clone(),
+            password,
+        });
+    }
+    Ok((catalog, inputs))
+}
+
+fn mount_inputs_changed(previous: &[MountInput], mut current: Vec<MountInput>) -> bool {
     for input in &mut current {
-        if input.2 == SharedVolumeAvailability::Unknown {
-            if let Some(known) = previous.iter().find(|known| known.0 == input.0) {
-                input.2 = known.2.clone();
+        if input.availability == SharedVolumeAvailability::Unknown {
+            if let Some(known) = previous.iter().find(|known| known.id == input.id) {
+                input.availability = known.availability.clone();
             }
         }
     }
@@ -109,12 +110,10 @@ pub async fn get_shared_volumes(
         .seed
         .ctx
         .db
-        .watch("/public/sharedVolumes".parse().unwrap())
+        .watch(patch_db::json_ptr::ROOT.to_owned())
         .await
-        .typed::<BTreeMap<SharedVolumeId, SharedVolume>>();
-    let catalog: BTreeMap<SharedVolumeId, SharedVolume> =
-        from_value(watch.as_mut().peek_and_mark_seen()?)?;
-    let inputs = mount_inputs(&service.seed.id, &catalog);
+        .typed::<Value>();
+    let (catalog, inputs) = mount_snapshot(&service.seed.id, watch.as_mut().peek_and_mark_seen()?)?;
     let result = granted_volumes(
         service
             .seed
@@ -132,9 +131,8 @@ pub async fn get_shared_volumes(
             service.seed.id.clone(),
             watch,
             move |value| {
-                from_value(value.clone()).map_or(true, |catalog| {
-                    mount_inputs_changed(&inputs, mount_inputs(&package, &catalog))
-                })
+                mount_snapshot(&package, value.clone())
+                    .map_or(true, |(_, current)| mount_inputs_changed(&inputs, current))
             },
             CallbackHandler::new(&service, callback),
         );
@@ -288,7 +286,14 @@ pub async fn mount_shared_volume(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared_volumes::{SharedVolumeGrant, SharedVolumeSource};
+    use crate::shared_volumes::{SharedVolumeCredentials, SharedVolumeGrant, SharedVolumeSource};
+
+    fn catalog_snapshot(catalog: &BTreeMap<SharedVolumeId, SharedVolume>) -> Value {
+        imbl_value::json!({
+            "public": { "sharedVolumes": to_value(catalog).unwrap() },
+            "private": { "sharedVolumeCredentials": {} }
+        })
+    }
 
     #[test]
     fn consumers_are_notified_only_when_their_mount_inputs_change() {
@@ -318,11 +323,12 @@ mod tests {
                 availability: SharedVolumeAvailability::Available,
             },
         );
-        let inputs = mount_inputs(&package, &catalog);
+        let (_, inputs) = mount_snapshot(&package, catalog_snapshot(&catalog)).unwrap();
         let changed = |edit: &dyn Fn(&mut BTreeMap<SharedVolumeId, SharedVolume>)| {
             let mut edited = catalog.clone();
             edit(&mut edited);
-            mount_inputs_changed(&inputs, mount_inputs(&package, &edited))
+            let (_, current) = mount_snapshot(&package, catalog_snapshot(&edited)).unwrap();
+            mount_inputs_changed(&inputs, current)
         };
         assert!(!changed(
             &|c| c.get_mut(&mine).unwrap().name = "Songs".into()
@@ -353,6 +359,99 @@ mod tests {
                 .grants
                 .insert(package.clone(), SharedVolumeGrant { readonly: true });
         }));
+    }
+
+    #[test]
+    fn password_only_edits_invalidate_consumers_without_disclosing_credentials() {
+        let package: PackageId = "consumer".parse().unwrap();
+        let id = SharedVolumeId::new();
+        let other = SharedVolumeId::new();
+        let mut catalog = BTreeMap::from([(
+            id.clone(),
+            SharedVolume {
+                name: "Music".into(),
+                source: SharedVolumeSource::Cifs {
+                    hostname: "nas".into(),
+                    path: "/music".into(),
+                    username: "reader".into(),
+                },
+                grants: [(package.clone(), SharedVolumeGrant { readonly: true })].into(),
+                availability: SharedVolumeAvailability::Available,
+            },
+        )]);
+        catalog.insert(
+            other.clone(),
+            SharedVolume {
+                name: "Private".into(),
+                source: SharedVolumeSource::Cifs {
+                    hostname: "other-nas".into(),
+                    path: "/private".into(),
+                    username: "owner".into(),
+                },
+                grants: BTreeMap::new(),
+                availability: SharedVolumeAvailability::Available,
+            },
+        );
+        let mut value = catalog_snapshot(&catalog);
+        value["private"]["sharedVolumeCredentials"] = to_value(&BTreeMap::from([
+            (
+                id.clone(),
+                SharedVolumeCredentials {
+                    password: Some("old-secret".into()),
+                },
+            ),
+            (
+                other.clone(),
+                SharedVolumeCredentials {
+                    password: Some("other-old-secret".into()),
+                },
+            ),
+        ]))
+        .unwrap();
+        let (_, previous) = mount_snapshot(&package, value.clone()).unwrap();
+        value["private"]["sharedVolumeCredentials"] = to_value(&BTreeMap::from([
+            (
+                id.clone(),
+                SharedVolumeCredentials {
+                    password: Some("old-secret".into()),
+                },
+            ),
+            (
+                other.clone(),
+                SharedVolumeCredentials {
+                    password: Some("unrelated-secret".into()),
+                },
+            ),
+        ]))
+        .unwrap();
+        let (_, current) = mount_snapshot(&package, value.clone()).unwrap();
+        assert!(!mount_inputs_changed(&previous, current));
+        value["private"]["sharedVolumeCredentials"] = to_value(&BTreeMap::from([
+            (
+                id.clone(),
+                SharedVolumeCredentials {
+                    password: Some("replacement-secret".into()),
+                },
+            ),
+            (
+                other,
+                SharedVolumeCredentials {
+                    password: Some("unrelated-secret".into()),
+                },
+            ),
+        ]))
+        .unwrap();
+        let (mut current_catalog, _) = mount_snapshot(&package, value.clone()).unwrap();
+        current_catalog.get_mut(&id).unwrap().availability = SharedVolumeAvailability::Unknown;
+        value["public"]["sharedVolumes"] = to_value(&current_catalog).unwrap();
+        let (current_catalog, current) = mount_snapshot(&package, value).unwrap();
+        assert!(mount_inputs_changed(&previous, current));
+        let listed = granted_volumes(true, &package, current_catalog).unwrap();
+        let public = to_value(&listed).unwrap();
+        assert_eq!(public[0]["id"], to_value(&id).unwrap());
+        assert!(public[0].get("source").is_none());
+        assert!(public[0].get("password").is_none());
+        assert!(!serde_json::to_string(&public).unwrap().contains("secret"));
     }
 
     #[test]

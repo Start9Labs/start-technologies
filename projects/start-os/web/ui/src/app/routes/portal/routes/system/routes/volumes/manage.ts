@@ -1,12 +1,7 @@
 import { Component, computed, effect, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { FormsModule } from '@angular/forms'
-import {
-  CopyService,
-  DialogService,
-  i18nPipe,
-  TaskService,
-} from '@start9labs/shared'
+import { CopyService, i18nPipe, TaskService } from '@start9labs/shared'
 import {
   TuiButton,
   TuiCell,
@@ -19,15 +14,16 @@ import { TuiAvatar, TuiConfirmService } from '@taiga-ui/kit'
 import { TuiForm } from '@taiga-ui/layout'
 import { injectContext } from '@taiga-ui/polymorpheus'
 import { PatchDB } from 'patch-db-client'
-import { firstValueFrom } from 'rxjs'
 
+import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { VOLUME_TYPES } from './types'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { getCurrentManifest } from 'src/app/utils/get-package-data'
 import { GrantChoice, grantFor, GrantLabel, permission } from './grant'
-import { SourceClient, SourceFields, sourceEdit } from './source-fields'
+import { SourceFields, sourceEdit } from './source-fields'
+import { SOURCE_MANAGE_STYLES } from './manage.styles'
 
 @Component({
   template: `
@@ -89,7 +85,7 @@ import { SourceClient, SourceFields, sourceEdit } from './source-fields'
             tuiButton
             type="button"
             appearance="flat-grayscale"
-            (click)="cancel()"
+            (click)="formDialog.close(context.$implicit)"
           >
             {{ 'Cancel' | i18n }}
           </button>
@@ -105,59 +101,33 @@ import { SourceClient, SourceFields, sourceEdit } from './source-fields'
       </div>
     }
   `,
-  styles: `
-    h3 {
-      margin-block: 0.5rem 0;
-    }
-
-    .access [tuiCell] {
-      position: relative;
-      padding-inline: 0;
-
-      [tuiAvatar] {
-        --t-size: 2rem;
-        inline-size: 2rem;
-        block-size: 2rem;
+  styles: [
+    SOURCE_MANAGE_STYLES,
+    `
+      h3 {
+        margin-block: 0.5rem 0;
       }
 
-      &:not(:last-child)::after {
-        content: '';
-        position: absolute;
-        inset: auto 0 0;
-        height: 1px;
-        background: var(--tui-background-neutral-1);
+      .access [tuiCell] {
+        position: relative;
+        padding-inline: 0;
+
+        [tuiAvatar] {
+          --t-size: 2rem;
+          inline-size: 2rem;
+          block-size: 2rem;
+        }
+
+        &:not(:last-child)::after {
+          content: '';
+          position: absolute;
+          inset: auto 0 0;
+          height: 1px;
+          background: var(--tui-background-neutral-1);
+        }
       }
-    }
-
-    .context {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      margin-block-end: 1.5rem;
-      font-weight: bold;
-
-      tui-icon {
-        font-size: 1.25rem;
-      }
-    }
-
-    footer {
-      position: sticky;
-      bottom: 0;
-      z-index: 10;
-      display: flex;
-      justify-content: flex-end;
-      gap: 1rem;
-      padding: 1rem 0;
-      margin: 1rem -1px -1rem;
-      background: var(--tui-background-elevation-1);
-      box-shadow: inset 0 1px var(--tui-background-neutral-1);
-    }
-
-    .remove {
-      margin-inline-end: auto;
-    }
-  `,
+    `,
+  ],
   imports: [
     FormsModule,
     GrantChoice,
@@ -178,7 +148,7 @@ export class VolumeManage {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
-  private readonly dialogs = inject(DialogService)
+  protected readonly formDialog = inject(FormDialogService)
   private readonly confirm = inject(TuiConfirmService, { optional: true })
 
   protected readonly copy = inject(CopyService)
@@ -215,27 +185,6 @@ export class VolumeManage {
     )
   }
 
-  protected async cancel() {
-    if (
-      this.changed() &&
-      !(await firstValueFrom(
-        this.dialogs.openConfirm({
-          label: 'Unsaved changes',
-          size: 's',
-          data: {
-            content:
-              'You have unsaved changes. Are you sure you want to leave?',
-            yes: 'Leave',
-            no: 'Cancel',
-          },
-        }),
-        { defaultValue: false },
-      ))
-    )
-      return
-    this.context.$implicit.complete()
-  }
-
   protected access(id: string): GrantLabel {
     return this.choices()[id] ?? permission(this.volume()?.grants[id])
   }
@@ -250,7 +199,7 @@ export class VolumeManage {
       this.isChanged(pkg),
     )
     const saved = await this.tasks.run(async () => {
-      await this.edit.save(id, this.api.rpc.volumes as unknown as SourceClient)
+      await this.edit.save(id, this.api.rpc.volumes)
       for (const packageId of grants) {
         await this.api.rpc.volumes.setGrant({
           id,

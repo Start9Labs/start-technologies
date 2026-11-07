@@ -158,7 +158,6 @@ boundary('src/app/routes/portal/pipes/to-manifest', ['ToManifestPipe'])
 boundary('../services/alerts.service', ['MarketplaceAlertsService'])
 boundary('src/app/services/title.service', ['TitleDirective'])
 boundary('src/app/routes/portal/components/form.component', ['FormComponent'])
-boundary('src/app/services/form-dialog.service', ['FormDialogService'])
 boundary(
   './source-picker',
   [],
@@ -1351,6 +1350,8 @@ const { DriveVolumeForm } =
   await import('src/app/routes/portal/routes/system/routes/volumes/drive-form')
 const { FormDialogService } =
   await import('src/app/services/form-dialog.service')
+const { sourceEdit } =
+  await import('src/app/routes/portal/routes/system/routes/volumes/source-fields')
 const { AddSourceService } =
   await import('src/app/routes/portal/routes/system/routes/volumes/add')
 const { default: Backups } =
@@ -1367,6 +1368,79 @@ const { WA_IS_MOBILE } = await import('@ng-web-apis/platform')
 const { getManifest, getCurrentManifest } =
   await import('src/app/utils/get-package-data')
 const { getPartitionName } = await import('src/app/utils/get-partition-name')
+
+for (const [label, result, expected] of [
+  ['declined', of(false), 0],
+  ['accepted', of(true), 1],
+  ['dismissed', EMPTY, 0],
+]) {
+  test(`form dialog Cancel uses the existing ${label} discard guard`, async () => {
+    const prompts = []
+    let closed = 0
+    const service = Object.assign(Object.create(FormDialogService.prototype), {
+      i18n: { transform: value => value },
+      formService: {
+        withConfirm: options => {
+          prompts.push(options)
+          return result
+        },
+      },
+    })
+    await service.close({ complete: () => closed++ })
+    assert.equal(closed, expected)
+    assert.equal(prompts.length, 1)
+    assert.equal(prompts[0].label, 'Unsaved changes')
+  })
+}
+
+test('source editor preserves unsaved fields when an inspection replaces its entry', () => {
+  const entry = signal({
+    name: 'Music',
+    source: {
+      kind: 'cifs',
+      hostname: 'nas',
+      path: '/music',
+      username: 'reader',
+    },
+    availability: 'unknown',
+    available: null,
+    error: null,
+  })
+  const edit = sourceEdit(entry)
+  edit.name.set('My music')
+  edit.hostname.set('new-nas')
+  edit.path.set('/albums')
+  edit.username.set('writer')
+  edit.password.set('replacement')
+  entry.update(value => ({
+    ...value,
+    availability: 'available',
+    available: 4096,
+    error: null,
+  }))
+  assert.equal(edit.name(), 'My music')
+  assert.equal(edit.hostname(), 'new-nas')
+  assert.equal(edit.path(), '/albums')
+  assert.equal(edit.username(), 'writer')
+  assert.equal(edit.password(), 'replacement')
+  assert.equal(edit.changed(), true)
+  assert.equal(edit.invalid(), false)
+})
+
+test('source editor follows an actual stored rename without treating it as an edit', () => {
+  const entry = signal({
+    name: 'Music',
+    source: { kind: 'local' },
+    availability: 'unknown',
+    available: null,
+    error: null,
+  })
+  const edit = sourceEdit(entry)
+  edit.name.set('Unsaved')
+  entry.update(value => ({ ...value, name: 'Renamed elsewhere' }))
+  assert.equal(edit.name(), 'Renamed elsewhere')
+  assert.equal(edit.changed(), false)
+})
 
 test('partition names distinguish partitions on one drive and fall back to their device path', () => {
   const drive = { vendor: 'Same vendor', model: 'Same drive' }

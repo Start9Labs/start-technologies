@@ -13,13 +13,8 @@ import { T } from '@start9labs/start-core'
 import { TuiButton, TuiIcon, TuiInput } from '@taiga-ui/core'
 import { TuiPassword, TuiTextarea, TuiTooltip } from '@taiga-ui/kit'
 
-import {
-  CifsSource,
-  DiskSource,
-  UpdateCifsClient,
-  VOLUME_STATUSES,
-  VOLUME_TYPES,
-} from './types'
+import { ApiClient } from 'src/app/services/api/api.types'
+import { VOLUME_STATUSES, VOLUME_TYPES } from './types'
 
 export interface SourceEntry {
   name: string
@@ -29,16 +24,15 @@ export interface SourceEntry {
   error: string | null
 }
 
-export type SourceClient = UpdateCifsClient & {
-  rename: (params: { id: string; name: string }) => Promise<unknown>
-}
+export type SourceClient = Pick<ApiClient['volumes'], 'rename' | 'updateCifs'>
 
 export function sourceEdit(entry: Signal<SourceEntry | undefined>) {
   const cifs = computed(() => {
     const source = entry()?.source
-    return source?.kind === 'cifs' ? (source as CifsSource) : null
+    return source?.kind === 'cifs' ? source : null
   })
-  const name = linkedSignal(() => entry()?.name ?? '')
+  const storedName = computed(() => entry()?.name ?? '')
+  const name = linkedSignal(storedName)
   const hostname = linkedSignal(() => cifs()?.hostname ?? '')
   const path = linkedSignal(() => cifs()?.path ?? '')
   const username = linkedSignal(() => cifs()?.username ?? '')
@@ -261,7 +255,8 @@ export class SourceFields {
   readonly edit = input.required<SourceEdit>()
   readonly localPath = input.required<string>()
 
-  protected readonly driveLabel = computed(
-    () => (this.edit().entry()?.source as DiskSource | undefined)?.label,
-  )
+  protected readonly driveLabel = computed(() => {
+    const source = this.edit().entry()?.source
+    return source?.kind === 'disk' ? source.label : null
+  })
 }
