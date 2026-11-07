@@ -8,7 +8,11 @@ import {
   viewChild,
 } from '@angular/core'
 import { TuiButton } from '@taiga-ui/core'
-import { ApiService, LogEntry } from 'src/app/services/api/api.service'
+import {
+  ApiService,
+  LogEntry,
+  type ContinuationSocket,
+} from 'src/app/services/api/api.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
 @Component({
@@ -77,7 +81,7 @@ export default class Logs {
       .join('\n'),
   )
 
-  private ws: WebSocket | null = null
+  private ws: ContinuationSocket | null = null
   private shouldAutoScroll = true
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempts = 0
@@ -114,8 +118,7 @@ export default class Logs {
       return
     }
     if (this.destroyed) return
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${location.host}/ws/rpc/${guid}`)
+    const ws = this.api.openWebsocket(guid)
     this.ws = ws
 
     ws.onopen = () => {

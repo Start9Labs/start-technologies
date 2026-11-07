@@ -1,5 +1,5 @@
 import { DOCUMENT, inject, Service } from '@angular/core'
-import { catchError, filter, firstValueFrom, throwError } from 'rxjs'
+import { filter, firstValueFrom } from 'rxjs'
 import { webSocket } from 'rxjs/webSocket'
 import type { WebSocketSubject, WebSocketSubjectConfig } from 'rxjs/webSocket'
 
@@ -25,6 +25,7 @@ export class RpcSocketService {
   >()
   private session?: {
     signal: AbortSignal
+    abort: AbortController
     socket: WebSocketSubject<unknown>
   }
 
@@ -37,22 +38,24 @@ export class RpcSocketService {
     const prepared = await this.prepare(lease)
     lease.signal.throwIfAborted()
     if (this.session?.signal !== lease.signal) {
+      const abort = new AbortController()
+      const signal = AbortSignal.any([prepared.signal, abort.signal])
       const socket = webSocket<unknown>({
         url: this.url(),
         WebSocketCtor: noiseWebSocketConstructor(
-          async () => prepared,
+          async () => ({ ...prepared, signal }),
           this.context,
         ),
         serializer: value =>
           typeof value === 'string' ? value : JSON.stringify(value),
       })
-      this.session = { signal: lease.signal, socket }
+      this.session = { signal: lease.signal, abort, socket }
       lease.signal.addEventListener(
         'abort',
         () => {
           if (this.session?.signal === lease.signal) this.session = undefined
         },
-        { once: true },
+        { once: true, signal: abort.signal },
       )
     }
     const id = this.document.defaultView!.crypto.randomUUID()
@@ -74,17 +77,29 @@ export class RpcSocketService {
             typeof value === 'object' &&
             ('result' in value || 'error' in value),
         ),
-        catchError(cause =>
-          throwError(() =>
-            Object.assign(
-              new Error('Encrypted RPC transport failed', { cause }),
-              { code: 0 },
-            ),
-          ),
-        ),
       )
     if (options.timeout) response = withTimeout(response, options.timeout)
-    return firstValueFrom(response)
+    try {
+      return await firstValueFrom(response)
+    } catch (cause) {
+      throw Object.assign(
+        new Error('Encrypted RPC transport failed', { cause }),
+        { code: 0 },
+      )
+    }
+  }
+
+  /** Aborts active RPC calls; the next call opens a fresh session. */
+  disconnect(): void {
+    const session = this.session
+    this.session = undefined
+    session?.abort.abort(new Error('RPC session disconnected'))
+  }
+
+  /** Opens an encrypted continuation with the DOM event/lifetime contract. */
+  openSocket(guid: string): WebSocket {
+    const Constructor = this.constructorFor(() => this.authKeys.lease())
+    return new Constructor(this.url(guid))
   }
 
   /** Redeems a continuation through encrypted admission. */

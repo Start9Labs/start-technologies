@@ -1,5 +1,6 @@
 import type { Api, RpcParamType, RpcReturnType } from './bindings'
 import { inject, Injectable } from '@angular/core'
+import { MockContinuation } from './mock-continuation'
 import { pauseFor, RPCErrorDetails, RpcError } from '@start9labs/shared'
 import { GIT_HASH } from 'src/app/utils/workspace-config'
 import {
@@ -123,10 +124,18 @@ function mockWidths(band: string, channel: number, listed: number[]): number[] {
   ]
 }
 
+const MOCK_UPDATE_GUID = 'mock-guid-1234'
+
 @Injectable({
   providedIn: 'root',
 })
 export class MockApiService extends ApiService {
+  openWebsocket(guid: string) {
+    return new MockContinuation(
+      guid === MOCK_UPDATE_GUID ? { overall: true, phases: [] } : undefined,
+    )
+  }
+
   async login(params: LoginReq): Promise<RpcReturnType<Api, 'auth.login'>> {
     await pauseFor(250)
 
@@ -316,7 +325,9 @@ export class MockApiService extends ApiService {
 
   async systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes> {
     await pauseFor(500)
-    return { target: '1.5.0', progress: 'mock-guid-1234' }
+    const target = params.targetVersion ?? '1.5.0'
+    this.mockSystemInfo.version = target
+    return { target, progress: MOCK_UPDATE_GUID }
   }
 
   async systemRestart(): Promise<null> {

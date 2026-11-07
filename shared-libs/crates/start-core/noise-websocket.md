@@ -79,8 +79,13 @@ unauthenticated state response cannot downgrade a normal call or its continuatio
 The existing state observer retains navigation, retry and DNS sequencing; no
 mode snapshot, copied method allowlist or global per-key security flag is added.
 `session_rpc_router` composes the common OS/Tunnel routes; MCP stays an independent
-OS route. Setup/init/diagnostic contexts remain unscoped. StartWRT, CLI migration
-and browser/administrator TOFU warnings remain unfinished.
+OS route. Setup/init/diagnostic contexts remain unscoped. StartWRT uses the same browser
+transport for keyed RPC and DOM-style GUID sockets. Its existing reconnect/update
+owners abort a stalled shared session before bounded recovery probes; anonymous
+bootstrap retains aborting HTTP. Typed firmware metadata and the retained HTTP
+header feed its existing stale-UI detector. CLI migration and browser/administrator
+TOFU warnings remain unfinished. Maintained Noise/stream modules load lazily;
+identity signing still finishes before native connection and RPC-response deadlines.
 
 The browser adapter composes libp2p's message stream and length-prefixed stream
 with a WebSocket-compatible facade. Its logical receive and queued-write payload

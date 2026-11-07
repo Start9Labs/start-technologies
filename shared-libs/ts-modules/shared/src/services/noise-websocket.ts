@@ -1,9 +1,8 @@
-import { lpStream } from '@libp2p/utils'
+import type { lpStream } from '@libp2p/utils'
 import { NOISE_PROFILE } from '@start9labs/start-core/osBindings/noise-profile'
 import { pEvent } from 'p-event'
 
 import type { PreparedNoiseIdentity } from './noise-identity'
-import { NoiseWebSocketStream } from './noise-stream'
 
 const profile = NOISE_PROFILE.transport
 const encoder = new TextEncoder()
@@ -111,7 +110,12 @@ export function noiseWebSocketConstructor(
     }
 
     private async connect(protocols?: string | string[]) {
-      const prepared = await prepare()
+      const [prepared, { lpStream }, { NoiseWebSocketStream }] =
+        await Promise.all([
+          prepare(),
+          import('@libp2p/utils'),
+          import('./noise-stream'),
+        ])
       if (this.readyState !== this.CONNECTING) return
       prepared.signal.throwIfAborted()
       prepared.signal.addEventListener(

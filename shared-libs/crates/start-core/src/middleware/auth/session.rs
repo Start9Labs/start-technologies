@@ -118,7 +118,7 @@ impl RpcSessionUpgrader {
     pub fn route<C: SecureRpcContext>(
         server: rpc_toolkit::HttpServer<C>,
     ) -> axum::routing::MethodRouter {
-        axum::routing::get(server.for_websocket().with_upgrader(Self))
+        axum::routing::any(server.for_websocket().with_upgrader(Self))
             .layer(crate::middleware::cors::layer())
     }
 }

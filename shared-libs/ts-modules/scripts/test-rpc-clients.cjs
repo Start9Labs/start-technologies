@@ -28,7 +28,7 @@ const compilerOptions = ts.parseJsonConfigFileContent(
   root,
 ).options
 
-function harness(moduleOverrides = new Map()) {
+function harness(moduleOverrides = new Map(), globals = {}) {
   const dependencies = new Map()
   const tokens = Object.fromEntries(
     [
@@ -53,6 +53,7 @@ function harness(moduleOverrides = new Map()) {
     },
   })
   dependencies.set(tokens.RpcSocketService, {})
+  dependencies.set(tokens.StaleUiService, { checkHash() {} })
   dependencies.set(tokens.i18nPipe, { transform: value => value })
   const modules = new Map()
   const angular = {
@@ -139,6 +140,7 @@ function harness(moduleOverrides = new Map()) {
         URL,
         TextEncoder,
         structuredClone,
+        ...globals,
       },
       { filename },
     )
@@ -1642,12 +1644,9 @@ test('WRT lazily invalidates authentication and preserves host errors and nullab
   let invalidated = 0
   let lookups = 0
   let response = { result: null }
-  const { rpcRequestBody } = load(
-    'shared-libs/ts-modules/shared/src/services/rpc-request.ts',
-  )
   const requests = []
   dependencies.set(tokens.AuthKeyService, {
-    signRpcBody: async options => rpcRequestBody(options),
+    lease: async () => null,
   })
   dependencies.set(tokens.HttpService, {
     request: async options => {
@@ -1698,6 +1697,223 @@ test('WRT lazily invalidates authentication and preserves host errors and nullab
     client.request({ method: 'auth.logout', params: {} }),
     /Empty RPC response/,
   )
+})
+
+test('WRT encrypted calls capture bytes, inspect firmware metadata and never downgrade', async () => {
+  const { dependencies, tokens, load } = harness()
+  const lease = { key: {}, signal: new AbortController().signal }
+  let resolveLease
+  dependencies.set(tokens.AuthKeyService, {
+    lease: () =>
+      new Promise(resolve => {
+        resolveLease = resolve
+      }),
+  })
+  const hashes = []
+  const calls = []
+  let response = { result: null, meta: { gitHash: 'firmware' } }
+  dependencies.set(tokens.StaleUiService, {
+    checkHash: hash => hashes.push(hash),
+  })
+  dependencies.set(tokens.HttpService, {
+    request: () => assert.fail('encrypted calls cannot fall back'),
+  })
+  dependencies.set(tokens.RpcSocketService, {
+    message: async (body, options, key) => {
+      calls.push({ body, options, key })
+      return response
+    },
+  })
+  let revoked = 0
+  dependencies.set(tokens.Injector, {
+    get: () => ({ setUnverified: () => revoked++ }),
+  })
+  const rpc = new (load(
+    'projects/start-wrt/web/src/app/services/rpc.service.ts',
+  ).RpcService)()
+  const params = { password: 'original' }
+  const pending = rpc.request({ method: 'auth.verify-password', params })
+  params.password = 'changed'
+  resolveLease(lease)
+  await pending
+  assert.equal(JSON.parse(calls[0].body).params.password, 'original')
+  assert.equal(calls[0].key, lease)
+  assert.deepEqual(hashes, ['firmware'])
+  response = {
+    error: { code: 34, message: 'revoked' },
+    meta: { gitHash: 'replacement' },
+  }
+  const rejected = rpc.request({ method: 'auth.logout', params: {} })
+  resolveLease(lease)
+  await assert.rejects(rejected, error => error.code === 34)
+  assert.deepEqual(hashes, ['firmware', 'replacement'])
+  assert.equal(revoked, 1)
+  dependencies.get(tokens.RpcSocketService).message = async () => {
+    throw Object.assign(new Error('network'), { code: 0 })
+  }
+  const failed = rpc.request({ method: 'system.info', params: {} })
+  resolveLease(lease)
+  await assert.rejects(failed, error => error.code === 0)
+})
+
+test('WRT mock continuations emit local events and close asynchronously without networking', async () => {
+  const { load } = harness(new Map(), {
+    queueMicrotask,
+    Event,
+    MessageEvent,
+    CloseEvent: class extends Event {
+      constructor(type, init) {
+        super(type)
+        Object.assign(this, init)
+      }
+    },
+  })
+  const { MockContinuation } = load(
+    'projects/start-wrt/web/src/app/services/api/mock-continuation.ts',
+  )
+  const progress = { overall: true, phases: [] }
+  const socket = new MockContinuation(progress)
+  const events = []
+  const closed = Promise.withResolvers()
+  socket.onopen = () => events.push('open')
+  socket.onmessage = event => {
+    assert.deepEqual(JSON.parse(event.data), progress)
+    events.push('message')
+    socket.close()
+    events.push('after-close')
+  }
+  socket.onclose = () => {
+    events.push('close')
+    closed.resolve()
+  }
+  await closed.promise
+  assert.deepEqual(events, ['open', 'message', 'after-close', 'close'])
+  socket.close()
+})
+
+function wrtFlowHarness(globals = {}) {
+  return harness(
+    new Map([
+      [
+        '@taiga-ui/core',
+        {
+          TuiLoader: class {},
+          TuiTitle: class {},
+          TuiNotificationService: class {},
+        },
+      ],
+      ['@taiga-ui/polymorpheus', { PolymorpheusComponent: class {} }],
+      ['src/app/i18n/i18n.pipe', { i18nPipe: class {} }],
+      [
+        'src/app/i18n/validation-errors',
+        {
+          fill: () =>
+            assert.fail('an unconfirmed update cannot report success'),
+        },
+      ],
+      ['src/app/services/network.service', { NetworkService: class {} }],
+      [
+        'src/app/utils/workspace-config',
+        { IS_MOCK: Symbol(), GIT_HASH: Symbol() },
+      ],
+    ]),
+    globals,
+  )
+}
+
+test('WRT outage ownership aborts a stalled RPC session only on the first declaration', () => {
+  const { load } = wrtFlowHarness({ setInterval: () => 1 })
+  const service = Object.create(
+    load('projects/start-wrt/web/src/app/services/connection.service.ts')
+      .ConnectionService.prototype,
+  )
+  let unreachable = false
+  let aborted = 0
+  Object.assign(service, {
+    unreachable: Object.assign(() => unreachable, {
+      set: value => {
+        unreachable = value
+      },
+    }),
+    message: { set() {} },
+    sockets: { disconnect: () => aborted++ },
+    i18n: { transform: value => value },
+    alerts: { open: () => of(null) },
+    poll() {},
+  })
+  service.reportUnreachable()
+  service.reportUnreachable()
+  assert.equal(aborted, 1)
+  assert.equal(unreachable, true)
+})
+
+test('WRT every failed recovery probe discards its stalled multiplexed session', async () => {
+  const { load } = wrtFlowHarness()
+  const service = Object.create(
+    load('projects/start-wrt/web/src/app/services/connection.service.ts')
+      .ConnectionService.prototype,
+  )
+  let aborted = 0
+  Object.assign(service, {
+    api: {
+      systemInfo: async timeout => {
+        assert.equal(timeout, 5000)
+        throw { code: 0 }
+      },
+    },
+    sockets: { disconnect: () => aborted++ },
+    staleUi: { check: () => assert.fail('no firmware response') },
+    recover: () => assert.fail('still offline'),
+  })
+  await service.poll()
+  await service.poll()
+  assert.equal(aborted, 2)
+})
+
+test('WRT interrupted-update recovery cannot claim the requested version from an old firmware reply', async () => {
+  const { load } = wrtFlowHarness({
+    setTimeout: callback => queueMicrotask(callback),
+    sessionStorage: { setItem: () => assert.fail('no success confirmation') },
+    window: {
+      location: { reload: () => assert.fail('no successful-update reload') },
+    },
+  })
+  const service = Object.create(
+    load('projects/start-wrt/web/src/app/services/system.service.ts')
+      .SystemService.prototype,
+  )
+  let attempts = 0
+  let rebooting = true
+  const messages = []
+  Object.assign(service, {
+    targetVersion: '1.5.0',
+    updating: { set() {} },
+    rebooting: {
+      set: value => {
+        rebooting = value
+      },
+    },
+    api: {
+      systemInfo: async () => {
+        if (++attempts === 1) throw { code: 0 }
+        return { version: '1.4.0' }
+      },
+    },
+    connection: { resume() {} },
+    sockets: { disconnect() {} },
+    i18n: { transform: value => value },
+    alerts: {
+      open: message => {
+        messages.push(message)
+        return of(null)
+      },
+    },
+    staleUi: { isStale: () => true },
+  })
+  await service.pollForReconnect()
+  assert.equal(attempts, 2)
+  assert.equal(rebooting, false)
+  assert.deepEqual(messages, ['Update failed — check device logs'])
 })
 
 function startupStateHarness() {

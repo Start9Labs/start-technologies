@@ -26,6 +26,68 @@ async fn server(ctx: RegistryContext) -> (Url, NonDetachingJoinHandle<()>) {
     (url, task)
 }
 
+#[tokio::test]
+async fn session_router_accepts_http2_extended_connect() {
+    use axum::body::{Body, Bytes};
+    use http_body_util::Empty;
+    use hyper_util::rt::{TokioExecutor, TokioIo};
+    use tower_service::Service;
+
+    let (_temp, ctx, _, _, _) = crate::registry::tests::fixture().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let app = session_rpc_router(ctx.clone(), registry_server(ctx));
+    let _server: NonDetachingJoinHandle<()> = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let service =
+            hyper::service::service_fn(move |request: http::Request<hyper::body::Incoming>| {
+                let mut app = app.clone();
+                async move { app.call(request.map(Body::new)).await }
+            });
+        hyper::server::conn::http2::Builder::new(TokioExecutor::new())
+            .enable_connect_protocol()
+            .serve_connection(TokioIo::new(socket), service)
+            .await
+            .unwrap();
+    })
+    .into();
+    let socket = tokio::net::TcpStream::connect(address).await.unwrap();
+    let (mut sender, connection) =
+        hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(socket))
+            .await
+            .unwrap();
+    let _client: NonDetachingJoinHandle<()> = tokio::spawn(async move {
+        let _ = connection.await;
+    })
+    .into();
+    // Wait for peer SETTINGS before requesting extended CONNECT.
+    sender
+        .send_request(
+            http::Request::builder()
+                .uri(format!("http://{address}/"))
+                .body(Empty::<Bytes>::new())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    sender.ready().await.unwrap();
+    let mut request = http::Request::builder()
+        .method(http::Method::CONNECT)
+        .version(http::Version::HTTP_2)
+        .uri(format!("http://{address}{}", RpcSessionUpgrader::PATH))
+        .header("sec-websocket-version", "13")
+        .body(Empty::<Bytes>::new())
+        .unwrap();
+    request
+        .extensions_mut()
+        .insert(hyper::ext::Protocol::from_static("websocket"));
+    let response = tokio::time::timeout(Duration::from_secs(3), sender.send_request(request))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response.status(), http::StatusCode::OK);
+}
+
 async fn encrypted(url: &Url, path: &str, signer: &Signer) -> EncryptedSocket {
     let mut url = url.join(path).unwrap();
     url.set_scheme("ws").unwrap();

@@ -1,17 +1,20 @@
-import { publicKeyFromRaw } from '@libp2p/crypto/keys'
 import type {
   Ed25519PrivateKey,
   Ed25519PublicKey,
   MessageStream,
 } from '@libp2p/interface'
-import { defaultLogger } from '@libp2p/logger'
-import { noise, pureJsCrypto } from '@libp2p/noise'
 import type { NoiseComponents } from '@libp2p/noise'
 import { auth } from '@start9labs/start-core'
 import { NOISE_PROFILE } from '@start9labs/start-core/osBindings/noise-profile'
 import { equals } from 'uint8arrays/equals'
 
 export async function prepareNoiseIdentity(key: auth.AuthKey) {
+  const [{ publicKeyFromRaw }, { defaultLogger }, { noise, pureJsCrypto }] =
+    await Promise.all([
+      import('@libp2p/crypto/keys'),
+      import('@libp2p/logger'),
+      import('@libp2p/noise'),
+    ])
   const dh = pureJsCrypto.generateX25519KeyPair()
   const message = new Uint8Array([
     ...NOISE_PROFILE.identity.signaturePrefix,

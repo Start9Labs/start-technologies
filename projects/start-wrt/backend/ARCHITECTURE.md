@@ -4,20 +4,20 @@ Rust crates powering the StartWRT router daemon and CLI. Three crates: `ctrl` (R
 
 ## Transport
 
-HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 at `POST /rpc/v1` via [rpc-toolkit](../../../shared-libs/crates/rpc-toolkit). Request-signature and local-token authentication from `start-core` (see [auth.rs](#authrs--authentication)).
+HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 uses optional Noise admission at `/ws/rpc`, with `POST /rpc/v1` compatibility, via [rpc-toolkit](../../../shared-libs/crates/rpc-toolkit). `rpc.rs` composes one dispatch/middleware stack, adds typed firmware metadata to replies and retains the CORS-exposed HTTP firmware header. Live authorization uses the verified connection peer; request-signature/local-token compatibility stays in `start-core` (see [auth.rs](#authrs--authentication)).
 
 Additional routes:
 
-| Route                                     | Purpose                                                           |
-| ----------------------------------------- | ----------------------------------------------------------------- |
-| `POST /api/setup/flash`                   | NDJSON streaming for setup wizard                                 |
-| `GET\|POST /rest/rpc/{guid}`              | Continuation endpoint for backup/restore/diagnostics (10MB limit) |
-| `GET /ws/rpc/{guid}`                      | WebSocket continuation endpoint (update progress, live logs)      |
-| `GET /luci`                               | Convenience redirect to `/cgi-bin/luci`                           |
-| `GET /static/local-root-ca.crt`           | Root CA certificate download (no auth)                            |
-| `GET /static/local-root-ca.mobileconfig`  | Root CA as an Apple configuration profile (no auth)               |
-| `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` | LuCI reverse proxy (localhost:8080)                               |
-| Fallback                                  | Serves embedded web UI via `include_dir`                          |
+| Route                                     | Purpose                                                             |
+| ----------------------------------------- | ------------------------------------------------------------------- |
+| `POST /api/setup/flash`                   | NDJSON streaming for setup wizard                                   |
+| `GET\|POST /rest/rpc/{guid}`              | Continuation endpoint for backup/restore/diagnostics (64 MiB limit) |
+| `GET /ws/rpc/{guid}`                      | WebSocket continuation endpoint (update progress, live logs)        |
+| `GET /luci`                               | Convenience redirect to `/cgi-bin/luci`                             |
+| `GET /static/local-root-ca.crt`           | Root CA certificate download (no auth)                              |
+| `GET /static/local-root-ca.mobileconfig`  | Root CA as an Apple configuration profile (no auth)                 |
+| `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` | LuCI reverse proxy (localhost:8080)                                 |
+| Fallback                                  | Serves embedded web UI via `include_dir`                            |
 
 Beside the wildcard listeners, port control binds the SNI demux to the WAN IPv4 on 443 while hostname routes hold it (SO_REUSEPORT; the kernel delivers a connection to the most specific bound socket).
 
@@ -181,7 +181,7 @@ Handler metadata:
 - `login: true` — enroll the signing key by password; reject enrollment when a valid local auth token is supplied
 - `get_signer: true` — inject the signing key as `__Auth_signer`
 
-Every other call needs a valid signature or the local token; the peer address grants nothing.
+Every other call needs an enrolled Noise peer, a valid compatibility signature or the local token; the peer address grants nothing. A secure-origin GUID requires fresh same-peer encrypted admission, independently of live revocation and resource budgets.
 
 Returns RPC error code 34 on auth failure (frontend auto-logs out).
 

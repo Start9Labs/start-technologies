@@ -62,11 +62,13 @@ promise-based**; components call `await this.api.method(params)` and never touch
   is absent. Resource requests retain HTTP/header signatures. Streams (logs, PatchDB, metrics)
   use `api.openWebsocket$<T>(guid)` (`rxjs/webSocket`), buffered (`bufferTime(250…1000)`), with
   retry/backoff in the source service.
-- **start-wrt keeps its own `HttpService`/`RpcService`/`ConnectionService` stack deliberately**:
-  its per-request rxjs `timeout` **aborts the fetch on unsubscribe**, surfacing `{code: 0}`
-  network errors that drive the reconnect UX. Preserve its firmware-hash header and reconnect
-  contracts when changing transport; shared HTTP deadlines also unsubscribe their actual source.
-  (Requires `withFetch()`.)
+- **start-wrt retains its RPC/reconnect workflow owners**: keyed calls compose shared Noise
+  transport; anonymous bootstrap keeps its aborting `HttpService` (`withFetch()`). Deadlines
+  surface `{code: 0}`; `ConnectionService` and update recovery call the shared session-abort
+  primitive before probing again. A timed-out multiplexed probe alone cannot release siblings
+  holding a dead socket. Generated firmware metadata and the retained HTTP header feed the
+  existing stale-UI detector. DOM-style encrypted continuations preserve log/update event,
+  close and retry ownership. Physical close starts recovery, not an update-success claim.
 - **start9-store = REST + Zod through a BFF**: frontend calls `/api/*` only (SSR server proxies
   it — same relative URLs in dev/prod/SSR); domain types + Zod schemas live in `shared/`;
   commerce backends hide behind the API (`CommerceBackend` interface). The frontend must never
