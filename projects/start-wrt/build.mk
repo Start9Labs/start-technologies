@@ -58,17 +58,16 @@ STARTWRT_IMAGES := results/$(STARTWRT_SDCARD_NAME) results/$(STARTWRT_SYSUPGRADE
 STARTWRT_REMOTE ?= root@192.168.0.1
 
 .PHONY: start-wrt
-# Build the startwrt binary (embeds the web UI). Cross-compiled for the K1 via
-# the dockerized cargo-zigbuild toolchain in build/build-rust.sh.
 start-wrt: $(STARTWRT_BIN)
 
-$(STARTWRT_BIN): $(STARTWRT_RUST_SRC) $(STARTWRT_SHARED_RUST_SRC) Cargo.toml Cargo.lock $(STARTWRT_WEB_DIST) $(STARTWRT_DIR)/build/build-rust.sh
+$(STARTWRT_BIN): $(STARTWRT_RUST_SRC) $(STARTWRT_SHARED_RUST_SRC) Cargo.toml Cargo.lock $(STARTWRT_WEB_DIST) \
+	$(addprefix $(STARTWRT_DIR)/build/,build-rust.sh builder-alias.sh zigcc-k1.sh zigcxx-k1.sh verify-isa.sh)
 	ARCH=$(STARTWRT_ARCH) RUST_ARCH=$(STARTWRT_RUST_ARCH) PROFILE=$(PROFILE) ./$(STARTWRT_DIR)/build/build-rust.sh
 	@touch $(STARTWRT_BIN)
 
 define STARTWRT_GENERATE_BINDINGS
-cargo run --profile bindings -p startwrt-core --example generate_rpc_bindings --features ts --locked -- $(STARTWRT_BINDINGS_DIR)/bindings.ts
-npm exec -- prettier -w $(STARTWRT_BINDINGS)
+bash $(STARTWRT_DIR)/build/generate-bindings.sh $(STARTWRT_BINDINGS)
+npm exec -- prettier --config .prettierrc.json -w $(STARTWRT_BINDINGS)
 endef
 
 .PHONY: start-wrt-rpc-bindings start-wrt-rpc-bindings-check
