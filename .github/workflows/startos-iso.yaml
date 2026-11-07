@@ -270,6 +270,7 @@ jobs:
               )
             )[(github.event.inputs.platform || 'ALL') == 'ALL']
           }}
+    # RISC-V Node's concurrent GC crashes during large artifact transfers.
     runs-on: >-
       ${{
         fromJson(
@@ -283,8 +284,8 @@ jobs:
               "aarch64-nonfree": "ubuntu-24.04-arm",
               "aarch64-nvidia": "ubuntu-24.04-arm",
               "raspberrypi": "ubuntu-24.04-arm",
-              "riscv64": "ubuntu-24.04-riscv",
-              "riscv64-nonfree": "ubuntu-24.04-riscv",
+              "riscv64": "ubuntu-24.04-arm",
+              "riscv64-nonfree": "ubuntu-24.04-arm",
             }')[matrix.platform],
             fromJson('{
               "x86_64": "amd64-fast",
@@ -343,19 +344,6 @@ jobs:
 
       - name: Set up docker QEMU
         uses: docker/setup-qemu-action@v4
-
-      # The RISE riscv64 runner ships no Node, and nodejs.org publishes no riscv64 builds.
-      # setup-node's mirror input requires a nodejs.org `/dist` layout, which unofficial-builds lacks.
-      - name: Install Node from unofficial-builds
-        if: ${{ env.ARCH == 'riscv64' && github.event.inputs.runner != 'fast' }}
-        run: |
-          base="https://unofficial-builds.nodejs.org/download/release/v${NODEJS_VERSION}"
-          tarball="node-v${NODEJS_VERSION}-linux-riscv64.tar.xz"
-          cd "$RUNNER_TEMP"
-          curl -fsSLO "$base/$tarball"
-          curl -fsSL "$base/SHASUMS256.txt" | grep " $tarball\$" | sha256sum -c -
-          tar -xJf "$tarball"
-          echo "$RUNNER_TEMP/${tarball%.tar.xz}/bin" >> "$GITHUB_PATH"
 
       - uses: actions/checkout@v6
         with:
