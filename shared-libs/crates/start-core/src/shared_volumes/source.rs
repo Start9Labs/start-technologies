@@ -59,16 +59,18 @@ impl SourceDefinition {
 
     fn filesystem(&self, id: &SharedVolumeId) -> SourceFilesystem {
         match &self.source {
-            SharedVolumeSource::Local => {
-                SourceFilesystem::Local(Bind::new(local_path(crate::DATA_DIR, id)))
-            }
+            SharedVolumeSource::Local => SourceFilesystem::Local(local_path(crate::DATA_DIR, id)),
             SharedVolumeSource::Disk { logicalname, .. } => SourceFilesystem::external(logicalname),
-            SharedVolumeSource::Cifs { hostname, path } => {
+            SharedVolumeSource::Cifs {
+                hostname,
+                path,
+                username,
+            } => {
                 let credentials = self.credentials.as_ref().unwrap();
                 SourceFilesystem::Cifs(SharedCifs(Cifs {
                     hostname: hostname.clone(),
                     path: path.clone(),
-                    username: credentials.username.clone(),
+                    username: username.clone(),
                     password: credentials.password.clone(),
                 }))
             }
@@ -77,7 +79,7 @@ impl SourceDefinition {
 }
 
 enum SourceFilesystem {
-    Local(Bind<PathBuf>),
+    Local(PathBuf),
     Disk(IdMapped<BlockDev<PathBuf>>),
     Cifs(SharedCifs),
 }
@@ -96,7 +98,15 @@ impl FileSystem for SourceFilesystem {
         mount_type: MountType,
     ) -> Result<(), Error> {
         match self {
-            Self::Local(filesystem) => filesystem.mount(mountpoint, mount_type).await,
+            Self::Local(path) => {
+                if !tokio::fs::metadata(path).await?.is_dir() {
+                    return Err(Error::new(
+                        eyre!(t!("shared-volumes.source-unavailable")),
+                        ErrorKind::Filesystem,
+                    ));
+                }
+                Bind::new(path).mount(mountpoint, mount_type).await
+            }
             Self::Disk(filesystem) => filesystem.mount(mountpoint, mount_type).await,
             Self::Cifs(filesystem) => filesystem.mount(mountpoint, mount_type).await,
         }
@@ -109,7 +119,7 @@ impl FileSystem for SourceFilesystem {
     }
     async fn source_hash(&self) -> Result<digest::Output<sha2::Sha256>, Error> {
         match self {
-            Self::Local(filesystem) => filesystem.source_hash().await,
+            Self::Local(path) => Bind::new(path).source_hash().await,
             Self::Disk(filesystem) => filesystem.source_hash().await,
             Self::Cifs(filesystem) => filesystem.source_hash().await,
         }
@@ -303,14 +313,31 @@ pub(crate) async fn measure_mount(path: &Path) -> Result<u64, Error> {
 pub(super) fn external_partition(
     disks: &[crate::disk::util::DiskInfo],
     logicalname: &Path,
-) -> Result<PathBuf, Error> {
+) -> Result<(PathBuf, Option<String>), Error> {
     disks
         .iter()
-        .flat_map(|disk| &disk.partitions)
-        .find(|partition| {
+        .flat_map(|disk| {
+            disk.partitions
+                .iter()
+                .map(move |partition| (disk, partition))
+        })
+        .find(|(_, partition)| {
             partition.logicalname == logicalname || partition.stable_path == logicalname
         })
-        .map(|partition| partition.logicalname.clone())
+        .map(|(disk, partition)| {
+            let model = [disk.vendor.as_deref(), disk.model.as_deref()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ");
+            (
+                partition.logicalname.clone(),
+                partition
+                    .label
+                    .clone()
+                    .or((!model.is_empty()).then_some(model)),
+            )
+        })
         .ok_or_else(|| {
             Error::new(
                 eyre!(t!("shared-volumes.invalid-drive")),
@@ -322,6 +349,7 @@ pub(super) fn external_partition(
 pub(super) async fn prepare_external_source(
     device: PathBuf,
     path: PathBuf,
+    label: Option<String>,
 ) -> Result<SharedVolumeSource, Error> {
     let path = confined_relative(&path)?;
     let logicalname = BlockDev::new(device).persistent_path().await?;
@@ -354,7 +382,11 @@ pub(super) async fn prepare_external_source(
             unmount?;
         }
     }
-    Ok(SharedVolumeSource::Disk { logicalname, path })
+    Ok(SharedVolumeSource::Disk {
+        logicalname,
+        path,
+        label,
+    })
 }
 
 fn create_directory_beneath(root: &Path, path: &Path) -> Result<(), Error> {

@@ -25,6 +25,9 @@ import { SYSTEM_MENU } from './system.const'
                 @if (page.item === 'General Settings' && badge()) {
                   <tui-badge-notification>{{ badge() }}</tui-badge-notification>
                 }
+                @if (page.link === 'backups' && backupsWarning()) {
+                  <tui-icon icon="@tui.triangle-alert" class="warning" />
+                }
               </span>
             </span>
           </a>
@@ -41,6 +44,12 @@ import { SYSTEM_MENU } from './system.const'
 
     tui-badge-notification {
       vertical-align: baseline;
+    }
+
+    .warning {
+      font-size: 1rem;
+      vertical-align: text-bottom;
+      color: var(--tui-status-warning);
     }
 
     hr {
@@ -115,4 +124,5 @@ import { SYSTEM_MENU } from './system.const'
 export class SystemComponent {
   readonly menu = SYSTEM_MENU
   readonly badge = toSignal(inject(BadgeService).getCount('system'))
+  readonly backupsWarning = toSignal(inject(BadgeService).getWarning('backups'))
 }

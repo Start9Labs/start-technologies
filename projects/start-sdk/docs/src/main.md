@@ -469,7 +469,7 @@ trigger: sdk.trigger.statusTrigger(30_000, {
 
 ## Volume Mounts
 
-User-managed local folders and CIFS shares use a separate [Volumes API](shared-volumes.md), with explicit user grants and optional mount outcomes. The declarations below concern package-owned storage and assets.
+User-managed local folders, attached drives and CIFS shares use a separate [Shared Volumes API](shared-volumes.md), with explicit user grants and optional mount outcomes. The declarations below concern package-owned storage and assets.
 
 Volume mounts declared `readonly: true` and all asset mounts are read-only; writes through them fail with `EROFS`. Copy assets that need modification into a writable volume and mount that copy. `type: 'infer'` detects existing regular files; use `type: 'file'` when the file may need to be created.
 

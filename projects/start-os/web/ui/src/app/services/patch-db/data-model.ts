@@ -10,6 +10,18 @@ export type DataModel = {
   packageData: AllPackageData
   sharedVolumes: T.Public['sharedVolumes']
   disks: T.Public['disks']
+  backupTargets: Record<string, BackupTargetEntry>
+}
+
+export type BackupTargetEntry = {
+  name: string
+  source: T.SharedVolumeSource
+  availability: T.SharedVolumeAvailability
+  available: number | null
+  error: string | null
+  checkedAt: string | null
+  startOs: Record<string, T.StartOsRecoveryInfo>
+  legacyBackup: boolean
 }
 
 export type UIData = {

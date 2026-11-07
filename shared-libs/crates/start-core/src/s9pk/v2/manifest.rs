@@ -36,7 +36,7 @@ pub struct Manifest {
     pub metadata: PackageMetadata,
     pub images: BTreeMap<ImageId, ImageConfig>,
     pub volumes: BTreeSet<VolumeId>,
-    /// Enables user-managed grants to system volumes; grants default to none.
+    /// Enables user-managed grants to shared volumes; grants default to none.
     #[serde(default)]
     pub shared_volumes: bool,
     #[serde(default)]

@@ -149,7 +149,7 @@ async fn source_overlaps_target(
 ) -> Result<bool, Error> {
     Ok(match (source, destination) {
         (
-            SharedVolumeSource::Cifs { hostname, path },
+            SharedVolumeSource::Cifs { hostname, path, .. },
             super::target::BackupTargetFS::Cifs(target),
         ) => {
             let target_path = Path::new("/")
@@ -376,6 +376,7 @@ mod tests {
         let source = SharedVolumeSource::Disk {
             logicalname: alias,
             path: PathBuf::new(),
+            label: None,
         };
         let target = |path| super::super::target::BackupTargetFS::Disk(BlockDev::new(path));
         assert!(

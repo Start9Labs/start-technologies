@@ -3,6 +3,7 @@ import { DialogService, i18nKey, i18nPipe } from '@start9labs/shared'
 import { TuiDialogOptions } from '@taiga-ui/core'
 import { TuiConfirmData, TuiConfirmService } from '@taiga-ui/kit'
 import { PolymorpheusComponent } from '@taiga-ui/polymorpheus'
+import { finalize, share } from 'rxjs'
 
 @Injectable({ providedIn: 'root' })
 export class FormDialogService {
@@ -19,7 +20,7 @@ export class FormDialogService {
     ],
   })
 
-  open<T>(
+  open<T, R = void>(
     component: Type<any>,
     options: Partial<TuiDialogOptions<T>> & {
       label?: i18nKey
@@ -38,14 +39,19 @@ export class FormDialogService {
 
     const closable = this.formService.withConfirm(PROMPT)
 
-    this.dialog
-      .openComponent(new PolymorpheusComponent(component, this.injector), {
+    const result$ = this.dialog
+      .openComponent<R>(new PolymorpheusComponent(component, this.injector), {
         dismissible: closable,
         closable,
         ...options,
       })
-      .subscribe({
-        complete: () => this.formService.markAsPristine(),
-      })
+      .pipe(
+        finalize(() => this.formService.markAsPristine()),
+        share(),
+      )
+
+    result$.subscribe()
+
+    return result$
   }
 }

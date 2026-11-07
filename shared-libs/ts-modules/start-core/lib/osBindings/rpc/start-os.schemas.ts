@@ -3634,6 +3634,32 @@ export const UnsetGatewaySecureParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ gateway: GatewayId }).meta({
   id: 'UnsetGatewaySecureParams',
 })
+export const UpdateCifsSharedVolumeParams: z.ZodObject<{
+  id: typeof SharedVolumeId
+  hostname: z.ZodString
+  path: z.ZodString
+  username: z.ZodString
+  /**
+   * Omitted keeps the stored password; empty clears it.
+   */
+  password: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  id: SharedVolumeId,
+  hostname: z.string(),
+  path: z.string(),
+  username: z.string(),
+  /**
+   * Omitted keeps the stored password; empty clears it.
+   */
+  password: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description: 'Omitted keeps the stored password; empty clears it.',
+  }),
+}).meta({
+  id: 'UpdateCifsSharedVolumeParams',
+})
 export const UpdateSystemRes: z.ZodObject<{
   target: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -7137,6 +7163,10 @@ export const Api = {
         },
         'set-grant': {
           _PARAMS: /* @__PURE__ */ SetSharedVolumeGrantParams,
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        'update-cifs': {
+          _PARAMS: /* @__PURE__ */ UpdateCifsSharedVolumeParams,
           _RETURN: /* @__PURE__ */ z.null(),
         },
       },

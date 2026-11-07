@@ -1,6 +1,8 @@
-# Volumes
+# Shared Volumes
 
-System volumes are user-owned local folders, folders on attached drives or CIFS/SMB shares granted to selected services. They are separate from package-owned `sdk.volumes` and dependency mounts.
+Shared volumes are for data that several services, or other devices, need to use; a service's own data belongs in its package-owned volumes. Declare support only if your service benefits from data the user shares with it.
+
+Shared volumes are user-owned local folders, folders on attached drives or CIFS/SMB shares granted to selected services. They are separate from package-owned `sdk.volumes` and dependency mounts.
 
 ## Declare support
 
@@ -10,7 +12,7 @@ Use Start SDK 4.1.0 or later. Add this property to `setupManifest`:
 sharedVolumes: true,
 ```
 
-This enables the service's **Volumes** controls in StartOS; it requests no access. Users grant each volume independently as read-only or read/write. `buildManifest` requires StartOS 0.4.2 for this capability and rejects an explicit older compatibility override. Packaging it requires Start CLI 2.8.0 or later; the build wrapper checks before packing and verifies the resulting archive preserves the opt-in. Unreleased builds can report 2.8.0 before including this capability. If archive verification fails, install a volume-capable CLI build; the failed output is removed.
+This enables the service's **Shared Volumes** controls in StartOS; it requests no access. Users grant each volume independently as read-only or read/write. `buildManifest` requires StartOS 0.4.2 for this capability and rejects an explicit older compatibility override. Packaging it requires Start CLI 2.8.0 or later; the build wrapper checks before packing and verifies the resulting archive preserves the opt-in. Unreleased builds can report 2.8.0 before including this capability. If archive verification fails, install a volume-capable CLI build; the failed output is removed.
 
 ## Read grants
 
@@ -20,7 +22,7 @@ const grants = await sdk.getSharedVolumes(effects).const()
 
 Each grant contains `id`, `name`, `readonly` and `availability`. Store the stable GUID `id` in service configuration and use the editable `name` in user-facing choices. Names are neither identities nor paths. The API returns neither host paths nor network credentials. Attached-drive mounts translate ownership through StartOS's existing service UID/GID mapping without changing on-disk owners. Linux mount metadata can reveal the CIFS account name to a granted service; its password remains private.
 
-The reader supports `.once()`, `.const()`, `.watch()` and the other [reactive reader methods](file-models.md). Grant additions, revocations, access-mode changes and renames invalidate reactive reads. An offline granted volume remains listed; revocation removes it. Availability is the host's last observation, not a mount preflight or a guarantee of continued connectivity.
+The reader supports `.once()`, `.const()`, `.watch()` and the other [reactive reader methods](file-models.md). Reactive reads are invalidated only when one of the service's own granted volumes changes in a way its mounts depend on: a grant is added or revoked, its access mode changes, it becomes available or unavailable (a status reset to unknown does not count), or its source changes, including updated CIFS connection details. Renames and changes to other volumes do not invalidate them, so a returned name can be stale until the next read. An offline granted volume remains listed; revocation removes it. Availability is the host's last observation, not a mount preflight or a guarantee of continued connectivity.
 
 ## Optional storage
 
@@ -82,7 +84,7 @@ StartOS checks the manifest capability, current grant, access mode and confined 
 
 ## Backup ownership
 
-System volumes are independent backup items. A service's backup must describe its package-owned state, including saved volume IDs where appropriate, rather than copy shared contents.
+Shared volumes are independent backup items. A service's backup must describe its package-owned state, including saved volume IDs where appropriate, rather than copy shared contents.
 
 For services declaring this capability, StartOS runs the backup procedure in a fresh runtime with shared mounts disabled. Initialization and uninitialization hooks do not run in that backup runtime. Read backup configuration from persistent state rather than variables populated by initialization hooks. Service restore also rejects shared mounts until restoration has finished.
 

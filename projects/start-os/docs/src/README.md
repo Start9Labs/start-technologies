@@ -52,11 +52,6 @@ The [Overview](overview.md) introduces the main StartOS concepts.
 - [DNS](dns.md)
 - [CGNAT](cgnat.md)
 
-## Backups
-
-- [Creating Backups](backup-create.md)
-- [Restoring Backups](backup-restore.md)
-
 ## System
 
 - [Notifications](notifications.md)
@@ -64,7 +59,8 @@ The [Overview](overview.md) introduces the main StartOS concepts.
 - [Server Name](server-name.md)
 - [SSH](ssh.md)
 - [SMTP](smtp.md)
-- [Volumes](volumes.md)
+- [Shared Volumes](shared-volumes.md)
+- [Backups](backups.md)
 - [WiFi](wifi.md)
 - [Internationalization](internationalization.md)
 - [Kiosk Mode](kiosk-mode.md)

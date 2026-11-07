@@ -436,14 +436,15 @@ mod test {
         })
     }
 
-    async fn wait_for_exit(pid: i32) -> bool {
-        tokio::time::timeout(Duration::from_secs(1), async {
-            while is_running(pid) {
-                tokio::time::sleep(Duration::from_millis(10)).await;
+    /// Output EOF can precede process exit after `SIGKILL`.
+    async fn stops_running_soon(pid: i32) -> bool {
+        for _ in 0..200 {
+            if !is_running(pid) {
+                return true;
             }
-        })
-        .await
-        .is_ok()
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        false
     }
 
     #[tokio::test]
@@ -456,10 +457,10 @@ mod test {
         .await
         .unwrap();
         let command = res.stdout.trim().parse().unwrap();
-        let exited = wait_for_exit(command).await;
+        let stopped = stops_running_soon(command).await;
         nix::sys::signal::kill(Pid::from_raw(command), Signal::SIGKILL).ok();
         assert!(res.timed_out);
-        assert!(exited, "the command survives the timeout");
+        assert!(stopped, "the command survives the timeout");
     }
 
     #[tokio::test]
@@ -473,10 +474,10 @@ mod test {
         .await
         .unwrap();
         let command = res.stdout.trim().parse().unwrap();
-        let exited = wait_for_exit(command).await;
+        let stopped = stops_running_soon(command).await;
         nix::sys::signal::kill(Pid::from_raw(command), Signal::SIGKILL).ok();
         assert!(res.timed_out);
-        assert!(exited, "the command survives the timeout");
+        assert!(stopped, "the command survives the timeout");
         assert!(started.elapsed() < TERMINATION_GRACE + Duration::from_secs(3));
     }
 

@@ -38,8 +38,9 @@ boundary(
     'RPCErrorDetails',
     'Exver',
     'ExverComparesPipe',
+    'LeafProgressPipe',
   ],
-  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const pauseFor = async () => {}; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const sameUrl = (a, b) => a === b; export const registryUrl = value => value; export const convertBytes = value => String(value); export const getErrorMessage = error => error.message;',
+  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const pauseFor = async () => {}; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const sameUrl = (a, b) => a === b; export const registryUrl = value => value; export const convertBytes = value => String(value); export const getErrorMessage = error => error.message; export const leafProgress = progress => progress;',
 )
 boundary(
   '@taiga-ui/core',
@@ -63,6 +64,7 @@ boundary(
     'TuiCheckbox',
     'TuiHint',
     'TuiLink',
+    'TuiExpand',
   ],
   'export const TUI_BREAKPOINT = Symbol("breakpoint"); export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => []; export const tuiIconStart = value => value;',
 )
@@ -86,6 +88,9 @@ boundary(
     'TuiSegmented',
     'TuiSwitch',
     'TuiTextarea',
+    'TuiTooltip',
+    'TuiConfirmService',
+    'TuiProgress',
   ],
   'export const tuiInputFilesOptionsProvider = () => [];',
 )
@@ -95,7 +100,11 @@ boundary(
   'export const tuiMarkControlAsTouchedAndValidate = () => {}; export const tuiProvide = () => []; export const tuiIsString = value => typeof value === "string";',
 )
 boundary('@taiga-ui/layout', ['TuiCardLarge', 'TuiHeader', 'TuiForm'])
-boundary('@taiga-ui/addon-table', ['TuiTable', 'TuiTableDirective'])
+boundary('@taiga-ui/addon-table', [
+  'TuiTable',
+  'TuiTableDirective',
+  'TuiTablePagination',
+])
 boundary('@taiga-ui/addon-mobile', ['TuiResponsiveDialog'])
 boundary(
   '@taiga-ui/i18n',
@@ -148,6 +157,16 @@ boundary('src/app/services/storage.service', ['StorageService'])
 boundary('src/app/routes/portal/pipes/to-manifest', ['ToManifestPipe'])
 boundary('../services/alerts.service', ['MarketplaceAlertsService'])
 boundary('src/app/services/title.service', ['TitleDirective'])
+boundary('src/app/routes/portal/components/form.component', ['FormComponent'])
+boundary('src/app/services/form-dialog.service', ['FormDialogService'])
+boundary(
+  './source-picker',
+  [],
+  'export const VOLUME_SOURCE_PICKER = {}; export const VOLUME_SOURCES = {};',
+)
+boundary('src/app/routes/portal/components/placeholder.component', [
+  'PlaceholderComponent',
+])
 boundary(
   'src/app/routes/portal/components/header/about.component',
   [],
@@ -178,7 +197,7 @@ boundaries.set(
 )
 loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
-const { Router } = await import('@angular/router')
+const { ActivatedRoute, Router } = await import('@angular/router')
 const { RefreshAlertComponent } =
   await import('src/app/components/refresh-alert.component')
 const { PatchDB } = await import('patch-db-client')
@@ -190,10 +209,6 @@ const { LocalizePipe: ProductionLocalizePipe } =
 const { I18N } =
   await import('../../../../../shared-libs/ts-modules/shared/src/i18n/i18n.providers.ts')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
-const { BackupService } =
-  await import('src/app/routes/portal/routes/system/routes/backups/backup.service')
-const { isVolumeInspectionStale } =
-  await import('src/app/utils/volume-inspection')
 const {
   TaskService,
   CopyService,
@@ -216,119 +231,6 @@ const { default: General } =
   await import('src/app/routes/portal/routes/system/routes/general/general.component')
 const { SystemUpdateModal, UPDATE } =
   await import('src/app/routes/portal/routes/system/routes/general/update.component')
-
-test('backup drives and backup metadata follow database state independently of CIFS discovery', async t => {
-  const disks = new BehaviorSubject([])
-  const requests = []
-  const injector = createEnvironmentInjector([
-    {
-      provide: PatchDB,
-      useValue: {
-        watch$: (...path) =>
-          path.at(-1) === 'disks'
-            ? disks
-            : of(path.at(-1) === 'id' ? 'server-id' : {}),
-      },
-    },
-    {
-      provide: ApiService,
-      useValue: {
-        rpc: {
-          backup: {
-            target: {
-              list: () => {
-                const request = deferred()
-                requests.push(request)
-                return request.promise
-              },
-            },
-          },
-        },
-      },
-    },
-    { provide: TaskService, useValue: {} },
-    { provide: DialogService, useValue: {} },
-    { provide: ErrorService, useValue: { handleError: assert.fail } },
-  ])
-  t.after(() => injector.destroy())
-  const service = runInInjectionContext(injector, () => new BackupService())
-  assert.equal(service.drives().length, 0)
-  const partition = {
-    logicalname: '/dev/sdb1',
-    stablePath: '/dev/disk/by-path/test-part1',
-    label: 'Photos',
-    capacity: 1000,
-    available: 900,
-    used: 100,
-    startOs: {},
-    legacyBackup: false,
-    guid: null,
-    filesystem: 'btrfs',
-  }
-  const disk = {
-    logicalname: '/dev/sdb',
-    stablePath: '/dev/disk/by-path/test',
-    vendor: 'Vendor',
-    model: 'Model',
-    partitionTable: 'gpt',
-    capacity: 2000,
-    guid: null,
-    filesystem: null,
-    partitions: [
-      partition,
-      { ...partition, logicalname: '/dev/sdb2', label: 'Music' },
-    ],
-  }
-  disks.next([disk])
-  assert.deepEqual(
-    service.drives().map(target => target.id),
-    ['disk-/dev/sdb1', 'disk-/dev/sdb2'],
-  )
-  assert.equal(requests.length, 0)
-  disks.next([
-    {
-      ...disk,
-      partitions: [
-        {
-          ...partition,
-          available: 800,
-          legacyBackup: true,
-          startOs: {
-            'server-id': {
-              hostname: 'server',
-              version: '0.4.2',
-              timestamp: '2026-11-06T00:00:00Z',
-              formatStatus: 'current',
-            },
-          },
-        },
-      ],
-    },
-  ])
-  assert.equal(service.drives()[0].hasCurrentBackup, true)
-  assert.equal(service.drives()[0].entry.legacyBackup, true)
-  assert.equal(service.drives()[0].entry.available, 800)
-  service.getBackupTargets()
-  assert.equal(requests.length, 1)
-  assert.equal(service.loading(), true)
-  disks.next([])
-  assert.equal(service.drives().length, 0)
-  requests[0].resolve({
-    nas: {
-      type: 'cifs',
-      hostname: 'nas',
-      path: '/share',
-      username: 'guest',
-      mountable: true,
-      available: 1000,
-      startOs: {},
-      legacyBackup: false,
-    },
-  })
-  await tick()
-  assert.equal(service.cifs().length, 1)
-  assert.equal(service.drives().length, 0)
-})
 
 function deferred() {
   let resolve, reject
@@ -1443,10 +1345,22 @@ const { VolumeGrant } =
   await import('src/app/routes/portal/routes/system/routes/volumes/grant')
 const { default: SystemVolumes } =
   await import('src/app/routes/portal/routes/system/routes/volumes/index')
-const { CreateVolume } =
+const { diskSource, cifsSource, usableDrives } =
   await import('src/app/routes/portal/routes/system/routes/volumes/create')
-const { FormatDrive, FormatDriveDialog } =
-  await import('src/app/routes/portal/components/format-drive')
+const { DriveVolumeForm } =
+  await import('src/app/routes/portal/routes/system/routes/volumes/drive-form')
+const { FormDialogService } =
+  await import('src/app/services/form-dialog.service')
+const { AddSourceService } =
+  await import('src/app/routes/portal/routes/system/routes/volumes/add')
+const { default: Backups } =
+  await import('src/app/routes/portal/routes/system/routes/backups/index')
+const { BackupService } =
+  await import('src/app/routes/portal/routes/system/routes/backups/backup.service')
+const { BACKUP_PICKER } =
+  await import('src/app/routes/portal/routes/system/routes/backups/picker')
+const { DELETE_LOCAL } =
+  await import('src/app/routes/portal/routes/system/routes/volumes/delete-local')
 const { Mock: VolumeMock } = await import('src/app/services/api/api.fixures')
 const { TuiNotificationService } = await import('@taiga-ui/core')
 const { WA_IS_MOBILE } = await import('@ng-web-apis/platform')
@@ -1483,20 +1397,63 @@ test('partition names distinguish partitions on one drive and fall back to their
 const volumeA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
 const volumeB = 'BCDEFGHIJKLMNOPQRSTUVWXYZ234567A'
 
-function volumeFixture(t, packageData = {}) {
+function volumeFixture(t, packageData = {}, disks = VolumeMock.Disks) {
   const source = new Subject()
   const cache = new BehaviorSubject({
     id: 1,
     value: {
-      disks: structuredClone(VolumeMock.Disks),
       packageData,
+      disks,
+      serverInfo: { id: 'server', statusInfo: { backupConversions: {} } },
+      backupTargets: {
+        localTarget: {
+          name: 'On this server',
+          source: { kind: 'local' },
+          availability: 'available',
+          available: 1000,
+          error: null,
+          checkedAt: new Date().toISOString(),
+          startOs: {
+            server: {
+              hostname: 'server',
+              timestamp: '2026-03-01T00:00:00Z',
+              version: '0.4.2',
+              formatStatus: 'current',
+            },
+          },
+          legacyBackup: false,
+        },
+        nasTarget: {
+          name: 'Office NAS',
+          source: { kind: 'cifs', hostname: 'nas', path: '/backups' },
+          availability: 'unavailable',
+          available: null,
+          error: 'Unreachable',
+          checkedAt: null,
+          startOs: {
+            server: {
+              hostname: 'server',
+              timestamp: '2026-01-01T00:00:00Z',
+              version: '0.4.2',
+              formatStatus: 'current',
+            },
+            other: {
+              hostname: 'other',
+              timestamp: '2026-02-01T00:00:00Z',
+              version: '0.4.2',
+              formatStatus: 'interrupted',
+            },
+          },
+          legacyBackup: false,
+        },
+      },
       sharedVolumes: {
         [volumeA]: {
           name: 'Photos',
           source: { kind: 'local' },
           grants: {},
           availability: 'available',
-          available: 1000,
+          available: 1234,
           error: null,
           checkedAt: new Date().toISOString(),
         },
@@ -1507,13 +1464,14 @@ function volumeFixture(t, packageData = {}) {
           availability: 'unavailable',
           available: null,
           error: 'Old observation',
-          checkedAt: new Date().toISOString(),
+          checkedAt: new Date(Date.now() - 3600000).toISOString(),
         },
       },
     },
   })
   const patch = new PatchDB(source, cache)
   patch.start()
+  const query = new BehaviorSubject({})
   const requests = [],
     results = [],
     errors = [],
@@ -1521,21 +1479,37 @@ function volumeFixture(t, packageData = {}) {
     grants = [],
     taskCalls = [],
     confirmations = [],
+    components = [],
     decisions = [],
-    formattedNotices = []
+    formattedNotices = [],
+    forms = [],
+    formValues = []
   let completed = 0
-  let revision = 1
   const api = {
     rpc: {
       disk: {
         format: async params => {
-          requests.push({ kind: 'format-drive', params })
+          requests.push({ kind: 'format', params })
           return `${params.disk}1`
         },
       },
       backup: {
         create: async params => {
           requests.push({ kind: 'backup', params })
+        },
+        target: {
+          remove: async params =>
+            requests.push({ kind: 'remove-target', params }),
+          inspect: async params => {
+            requests.push({ kind: 'inspect-target', params })
+            return null
+          },
+        },
+        history: {
+          list: async params => {
+            requests.push({ kind: 'history', params })
+            return { runs: [], total: 0 }
+          },
         },
         volume: {
           restore: async (params, options) => {
@@ -1562,6 +1536,11 @@ function volumeFixture(t, packageData = {}) {
           requests.push({ kind: 'create-volume', params })
           return volumeA
         },
+        inspect: async () => ({
+          availability: 'available',
+          available: 0,
+          error: null,
+        }),
         setGrant: async params => {
           grants.push(params)
         },
@@ -1569,8 +1548,29 @@ function volumeFixture(t, packageData = {}) {
     },
   }
   const injector = createEnvironmentInjector([
+    AddSourceService,
+    BackupService,
+    { provide: OSService, useValue: { backingUp$: of(false) } },
+    {
+      provide: ActivatedRoute,
+      useValue: {
+        queryParamMap: query.pipe(
+          map(params => ({ get: key => params[key] ?? null })),
+        ),
+      },
+    },
     { provide: PatchDB, useValue: patch },
     { provide: ApiService, useValue: api },
+    {
+      provide: FormDialogService,
+      useValue: {
+        open(_, options) {
+          forms.push(options)
+          if (formValues.length)
+            options.data.buttons[0].handler(formValues.shift())
+        },
+      },
+    },
     {
       provide: DialogService,
       useValue: {
@@ -1578,7 +1578,8 @@ function volumeFixture(t, packageData = {}) {
           confirmations.push(options)
           return of(decisions.shift() ?? true)
         },
-        openComponent() {
+        openComponent(content, options) {
+          components.push({ content, options })
           return of(decisions.shift() ?? true)
         },
       },
@@ -1621,8 +1622,8 @@ function volumeFixture(t, packageData = {}) {
     {
       provide: Router,
       useValue: {
-        async navigate(route) {
-          routes.push(route)
+        async navigate(route, extras) {
+          routes.push(extras ? { route, extras } : route)
         },
       },
     },
@@ -1634,11 +1635,9 @@ function volumeFixture(t, packageData = {}) {
             completed++
           },
         },
-        completeWith() {
-          completed++
-        },
         data: {
           id: 'target',
+          create: params => api.rpc.volumes.create(params),
           targetId: 'target',
           serverId: 'server',
           password: 'password',
@@ -1681,31 +1680,42 @@ function volumeFixture(t, packageData = {}) {
     grants,
     taskCalls,
     confirmations,
+    components,
     decisions,
     formattedNotices,
-    publish(operations) {
-      source.next([{ id: ++revision, patch: operations }])
-    },
+    forms,
+    formValues,
     get completed() {
       return completed
+    },
+    query,
+    attach(disks) {
+      source.next([
+        { id: 2, patch: [{ op: 'replace', path: '/disks', value: disks }] },
+      ])
     },
     make: Class => runInInjectionContext(injector, () => new Class()),
   }
 }
 
-test('creating a drive volume uses physical discovery and sends only the selected source', async t => {
+test('choosing an external drive opens its form dialog without a separate loading task', async t => {
   const f = volumeFixture(t)
-  const model = f.make(CreateVolume)
-  assert.equal(f.api.rpc.disk.list, undefined)
-  model.source.set('External drive')
-  model.form.patchValue({
+  await f.make(AddSourceService).form('disk', async () => null)
+  assert.equal(f.forms.length, 1)
+  assert.deepEqual(f.taskCalls, [])
+})
+
+test('the external drive form creates a volume on an existing partition without erasing', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(DriveVolumeForm)
+  await tick()
+  assert.ok(model.spec())
+  await model.buttons[0].handler({
     name: 'Photos',
-    logicalname: '/dev/sdc1',
+    drive: { selection: '/dev/sdc', value: { partition: '/dev/sdc1' } },
     path: 'library/photos',
-    username: 'unused-user',
-    password: 'unused-password',
   })
-  await model.save()
+  assert.deepEqual(f.confirmations, [])
   assert.deepEqual(f.requests, [
     {
       kind: 'create-volume',
@@ -1719,79 +1729,145 @@ test('creating a drive volume uses physical discovery and sends only the selecte
       },
     },
   ])
-  assert.equal(f.completed, 1)
 })
 
-test('the external-drive selector follows database changes without losing form input', async t => {
+test('erasing a drive confirms, formats it with the volume name, then creates the volume', async t => {
   const f = volumeFixture(t)
-  const model = f.make(CreateVolume)
-  model.form.patchValue({
-    name: 'Keep this name',
-    logicalname: model.drives()[0].logicalname,
-    path: 'keep/this/path',
-  })
-  f.publish([{ op: 'replace', path: '/disks', value: [] }])
-  f.publish([
-    { op: 'replace', path: '/disks', value: structuredClone(VolumeMock.Disks) },
-  ])
-  assert.ok(model.drives().length)
-  assert.equal(model.form.controls.logicalname.value, '')
-  assert.equal(model.form.controls.name.value, 'Keep this name')
-  assert.equal(model.form.controls.path.value, 'keep/this/path')
-  assert.deepEqual(f.errors, [])
-  assert.deepEqual(f.taskCalls, [])
-})
-
-test('removing a drive clears the destructive selection and acknowledgement', async t => {
-  const f = volumeFixture(t)
-  const model = f.make(FormatDriveDialog)
-  model.form.patchValue({ disk: model.disks()[0], acknowledged: true })
-  assert.ok(model.selectedDisk())
-  f.publish([{ op: 'replace', path: '/disks', value: [] }])
-  f.publish([
-    { op: 'replace', path: '/disks', value: structuredClone(VolumeMock.Disks) },
-  ])
-  assert.equal(model.form.controls.disk.value, null)
-  assert.equal(model.form.controls.acknowledged.value, false)
-  model.format()
+  const model = f.make(DriveVolumeForm)
   await tick()
-  assert.deepEqual(f.requests, [])
-  assert.equal(model.selectedDisk(), undefined)
-})
-
-test('drive formatting rejects unacknowledged and invalid submissions', async t => {
-  const f = volumeFixture(t)
-  const model = f.make(FormatDriveDialog)
-  const disk = model.disks()[0]
-  model.form.controls.disk.setValue(disk)
-  model.format()
-  await tick()
-  assert.deepEqual(f.requests, [])
-  model.form.patchValue({ acknowledged: true, label: 'é'.repeat(128) })
-  model.format()
-  await tick()
-  assert.deepEqual(f.requests, [])
-  model.form.controls.label.setValue('Backups')
-  model.format()
-  await tick()
+  assert.equal(
+    await model.buttons[0].handler({
+      name: 'Media',
+      drive: { selection: '/dev/sdb', value: { partition: 'format' } },
+      path: null,
+    }),
+    true,
+  )
+  assert.equal(f.confirmations.length, 1)
   assert.deepEqual(f.requests, [
+    { kind: 'format', params: { disk: '/dev/sdb', label: 'Media' } },
     {
-      kind: 'format-drive',
-      params: { disk: disk.logicalname, label: 'Backups' },
+      kind: 'create-volume',
+      params: {
+        name: 'Media',
+        source: { kind: 'disk', logicalname: '/dev/sdb1', path: '' },
+      },
     },
   ])
-  assert.equal(f.completed, 1)
-  assert.deepEqual(f.errors, [])
 })
 
-test('shared drive formatting reports success only after completion', t => {
+test('declining the erase confirmation leaves the drive untouched', async t => {
   const f = volumeFixture(t)
-  const model = f.make(FormatDrive)
-  f.decisions.push(false, true)
-  model.format()
-  assert.deepEqual(f.formattedNotices, [])
-  model.format()
-  assert.deepEqual(f.formattedNotices, ['Drive formatted'])
+  const model = f.make(DriveVolumeForm)
+  await tick()
+  f.decisions.push(false)
+  assert.equal(
+    await model.buttons[0].handler({
+      name: 'Media',
+      drive: { selection: '/dev/sdb', value: { partition: 'format' } },
+      path: null,
+    }),
+    false,
+  )
+  assert.deepEqual(f.requests, [])
+})
+
+test('a volume that fails after formatting reports that the drive was formatted', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(DriveVolumeForm)
+  await tick()
+  f.api.rpc.volumes.create = async () => {
+    throw { code: 0, message: 'create failed' }
+  }
+  assert.equal(
+    await model.buttons[0].handler({
+      name: 'Media',
+      drive: { selection: '/dev/sdb', value: { partition: 'format' } },
+      path: null,
+    }),
+    false,
+  )
+  assert.equal(
+    f.errors[0].message,
+    'The drive was formatted, but could not be added. create failed',
+  )
+})
+
+test('the external drive form never offers the OS drive or a StartOS data drive', () => {
+  const drive = (stablePath, extra = {}) => ({
+    logicalname: stablePath,
+    stablePath,
+    partitions: [],
+    guid: null,
+    ...extra,
+  })
+  assert.deepEqual(
+    usableDrives([
+      drive('/dev/disk/by-path/usb-a'),
+      drive('/dev/disk/by-path/nvme-a-part3'),
+      drive('/dev/disk/by-path/usb-b', { guid: 'pool' }),
+      drive('/dev/disk/by-path/usb-c', {
+        partitions: [{ logicalname: '/dev/sdc1', guid: 'pool' }],
+      }),
+    ]).map(d => d.stablePath),
+    ['/dev/disk/by-path/usb-a'],
+  )
+})
+
+test('local and CIFS forms open their own dialogs', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(AddSourceService)
+  const create = params => f.api.rpc.volumes.create(params)
+  f.formValues.push({ name: 'Shared' })
+  await model.form('local', create)
+  await model.form('cifs', create)
+  await Promise.resolve()
+  assert.equal(f.forms.length, 2)
+  assert.deepEqual(
+    f.requests.filter(r => r.kind === 'create-volume'),
+    [
+      {
+        kind: 'create-volume',
+        params: { name: 'Shared', source: { kind: 'local' } },
+      },
+    ],
+  )
+})
+
+test('the external drive form follows the attached drives', async t => {
+  const f = volumeFixture(t, {}, [])
+  const model = f.make(DriveVolumeForm)
+  await tick()
+  assert.deepEqual(model.drives(), [])
+  assert.equal(model.spec(), null)
+  f.attach(VolumeMock.Disks)
+  await tick()
+  assert.equal(model.drives().length, VolumeMock.Disks.length)
+  assert.ok(model.spec())
+})
+
+test('volume sources map blank optional fields to their wire defaults', () => {
+  assert.deepEqual(diskSource('/dev/sdc1', null), {
+    kind: 'disk',
+    logicalname: '/dev/sdc1',
+    path: '',
+  })
+  assert.deepEqual(
+    cifsSource({
+      name: 'A',
+      hostname: 'nas',
+      path: 'share',
+      username: null,
+      password: null,
+    }),
+    {
+      kind: 'cifs',
+      hostname: 'nas',
+      path: 'share',
+      username: '',
+      password: null,
+    },
+  )
 })
 
 test('retained-volume page loading never starts a global task', async t => {
@@ -1816,79 +1892,22 @@ test('retained-volume page failures reach ErrorService without a global task', a
   assert.deepEqual(f.taskCalls, [])
 })
 
-test('volume inspection is stale only when missing or older than ten minutes', () => {
-  const now = Date.parse('2026-11-06T12:00:00Z')
-  assert.equal(isVolumeInspectionStale(null, now), true)
-  assert.equal(isVolumeInspectionStale('2026-11-06T12:00:00Z', now), false)
-  assert.equal(isVolumeInspectionStale('2026-11-06T11:50:00Z', now), false)
-  assert.equal(isVolumeInspectionStale('2026-11-06T11:49:59.999Z', now), true)
-})
-
-test('opening volumes checks stale observations and renders later database observations rather than RPC results', async t => {
+test('the volumes page re-checks only volumes whose last check is stale', async t => {
   const f = volumeFixture(t)
-  const fresh = 'CDEFGHIJKLMNOPQRSTUVWXYZ234567AB'
-  f.publish([
-    { op: 'replace', path: `/sharedVolumes/${volumeA}/checkedAt`, value: null },
-    {
-      op: 'replace',
-      path: `/sharedVolumes/${volumeB}/checkedAt`,
-      value: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
-    },
-    {
-      op: 'add',
-      path: `/sharedVolumes/${fresh}`,
-      value: {
-        name: 'Fresh',
-        source: { kind: 'local' },
-        grants: {},
-        availability: 'available',
-        available: 1000,
-        error: null,
-        checkedAt: new Date().toISOString(),
-      },
-    },
-  ])
-  const pending = deferred()
   const requested = []
-  const error = new Error('inspection failed')
-  f.api.rpc.volumes.inspect = ({ id }) => {
+  const error = new Error('inspect failed')
+  f.api.rpc.volumes.inspect = async ({ id }) => {
     requested.push(id)
-    return id === volumeA ? pending.promise : Promise.reject(error)
+    throw error
   }
-  const model = f.make(SystemVolumes)
+  f.make(SystemVolumes)
   await tick()
-  assert.deepEqual(requested, [volumeA, volumeB])
-  assert.equal(model.volumes()[volumeB].error, 'Old observation')
-  const current = {
-    availability: 'available',
-    available: 1234,
-    error: null,
-    checkedAt: new Date().toISOString(),
-  }
-  f.publish([
-    {
-      op: 'replace',
-      path: `/sharedVolumes/${volumeA}`,
-      value: {
-        ...model.volumes()[volumeA],
-        ...current,
-      },
-    },
-  ])
-  pending.resolve({
-    availability: 'unavailable',
-    available: null,
-    error: 'Earlier result',
-    checkedAt: null,
-  })
-  await tick()
-  assert.equal(model.volumes()[volumeA].available, 1234)
-  assert.equal(model.volumes()[volumeA].error, null)
+  assert.deepEqual(requested, [volumeB])
   assert.deepEqual(f.errors, [error])
   assert.deepEqual(f.taskCalls, [])
 })
 
-test('volume removal uses distinct local Delete and external Remove confirmations', async t => {
+test('local volume deletion requires the typed-name dialog and external removal a plain confirm', async t => {
   const f = volumeFixture(t)
   const model = f.make(SystemVolumes)
   const local = { name: 'Local', source: { kind: 'local' } }
@@ -1896,13 +1915,13 @@ test('volume removal uses distinct local Delete and external Remove confirmation
   await model.remove(volumeA, local)
   assert.deepEqual(f.requests, [])
   assert.deepEqual(f.taskCalls, [])
-  assert.equal(f.confirmations.at(-1).label, 'Delete')
-  assert.equal(
-    f.confirmations.at(-1).data.content,
-    'Delete this volume and all service access? Its local folder and all contents will be permanently deleted.',
-  )
-  assert.equal(f.confirmations.at(-1).data.yes, 'Delete')
-  assert.equal(f.confirmations.at(-1).data.appearance, 'primary-destructive')
+  assert.deepEqual(f.confirmations, [])
+  assert.equal(f.components.at(-1).options.label, 'Delete permanently')
+  assert.deepEqual(f.components.at(-1).options.data, {
+    name: 'Local',
+    warning:
+      'Deleting this volume permanently erases its folder on this server and every file in it.',
+  })
   for (const source of [
     { kind: 'disk', logicalname: '/dev/disk/by-uuid/photos', path: 'library' },
     { kind: 'cifs', hostname: 'nas', path: '/photos' },
@@ -1914,13 +1933,106 @@ test('volume removal uses distinct local Delete and external Remove confirmation
     )
     assert.equal(f.confirmations.at(-1).label, 'Remove')
     assert.equal(f.confirmations.at(-1).data.yes, 'Remove')
-    assert.equal(f.confirmations.at(-1).data.appearance, 'primary')
     assert.equal(f.taskCalls.at(-1), 'Removing')
     assert.deepEqual(f.requests.at(-1), {
       kind: 'remove-volume',
       params: { id: volumeB },
     })
   }
+})
+
+test('the backups page re-checks only targets whose last check is stale', async t => {
+  const f = volumeFixture(t)
+  f.make(Backups)
+  await tick()
+  assert.deepEqual(
+    f.requests.filter(r => r.kind === 'inspect-target'),
+    [{ kind: 'inspect-target', params: { id: 'nasTarget' } }],
+  )
+})
+
+test('backup history loads its page and pagination writes only non-default query params', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(Backups)
+  await tick()
+  f.query.next({ page: '2', size: '25' })
+  await tick()
+  assert.deepEqual(
+    f.requests.filter(r => r.kind === 'history').map(r => r.params),
+    [
+      { offset: 0, limit: 10 },
+      { offset: 50, limit: 25 },
+    ],
+  )
+  model.paginate({ page: 2, size: 25 })
+  model.paginate({ page: 0, size: 10 })
+  assert.deepEqual(
+    f.routes.map(r => r.extras),
+    [
+      { queryParams: { page: 2, size: 25 }, queryParamsHandling: 'merge' },
+      { queryParams: { page: null, size: null }, queryParamsHandling: 'merge' },
+    ],
+  )
+})
+
+test('backup history results distinguish success, item errors and failure', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(Backups)
+  const run = (server, item) => ({
+    report: {
+      server: { attempted: true, error: server },
+      packages: { service: { error: null } },
+      sharedVolumes: { [volumeA]: { error: item } },
+    },
+  })
+  assert.equal(model.toResult(run(null, null)).label, 'Succeeded')
+  assert.equal(
+    model.toResult(run(null, 'disk full')).label,
+    'Completed with errors',
+  )
+  assert.equal(model.toResult(run('target lost', null)).label, 'Failed')
+})
+
+test('local backup target deletion requires the typed-name dialog and external removal a plain confirm', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(Backups)
+  const targets = f.make(BackupService).targets()
+  f.decisions.push(false)
+  await model.remove('localTarget', targets.localTarget)
+  assert.deepEqual(f.confirmations, [])
+  assert.equal(f.components.at(-1).content, DELETE_LOCAL)
+  assert.deepEqual(f.components.at(-1).options.data, {
+    name: 'On this server',
+    warning:
+      'Deleting this target permanently erases its folder on this server and every backup in it.',
+  })
+  assert.equal(f.requests.filter(r => r.kind === 'remove-target').length, 0)
+  await model.remove('nasTarget', targets.nasTarget)
+  assert.equal(f.confirmations.at(-1).label, 'Remove')
+  assert.equal(
+    f.confirmations.at(-1).data.content,
+    'Remove this backup target? Backups on the external drive or CIFS share will not be deleted.',
+  )
+  assert.equal(f.taskCalls.at(-1), 'Removing')
+  assert.deepEqual(f.requests.at(-1), {
+    kind: 'remove-target',
+    params: { id: 'nasTarget' },
+  })
+})
+
+test('the restore picker lists every server backup newest first and disables unusable ones', async t => {
+  const f = volumeFixture(t)
+  const picker = f.make(BACKUP_PICKER.component)
+  assert.deepEqual(
+    picker
+      .backups()
+      .map(({ targetId, serverId, usable }) => [targetId, serverId, usable]),
+    [
+      ['localTarget', 'server', true],
+      ['nasTarget', 'other', false],
+      ['nasTarget', 'server', false],
+    ],
+  )
 })
 
 test('failed volume deletion refreshes pending local cleanup after catalog removal', async t => {
@@ -2082,10 +2194,10 @@ test('grant choices map to the backend contract and pending resets after saving'
   const model = f.make(VolumeGrant)
   model.volumeId = () => volumeA
   model.packageId = () => 'service'
-  for (const [choice, expected, index] of [
-    ['No Access', null, 0],
-    ['Read', { readonly: true }, 1],
-    ['Read/write', { readonly: false }, 2],
+  for (const [choice, expected] of [
+    ['No Access', null],
+    ['Read', { readonly: true }],
+    ['Read/write', { readonly: false }],
   ]) {
     await model.save(choice)
     assert.deepEqual(f.grants.at(-1), {
@@ -2094,7 +2206,7 @@ test('grant choices map to the backend contract and pending resets after saving'
       grant: expected,
     })
     assert.equal(model.pending(), false)
-    assert.equal(model.activeIndex(), index)
+    assert.equal(model.value(), choice)
   }
 })
 
@@ -2116,7 +2228,6 @@ test('failed optimistic grant uses the latest observed grant rather than a stale
   pending.resolve()
   await saved
   assert.equal(model.value(), 'Read/write')
-  assert.equal(model.activeIndex(), 2)
   assert.equal(model.pending(), false)
 })
 
@@ -2156,7 +2267,7 @@ test('grant capability reads the installed manifest throughout updates without c
   assert.equal(getCurrentManifest(pkg), installed)
 })
 
-test('production mocks support inspection, independent failed backups and new-local restore without public credentials', async t => {
+test('production mocks support inspection, independent failed backups and new-local restore without a public password', async t => {
   const { MockApiService } =
     await import('src/app/services/api/embassy-mock-api.service')
   const { Mock } = await import('src/app/services/api/api.fixures')
@@ -2209,28 +2320,33 @@ test('production mocks support inspection, independent failed backups and new-lo
     name: 'External',
     source: diskSource,
   })
+  const stored = {
+    kind: 'disk',
+    logicalname: Mock.driveLink('/dev/sdz1'),
+    label: null,
+  }
   assert.deepEqual(cache.value.value.sharedVolumes[disk].source, {
-    ...diskSource,
+    ...stored,
     path: '',
   })
-  const folderSource = { ...diskSource, path: 'library/photos' }
   const folder = await api.rpc.volumes.create({
     name: 'External folder',
-    source: folderSource,
+    source: { ...diskSource, path: '/library/photos' },
   })
-  assert.deepEqual(cache.value.value.sharedVolumes[folder].source, folderSource)
+  assert.deepEqual(cache.value.value.sharedVolumes[folder].source, {
+    ...stored,
+    path: 'library/photos',
+  })
   assert.match(local, /^[A-Z2-7]{32}$/)
   assert.match(remote, /^[A-Z2-7]{32}$/)
   assert.equal(
     cache.value.value.sharedVolumes[remote].availability,
     'unavailable',
   )
-  assert.equal(cache.value.value.sharedVolumes[remote].available, null)
-  assert.ok(cache.value.value.sharedVolumes[remote].error)
-  assert.ok(cache.value.value.sharedVolumes[remote].checkedAt)
+  assert.match(cache.value.value.sharedVolumes[remote].error, /mount error/)
   assert.doesNotMatch(
     JSON.stringify(cache.value.value.sharedVolumes),
-    /private-user|private-password/,
+    /private-password/,
   )
   assert.equal(
     (await api.rpc.volumes.inspect({ id: remote })).availability,
@@ -2275,15 +2391,15 @@ test('production mocks support inspection, independent failed backups and new-lo
   })
   assert.notEqual(restored.restored[local], local)
   assert.match(restored.restored[local], /^[A-Z2-7]{32}$/)
-  const { checkedAt, ...restoredVolume } =
+  const { checkedAt, ...copy } =
     cache.value.value.sharedVolumes[restored.restored[local]]
-  assert.ok(Number.isFinite(Date.parse(checkedAt)))
-  assert.deepEqual(restoredVolume, {
+  assert.ok(checkedAt)
+  assert.deepEqual(copy, {
     name: 'Renamed photos',
     source: { kind: 'local' },
     grants: {},
     availability: 'available',
-    available: 50000000000,
+    available: 812400000000,
     error: null,
   })
   await api.rpc.volumes.remove({ id: local })

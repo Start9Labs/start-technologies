@@ -5,152 +5,122 @@ import { RouterLink } from '@angular/router'
 import {
   ConvertBytesPipe,
   DialogService,
+  DocsLinkDirective,
   ErrorService,
   HttpError,
-  i18nKey,
   i18nPipe,
   TaskService,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import {
-  TuiButton,
-  TuiDataList,
-  TuiDropdown,
-  TuiHint,
-  TuiIcon,
-  TuiTitle,
-} from '@taiga-ui/core'
-import { TuiHeader } from '@taiga-ui/layout'
+import { TuiButton, TuiHint, TuiIcon, TuiCell } from '@taiga-ui/core'
+import { TuiTooltip } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
-import { firstValueFrom } from 'rxjs'
+import { filter, firstValueFrom } from 'rxjs'
 
-import { FormatDrive } from 'src/app/routes/portal/components/format-drive'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { Result } from 'src/app/services/api/api.types'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { TitleDirective } from 'src/app/services/title.service'
-import { isVolumeInspectionStale } from 'src/app/utils/volume-inspection'
-import { CREATE_VOLUME } from './create'
-import { VOLUME_GRANTS } from './grants'
+import { AddSourceService } from './add'
+import { VolumeManage } from './manage'
+import { isStale, VOLUME_STATUSES, VOLUME_TYPES, volumeLocation } from './types'
+import { VOLUME_SOURCES } from './source-picker'
 
+import { DELETE_LOCAL } from './delete-local'
 @Component({
   template: `
     <ng-container *title>
-      <a tuiIconButton routerLink=".." iconStart="@tui.arrow-left">
-        {{ 'Back' | i18n }}
-      </a>
-      {{ 'Volumes' | i18n }}
+      <div>
+        <a tuiIconButton routerLink=".." iconStart="@tui.arrow-left">
+          {{ 'Back' | i18n }}
+        </a>
+        {{ 'Shared Volumes' | i18n }}
+        <a
+          tuiIconButton
+          size="xs"
+          docsLink
+          path="/start-os/shared-volumes.html"
+          appearance="icon"
+          iconStart="@tui.book-open-text"
+        ></a>
+      </div>
     </ng-container>
-    <header tuiHeader>
-      <h3 tuiTitle>{{ 'Volumes' | i18n }}</h3>
-      <aside tuiAccessories>
-        <button formatDrive size="s"></button>
-        <button tuiButton size="s" iconStart="@tui.plus" (click)="create()">
-          {{ 'New' | i18n }}
+    <section class="g-card">
+      <header>
+        {{ 'Shared Volumes' | i18n }}
+        <a
+          tuiIconButton
+          size="xs"
+          docsLink
+          path="/start-os/shared-volumes.html"
+          appearance="icon"
+          iconStart="@tui.book-open-text"
+        >
+          {{ 'Documentation' | i18n }}
+        </a>
+        <button
+          tuiButton
+          size="xs"
+          iconStart="@tui.plus"
+          class="actions"
+          (click)="add()"
+        >
+          {{ 'Add' | i18n }}
         </button>
-      </aside>
-    </header>
-    <table
-      [appTable]="['Name', 'Source', 'Status', 'Free', 'Service access', null]"
-    >
-      @for (entry of volumes() | keyvalue: null; track entry.key) {
-        @let id = entry.key;
-        @let volume = entry.value;
-        @let grants = volume.grants | keyvalue: null;
-        <tr>
-          <td>{{ volume.name }}</td>
-          <td>
-            @if (volume.source.kind === 'local') {
-              {{ 'Local folder' | i18n }}
-            } @else if (volume.source.kind === 'disk') {
-              <span tuiTitle>
-                {{ 'External drive' | i18n }}
-                <span tuiSubtitle>{{ volume.source.logicalname }}</span>
-                <span tuiSubtitle>{{ volume.source.path || '/' }}</span>
-              </span>
-            } @else {
-              <span tuiTitle>
-                {{ volume.source.hostname }}
-                <span tuiSubtitle>{{ volume.source.path }}</span>
-              </span>
-            }
-          </td>
-          <td>
-            <span tuiTitle>
-              <span>
-                <tui-icon
-                  [icon]="
-                    volume.source.kind === 'cifs'
-                      ? '@tui.signal-high'
-                      : volume.source.kind === 'disk'
-                        ? '@tui.hard-drive'
-                        : '@tui.folder'
-                  "
-                  [class.g-positive]="volume.availability === 'available'"
-                  [class.g-negative]="volume.availability === 'unavailable'"
-                  [style.font-size.rem]="1"
-                />
-                {{ statuses[volume.availability] | i18n }}
-              </span>
-              @if (volume.error; as error) {
-                <span tuiSubtitle>{{ error }}</span>
-              }
-            </span>
-          </td>
-          <td>
-            @if (volume.available !== null) {
-              {{ volume.available | convertBytes }}
-            } @else {
-              &mdash;
-            }
-          </td>
-          <td>{{ grants.length }}</td>
-          <td>
-            <button
-              tuiIconButton
-              tuiDropdown
-              tuiDropdownAuto
-              tuiDropdownAlign="end"
-              size="s"
-              appearance="flat-grayscale"
-              iconStart="@tui.ellipsis-vertical"
+      </header>
+      <table [appTable]="['Name', 'Location', 'Status', 'Free', null]">
+        @for (entry of volumes() | keyvalue: null; track entry.key) {
+          @let id = entry.key;
+          @let volume = entry.value;
+          <tr>
+            <td>{{ volume.name }}</td>
+            <td>
+              <div tuiCell="s">
+                <tui-icon [icon]="types[volume.source.kind].icon" />
+                {{ location(volume.source) || ('This server' | i18n) }}
+              </div>
+            </td>
+            <td
+              [class.g-positive]="volume.availability === 'available'"
+              [class.g-negative]="volume.availability === 'unavailable'"
             >
-              {{ 'More' | i18n }}
-              <tui-data-list *tuiDropdown="let close" (click)="close()">
-                <button tuiOption iconStart="@tui.users" (click)="manage(id)">
-                  {{ 'Service access' | i18n }}
-                </button>
-                <button
-                  tuiOption
-                  iconStart="@tui.pencil"
-                  (click)="rename(id, volume)"
-                >
-                  {{ 'Rename' | i18n }}
-                </button>
-                <button
-                  tuiOption
-                  iconStart="@tui.trash-2"
-                  (click)="remove(id, volume)"
-                >
-                  {{ 'Remove' | i18n }}
-                </button>
-              </tui-data-list>
-            </button>
-          </td>
-        </tr>
-      } @empty {
-        <tr>
-          <td colspan="6">{{ 'No volumes' | i18n }}</td>
-        </tr>
-      }
-    </table>
+              {{ statuses[volume.availability] | i18n }}
+              @if (volume.error; as error) {
+                <tui-icon [tuiTooltip]="error" />
+              }
+            </td>
+            <td [attr.data-label]="'Free' | i18n">
+              @if (volume.available !== null) {
+                {{ volume.available | convertBytes }}
+              } @else {
+                &mdash;
+              }
+            </td>
+            <td>
+              <button
+                tuiIconButton
+                size="s"
+                appearance="flat-grayscale"
+                iconStart="@tui.settings"
+                (click)="manage(id, volume)"
+              >
+                {{ 'Manage' | i18n }}
+              </button>
+            </td>
+          </tr>
+        } @empty {
+          <tr>
+            <td colspan="5">{{ 'No shared volumes' | i18n }}</td>
+          </tr>
+        }
+      </table>
+    </section>
     @let retainedItems = retained() | keyvalue: null;
     @if (retainedItems.length) {
-      <section>
-        <header tuiHeader>
-          <h3 tuiTitle>{{ 'Pending local deletion' | i18n }}</h3>
-        </header>
+      <section class="g-card">
+        <header>{{ 'Pending local deletion' | i18n }}</header>
         <p>
           {{
             'Local data left after an unsuccessful deletion. Retry to delete it permanently.'
@@ -179,20 +149,74 @@ import { VOLUME_GRANTS } from './grants'
       </section>
     }
   `,
+  styles: `
+    :host {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .actions {
+      margin-inline-start: auto;
+    }
+
+    td:last-child:not([colspan]) {
+      text-align: end;
+    }
+
+    td tui-icon {
+      font-size: 1rem;
+      vertical-align: text-bottom;
+    }
+
+    [tuiCell] {
+      margin: 0;
+      padding: 0;
+      min-block-size: 0;
+      gap: 0.75rem;
+
+      tui-icon {
+        font-size: 1.25rem;
+      }
+    }
+
+    :host-context(tui-root._mobile) {
+      .g-card > header > [docsLink] {
+        display: none;
+      }
+
+      tr {
+        grid-template-columns: 1fr auto;
+        row-gap: 0.25rem;
+      }
+
+      td {
+        grid-column: 1;
+      }
+
+      td[data-label]::before {
+        content: attr(data-label) ': ';
+      }
+
+      td:last-child:not([colspan]) {
+        grid-column: 2;
+        grid-row: 1 / span 4;
+        align-self: center;
+      }
+    }
+  `,
   imports: [
     RouterLink,
+    DocsLinkDirective,
     i18nPipe,
     ConvertBytesPipe,
     TuiButton,
-    TuiDataList,
-    TuiDropdown,
     TuiHint,
     TuiIcon,
+    TuiTooltip,
     KeyValuePipe,
-    TuiTitle,
-    TuiHeader,
+    TuiCell,
     TableComponent,
-    FormatDrive,
     TitleDirective,
   ],
 })
@@ -201,21 +225,34 @@ export default class Volumes {
   private readonly tasks = inject(TaskService)
   private readonly errors = inject(ErrorService)
   private readonly dialogs = inject(DialogService)
+  private readonly formDialog = inject(FormDialogService)
+  private readonly addSource = inject(AddSourceService)
 
-  protected readonly volumes = toSignal(
-    inject<PatchDB<DataModel>>(PatchDB).watch$('sharedVolumes'),
-    { initialValue: {} as DataModel['sharedVolumes'] },
-  )
+  private readonly volumes$ =
+    inject<PatchDB<DataModel>>(PatchDB).watch$('sharedVolumes')
+
+  protected readonly volumes = toSignal(this.volumes$, { initialValue: {} })
   protected readonly retained = signal<Result<'volumes.list-retained'>>({})
-  protected readonly statuses: Record<T.SharedVolumeAvailability, i18nKey> = {
-    unknown: 'Unknown',
-    available: 'Available',
-    unavailable: 'Unavailable',
-  }
+  protected readonly types = VOLUME_TYPES
+  protected readonly location = volumeLocation
+  protected readonly statuses = VOLUME_STATUSES
 
   constructor() {
     this.refreshRetained()
-    this.inspectStale()
+    this.recheckStale()
+  }
+
+  private async recheckStale() {
+    const volumes = await firstValueFrom(this.volumes$)
+    await Promise.all(
+      Object.entries(volumes)
+        .filter(([, { checkedAt }]) => isStale(checkedAt))
+        .map(([id]) =>
+          this.api.rpc.volumes
+            .inspect({ id })
+            .catch(error => this.errors.handleError(error as HttpError)),
+        ),
+    )
   }
 
   private async refreshRetained() {
@@ -226,68 +263,47 @@ export default class Volumes {
     }
   }
 
-  protected create() {
-    this.dialogs.openComponent(CREATE_VOLUME).subscribe()
-  }
-
-  protected manage(id: string) {
-    this.dialogs.openComponent(VOLUME_GRANTS, { data: { id } }).subscribe()
-  }
-
-  private async inspectStale() {
-    const now = Date.now()
-    await Promise.all(
-      Object.entries(this.volumes() || {})
-        .filter(([, volume]) => isVolumeInspectionStale(volume.checkedAt, now))
-        .map(async ([id]) => {
-          try {
-            await this.api.rpc.volumes.inspect({ id })
-          } catch (error) {
-            this.errors.handleError(error as HttpError)
-          }
-        }),
+  protected add() {
+    this.addSource.open('Add shared volume', VOLUME_SOURCES, params =>
+      this.api.rpc.volumes.create(params),
     )
   }
 
-  protected async rename(id: string, volume: T.SharedVolume) {
-    const name = await firstValueFrom(
-      this.dialogs.openPrompt<string>({
-        label: 'Rename',
-        data: {
-          message: 'Volume name',
-          label: 'Name',
-          initialValue: volume.name,
-          buttonText: 'Save',
-        },
-      }),
-      { defaultValue: null },
-    )
-    if (name === null) return
-    return this.tasks.run(
-      () => this.api.rpc.volumes.rename({ id, name }),
-      'Saving',
-    )
+  protected manage(id: string, volume: T.SharedVolume) {
+    this.formDialog
+      .open<unknown, boolean>(VolumeManage, {
+        label: 'Shared Volume',
+        data: { id },
+      })
+      .pipe(filter(Boolean))
+      .subscribe(() => this.remove(id, volume))
   }
 
   protected async remove(id: string, volume: T.SharedVolume) {
     const local = volume.source.kind === 'local'
-    if (
-      !(await firstValueFrom(
-        this.dialogs.openConfirm({
-          label: local ? 'Delete' : 'Remove',
-          data: {
-            content: local
-              ? 'Delete this volume and all service access? Its local folder and all contents will be permanently deleted.'
-              : 'Remove this volume and all service access? Data on the external drive or CIFS share will not be deleted.',
-            yes: local ? 'Delete' : 'Remove',
-            no: 'Cancel',
-            appearance: local ? 'primary-destructive' : 'primary',
-          },
-        }),
-        { defaultValue: false },
-      ))
+    const confirmed = await firstValueFrom(
+      local
+        ? this.dialogs.openComponent<boolean>(DELETE_LOCAL, {
+            label: 'Delete permanently',
+            size: 's',
+            data: {
+              name: volume.name,
+              warning:
+                'Deleting this volume permanently erases its folder on this server and every file in it.',
+            },
+          })
+        : this.dialogs.openConfirm({
+            label: 'Remove',
+            data: {
+              content:
+                'Remove this volume and all service access? Data on the external drive or CIFS share will not be deleted.',
+              yes: 'Remove',
+              no: 'Cancel',
+            },
+          }),
+      { defaultValue: false },
     )
-      return
+    if (!confirmed) return
     await this.tasks.run(
       () => this.api.rpc.volumes.remove({ id }),
       local ? 'Deleting' : 'Removing',

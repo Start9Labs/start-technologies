@@ -1556,11 +1556,22 @@ export const SharedVolumeSource: z.ZodUnion<
       z.ZodObject<{
         logicalname: z.ZodString
         path: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+        /**
+         * The partition label or drive model when the volume was created, for display.
+         */
+        label: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodString>>,
+          z.ZodNullable<z.ZodString>
+        >
       }>
     >,
     z.ZodIntersection<
       z.ZodObject<{ kind: z.ZodLiteral<'cifs'> }>,
-      z.ZodObject<{ hostname: z.ZodString; path: z.ZodString }>
+      z.ZodObject<{
+        hostname: z.ZodString
+        path: z.ZodString
+        username: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+      }>
     >,
   ]
 > = /* @__PURE__ */ z
@@ -1571,11 +1582,25 @@ export const SharedVolumeSource: z.ZodUnion<
       object({
         logicalname: z.string(),
         path: wire(z.string().optional(), z.string()),
+        /**
+         * The partition label or drive model when the volume was created, for display.
+         */
+        label: wire(
+          z.string().nullable().optional(),
+          z.string().nullable(),
+        ).meta({
+          description:
+            'The partition label or drive model when the volume was created, for display.',
+        }),
       }),
     ),
     z.intersection(
       object({ kind: z.literal('cifs') }),
-      object({ hostname: z.string(), path: z.string() }),
+      object({
+        hostname: z.string(),
+        path: z.string(),
+        username: wire(z.string().optional(), z.string()),
+      }),
     ),
   ])
   .meta({
@@ -6561,7 +6586,7 @@ export const Manifest: z.ZodIntersection<
     images: z.ZodRecord<z.ZodString, typeof ImageConfig>
     volumes: z.ZodArray<typeof VolumeId>
     /**
-     * Enables user-managed grants to system volumes; grants default to none.
+     * Enables user-managed grants to shared volumes; grants default to none.
      */
     sharedVolumes: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
     dependencies: z.ZodCodec<
@@ -6584,11 +6609,11 @@ export const Manifest: z.ZodIntersection<
       images: z.record(z.string(), ImageConfig),
       volumes: z.array(VolumeId),
       /**
-       * Enables user-managed grants to system volumes; grants default to none.
+       * Enables user-managed grants to shared volumes; grants default to none.
        */
       sharedVolumes: wire(z.boolean().optional(), z.boolean()).meta({
         description:
-          'Enables user-managed grants to system volumes; grants default to none.',
+          'Enables user-managed grants to shared volumes; grants default to none.',
       }),
       dependencies: wire(Dependencies.optional(), Dependencies),
       hardwareRequirements: wire(

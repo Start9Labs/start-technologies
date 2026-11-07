@@ -35,20 +35,14 @@ export default [
       {
         path: 'volumes',
         title: titleResolver,
-        data: { title: 'Volumes' },
+        data: { title: 'Shared Volumes' },
         loadComponent: () => import('./routes/volumes'),
       },
       {
-        path: 'backup',
+        path: 'backups',
         title: titleResolver,
-        loadComponent: () => import('./routes/backups/backups.component'),
-        data: { type: 'create' },
-      },
-      {
-        path: 'restore',
-        title: titleResolver,
-        loadComponent: () => import('./routes/backups/backups.component'),
-        data: { type: 'restore' },
+        data: { title: 'Backups' },
+        loadComponent: () => import('./routes/backups'),
       },
       {
         path: 'interfaces',

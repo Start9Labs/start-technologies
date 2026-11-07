@@ -1,12 +1,13 @@
 import { GetPackagesRes } from '@start9labs/marketplace'
 import { ISB, IST, T } from '@start9labs/start-core'
+import type { BackupRun } from 'src/app/routes/portal/routes/system/routes/backups/backup.types'
 import {
   InstalledState,
   PackageDataEntry,
 } from 'src/app/services/patch-db/data-model'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
 import { BTC_ICON, LND_ICON, PROXY_ICON, REGISTRY_ICON } from './api-icons'
-import { ActionRes } from './api.types'
+import { ActionRes, Result } from './api.types'
 
 import markdown from './md-sample.md'
 
@@ -25,6 +26,23 @@ const mockDescription = {
 }
 
 export namespace Mock {
+  export function driveLink(logicalname: string) {
+    const hex = [0, 1, 2, 3]
+      .map(seed =>
+        [...logicalname]
+          .reduce(
+            (hash, c) => Math.imul(hash ^ c.charCodeAt(0), 16777619),
+            2166136261 + seed,
+          )
+          .toString(16)
+          .replace('-', '')
+          .padStart(8, '0')
+          .slice(-8),
+      )
+      .join('')
+    return `/dev/disk/by-uuid/${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+
   export const ServerId = '1234-5678-9876-5432'
 
   export const ServerUpdated: T.ServerStatus = {
@@ -1423,7 +1441,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     ],
   }
 
-  export const Disks: T.DiskInfo[] = [
+  export const Disks: T.Public['disks'] = [
     {
       logicalname: '/dev/sdb',
       stablePath: '/dev/disk/by-path/pci-0000:00:14.0-usb-0:2:1.0-scsi-0:0:0:0',
@@ -1479,6 +1497,37 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       guid: null,
       filesystem: null,
     },
+    {
+      logicalname: '/dev/sdd',
+      stablePath: '/dev/disk/by-path/pci-0000:00:17.0-ata-2',
+      partitionTable: 'gpt',
+      vendor: 'SSK',
+      model: null,
+      partitions: [
+        {
+          logicalname: '/dev/sdd1',
+          stablePath: '/dev/disk/by-path/pci-0000:00:17.0-ata-2-part1',
+          label: 'Another Drive',
+          capacity: 2000000000000,
+          used: 100000000000,
+          available: 1000000000,
+          startOs: {
+            [ServerId]: {
+              hostname: 'server-name',
+              timestamp: new Date().toISOString(),
+              version: '0.4.0',
+              formatStatus: 'interrupted',
+            },
+          },
+          legacyBackup: true,
+          guid: null,
+          filesystem: null,
+        },
+      ],
+      capacity: 2000000000000,
+      guid: null,
+      filesystem: null,
+    },
   ]
 
   export const BackupTargets: { [id: string]: T.BackupTarget } = {
@@ -1499,6 +1548,16 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       },
       legacyBackup: false,
     },
+    // 'ftcvewdnkemfksdm': {
+    //   type: 'disk',
+    //   logicalname: 'sdba1',
+    //   label: 'Matt Stuff',
+    //   capacity: 1000000000000,
+    //   used: 0,
+    //   model: 'Evo SATA 2.5',
+    //   vendor: 'Samsung',
+    //   startOs: {},
+    // },
     csgashbdjkasnd: {
       type: 'cifs',
       hostname: 'smb://192.169.10.0',
@@ -1652,6 +1711,77 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
   //     },
   //   },
   // ]
+
+  export const BackupHistory: BackupRun[] = [
+    {
+      id: 'MOCKRUNNAS3',
+      targetId: 'MOCKBACKUPNAS234567ABCDEFGHIJKLM',
+      targetName: 'Office NAS',
+      startedAt: new Date(Date.now() - 86400000 * 3 - 754000).toISOString(),
+      completedAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+      report: {
+        server: { attempted: true, error: null },
+        packages: {
+          bitcoind: { error: null, duration_ms: 512000 },
+          lnd: { error: null, duration_ms: 64000 },
+        },
+        sharedVolumes: {
+          MOCKLOCALVOLUME234567ABCDEFGHIJK: {
+            name: 'Shared files',
+            error: null,
+            duration_ms: 171000,
+          },
+        },
+      },
+    },
+    {
+      id: 'MOCKRUNNAS10',
+      targetId: 'MOCKBACKUPNAS234567ABCDEFGHIJKLM',
+      targetName: 'Office NAS',
+      startedAt: new Date(Date.now() - 86400000 * 10 - 803000).toISOString(),
+      completedAt: new Date(Date.now() - 86400000 * 10).toISOString(),
+      report: {
+        server: { attempted: true, error: null },
+        packages: {
+          bitcoind: { error: null, duration_ms: 530000 },
+          lnd: {
+            error: 'Service is not responding to backup requests',
+            duration_ms: 12000,
+          },
+        },
+        sharedVolumes: {},
+      },
+    },
+    {
+      id: 'MOCKRUNDESKTOP',
+      targetId: 'MOCKBACKUPDESKTOP234567ABCDEFGHI',
+      targetName: 'Old desktop',
+      startedAt: new Date(Date.now() - 86400000 * 31 - 9000).toISOString(),
+      completedAt: new Date(Date.now() - 86400000 * 31).toISOString(),
+      report: {
+        server: {
+          attempted: true,
+          error: 'mount error(113): could not connect to desktop.invalid',
+        },
+        packages: {},
+        sharedVolumes: {},
+      },
+    },
+    ...Array.from({ length: 20 }, (_, i) => ({
+      id: `MOCKRUNWEEKLY${i}`,
+      targetId: 'MOCKBACKUPDRIVE234567ABCDEFGHIJK',
+      targetName: 'Samsung T7',
+      startedAt: new Date(
+        Date.now() - 86400000 * (38 + 7 * i) - 690000,
+      ).toISOString(),
+      completedAt: new Date(Date.now() - 86400000 * (38 + 7 * i)).toISOString(),
+      report: {
+        server: { attempted: true, error: null },
+        packages: { bitcoind: { error: null, duration_ms: 498000 } },
+        sharedVolumes: {},
+      },
+    })),
+  ]
 
   export const BackupInfo: T.BackupInfo = {
     sharedVolumeBackups: {},

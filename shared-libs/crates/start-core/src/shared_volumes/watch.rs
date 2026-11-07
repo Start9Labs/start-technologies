@@ -250,6 +250,7 @@ mod tests {
             source: SharedVolumeSource::Cifs {
                 hostname: "nas.local".into(),
                 path: "/share".into(),
+                username: String::new(),
             },
             grants: BTreeMap::new(),
             inspection: super::super::SharedVolumeInspection {

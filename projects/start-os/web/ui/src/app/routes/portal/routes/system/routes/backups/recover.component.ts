@@ -35,7 +35,7 @@ import { RecoverData, RecoverOption } from './backup.types'
                   {{ 'Version' | i18n }} {{ option.version }}
                 </span>
               } @else {
-                <span tuiSubtitle>{{ 'Volumes' | i18n }}</span>
+                <span tuiSubtitle>{{ 'Shared Volumes' | i18n }}</span>
                 <span tuiSubtitle>
                   {{
                     'Restore creates a new local volume and leaves existing data untouched.'

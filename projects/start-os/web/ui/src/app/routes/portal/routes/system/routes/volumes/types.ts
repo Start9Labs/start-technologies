@@ -1,0 +1,53 @@
+import { i18nKey } from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
+
+export const VOLUME_TYPES: Record<
+  T.SharedVolumeSource['kind'],
+  { icon: string; label: i18nKey }
+> = {
+  local: { icon: '@tui.folder', label: 'Local folder' },
+  disk: { icon: '@tui.hard-drive', label: 'External drive' },
+  cifs: { icon: '@tui.network', label: 'CIFS share' },
+}
+
+export const isStale = (checkedAt: string | null) =>
+  !checkedAt || Date.now() - Date.parse(checkedAt) > 10 * 60 * 1000
+
+export const VOLUME_STATUSES: Record<T.SharedVolumeAvailability, i18nKey> = {
+  unknown: 'Unknown',
+  available: 'Available',
+  unavailable: 'Unavailable',
+}
+
+export type DiskSource = Extract<T.SharedVolumeSource, { kind: 'disk' }> & {
+  label?: string | null
+}
+
+export const volumeLocation = (source: T.SharedVolumeSource): string | null => {
+  switch (source.kind) {
+    case 'local':
+      return null
+    case 'disk': {
+      const { label, path } = source as DiskSource
+      return label ? [label, path].filter(Boolean).join('/') : `/${path}`
+    }
+    case 'cifs':
+      return `${source.hostname}${source.path}`
+  }
+}
+
+export type CifsSource = Extract<T.SharedVolumeSource, { kind: 'cifs' }> & {
+  username?: string
+}
+
+type UpdateCifsParams = {
+  id: string
+  hostname: string
+  path: string
+  username: string
+  password?: string
+}
+
+export type UpdateCifsClient = {
+  updateCifs: (params: UpdateCifsParams) => Promise<null>
+}

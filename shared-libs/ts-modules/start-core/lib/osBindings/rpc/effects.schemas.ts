@@ -3018,7 +3018,7 @@ export const Manifest: z.ZodIntersection<
     images: z.ZodRecord<z.ZodString, typeof ImageConfig>
     volumes: z.ZodArray<typeof VolumeId>
     /**
-     * Enables user-managed grants to system volumes; grants default to none.
+     * Enables user-managed grants to shared volumes; grants default to none.
      */
     sharedVolumes: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
     dependencies: z.ZodCodec<
@@ -3041,11 +3041,11 @@ export const Manifest: z.ZodIntersection<
       images: z.record(z.string(), ImageConfig),
       volumes: z.array(VolumeId),
       /**
-       * Enables user-managed grants to system volumes; grants default to none.
+       * Enables user-managed grants to shared volumes; grants default to none.
        */
       sharedVolumes: wire(z.boolean().optional(), z.boolean()).meta({
         description:
-          'Enables user-managed grants to system volumes; grants default to none.',
+          'Enables user-managed grants to shared volumes; grants default to none.',
       }),
       dependencies: wire(Dependencies.optional(), Dependencies),
       hardwareRequirements: wire(

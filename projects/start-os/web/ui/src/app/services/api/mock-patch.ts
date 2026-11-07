@@ -13,6 +13,7 @@ function mockService(
   title: string,
   pkgVersion: string,
   statusInfo: T.StatusInfo,
+  sharedVolumes = false,
 ): PackageDataEntry<InstalledState> {
   return {
     stateInfo: {
@@ -22,6 +23,7 @@ function mockService(
         id,
         title,
         version: pkgVersion,
+        sharedVolumes,
       },
     },
     s9pk: `/media/startos/data/package-data/archive/installed/${id}.s9pk`,
@@ -73,7 +75,195 @@ function mockStart9Key(
 
 export const mockPatchData: DataModel = {
   disks: structuredClone(Mock.Disks),
-  sharedVolumes: {},
+  sharedVolumes: {
+    MOCKLOCALVOLUME234567ABCDEFGHIJK: {
+      name: 'Shared files',
+      source: { kind: 'local' },
+      grants: {
+        'btc-rpc-proxy': { readonly: false },
+        nextcloud: { readonly: false },
+      },
+      availability: 'available',
+      available: 812400000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+    },
+    MOCKDISKVOLUME234567ABCDEFGHIJKL: {
+      name: 'Photos library',
+      source: {
+        kind: 'disk',
+        logicalname: Mock.driveLink('/dev/sdc1'),
+        path: 'media/photos',
+        label: 'Old Backups',
+      } as T.SharedVolumeSource,
+      grants: {
+        nextcloud: { readonly: true },
+        jellyfin: { readonly: true },
+      },
+      availability: 'available',
+      available: 900000000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+    },
+    MOCKMISSINGDRIVE234567ABCDEFGHIJ: {
+      name: 'Movies',
+      source: {
+        kind: 'disk',
+        logicalname: Mock.driveLink('/dev/sdz1'),
+        path: 'movies',
+        label: 'Movie Drive',
+      } as T.SharedVolumeSource,
+      grants: { jellyfin: { readonly: true } },
+      availability: 'unavailable',
+      available: null,
+      error:
+        'The volume source is unavailable. Check the source, network and credentials.: mount: special device ' +
+        Mock.driveLink('/dev/sdz1') +
+        ' does not exist',
+      checkedAt: new Date(Date.now() - 3600000).toISOString(),
+    },
+    MOCKCIFSDOCUMENTS234567ABCDEFGHI: {
+      name: 'Family documents',
+      source: {
+        kind: 'cifs',
+        hostname: 'nas.local',
+        path: '/documents',
+        username: 'family',
+      } as T.SharedVolumeSource,
+      grants: { nextcloud: { readonly: false } },
+      availability: 'available',
+      available: 3215000000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+    },
+    MOCKCIFSVOLUME234567ABCDEFGHIJKL: {
+      name: 'NAS music',
+      source: {
+        kind: 'cifs',
+        hostname: 'nas.invalid',
+        path: '/music',
+        username: 'media',
+      } as T.SharedVolumeSource,
+      grants: { jellyfin: { readonly: true } },
+      availability: 'unavailable',
+      available: null,
+      error:
+        'The volume source is unavailable. Check the source, network and credentials.: mount error(113): could not connect to nas.invalid',
+      checkedAt: new Date().toISOString(),
+    },
+  },
+  backupTargets: {
+    MOCKBACKUPDRIVE234567ABCDEFGHIJK: {
+      name: 'Samsung T7',
+      source: {
+        kind: 'disk',
+        logicalname: Mock.driveLink('/dev/sdc1'),
+        path: '',
+        label: 'Old Backups',
+      } as T.SharedVolumeSource,
+      availability: 'available',
+      available: 900000000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+      startOs: {
+        [Mock.ServerId]: {
+          hostname: 'server-name',
+          timestamp: new Date().toISOString(),
+          version: '0.4.0',
+          formatStatus: 'legacy',
+        },
+      },
+      legacyBackup: false,
+    },
+    MOCKBACKUPLEGACY234567ABCDEFGHIJ: {
+      name: 'SSK drive',
+      source: {
+        kind: 'disk',
+        logicalname: Mock.driveLink('/dev/sdd1'),
+        path: '',
+        label: 'Another Drive',
+      } as T.SharedVolumeSource,
+      availability: 'available',
+      available: 1000000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+      startOs: {
+        [Mock.ServerId]: {
+          hostname: 'server-name',
+          timestamp: new Date().toISOString(),
+          version: '0.4.0',
+          formatStatus: 'interrupted',
+        },
+      },
+      legacyBackup: true,
+    },
+    MOCKBACKUPPASSPORT234567ABCDEFGH: {
+      name: 'WD Passport',
+      source: {
+        kind: 'disk',
+        logicalname: Mock.driveLink('/dev/sdc2'),
+        path: '',
+        label: 'Server One',
+      } as T.SharedVolumeSource,
+      availability: 'available',
+      available: 61200000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+      startOs: {
+        [Mock.ServerId]: {
+          hostname: 'server-name',
+          timestamp: new Date(Date.now() - 86400000).toISOString(),
+          version: '0.4.0',
+          formatStatus: 'current',
+        },
+      },
+      legacyBackup: true,
+    },
+    MOCKBACKUPNAS234567ABCDEFGHIJKLM: {
+      name: 'Office NAS',
+      source: {
+        kind: 'cifs',
+        hostname: 'office-nas.local',
+        path: '/startos-backups',
+        username: 'TestUser',
+      } as T.SharedVolumeSource,
+      availability: 'available',
+      available: 50000000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+      startOs: {
+        [Mock.ServerId]: {
+          hostname: 'server-name',
+          timestamp: new Date(Date.now() - 86400000 * 3).toISOString(),
+          version: '0.4.0',
+          formatStatus: 'current',
+        },
+        'archive-server': {
+          hostname: 'archive-server',
+          timestamp: new Date(Date.now() - 86400000 * 90).toISOString(),
+          version: '0.4.0',
+          formatStatus: 'legacy',
+        },
+      },
+      legacyBackup: false,
+    },
+    MOCKBACKUPDESKTOP234567ABCDEFGHI: {
+      name: 'Old desktop',
+      source: {
+        kind: 'cifs',
+        hostname: 'desktop.invalid',
+        path: '/Desktop/startos-backups',
+        username: 'TestUser',
+      } as T.SharedVolumeSource,
+      availability: 'unavailable',
+      available: null,
+      error:
+        'The volume source is unavailable. Check the source, network and credentials.: mount error(113): could not connect to desktop.invalid',
+      checkedAt: new Date(Date.now() - 3600000).toISOString(),
+      startOs: {},
+      legacyBackup: false,
+    },
+  },
   ui: {
     registries: {
       'https://registry.start9.com/': 'Start9 Registry',
@@ -1242,14 +1432,20 @@ export const mockPatchData: DataModel = {
       plugin: { url: { tableAction: 'create-onion-service' } },
       tasks: {},
     },
-    nextcloud: mockService('nextcloud', 'Nextcloud', '30.0.2:0', {
-      desired: { main: 'running' },
-      error: null,
-      health: {
-        web: { name: 'Web Interface', result: 'success', message: null },
+    nextcloud: mockService(
+      'nextcloud',
+      'Nextcloud',
+      '30.0.2:0',
+      {
+        desired: { main: 'running' },
+        error: null,
+        health: {
+          web: { name: 'Web Interface', result: 'success', message: null },
+        },
+        started: new Date(Date.now() - 86400000).toISOString(),
       },
-      started: new Date(Date.now() - 86400000).toISOString(),
-    }),
+      true,
+    ),
     vaultwarden: mockService('vaultwarden', 'Vaultwarden', '1.32.7:0', {
       desired: { main: 'running' },
       error: null,
@@ -1263,12 +1459,18 @@ export const mockPatchData: DataModel = {
       },
       started: new Date(Date.now() - 30000).toISOString(),
     }),
-    jellyfin: mockService('jellyfin', 'Jellyfin', '10.10.3:0', {
-      desired: { main: 'stopped' },
-      error: null,
-      health: {},
-      started: null,
-    }),
+    jellyfin: mockService(
+      'jellyfin',
+      'Jellyfin',
+      '10.10.3:0',
+      {
+        desired: { main: 'stopped' },
+        error: null,
+        health: {},
+        started: null,
+      },
+      true,
+    ),
     electrs: mockService('electrs', 'Electrs', '0.10.5:0', {
       desired: { main: 'running' },
       error: null,
@@ -1295,6 +1497,7 @@ export const mockPatchData: DataModel = {
         health: {},
         started: null,
       },
+      true,
     ),
   },
 }

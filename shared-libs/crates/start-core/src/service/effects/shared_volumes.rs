@@ -5,7 +5,9 @@ use crate::prelude::*;
 use crate::service::effects::callbacks::CallbackHandler;
 use crate::service::effects::prelude::*;
 use crate::service::rpc::CallbackId;
-use crate::shared_volumes::{SharedVolume, SharedVolumeAvailability, SharedVolumeId};
+use crate::shared_volumes::{
+    SharedVolume, SharedVolumeAvailability, SharedVolumeId, SharedVolumeSource,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -49,6 +51,55 @@ fn granted_volumes(
         .collect())
 }
 
+/// What a consumer's mounts depend on: its granted volumes' access, availability and source.
+fn mount_inputs(
+    package: &PackageId,
+    catalog: &BTreeMap<SharedVolumeId, SharedVolume>,
+) -> Vec<(
+    SharedVolumeId,
+    bool,
+    SharedVolumeAvailability,
+    SharedVolumeSource,
+)> {
+    catalog
+        .iter()
+        .filter_map(|(id, volume)| {
+            let grant = volume.grants.get(package)?;
+            Some((
+                id.clone(),
+                grant.readonly,
+                volume.inspection.availability.clone(),
+                volume.source.clone(),
+            ))
+        })
+        .collect()
+}
+
+/// Whether a consumer's mount inputs changed; a volume becoming unknown is not a change.
+fn mount_inputs_changed(
+    previous: &[(
+        SharedVolumeId,
+        bool,
+        SharedVolumeAvailability,
+        SharedVolumeSource,
+    )],
+    mut current: Vec<(
+        SharedVolumeId,
+        bool,
+        SharedVolumeAvailability,
+        SharedVolumeSource,
+    )>,
+) -> bool {
+    for input in &mut current {
+        if input.2 == SharedVolumeAvailability::Unknown {
+            if let Some(known) = previous.iter().find(|known| known.0 == input.0) {
+                input.2 = known.2.clone();
+            }
+        }
+    }
+    current != previous
+}
+
 pub async fn get_shared_volumes(
     context: EffectContext,
     GetSharedVolumesParams { callback }: GetSharedVolumesParams,
@@ -61,6 +112,9 @@ pub async fn get_shared_volumes(
         .watch("/public/sharedVolumes".parse().unwrap())
         .await
         .typed::<BTreeMap<SharedVolumeId, SharedVolume>>();
+    let catalog: BTreeMap<SharedVolumeId, SharedVolume> =
+        from_value(watch.as_mut().peek_and_mark_seen()?)?;
+    let inputs = mount_inputs(&service.seed.id, &catalog);
     let result = granted_volumes(
         service
             .seed
@@ -69,13 +123,19 @@ pub async fn get_shared_volumes(
             .as_manifest()
             .shared_volumes,
         &service.seed.id,
-        from_value(watch.as_mut().peek_and_mark_seen()?)?,
+        catalog,
     )?;
     if let Some(callback) = callback {
         let callback = callback.register(&service.seed.persistent_container);
+        let package = service.seed.id.clone();
         service.seed.ctx.callbacks.add_get_shared_volumes(
             service.seed.id.clone(),
             watch,
+            move |value| {
+                from_value(value.clone()).map_or(true, |catalog| {
+                    mount_inputs_changed(&inputs, mount_inputs(&package, &catalog))
+                })
+            },
             CallbackHandler::new(&service, callback),
         );
     }
@@ -229,6 +289,73 @@ pub async fn mount_shared_volume(
 mod tests {
     use super::*;
     use crate::shared_volumes::{SharedVolumeGrant, SharedVolumeSource};
+
+    #[test]
+    fn consumers_are_notified_only_when_their_mount_inputs_change() {
+        let package: PackageId = "consumer".parse().unwrap();
+        let mine = SharedVolumeId::new();
+        let other = SharedVolumeId::new();
+        let mut catalog = BTreeMap::new();
+        catalog.insert(
+            mine.clone(),
+            SharedVolume {
+                name: "Music".into(),
+                source: SharedVolumeSource::Cifs {
+                    hostname: "nas".into(),
+                    path: "/music".into(),
+                    username: String::new(),
+                },
+                grants: [(package.clone(), SharedVolumeGrant { readonly: true })].into(),
+                inspection: crate::shared_volumes::SharedVolumeInspection::available(None),
+            },
+        );
+        catalog.insert(
+            other.clone(),
+            SharedVolume {
+                name: "Private".into(),
+                source: SharedVolumeSource::Local,
+                grants: BTreeMap::new(),
+                inspection: crate::shared_volumes::SharedVolumeInspection::available(None),
+            },
+        );
+        let inputs = mount_inputs(&package, &catalog);
+        let changed = |edit: &dyn Fn(&mut BTreeMap<SharedVolumeId, SharedVolume>)| {
+            let mut edited = catalog.clone();
+            edit(&mut edited);
+            mount_inputs_changed(&inputs, mount_inputs(&package, &edited))
+        };
+        assert!(!changed(
+            &|c| c.get_mut(&mine).unwrap().name = "Songs".into()
+        ));
+        assert!(!changed(&|c| {
+            c.get_mut(&other).unwrap().inspection.availability =
+                SharedVolumeAvailability::Unavailable
+        }));
+        assert!(!changed(&|c| {
+            c.get_mut(&mine).unwrap().inspection.availability = SharedVolumeAvailability::Unknown
+        }));
+        assert!(changed(&|c| {
+            c.get_mut(&mine).unwrap().inspection.availability =
+                SharedVolumeAvailability::Unavailable
+        }));
+        assert!(changed(&|c| {
+            c.get_mut(&mine).unwrap().source = SharedVolumeSource::Cifs {
+                hostname: "nas2".into(),
+                path: "/music".into(),
+                username: String::new(),
+            }
+        }));
+        assert!(changed(&|c| {
+            c.get_mut(&mine).unwrap().grants =
+                [(package.clone(), SharedVolumeGrant { readonly: false })].into()
+        }));
+        assert!(changed(&|c| {
+            c.get_mut(&other)
+                .unwrap()
+                .grants
+                .insert(package.clone(), SharedVolumeGrant { readonly: true });
+        }));
+    }
 
     #[test]
     fn listing_preserves_offline_grants_without_exposing_other_volumes() {
