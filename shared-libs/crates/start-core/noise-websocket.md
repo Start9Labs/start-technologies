@@ -61,7 +61,8 @@ opaque signer, session negotiation and encrypted socket as native subscriptions.
 Serialization precedes certificate preparation; GPG-agent unlocking and signing
 finish before connection/exchange deadlines. A refused admission never retries as
 plaintext. Local/bearer access and public calls without an initialized identity
-retain HTTP; malformed or unavailable configured identities fail closed.
+retain HTTP. Malformed keys and failed GPG-agent resolution or signing fail
+closed.
 
 `CliContext` parses proxy and TLS policy once for its ordinary HTTP client and a
 separate HTTP/1-only, nonredirecting upgrade client. `reqwest-websocket` 0.5.0
