@@ -1,5 +1,5 @@
 import type { ApiClient, Params, WebsocketConfig } from './api.types'
-import { DOCUMENT, inject, Injectable } from '@angular/core'
+import { DOCUMENT, inject, Service } from '@angular/core'
 import { blake3 } from '@noble/hashes/blake3'
 import {
   AuthKeyService,
@@ -8,22 +8,24 @@ import {
   isRpcError,
   RpcError,
   RPCOptions,
+  RpcSocketService,
   rpcRequestBody,
   waitForPatchSequence,
 } from '@start9labs/shared'
 import { createRpcClient } from '@start9labs/start-core'
 import { Dump } from 'patch-db-client'
 import type { Observable } from 'rxjs'
-import { webSocket, WebSocketSubject } from 'rxjs/webSocket'
+import type { WebSocketSubject } from 'rxjs/webSocket'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { AuthService } from '../auth.service'
 import { DataModel } from '../patch-db/data-model'
 import { ApiService, FileUploadOptions } from './embassy-api.service'
 
-@Injectable()
+@Service()
 export class LiveApiService extends ApiService {
   private readonly document = inject(DOCUMENT)
   private readonly http = inject(HttpService)
+  private readonly sockets = inject(RpcSocketService)
   private readonly auth = inject(AuthService)
   private readonly authKeys = inject(AuthKeyService)
   private readonly cache$ = inject<Observable<Dump<DataModel>>>(PATCH_CACHE)
@@ -39,8 +41,7 @@ export class LiveApiService extends ApiService {
   constructor() {
     super()
 
-    // @ts-ignore
-    this.document.defaultView.rpcClient = this
+    Object.assign(this.document.defaultView!, { rpcClient: this })
   }
 
   async uploadFile(
@@ -107,14 +108,7 @@ export class LiveApiService extends ApiService {
     guid: string,
     config: WebsocketConfig<T> = {},
   ): WebSocketSubject<T> {
-    const { location } = this.document.defaultView!
-    const protocol = location.protocol === 'http:' ? 'ws' : 'wss'
-    const host = location.host
-
-    return webSocket({
-      url: `${protocol}://${host}/ws/rpc/${guid}`,
-      ...config,
-    })
+    return this.sockets.open<T>(guid, config)
   }
 
   async echo(params: Params<'echo'>, url: string): Promise<string> {
@@ -132,12 +126,11 @@ export class LiveApiService extends ApiService {
     options: RPCOptions<Record<string, unknown>, string>,
     urlOverride?: string,
   ): Promise<T> {
-    // An endpoint override must not receive the local device proof.
-    const request = urlOverride
-      ? rpcRequestBody(options)
-      : await this.authKeys.signRpcBody(options)
-    const res = await this.http.rpcMessage<T>(request, options, urlOverride)
-    const body = res.body
+    const request = rpcRequestBody(options)
+    const lease = urlOverride ? null : await this.authKeys.lease()
+    const body = lease
+      ? await this.sockets.message<T>(request, options, lease)
+      : (await this.http.rpcMessage<T>(request, options, urlOverride)).body
 
     if (isRpcError(body)) {
       if (body.error.code === 34) {

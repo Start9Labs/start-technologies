@@ -1,5 +1,4 @@
 import { DOCUMENT, inject, Service } from '@angular/core'
-import { NOISE_PROFILE } from '@start9labs/start-core/osBindings/noise-profile'
 import { catchError, filter, firstValueFrom, throwError } from 'rxjs'
 import { webSocket } from 'rxjs/webSocket'
 import type { WebSocketSubject, WebSocketSubjectConfig } from 'rxjs/webSocket'
@@ -12,6 +11,7 @@ import { withTimeout } from './http.service'
 import { prepareNoiseIdentity } from './noise-identity'
 import type { PreparedNoiseIdentity } from './noise-identity'
 import { noiseWebSocketConstructor } from './noise-websocket'
+import { rpcWebSocketUrl } from './rpc-request'
 
 @Service()
 export class RpcSocketService {
@@ -28,7 +28,7 @@ export class RpcSocketService {
     socket: WebSocketSubject<unknown>
   }
 
-  /** Adds a correlation ID without reparsing the serialized RPC request. */
+  /** Adds a correlation ID to an ID-less serialized RPC object. */
   async message<T>(
     body: string,
     options: Pick<RPCOptions, 'timeout'>,
@@ -100,12 +100,11 @@ export class RpcSocketService {
   }
 
   private url(guid?: string): string {
-    const url = new URL(this.relativeUrl, this.document.location.origin)
-    url.protocol = url.protocol === 'http:' ? 'ws:' : 'wss:'
-    url.pathname =
-      NOISE_PROFILE.rpcPath +
-      (guid === undefined ? '' : `/${encodeURIComponent(guid)}`)
-    return url.href
+    return rpcWebSocketUrl(
+      this.relativeUrl,
+      this.document.location.origin,
+      guid,
+    )
   }
 
   private constructorFor(lease: () => Promise<AuthKeyLease | null>) {

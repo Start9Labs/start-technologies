@@ -42,7 +42,7 @@ running live `check_pubkey`, `post_auth_hook` and password-enrollment rate limit
 Request-supplied proofs cannot switch the identity of an encrypted connection.
 Local/bearer authentication retains its separate precedence and policy.
 
-Registry and Tunnel register the shared upgrader route on `/ws/rpc`. The native registry client uses
+StartOS's normal RPC context, Registry and Tunnel register the shared upgrader route on `/ws/rpc`. The native registry client uses
 `session_url` to serialize the shared negotiation type and version, then binds
 the same selected hostname through `prologue`. Configured registry hostnames must
 cover that name. Other product routes opt into the upgrader explicitly.
@@ -70,11 +70,17 @@ lease, independently of persistent enrollment and per-exchange ephemeral keys.
 subject and redeems encrypted continuations through fresh exchanges. The last
 unsubscribe closes the subject's socket; no separate heartbeat or reconnect
 manager is added. Device-key replacement, rollback and logout cancel active
-channels. Captured request bytes are not reparsed to add correlation IDs. Tunnel
-uses this transport when a device key exists; missing keys retain public HTTP
-bootstrap, never negotiation-failure fallback. Its PatchDB source subscribes only
-after authentication. StartOS's mixed initialization/diagnostic boundary,
-StartWRT, CLI migration and browser/administrator TOFU warnings remain unfinished.
+channels. Captured request bytes are not reparsed to add correlation IDs. StartOS and Tunnel use this transport when a device key exists; missing keys
+retain anonymous public HTTP, never negotiation-failure fallback. Their PatchDB
+sources subscribe only after authentication. StartOS initialization, diagnostics
+and state/DNS probing use a separate `StartupApiService` contract: unsigned HTTP
+and legacy-origin WebSocket continuations, independent of any stored key. An
+unauthenticated state response cannot downgrade a normal call or its continuation.
+The existing state observer retains navigation, retry and DNS sequencing; no
+mode snapshot, copied method allowlist or global per-key security flag is added.
+`session_rpc_router` composes the common OS/Tunnel routes; MCP stays an independent
+OS route. Setup/init/diagnostic contexts remain unscoped. StartWRT, CLI migration
+and browser/administrator TOFU warnings remain unfinished.
 
 The browser adapter composes libp2p's message stream and length-prefixed stream
 with a WebSocket-compatible facade. Its logical receive and queued-write payload

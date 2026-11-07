@@ -38,6 +38,7 @@ function harness(moduleOverrides = new Map()) {
       'HttpService',
       'AuthKeyService',
       'AuthService',
+      'RpcSocketService',
       'i18nPipe',
       'StaleUiService',
       'PATCH_CACHE',
@@ -51,6 +52,7 @@ function harness(moduleOverrides = new Map()) {
       throw new Error('Unexpected XHR request')
     },
   })
+  dependencies.set(tokens.RpcSocketService, {})
   dependencies.set(tokens.i18nPipe, { transform: value => value })
   const modules = new Map()
   const angular = {
@@ -317,22 +319,21 @@ for (const [name, file, className, deauthMethod] of [
     'setUnverified',
   ],
 ]) {
-  test(`${name} signs local calls, excludes foreign origins and waits for patches`, async () => {
+  test(`${name} encrypts local calls, excludes foreign origins and waits for patches`, async () => {
     const { dependencies, tokens, load } = harness()
     const cache = new BehaviorSubject({ id: 1 })
     const calls = []
-    const signed = []
+    const lease = { key: {}, signal: new AbortController().signal }
     let patchSequence = 3
     dependencies.set(tokens.PATCH_CACHE, cache)
     dependencies.set(tokens.AuthService, { deauthenticate() {} })
     dependencies.set(tokens.AuthKeyService, {
-      signRpcBody: async options => {
-        signed.push(options)
-        return JSON.stringify({
-          method: options.method,
-          params: options.params,
-          signature: 'signed',
-        })
+      lease: async () => lease,
+    })
+    dependencies.set(tokens.RpcSocketService, {
+      message: async (request, options, identity) => {
+        calls.push({ request, options, lease: identity })
+        return { result: null, meta: { patchSequence } }
       },
     })
     dependencies.set(tokens.HttpService, {
@@ -358,10 +359,10 @@ for (const [name, file, className, deauthMethod] of [
     })
     await new Promise(resolve => setImmediate(resolve))
     assert.equal(settled, false)
-    assert.equal(signed[0], options)
+    assert.equal(calls[0].lease, lease)
     assert.equal(calls[0].options.headers.existing, 'preserved')
     assert.equal(calls[0].options.headers.signature, undefined)
-    assert.equal(JSON.parse(calls[0].request).signature, 'signed')
+    assert.equal(JSON.parse(calls[0].request).signature, undefined)
     cache.next({ id: 2 })
     await new Promise(resolve => setImmediate(resolve))
     assert.equal(settled, false)
@@ -372,7 +373,7 @@ for (const [name, file, className, deauthMethod] of [
       await client.rpcRequest(options, 'https://foreign.test/rpc'),
       null,
     )
-    assert.equal(signed.length, 1)
+    assert.equal(calls[1].lease, undefined)
     assert.equal(calls[1].options, options)
     assert.equal(JSON.parse(calls[1].request).signature, undefined)
     assert.equal(calls[1].url, 'https://foreign.test/rpc')
@@ -387,18 +388,16 @@ for (const [name, file, className, deauthMethod] of [
       [deauthMethod]: () => deauthenticated++,
     })
     dependencies.set(tokens.AuthKeyService, {
-      signRpcBody: async options => JSON.stringify(options),
+      lease: async () => ({ key: {}, signal: new AbortController().signal }),
     })
-    dependencies.set(tokens.HttpService, {
-      rpcMessage: async () => ({
-        body: {
-          error: {
-            code: 34,
-            message: 'unauthorized',
-            data: { details: 'session expired' },
-          },
+    dependencies.set(tokens.HttpService, {})
+    dependencies.set(tokens.RpcSocketService, {
+      message: async () => ({
+        error: {
+          code: 34,
+          message: 'unauthorized',
+          data: { details: 'session expired' },
         },
-        headers: { get: () => '999' },
       }),
     })
     const client = new (load(file)[className])()
@@ -1718,7 +1717,10 @@ function startupStateHarness() {
       ['@taiga-ui/cdk', {}],
       ['@taiga-ui/core', { TuiNotificationService: keys.alerts }],
       ['@taiga-ui/polymorpheus', { PolymorpheusComponent: class {} }],
-      ['src/app/services/api/embassy-api.service', { ApiService: keys.api }],
+      [
+        'src/app/services/api/startup-api.service',
+        { StartupApiService: keys.api },
+      ],
       ['src/app/services/network.service', { NetworkService: keys.network }],
     ]),
   )

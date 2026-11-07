@@ -112,7 +112,7 @@ impl UiContext for RpcContext {
                 Router::new()
             })
             .layer(cors::layer());
-        rpc_router(self, any(server).layer(cors::layer())).merge(mcp)
+        session_rpc_router(self, server).merge(mcp)
     }
     fn extend_router(self, router: Router) -> Router {
         router
@@ -249,6 +249,17 @@ fn is_local_host(host: &str) -> bool {
             .unwrap_or(host)
             .rsplit_once('.')
             .is_some_and(|(_, tld)| tld.eq_ignore_ascii_case("local"))
+}
+
+/// RPC and continuation routes with optional encrypted WebSocket admission.
+pub fn session_rpc_router<C>(ctx: C, server: HttpServer<C>) -> Router
+where
+    C: crate::middleware::auth::session::SecureRpcContext + AsRef<RpcContinuations>,
+{
+    use crate::middleware::auth::session::RpcSessionUpgrader;
+
+    rpc_router(ctx, any(server.clone()).layer(cors::layer()))
+        .route(RpcSessionUpgrader::PATH, RpcSessionUpgrader::route(server))
 }
 
 pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
@@ -1077,6 +1088,9 @@ fn e_tag(path: &Path, modified: SystemTime, encoding: Option<&str>) -> String {
 
 #[cfg(test)]
 mod icon_tests;
+
+#[cfg(test)]
+mod session_tests;
 
 #[cfg(test)]
 mod tests {

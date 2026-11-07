@@ -16,19 +16,21 @@ import {
   tap,
   timer,
 } from 'rxjs'
-import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { StartupApiService } from 'src/app/services/api/startup-api.service'
 import { StateService } from 'src/app/services/state.service'
 
 @Component({
   template: '<app-initializing [progress]="progress()" />',
   providers: [
-    provideSetupLogsService(ApiService, api => api.rpc.init.logs.follow({})),
+    provideSetupLogsService(StartupApiService, api =>
+      api.rpc.init.logs.follow({}),
+    ),
   ],
   styles: ':host { height: 100%; }',
   imports: [InitializingComponent],
 })
 export default class InitializingPage {
-  private readonly api = inject(ApiService)
+  private readonly api = inject(StartupApiService)
   private readonly state = inject(StateService)
 
   readonly progress = toSignal(

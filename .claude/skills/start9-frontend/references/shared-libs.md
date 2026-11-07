@@ -1,6 +1,8 @@
 # Shared libraries — @start9labs/\*
 
-`@start9labs/shared` (monorepo apps): `HttpService` (JSON-RPC), `ErrorService` +
+`@start9labs/shared` (monorepo apps): `HttpService` (HTTP JSON-RPC/resources),
+`RpcSocketService` (encrypted local RPC/continuations), `AuthKeyService` (device-key leases),
+`rpcWebSocketUrl` (shared RPC/continuation endpoint selection), `ErrorService` +
 `getErrorMessage`, **`TaskService.run`** (the async-action wrapper), **`DialogService`**
 (responsive + i18n prompt/confirm/alert/component), `CopyService` (clipboard + toast),
 `DownloadHTMLService`, `Exver` (version algebra façade), `SetupLogsService` +

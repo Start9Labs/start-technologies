@@ -2,6 +2,7 @@
 release-notes: false
 ---
 
-- Bind browser RPC credentials to each serialized JSON message while preserving resource-header and legacy-client authentication.
+- Encrypt normal browser RPC and WebSocket continuations after signature-authenticated Noise admission, keeping initialization, diagnostics and state probing on an explicit legacy transport without mode-based downgrade.
+- Preserve HTTP resource/header, foreign-origin and legacy-client contracts.
 - Bound replay-cache memory when clock synchronization is unavailable.
 - Preserve request IDs on middleware errors.

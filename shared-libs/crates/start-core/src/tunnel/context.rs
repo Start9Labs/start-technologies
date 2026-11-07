@@ -27,7 +27,6 @@ use crate::db::model::public::{NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::middleware::auth::Auth;
 use crate::middleware::auth::local::{LocalAuthContext, dial_addr, local_auth_header};
 use crate::middleware::auth::signature::{NonceCache, url_host_str};
-use crate::middleware::cors;
 use crate::middleware::db::SyncDb;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord, UpdateAuth};
 use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6};
@@ -936,11 +935,7 @@ impl UiContext for TunnelContext {
             .middleware(SyncDb::new())
     }
     fn rpc_server_routes(self, server: rpc_toolkit::HttpServer<Self>) -> axum::Router {
-        use crate::middleware::auth::session::RpcSessionUpgrader;
-
-        let websocket = RpcSessionUpgrader::route(server.clone());
-        crate::net::static_server::rpc_router(self, axum::routing::any(server).layer(cors::layer()))
-            .route(RpcSessionUpgrader::PATH, websocket)
+        crate::net::static_server::session_rpc_router(self, server)
     }
 }
 

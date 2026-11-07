@@ -47,19 +47,25 @@ Every app follows **abstract `ApiService` + `LiveApiService` + `MockApiService`*
 DI level by workspace config (monorepo) or environment (brochure). Methods are **typed and
 promise-based**; components call `await this.api.method(params)` and never touch HTTP.
 
-- **Monorepo = JSON-RPC** over `HttpService` (`@start9labs/shared`): POST `{ method, params }`
-  to `RELATIVE_URL`, `withCredentials`; transport failures wrap as `HttpError`, RPC-level errors
-  are checked with `isRpcError(body)` → `RpcError` (code 34 → force logout). StartOS's live API
-  reads `meta.patchSequence` and awaits the PatchDB cache before resolving. Shared HTTP
-  compatibility projects older servers' `x-patch-sequence` headers when JSON metadata is absent.
-  `AuthKeyService.signRpcBody()` captures serialization before asynchronous signing; send that
-  body unchanged through `HttpService.rpcMessage()`. Endpoint overrides stay unsigned by the
-  local device key. Resource requests retain HTTP header signatures. Streams (logs, PatchDB, metrics) via
-  `api.openWebsocket$<T>(guid)` (`rxjs/webSocket`), buffered (`bufferTime(250…1000)`), with
+- **Monorepo = JSON-RPC**: StartOS/Tunnel's keyed local calls use `RpcSocketService`
+  (`@start9labs/shared`) for signature-authenticated Noise admission and encrypted messages.
+  Capture serialization before asynchronous key lookup; retain the existing RxJS socket and
+  source-service retry/cancellation owners. `AuthKeyService` leases cancel on replacement,
+  rollback and logout. Public calls without a key and explicit foreign overrides retain HTTP;
+  a failed exchange never retries as plaintext. StartOS's `StartupApiService` separately owns
+  unsigned HTTP and legacy WebSockets for initialization, diagnostics and the state/DNS probe.
+  Callers select that contract explicitly; an unauthenticated mode response cannot downgrade
+  a normal caller. Mock mode reuses the existing API fixture. RPC-level errors use
+  `isRpcError(body)` → `RpcError`; normal code-34 rejection forces logout. Local replies wait
+  for `meta.patchSequence` through the shared fence; foreign replies never wait on the local
+  cache. HTTP compatibility projects older `x-patch-sequence` headers only when JSON metadata
+  is absent. Resource requests retain HTTP/header signatures. Streams (logs, PatchDB, metrics)
+  use `api.openWebsocket$<T>(guid)` (`rxjs/webSocket`), buffered (`bufferTime(250…1000)`), with
   retry/backoff in the source service.
 - **start-wrt keeps its own `HttpService`/`RpcService`/`ConnectionService` stack deliberately**:
   its per-request rxjs `timeout` **aborts the fetch on unsubscribe**, surfacing `{code: 0}`
-  network errors that drive the reconnect UX. Don't swap it for shared's non-aborting client.
+  network errors that drive the reconnect UX. Preserve its firmware-hash header and reconnect
+  contracts when changing transport; shared HTTP deadlines also unsubscribe their actual source.
   (Requires `withFetch()`.)
 - **start9-store = REST + Zod through a BFF**: frontend calls `/api/*` only (SSR server proxies
   it — same relative URLs in dev/prod/SSR); domain types + Zod schemas live in `shared/`;
