@@ -1346,6 +1346,10 @@ export const PackageVersionCount: z.ZodObject<{
 }).meta({
   id: 'PackageVersionCount',
 })
+export const PartitionTable: z.ZodEnum<{ mbr: 'mbr'; gpt: 'gpt' }> =
+  /* @__PURE__ */ z.enum(['mbr', 'gpt']).meta({
+    id: 'PartitionTable',
+  })
 export const PathOrUrl: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'PathOrUrl',
 })
@@ -4273,24 +4277,33 @@ export const SetupResult: z.ZodObject<{
 }).meta({
   id: 'SetupResult',
 })
-export const SharedVolume: z.ZodObject<{
-  name: z.ZodString
-  source: typeof SharedVolumeSource
-  grants: z.ZodRecord<z.ZodString, typeof SharedVolumeGrant>
+export const SharedVolumeInspection: z.ZodObject<{
   availability: z.ZodCodec<
     z.ZodOptional<typeof SharedVolumeAvailability>,
     typeof SharedVolumeAvailability
   >
+  available: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  error: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  checkedAt: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
 }> = /* @__PURE__ */ object({
-  name: z.string(),
-  source: SharedVolumeSource,
-  grants: z.record(z.string(), SharedVolumeGrant),
   availability: wire(
     SharedVolumeAvailability.optional(),
     SharedVolumeAvailability,
   ),
+  available: wire(z.int().nullable().optional(), z.int().nullable()),
+  error: wire(z.string().nullable().optional(), z.string().nullable()),
+  checkedAt: wire(z.string().nullable().optional(), z.string().nullable()),
 }).meta({
-  id: 'SharedVolume',
+  id: 'SharedVolumeInspection',
 })
 export const SharedVolumeMountResult: z.ZodUnion<
   readonly [
@@ -5465,6 +5478,25 @@ export const SetupProgress: z.ZodObject<{
 }> = /* @__PURE__ */ object({ progress: FullProgress, guid: Guid }).meta({
   id: 'SetupProgress',
 })
+export const SharedVolume: z.ZodIntersection<
+  z.ZodObject<{
+    name: z.ZodString
+    source: typeof SharedVolumeSource
+    grants: z.ZodRecord<z.ZodString, typeof SharedVolumeGrant>
+  }>,
+  typeof SharedVolumeInspection
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      name: z.string(),
+      source: SharedVolumeSource,
+      grants: z.record(z.string(), SharedVolumeGrant),
+    }),
+    SharedVolumeInspection,
+  )
+  .meta({
+    id: 'SharedVolume',
+  })
 export const SideloadParams: z.ZodObject<{
   acceptSigners: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
@@ -5963,6 +5995,47 @@ export const DerivedAddressInfo: z.ZodObject<{
 }).meta({
   id: 'DerivedAddressInfo',
 })
+export const DiskInfo: z.ZodObject<{
+  logicalname: z.ZodString
+  stablePath: z.ZodString
+  partitionTable: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof PartitionTable>>,
+    z.ZodNullable<typeof PartitionTable>
+  >
+  vendor: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  model: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  partitions: z.ZodArray<typeof PartitionInfo>
+  capacity: z.ZodInt
+  guid: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  filesystem: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  logicalname: z.string(),
+  stablePath: z.string(),
+  partitionTable: wire(
+    PartitionTable.nullable().optional(),
+    PartitionTable.nullable(),
+  ),
+  vendor: wire(z.string().nullable().optional(), z.string().nullable()),
+  model: wire(z.string().nullable().optional(), z.string().nullable()),
+  partitions: z.array(PartitionInfo),
+  capacity: z.int(),
+  guid: wire(z.string().nullable().optional(), z.string().nullable()),
+  filesystem: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'DiskInfo',
+})
 export const ImageConfig: z.ZodCodec<
   typeof ImageConfigRepr,
   z.ZodObject<{
@@ -6048,10 +6121,6 @@ export const ServerStatus: z.ZodObject<{
     >,
     z.ZodRecord<z.ZodString, z.ZodRecord<z.ZodString, typeof ConversionJob>>
   >
-  /**
-   * Invalidates cached drive discovery across daemon restarts.
-   */
-  diskRevision: z.ZodCodec<z.ZodOptional<z.ZodInt>, z.ZodInt>
   updateProgress: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof FullProgress>>,
     z.ZodNullable<typeof FullProgress>
@@ -6071,12 +6140,6 @@ export const ServerStatus: z.ZodObject<{
     z.record(z.string(), z.record(z.string(), ConversionJob)).optional(),
     z.record(z.string(), z.record(z.string(), ConversionJob)),
   ),
-  /**
-   * Invalidates cached drive discovery across daemon restarts.
-   */
-  diskRevision: wire(z.int().optional(), z.int()).meta({
-    description: 'Invalidates cached drive discovery across daemon restarts.',
-  }),
   updateProgress: wire(
     FullProgress.nullable().optional(),
     FullProgress.nullable(),
@@ -6856,6 +6919,10 @@ export const AllPackageData: z.ZodRecord<z.ZodString, typeof PackageDataEntry> =
 export const Public: z.ZodObject<{
   serverInfo: typeof ServerInfo
   packageData: typeof AllPackageData
+  disks: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof DiskInfo>>,
+    z.ZodArray<typeof DiskInfo>
+  >
   sharedVolumes: z.ZodCodec<
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof SharedVolume>>,
     z.ZodRecord<z.ZodString, typeof SharedVolume>
@@ -6864,6 +6931,7 @@ export const Public: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   serverInfo: ServerInfo,
   packageData: AllPackageData,
+  disks: wire(z.array(DiskInfo).optional(), z.array(DiskInfo)),
   sharedVolumes: wire(
     z.record(z.string(), SharedVolume).optional(),
     z.record(z.string(), SharedVolume),

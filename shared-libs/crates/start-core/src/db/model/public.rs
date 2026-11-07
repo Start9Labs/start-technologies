@@ -42,6 +42,8 @@ pub struct Public {
     pub server_info: ServerInfo,
     pub package_data: AllPackageData,
     #[serde(default)]
+    pub disks: Vec<crate::disk::util::DiskInfo>,
+    #[serde(default)]
     pub shared_volumes:
         BTreeMap<crate::shared_volumes::SharedVolumeId, crate::shared_volumes::SharedVolume>,
     pub ui: Value,
@@ -130,7 +132,6 @@ impl Public {
                 status_info: ServerStatus {
                     backup_progress: None,
                     backup_conversions: Default::default(),
-                    disk_revision: 0,
                     update_progress: None,
                     shutting_down: false,
                     restarting: false,
@@ -156,6 +157,7 @@ impl Public {
                 keyboard,
             },
             package_data: AllPackageData::default(),
+            disks: Vec::new(),
             shared_volumes: BTreeMap::new(),
             ui: serde_json::from_str(*DB_UI_SEED_CELL.get().unwrap_or(&"null"))
                 .with_kind(ErrorKind::Deserialization)?,
@@ -495,9 +497,6 @@ pub struct ServerStatus {
     pub backup_progress: Option<FullProgress>,
     #[serde(default)]
     pub backup_conversions: crate::backup::target::conversion::ConversionJobs,
-    /// Invalidates cached drive discovery across daemon restarts.
-    #[serde(default)]
-    pub disk_revision: u64,
     pub update_progress: Option<FullProgress>,
     #[serde(default)]
     pub shutting_down: bool,

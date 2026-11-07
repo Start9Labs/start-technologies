@@ -192,6 +192,8 @@ const { I18N } =
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
 const { BackupService } =
   await import('src/app/routes/portal/routes/system/routes/backups/backup.service')
+const { isVolumeInspectionStale } =
+  await import('src/app/utils/volume-inspection')
 const {
   TaskService,
   CopyService,
@@ -215,16 +217,16 @@ const { default: General } =
 const { SystemUpdateModal, UPDATE } =
   await import('src/app/routes/portal/routes/system/routes/general/update.component')
 
-test('backup drives react to coalesced device revisions without accepting stale lists', async t => {
-  const revisions = new BehaviorSubject(0)
+test('backup drives and backup metadata follow database state independently of CIFS discovery', async t => {
+  const disks = new BehaviorSubject([])
   const requests = []
   const injector = createEnvironmentInjector([
     {
       provide: PatchDB,
       useValue: {
         watch$: (...path) =>
-          path.at(-1) === 'diskRevision'
-            ? revisions
+          path.at(-1) === 'disks'
+            ? disks
             : of(path.at(-1) === 'id' ? 'server-id' : {}),
       },
     },
@@ -250,25 +252,81 @@ test('backup drives react to coalesced device revisions without accepting stale 
   ])
   t.after(() => injector.destroy())
   const service = runInInjectionContext(injector, () => new BackupService())
+  assert.equal(service.drives().length, 0)
+  const partition = {
+    logicalname: '/dev/sdb1',
+    stablePath: '/dev/disk/by-path/test-part1',
+    label: 'Photos',
+    capacity: 1000,
+    available: 900,
+    used: 100,
+    startOs: {},
+    legacyBackup: false,
+    guid: null,
+    filesystem: 'btrfs',
+  }
+  const disk = {
+    logicalname: '/dev/sdb',
+    stablePath: '/dev/disk/by-path/test',
+    vendor: 'Vendor',
+    model: 'Model',
+    partitionTable: 'gpt',
+    capacity: 2000,
+    guid: null,
+    filesystem: null,
+    partitions: [
+      partition,
+      { ...partition, logicalname: '/dev/sdb2', label: 'Music' },
+    ],
+  }
+  disks.next([disk])
+  assert.deepEqual(
+    service.drives().map(target => target.id),
+    ['disk-/dev/sdb1', 'disk-/dev/sdb2'],
+  )
+  assert.equal(requests.length, 0)
+  disks.next([
+    {
+      ...disk,
+      partitions: [
+        {
+          ...partition,
+          available: 800,
+          legacyBackup: true,
+          startOs: {
+            'server-id': {
+              hostname: 'server',
+              version: '0.4.2',
+              timestamp: '2026-11-06T00:00:00Z',
+              formatStatus: 'current',
+            },
+          },
+        },
+      ],
+    },
+  ])
+  assert.equal(service.drives()[0].hasCurrentBackup, true)
+  assert.equal(service.drives()[0].entry.legacyBackup, true)
+  assert.equal(service.drives()[0].entry.available, 800)
   service.getBackupTargets()
   assert.equal(requests.length, 1)
-  revisions.next(1)
-  revisions.next(2)
-  await new Promise(resolve => setTimeout(resolve, 300))
-  assert.equal(requests.length, 2)
-  requests[1].resolve({ drive: { type: 'disk', capacity: 1, startOs: {} } })
+  assert.equal(service.loading(), true)
+  disks.next([])
+  assert.equal(service.drives().length, 0)
+  requests[0].resolve({
+    nas: {
+      type: 'cifs',
+      hostname: 'nas',
+      path: '/share',
+      username: 'guest',
+      mountable: true,
+      available: 1000,
+      startOs: {},
+      legacyBackup: false,
+    },
+  })
   await tick()
-  assert.equal(service.drives().length, 1)
-  requests[0].resolve({})
-  await tick()
-  assert.equal(service.drives().length, 1)
-  revisions.next(2)
-  await new Promise(resolve => setTimeout(resolve, 300))
-  assert.equal(requests.length, 2)
-  revisions.next(3)
-  await new Promise(resolve => setTimeout(resolve, 300))
-  requests[2].resolve({})
-  await tick()
+  assert.equal(service.cifs().length, 1)
   assert.equal(service.drives().length, 0)
 })
 
@@ -1387,7 +1445,7 @@ const { default: SystemVolumes } =
   await import('src/app/routes/portal/routes/system/routes/volumes/index')
 const { CreateVolume } =
   await import('src/app/routes/portal/routes/system/routes/volumes/create')
-const { FormatDrive } =
+const { FormatDrive, FormatDriveDialog } =
   await import('src/app/routes/portal/components/format-drive')
 const { Mock: VolumeMock } = await import('src/app/services/api/api.fixures')
 const { TuiNotificationService } = await import('@taiga-ui/core')
@@ -1430,6 +1488,7 @@ function volumeFixture(t, packageData = {}) {
   const cache = new BehaviorSubject({
     id: 1,
     value: {
+      disks: structuredClone(VolumeMock.Disks),
       packageData,
       sharedVolumes: {
         [volumeA]: {
@@ -1437,12 +1496,18 @@ function volumeFixture(t, packageData = {}) {
           source: { kind: 'local' },
           grants: {},
           availability: 'available',
+          available: 1000,
+          error: null,
+          checkedAt: new Date().toISOString(),
         },
         [volumeB]: {
           name: 'Music',
           source: { kind: 'cifs', hostname: 'nas.invalid', path: '/music' },
           grants: {},
           availability: 'unavailable',
+          available: null,
+          error: 'Old observation',
+          checkedAt: new Date().toISOString(),
         },
       },
     },
@@ -1459,13 +1524,13 @@ function volumeFixture(t, packageData = {}) {
     decisions = [],
     formattedNotices = []
   let completed = 0
-  let driveLoads = 0
+  let revision = 1
   const api = {
     rpc: {
       disk: {
-        list: async () => {
-          driveLoads++
-          return VolumeMock.Disks
+        format: async params => {
+          requests.push({ kind: 'format-drive', params })
+          return `${params.disk}1`
         },
       },
       backup: {
@@ -1569,6 +1634,9 @@ function volumeFixture(t, packageData = {}) {
             completed++
           },
         },
+        completeWith() {
+          completed++
+        },
         data: {
           id: 'target',
           targetId: 'target',
@@ -1615,8 +1683,8 @@ function volumeFixture(t, packageData = {}) {
     confirmations,
     decisions,
     formattedNotices,
-    get driveLoads() {
-      return driveLoads
+    publish(operations) {
+      source.next([{ id: ++revision, patch: operations }])
     },
     get completed() {
       return completed
@@ -1628,7 +1696,7 @@ function volumeFixture(t, packageData = {}) {
 test('creating a drive volume uses physical discovery and sends only the selected source', async t => {
   const f = volumeFixture(t)
   const model = f.make(CreateVolume)
-  assert.equal(f.driveLoads, 1)
+  assert.equal(f.api.rpc.disk.list, undefined)
   model.source.set('External drive')
   model.form.patchValue({
     name: 'Photos',
@@ -1654,32 +1722,75 @@ test('creating a drive volume uses physical discovery and sends only the selecte
   assert.equal(f.completed, 1)
 })
 
-test('drive discovery failures preserve volume input and avoid a global task', async t => {
+test('the external-drive selector follows database changes without losing form input', async t => {
   const f = volumeFixture(t)
-  const error = new Error('discovery unavailable')
-  f.api.rpc.disk.list = async () => {
-    throw error
-  }
   const model = f.make(CreateVolume)
-  model.form.controls.name.setValue('Keep this name')
-  await Promise.resolve()
-  assert.equal(model.loading(), false)
+  model.form.patchValue({
+    name: 'Keep this name',
+    logicalname: model.drives()[0].logicalname,
+    path: 'keep/this/path',
+  })
+  f.publish([{ op: 'replace', path: '/disks', value: [] }])
+  f.publish([
+    { op: 'replace', path: '/disks', value: structuredClone(VolumeMock.Disks) },
+  ])
+  assert.ok(model.drives().length)
+  assert.equal(model.form.controls.logicalname.value, '')
   assert.equal(model.form.controls.name.value, 'Keep this name')
-  assert.deepEqual(f.errors, [error])
+  assert.equal(model.form.controls.path.value, 'keep/this/path')
+  assert.deepEqual(f.errors, [])
   assert.deepEqual(f.taskCalls, [])
 })
 
-test('shared drive formatting refreshes callers only after successful completion', t => {
+test('removing a drive clears the destructive selection and acknowledgement', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(FormatDriveDialog)
+  model.form.patchValue({ disk: model.disks()[0], acknowledged: true })
+  assert.ok(model.selectedDisk())
+  f.publish([{ op: 'replace', path: '/disks', value: [] }])
+  f.publish([
+    { op: 'replace', path: '/disks', value: structuredClone(VolumeMock.Disks) },
+  ])
+  assert.equal(model.form.controls.disk.value, null)
+  assert.equal(model.form.controls.acknowledged.value, false)
+  model.format()
+  await tick()
+  assert.deepEqual(f.requests, [])
+  assert.equal(model.selectedDisk(), undefined)
+})
+
+test('drive formatting rejects unacknowledged and invalid submissions', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(FormatDriveDialog)
+  const disk = model.disks()[0]
+  model.form.controls.disk.setValue(disk)
+  model.format()
+  await tick()
+  assert.deepEqual(f.requests, [])
+  model.form.patchValue({ acknowledged: true, label: 'é'.repeat(128) })
+  model.format()
+  await tick()
+  assert.deepEqual(f.requests, [])
+  model.form.controls.label.setValue('Backups')
+  model.format()
+  await tick()
+  assert.deepEqual(f.requests, [
+    {
+      kind: 'format-drive',
+      params: { disk: disk.logicalname, label: 'Backups' },
+    },
+  ])
+  assert.equal(f.completed, 1)
+  assert.deepEqual(f.errors, [])
+})
+
+test('shared drive formatting reports success only after completion', t => {
   const f = volumeFixture(t)
   const model = f.make(FormatDrive)
-  let refreshed = 0
-  model.formatted.subscribe(() => refreshed++)
   f.decisions.push(false, true)
   model.format()
-  assert.equal(refreshed, 0)
   assert.deepEqual(f.formattedNotices, [])
   model.format()
-  assert.equal(refreshed, 1)
   assert.deepEqual(f.formattedNotices, ['Drive formatted'])
 })
 
@@ -1705,39 +1816,74 @@ test('retained-volume page failures reach ErrorService without a global task', a
   assert.deepEqual(f.taskCalls, [])
 })
 
-test('table refresh waits for every volume, preserves failed observations and uses no global task', async t => {
+test('volume inspection is stale only when missing or older than ten minutes', () => {
+  const now = Date.parse('2026-11-06T12:00:00Z')
+  assert.equal(isVolumeInspectionStale(null, now), true)
+  assert.equal(isVolumeInspectionStale('2026-11-06T12:00:00Z', now), false)
+  assert.equal(isVolumeInspectionStale('2026-11-06T11:50:00Z', now), false)
+  assert.equal(isVolumeInspectionStale('2026-11-06T11:49:59.999Z', now), true)
+})
+
+test('opening volumes checks stale observations and renders later database observations rather than RPC results', async t => {
   const f = volumeFixture(t)
-  let finish
-  const pending = new Promise(resolve => {
-    finish = resolve
-  })
+  const fresh = 'CDEFGHIJKLMNOPQRSTUVWXYZ234567AB'
+  f.publish([
+    { op: 'replace', path: `/sharedVolumes/${volumeA}/checkedAt`, value: null },
+    {
+      op: 'replace',
+      path: `/sharedVolumes/${volumeB}/checkedAt`,
+      value: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+    },
+    {
+      op: 'add',
+      path: `/sharedVolumes/${fresh}`,
+      value: {
+        name: 'Fresh',
+        source: { kind: 'local' },
+        grants: {},
+        availability: 'available',
+        available: 1000,
+        error: null,
+        checkedAt: new Date().toISOString(),
+      },
+    },
+  ])
+  const pending = deferred()
   const requested = []
-  const error = new Error('refresh failed')
-  const previous = {
-    availability: 'unavailable',
-    available: null,
-    error: 'Old observation',
-  }
-  const current = { availability: 'available', available: 1234, error: null }
-  f.api.rpc.volumes.inspect = async ({ id }) => {
+  const error = new Error('inspection failed')
+  f.api.rpc.volumes.inspect = ({ id }) => {
     requested.push(id)
-    if (id === volumeA) return pending
-    throw error
+    return id === volumeA ? pending.promise : Promise.reject(error)
   }
   const model = f.make(SystemVolumes)
-  model.inspections.set({ [volumeB]: previous })
-  const refresh = model.refresh()
-  await Promise.resolve()
-  assert.equal(model.refreshing(), true)
+  await tick()
   assert.deepEqual(requested, [volumeA, volumeB])
-  assert.deepEqual(model.inspections()[volumeB], previous)
-  finish(current)
-  await refresh
-  assert.equal(model.refreshing(), false)
-  assert.deepEqual(model.inspections(), {
-    [volumeA]: current,
-    [volumeB]: previous,
+  assert.equal(model.volumes()[volumeB].error, 'Old observation')
+  const current = {
+    availability: 'available',
+    available: 1234,
+    error: null,
+    checkedAt: new Date().toISOString(),
+  }
+  f.publish([
+    {
+      op: 'replace',
+      path: `/sharedVolumes/${volumeA}`,
+      value: {
+        ...model.volumes()[volumeA],
+        ...current,
+      },
+    },
+  ])
+  pending.resolve({
+    availability: 'unavailable',
+    available: null,
+    error: 'Earlier result',
+    checkedAt: null,
   })
+  await tick()
+  assert.equal(model.volumes()[volumeA].available, 1234)
+  assert.equal(model.volumes()[volumeA].error, null)
   assert.deepEqual(f.errors, [error])
   assert.deepEqual(f.taskCalls, [])
 })
@@ -2075,7 +2221,13 @@ test('production mocks support inspection, independent failed backups and new-lo
   assert.deepEqual(cache.value.value.sharedVolumes[folder].source, folderSource)
   assert.match(local, /^[A-Z2-7]{32}$/)
   assert.match(remote, /^[A-Z2-7]{32}$/)
-  assert.equal(cache.value.value.sharedVolumes[remote].availability, 'unknown')
+  assert.equal(
+    cache.value.value.sharedVolumes[remote].availability,
+    'unavailable',
+  )
+  assert.equal(cache.value.value.sharedVolumes[remote].available, null)
+  assert.ok(cache.value.value.sharedVolumes[remote].error)
+  assert.ok(cache.value.value.sharedVolumes[remote].checkedAt)
   assert.doesNotMatch(
     JSON.stringify(cache.value.value.sharedVolumes),
     /private-user|private-password/,
@@ -2123,11 +2275,16 @@ test('production mocks support inspection, independent failed backups and new-lo
   })
   assert.notEqual(restored.restored[local], local)
   assert.match(restored.restored[local], /^[A-Z2-7]{32}$/)
-  assert.deepEqual(cache.value.value.sharedVolumes[restored.restored[local]], {
+  const { checkedAt, ...restoredVolume } =
+    cache.value.value.sharedVolumes[restored.restored[local]]
+  assert.ok(Number.isFinite(Date.parse(checkedAt)))
+  assert.deepEqual(restoredVolume, {
     name: 'Renamed photos',
     source: { kind: 'local' },
     grants: {},
     availability: 'available',
+    available: 50000000000,
+    error: null,
   })
   await api.rpc.volumes.remove({ id: local })
   assert.deepEqual(await api.rpc.volumes.listRetained({}), {})

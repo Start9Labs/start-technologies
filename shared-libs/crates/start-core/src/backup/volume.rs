@@ -287,7 +287,10 @@ fn new_local_restore(name: String) -> (SharedVolumeId, SharedVolume) {
             name,
             source: SharedVolumeSource::Local,
             grants: BTreeMap::new(),
-            availability: SharedVolumeAvailability::Available,
+            inspection: crate::shared_volumes::SharedVolumeInspection {
+                availability: SharedVolumeAvailability::Available,
+                ..Default::default()
+            },
         },
     )
 }

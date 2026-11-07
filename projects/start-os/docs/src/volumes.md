@@ -12,7 +12,7 @@ Open **System → Volumes** and create a volume with a name and a source:
 
 Availability is checked after boot and follows drive changes, network changes and SMB announcements. Unavailable CIFS shares granted to services retry automatically, backing off to every five minutes. Supporting services are notified when availability changes and can remount without opening this page. Backups' drive list also follows connected and removed drives.
 
-The table's **Refresh** button updates status and free space for every volume and reports source errors. For local folders it checks the directory and available data-drive space; it is not a connectivity test. CIFS rows use the same signal bars as Backups. A successful refresh is an observation, not a guarantee that a device will remain connected.
+The table shows the stored status, free space and last source error. Opening the page checks volumes whose last observation is missing or more than ten minutes old. For local folders this checks the directory and available data-drive space; it is not a connectivity test. CIFS rows use the same signal bars as Backups. A successful check is an observation, not a guarantee that a device will remain connected.
 
 **Format a drive** opens the same formatting dialog as Backups. It permanently erases the selected drive and creates one Btrfs partition. System and active mounted drives are protected. Formatting a drive changes its filesystem UUID: an existing volume for its old filesystem becomes unavailable rather than acquiring access to the replacement.
 

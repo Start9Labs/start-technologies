@@ -6,7 +6,7 @@ import {
 } from 'src/app/services/patch-db/data-model'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
 import { BTC_ICON, LND_ICON, PROXY_ICON, REGISTRY_ICON } from './api-icons'
-import { ActionRes, Result } from './api.types'
+import { ActionRes } from './api.types'
 
 import markdown from './md-sample.md'
 
@@ -28,7 +28,6 @@ export namespace Mock {
   export const ServerId = '1234-5678-9876-5432'
 
   export const ServerUpdated: T.ServerStatus = {
-    diskRevision: 0,
     backupConversions: {},
     backupProgress: null,
     updateProgress: null,
@@ -1424,7 +1423,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     ],
   }
 
-  export const Disks: Result<'disk.list'> = [
+  export const Disks: T.DiskInfo[] = [
     {
       logicalname: '/dev/sdb',
       stablePath: '/dev/disk/by-path/pci-0000:00:14.0-usb-0:2:1.0-scsi-0:0:0:0',
@@ -1500,16 +1499,6 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       },
       legacyBackup: false,
     },
-    // 'ftcvewdnkemfksdm': {
-    //   type: 'disk',
-    //   logicalname: 'sdba1',
-    //   label: 'Matt Stuff',
-    //   capacity: 1000000000000,
-    //   used: 0,
-    //   model: 'Evo SATA 2.5',
-    //   vendor: 'Samsung',
-    //   startOs: {},
-    // },
     csgashbdjkasnd: {
       type: 'cifs',
       hostname: 'smb://192.169.10.0',
@@ -1533,41 +1522,6 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       },
       legacyBackup: false,
     },
-    powjefhjbnwhdva: {
-      type: 'disk',
-      logicalname: 'sdba1',
-      stablePath: '/dev/disk/by-path/pci-0000:00:17.0-ata-2-part1',
-      label: 'Another Drive',
-      capacity: 2000000000000,
-      used: 100000000000,
-      model: null,
-      vendor: 'SSK',
-      guid: null,
-      filesystem: null,
-      available: 1000000000,
-      startOs: {
-        [ServerId]: {
-          hostname: 'server-name',
-          timestamp: new Date().toISOString(),
-          version: '0.4.0',
-          formatStatus: 'interrupted',
-        },
-      },
-      legacyBackup: true,
-    },
-    ...Object.fromEntries(
-      Disks.flatMap(disk =>
-        disk.partitions.map(partition => [
-          `disk-${partition.logicalname}`,
-          {
-            ...partition,
-            type: 'disk' as const,
-            vendor: disk.vendor,
-            model: disk.model,
-          },
-        ]),
-      ),
-    ),
   }
 
   // @TODO 041

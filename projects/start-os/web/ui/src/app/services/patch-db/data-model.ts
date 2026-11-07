@@ -9,6 +9,7 @@ export type DataModel = {
   }
   packageData: AllPackageData
   sharedVolumes: T.Public['sharedVolumes']
+  disks: T.Public['disks']
 }
 
 export type UIData = {

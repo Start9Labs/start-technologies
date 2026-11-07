@@ -6103,11 +6103,11 @@ about.commands-diagnostic:
   pl_PL: "Polecenia wyświetlania logów, restartu serwera itp."
 
 about.commands-disk:
-  en_US: "Commands for listing disk info and repairing"
-  de_DE: "Befehle zum Auflisten von Festplatteninfo und Reparieren"
-  es_ES: "Comandos para listar información de disco y reparar"
-  fr_FR: "Commandes pour lister les informations de disque et réparer"
-  pl_PL: "Polecenia wyświetlania informacji o dysku i naprawy"
+  en_US: "Commands for formatting and repairing drives"
+  de_DE: "Befehle zum Formatieren und Reparieren von Laufwerken"
+  es_ES: "Comandos para formatear y reparar unidades"
+  fr_FR: "Commandes de formatage et de réparation des disques"
+  pl_PL: "Polecenia formatowania i naprawy dysków"
 
 about.commands-display-file-paths-contents-manifest:
   en_US: "Commands to display file paths, file contents, or manifest"

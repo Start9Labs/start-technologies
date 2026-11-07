@@ -12,7 +12,7 @@ use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::prelude::*;
 use crate::shared_volumes::mounts::{PreparedSource, confined_relative};
 use crate::shared_volumes::{
-    SharedVolumeAvailability, SharedVolumeId, SharedVolumeSource, local_path,
+    SharedVolumeId, SharedVolumeInspection, SharedVolumeSource, local_path,
 };
 
 pub async fn create_local_directory(path: &Path) -> Result<(), Error> {
@@ -69,20 +69,23 @@ pub async fn open_source(
             )
         }
     };
-    let result = match mounted {
-        Ok(guard) => PreparedSource::open(guard, subpath).await,
-        Err(error) => Err(error),
+    let result = source_result(
+        async {
+            let source = PreparedSource::open(mounted?, subpath).await?;
+            let available = measure_mount(source.path()).await?;
+            Ok((source, available))
+        }
+        .await,
+    );
+    let inspection = match &result {
+        Ok((_, available)) => SharedVolumeInspection::available(Some(*available)),
+        Err(error) => SharedVolumeInspection::unavailable(error.to_string()),
     };
-    let availability = if result.is_ok() {
-        SharedVolumeAvailability::Available
-    } else {
-        SharedVolumeAvailability::Unavailable
-    };
-    record_availability(ctx, id, availability).await?;
-    source_result(result)
+    record_availability(ctx, id, inspection).await?;
+    result.map(|(source, _)| source)
 }
 
-fn source_result(result: Result<PreparedSource, Error>) -> Result<PreparedSource, Error> {
+fn source_result<T>(result: Result<T, Error>) -> Result<T, Error> {
     result.with_ctx(|error| {
         (
             match error.kind {
@@ -97,17 +100,39 @@ fn source_result(result: Result<PreparedSource, Error>) -> Result<PreparedSource
 pub(crate) async fn record_availability(
     ctx: &RpcContext,
     id: &SharedVolumeId,
-    availability: SharedVolumeAvailability,
+    inspection: SharedVolumeInspection,
 ) -> Result<(), Error> {
     ctx.db
-        .mutate(|db| {
-            if let Some(volume) = db.as_public_mut().as_shared_volumes_mut().as_idx_mut(id) {
-                volume.as_availability_mut().ser(&availability)?;
-            }
-            Ok(())
-        })
+        .mutate(|db| write_inspection(db, id, inspection))
         .await
         .result
+}
+
+fn write_inspection(
+    db: &mut crate::db::model::DatabaseModel,
+    id: &SharedVolumeId,
+    inspection: SharedVolumeInspection,
+) -> Result<(), Error> {
+    if let Some(volume) = db.as_public_mut().as_shared_volumes_mut().as_idx_mut(id) {
+        if volume.as_inspection().de()? != inspection {
+            // Flattened field serialization replaces the entire parent object.
+            volume.mutate(|volume| {
+                volume.inspection = inspection;
+                Ok(())
+            })?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn measure_mount(path: &Path) -> Result<u64, Error> {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        crate::disk::util::get_available(path),
+    )
+    .await
+    .with_kind(ErrorKind::Timeout)
+    .and_then(|result| result)
 }
 
 pub(super) fn external_partition(

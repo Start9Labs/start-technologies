@@ -80,7 +80,12 @@ function fixture(t, { confirm = of(true), password = of('secret') } = {}) {
     {
       provide: PatchDB,
       useValue: {
-        watch$: (...path) => (path.at(-1) === 'id' ? of('own') : observations),
+        watch$: (...path) =>
+          path.at(-1) === 'id'
+            ? of('own')
+            : path.at(-1) === 'disks'
+              ? of([])
+              : observations,
       },
     },
     {

@@ -95,14 +95,14 @@ import { BACKUP_RESTORE } from './restore.component'
     } @else {
       @if (service.loading()) {
         <tui-loader
-          textContent="Fetching backups"
+          [textContent]="'Loading' | i18n"
           size="l"
           [style.height.rem]="20"
         />
       } @else {
         <section (networkFolders)="onTarget($event)"></section>
-        <section (physicalFolders)="onTarget($event)"></section>
       }
+      <section (physicalFolders)="onTarget($event)"></section>
     }
   `,
   styles: `

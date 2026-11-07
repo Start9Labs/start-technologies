@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use patch_db::HasModel;
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 use tokio::task;
 use tracing::instrument;
 use zeroize::Zeroizing;
@@ -159,6 +159,7 @@ pub async fn start(
         BackupTargetFS::Cifs(cifs) => format!("{}:{}", cifs.hostname, cifs.path.display()),
     };
     let guard = TmpMountGuard::mount(&fs, ReadWrite).await?;
+    let _disk_refresh = target_id.refresh_disks_on_drop(ctx.disk_updates.clone());
     let prepared =
         BackupMountGuard::<TmpMountGuard>::prepare_conversion(guard.path(), &server_id, &password)
             .await;
@@ -211,7 +212,13 @@ pub async fn start(
         key,
     };
     let db = ctx.db.clone();
-    task::spawn(async move { conversion.run(db, progress, shutdown).await.log_err() });
+    let disk_updates = ctx.disk_updates.clone();
+    task::spawn(async move {
+        conversion
+            .run(db, progress, shutdown, disk_updates)
+            .await
+            .log_err()
+    });
     Ok(())
 }
 
@@ -230,6 +237,7 @@ impl<G: GenericMountGuard> PreparedConversion<G> {
         db: TypedPatchDb<Database>,
         mut progress: backupfs::ConversionProgressSink,
         mut shutdown: broadcast::Receiver<Option<Shutdown>>,
+        disk_updates: watch::Sender<()>,
     ) -> Result<(), Error> {
         let Self {
             target_id,
@@ -239,6 +247,7 @@ impl<G: GenericMountGuard> PreparedConversion<G> {
             data,
             key,
         } = self;
+        let _disk_refresh = target_id.refresh_disks_on_drop(disk_updates);
         let target_for_progress = target_id.to_string();
         let server_for_progress = server_id.clone();
         let progress_sync =

@@ -117,8 +117,8 @@ pub struct SharedVolume {
     pub name: String,
     pub source: SharedVolumeSource,
     pub grants: BTreeMap<PackageId, SharedVolumeGrant>,
-    #[serde(default)]
-    pub availability: SharedVolumeAvailability,
+    #[serde(flatten)]
+    pub inspection: SharedVolumeInspection,
 }
 
 rpc_toolkit::reflect_ts!(SharedVolume);
@@ -258,7 +258,7 @@ pub async fn create(
                     name,
                     source,
                     grants: BTreeMap::new(),
-                    availability: SharedVolumeAvailability::default(),
+                    inspection: SharedVolumeInspection::default(),
                 },
             )?;
             Ok(())
@@ -459,12 +459,34 @@ async fn delete_retained_data(ctx: &RpcContext, id: &SharedVolumeId) -> Result<(
         .result
 }
 
-#[derive(Serialize, Deserialize, VisitFields)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, HasModel, VisitFields)]
+#[serde(default, rename_all = "camelCase")]
+#[model = "Model<Self>"]
 pub struct SharedVolumeInspection {
     pub availability: SharedVolumeAvailability,
     pub available: Option<u64>,
     pub error: Option<String>,
+    pub checked_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl SharedVolumeInspection {
+    pub(crate) fn available(bytes: Option<u64>) -> Self {
+        Self {
+            availability: SharedVolumeAvailability::Available,
+            available: bytes,
+            error: None,
+            checked_at: Some(chrono::Utc::now()),
+        }
+    }
+
+    pub(crate) fn unavailable(error: String) -> Self {
+        Self {
+            availability: SharedVolumeAvailability::Unavailable,
+            available: None,
+            error: Some(error),
+            checked_at: Some(chrono::Utc::now()),
+        }
+    }
 }
 
 rpc_toolkit::reflect_ts!(SharedVolumeInspection);
@@ -475,39 +497,18 @@ pub async fn inspect(
 ) -> Result<SharedVolumeInspection, Error> {
     use crate::disk::mount::filesystem::ReadOnly;
     use crate::disk::mount::guard::GenericMountGuard;
-    match source::open_source(&ctx, &id, ReadOnly).await {
-        Ok(guard) => {
-            let available = tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                crate::disk::util::get_available(guard.path()),
-            )
-            .await
-            .with_kind(ErrorKind::Timeout)
-            .and_then(|result| result);
-            guard.unmount().await?;
-            match available {
-                Ok(available) => Ok(SharedVolumeInspection {
-                    availability: SharedVolumeAvailability::Available,
-                    available: Some(available),
-                    error: None,
-                }),
-                Err(_) => {
-                    source::record_availability(&ctx, &id, SharedVolumeAvailability::Unavailable)
-                        .await?;
-                    Ok(SharedVolumeInspection {
-                        availability: SharedVolumeAvailability::Unavailable,
-                        available: None,
-                        error: Some(t!("shared-volumes.source-unavailable").to_string()),
-                    })
-                }
-            }
-        }
-        Err(error) => Ok(SharedVolumeInspection {
-            availability: SharedVolumeAvailability::Unavailable,
-            available: None,
-            error: Some(error.to_string()),
-        }),
+    if let Ok(guard) = source::open_source(&ctx, &id, ReadOnly).await {
+        guard.unmount().await?;
     }
+    ctx.db
+        .peek()
+        .await
+        .as_public()
+        .as_shared_volumes()
+        .as_idx(&id)
+        .or_not_found(&id)?
+        .as_inspection()
+        .de()
 }
 
 #[cfg(test)]
@@ -614,7 +615,7 @@ mod tests {
             name: "Photos".into(),
             source: SharedVolumeSource::Local,
             grants: BTreeMap::new(),
-            availability: SharedVolumeAvailability::Unknown,
+            inspection: SharedVolumeInspection::default(),
         };
         assert!(volume.authorize(true, &package, true).is_err());
         volume

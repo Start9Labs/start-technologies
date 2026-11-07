@@ -16,27 +16,21 @@ import { T, Version } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
   catchError,
-  debounceTime,
   defer,
-  distinctUntilChanged,
   EMPTY,
   filter,
   finalize,
   firstValueFrom,
   from,
-  merge,
   pairwise,
-  skip,
   Subject,
   switchMap,
 } from 'rxjs'
 
-import {
-  CifsBackupTarget,
-  DiskBackupTarget,
-} from 'src/app/services/api/api.types'
+import { CifsBackupTarget } from 'src/app/services/api/api.types'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
+import { getDiskBackupTargets } from 'src/app/utils/disk-backup-targets'
 
 export interface MappedBackupTarget<E> {
   id: string
@@ -54,12 +48,7 @@ export class BackupService {
   private readonly tasks = inject(TaskService)
   private readonly reload = new Subject<void>()
   private readonly targets = toSignal(
-    merge(
-      this.reload,
-      this.patch
-        .watch$('serverInfo', 'statusInfo', 'diskRevision')
-        .pipe(distinctUntilChanged(), skip(1), debounceTime(250)),
-    ).pipe(
+    this.reload.pipe(
       switchMap(() =>
         defer(() => {
           this.loading.set(true)
@@ -75,13 +64,13 @@ export class BackupService {
     ),
     { initialValue: {} as Record<string, T.BackupTarget> },
   )
+  private readonly disks = toSignal(this.patch.watch$('disks'), {
+    initialValue: [],
+  })
   private readonly mapped = computed(() =>
-    Object.entries(this.targets()).map(([id, entry]) => ({
-      id,
-      entry,
-      hasAnyBackup: this.hasAnyBackup(entry),
-      hasCurrentBackup: this.hasCurrentBackup(entry),
-    })),
+    Object.entries(this.targets()).map(([id, entry]) =>
+      this.mapTarget(id, entry),
+    ),
   )
   private readonly settled = this.patch
     .watch$('serverInfo', 'statusInfo', 'backupConversions')
@@ -113,13 +102,24 @@ export class BackupService {
         target.entry.type === 'cifs',
     ),
   )
-  public readonly drives = linkedSignal(() =>
-    this.mapped().filter(
-      (target): target is MappedBackupTarget<DiskBackupTarget> =>
-        target.entry.type === 'disk' && target.entry.capacity > 0,
-    ),
+  public readonly drives = computed(() =>
+    Object.entries(getDiskBackupTargets(this.disks()))
+      .filter(([, partition]) => partition.capacity > 0)
+      .map(([id, partition]) => this.mapTarget(id, partition)),
   )
   public readonly loading = signal(true)
+
+  private mapTarget<E extends T.BackupTarget>(
+    id: string,
+    entry: E,
+  ): MappedBackupTarget<E> {
+    return {
+      id,
+      entry,
+      hasAnyBackup: this.hasAnyBackup(entry),
+      hasCurrentBackup: this.hasCurrentBackup(entry),
+    }
+  }
 
   getBackupTargets(): void {
     this.reload.next()
@@ -152,7 +152,6 @@ export class BackupService {
           ? { ...target, entry: { ...target.entry, legacyBackup: false } }
           : target,
       )
-    this.drives.update(clear)
     this.cifs.update(clear)
   }
 

@@ -429,7 +429,6 @@ pub async fn init(
         update_progress: None,
         backup_progress: None,
         backup_conversions: Default::default(),
-        disk_revision: server_info.as_status_info().de()?.disk_revision,
         shutting_down: false,
         restarting: false,
         restart: None,

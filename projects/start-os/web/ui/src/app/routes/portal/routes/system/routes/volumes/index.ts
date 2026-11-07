@@ -20,7 +20,6 @@ import {
   TuiIcon,
   TuiTitle,
 } from '@taiga-ui/core'
-import { TuiButtonLoading } from '@taiga-ui/kit'
 import { TuiHeader } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
 import { firstValueFrom } from 'rxjs'
@@ -31,6 +30,7 @@ import { Result } from 'src/app/services/api/api.types'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { TitleDirective } from 'src/app/services/title.service'
+import { isVolumeInspectionStale } from 'src/app/utils/volume-inspection'
 import { CREATE_VOLUME } from './create'
 import { VOLUME_GRANTS } from './grants'
 
@@ -45,17 +45,6 @@ import { VOLUME_GRANTS } from './grants'
     <header tuiHeader>
       <h3 tuiTitle>{{ 'Volumes' | i18n }}</h3>
       <aside tuiAccessories>
-        <button
-          tuiIconButton
-          size="s"
-          appearance="secondary"
-          iconStart="@tui.refresh-cw"
-          [loading]="refreshing()"
-          [disabled]="refreshing()"
-          (click)="refresh()"
-        >
-          {{ 'Refresh' | i18n }}
-        </button>
         <button formatDrive size="s"></button>
         <button tuiButton size="s" iconStart="@tui.plus" (click)="create()">
           {{ 'New' | i18n }}
@@ -104,20 +93,14 @@ import { VOLUME_GRANTS } from './grants'
                 />
                 {{ statuses[volume.availability] | i18n }}
               </span>
-              @if (
-                volume.availability === 'unavailable' &&
-                  inspections()[id]?.error;
-                as error
-              ) {
+              @if (volume.error; as error) {
                 <span tuiSubtitle>{{ error }}</span>
               }
             </span>
           </td>
           <td>
-            @if (inspections()[id]?.available; as free) {
-              {{ free | convertBytes }}
-            } @else if (inspections()[id]?.available === 0) {
-              {{ 0 | convertBytes }}
+            @if (volume.available !== null) {
+              {{ volume.available | convertBytes }}
             } @else {
               &mdash;
             }
@@ -205,7 +188,6 @@ import { VOLUME_GRANTS } from './grants'
     TuiDropdown,
     TuiHint,
     TuiIcon,
-    TuiButtonLoading,
     KeyValuePipe,
     TuiTitle,
     TuiHeader,
@@ -222,13 +204,9 @@ export default class Volumes {
 
   protected readonly volumes = toSignal(
     inject<PatchDB<DataModel>>(PatchDB).watch$('sharedVolumes'),
-    { initialValue: {} },
+    { initialValue: {} as DataModel['sharedVolumes'] },
   )
-  protected readonly inspections = signal<
-    Record<string, Result<'volumes.inspect'>>
-  >({})
   protected readonly retained = signal<Result<'volumes.list-retained'>>({})
-  protected readonly refreshing = signal(false)
   protected readonly statuses: Record<T.SharedVolumeAvailability, i18nKey> = {
     unknown: 'Unknown',
     available: 'Available',
@@ -237,6 +215,7 @@ export default class Volumes {
 
   constructor() {
     this.refreshRetained()
+    this.inspectStale()
   }
 
   private async refreshRetained() {
@@ -255,22 +234,19 @@ export default class Volumes {
     this.dialogs.openComponent(VOLUME_GRANTS, { data: { id } }).subscribe()
   }
 
-  protected async refresh() {
-    this.refreshing.set(true)
-    try {
-      await Promise.all(
-        Object.keys(this.volumes() || {}).map(async id => {
+  private async inspectStale() {
+    const now = Date.now()
+    await Promise.all(
+      Object.entries(this.volumes() || {})
+        .filter(([, volume]) => isVolumeInspectionStale(volume.checkedAt, now))
+        .map(async ([id]) => {
           try {
-            const result = await this.api.rpc.volumes.inspect({ id })
-            this.inspections.update(all => ({ ...all, [id]: result }))
+            await this.api.rpc.volumes.inspect({ id })
           } catch (error) {
             this.errors.handleError(error as HttpError)
           }
         }),
-      )
-    } finally {
-      this.refreshing.set(false)
-    }
+    )
   }
 
   protected async rename(id: string, volume: T.SharedVolume) {

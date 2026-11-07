@@ -1,18 +1,12 @@
-import { Component, inject, signal } from '@angular/core'
+import { Component, computed, inject, signal } from '@angular/core'
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop'
 import {
   FormsModule,
   NonNullableFormBuilder,
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms'
-import {
-  ConvertBytesPipe,
-  ErrorService,
-  HttpError,
-  i18nPipe,
-  TaskService,
-} from '@start9labs/shared'
-import { T } from '@start9labs/start-core'
+import { ConvertBytesPipe, i18nPipe, TaskService } from '@start9labs/shared'
 import { WA_IS_MOBILE } from '@ng-web-apis/platform'
 import { TuiAutoFocus, tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
 import {
@@ -23,13 +17,14 @@ import {
   TuiError,
   TuiIcon,
   TuiInput,
-  TuiLoader,
   TuiTitle,
 } from '@taiga-ui/core'
 import { TuiChevron, TuiPassword, TuiRadioList, TuiSelect } from '@taiga-ui/kit'
 import { TuiForm, TuiHeader } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
+import { PatchDB } from 'patch-db-client'
 
+import { DataModel } from 'src/app/services/patch-db/data-model'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { getPartitionName } from 'src/app/utils/get-partition-name'
 
@@ -63,32 +58,17 @@ import { getPartitionName } from 'src/app/utils/get-partition-name'
           <label tuiLabel>{{ 'Drive' | i18n }}</label>
           <input tuiSelect formControlName="logicalname" required />
           <tui-data-list *tuiDropdown>
-            @if (loading()) {
-              <tui-loader size="s" />
-            } @else {
-              @for (drive of drives(); track drive.logicalname) {
-                <button tuiOption [value]="drive.logicalname">
-                  {{ partitionName(drive) }} ·
-                  {{ drive.capacity | convertBytes }}
-                </button>
-              } @empty {
-                {{ 'No drives detected' | i18n }}
-              }
+            @for (drive of drives(); track drive.logicalname) {
+              <button tuiOption [value]="drive.logicalname">
+                {{ partitionName(drive) }} ·
+                {{ drive.capacity | convertBytes }}
+              </button>
+            } @empty {
+              {{ 'No drives detected' | i18n }}
             }
           </tui-data-list>
         </tui-textfield>
         <tui-error formControlName="logicalname" />
-        <button
-          tuiButton
-          type="button"
-          size="s"
-          appearance="flat"
-          iconStart="@tui.refresh-cw"
-          [disabled]="loading()"
-          (click)="loadDrives()"
-        >
-          {{ 'Refresh' | i18n }}
-        </button>
         <tui-textfield>
           <label tuiLabel>{{ 'Path' | i18n }}</label>
           <input
@@ -184,7 +164,6 @@ import { getPartitionName } from 'src/app/utils/get-partition-name'
     TuiError,
     TuiIcon,
     TuiInput,
-    TuiLoader,
     TuiTitle,
     TuiPassword,
     TuiRadioList,
@@ -195,10 +174,13 @@ import { getPartitionName } from 'src/app/utils/get-partition-name'
 export class CreateVolume {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
-  private readonly errors = inject(ErrorService)
+  private readonly attached$ =
+    inject<PatchDB<DataModel>>(PatchDB).watch$('disks')
+  private readonly disks = toSignal(this.attached$, { initialValue: [] })
 
-  protected readonly drives = signal<T.PartitionInfo[]>([])
-  protected readonly loading = signal(true)
+  protected readonly drives = computed(() =>
+    this.disks().flatMap(disk => disk.partitions),
+  )
   protected readonly isMobile = inject(WA_IS_MOBILE)
   protected readonly context = injectContext<TuiDialogContext<void>>()
   protected readonly sources = [
@@ -217,28 +199,28 @@ export class CreateVolume {
     password: [''],
   })
 
+  private readonly removedSelection = this.attached$
+    .pipe(takeUntilDestroyed())
+    .subscribe(disks => {
+      const logicalname = this.form.controls.logicalname.value
+      if (
+        logicalname &&
+        !disks.some(disk =>
+          disk.partitions.some(
+            partition => partition.logicalname === logicalname,
+          ),
+        )
+      ) {
+        this.form.controls.logicalname.reset()
+      }
+    })
+
   protected readonly partitionName = getPartitionName
   protected readonly driveLabel = (logicalname: string) => {
     const partition = this.drives().find(
       drive => drive.logicalname === logicalname,
     )
     return partition ? getPartitionName(partition) : logicalname
-  }
-
-  constructor() {
-    this.loadDrives()
-  }
-
-  protected async loadDrives() {
-    this.loading.set(true)
-    try {
-      const disks = await this.api.rpc.disk.list({})
-      this.drives.set(disks.flatMap(disk => disk.partitions))
-    } catch (error) {
-      this.errors.handleError(error as HttpError)
-    } finally {
-      this.loading.set(false)
-    }
   }
 
   protected async save() {

@@ -108,7 +108,7 @@ A new drive, or one formatted for another system, can be prepared from StartOS: 
 
 1. Plug the drive into your server.
 
-1. In StartOS, go to `System > Create Backup`. The drive appears under `Physical Drives`; if it doesn't, click "Refresh".
+1. In StartOS, go to `System > Create Backup`. The drive appears under `Physical Drives`; the list updates automatically when drives are connected or removed.
 
 1. Click the drive.
 

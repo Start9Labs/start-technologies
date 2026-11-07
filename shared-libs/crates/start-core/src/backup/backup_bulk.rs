@@ -222,6 +222,7 @@ pub async fn backup_all(
     );
 
     let disk_guard = TmpMountGuard::mount(&fs, BackupWrite).await?;
+    let disk_refresh = target_id.refresh_disks_on_drop(ctx.disk_updates.clone());
 
     // The master password is validated; this failure identifies the target's password.
     BackupMountGuard::<TmpMountGuard>::validate_password(
@@ -254,6 +255,7 @@ pub async fn backup_all(
     )));
 
     tokio::task::spawn(async move {
+        let _disk_refresh = disk_refresh;
         let _progress_db_sync = progress_db_sync;
         let mut backup_guard =
             match BackupMountGuard::mount(disk_guard.clone(), &server_id, &old_password_decrypted)
