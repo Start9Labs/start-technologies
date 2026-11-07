@@ -151,7 +151,6 @@ impl<Context: crate::Context> McpServer<Context> {
 /// The context and middleware of the HTTP request carrying an MCP message.
 struct McpRequest<Context> {
     context: Context,
-    body: axum::body::Bytes,
     middleware: Mutex<Vector<DynMiddleware<Context>>>,
 }
 
@@ -198,8 +197,6 @@ impl<Context: crate::Context> ServerHandler for McpServer<Context> {
             method: GenericRpcMethod::new(InternedString::intern(&*tool.name)),
             params,
         };
-        let message: Value = serde_json::from_slice(&http_request.body)
-            .map_err(|error| McpError::invalid_params(error.to_string(), None))?;
         let mut middleware = http_request.middleware.lock().await;
         let response = self
             .http
@@ -207,7 +204,6 @@ impl<Context: crate::Context> ServerHandler for McpServer<Context> {
                 &http_request.context,
                 &mut middleware,
                 rpc_request,
-                &message,
                 None,
             )
             .await;
@@ -240,13 +236,12 @@ impl<Context: crate::Context> McpService<Context> {
     pub fn handle(&self, mut req: Request) -> BoxFuture<'static, Response> {
         let this = self.clone();
         async move {
-            let (context, middleware, body) = match this.http.begin_http_request(&mut req).await {
+            let (context, middleware, _) = match this.http.begin_http_request(&mut req).await {
                 Ok(a) => a,
                 Err(res) => return res,
             };
             let state = Arc::new(McpRequest {
                 context,
-                body,
                 middleware: Mutex::new(middleware),
             });
             req.extensions_mut().insert(state.clone());

@@ -294,16 +294,6 @@ async fn rpc_response_metadata_maps_to_mcp_result_metadata_on_success_and_error(
     struct ReplyMetadata;
     impl Middleware<Ctx> for ReplyMetadata {
         type Metadata = rpc_toolkit::Empty;
-        async fn process_rpc_message(
-            &mut self,
-            _: &Ctx,
-            message: &Value,
-        ) -> Result<(), RpcResponse> {
-            assert_eq!(message["method"].as_str(), Some("tools/call"));
-            assert!(message["params"]["name"].is_string());
-            assert_eq!(message["signature"].as_str(), Some("original-mcp-proof"));
-            Ok(())
-        }
         async fn process_rpc_response(&mut self, _: &Ctx, response: &mut RpcResponse) {
             response.add_meta(json!({"patchSequence": 7})).unwrap();
         }
@@ -338,9 +328,7 @@ async fn rpc_response_metadata_maps_to_mcp_result_metadata_on_success_and_error(
         ("greet", json!({"name":"mcp"}), false),
         ("fail", json!({}), true),
     ] {
-        let mut message =
-            Client::message("tools/call", json!({"name":name, "arguments":arguments}));
-        message["signature"] = "original-mcp-proof".into();
+        let message = Client::message("tools/call", json!({"name":name, "arguments":arguments}));
         let response = body(client.send_message(message).await).await;
         assert_eq!(response["result"]["_meta"], json!({"patchSequence":7}));
         assert_eq!(response["result"]["isError"] == true, error);

@@ -96,14 +96,13 @@ async fn rpc(url: &Url, method: &str, params: Value, signer: Option<&Signer>) ->
         .unwrap()
 }
 
-async fn signed_message(signer: &Signer, mut message: Value) -> Value {
-    let proof = SignatureHeader::sign_rpc(signer, &message, "127.0.0.1")
-        .await
+async fn registry_socket(url: &Url, signer: &Signer) -> crate::util::net::secure::EncryptedSocket {
+    let url = url
+        .join("ws/rpc?noise=1&context=127.0.0.1")
         .unwrap()
-        .to_header();
-    message[crate::middleware::auth::signature::rpc::RPC_SIGNATURE_FIELD] =
-        Value::from(proof.to_str().unwrap());
-    message
+        .to_string()
+        .replacen("http:", "ws:", 1);
+    session::encrypted(&url, signer).await
 }
 
 async fn post_json_message(url: &Url, message: &Value) -> Value {
@@ -122,83 +121,16 @@ async fn post_json_message(url: &Url, message: &Value) -> Value {
 }
 
 #[tokio::test]
-async fn json_signatures_bind_http_calls_reject_replay_and_keep_batch_proofs_independent() {
+async fn root_signature_fields_neither_authenticate_nor_override_http_headers() {
     let (_temp, ctx, admin, _reader, _) = fixture().await;
     let (url, _task) = server(ctx).await;
-    let message = signed_message(
-        &admin,
-        json!({"id":u64::MAX, "method":"package.access.get", "params":{"id":"secret"}}),
-    )
-    .await;
+    let message = json!({"id":u64::MAX,"method":"package.access.get","params":{"id":"secret"},"signature":"untrusted"});
     let response = post_json_message(&url, &message).await;
     assert_eq!(response["id"], json!(u64::MAX));
-    assert_eq!(response["result"]["private"], json!(true));
-    let replay = post_json_message(&url, &message).await;
     assert_eq!(
-        replay["error"]["code"],
-        json!(ErrorKind::InvalidSignature as i32)
+        response["error"]["code"],
+        json!(ErrorKind::Authorization as i32)
     );
-    assert_eq!(replay["id"], json!(u64::MAX));
-    let mut tampered = signed_message(
-        &admin,
-        json!({"id":7, "method":"package.access.get", "params":{"id":"secret"}}),
-    )
-    .await;
-    tampered["params"]["id"] = "public".into();
-    assert_eq!(
-        post_json_message(&url, &tampered).await["error"]["code"],
-        json!(ErrorKind::InvalidSignature as i32)
-    );
-    let batch = json!([
-        signed_message(
-            &admin,
-            json!({"id":8,"method":"package.access.get","params":{"id":"secret"}})
-        )
-        .await,
-        signed_message(
-            &admin,
-            json!({"id":9,"method":"package.access.get","params":{"id":"public"}})
-        )
-        .await,
-    ]);
-    let responses = post_json_message(&url, &batch).await;
-    assert_eq!(responses[0]["result"]["private"], json!(true));
-    assert_eq!(responses[1]["result"]["private"], json!(false));
-}
-
-#[tokio::test]
-async fn canonical_signing_bodies_can_exceed_the_wire_request_budget() {
-    let (_temp, ctx, admin, _reader, _) = fixture().await;
-    let (url, _task) = server(ctx).await;
-    let padding = Value::Array(std::iter::repeat_n(Value::from(1.0), 120_000).collect());
-    let message = signed_message(
-        &admin,
-        json!({"id":1,"method":"package.access.get","params":{"id":"secret","padding":padding}}),
-    )
-    .await;
-    let limit = rpc_toolkit::RequestBodyLimit::default().0.get();
-    assert!(serde_json::to_vec(&message).unwrap().len() < limit);
-    assert!(
-        crate::middleware::auth::signature::rpc::rpc_signing_body(&message)
-            .unwrap()
-            .len()
-            > limit
-    );
-    assert_eq!(
-        post_json_message(&url, &message).await["result"]["private"],
-        json!(true)
-    );
-}
-
-#[tokio::test]
-async fn explicit_json_identity_takes_precedence_over_a_legacy_http_proof() {
-    let (_temp, ctx, admin, reader, _) = fixture().await;
-    let (url, _task) = server(ctx).await;
-    let message = signed_message(
-        &reader,
-        json!({"id":1,"method":"package.access.get","params":{"id":"secret"}}),
-    )
-    .await;
     let bytes = serde_json::to_vec(&message).unwrap();
     let legacy = SignatureHeader::sign(&admin, &bytes, "127.0.0.1")
         .await
@@ -215,15 +147,13 @@ async fn explicit_json_identity_takes_precedence_over_a_legacy_http_proof() {
         .json()
         .await
         .unwrap();
-    assert_eq!(
-        response["error"]["code"],
-        json!(ErrorKind::Authorization as i32)
-    );
+    assert_eq!(response["id"], json!(u64::MAX));
+    assert_eq!(response["result"]["private"], json!(true));
 }
 
 #[tokio::test]
-async fn websocket_json_identity_is_per_call_and_upgrade_body_proofs_do_not_authorize_calls() {
-    let (_temp, ctx, admin, reader, _) = fixture().await;
+async fn websocket_upgrade_headers_and_root_fields_do_not_authenticate_plaintext_calls() {
+    let (_temp, ctx, admin, _reader, _) = fixture().await;
     let (url, _task) = server(ctx).await;
     let mut request = url
         .join("ws/rpc")
@@ -263,7 +193,7 @@ async fn websocket_json_identity_is_per_call_and_upgrade_body_proofs_do_not_auth
         json!(ErrorKind::Authorization as i32)
     );
     let batch = json!([
-        signed_message(&reader, json!({"jsonrpc":"2.0","id":2,"method":"index"})).await,
+        json!({"jsonrpc":"2.0","id":2,"method":"index","signature":"untrusted"}),
         json!({"jsonrpc":"2.0","id":3,"method":"index"}),
     ]);
     socket
@@ -292,7 +222,7 @@ async fn websocket_json_identity_is_per_call_and_upgrade_body_proofs_do_not_auth
     assert!(
         signed["result"]["package"]["packages"]
             .get("secret")
-            .is_some(),
+            .is_none(),
         "{signed}"
     );
     assert!(
@@ -637,30 +567,12 @@ async fn rejected_icon_proofs_fall_back_to_anonymous_access() {
 
 #[tokio::test]
 async fn watches_multiplex_with_ordinary_calls_and_revoke_private_packages() {
+    use axum::extract::ws::Message;
     let (_temp, ctx, _admin, reader, _) = fixture().await;
     let (url, _task) = server(ctx.clone()).await;
-    let mut request = url
-        .join("ws/rpc")
-        .unwrap()
-        .to_string()
-        .replacen("http:", "ws:", 1)
-        .into_client_request()
-        .unwrap();
-    request.headers_mut().insert(
-        AUTH_SIG_HEADER,
-        SignatureHeader::sign(&reader, b"", "127.0.0.1")
-            .await
-            .unwrap()
-            .to_header(),
-    );
-    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
-    socket.send(Message::Text(signed_message(&reader, json!({"jsonrpc":"2.0", "id":40, "method":"db.subscribe", "params":{"osVersion":"0.4.1.3"}})).await.to_string().into())).await.unwrap();
-    let message = tokio::time::timeout(std::time::Duration::from_secs(5), socket.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    let legacy: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+    let mut socket = registry_socket(&url, &reader).await;
+    socket.send(Message::Text(json!({"jsonrpc":"2.0", "id":40, "method":"db.subscribe", "params":{"osVersion":"0.4.1.3"}}).to_string().into())).await.unwrap();
+    let legacy = session::receive(&mut socket).await;
     assert_eq!(legacy["id"], json!(40));
     assert!(
         legacy["result"]["dump"]["value"]["package"]["packages"]
@@ -672,16 +584,11 @@ async fn watches_multiplex_with_ordinary_calls_and_revoke_private_packages() {
     let guid: Guid = from_value(legacy["result"]["guid"].clone()).unwrap();
     drop(ctx.rpc_continuations.get_ws_handler(&guid).await);
     for (id, pointer) in [(41, "/index"), (42, "/index/os")] {
-        socket.send(Message::Text(signed_message(&reader, json!({"jsonrpc":"2.0", "rpcstream":"1.0", "id":id, "method":"db.subscribe", "params":{"pointer":pointer, "osVersion":"0.4.1.3"}})).await.to_string().into())).await.unwrap();
+        socket.send(Message::Text(json!({"jsonrpc":"2.0", "rpcstream":"1.0", "id":id, "method":"db.subscribe", "params":{"pointer":pointer, "osVersion":"0.4.1.3"}}).to_string().into())).await.unwrap();
     }
     let mut dumps = BTreeMap::new();
     for _ in 0..2 {
-        let message = tokio::time::timeout(std::time::Duration::from_secs(5), socket.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        let response: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+        let response = session::receive(&mut socket).await;
         assert!(response.get("error").is_none(), "{response}");
         dumps.insert(
             response["id"].as_u64().unwrap(),
@@ -717,12 +624,7 @@ async fn watches_multiplex_with_ordinary_calls_and_revoke_private_packages() {
     let mut saw_revision = false;
     let mut saw_reply = false;
     while !saw_revision || !saw_reply {
-        let message = tokio::time::timeout(std::time::Duration::from_secs(5), socket.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        let response: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+        let response = session::receive(&mut socket).await;
         match response["id"].as_u64().unwrap() {
             41 => {
                 assert_eq!(response["end"], json!(false));
@@ -751,7 +653,7 @@ async fn watches_multiplex_with_ordinary_calls_and_revoke_private_packages() {
             .await
             .unwrap();
     }
-    socket.close(None).await.unwrap();
+    socket.close().await.unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             if ctx

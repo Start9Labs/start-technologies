@@ -271,8 +271,7 @@ impl CliContext {
             )
             .await;
         }
-        crate::middleware::auth::signature::call_remote_with_client(
-            None,
+        crate::middleware::auth::signature::call_http(
             self.client.clone(),
             url,
             headers,
@@ -287,8 +286,7 @@ impl CliContext {
         method: &str,
         params: Value,
     ) -> Result<Value, RpcError> {
-        crate::middleware::auth::signature::call_remote_with_client(
-            None,
+        crate::middleware::auth::signature::call_http(
             self.client.clone(),
             self.rpc_url()?,
             HeaderMap::new(),
@@ -430,8 +428,7 @@ impl CallRemote<DiagnosticContext> for CliContext {
         if let Some(auth) = local_auth_header_for_url::<DiagnosticContext>(&rpc_url).await {
             headers.insert(AUTHORIZATION, auth);
         }
-        crate::middleware::auth::signature::call_remote_with_client(
-            None,
+        crate::middleware::auth::signature::call_http(
             self.client.clone(),
             rpc_url,
             headers,

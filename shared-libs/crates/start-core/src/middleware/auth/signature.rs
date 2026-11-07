@@ -32,8 +32,6 @@ use crate::sign::{AnySignature, AnySigningKey, AnyVerifyingKey, Signer};
 use crate::util::serde::DerEncoding;
 use crate::util::sync::SyncMutex;
 
-pub mod rpc;
-
 pub const AUTH_SIG_HEADER: &str = "X-Start-Auth-Sig";
 
 /// RPC-metadata fields understood by [`SignatureAuth`] when layered over an
@@ -398,7 +396,6 @@ pub struct SignatureAuth {
     signer: Option<Result<(AnyVerifyingKey, InternedString), RpcError>>,
     user_agent: Option<HeaderValue>,
     origin: RequestOrigin,
-    loopback: Option<InternedString>,
 }
 impl SignatureAuth {
     pub fn new() -> Self {
@@ -406,7 +403,6 @@ impl SignatureAuth {
             signer: None,
             user_agent: None,
             origin: RequestOrigin::default(),
-            loopback: None,
         }
     }
 }
@@ -589,18 +585,9 @@ impl SignatureHeader {
         })
     }
     pub async fn sign(signer: &Signer, body: &[u8], context: &str) -> Result<Self, Error> {
-        Self::sign_tagged(signer, body, REQUEST_AUTH_TAG, context).await
-    }
-
-    async fn sign_tagged(
-        signer: &Signer,
-        body: &[u8],
-        tag: &[u8],
-        context: &str,
-    ) -> Result<Self, Error> {
         let commitment = RequestCommitment::for_bytes(body);
         let signature = signer
-            .sign_message(&crate::sign::signing_message(tag, &commitment, context)?)
+            .sign_message(&request_signing_message(&commitment, context)?)
             .await?;
         Ok(Self {
             commitment,
@@ -686,7 +673,6 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
     ) -> Result<(), axum::response::Response> {
         self.user_agent = request.headers().get(USER_AGENT).cloned();
         self.origin = RequestOrigin::from_extensions(request.extensions());
-        self.loopback = loopback_identity(request);
         if request
             .extensions()
             .get::<rpc_toolkit::WebSocketRequest>()
@@ -695,20 +681,6 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
         {
             self.signer = Some(
                 verify_request_signature_with_address(context, request)
-                    .await
-                    .map_err(RpcError::from),
-            );
-        }
-        Ok(())
-    }
-    async fn process_rpc_message(
-        &mut self,
-        context: &C,
-        message: &Value,
-    ) -> Result<(), RpcResponse> {
-        if context.secure_session().is_none() && message.get(rpc::RPC_SIGNATURE_FIELD).is_some() {
-            self.signer = Some(
-                rpc::verify_rpc_signature(context, message, &self.origin, self.loopback.clone())
                     .await
                     .map_err(RpcError::from),
             );
@@ -753,18 +725,6 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
     }
 }
 
-pub async fn call_remote<Ctx: SigningContext + AsRef<Client>>(
-    ctx: &Ctx,
-    url: Url,
-    headers: HeaderMap,
-    sig_context: Option<&str>,
-    method: &str,
-    params: Value,
-) -> Result<Value, RpcError> {
-    let signer = sig_context.and_then(|c| Some((ctx.signing_key().ok()?, c)));
-    call_remote_with_client(signer, ctx.as_ref().clone(), url, headers, method, params).await
-}
-
 pub(crate) fn rpc_request_body(method: &str, params: Value) -> Result<String, RpcError> {
     use rpc_toolkit::yajrc::{GenericRpcMethod, Id, RpcRequest};
     serde_json::to_string(&RpcRequest {
@@ -775,9 +735,7 @@ pub(crate) fn rpc_request_body(method: &str, params: Value) -> Result<String, Rp
     .map_err(Into::into)
 }
 
-/// Signs the request when given a signer and the server identity to bind it to.
-pub async fn call_remote_with_client(
-    signer: Option<(Signer, &str)>,
+pub async fn call_http(
     client: Client,
     url: Url,
     headers: HeaderMap,
@@ -788,20 +746,12 @@ pub async fn call_remote_with_client(
     use reqwest::header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE};
     use rpc_toolkit::RpcResponse;
     let body = rpc_request_body(method, params)?;
-    let mut req = client
+    let req = client
         .request(Method::POST, url)
         .header(CONTENT_TYPE, "application/json")
         .header(ACCEPT, "application/json")
         .header(CONTENT_LENGTH, body.len())
         .headers(headers);
-    if let Some((key, sig_ctx)) = signer {
-        req = req.header(
-            AUTH_SIG_HEADER,
-            SignatureHeader::sign(&key, body.as_bytes(), sig_ctx)
-                .await?
-                .to_header(),
-        );
-    }
     let res = req.body(body).send().await?;
 
     if !res.status().is_success() {

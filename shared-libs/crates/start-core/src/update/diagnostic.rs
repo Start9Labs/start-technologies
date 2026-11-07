@@ -252,8 +252,7 @@ async fn get_versions(
     target: &VersionRange,
 ) -> Result<BTreeMap<Version, OsVersionInfo>, Error> {
     let registry = crate::registry::package::promote::registry_rpc_url(&registry)?;
-    let res = signature::call_remote_with_client(
-        None,
+    let res = signature::call_http(
         client.clone(),
         registry,
         HeaderMap::new(),

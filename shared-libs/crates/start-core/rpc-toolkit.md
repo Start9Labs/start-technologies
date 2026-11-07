@@ -132,19 +132,11 @@ Metadata tags are processed by different middleware. Group them logically:
 | ------------ | ------- | ------------------------------------------------------- |
 | `get_signer` | `false` | Inject signer public key into params as `__Auth_signer` |
 
-`signature::rpc::rpc_signing_body` and TypeScript `auth.rpcSigningBody` encode the complete
-request object except its root `signature` field. The signing body uses length-first
-deterministic CBOR: integers remain integers; floating-point values become eight big-endian
-IEEE-754 bytes. This retains numeric type distinctions and signed zero. The TypeScript helper
-accepts raw JSON and requires source-aware `JSON.parse` to retain full-u64 integers. These
-helpers encode the signing body only. `SignatureHeader::sign_rpc` and TypeScript
-`auth.signRpcRequest` produce the query-encoded proof stored in root `signature`.
-`SignatureAuth` checks that proof per call through `process_rpc_message`, using the
-`Start-RPC-Auth-Sig v1` domain, current signing identities, enrollment policy, clock and nonce
-cache. An explicit JSON proof takes precedence over a compatibility header. Legacy HTTP
-proofs remain valid for HTTP calls and resources, but an upgrade-body proof does not authorize
-later WebSocket messages. MCP tool calls verify the original MCP message, not a reconstructed
-backend call.
+`SignatureAuth` reads the peer from completed Noise admission and applies current enrollment,
+permissions and hooks on each call. HTTP compatibility uses `X-Start-Auth-Sig` over the
+captured body, including the original MCP HTTP body, with the existing clock and nonce checks.
+`SignatureHeader::sign` and TypeScript `auth.signRequest` produce those headers. WebSocket
+calls derive their authenticated identity from admission, not the HTTP upgrade body.
 
 ### Registry Auth (extends Signature Auth)
 

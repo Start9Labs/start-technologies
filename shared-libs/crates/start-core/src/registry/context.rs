@@ -274,8 +274,7 @@ pub(crate) async fn call_cli(
         }
         client::request(&mut socket, body).await
     } else {
-        crate::middleware::auth::signature::call_remote_with_client(
-            None,
+        crate::middleware::auth::signature::call_http(
             ctx.client.clone(),
             url,
             headers,

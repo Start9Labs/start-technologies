@@ -30,7 +30,7 @@ fn ws_url(url: &Url, path: &str) -> String {
         .replacen("http:", "ws:", 1)
 }
 
-async fn encrypted(url: &str, signer: &Signer) -> EncryptedSocket {
+pub(super) async fn encrypted(url: &str, signer: &Signer) -> EncryptedSocket {
     let identity = NoiseIdentity::new(signer).await.unwrap();
     EncryptedSocket::initiate(
         raw_socket(url).await,
@@ -43,7 +43,7 @@ async fn encrypted(url: &str, signer: &Signer) -> EncryptedSocket {
     .1
 }
 
-async fn receive(socket: &mut EncryptedSocket) -> Value {
+pub(super) async fn receive(socket: &mut EncryptedSocket) -> Value {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match socket.next().await.unwrap().unwrap() {
@@ -108,8 +108,7 @@ async fn encrypted_identity_reaches_live_auth_without_per_message_proofs() {
         assert_eq!(reply["result"]["private"], json!(true));
     }
     let mut reader_socket = encrypted(&secure_url(&url), &reader).await;
-    let mut forged = signed_message(&admin, json!({"id":3,"method":"package.access.get","params":{"id":"secret","__Auth_signer":admin.verifying_key().await.unwrap()}})).await;
-    forged["jsonrpc"] = "2.0".into();
+    let forged = json!({"jsonrpc":"2.0","id":3,"method":"package.access.get","params":{"id":"secret","__Auth_signer":admin.verifying_key().await.unwrap()},"signature":"untrusted"});
     assert_eq!(
         call(&mut reader_socket, forged).await["error"]["code"],
         json!(ErrorKind::Authorization as i32)
@@ -254,34 +253,4 @@ async fn handshake_rejects_unconfigured_name_and_mismatched_transcript_context()
         .await
         .is_err()
     );
-}
-
-#[tokio::test]
-async fn missing_crypto_opt_in_preserves_legacy_per_call_authentication() {
-    let (_temp, ctx, admin, _reader, _) = fixture().await;
-    let (url, _task) = session_server(ctx).await;
-    let (mut socket, _) = tokio_tungstenite::connect_async(ws_url(&url, "secure"))
-        .await
-        .unwrap();
-    let request =
-        json!({"jsonrpc":"2.0","id":1,"method":"package.access.get","params":{"id":"secret"}});
-    socket
-        .send(Message::Text(request.clone().to_string().into()))
-        .await
-        .unwrap();
-    let response: Value =
-        serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
-    assert_eq!(
-        response["error"]["code"],
-        json!(ErrorKind::Authorization as i32)
-    );
-    socket
-        .send(Message::Text(
-            signed_message(&admin, request).await.to_string().into(),
-        ))
-        .await
-        .unwrap();
-    let response: Value =
-        serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
-    assert_eq!(response["result"]["private"], json!(true));
 }

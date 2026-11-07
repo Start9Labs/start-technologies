@@ -162,10 +162,8 @@ A batch larger than the in-flight limit closes the connection with policy code 1
 fairly; a stalled network write ends the connection after its send deadline.
 
 HTTP middleware runs once during upgrade. Each RPC call clones that prepared
-middleware state and runs `process_rpc_message` on the original JSON before typed request
-hooks or parameter injection. The original message retains omitted parameters and extension
-fields, including `rpcstream`. Per-call state
-mutations do not leak to other calls or batch members. Middleware response
+middleware state and runs typed request middleware before dispatch. Per-call state mutations
+do not leak to other calls or batch members. Middleware response
 rewrites apply to the initiating result; stream event payloads follow their own
 handler-defined contract. HTTP-response middleware runs on the upgrade response,
 not on later WebSocket frames. RPC response middleware can add per-call fields with

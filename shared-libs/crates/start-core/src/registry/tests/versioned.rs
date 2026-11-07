@@ -1,26 +1,13 @@
+use axum::extract::ws::Message;
 use patch_db::json_ptr::JsonPointer;
 
+use super::session::receive as response;
 use super::*;
 use crate::registry::os::index::OsVersionInfo;
+use crate::util::net::secure::EncryptedSocket;
 
-async fn response<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
-    socket: &mut tokio_tungstenite::WebSocketStream<S>,
-) -> Value {
-    let message = tokio::time::timeout(std::time::Duration::from_secs(5), socket.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    serde_json::from_str(message.to_text().unwrap()).unwrap()
-}
-
-async fn subscribe<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
-    socket: &mut tokio_tungstenite::WebSocketStream<S>,
-    reader: &Signer,
-    id: u64,
-    version: &str,
-) {
-    socket.send(Message::Text(signed_message(reader, json!({"jsonrpc":"2.0", "rpcstream":"1.0", "id":id, "method":"db.subscribe", "params":{"pointer":"/index", "osVersion":version}})).await.to_string().into())).await.unwrap();
+async fn subscribe(socket: &mut EncryptedSocket, id: u64, version: &str) {
+    socket.send(Message::Text(json!({"jsonrpc":"2.0", "rpcstream":"1.0", "id":id, "method":"db.subscribe", "params":{"pointer":"/index", "osVersion":version}}).to_string().into())).await.unwrap();
 }
 
 #[tokio::test]
@@ -55,16 +42,9 @@ async fn subscribe_selects_each_messages_os_version_for_dumps_and_revisions() {
     );
     let guid: Guid = from_value(legacy["result"]["guid"].clone()).unwrap();
     drop(ctx.rpc_continuations.get_ws_handler(&guid).await);
-    let (mut socket, _) = tokio_tungstenite::connect_async(
-        url.join("ws/rpc")
-            .unwrap()
-            .to_string()
-            .replacen("http:", "ws:", 1),
-    )
-    .await
-    .unwrap();
-    subscribe(&mut socket, &reader, 71, "0.4.0.2").await;
-    subscribe(&mut socket, &reader, 72, "0.4.1.3").await;
+    let mut socket = registry_socket(&url, &reader).await;
+    subscribe(&mut socket, 71, "0.4.0.2").await;
+    subscribe(&mut socket, 72, "0.4.1.3").await;
     let mut views = BTreeMap::new();
     for _ in 0..2 {
         let message = response(&mut socket).await;
@@ -120,23 +100,16 @@ async fn subscribe_selects_each_messages_os_version_for_dumps_and_revisions() {
         views[&72]["os"]["versions"]["0.4.0.6"]["releaseNotes"],
         json!({"en_US":"Updated", "pl_PL":"Nowe"})
     );
-    socket.close(None).await.unwrap();
+    socket.close().await.unwrap();
 }
 
 #[tokio::test]
 async fn failed_compatibility_replica_ends_only_its_stream() {
     let (temp, ctx, _admin, reader, path) = fixture().await;
     let (url, _task) = server(ctx.clone()).await;
-    let (mut socket, _) = tokio_tungstenite::connect_async(
-        url.join("ws/rpc")
-            .unwrap()
-            .to_string()
-            .replacen("http:", "ws:", 1),
-    )
-    .await
-    .unwrap();
-    subscribe(&mut socket, &reader, 1, "0.4.0.2").await;
-    subscribe(&mut socket, &reader, 2, "0.4.1.3").await;
+    let mut socket = registry_socket(&url, &reader).await;
+    subscribe(&mut socket, 1, "0.4.0.2").await;
+    subscribe(&mut socket, 2, "0.4.1.3").await;
     for _ in 0..2 {
         let initial = response(&mut socket).await;
         assert!(initial.get("error").is_none(), "{initial}");
@@ -175,5 +148,5 @@ async fn failed_compatibility_replica_ends_only_its_stream() {
         }
         assert!(seen.insert(id));
     }
-    socket.close(None).await.unwrap();
+    socket.close().await.unwrap();
 }

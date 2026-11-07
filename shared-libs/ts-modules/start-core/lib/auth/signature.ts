@@ -2,23 +2,12 @@ import { ed25519 } from '@noble/curves/ed25519'
 import { blake3 } from '@noble/hashes/blake3'
 import { concatBytes, hexToBytes } from '@noble/hashes/utils'
 
-import { rpcSigningBody } from './rpc'
-
-export { rpcSigningBody, RPC_SIGNATURE_FIELD } from './rpc'
-
 /**
- * Ed25519 authentication for JSON RPC messages and HTTP resource bodies.
- *
- * HTTP uses the `Start-Auth-Sig v2` domain over raw bytes; RPC uses
- * `Start-RPC-Auth-Sig v1` over the type-preserving signing-body codec.
- * Both frame the domain, length-prefixed server identity and request commitment
- * through `signingMessage`, returning a query-encoded proof with DER keys/signatures.
+ * Ed25519 HTTP resource authentication using `Start-Auth-Sig v2` over raw bytes.
  * Generated WebCrypto private keys are non-extractable and require a secure context.
  */
 
 const REQUEST_AUTH_TAG = new TextEncoder().encode('Start-Auth-Sig v2\0')
-const RPC_AUTH_TAG = new TextEncoder().encode('Start-RPC-Auth-Sig v1\0')
-
 // The server's `SignedCommitment::TYPE_ID` for `RequestCommitment`.
 const REQUEST_COMMITMENT_TYPE = 3
 
@@ -50,24 +39,6 @@ export async function signRequest(
   context: string,
   body: Uint8Array,
 ): Promise<string> {
-  return signTaggedRequest(key, context, body, REQUEST_AUTH_TAG)
-}
-
-/** Produces the root `signature` value for the serialized JSON request. */
-export async function signRpcRequest(
-  key: AuthKey,
-  context: string,
-  request: string,
-): Promise<string> {
-  return signTaggedRequest(key, context, rpcSigningBody(request), RPC_AUTH_TAG)
-}
-
-async function signTaggedRequest(
-  key: AuthKey,
-  context: string,
-  body: Uint8Array,
-  tag: Uint8Array,
-): Promise<string> {
   const timestamp = BigInt(Math.floor(Date.now() / 1000))
   const nonce = crypto.getRandomValues(new BigUint64Array(1))[0]
   const size = BigInt(body.length)
@@ -79,7 +50,7 @@ async function signTaggedRequest(
   view.setBigUint64(16, size, false)
   commitment.set(hash, 24)
   const message = signingMessage(
-    tag,
+    REQUEST_AUTH_TAG,
     context,
     REQUEST_COMMITMENT_TYPE,
     commitment,

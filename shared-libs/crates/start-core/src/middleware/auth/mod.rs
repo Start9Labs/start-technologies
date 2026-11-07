@@ -100,16 +100,6 @@ impl<C: Context> Middleware<C> for Auth<C> {
         }
         Ok(())
     }
-    async fn process_rpc_message(
-        &mut self,
-        context: &C,
-        message: &Value,
-    ) -> Result<(), RpcResponse> {
-        for middleware in self.methods() {
-            middleware.process_rpc_message(context, message).await?;
-        }
-        Ok(())
-    }
     async fn process_rpc_request(
         &mut self,
         context: &C,

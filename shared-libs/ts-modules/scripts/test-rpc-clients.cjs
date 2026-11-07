@@ -184,67 +184,31 @@ function deviceSigner() {
   return AuthKeyService.prototype
 }
 
-function assertRpcProof(body) {
-  const { auth } = require('@start9labs/start-core')
-  const { blake3 } = require('@noble/hashes/blake3')
-  const proof = new URLSearchParams(JSON.parse(body).signature)
-  const bytes = auth.rpcSigningBody(body)
-  assert.equal(proof.get('commitment'), 'request')
-  assert.equal(proof.get('size'), String(bytes.length))
-  assert.equal(
-    proof.get('blake3'),
-    Buffer.from(blake3(bytes)).toString('base64url'),
+test('RPC request capture serializes params once and preserves raw numeric tokens', () => {
+  const { load } = harness()
+  const { rpcRequestBody } = load(
+    'shared-libs/ts-modules/shared/src/services/rpc-request.ts',
   )
-}
-
-for (const enrolled of [false, true]) {
-  test(`RPC serialization captures params before asynchronous ${enrolled ? 'signing' : 'key lookup'}`, async () => {
-    const { auth } = require('@start9labs/start-core')
-    const key = enrolled ? await auth.generateAuthKey() : null
-    let finish
-    const lookup = new Promise(resolve => {
-      finish = resolve
-    })
-    let serialized = 0
-    const params = {
-      value: 'original',
-      toJSON() {
-        serialized++
-        return { value: this.value }
-      },
-    }
-    const pending = deviceSigner().signRpcBody.call(
-      { get: () => lookup, host: 'server.test' },
-      { method: 'test', params },
-    )
-    params.value = 'changed'
-    finish(key)
-    const body = await pending
-    assert.equal(serialized, 1)
-    assert.equal(JSON.parse(body).params.value, 'original')
-    if (enrolled) assertRpcProof(body)
-    else assert.equal(JSON.parse(body).signature, undefined)
-  })
-}
-
-test('RPC proofs preserve raw integer and floating-point tokens', async () => {
-  const { auth } = require('@start9labs/start-core')
-  const key = await auth.generateAuthKey()
-  const body = await deviceSigner().signRpcBody.call(
-    { get: async () => key, host: 'server.test' },
-    {
-      method: 'test',
-      params: {
+  let serialized = 0
+  const params = {
+    value: 'original',
+    toJSON() {
+      serialized++
+      return {
+        value: this.value,
         integer: JSON.rawJSON('18446744073709551615'),
         float: JSON.rawJSON('1.0'),
         zero: JSON.rawJSON('-0'),
-      },
+      }
     },
-  )
+  }
+  const body = rpcRequestBody({ method: 'test', params })
+  params.value = 'changed'
+  assert.equal(serialized, 1)
+  assert.equal(JSON.parse(body).params.value, 'original')
   assert.ok(body.includes('18446744073709551615'))
   assert.ok(body.includes('"float":1.0'))
   assert.ok(body.includes('"zero":-0'))
-  assertRpcProof(body)
 })
 
 test('resource headers retain legacy signing and caller headers without mutation', async () => {
@@ -294,8 +258,7 @@ test('shared HTTP sends captured RPC bodies as JSON and preserves response compa
   const client = new (load(
     'shared-libs/ts-modules/shared/src/services/http.service.ts',
   ).HttpService)()
-  const body =
-    '{"signature":"proof","method":"test","params":{"integer":18446744073709551615}}'
+  const body = '{"method":"test","params":{"integer":18446744073709551615}}'
   const response = await client.rpcMessage(body, {
     headers: { 'content-type': 'text/plain', 'x-trace': 'keep' },
   })

@@ -9,9 +9,6 @@
     "esModuleInterop": true,
     "types": ["node", "jest"],
     "moduleResolution": "bundler",
-    "paths": {
-      "cborg": ["./node_modules/cborg/types/cborg.d.ts"]
-    },
     "skipLibCheck": true,
     "module": "commonjs",
     "outDir": "dist",

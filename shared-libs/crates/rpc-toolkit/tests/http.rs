@@ -103,40 +103,6 @@ fn rejected_before_dispatch(context: &TestContext) {
 }
 
 #[derive(Clone)]
-struct OriginalMessage(imbl_value::Value);
-impl Middleware<TestContext> for OriginalMessage {
-    type Metadata = rpc_toolkit::Empty;
-    async fn process_rpc_message(
-        &mut self,
-        _: &TestContext,
-        message: &imbl_value::Value,
-    ) -> Result<(), RpcResponse> {
-        self.0 = message.clone();
-        Ok(())
-    }
-    async fn process_rpc_request(
-        &mut self,
-        _: &TestContext,
-        _: Self::Metadata,
-        request: &mut rpc_toolkit::RpcRequest,
-    ) -> Result<(), RpcResponse> {
-        request.params["text"] = self.0["extra"].clone();
-        Ok(())
-    }
-}
-
-#[tokio::test]
-async fn original_messages_reach_per_call_middleware_before_typed_mutation_in_batches() {
-    let server =
-        bare_server(TestContext::default()).middleware(OriginalMessage(imbl_value::Value::Null));
-    let response = server.handle(request(Body::from(r#"[{"id":1,"method":"echo","params":{"text":"ignored"},"extra":"a"},{"id":2,"method":"echo","params":{"text":"ignored"},"extra":"long"}]"#))).await;
-    let response: Value =
-        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
-    assert_eq!(response[0]["result"], 1);
-    assert_eq!(response[1]["result"], 4);
-}
-
-#[derive(Clone)]
 struct RejectRpc;
 impl Middleware<TestContext> for RejectRpc {
     type Metadata = rpc_toolkit::Empty;

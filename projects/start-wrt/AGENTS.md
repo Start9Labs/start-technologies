@@ -59,7 +59,9 @@ have tested and stop.
 [`bench/bench.sh`](bench/bench.sh) drives all of it; `bench.sh --help` lists the commands.
 Run `bash projects/start-wrt/bench/bench.test.sh` from the repo root for the harness's
 host-mocked regression tests; they need Bash, Node.js, and the root npm dependencies, not a
-physical bench, and `bench.sh ui` needs the same dependencies.
+physical bench. Build the shared SDK core first with
+`make -C shared-libs/ts-modules/start-core dist`; the tests and `bench.sh ui` use its
+CommonJS `auth.signRequest` for HTTP compatibility signing.
 Its state — the console log, config snapshots, and the UI signing key — lives in
 `~/.local/state/startwrt-bench/`, outside the repo. A snapshot is a `sysupgrade` backup:
 it holds the router's password hash and private keys, so it never leaves that directory.

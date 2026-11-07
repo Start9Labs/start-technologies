@@ -237,8 +237,7 @@ impl CliContext {
             )
             .await;
         }
-        startos::middleware::auth::signature::call_remote_with_client(
-            None,
+        startos::middleware::auth::signature::call_http(
             self.client.clone(),
             self.host.clone(),
             headers,

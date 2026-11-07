@@ -4,8 +4,6 @@ import { WA_WINDOW } from '@ng-web-apis/common'
 import { auth } from '@start9labs/start-core'
 
 import type { HttpOptions } from '../types/http.types'
-import type { RPCOptions } from '../types/rpc.types'
-import { rpcRequestBody } from './rpc-request'
 import { identityStore } from './identity-store'
 
 /** IndexedDB record key for the device key. Override per app so two apps
@@ -103,18 +101,6 @@ export class AuthKeyService {
       auth.AUTH_SIG_HEADER,
       await auth.signRequest(key, this.host, bytes),
     )
-  }
-
-  /** Captures a serialized RPC body and adds the stored device key's proof when available. */
-  async signRpcBody(
-    options: Pick<RPCOptions<unknown>, 'method' | 'params'>,
-  ): Promise<string> {
-    const body = rpcRequestBody(options)
-    const key = await this.get()
-    if (!key) return body
-    const proof = await auth.signRpcRequest(key, this.host, body)
-    // Reparsing would round raw JSON integers and change numeric token types.
-    return `{${JSON.stringify(auth.RPC_SIGNATURE_FIELD)}:${JSON.stringify(proof)},${body.slice(1)}`
   }
 
   private async put(key: auth.AuthKey): Promise<void> {

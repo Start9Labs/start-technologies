@@ -56,14 +56,14 @@ these fields; MCP maps them to tool-result `_meta`. Empty metadata preserves the
 Transports wrap a `Server`:
 
 - **HTTP** (`server/http.rs`): `HttpServer` on `axum`, with JSON request/reply encoding
-  and a `Middleware` pipeline (`process_http_request`, `process_rpc_message`, `process_rpc_request`, `process_rpc_response`,
+  and a `Middleware` pipeline (`process_http_request`, `process_rpc_request`, `process_rpc_response`,
   `process_http_response`, all defaulting to no-ops) erased through `DynMiddleware`.
   `begin_http_request` bounds and buffers the body before context creation or middleware. The
   default is 1 MiB, configurable through `with_max_request_body_size`; oversized bodies return
   HTTP 413. `RequestBodyLimit` in the request extensions exposes that limit to middleware.
   MCP and WebSocket upgrades reuse this preparation and its final bounded bytes. Outgoing bodies
-  are independent. Message hooks receive the original per-call JSON before typed request hooks;
-  dispatch restores the caller's ID after response hooks, including middleware rejections.
+  are independent. Dispatch restores the caller's ID after response hooks, including middleware
+  rejections.
 - **WebSocket** (`server/websocket.rs`, opt-in `websocket` feature): `WebSocketServer` accepts JSON
   text requests and batches through the existing RPC middleware pipeline. HTTP middleware prepares
   the upgrade; each call clones that prepared middleware state. An optional `WebSocketUpgrader`
@@ -89,8 +89,7 @@ Transports wrap a `Server`:
   `ToolPolicy` decides from each method's metadata whether it is offered and which
   `ToolAnnotations` it carries. `McpService` runs the `HttpServer`'s middleware unchanged:
   `process_http_request` once per HTTP request (shared with the JSON-RPC path through
-  `begin_http_request`), then `process_rpc_message` with the original MCP message,
-  `process_rpc_request`, dispatch and `process_rpc_response` per tool call, then
+  `begin_http_request`), then `process_rpc_request`, dispatch and `process_rpc_response` per tool call, then
   `process_http_response`. Handler results become text content, plus
   `structuredContent` when the tool declares an `outputSchema`; RPC errors become `isError`
   results carrying the serialized `RpcError`.
