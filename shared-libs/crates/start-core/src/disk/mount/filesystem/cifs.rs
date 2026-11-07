@@ -79,11 +79,11 @@ pub(crate) async fn locations_overlap(
                 std::path::Component::Normal(name) => Some(name.to_string_lossy().to_lowercase()),
                 _ => None,
             })
-            .collect::<Vec<_>>()
+            .collect::<PathBuf>()
     };
     let source_path = components(source.1);
     let destination_path = components(destination.1);
-    if !source_path.starts_with(&destination_path) && !destination_path.starts_with(&source_path) {
+    if !crate::util::io::paths_overlap(&source_path, &destination_path) {
         return Ok(false);
     }
     if source.0.eq_ignore_ascii_case(destination.0) {
@@ -420,6 +420,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mountability_checks_validate_before_reserving_or_mounting_a_source() {
+        let error = Cifs {
+            hostname: "//invalid".into(),
+            path: "/share".into(),
+            username: "user".into(),
+            password: None,
+        }
+        .mountable()
+        .await
+        .unwrap_err();
+        assert_eq!(error.kind, crate::ErrorKind::InvalidRequest);
+    }
+
+    #[tokio::test]
     async fn temporary_mount_identity_includes_credentials_and_runtime_policy() {
         let mut source = Cifs {
             hostname: "nas.lan".into(),
@@ -625,6 +639,7 @@ impl Cifs {
     }
 
     pub async fn mountable(&self) -> Result<(), Error> {
+        self.validate()?;
         let guard = TmpMountGuard::mount(self, ReadOnly).await?;
         guard.unmount().await?;
         Ok(())

@@ -1835,6 +1835,10 @@ pub fn to_tmp_path(path: impl AsRef<Path>) -> Result<PathBuf, Error> {
     }
 }
 
+pub(crate) fn paths_overlap(source: &Path, destination: &Path) -> bool {
+    source.starts_with(destination) || destination.starts_with(source)
+}
+
 pub(crate) async fn file_identity(path: impl AsRef<Path>) -> Result<(u64, u64), Error> {
     let path = path.as_ref();
     let metadata = tokio::fs::metadata(path)

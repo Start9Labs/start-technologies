@@ -103,6 +103,7 @@ pub async fn add(
         username,
         password,
     };
+    cifs.mountable().await?;
     let name = catalog::cifs_name(&cifs);
     let id = catalog::create(
         ctx.clone(),
@@ -162,17 +163,15 @@ pub async fn update(
         password,
     }: CifsUpdateParams,
 ) -> Result<KeyVal<BackupTargetId, BackupTarget>, Error> {
-    catalog::update_cifs(
-        ctx.clone(),
-        catalog::UpdateCifsTargetParams {
-            id: id.clone(),
-            hostname,
-            path,
-            username,
-            password,
-        },
-    )
-    .await?;
+    catalog::ensure_cifs(&ctx.db.peek().await, &id)?;
+    let cifs = Cifs {
+        hostname,
+        path,
+        username,
+        password,
+    };
+    cifs.mountable().await?;
+    catalog::update_cifs(ctx.clone(), legacy_replacement(id.clone(), cifs)).await?;
     catalog::inspect(ctx.clone(), catalog::TargetParams { id: id.clone() }).await?;
     let value = ctx
         .db
@@ -184,6 +183,16 @@ pub async fn update(
         .or_not_found(&id)?
         .de()?;
     Ok(KeyVal { key: id, value })
+}
+
+fn legacy_replacement(id: BackupTargetId, cifs: Cifs) -> catalog::UpdateCifsTargetParams {
+    catalog::UpdateCifsTargetParams {
+        id,
+        hostname: cifs.hostname,
+        path: cifs.path,
+        username: cifs.username,
+        password: Some(cifs.password.unwrap_or_default()),
+    }
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
@@ -208,6 +217,28 @@ pub async fn remove(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_updates_replace_passwords_instead_of_using_the_catalog_omission_rule() {
+        for (password, expected) in [
+            (None, ""),
+            (Some(""), ""),
+            (Some("replacement"), "replacement"),
+        ] {
+            let id: BackupTargetId = "cifs-7".parse().unwrap();
+            let params = legacy_replacement(
+                id.clone(),
+                Cifs {
+                    hostname: "nas.local".into(),
+                    path: "/share".into(),
+                    username: "owner".into(),
+                    password: password.map(str::to_owned),
+                },
+            );
+            assert_eq!(params.id, id);
+            assert_eq!(params.password.as_deref(), Some(expected));
+        }
+    }
 
     #[test]
     fn cifs_password_is_not_a_cli_argument_but_remains_in_rpc_params() {

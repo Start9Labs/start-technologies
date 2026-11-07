@@ -221,6 +221,7 @@ pub(super) async fn existing_source(
     }))
 }
 
+/// Capacity failures do not invalidate a successfully opened source.
 pub async fn open_source(
     ctx: &RpcContext,
     id: &SharedVolumeId,
@@ -237,12 +238,16 @@ pub async fn open_source(
         async {
             let mount = TmpMountGuard::mount(&filesystem, mount_type).await?;
             prepared = Some(PreparedSource::open(mount, subpath).await?);
-            measure_mount(prepared.as_ref().unwrap().path()).await
+            Ok(())
         }
         .await,
     );
     let inspection = match &result {
-        Ok(available) => SharedVolumeInspection::available(Some(*available)),
+        Ok(()) => SharedVolumeInspection::available_capacity(
+            measure_mount(prepared.as_ref().unwrap().path())
+                .await
+                .map_err(public_error_message),
+        ),
         Err(error) => SharedVolumeInspection::unavailable(public_error_message(error)),
     };
     let mount = prepared.as_ref().map(|source| source.mount().downgrade());

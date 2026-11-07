@@ -561,6 +561,13 @@ impl SharedVolumeInspection {
         Self::observed(SharedVolumeAvailability::Available, bytes, None)
     }
 
+    pub(crate) fn available_capacity(result: Result<u64, String>) -> Self {
+        match result {
+            Ok(bytes) => Self::available(Some(bytes)),
+            Err(error) => Self::observed(SharedVolumeAvailability::Available, None, Some(error)),
+        }
+    }
+
     pub(crate) fn unavailable(error: String) -> Self {
         Self::observed(SharedVolumeAvailability::Unavailable, None, Some(error))
     }

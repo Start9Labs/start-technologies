@@ -152,10 +152,12 @@ fn block_event(message: &[u8]) -> bool {
     let Some(properties) = message.get(offset..end) else {
         return false;
     };
-    properties
-        .split(|byte| *byte == 0)
-        .any(|field| field == b"SUBSYSTEM=block")
-        && properties.split(|byte| *byte == 0).any(|field| {
+    let mut fields = properties.split(|byte| *byte == 0);
+    fields.clone().any(|field| field == b"SUBSYSTEM=block")
+        && !fields
+            .clone()
+            .any(|field| field.starts_with(b"DEVNAME=/dev/loop"))
+        && fields.any(|field| {
             matches!(
                 field,
                 b"ACTION=add" | b"ACTION=remove" | b"ACTION=change" | b"ACTION=move"
@@ -239,6 +241,20 @@ mod tests {
         ));
         assert!(!block_event(&event(b"ACTION=add\0SUBSYSTEM=net\0")));
         assert!(!block_event(&event(b"ACTION=bind\0SUBSYSTEM=block\0")));
+    }
+
+    #[test]
+    fn service_loop_lifetimes_do_not_invalidate_physical_drive_discovery() {
+        for action in ["add", "remove", "change", "move"] {
+            for node in ["/dev/loop0", "/dev/loop123"] {
+                assert!(!block_event(&event(
+                    format!("ACTION={action}\0SUBSYSTEM=block\0DEVNAME={node}\0").as_bytes()
+                )));
+            }
+            assert!(block_event(&event(
+                format!("ACTION={action}\0SUBSYSTEM=block\0DEVNAME=/dev/sda1\0").as_bytes()
+            )));
+        }
     }
 
     #[test]

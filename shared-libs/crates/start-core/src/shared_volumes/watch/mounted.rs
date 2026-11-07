@@ -222,17 +222,12 @@ fn space_inspection(
             t!("shared-volumes.source-unavailable").to_string(),
         );
     }
+    if connection == Some(true) {
+        return SharedVolumeInspection::available_capacity(result);
+    }
     match result {
         Ok(bytes) => SharedVolumeInspection::available(Some(bytes)),
-        Err(error) => SharedVolumeInspection::observed(
-            if connection == Some(true) {
-                SharedVolumeAvailability::Available
-            } else {
-                SharedVolumeAvailability::Unavailable
-            },
-            None,
-            Some(error),
-        ),
+        Err(error) => SharedVolumeInspection::unavailable(error),
     }
 }
 

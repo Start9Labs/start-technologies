@@ -2071,20 +2071,6 @@ backup.target.partial-mount:
   fr_FR: "Le système de fichiers de base a été monté avec succès sur %{path}."
   pl_PL: "Bazowy system plików został pomyślnie zamontowany w %{path}."
 
-backup.target.cifs.target-not-found:
-  en_US: "Backup Target ID %{id} Not Found"
-  de_DE: "Sicherungsziel-ID %{id} nicht gefunden"
-  es_ES: "ID de destino de copia de seguridad %{id} no encontrado"
-  fr_FR: "ID de cible de sauvegarde %{id} non trouvé"
-  pl_PL: "Nie znaleziono ID celu kopii zapasowej %{id}"
-
-backup.target.cifs.target-not-found-id:
-  en_US: "Backup Target ID %{id} Not Found"
-  de_DE: "Sicherungsziel-ID %{id} nicht gefunden"
-  es_ES: "ID de destino de copia de seguridad %{id} no encontrado"
-  fr_FR: "ID de cible de sauvegarde %{id} non trouvé"
-  pl_PL: "Nie znaleziono ID celu kopii zapasowej %{id}"
-
 backup.volume.invalid-generation:
   en_US: "The volume backup has an invalid copy identifier"
   de_DE: "Die Volume-Sicherung hat eine ungültige Kopiekennung"
@@ -6927,13 +6913,6 @@ about.list-devices-in-subnet:
   es_ES: "Listar dispositivos en una subred"
   fr_FR: "Lister les appareils dans un sous-réseau"
   pl_PL: "Wyświetl urządzenia w podsieci"
-
-about.list-disk-info:
-  en_US: "List disk information"
-  de_DE: "Festplatteninformationen auflisten"
-  es_ES: "Listar información del disco"
-  fr_FR: "Lister les informations du disque"
-  pl_PL: "Wyświetl informacje o dysku"
 
 about.list-existing-backup-targets:
   en_US: "List existing backup targets"

@@ -21,6 +21,21 @@ enum Event {
     Probe(mounted::ProbeUpdate),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum InspectionEvent {
+    None,
+    Check,
+    Restart,
+}
+
+fn inspection_event(event: Option<&Event>, source: &SharedVolumeSource) -> InspectionEvent {
+    match (event, source) {
+        (Some(Event::Disks), SharedVolumeSource::Disk { .. }) => InspectionEvent::Restart,
+        (Some(Event::Network), SharedVolumeSource::Cifs { .. }) => InspectionEvent::Check,
+        _ => InspectionEvent::None,
+    }
+}
+
 struct Retry {
     next: Instant,
     delay: Duration,
@@ -120,6 +135,9 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
                     .is_ok_and(|current| current == *definition)
         });
         retries.retain(|id, _| volumes.get(id).is_some_and(retryable));
+        if matches!(event, Some(Event::Network)) {
+            retries.clear();
+        }
         if matches!(event, Some(Event::Disks))
             || retire_at.is_some_and(|deadline| deadline <= Instant::now())
         {
@@ -167,13 +185,9 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
             );
         }
         for (id, volume) in volumes {
-            let event_matches = match (&event, &volume.source) {
-                (Some(Event::Disks), SharedVolumeSource::Disk { .. }) => true,
-                (Some(Event::Network), SharedVolumeSource::Cifs { .. }) => true,
-                _ => false,
-            };
+            let trigger = inspection_event(event.as_ref(), &volume.source);
             let full = startup
-                || event_matches
+                || trigger != InspectionEvent::None
                 || volume.inspection.availability == SharedVolumeAvailability::Unknown;
             if matches!(volume.source, SharedVolumeSource::Cifs { .. })
                 && (full || retryable(&volume))
@@ -188,7 +202,7 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
                 }
                 continue;
             }
-            if event_matches {
+            if trigger == InspectionEvent::Restart {
                 running.remove(&id);
             }
             if full {
@@ -245,6 +259,37 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn network_activity_reuses_pending_checks_but_device_replacement_restarts_them() {
+        let cifs = SharedVolumeSource::Cifs {
+            hostname: "nas".into(),
+            path: "/share".into(),
+            username: "user".into(),
+        };
+        let disk = SharedVolumeSource::Disk {
+            logicalname: "/dev/disk/by-uuid/data".into(),
+            path: "media".into(),
+            label: None,
+        };
+        assert_eq!(
+            inspection_event(Some(&Event::Network), &cifs),
+            InspectionEvent::Check
+        );
+        assert_eq!(
+            inspection_event(Some(&Event::Disks), &disk),
+            InspectionEvent::Restart
+        );
+        assert_eq!(
+            inspection_event(Some(&Event::Network), &disk),
+            InspectionEvent::None
+        );
+        assert_eq!(
+            inspection_event(Some(&Event::Disks), &cifs),
+            InspectionEvent::None
+        );
+        assert_eq!(inspection_event(None, &cifs), InspectionEvent::None);
+    }
 
     #[test]
     fn retries_back_off_to_five_minutes() {

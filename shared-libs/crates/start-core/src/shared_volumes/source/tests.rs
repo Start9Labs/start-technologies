@@ -100,6 +100,25 @@ async fn shared_cifs_mounts_delegate_their_cache_policy() {
 }
 
 #[test]
+fn mounted_sources_stay_available_when_capacity_fails_or_times_out() {
+    for kind in [ErrorKind::Filesystem, ErrorKind::Timeout] {
+        let error = Error::new(eyre!("capacity unavailable"), kind);
+        let inspection =
+            SharedVolumeInspection::available_capacity(Err(public_error_message(error)));
+        assert_eq!(
+            inspection.availability,
+            super::super::SharedVolumeAvailability::Available
+        );
+        assert_eq!(inspection.available, None);
+        assert!(inspection.error.unwrap().contains("capacity unavailable"));
+        assert!(inspection.checked_at.is_some());
+    }
+    let measured = SharedVolumeInspection::available_capacity(Ok(0));
+    assert_eq!(measured.available, Some(0));
+    assert_eq!(measured.error, None);
+}
+
+#[test]
 fn password_edits_preserve_omissions_and_clear_explicit_empty_values() {
     let mut credentials = SharedVolumeCredentials {
         password: Some("original".into()),

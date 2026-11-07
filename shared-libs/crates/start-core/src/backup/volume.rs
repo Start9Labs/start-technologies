@@ -166,14 +166,19 @@ async fn source_overlaps_target(
             .await?
         }
         (
-            SharedVolumeSource::Disk { logicalname, .. },
+            SharedVolumeSource::Disk {
+                logicalname, path, ..
+            },
             SharedVolumeSource::Disk {
                 logicalname: target,
+                path: target_path,
                 ..
             },
         ) => {
-            BlockDev::new(logicalname).source_hash().await?
-                == BlockDev::new(target).source_hash().await?
+            let target_path = target_path.join(encrypted_relative_path);
+            crate::util::io::paths_overlap(path, &target_path)
+                && BlockDev::new(logicalname).source_hash().await?
+                    == BlockDev::new(target).source_hash().await?
         }
         _ => false,
     })
@@ -368,7 +373,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn external_volume_backups_reject_the_same_partition_through_any_alias() {
+    async fn external_volume_backups_reject_overlapping_folders_through_any_device_alias() {
         let fixture = tempfile::tempdir().unwrap();
         let disk = fixture.path().join("disk");
         let alias = fixture.path().join("filesystem-uuid");
@@ -376,26 +381,43 @@ mod tests {
         std::fs::write(&disk, "source").unwrap();
         std::fs::write(&other, "destination").unwrap();
         symlink(&disk, &alias).unwrap();
-        let source = SharedVolumeSource::Disk {
-            logicalname: alias,
-            path: PathBuf::new(),
+        let source = |path: &str| SharedVolumeSource::Disk {
+            logicalname: alias.clone(),
+            path: path.into(),
             label: None,
         };
-        let target = |logicalname| SharedVolumeSource::Disk {
+        let target = |logicalname, path: &str| SharedVolumeSource::Disk {
             logicalname,
-            path: PathBuf::new(),
+            path: path.into(),
             label: None,
         };
-        assert!(
-            source_overlaps_target(&source, &target(disk), Path::new("backup"))
+        for (source_path, target_path, overlaps) in [
+            ("", "", true),
+            ("media", "backups", false),
+            ("media", "media", true),
+            ("media/backup/photos", "media", true),
+            ("media/backups", "media", false),
+        ] {
+            assert_eq!(
+                source_overlaps_target(
+                    &source(source_path),
+                    &target(disk.clone(), target_path),
+                    Path::new("backup")
+                )
+                .await
+                .unwrap(),
+                overlaps
+            );
+            assert!(
+                !source_overlaps_target(
+                    &source(source_path),
+                    &target(other.clone(), target_path),
+                    Path::new("backup")
+                )
                 .await
                 .unwrap()
-        );
-        assert!(
-            !source_overlaps_target(&source, &target(other), Path::new("backup"))
-                .await
-                .unwrap()
-        );
+            );
+        }
     }
 
     fn info(generation: String) -> SharedVolumeBackupInfo {
