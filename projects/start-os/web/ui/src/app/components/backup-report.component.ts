@@ -8,6 +8,7 @@ import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { PatchDB } from 'patch-db-client'
 import { map } from 'rxjs'
 import { T } from '@start9labs/start-core'
+import { formatDuration } from '../utils/format-duration'
 import { getManifest } from '../utils/get-package-data'
 import { DataModel } from '../services/patch-db/data-model'
 
@@ -44,7 +45,7 @@ import { DataModel } from '../services/patch-db/data-model'
                 <span tuiTitle>
                   <b>{{ item.title }}</b>
                   @if (item.kind === 'volume') {
-                    <span tuiSubtitle>{{ 'Volumes' | i18n }}</span>
+                    <span tuiSubtitle>{{ 'Shared Volumes' | i18n }}</span>
                   }
                 </span>
               </td>
@@ -155,14 +156,7 @@ export class BackupsReportModal {
     return error ? '@tui.circle-minus' : '@tui.check'
   }
 
-  formatDuration(ms: number): string {
-    if (ms < 1000) return `${ms}ms`
-    const seconds = Math.round(ms / 1000)
-    if (seconds < 60) return `${seconds}s`
-    const minutes = Math.floor(seconds / 60)
-    const remainder = seconds % 60
-    return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`
-  }
+  readonly formatDuration = formatDuration
 }
 
 export const REPORT = new PolymorpheusComponent(BackupsReportModal)

@@ -1,0 +1,270 @@
+import { Component, computed, effect, inject, signal } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
+import { FormsModule } from '@angular/forms'
+import {
+  CopyService,
+  DialogService,
+  i18nPipe,
+  TaskService,
+} from '@start9labs/shared'
+import {
+  TuiButton,
+  TuiCell,
+  TuiDialogContext,
+  TuiIcon,
+  TuiInput,
+  TuiTitle,
+} from '@taiga-ui/core'
+import { TuiAvatar, TuiConfirmService } from '@taiga-ui/kit'
+import { TuiForm } from '@taiga-ui/layout'
+import { injectContext } from '@taiga-ui/polymorpheus'
+import { PatchDB } from 'patch-db-client'
+import { firstValueFrom } from 'rxjs'
+
+import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
+import { VOLUME_TYPES } from './types'
+import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { DataModel } from 'src/app/services/patch-db/data-model'
+import { getCurrentManifest } from 'src/app/utils/get-package-data'
+import { GrantChoice, grantFor, GrantLabel, permission } from './grant'
+import { SourceClient, SourceFields, sourceEdit } from './source-fields'
+
+@Component({
+  template: `
+    @if (volume(); as volume) {
+      <div class="context">
+        <tui-icon [icon]="types[volume.source.kind].icon" />
+        {{ volume.name }}
+      </div>
+      <div tuiForm="l">
+        <source-fields [edit]="edit" [localPath]="localPath()" />
+        <tui-textfield>
+          <label tuiLabel>{{ 'Volume ID' | i18n }}</label>
+          <input tuiInput [readonly]="true" [ngModel]="context.data.id" />
+          <button
+            tuiIconButton
+            appearance="icon"
+            size="s"
+            type="button"
+            tabindex="-1"
+            iconStart="@tui.copy"
+            (pointerdown.stop)="(0)"
+            (click)="copy.copy(context.data.id)"
+          >
+            {{ 'Copy' | i18n }}
+          </button>
+        </tui-textfield>
+        <h3 tuiTitle="m">{{ 'Service access' | i18n }}</h3>
+        @if (packages().length) {
+          <div class="access">
+            @for (pkg of packages(); track pkg.id) {
+              <div tuiCell>
+                <span tuiAvatar aria-hidden="true">
+                  <img alt="" [pkgIcon]="pkg.id" />
+                </span>
+                <span tuiTitle>{{ pkg.title }}</span>
+                <grant-choice
+                  [label]="pkg.title"
+                  [value]="access(pkg.id)"
+                  (selected)="choose(pkg.id, $event)"
+                />
+              </div>
+            }
+          </div>
+        } @else {
+          <p>{{ 'No installed services can use shared volumes' | i18n }}</p>
+        }
+        <footer>
+          <button
+            tuiButton
+            type="button"
+            appearance="flat-destructive"
+            iconStart="@tui.trash-2"
+            class="remove"
+            (click)="context.completeWith(true)"
+          >
+            {{ (volume.source.kind === 'local' ? 'Delete' : 'Remove') | i18n }}
+          </button>
+          <button
+            tuiButton
+            type="button"
+            appearance="flat-grayscale"
+            (click)="cancel()"
+          >
+            {{ 'Cancel' | i18n }}
+          </button>
+          <button
+            tuiButton
+            type="button"
+            [disabled]="!changed() || edit.invalid()"
+            (click)="save()"
+          >
+            {{ 'Save' | i18n }}
+          </button>
+        </footer>
+      </div>
+    }
+  `,
+  styles: `
+    h3 {
+      margin-block: 0.5rem 0;
+    }
+
+    .access [tuiCell] {
+      position: relative;
+      padding-inline: 0;
+
+      [tuiAvatar] {
+        --t-size: 2rem;
+        inline-size: 2rem;
+        block-size: 2rem;
+      }
+
+      &:not(:last-child)::after {
+        content: '';
+        position: absolute;
+        inset: auto 0 0;
+        height: 1px;
+        background: var(--tui-background-neutral-1);
+      }
+    }
+
+    .context {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-block-end: 1.5rem;
+      font-weight: bold;
+
+      tui-icon {
+        font-size: 1.25rem;
+      }
+    }
+
+    footer {
+      position: sticky;
+      bottom: 0;
+      z-index: 10;
+      display: flex;
+      justify-content: flex-end;
+      gap: 1rem;
+      padding: 1rem 0;
+      margin: 1rem -1px -1rem;
+      background: var(--tui-background-elevation-1);
+      box-shadow: inset 0 1px var(--tui-background-neutral-1);
+    }
+
+    .remove {
+      margin-inline-end: auto;
+    }
+  `,
+  imports: [
+    FormsModule,
+    GrantChoice,
+    SourceFields,
+    TuiButton,
+    TuiCell,
+    TuiAvatar,
+    PkgIconDirective,
+    TuiForm,
+    TuiIcon,
+    TuiInput,
+    TuiTitle,
+    i18nPipe,
+  ],
+})
+export class VolumeManage {
+  protected readonly types = VOLUME_TYPES
+  private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
+  private readonly api = inject(ApiService)
+  private readonly tasks = inject(TaskService)
+  private readonly dialogs = inject(DialogService)
+  private readonly confirm = inject(TuiConfirmService, { optional: true })
+
+  protected readonly copy = inject(CopyService)
+  protected readonly context =
+    injectContext<TuiDialogContext<boolean, { id: string }>>()
+
+  private readonly volumes = toSignal(this.patch.watch$('sharedVolumes'))
+  private readonly allPackages = toSignal(this.patch.watch$('packageData'))
+  private readonly choices = signal<Record<string, GrantLabel>>({})
+
+  protected readonly volume = computed(
+    () => this.volumes()?.[this.context.data.id],
+  )
+  protected readonly edit = sourceEdit(this.volume)
+  protected readonly packages = computed(() =>
+    Object.values(this.allPackages() || {})
+      .map(getCurrentManifest)
+      .filter(manifest => manifest.sharedVolumes),
+  )
+  protected readonly localPath = computed(
+    () => `/media/startos/data/shared-volumes/${this.context.data.id}`,
+  )
+  protected readonly changed = computed(
+    () =>
+      this.edit.changed() ||
+      Object.keys(this.choices()).some(id => this.isChanged(id)),
+  )
+
+  constructor() {
+    effect(() =>
+      this.changed()
+        ? this.confirm?.markAsDirty()
+        : this.confirm?.markAsPristine(),
+    )
+  }
+
+  protected async cancel() {
+    if (
+      this.changed() &&
+      !(await firstValueFrom(
+        this.dialogs.openConfirm({
+          label: 'Unsaved changes',
+          size: 's',
+          data: {
+            content:
+              'You have unsaved changes. Are you sure you want to leave?',
+            yes: 'Leave',
+            no: 'Cancel',
+          },
+        }),
+        { defaultValue: false },
+      ))
+    )
+      return
+    this.context.$implicit.complete()
+  }
+
+  protected access(id: string): GrantLabel {
+    return this.choices()[id] ?? permission(this.volume()?.grants[id])
+  }
+
+  protected choose(id: string, label: GrantLabel) {
+    this.choices.update(choices => ({ ...choices, [id]: label }))
+  }
+
+  protected async save() {
+    const id = this.context.data.id
+    const grants = Object.keys(this.choices()).filter(pkg =>
+      this.isChanged(pkg),
+    )
+    const saved = await this.tasks.run(async () => {
+      await this.edit.save(id, this.api.rpc.volumes as unknown as SourceClient)
+      for (const packageId of grants) {
+        await this.api.rpc.volumes.setGrant({
+          id,
+          packageId,
+          grant: grantFor(this.choices()[packageId]!),
+        })
+      }
+    }, 'Saving')
+    if (!saved) return
+    this.confirm?.markAsPristine()
+    this.context.$implicit.complete()
+  }
+
+  private isChanged(id: string) {
+    return this.choices()[id] !== permission(this.volume()?.grants[id])
+  }
+}

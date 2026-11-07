@@ -2,4 +2,4 @@
 release-notes: false
 ---
 
-- Network-folder connections respect each target's configured credentials.
+- CIFS share backup targets connect with their own configured credentials.

@@ -44,10 +44,14 @@ pub async fn open_source(
             let path = local_path(crate::DATA_DIR, id);
             (open_local(&path, mount_type).await, None)
         }
-        SharedVolumeSource::Disk { logicalname, path } => {
-            (open_external(&logicalname, mount_type).await, Some(path))
-        }
-        SharedVolumeSource::Cifs { hostname, path } => {
+        SharedVolumeSource::Disk {
+            logicalname, path, ..
+        } => (open_external(&logicalname, mount_type).await, Some(path)),
+        SharedVolumeSource::Cifs {
+            hostname,
+            path,
+            username,
+        } => {
             let credentials = db
                 .as_private()
                 .as_shared_volume_credentials()
@@ -59,7 +63,7 @@ pub async fn open_source(
                     &SharedCifs(Cifs {
                         hostname,
                         path,
-                        username: credentials.username,
+                        username,
                         password: credentials.password,
                     }),
                     mount_type,
@@ -110,17 +114,35 @@ pub(crate) async fn record_availability(
         .result
 }
 
+/// The detected partition and its display name: its label, else its drive's vendor and model.
 pub(super) fn external_partition(
     disks: &[crate::disk::util::DiskInfo],
     logicalname: &Path,
-) -> Result<PathBuf, Error> {
+) -> Result<(PathBuf, Option<String>), Error> {
     disks
         .iter()
-        .flat_map(|disk| &disk.partitions)
-        .find(|partition| {
+        .flat_map(|disk| {
+            disk.partitions
+                .iter()
+                .map(move |partition| (disk, partition))
+        })
+        .find(|(_, partition)| {
             partition.logicalname == logicalname || partition.stable_path == logicalname
         })
-        .map(|partition| partition.logicalname.clone())
+        .map(|(disk, partition)| {
+            let model = [disk.vendor.as_deref(), disk.model.as_deref()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ");
+            (
+                partition.logicalname.clone(),
+                partition
+                    .label
+                    .clone()
+                    .or((!model.is_empty()).then_some(model)),
+            )
+        })
         .ok_or_else(|| {
             Error::new(
                 eyre!(t!("shared-volumes.invalid-drive")),
@@ -132,6 +154,7 @@ pub(super) fn external_partition(
 pub(super) async fn prepare_external_source(
     device: PathBuf,
     path: PathBuf,
+    label: Option<String>,
 ) -> Result<SharedVolumeSource, Error> {
     let path = confined_relative(&path)?;
     let logicalname = BlockDev::new(device).persistent_path().await?;
@@ -164,7 +187,11 @@ pub(super) async fn prepare_external_source(
             unmount?;
         }
     }
-    Ok(SharedVolumeSource::Disk { logicalname, path })
+    Ok(SharedVolumeSource::Disk {
+        logicalname,
+        path,
+        label,
+    })
 }
 
 fn create_directory_beneath(root: &Path, path: &Path) -> Result<(), Error> {

@@ -1,19 +1,13 @@
-# Creating Backups
+# Backups
 
-Back up your server's data to a physical drive or a network folder.
+Back up your server's services and shared volumes to a backup target, review past backups, and restore from them. Everything is under **System → Backups**.
 
 > [!IMPORTANT]
 > Creating backups is an essential responsibility of self-hosting. If you do not make backups, you _will_ eventually lose your data.
 
-## Watch The Video
-
-<div class="yt-video" data-id="omHymkqroRk" data-title="Creating Backups"></div>
-
 ## Important Info
 
-1. You can create backups to a [physical drive](#physical-drive) plugged directly into your server, or over-the-air to another device on the same LAN (a [network folder](#network-folder)).
-
-1. Backups are encrypted using your master password. If you change your password prior backups retain the original password.
+1. Backups are encrypted using your master password. If you change your password, prior backups retain the original password.
 
 1. Services may choose to exclude certain files or folders from the backup. For example, Bitcoin excludes the blockchain, since it can be recovered by re-syncing.
 
@@ -21,85 +15,29 @@ Back up your server's data to a physical drive or a network folder.
 
 1. To back up a service, StartOS first stops it (if it was running), performs the backup, then restarts it — but only if it was running beforehand. A service that was already stopped stays stopped. Consequently a service cannot be used while it is backing up, though you may continue to use your server and other services in the meantime.
 
-1. Select [volumes](volumes.md) independently of services. A service backup excludes its attached volume contents; an unavailable volume source fails that volume's item without preventing unrelated service backups.
-
-1. Upon completion, StartOS issues a backup report, indicating which services and volumes were backed up, as well as any errors.
-
-1. Wait for the `Backup Complete` notification before unplugging a backup drive. StartOS writes out the last of the backup and unmounts the drive before raising that notification, so the drive is safe to remove once it appears. The `Backup Progress` card reads `Complete` first, while StartOS is still finishing — the notification is the one to wait for.
+1. Select [shared volumes](shared-volumes.md) independently of services. A service backup excludes its attached volume contents; an unavailable volume source fails that volume's item without preventing unrelated service backups.
 
 1. Each backup updates the current state on its target. Volume backups copy the entire backing folder and retain the previous successful copy until its replacement has been saved, requiring space for the replacement. Keep backups on multiple targets for protection against loss of a drive or network share.
 
-1. The backup targets list shows the free space available on each drive and network folder, so you can confirm your backup will fit before you start.
-
 1. A backup keeps each service image for the server's architecture (x86, ARM, or RISC-V). On another architecture, StartOS restores that image under emulation. Reinstall or update the service from the marketplace after the restore so StartOS can select its package for the new server architecture, including a native image where available.
 
-1. The backup format changed. New backups are written to a `StartOSBackupsV2` folder on the target, replacing the older `StartOSBackups` (V1) format written by StartOS 0.4 betas. A backup made on StartOS 0.3.5.1 is a different, older backup: it is not removed by the **Delete old backup** button, and StartOS 0.4 never touches it. To free that space, delete it yourself from the drive. StartOS helps you clean up the obsolete V1 data:
-   - When you select a target that still holds a V1 backup for this server, StartOS warns you before backing up and shows how much free space remains on the target (see below).
-   - After a backup completes, if the target still contains this server's V1 backup, StartOS raises a notification reminding you it is no longer needed.
-   - On the `Create Backup` page, any target holding this server's V1 backup shows a **Delete old backup** button — whether or not a new (V2) backup exists yet. After you confirm, StartOS removes this server's old V1 backup from the target immediately and reclaims the space it occupied in the background, raising a notification once the space has been fully freed (on a large backup this can take a while); your current `StartOSBackupsV2` backup — and any backups belonging to other servers that share the target — are untouched. If this server has no current (V2) backup on that target, StartOS asks for an extra confirmation first, since deleting the old backup would leave this server with no backup there.
+## Backup Targets
 
-   > [!WARNING]
-   > Before backing up, check the free space remaining on the target and make sure your selected services and volumes will fit. If space is tight, use the **Delete old backup** button to reclaim the space this server's old backup occupies, or choose another drive. A backup started while that space is still being reclaimed in the background waits for the reclamation to finish first, shown as an initial `Reclaiming Space` phase in the backup's progress.
+A backup target is where StartOS stores encrypted backups. The **Targets** table lists each target with its location, status, the time of this server's last backup to it, and its free space, so you can confirm a backup will fit before you start. StartOS rechecks a target's status and free space when you open the page if they have not been checked in the last 10 minutes.
 
-## Backup Format Upgrades
+To add a target, select **Add** and choose a type:
 
-Existing backups remain usable for backups and restores with their original filesystem encryption/checksum format until explicitly converted. Normal mounts do not start conversion. The folder remains `StartOSBackupsV2`; this is separate from the older `StartOSBackups` folder cleanup described above.
+- **Local folder**: a new folder on this server's data drive. It is the easiest to set up, but it does not protect you if that drive fails, and removing the target deletes it.
+- **External drive**: a [drive connected to this server](#external-drive). Backups survive a failure of the server and are kept when you remove the target.
+- **CIFS share**: a [shared folder on a NAS or another computer](#cifs-share) on your network. Backups are kept when you remove the target.
 
-In **System → Create Backup**, select **Update format** beside a target to convert this server's backup. Review the downtime and compatibility warning and enter the selected backup's master password. Selecting a target to create a backup also offers **Update format** or **Skip** when this server's backup uses the older format. Skipping continues backup creation using the existing format.
+Select a target's settings button to open **Manage**, where you can see its details, rename it and remove it. For a CIFS share you can also update the hostname, path, username and password; leave the password blank to keep it. Changes apply when you **Save**.
 
-Conversion runs in the background. Reopen the target's conversion control to view weighted overall progress, all conversion phases, and byte/object counts. The completion notification names the target and reports success or the failure's error message. A failed attempt offers **Retry conversion**, or **Resume conversion** when discovery reports it interrupted. An interrupted backup remains unavailable until resumption finishes. **Resume conversion** revalidates the password and continues from durable migration state. Closing the dialog does not cancel the operation. This control is separate from **Delete old backup**, which removes the pre-V2 backup folder.
+Removing an external drive or CIFS share target leaves its backups on the drive or share. A local folder target is deleted together with every backup in it, so its **Delete** button asks you to type the target's name to confirm.
 
-Conversion upgrades encryption authentication and current-version references by rewriting encrypted data. It moves content in batches rather than keeping a second complete copy; free space is still needed for one batch of rewritten data and new index metadata. On a large or remote backup, this can take substantially longer than an ordinary incremental backup. Conversion requires exclusive offline access. Leave the target connected until it finishes; after interruption, explicitly resume conversion before using that store again.
-
-An unreadable encrypted object or log frame does not block the upgrade of healthy data. Damaged data stays unreadable; filesystem I/O failures leave the upgrade resumable.
-
-Without its saved key metadata, StartOS cannot decrypt a managed store. A retry moves such keyless encrypted data to the target's trash for reclamation before starting over. This includes failed first backups from older releases. Partially populated key metadata is rejected instead.
-
-> [!WARNING]
-> Older StartOS releases cannot read an upgraded backup. Upgraded backups reject substitutions of individual stored records against their authenticated current references. An upgrade cannot establish the provenance of older data, prevent rollback to an entire genuine older backup view, or revoke previously copied backup data and key-wrapping metadata.
-
-The discovery date shown before unlocking a backup is editable plaintext. After unlocking a converted backup, the date inside encrypted backup metadata belongs to the authenticated backup view. A genuine older view retains its older protected date; that date does not establish that no newer backup exists.
-
-## Command-Line Passwords
-
-`start-cli backup target mount`, `start-cli backup target info`, `start-cli package backup restore`, and `start-cli backup volume restore` prompt for the backup password instead of accepting it as a positional argument. Automation can supply it through `BACKUP_PASSWORD`. CIFS target add/update commands similarly prompt for the share password or read `CIFS_PASSWORD`; an empty password selects passwordless access. The `PASSWORD` variable used for CLI authentication remains separate.
-
-Avoid typing secret values into shell commands, where shell history can retain them. The standalone `startos-backup-fs` utility reads its filesystem credential from standard input or `--password-file`; password changes read the replacement credential from `--new-password-file`. It does not accept plaintext password arguments. For StartOS-managed backups, this utility uses the filesystem key managed by StartOS, not the master password accepted by `start-cli`.
-
-## Read-only Snapshots
-
-The low-level `startos-backup-fs` utility can retain named recovery points without duplicating unchanged file content. Upgraded stores never overwrite stored data in place; a snapshot retains a selected view while the current backup continues to update normally. Retention is manual: delete points when they are no longer needed.
-
-Snapshots require a new-format or explicitly converted store. The low-level conversion command is `startos-backup-fs convert /path/to/crypt --password-file /protected/filesystem-key`.
-
-Snapshot operations require exclusive offline access. Finish backups and unmount the decrypted filesystem before creating, listing, deleting, or mounting a recovery point. Use the filesystem credential described above, not the StartOS master password:
-
-```sh
-startos-backup-fs snapshot create /path/to/crypt before-update --password-file /protected/filesystem-key
-startos-backup-fs snapshot list /path/to/crypt --password-file /protected/filesystem-key
-startos-backup-fs mount /path/to/crypt /mnt/recovery --snapshot before-update --password-file /protected/filesystem-key
-fusermount3 -u /mnt/recovery
-startos-backup-fs snapshot delete /path/to/crypt before-update --password-file /protected/filesystem-key
-```
-
-The backing directory is `StartOSBackupsV2/<server-id>/crypt` on the mounted target. Protect the credential file with owner-only permissions. A recovery mount is read-only. Snapshot names use letters, digits, `-`, `_`, or `.`, up to 128 characters; `.` and `..` are reserved.
-
-Snapshot indices are stored in bounded, shared chunks. Metadata and retained changed data require space; the catalog of snapshot descriptors has a 64 MiB limit. After a point is deleted, storage it alone used is reclaimed once the files holding it are mostly unused by the current backup and other retained points. Snapshots share the target's hardware and do not replace backups on separate devices.
-
-## Best Practices
-
-Even with proper backups the risk of data corruption is always non-zero. Therefore it is recommended to take additional care when backing up highly valuable or irreplaceable data like a lightning node:
-
-- High quality SSDs should be favored over HDDs as a backup target.
-- Backup to multiple targets.
-- If backing up to multiple targets make sure all backups are up to date.
-- Set up [continuous backups](/bitcoin-guides/continuous-backups.html) where a service offers them. A StartOS backup holds LND's channel backup only as of the moment it was taken, and leaves Bark Wallet's database out entirely; a continuous backup keeps a current, encrypted copy on storage you choose.
-
-## Physical Drive
+### External Drive
 
 `Btrfs` is the recommended format of your backup drive. Existing `EXT4` backup drives remain supported. `fat32` and `exFAT` are _not_ recommended and may not work.
-
-A new drive, or one formatted for another system, can be prepared from StartOS: in `System > Create Backup`, click "Format a drive", choose the drive, and confirm. This erases everything on the drive and leaves a single `Btrfs` partition. The drive must be at least 1 GiB.
 
 > [!WARNING]
 > Backing up to USB thumb drives or SD card media is not recommended unless you are using high-endurance, high-quality storage. Low-quality flash memory is prone to corruption and failure over time.
@@ -108,19 +46,17 @@ A new drive, or one formatted for another system, can be prepared from StartOS: 
 
 1. Plug the drive into your server.
 
-1. In StartOS, go to `System > Create Backup`. The drive appears under `Physical Drives`; if it doesn't, click "Refresh".
+1. In **System → Backups**, select **Add**, then **External drive**.
 
-1. Click the drive.
+1. Name the target and choose the drive, then one of its partitions. To prepare a new drive, or one formatted for another system, choose **Erase and format this drive** instead: after a confirmation, StartOS erases everything on the drive and creates a single `Btrfs` partition. The server's own system and data drives are not offered.
 
-1. Select the services and volumes to back up, or click "Toggle all", then click "Done".
+1. Optionally enter a folder on the drive to use. Leaving it blank uses the whole partition.
 
-1. Enter your master password.
+### CIFS Share
 
-## Network Folder
+A CIFS share sends your encrypted backup over the LAN to a shared folder on another device. First, create a shared folder on the target device, then add it in StartOS.
 
-A network folder backup sends your encrypted backup over the LAN to a shared folder on another device. First, create a shared folder on the target device, then connect to it from StartOS.
-
-### Step 1. Create a Shared Folder
+#### Step 1. Create a Shared Folder
 
 {{#tabs global="backup-target"}}
 
@@ -409,15 +345,13 @@ A network folder backup sends your encrypted backup over the LAN to a shared fol
 
 {{#endtabs}}
 
-### Step 2. Connect from StartOS
+#### Step 2. Add It in StartOS
 
 The **Hostname** field accepts an IP address, a DNS name containing a dot (such as `nas.home.arpa`), a `.local` mDNS name, or a bare NetBIOS computer name. For DNS, enter the full name rather than a bare name such as `nas`.
 
-1. In StartOS, go to `System > Create Backup`.
+1. In **System → Backups**, select **Add**, then **CIFS share**.
 
-1. Under `Network Folders`, click "New".
-
-1. Complete the form:
+1. Name the target and complete the form:
 
 {{#tabs global="backup-target"}}
 
@@ -504,10 +438,114 @@ The **Hostname** field accepts an IP address, a DNS name containing a dot (such 
 > [!WARNING]
 > If you receive `Filesystem I/O Error mount error(13): Permission denied`, ensure you have entered the correct values in the Username and Password fields.
 
-### Step 3. Back Up
+## Creating a Backup
 
-1. Click the folder under `Network Folders`.
+1. In **System → Backups**, select **Create backup** in the **History** section.
+
+1. Choose a target. Unavailable targets cannot be selected.
 
 1. Select the services and volumes to back up, or click "Toggle all", then click "Done".
 
 1. Enter your master password.
+
+While a backup runs, its progress appears at the top of the page. Wait for the `Backup Complete` notification before unplugging a backup drive. StartOS writes out the last of the backup and unmounts the drive before raising that notification, so the drive is safe to remove once it appears. The progress card reads `Complete` first, while StartOS is still finishing — the notification is the one to wait for.
+
+## History
+
+The **History** section lists past backups, newest first, with when each started, how long it took, its target and its result: **Succeeded**, **Completed with errors** or **Failed**. Select a backup's report button to see which services and volumes were backed up, and any errors.
+
+## Restoring Backups
+
+Restore previously created backups to recover individual services, volumes or your entire server. This is for disaster recovery when a service is accidentally uninstalled or when your data drive is lost or corrupted.
+
+### Restoring Individual Services or Volumes
+
+Services must be uninstalled before they can be restored. A volume is restored as a new local copy.
+
+1. In **System → Backups**, select **Restore** in the **History** section.
+
+1. Choose a backup. The list shows every server backup on every target, newest first, and explains why any of them cannot be chosen, such as an unavailable target. This server's backups are marked **This server**.
+
+1. Enter the password that was used to create the backup.
+
+1. Select the services and volumes you want to restore and click "Restore selected".
+
+Each restored volume receives a new identity and starts with no service grants, even if its backup came from an external drive or CIFS share. Existing local and remote data is untouched. Grant the new local copy from [Shared Volumes](shared-volumes.md) and update consumers' saved selections.
+
+> [!TIP]
+> If the backup came from a different system architecture (x86, ARM, or RISC-V), StartOS runs its service images under emulation. After the restore, _reinstall_ or update each service from the marketplace so StartOS can select its package for the new server architecture. Do not uninstall it, since uninstalling deletes its data.
+
+### Restoring an Entire Server
+
+If your StartOS data drive is lost or corrupted and you need to restore your entire server, choose **Restore from Backup** during [initial setup](initial-setup.md).
+
+## Targets That Need Attention
+
+A target that needs attention shows a yellow button in its row, and a warning icon appears beside **Backups** in the System menu and on **System** in the top bar.
+
+### Old Backups
+
+New backups are written to a `StartOSBackupsV2` folder on the target, replacing the older `StartOSBackups` (V1) format written by StartOS 0.4 betas. A backup made on StartOS 0.3.5.1 is a different, older backup: it is not removed by **Delete old backup**, and StartOS 0.4 never touches it. To free that space, delete it yourself from the drive.
+
+- When you choose a target that still holds a V1 backup for this server, StartOS warns you before backing up and shows how much free space remains on the target.
+- After a backup completes, if the target still contains this server's V1 backup, StartOS raises a notification reminding you it is no longer needed.
+- A target holding this server's V1 backup shows a **Delete old backup** button. The dialog names this server's latest current backup, or warns that there is none yet. After you confirm, StartOS removes this server's old V1 backup immediately and reclaims the space it occupied in the background, raising a notification once the space has been fully freed (on a large backup this can take a while). Your current `StartOSBackupsV2` backup, and any backups belonging to other servers that share the target, are untouched.
+
+> [!WARNING]
+> Before backing up, check the free space remaining on the target and make sure your selected services and volumes will fit. If space is tight, use **Delete old backup** to reclaim the space this server's old backup occupies, or choose another target. A backup started while that space is still being reclaimed in the background waits for the reclamation to finish first, shown as an initial `Reclaiming Space` phase in the backup's progress.
+
+### Backup Format Upgrades
+
+Existing backups remain usable for backups and restores with their original filesystem encryption/checksum format until explicitly converted. Normal mounts do not start conversion. The folder remains `StartOSBackupsV2`; this is separate from the older `StartOSBackups` folder cleanup described above.
+
+A target holding this server's old-format backup shows an **Update format** button. Select it, review how long conversion may take for that kind of target, select **Convert backup** and enter the backup's master password. Choosing that target to create a backup also offers **Update format** or **Skip**; skipping continues backup creation using the existing format.
+
+Conversion runs in the background, and the target is unavailable until it finishes. The target's button reads **Conversion in progress**; select it to view weighted overall progress, all conversion phases, and byte/object counts. The completion notification names the target and reports success or the failure's error message. A failed attempt offers **Retry conversion**, or **Resume conversion** when it was interrupted. **Resume conversion** revalidates the password and continues from durable migration state. Closing the dialog does not cancel the operation.
+
+Conversion upgrades encryption authentication and current-version references by rewriting encrypted data. It moves content in batches rather than keeping a second complete copy; free space is still needed for one batch of rewritten data and new index metadata. On a large or remote backup, this can take substantially longer than an ordinary incremental backup. Conversion requires exclusive offline access. Leave the target connected until it finishes; after interruption, explicitly resume conversion before using that store again.
+
+An unreadable encrypted object or log frame does not block the upgrade of healthy data. Damaged data stays unreadable; filesystem I/O failures leave the upgrade resumable.
+
+Without its saved key metadata, StartOS cannot decrypt a managed store. A retry moves such keyless encrypted data to the target's trash for reclamation before starting over. This includes failed first backups from older releases. Partially populated key metadata is rejected instead.
+
+> [!WARNING]
+> Older StartOS releases cannot read an upgraded backup. Upgraded backups reject substitutions of individual stored records against their authenticated current references. An upgrade cannot establish the provenance of older data, prevent rollback to an entire genuine older backup view, or revoke previously copied backup data and key-wrapping metadata.
+
+The discovery date shown before unlocking a backup is editable plaintext. After unlocking a converted backup, the date inside encrypted backup metadata belongs to the authenticated backup view. A genuine older view retains its older protected date; that date does not establish that no newer backup exists.
+
+When restoring, the backup list marks each old-format backup with an **Old format** tag. An old-format backup remains restorable without conversion, but once conversion has started it must finish before that backup can be restored; other servers' backups on the same target remain independent. Conversion and resumption happen on the server the backup belongs to. If initial setup cannot restore an interrupted backup, finish conversion on its original server before retrying setup recovery. The setup wizard does not automatically convert a backup.
+
+## Command-Line Passwords
+
+`start-cli backup target mount`, `start-cli backup target info`, `start-cli package backup restore`, and `start-cli backup volume restore` prompt for the backup password instead of accepting it as a positional argument. Automation can supply it through `BACKUP_PASSWORD`. CIFS target add/update commands similarly prompt for the share password or read `CIFS_PASSWORD`; an empty password selects passwordless access. The `PASSWORD` variable used for CLI authentication remains separate.
+
+Avoid typing secret values into shell commands, where shell history can retain them. The standalone `startos-backup-fs` utility reads its filesystem credential from standard input or `--password-file`; password changes read the replacement credential from `--new-password-file`. It does not accept plaintext password arguments. For StartOS-managed backups, this utility uses the filesystem key managed by StartOS, not the master password accepted by `start-cli`.
+
+## Read-only Snapshots
+
+The low-level `startos-backup-fs` utility can retain named recovery points without duplicating unchanged file content. Upgraded stores never overwrite stored data in place; a snapshot retains a selected view while the current backup continues to update normally. Retention is manual: delete points when they are no longer needed.
+
+Snapshots require a new-format or explicitly converted store. The low-level conversion command is `startos-backup-fs convert /path/to/crypt --password-file /protected/filesystem-key`.
+
+Snapshot operations require exclusive offline access. Finish backups and unmount the decrypted filesystem before creating, listing, deleting, or mounting a recovery point. Use the filesystem credential described above, not the StartOS master password:
+
+```sh
+startos-backup-fs snapshot create /path/to/crypt before-update --password-file /protected/filesystem-key
+startos-backup-fs snapshot list /path/to/crypt --password-file /protected/filesystem-key
+startos-backup-fs mount /path/to/crypt /mnt/recovery --snapshot before-update --password-file /protected/filesystem-key
+fusermount3 -u /mnt/recovery
+startos-backup-fs snapshot delete /path/to/crypt before-update --password-file /protected/filesystem-key
+```
+
+The backing directory is `StartOSBackupsV2/<server-id>/crypt` on the mounted target. Protect the credential file with owner-only permissions. A recovery mount is read-only. Snapshot names use letters, digits, `-`, `_`, or `.`, up to 128 characters; `.` and `..` are reserved.
+
+Snapshot indices are stored in bounded, shared chunks. Metadata and retained changed data require space; the catalog of snapshot descriptors has a 64 MiB limit. After a point is deleted, storage it alone used is reclaimed once the files holding it are mostly unused by the current backup and other retained points. Snapshots share the target's hardware and do not replace backups on separate devices.
+
+## Best Practices
+
+Even with proper backups the risk of data corruption is always non-zero. Therefore it is recommended to take additional care when backing up highly valuable or irreplaceable data like a lightning node:
+
+- High quality SSDs should be favored over HDDs as a backup target.
+- Backup to multiple targets.
+- If backing up to multiple targets make sure all backups are up to date.
+- Set up [continuous backups](/bitcoin-guides/continuous-backups.html) where a service offers them. A StartOS backup holds LND's channel backup only as of the moment it was taken, and leaves Bark Wallet's database out entirely; a continuous backup keeps a current, encrypted copy on storage you choose.

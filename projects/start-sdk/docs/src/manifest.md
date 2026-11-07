@@ -387,7 +387,7 @@ volumes: ['main', 'db', 'config'],
 
 Reference these in `main.ts` mounts by the volume ID you chose.
 
-To support user-managed local folders and network shares, declare `sharedVolumes: true` separately. This enables user-selected grants rather than adding sources to package-owned `volumes`. See [Volumes](shared-volumes.md) for optional mounting, reactive grants and backup ownership.
+To support user-managed local folders, attached drives and network shares, declare `sharedVolumes: true` separately. This enables user-selected grants rather than adding sources to package-owned `volumes`. See [Shared Volumes](shared-volumes.md) for optional mounting, reactive grants and backup ownership.
 
 ## Dependencies
 

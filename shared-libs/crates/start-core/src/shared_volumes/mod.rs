@@ -80,10 +80,15 @@ pub enum SharedVolumeSource {
         logicalname: PathBuf,
         #[serde(default)]
         path: PathBuf,
+        /// The partition label or drive model when the volume was created, for display.
+        #[serde(default)]
+        label: Option<String>,
     },
     Cifs {
         hostname: String,
         path: PathBuf,
+        #[serde(default)]
+        username: String,
     },
 }
 
@@ -125,7 +130,6 @@ rpc_toolkit::ts_export!(SharedVolume, namespaces = [""]);
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SharedVolumeCredentials {
-    pub username: String,
     pub password: Option<String>,
 }
 
@@ -166,6 +170,7 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand("create", from_fn_async(create).no_cli())
         .subcommand("rename", from_fn_async(rename).no_cli())
+        .subcommand("update-cifs", from_fn_async(update_cifs).no_cli())
         .subcommand("set-grant", from_fn_async(set_grant).no_cli())
         .subcommand("remove", from_fn_async(remove).no_cli())
         .subcommand("delete-data", from_fn_async(delete_data).no_cli())
@@ -220,9 +225,14 @@ pub async fn create(
         CreateSharedVolumeSource::Disk { logicalname, path } => {
             let disks = crate::disk::util::list(&ctx.os_partitions, None).await?;
             let logicalname = tokio::fs::canonicalize(logicalname).await?;
-            let partition = source::external_partition(&disks, &logicalname)?;
+            let (partition, label) = source::external_partition(&disks, &logicalname)?;
+            crate::disk::format::refuse_system_drive(
+                &ctx.os_partitions,
+                &crate::disk::format::parent_drive(&partition).await?,
+            )
+            .await?;
             (
-                source::prepare_external_source(partition, path).await?,
+                source::prepare_external_source(partition, path, label).await?,
                 None,
             )
         }
@@ -238,8 +248,9 @@ pub async fn create(
                 SharedVolumeSource::Cifs {
                     hostname,
                     path: Path::new("/").join(path),
+                    username,
                 },
-                Some(SharedVolumeCredentials { username, password }),
+                Some(SharedVolumeCredentials { password }),
             )
         }
     };
@@ -288,6 +299,88 @@ pub async fn rename(
                 .or_not_found(&id)?
                 .as_name_mut()
                 .ser(&name)
+        })
+        .await
+        .result
+}
+
+#[derive(Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCifsSharedVolumeParams {
+    pub id: SharedVolumeId,
+    pub hostname: String,
+    pub path: PathBuf,
+    pub username: String,
+    /// Omitted keeps the stored password; empty clears it.
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+rpc_toolkit::reflect_ts!(UpdateCifsSharedVolumeParams);
+
+pub async fn update_cifs(
+    ctx: RpcContext,
+    UpdateCifsSharedVolumeParams {
+        id,
+        hostname,
+        path,
+        username,
+        password,
+    }: UpdateCifsSharedVolumeParams,
+) -> Result<(), Error> {
+    ctx.db
+        .mutate(|db| {
+            let volume = db
+                .as_public()
+                .as_shared_volumes()
+                .as_idx(&id)
+                .or_not_found(&id)?
+                .de()?;
+            if !matches!(volume.source, SharedVolumeSource::Cifs { .. }) {
+                return Err(Error::new(
+                    eyre!(t!("shared-volumes.not-cifs")),
+                    ErrorKind::InvalidRequest,
+                ));
+            }
+            let stored = db
+                .as_private()
+                .as_shared_volume_credentials()
+                .as_idx(&id)
+                .map(|credentials| credentials.de())
+                .transpose()?;
+            let password = match password {
+                Some(password) => (!password.is_empty()).then_some(password),
+                None => stored.and_then(|stored| stored.password),
+            };
+            let cifs = Cifs {
+                hostname,
+                path,
+                username,
+                password,
+            };
+            cifs.validate()?;
+            let Cifs {
+                hostname,
+                path,
+                username,
+                password,
+            } = cifs;
+            db.as_private_mut()
+                .as_shared_volume_credentials_mut()
+                .insert(&id, &SharedVolumeCredentials { password })?;
+            let volume = db
+                .as_public_mut()
+                .as_shared_volumes_mut()
+                .as_idx_mut(&id)
+                .or_not_found(&id)?;
+            volume.as_source_mut().ser(&SharedVolumeSource::Cifs {
+                hostname,
+                path: Path::new("/").join(path),
+                username,
+            })?;
+            volume
+                .as_availability_mut()
+                .ser(&SharedVolumeAvailability::Unknown)
         })
         .await
         .result
@@ -571,7 +664,7 @@ mod tests {
                 disk.to_string(): {"name":"Drive", "source":{"kind":"disk","logicalname":"/dev/disk/by-uuid/aabbccdd-0000-4000-8000-0123456789ab"}, "grants":{}}
             }, "packageData": {} },
             "private": { "sharedVolumeCredentials": {
-                cifs.to_string(): {"username":"private", "password":"secret"}
+                cifs.to_string(): {"password":"secret"}
             }, "retainedSharedVolumes": {} }
         })).unwrap());
         remove_definition(&mut db, &local).unwrap();

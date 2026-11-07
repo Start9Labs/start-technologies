@@ -83,14 +83,18 @@ async fn external_folder_is_created_pinned_and_limits_consumer_subpaths() {
     use crate::disk::mount::guard::MountGuard;
     use crate::util::Invoke;
     let device = PathBuf::from(std::env::var_os("STARTOS_TEST_EXTERNAL_PARTITION").unwrap());
-    let chosen = prepare_external_source(device.clone(), PathBuf::from("/created-folder/view"))
-        .await
-        .unwrap();
-    let SharedVolumeSource::Disk { logicalname, path } = chosen else {
+    let chosen =
+        prepare_external_source(device.clone(), PathBuf::from("/created-folder/view"), None)
+            .await
+            .unwrap();
+    let SharedVolumeSource::Disk {
+        logicalname, path, ..
+    } = chosen
+    else {
         panic!("disk source")
     };
     assert_eq!(path, Path::new("created-folder/view"));
-    prepare_external_source(device.clone(), path.clone())
+    prepare_external_source(device.clone(), path.clone(), None)
         .await
         .unwrap();
     let source = PreparedSource::open(
@@ -257,8 +261,8 @@ fn only_partitions_from_backup_discovery_can_be_registered() {
         "logicalname": "/dev/sdz",
         "stablePath": "/dev/disk/by-path/external",
         "partitionTable": "gpt",
-        "vendor": null,
-        "model": null,
+        "vendor": "Samsung",
+        "model": "T7",
         "capacity": 4096,
         "guid": null,
         "filesystem": null,
@@ -273,15 +277,30 @@ fn only_partitions_from_backup_discovery_can_be_registered() {
             "legacyBackup": false,
             "guid": null,
             "filesystem": null
+        }, {
+            "logicalname": "/dev/sdz2",
+            "stablePath": "/dev/disk/by-path/external-part2",
+            "label": null,
+            "capacity": 4096,
+            "used": null,
+            "available": null,
+            "startOs": {},
+            "legacyBackup": false,
+            "guid": null,
+            "filesystem": null
         }]
     }]))
     .unwrap();
     for path in ["/dev/sdz1", "/dev/disk/by-path/external-part1"] {
         assert_eq!(
             external_partition(&disks, Path::new(path)).unwrap(),
-            Path::new("/dev/sdz1")
+            (PathBuf::from("/dev/sdz1"), Some("Photos".to_owned()))
         );
     }
+    assert_eq!(
+        external_partition(&disks, Path::new("/dev/sdz2")).unwrap(),
+        (PathBuf::from("/dev/sdz2"), Some("Samsung T7".to_owned()))
+    );
     for path in ["/", "/dev/sdz", "/dev/system-root", "/dev/missing"] {
         assert!(external_partition(&disks, Path::new(path)).is_err());
     }

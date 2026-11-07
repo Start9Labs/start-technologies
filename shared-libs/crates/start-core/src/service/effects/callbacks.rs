@@ -61,6 +61,17 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
         watch: TypedDbWatch<T>,
         handler: CallbackHandler,
     ) {
+        self.add_filtered(key, watch, |_| true, handler)
+    }
+
+    /// Fires on the first change the filter accepts.
+    pub fn add_filtered<T: Send + 'static>(
+        self: &Arc<Self>,
+        key: K,
+        watch: TypedDbWatch<T>,
+        mut relevant: impl FnMut(&Value) -> bool + Send + 'static,
+        handler: CallbackHandler,
+    ) {
         self.inner.mutate(|map| {
             map.entry(key.clone())
                 .or_insert_with(|| {
@@ -70,16 +81,20 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
                     (
                         tokio::spawn(async move {
                             let mut watch = watch.untyped();
-                            if watch.changed().await.is_ok() {
+                            while watch.changed().await.is_ok() {
+                                let value = watch.peek_and_mark_seen().unwrap_or_default();
+                                if !relevant(&value) {
+                                    continue;
+                                }
                                 if let Some(cbs) = this.inner.mutate(|map| {
                                     map.remove(&k).and_then(CallbackHandlers::detach_watcher)
                                 }) {
-                                    let value = watch.peek_and_mark_seen().unwrap_or_default();
                                     if let Err(e) = cbs.call((this.arguments)(value)).await {
                                         tracing::error!("Error in {label} callback: {e}");
                                         tracing::debug!("{e:?}");
                                     }
                                 }
+                                break;
                             }
                         })
                         .into(),
@@ -361,9 +376,11 @@ impl ServiceCallbacks {
         &self,
         package_id: PackageId,
         watch: TypedDbWatch<T>,
+        relevant: impl FnMut(&Value) -> bool + Send + 'static,
         handler: CallbackHandler,
     ) {
-        self.get_shared_volumes.add(package_id, watch, handler);
+        self.get_shared_volumes
+            .add_filtered(package_id, watch, relevant, handler);
     }
 
     pub(super) fn add_get_service_manifest(

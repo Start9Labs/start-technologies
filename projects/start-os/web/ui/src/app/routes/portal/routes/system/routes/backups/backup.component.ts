@@ -39,7 +39,7 @@ type BackupItem = {
             <span
               size="m"
               aria-hidden="true"
-              [tuiAvatar]="item.kind === 'volume' ? '@tui.folder' : ''"
+              [tuiAvatar]="item.kind === 'volume' ? '@tui.folder-symlink' : ''"
             >
               @if (item.kind === 'package') {
                 <img [pkgIcon]="item.id" />
@@ -48,7 +48,7 @@ type BackupItem = {
             <span tuiTitle>
               <b>{{ item.title }}</b>
               @if (item.kind === 'volume') {
-                <span tuiSubtitle>{{ 'Volumes' | i18n }}</span>
+                <span tuiSubtitle>{{ 'Shared Volumes' | i18n }}</span>
                 @if (item.availability === 'unavailable') {
                   <span tuiSubtitle>
                     {{ 'Volume source unavailable' | i18n }}
