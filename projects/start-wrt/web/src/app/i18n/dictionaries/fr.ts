@@ -567,4 +567,6 @@ export default {
   599: 'Les appareils sur {port} passeront au profil {profile}. La plupart se reconnectent en quelques secondes. Si un appareil n’a ensuite plus accès à Internet ou ne peut plus joindre d’autres appareils, ce qui est fréquent derrière un switch, débranchez puis rebranchez son câble, ou redémarrez l’appareil ou le switch. Sinon, il se reconnectera de lui-même dans les 12 heures.',
   600: 'Changer le profil de sécurité ?',
   601: 'Changer de profil',
+  602: 'Saisissez votre mot de passe administrateur pour chiffrer cette sauvegarde.',
+  603: 'Tous les paramètres actuels seront écrasés et l’appareil redémarrera. Saisissez le mot de passe administrateur en vigueur lors de la création de cette sauvegarde.',
 } satisfies i18n
