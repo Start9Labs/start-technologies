@@ -17,7 +17,7 @@ import { webSocket, WebSocketSubject } from 'rxjs/webSocket'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { AuthService } from '../auth.service'
 import { DataModel } from '../patch-db/data-model'
-import { ApiService } from './embassy-api.service'
+import { ApiService, FileUploadOptions } from './embassy-api.service'
 
 @Injectable()
 export class LiveApiService extends ApiService {
@@ -42,15 +42,34 @@ export class LiveApiService extends ApiService {
     this.document.defaultView.rpcClient = this
   }
 
-  async uploadFile(guid: string, body: Blob): Promise<void> {
+  async uploadFile(
+    guid: string,
+    body: Blob,
+    options: FileUploadOptions = {},
+  ): Promise<void> {
     await this.httpRequest({
       method: 'POST',
       body,
-      url: `/rest/rpc/${guid}`,
+      url: this.restContinuationUrl(guid),
       // Service-worker fetch events expire during long uploads.
-      headers: { 'ngsw-bypass': 'true' },
+      headers: {
+        'ngsw-bypass': 'true',
+        ...(options.filename === undefined
+          ? {}
+          : { 'X-File-Name': encodeURIComponent(options.filename) }),
+      },
+      uploadProgress: options.progress,
+      signal: options.signal,
       timeout: 0,
     })
+  }
+
+  downloadFileUrl(guid: string): string {
+    return `${this.restContinuationUrl(guid)}?ngsw-bypass=true`
+  }
+
+  private restContinuationUrl(guid: string): string {
+    return `/rest/rpc/${encodeURIComponent(guid)}`
   }
 
   async getStatic(

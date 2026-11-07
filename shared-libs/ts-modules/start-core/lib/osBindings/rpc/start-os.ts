@@ -82,7 +82,6 @@ export type AcmeProviderInput = z.input<typeof schemas.AcmeProvider>
 export type ActionId = z.output<typeof schemas.ActionId>
 export type ActionIdInput = z.input<typeof schemas.ActionId>
 export type ActionResultV0 = z.output<typeof schemas.ActionResultV0>
-export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
 
 /**
  * Keys an import added, and keys it found already present.
@@ -200,6 +199,11 @@ export type ListVersionSignersParamsInput = z.input<
 export type LocaleString = z.output<typeof schemas.LocaleString>
 export type LocaleStringInput = z.input<typeof schemas.LocaleString>
 export type LogEntry = z.output<typeof schemas.LogEntry>
+
+/**
+ * Verbosity accepted by the server's runtime logging control.
+ */
+export type LogLevelInput = z.input<typeof schemas.LogLevel>
 export type LogoutParamsInput = z.input<typeof schemas.LogoutParams>
 export type LshwDisplay = z.output<typeof schemas.LshwDisplay>
 export type LshwProcessor = z.output<typeof schemas.LshwProcessor>
@@ -346,8 +350,7 @@ export type WifiSsidParamsInput = z.input<typeof schemas.WifiSsidParams>
 export type ZramParamsInput = z.input<typeof schemas.ZramParams>
 export type AcceptSignersInput = z.input<typeof schemas.AcceptSigners>
 export type ActionInput = z.output<typeof schemas.ActionInput>
-export type ActionResultMember = z.output<typeof schemas.ActionResultMember>
-export type ActionResultV1 = z.output<typeof schemas.ActionResultV1>
+export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
 export type AddAdminParamsInput = z.input<typeof schemas.AddAdminParams>
 export type AddAssetParamsInput = z.input<typeof schemas.AddAssetParams>
 export type AddCategoryParamsInput = z.input<typeof schemas.AddCategoryParams>
@@ -550,6 +553,11 @@ export type SetGatewaySecureParamsInput = z.input<
   typeof schemas.SetGatewaySecureParams
 >
 export type SetIconParamsInput = z.input<typeof schemas.SetIconParams>
+
+/**
+ * Sets verbosity for StartOS backend code in the running daemon.
+ */
+export type SetLogLevelParamsInput = z.input<typeof schemas.SetLogLevelParams>
 export type SetOsUpdateSignerParamsInput = z.input<
   typeof schemas.SetOsUpdateSignerParams
 >
@@ -591,7 +599,8 @@ export type VersionSignerParamsInput = z.input<
   typeof schemas.VersionSignerParams
 >
 export type WifiListOut = z.output<typeof schemas.WifiListOut>
-export type ActionResult = z.output<typeof schemas.ActionResult>
+export type ActionResultMember = z.output<typeof schemas.ActionResultMember>
+export type ActionResultV1 = z.output<typeof schemas.ActionResultV1>
 export type AddPublicDomainRes = z.output<typeof schemas.AddPublicDomainRes>
 export type BackupInfo = z.output<typeof schemas.BackupInfo>
 export type BackupParamsInput = z.input<typeof schemas.BackupParams>
@@ -634,6 +643,7 @@ export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 export type SubscribeIndexResult = z.output<typeof schemas.SubscribeIndexResult>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type WifiListInfo = z.output<typeof schemas.WifiListInfo>
+export type ActionResult = z.output<typeof schemas.ActionResult>
 export type AddSslOptions = z.output<typeof schemas.AddSslOptions>
 export type BackupTarget = z.output<typeof schemas.BackupTarget>
 export type BindingSetAddressEnabledParamsInput = z.input<

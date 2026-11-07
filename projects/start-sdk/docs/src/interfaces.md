@@ -573,7 +573,7 @@ Otherwise prefer TLS termination. HTTP proxying is an independent choice, and ap
 | UDP on the TLS port              | Not applicable                                      | Not applicable                 | Not applicable                                            |
 | Certificate issuance and renewal | Handled by the platform                             | Handled by the platform        | Yours to handle                                           |
 
-For unproxied service TLS, StartOS preserves the client source IP when it routes the container's replies, including termination and rewrapping. Server-local and bridge clients, or a failed transparent dial, use the proxy address.
+For unproxied service TLS, StartOS preserves the client source IP when it routes the container's replies, including termination and rewrapping. Server-local and bridge clients use the proxy address. StartOS refuses any other connection whose source IP it cannot preserve, so a service must listen on IPv6 as well as IPv4 to accept IPv6 clients on such a binding. Rejection during TLS does not trigger Happy Eyeballs' TCP fallback to IPv4.
 
 ### Minting the certificate
 

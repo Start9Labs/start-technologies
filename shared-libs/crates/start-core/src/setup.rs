@@ -25,13 +25,13 @@ use crate::context::rpc::InitRpcContextPhases;
 use crate::context::setup::SetupResult;
 use crate::context::{CliContext, RpcContext, SetupContext};
 use crate::db::model::Database;
+use crate::disk::REPAIR_DISK_PATH;
 use crate::disk::fsck::RepairStrategy;
 use crate::disk::main::{DEFAULT_PASSWORD, ImportMode};
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::disk::util::{DiskInfo, StartOsRecoveryInfo, pvscan, recovery_info};
-use crate::disk::{LIVE_MEDIUM_PATH, REPAIR_DISK_PATH};
 use crate::hostname::{ServerHostname, repair_hostname};
 use crate::init::{InitPhases, InitResult, init};
 use crate::net::ssl::root_ca_start_time;
@@ -163,22 +163,12 @@ pub fn disk<C: Context>() -> ParentHandler<C> {
 }
 
 pub async fn list_disks(_ctx: SetupContext) -> Result<Vec<DiskInfo>, Error> {
-    let mut disks = crate::disk::util::list(
+    crate::os_install::installable_disks(
         &crate::disk::OsPartitionInfo::from_fstab()
             .await
             .unwrap_or_default(),
-        None,
     )
-    .await?;
-
-    // Filter out the disk containing the live medium (installer USB)
-    if let Ok(Some(live_medium_source)) =
-        crate::disk::util::get_mount_source(LIVE_MEDIUM_PATH).await
-    {
-        disks.retain(|disk| disk.logicalname != live_medium_source);
-    }
-
-    Ok(disks)
+    .await
 }
 
 fn setup_hostname(existing: ServerHostname, requested: Option<ServerHostname>) -> ServerHostname {

@@ -11578,6 +11578,41 @@
     }
   },
   {
+    "name": "server.set-log-level",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SetLogLevelParams": {
+          "type": "object",
+          "properties": {
+            "level": {
+              "description": "Applies to start-core/start-os until the daemon restarts.",
+              "$ref": "#/$defs/LogLevel"
+            }
+          },
+          "required": ["level"],
+          "additionalProperties": true,
+          "description": "Sets verbosity for StartOS backend code in the running daemon."
+        },
+        "LogLevel": {
+          "type": "string",
+          "enum": ["error", "warn", "info", "debug", "trace"],
+          "description": "Verbosity accepted by the server's runtime logging control."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "level": {
+          "description": "Applies to start-core/start-os until the daemon restarts.",
+          "$ref": "#/$defs/LogLevel"
+        }
+      },
+      "required": ["level"],
+      "additionalProperties": true,
+      "description": "Sets verbosity for StartOS backend code in the running daemon."
+    }
+  },
+  {
     "name": "server.set-smtp",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

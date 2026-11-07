@@ -199,6 +199,12 @@ rpc_toolkit::reflect_ts!(ActionResultMember);
 #[serde(rename_all_fields = "camelCase")]
 #[serde(tag = "type")]
 pub enum ActionResultValue {
+    File {
+        /// The capability prepared by this action's prepare-download effect.
+        value: Guid,
+        /// Removes the exported file after completion, failure, cancellation, or expiry.
+        delete: bool,
+    },
     Single {
         /// The actual string value to display. The UI renders it as a single-line field —
         /// multi-line text belongs in a `multiline` value.
@@ -231,25 +237,33 @@ pub enum ActionResultValue {
 }
 
 rpc_toolkit::reflect_ts!(ActionResultValue);
+
+fn write_indent(f: &mut fmt::Formatter<'_>, indent: usize) -> fmt::Result {
+    for _ in 0..indent {
+        write!(f, "  ")?;
+    }
+    Ok(())
+}
+
 impl ActionResultValue {
     fn fmt_rec(&self, f: &mut fmt::Formatter<'_>, indent: usize) -> fmt::Result {
         match self {
+            Self::File { value, .. } => {
+                write_indent(f, indent)?;
+                write!(f, "/rest/rpc/{value}")?;
+            }
             Self::Single { value, qr, .. } | Self::Multiline { value, qr, .. } => {
                 for (i, line) in value.lines().enumerate() {
                     if i > 0 {
                         writeln!(f)?;
                     }
-                    for _ in 0..indent {
-                        write!(f, "  ")?;
-                    }
+                    write_indent(f, indent)?;
                     write!(f, "{line}")?;
                 }
                 if qr.unwrap_or_default() {
                     use qrcode::render::unicode;
                     writeln!(f)?;
-                    for _ in 0..indent {
-                        write!(f, "  ")?;
-                    }
+                    write_indent(f, indent)?;
                     write!(
                         f,
                         "{}",
@@ -261,15 +275,19 @@ impl ActionResultValue {
                 }
             }
             Self::Group { value } => {
-                for ActionResultMember {
-                    name,
-                    description,
-                    value,
-                } in value
+                for (
+                    index,
+                    ActionResultMember {
+                        name,
+                        description,
+                        value,
+                    },
+                ) in value.iter().enumerate()
                 {
-                    for _ in 0..indent {
-                        write!(f, "  ")?;
+                    if index > 0 {
+                        writeln!(f)?;
                     }
+                    write_indent(f, indent)?;
                     write!(f, "{name}")?;
                     if let Some(description) = description {
                         write!(f, ": {description}")?;
@@ -378,7 +396,6 @@ impl FromArgMatches for RunActionParams {
     }
 }
 
-// #[command(about = "Executes an action", display(display_action_result))]
 #[instrument(skip_all)]
 pub async fn run_action(
     ctx: RpcContext,
@@ -451,4 +468,44 @@ pub async fn clear_task(
         })
         .await
         .result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_results_round_trip_and_display_the_download_path() {
+        let id = Guid::new();
+        for delete in [false, true] {
+            let wire = serde_json::json!({
+                "version": "1", "title": "Ready", "message": null,
+                "result": {"type": "file", "value": id, "delete": delete},
+            });
+            let result: ActionResult = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&result).unwrap(), wire);
+            assert_eq!(result.to_string(), format!("Ready:\n  /rest/rpc/{id}"));
+        }
+    }
+
+    #[test]
+    fn grouped_results_separate_members_and_indent_nested_file_paths() {
+        let id = Guid::new();
+        let result: ActionResult = serde_json::from_value(serde_json::json!({
+            "version": "1", "title": "Ready", "message": null,
+            "result": {"type": "group", "value": [
+                {"name": "Exports", "description": null, "type": "group", "value": [
+                    {"name": "Report", "description": null, "type": "file", "value": id, "delete": false},
+                    {"name": "Note", "description": null, "type": "single", "value": "Complete"},
+                ]},
+                {"name": "Status", "description": null, "type": "single", "value": "Done"},
+            ]},
+        })).unwrap();
+        assert_eq!(
+            result.to_string(),
+            format!(
+                "Ready:\n  Exports:\n    Report:\n      /rest/rpc/{id}\n    Note:\n      Complete\n  Status:\n    Done"
+            )
+        );
+    }
 }

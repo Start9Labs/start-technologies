@@ -14,6 +14,7 @@ pub mod callbacks;
 pub mod context;
 mod control;
 pub(super) mod dependency;
+mod files;
 mod health;
 mod init;
 mod net;
@@ -30,6 +31,22 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "echo",
             from_fn(echo::<EffectContext>).with_call_remote::<ContainerCliContext>(),
+        )
+        .subcommand(
+            "prepare-upload",
+            from_fn_async(files::prepare_upload).no_cli(),
+        )
+        .subcommand(
+            "prepare-download",
+            from_fn_async(files::prepare_download).no_cli(),
+        )
+        .subcommand(
+            "resolve-upload",
+            from_fn_async(files::resolve_upload).no_cli(),
+        )
+        .subcommand(
+            "get-upload-limits",
+            from_fn_async(files::get_upload_limits).no_cli(),
         )
         // action
         .subcommand("action", action::action_api::<C>())
