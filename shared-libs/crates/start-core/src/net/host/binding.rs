@@ -134,7 +134,7 @@ impl DerivedAddressInfo {
             // `gua_wan` is current; a GUA's `public` flag waits for `set_available`.
             let public = address.gua().map_or_else(
                 || enabled.contains(address),
-                |gua| previous.gua_wan.contains(&gua),
+                |gua| previous.gua_wan.contains(&gua) && previous.public_ip_on(address),
             );
             for gateway in address.metadata.gateways() {
                 *all_public
@@ -2551,6 +2551,33 @@ mod test {
         );
         assert_wan_group_off(&info);
         assert!(!info.enabled().contains(&plain));
+    }
+
+    #[test]
+    fn a_disabled_public_gua_keeps_a_tls_to_plain_group_off() {
+        let gua = HostnameInfo {
+            public: true,
+            ..ipv6_addr("2001:db8::1", 5223)
+        };
+        let mut info = DerivedAddressInfo::default();
+        info.available.extend([
+            domain_row("smp.example.com", true, 5223),
+            gua.clone(),
+        ]);
+        info.gua_wan.insert(gua.gua().unwrap());
+        set_address_enabled_on(&mut info, &gua, true).unwrap();
+        set_address_enabled_on(&mut info, &gua, false).unwrap();
+        assert!(info.gua_wan.contains(&gua.gua().unwrap()));
+        assert!(!info.enabled().contains(&gua));
+
+        refresh(
+            &mut info,
+            BTreeSet::from([
+                domain_row("smp.example.com", false, 5223),
+                HostnameInfo { ssl: false, ..gua },
+            ]),
+        );
+        assert_wan_group_off(&info);
     }
 
     #[test]
