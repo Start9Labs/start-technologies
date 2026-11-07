@@ -97,8 +97,24 @@ result survives a failed subsequent acknowledgement. Normal update progress deri
 its outcome from the database's staged-update restart state. WRT CLI shares the
 signing context's automatic credential selection and returns log/update GUIDs to
 separate consumers. Its selected HTTP target is `/rpc/v1`; the shared converter
-preserves its deployment prefix. Permitted browser/registry-administrator TOFU
-warnings remain unfinished.
+preserves its deployment prefix.
+
+Keyed registry CLI commands remember verified server identities in
+`registry-identities/` beside the configured CLI identity path (by default,
+`~/.startos/registry-identities/`), including when an opaque GPG identity is selected.
+Each sanitized target URL has one atomic PEM record, scoped by selected hostname,
+port and deployment path, not an mDNS-pinned dial IP. First contact and unchanged
+keys are silent. Rotation writes target/previous/current fingerprints and
+out-of-band verification advice to stderr, then remembers the new verified key.
+Fingerprints are SHA-256 of raw Ed25519 public bytes, displayed as `SHA256:` plus
+lowercase hexadecimal. Storage and advisory-output failures do not change RPC
+results, stdout or exit status. Registration/permissions remain live and separate.
+
+The registry-specific CLI flow observes the peer after completed admission and
+before sending the RPC, including calls subsequently denied authorization. Normal
+OS/Tunnel/WRT native calls, OS registry discovery/subscriptions, local-token and
+anonymous HTTP calls do not own these records or warnings. Browser own-server
+TOFU remains unfinished.
 
 ## Browser transport
 

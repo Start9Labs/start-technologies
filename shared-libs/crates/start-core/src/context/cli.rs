@@ -45,6 +45,10 @@ pub struct LazyUrl {
     pinned: OnceCell<Url>,
 }
 impl LazyUrl {
+    pub(crate) fn selected_host(&self) -> Option<&str> {
+        self.unpinned.host_str()
+    }
+
     /// BLOCKING
     pub fn get(&self) -> Result<&Url, Error> {
         self.pinned.get_or_try_init(|| {

@@ -56,6 +56,7 @@ pub(crate) async fn connect(
         Ok(transport(socket))
     })
     .await
+    .map(|(_, socket)| socket)
 }
 
 pub(super) async fn subscribe(

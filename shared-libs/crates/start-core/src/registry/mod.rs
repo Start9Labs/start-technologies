@@ -28,6 +28,7 @@ use crate::util::serde::HandlerExtSerde;
 
 pub mod admin;
 pub mod asset;
+mod cli_identity;
 mod compat;
 pub mod context;
 pub mod db;

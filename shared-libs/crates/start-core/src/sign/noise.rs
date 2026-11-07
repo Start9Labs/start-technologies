@@ -9,6 +9,17 @@ use crate::prelude::*;
 const PROTOCOL: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
 const STATIC_KEY_SIGNATURE_PREFIX: &[u8] = b"noise-libp2p-static-key:";
 const ED25519_KEY_TYPE: i32 = 1;
+const FINGERPRINT_PREFIX: &str = "SHA256:";
+
+/// SHA-256 fingerprint of the raw Ed25519 identity public key.
+pub fn fingerprint(key: &AnyVerifyingKey) -> String {
+    use sha2::Digest;
+    let AnyVerifyingKey::Ed25519(key) = key;
+    format!(
+        "{FINGERPRINT_PREFIX}{}",
+        hex::encode(sha2::Sha256::digest(key.as_bytes()))
+    )
+}
 
 #[derive(Clone, PartialEq, Message)]
 struct PublicKey {
@@ -154,6 +165,15 @@ mod tests {
         let size = peer.read_message(&wire[..size], &mut decoded).unwrap();
         decoded.truncate(size);
         decoded
+    }
+
+    #[test]
+    fn identity_fingerprint_matches_the_published_ed25519_fixture() {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[21; 32]).verifying_key();
+        assert_eq!(
+            fingerprint(&AnyVerifyingKey::Ed25519(key)),
+            "SHA256:d7e1e084be213b01e506852af8198b9980b43e03749c67d82dcd0903f4001c77"
+        );
     }
 
     #[tokio::test]

@@ -109,7 +109,8 @@ constructs the context, dispatches synchronously, then renders the result with `
 `println!`, `eprint!` and `eprintln!` macros. A broken output pipe exits with status 141
 without changing signal dispositions. Default handler displays and clap diagnostics use
 that policy; consumers import the macros with `#[macro_use]` to shadow `std`'s and use the same writers for
-custom formatters and serialization.
+custom formatters and serialization. `output::advisory` writes optional stderr notices
+without propagating output errors or changing process status.
 
 For talking to a _remote_ server, `CallRemote` + `CallRemoteHandler` forward a local invocation
 over the wire using `call_remote_http` (CBOR or JSON over `reqwest`) or `call_remote_socket`

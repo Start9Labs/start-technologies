@@ -11,7 +11,7 @@ root and `shared-libs/` guidance first. `CLAUDE.md` imports this file.
   share forwarding without changing caller-specific behavior.
 - `handler/from_fn.rs` owns sync, blocking, async and local-async factories.
 - `server/` owns dispatch and HTTP/socket transports; `cli.rs` owns clap and
-  remote calls. `output.rs` owns stdout/stderr broken-pipe handling; callers must
+  remote calls. `output.rs` owns stdout/stderr broken-pipe handling and best-effort `advisory` notices; callers must
   not apply that policy to network or filesystem errors. `server/mcp.rs` (`mcp` feature) owns the MCP tool surface and
   reuses `HttpServer`'s middleware steps rather than reimplementing them.
   `server/websocket.rs` (`websocket` feature) owns the shared WebSocket connection.

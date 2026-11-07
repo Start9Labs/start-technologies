@@ -61,6 +61,14 @@ consumers retain lifecycle ownership and require application completion rather t
 Commands without a remote handler (`s9pk`, `init-key`, `pubkey`, `util`) execute locally. The `registry`
 and `tunnel` groups can target a separate registry/tunnel host via `--registry`/`--tunnel`.
 
+Registry CLI calls observe the verified peer immediately after admission and before RPC
+execution. They atomically remember one public key per sanitized target under
+`registry-identities/` beside the configured identity path; selected names survive mDNS
+pinning. First contact is silent; key changes produce a best-effort stderr advisory with
+old/new fingerprints and verification advice. Storage/output failures never change the
+RPC result or command status. This registry-administration policy does not apply to
+normal OS/Tunnel/WRT calls or to the OS's registry-cache connections.
+
 ### Configuration
 
 `ClientConfig` (in `start-core::context::config`) is the single config type — the workspace

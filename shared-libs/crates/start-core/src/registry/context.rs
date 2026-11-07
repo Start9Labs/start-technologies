@@ -249,8 +249,41 @@ pub(crate) async fn call_cli(
     method: &str,
     mut params: Value,
 ) -> Result<Value, RpcError> {
+    use crate::middleware::auth::session::client;
     super::compat::pem_wire(&mut params);
-    ctx.call_rpc(url, headers, address, method, params).await
+    if let Some(signer) = ctx.rpc_signer(&headers)? {
+        let body = client::request_body(method, params)?;
+        let identity = crate::sign::noise::NoiseIdentity::new(&signer).await?;
+        let (peer, mut socket) = client::connect(
+            &ctx.websocket_client,
+            identity,
+            client::websocket_url(url.clone())?,
+            address,
+            headers,
+        )
+        .await?;
+        for warning in super::cli_identity::observe(
+            &ctx.id_key_path.with_file_name("registry-identities"),
+            &url,
+            address,
+            &peer,
+        )
+        .await
+        {
+            rpc_toolkit::output::advisory(format_args!("{}", warning));
+        }
+        client::request(&mut socket, body).await
+    } else {
+        crate::middleware::auth::signature::call_remote_with_client(
+            None,
+            ctx.client.clone(),
+            url,
+            headers,
+            method,
+            params,
+        )
+        .await
+    }
 }
 
 impl CallRemote<RegistryContext> for CliContext {
@@ -296,7 +329,13 @@ impl CallRemote<RegistryContext> for CliContext {
             .registry_hostname
             .get(0)
             .cloned()
-            .or_else(|| url.host().as_ref().map(InternedString::from_display));
+            .or_else(|| {
+                self.registry_url
+                    .as_ref()
+                    .and_then(|url| url.selected_host())
+                    .map(InternedString::intern)
+            })
+            .or_else(|| url.host_str().map(InternedString::intern));
 
         call_cli(
             self,
@@ -524,6 +563,20 @@ mod tests {
 
 #[cfg(test)]
 pub(crate) async fn test_context(datadir: PathBuf, uploader: AnyVerifyingKey) -> RegistryContext {
+    test_context_for_hosts(
+        datadir,
+        uploader,
+        vec!["localhost".into(), "127.0.0.1".into()],
+    )
+    .await
+}
+
+#[cfg(test)]
+pub(crate) async fn test_context_for_hosts(
+    datadir: PathBuf,
+    uploader: AnyVerifyingKey,
+    hostnames: Vec<InternedString>,
+) -> RegistryContext {
     use crate::rpc_continuations::Guid;
 
     tokio::fs::create_dir_all(&datadir).await.unwrap();
@@ -545,7 +598,7 @@ pub(crate) async fn test_context(datadir: PathBuf, uploader: AnyVerifyingKey) ->
     db.put(&ROOT, &database).await.unwrap();
     RegistryContext(
         Arc::new(RegistryContextSeed {
-            hostnames: vec!["localhost".into(), "127.0.0.1".into()],
+            hostnames,
             listen: "127.0.0.1:0".parse().unwrap(),
             db,
             index_mirrors: Default::default(),

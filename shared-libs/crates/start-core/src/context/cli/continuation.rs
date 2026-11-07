@@ -35,7 +35,7 @@ impl CliWebSocketContext for RpcContext {
         }
         if let Some(signer) = ctx.rpc_signer(&headers)? {
             let identity = NoiseIdentity::new(&signer).await?;
-            let socket = client::connect(
+            let (_, socket) = client::connect(
                 &ctx.websocket_client,
                 identity,
                 url,

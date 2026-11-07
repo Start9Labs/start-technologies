@@ -2784,6 +2784,27 @@ registry.db.pointer-outside-index:
   fr_FR: "Le pointeur d'abonnement doit être situé au niveau ou en dessous de /index"
   pl_PL: "Wskaźnik subskrypcji musi znajdować się w /index lub poniżej"
 
+registry.identity.changed:
+  en_US: "Warning: registry identity changed for %{target}.\nPrevious: %{previous}\nCurrent: %{current}\nThe connection continues. If this change was unexpected, verify the new fingerprint with the registry administrator through a trusted channel; it may indicate server replacement or interception."
+  de_DE: "Warnung: Die Registry-Identität für %{target} hat sich geändert.\nVorher: %{previous}\nJetzt: %{current}\nDie Verbindung wird fortgesetzt. Falls diese Änderung unerwartet war, bestätigen Sie den neuen Fingerabdruck beim Registry-Administrator über einen vertrauenswürdigen Kanal; sie kann auf einen Serveraustausch oder einen Abfangversuch hindeuten."
+  es_ES: "Advertencia: la identidad del registro ha cambiado para %{target}.\nAnterior: %{previous}\nActual: %{current}\nLa conexión continúa. Si no esperabas este cambio, verifica la nueva huella con el administrador del registro por un canal de confianza; puede indicar un reemplazo del servidor o una interceptación."
+  fr_FR: "Avertissement : l’identité du registre a changé pour %{target}.\nPrécédente : %{previous}\nActuelle : %{current}\nLa connexion continue. Si ce changement était inattendu, vérifiez la nouvelle empreinte auprès de l’administrateur du registre par un canal de confiance ; il peut signaler un remplacement du serveur ou une interception."
+  pl_PL: "Ostrzeżenie: zmieniła się tożsamość rejestru %{target}.\nPoprzednia: %{previous}\nObecna: %{current}\nPołączenie jest kontynuowane. Jeśli zmiana jest nieoczekiwana, zweryfikuj nowy odcisk z administratorem rejestru zaufanym kanałem; może oznaczać wymianę serwera lub przechwycenie połączenia."
+
+registry.identity.read-failed:
+  en_US: "Warning: could not read the remembered registry identity for %{target}: %{details}. The connection continues."
+  de_DE: "Warnung: Die gespeicherte Registry-Identität für %{target} konnte nicht gelesen werden: %{details}. Die Verbindung wird fortgesetzt."
+  es_ES: "Advertencia: no se pudo leer la identidad guardada del registro para %{target}: %{details}. La conexión continúa."
+  fr_FR: "Avertissement : impossible de lire l’identité mémorisée du registre pour %{target} : %{details}. La connexion continue."
+  pl_PL: "Ostrzeżenie: nie można odczytać zapamiętanej tożsamości rejestru %{target}: %{details}. Połączenie jest kontynuowane."
+
+registry.identity.write-failed:
+  en_US: "Warning: could not remember the verified registry identity for %{target}: %{details}. The connection continues."
+  de_DE: "Warnung: Die bestätigte Registry-Identität für %{target} konnte nicht gespeichert werden: %{details}. Die Verbindung wird fortgesetzt."
+  es_ES: "Advertencia: no se pudo guardar la identidad verificada del registro para %{target}: %{details}. La conexión continúa."
+  fr_FR: "Avertissement : impossible de mémoriser l’identité vérifiée du registre pour %{target} : %{details}. La connexion continue."
+  pl_PL: "Ostrzeżenie: nie można zapamiętać zweryfikowanej tożsamości rejestru %{target}: %{details}. Połączenie jest kontynuowane."
+
 # registry/os/asset/add.rs
 registry.os.asset.commitment-mismatch:
   en_US: "Commitment does not match"

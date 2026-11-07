@@ -23,14 +23,16 @@ async fn server(app: Router) -> (Url, NonDetachingJoinHandle<()>) {
     (url, task)
 }
 
-fn cli(url: &Url, signer: Signer) -> CliContext {
+fn cli(url: &Url, signer: Signer) -> (CliContext, tempfile::TempDir) {
+    let directory = tempfile::tempdir().unwrap();
     let ctx = CliContext::init(ClientConfig {
+        id_key_path: Some(directory.path().join("id.pem")),
         registry: Some(url.as_str().parse().unwrap()),
         ..Default::default()
     })
     .unwrap();
     ctx.id_key.set(signer).unwrap();
-    ctx
+    (ctx, directory)
 }
 
 #[test]
@@ -154,7 +156,7 @@ async fn configured_client_receives_a_bulk_private_index() {
         .await
         .unwrap();
     let (url, _task) = server(crate::registry::registry_router(registry)).await;
-    let ctx = cli(&url, admin);
+    let (ctx, _identity) = cli(&url, admin);
     let result = <CliContext as CallRemote<RegistryContext>>::call_remote(
         &ctx,
         "registry.index",
@@ -309,7 +311,7 @@ async fn all_startup_contexts_ignore_an_unavailable_stored_signer() {
 async fn actual_registry_cli_dispatch_and_promotion_use_encrypted_admission() {
     let (_temp, registry, admin, _, _) = crate::registry::tests::fixture().await;
     let (url, _task) = server(crate::registry::registry_router(registry)).await;
-    let ctx = cli(&url, admin);
+    let (ctx, _identity) = cli(&url, admin);
     let result = <CliContext as CallRemote<RegistryContext>>::call_remote(
         &ctx,
         "registry.package.access.get",
@@ -358,6 +360,7 @@ async fn registry_cli_websocket_keeps_the_configured_http_proxy() {
     })
     .into();
     let ctx = CliContext::init(ClientConfig {
+        id_key_path: Some(_temp.path().join("id.pem")),
         registry: Some(url.as_str().parse().unwrap()),
         proxy: Some(proxy),
         ..Default::default()
@@ -415,6 +418,7 @@ async fn registry_cli_websocket_keeps_socks_remote_dns() {
     })
     .into();
     let ctx = CliContext::init(ClientConfig {
+        id_key_path: Some(_temp.path().join("id.pem")),
         registry: Some(url.as_str().parse().unwrap()),
         proxy: Some(proxy),
         ..Default::default()
@@ -514,7 +518,7 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
     .into();
     let ca = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(ca.path(), cert.to_pem().unwrap()).unwrap();
-    let rejected = cli(&url, admin.clone());
+    let (rejected, _identity) = cli(&url, admin.clone());
     assert!(
         crate::registry::package::promote::call_registry(
             &rejected,
@@ -526,6 +530,7 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
         .is_err()
     );
     let trusted = CliContext::init(ClientConfig {
+        id_key_path: Some(_temp.path().join("id.pem")),
         root_ca: Some(vec![ca.path().to_owned()]),
         registry: Some(url.as_str().parse().unwrap()),
         tunnel: Some(
@@ -581,6 +586,7 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
     assert!(rejected.is_err());
     assert_eq!(calls.load(Ordering::Relaxed), 0);
     let insecure = CliContext::init(ClientConfig {
+        id_key_path: Some(_temp.path().join("id.pem")),
         insecure: true,
         ..Default::default()
     })
@@ -629,7 +635,7 @@ async fn secure_registry_refusal_never_sends_a_plaintext_rpc() {
         }),
     );
     let (url, _task) = server(app).await;
-    let ctx = cli(&url, admin);
+    let (ctx, _identity) = cli(&url, admin);
     let result = crate::registry::package::promote::call_registry(
         &ctx,
         crate::registry::package::promote::registry_rpc_url(&url).unwrap(),
@@ -639,6 +645,11 @@ async fn secure_registry_refusal_never_sends_a_plaintext_rpc() {
     .await;
     assert!(result.is_err());
     assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert!(
+        !ctx.id_key_path
+            .with_file_name("registry-identities")
+            .exists()
+    );
 }
 
 #[tokio::test]
@@ -831,6 +842,136 @@ async fn actual_gpg_cli_authenticates_without_exporting_the_identity() {
 }
 
 #[tokio::test]
+async fn registry_cli_remembers_verified_peer_before_authorization_rejection() {
+    let (_temp, registry, _admin, reader, _) = crate::registry::tests::fixture().await;
+    let peer = registry.server_identity.verifying_key().await.unwrap();
+    let (url, _server) = server(crate::registry::registry_router(registry)).await;
+    let (ctx, _identity) = cli(&url, reader);
+    let error = ctx
+        .call_remote::<RegistryContext>("registry.admin.list", imbl_value::json!({}))
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, crate::ErrorKind::Authorization);
+    let path = std::fs::read_dir(ctx.id_key_path.with_file_name("registry-identities"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    assert_eq!(
+        std::fs::read_to_string(path)
+            .unwrap()
+            .parse::<crate::sign::AnyVerifyingKey>()
+            .unwrap(),
+        peer
+    );
+}
+
+#[tokio::test]
+#[ignore = "Requires START_CLI_BIN pointing to the built CLI"]
+async fn actual_cli_tofu_preserves_stdout_and_exit_status_across_rotation_and_storage_errors() {
+    use patch_db::ModelExt;
+    use pkcs8::EncodePrivateKey;
+    use tokio::process::Command;
+    use tower_service::Service;
+    let cli_bin = std::env::var("START_CLI_BIN").unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let key = crate::sign::AnySigningKey::generate();
+    let key_path = temp.path().join("id.pem");
+    std::fs::write(
+        &key_path,
+        key.to_pkcs8_pem(Default::default()).unwrap().as_bytes(),
+    )
+    .unwrap();
+    let signer: Signer = key.into();
+    let public = signer.verifying_key().await.unwrap();
+    let first =
+        crate::registry::context::test_context(temp.path().join("first"), public.clone()).await;
+    let second = crate::registry::context::test_context(temp.path().join("second"), public).await;
+    second
+        .db
+        .put(&patch_db::json_ptr::ROOT, first.db.peek().await.as_value())
+        .await
+        .unwrap();
+    let old =
+        crate::sign::noise::fingerprint(&first.server_identity.verifying_key().await.unwrap());
+    let new =
+        crate::sign::noise::fingerprint(&second.server_identity.verifying_key().await.unwrap());
+    let selected = Arc::new(tokio::sync::RwLock::new(first));
+    let serving = selected.clone();
+    let app = Router::new().fallback(move |request: axum::extract::Request| {
+        let serving = serving.clone();
+        async move {
+            crate::registry::registry_router(serving.read().await.clone())
+                .call(request)
+                .await
+                .unwrap()
+        }
+    });
+    let (url, _server) = server(app).await;
+    let command = || {
+        let mut command = Command::new(&cli_bin);
+        command
+            .current_dir(temp.path())
+            .env("HOME", temp.path())
+            .args([
+                "--id-key-path",
+                key_path.to_str().unwrap(),
+                "--registry",
+                url.as_str(),
+                "registry",
+                "admin",
+                "list",
+                "--format",
+                "json",
+            ]);
+        command
+    };
+    let initial = command().output().await.unwrap();
+    assert!(
+        initial.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initial.stderr)
+    );
+    let _: serde_json::Value = serde_json::from_slice(&initial.stdout).unwrap();
+    assert!(!String::from_utf8_lossy(&initial.stderr).contains("registry identity changed"));
+    *selected.write().await = second;
+    let rotated = command().output().await.unwrap();
+    assert!(rotated.status.success());
+    assert_eq!(rotated.stdout, initial.stdout);
+    let warning = String::from_utf8(rotated.stderr).unwrap();
+    assert!(warning.contains("registry identity changed"));
+    assert!(warning.contains(&old) && warning.contains(&new));
+    assert!(warning.contains(url.as_str().trim_end_matches('/')));
+    let unchanged = command().output().await.unwrap();
+    assert!(unchanged.status.success());
+    assert_eq!(unchanged.stdout, initial.stdout);
+    assert!(!String::from_utf8_lossy(&unchanged.stderr).contains("registry identity changed"));
+    let directory = key_path.with_file_name("registry-identities");
+    let path = std::fs::read_dir(&directory)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    let failed_storage = command().output().await.unwrap();
+    assert!(failed_storage.status.success());
+    assert_eq!(failed_storage.stdout, initial.stdout);
+    assert!(String::from_utf8_lossy(&failed_storage.stderr).contains("could not remember"));
+    let mut child = command()
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stderr.take());
+    let closed_stderr = child.wait_with_output().await.unwrap();
+    assert!(closed_stderr.status.success());
+    assert_eq!(closed_stderr.stdout, initial.stdout);
+}
+
+#[tokio::test]
 async fn missing_identity_keeps_public_http_but_malformed_identity_fails_closed() {
     let temp = tempfile::tempdir().unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
@@ -902,7 +1043,7 @@ async fn local_bearer_keeps_the_http_and_exact_header_contract() {
         }),
     );
     let (url, _task) = server(app).await;
-    let ctx = cli(&url, admin);
+    let (ctx, _identity) = cli(&url, admin);
     let mut headers = HeaderMap::new();
     headers.insert(
         http::header::AUTHORIZATION,
@@ -919,4 +1060,9 @@ async fn local_bearer_keeps_the_http_and_exact_header_contract() {
     .await
     .unwrap();
     assert_eq!(result.as_str(), Some("local"));
+    assert!(
+        !ctx.id_key_path
+            .with_file_name("registry-identities")
+            .exists()
+    );
 }
