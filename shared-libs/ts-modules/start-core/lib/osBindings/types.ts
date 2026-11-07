@@ -10,8 +10,6 @@ export type ActionId = z.output<typeof schemas.ActionId>
 export type ActionIdInput = z.input<typeof schemas.ActionId>
 export type ActionResultV0 = z.output<typeof schemas.ActionResultV0>
 export type ActionResultV0Input = z.input<typeof schemas.ActionResultV0>
-export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
-export type ActionResultValueInput = z.input<typeof schemas.ActionResultValue>
 export type ActionVisibility = z.output<typeof schemas.ActionVisibility>
 export type ActionVisibilityInput = z.input<typeof schemas.ActionVisibility>
 
@@ -124,6 +122,8 @@ export type Epp = z.output<typeof schemas.Epp>
 export type EppInput = z.input<typeof schemas.Epp>
 export type ErrorData = z.output<typeof schemas.ErrorData>
 export type ErrorDataInput = z.input<typeof schemas.ErrorData>
+export type FileCommitment = z.output<typeof schemas.FileCommitment>
+export type FileCommitmentInput = z.input<typeof schemas.FileCommitment>
 export type FileType = z.output<typeof schemas.FileType>
 export type FileTypeInput = z.input<typeof schemas.FileType>
 
@@ -508,6 +508,8 @@ export type TrustedOsUpdateSigner = z.output<
 export type TrustedOsUpdateSignerInput = z.input<
   typeof schemas.TrustedOsUpdateSigner
 >
+export type UploadLimits = z.output<typeof schemas.UploadLimits>
+export type UploadLimitsInput = z.input<typeof schemas.UploadLimits>
 
 /**
  * How the OS reverse proxy validates the container's TLS certificate when it
@@ -544,10 +546,8 @@ export type ActionInput = z.output<typeof schemas.ActionInput>
 export type ActionInputInput = z.input<typeof schemas.ActionInput>
 export type ActionMetadata = z.output<typeof schemas.ActionMetadata>
 export type ActionMetadataInput = z.input<typeof schemas.ActionMetadata>
-export type ActionResultMember = z.output<typeof schemas.ActionResultMember>
-export type ActionResultMemberInput = z.input<typeof schemas.ActionResultMember>
-export type ActionResultV1 = z.output<typeof schemas.ActionResultV1>
-export type ActionResultV1Input = z.input<typeof schemas.ActionResultV1>
+export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
+export type ActionResultValueInput = z.input<typeof schemas.ActionResultValue>
 export type AddAdminParams = z.output<typeof schemas.AddAdminParams>
 export type AddAdminParamsInput = z.input<typeof schemas.AddAdminParams>
 export type AddAssetParams = z.output<typeof schemas.AddAssetParams>
@@ -1148,6 +1148,8 @@ export type UpdateSystemRes = z.output<typeof schemas.UpdateSystemRes>
 export type UpdateSystemResInput = z.input<typeof schemas.UpdateSystemRes>
 export type UpdateTunnelParams = z.output<typeof schemas.UpdateTunnelParams>
 export type UpdateTunnelParamsInput = z.input<typeof schemas.UpdateTunnelParams>
+export type UploadedFile = z.output<typeof schemas.UploadedFile>
+export type UploadedFileInput = z.input<typeof schemas.UploadedFile>
 export type UrlPluginRegisterParams = z.output<
   typeof schemas.UrlPluginRegisterParams
 >
@@ -1172,8 +1174,10 @@ export type WifiInfo = z.output<typeof schemas.WifiInfo>
 export type WifiInfoInput = z.input<typeof schemas.WifiInfo>
 export type WifiListOut = z.output<typeof schemas.WifiListOut>
 export type WifiListOutInput = z.input<typeof schemas.WifiListOut>
-export type ActionResult = z.output<typeof schemas.ActionResult>
-export type ActionResultInput = z.input<typeof schemas.ActionResult>
+export type ActionResultMember = z.output<typeof schemas.ActionResultMember>
+export type ActionResultMemberInput = z.input<typeof schemas.ActionResultMember>
+export type ActionResultV1 = z.output<typeof schemas.ActionResultV1>
+export type ActionResultV1Input = z.input<typeof schemas.ActionResultV1>
 export type AddPublicDomainRes = z.output<typeof schemas.AddPublicDomainRes>
 export type AddPublicDomainResInput = z.input<typeof schemas.AddPublicDomainRes>
 export type BackupInfo = z.output<typeof schemas.BackupInfo>
@@ -1312,6 +1316,8 @@ export type UrlPluginExportUrlParamsInput = z.input<
 >
 export type WifiListInfo = z.output<typeof schemas.WifiListInfo>
 export type WifiListInfoInput = z.input<typeof schemas.WifiListInfo>
+export type ActionResult = z.output<typeof schemas.ActionResult>
+export type ActionResultInput = z.input<typeof schemas.ActionResult>
 export type AddSslOptions = z.output<typeof schemas.AddSslOptions>
 export type AddSslOptionsInput = z.input<typeof schemas.AddSslOptions>
 export type BackupTarget = z.output<typeof schemas.BackupTarget>

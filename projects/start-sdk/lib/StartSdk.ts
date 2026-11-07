@@ -75,7 +75,7 @@ import { createVolumes } from './util/Volume'
 import { getDataVersion, setDataVersion } from './version'
 
 /** The minimum StartOS version required by this SDK release */
-export const OSVersion = testTypeVersion('0.4.1')
+export const OSVersion = testTypeVersion('0.4.2')
 
 // prettier-ignore
 type AnyNeverCond<T extends any[], Then, Else> = 
@@ -162,6 +162,10 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       | 'setDataVersion'
       | 'getServiceManifest'
       | 'getSharedVolumes'
+      | 'prepareUpload'
+      | 'prepareDownload'
+      | 'resolveUpload'
+      | 'getUploadLimits'
 
     // prettier-ignore
     type StartSdkEffectWrapper = {
@@ -198,6 +202,20 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       /** Volume path helpers derived from the manifest volume definitions */
       volumes: createVolumes(this.manifest),
       ...startSdkEffectWrapper,
+      /** Prepares an upload destination for a File action input. */
+      prepareUpload: (
+        effects: Effects,
+        options: Omit<Parameters<Effects['prepareUpload']>[0], 'volume'> & {
+          volume: Manifest['volumes'][number]
+        },
+      ) => effects.prepareUpload(options),
+      /** Prepares a volume file for a File action result. */
+      prepareDownload: (
+        effects: Effects,
+        options: Omit<Parameters<Effects['prepareDownload']>[0], 'volume'> & {
+          volume: Manifest['volumes'][number]
+        },
+      ) => effects.prepareDownload(options),
       /** Persist the current data version to the StartOS effect system */
       setDataVersion,
       /** Retrieve the current data version from the StartOS effect system */

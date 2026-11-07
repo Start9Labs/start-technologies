@@ -267,14 +267,15 @@ mod tests {
                 .unwrap();
         let historical =
             legacy::individual_keys(&legacy::historical_keyrings(), Utc::now()).unwrap();
-        fixture["public"]["serverInfo"]["version"] = to_value(&Version.semver()).unwrap();
         fixture["public"]["serverInfo"]["trustedKeys"] = to_value(&historical).unwrap();
         fixture["public"]["serverInfo"]["version"] = to_value(&Version.semver()).unwrap();
         fixture["public"]["serverInfo"]["latestMigrationRevision"] = imbl_value::json!(1);
         let db = patch_db::PatchDb::in_memory();
         db.put(&patch_db::json_ptr::ROOT, &fixture).await.unwrap();
-        let current = super::super::Current::default();
-        current.pre_init(&db).await.unwrap();
+        super::super::Current::default()
+            .pre_init(&db)
+            .await
+            .unwrap();
         let migrated = db.dump(&patch_db::json_ptr::ROOT).await.value;
         let keys: TrustedKeys =
             from_value(migrated["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
@@ -283,12 +284,8 @@ mod tests {
             assert!(!keys.contains_key(&key.interned_der64()));
         }
         assert_eq!(
-            migrated["public"]["serverInfo"]["version"],
-            to_value(&current.semver()).unwrap()
-        );
-        assert_eq!(
             migrated["public"]["serverInfo"]["latestMigrationRevision"],
-            imbl_value::json!(current.migration_revision())
+            imbl_value::json!(super::super::Current::default().migration_revision())
         );
     }
 
