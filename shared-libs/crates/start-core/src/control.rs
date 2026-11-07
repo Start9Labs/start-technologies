@@ -27,8 +27,7 @@ fn record_start(db: &mut DatabaseModel, id: &PackageId) -> Result<(), Error> {
         .as_idx_mut(id)
         .or_not_found(id)?
         .as_status_info_mut()
-        .as_desired_mut()
-        .map_mutate(|s| Ok(s.start()))?;
+        .start()?;
     Ok(())
 }
 
@@ -105,6 +104,29 @@ mod tests {
         );
         assert!(entry.has_blocking_task(&id).unwrap());
         assert_eq!(entry.as_status_info().de().unwrap().started, None);
+    }
+
+    #[test]
+    fn force_stop_deadline_clears_when_blocked_start_is_recorded() {
+        let id = "service".parse().unwrap();
+        let deadline = chrono::Utc::now();
+        let mut entry = package_entry(true);
+        entry["statusInfo"]["started"] = serde_json::json!(deadline);
+        entry["statusInfo"]["forceStopAt"] = serde_json::json!(deadline);
+        let mut db = DatabaseModel::from(
+            to_value(&serde_json::json!({
+                "public": { "packageData": { "service": entry } }
+            }))
+            .unwrap(),
+        );
+        record_start(&mut db, &id).unwrap();
+        let entry = db.as_public().as_package_data().as_idx(&id).unwrap();
+        let status = entry.as_status_info().de().unwrap();
+        assert_eq!(status.desired, DesiredStatus::Running);
+        assert_eq!(status.started, Some(deadline));
+        assert_eq!(status.force_stop_at, None);
+        assert!(!status.can_force_stop(deadline, deadline));
+        assert!(entry.has_blocking_task(&id).unwrap());
     }
 
     #[test]
@@ -249,6 +271,24 @@ pub async fn stop(ctx: RpcContext, ControlParams { id }: ControlParams) -> Resul
         .result?;
 
     Ok(())
+}
+
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+pub struct ForceStopParams {
+    pub id: PackageId,
+    pub force_stop_at: chrono::DateTime<chrono::Utc>,
+}
+
+rpc_toolkit::reflect_ts!(ForceStopParams);
+rpc_toolkit::ts_export!(ForceStopParams, namespaces = [""]);
+
+pub async fn force_stop(
+    ctx: RpcContext,
+    ForceStopParams { id, force_stop_at }: ForceStopParams,
+) -> Result<(), Error> {
+    ctx.services.force_stop(&ctx, &id, force_stop_at).await
 }
 
 pub async fn restart(ctx: RpcContext, ControlParams { id }: ControlParams) -> Result<(), Error> {

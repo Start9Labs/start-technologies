@@ -960,4 +960,7 @@ export default {
   1108: 'Format de fichier non valide',
   1109: 'Réponse du serveur non valide',
   1110: 'Taille maximale du fichier',
+  1111: 'Forcer l’arrêt',
+  1112: 'Arrêt forcé en cours',
+  1113: 'Forcer l’arrêt peut entraîner une perte de données ou laisser le service dans un état défectueux. Voulez-vous vraiment forcer l’arrêt ?',
 } satisfies i18n

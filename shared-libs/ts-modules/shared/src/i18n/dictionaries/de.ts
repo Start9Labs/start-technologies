@@ -960,4 +960,7 @@ export default {
   1108: 'Ungültiges Dateiformat',
   1109: 'Ungültige Antwort vom Server',
   1110: 'Maximale Dateigröße',
+  1111: 'Stopp erzwingen',
+  1112: 'Stopp wird erzwungen',
+  1113: 'Ein erzwungener Stopp kann zu Datenverlust führen oder den Dienst in einem fehlerhaften Zustand hinterlassen. Möchten Sie den Stopp wirklich erzwingen?',
 } satisfies i18n

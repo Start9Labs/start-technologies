@@ -961,4 +961,7 @@ export const ENGLISH: Record<string, number> = {
   'Invalid file format': 1108,
   'Invalid response from server': 1109,
   'Maximum file size': 1110,
+  'Force stop': 1111,
+  'Force stopping': 1112,
+  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 1113,
 }

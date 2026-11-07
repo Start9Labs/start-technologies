@@ -960,4 +960,7 @@ export default {
   1108: 'Formato de archivo no válido',
   1109: 'Respuesta del servidor no válida',
   1110: 'Tamaño máximo del archivo',
+  1111: 'Forzar detención',
+  1112: 'Forzando detención',
+  1113: 'Forzar la detención puede provocar pérdida de datos o dejar el servicio en mal estado. ¿Seguro que deseas forzar la detención?',
 } satisfies i18n

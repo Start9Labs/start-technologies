@@ -960,4 +960,7 @@ export default {
   1108: 'Nieprawidłowy format pliku',
   1109: 'Nieprawidłowa odpowiedź serwera',
   1110: 'Maksymalny rozmiar pliku',
+  1111: 'Wymuś zatrzymanie',
+  1112: 'Wymuszanie zatrzymania',
+  1113: 'Wymuszenie zatrzymania może spowodować utratę danych lub pozostawić serwis w nieprawidłowym stanie. Czy na pewno chcesz wymusić zatrzymanie?',
 } satisfies i18n
