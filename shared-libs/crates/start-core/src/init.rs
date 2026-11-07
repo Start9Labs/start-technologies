@@ -529,6 +529,7 @@ pub async fn init_progress(ctx: InitContext) -> Result<InitProgressRes, Error> {
             guid.clone(),
             RpcContinuation::ws(
                 WebSocketPolicy::Public,
+                ctx.secure_session().cloned(),
                 |mut ws| async move {
                     let res = tokio::try_join!(
                         async {

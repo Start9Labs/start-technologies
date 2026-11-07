@@ -23,6 +23,8 @@ pub struct InitContextSeed {
 
 #[derive(Clone)]
 pub struct InitContext(Arc<InitContextSeed>);
+
+impl crate::middleware::auth::session::SessionContext for InitContext {}
 impl InitContext {
     #[instrument(skip_all)]
     pub async fn init(cfg: &ServerConfig, dns: Arc<DnsController>) -> Result<Self, Error> {

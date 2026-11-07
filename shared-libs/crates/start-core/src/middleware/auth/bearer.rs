@@ -133,6 +133,8 @@ pub(crate) mod tests {
             &self.0.db
         }
     }
+    impl crate::middleware::auth::session::SessionContext for TestCtx {}
+
     impl SignatureAuthContext for TestCtx {
         type AdditionalMetadata = LoginMetadata;
         type CheckPubkeyRes = ();

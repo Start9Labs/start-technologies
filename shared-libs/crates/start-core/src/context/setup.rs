@@ -71,6 +71,8 @@ pub struct SetupContextSeed {
 
 #[derive(Clone)]
 pub struct SetupContext(Arc<SetupContextSeed>);
+
+impl crate::middleware::auth::session::SessionContext for SetupContext {}
 impl SetupContext {
     #[instrument(skip_all)]
     pub fn init(
@@ -166,6 +168,7 @@ impl SetupContext {
                 guid.clone(),
                 RpcContinuation::ws(
                     WebSocketPolicy::Public,
+                    self.secure_session().cloned(),
                     |mut ws| async move {
                         if let Err(e) = async {
                             let mut stream =

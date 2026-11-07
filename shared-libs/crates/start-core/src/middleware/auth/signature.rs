@@ -86,7 +86,7 @@ pub fn check_enrolled(
     }
 }
 
-pub trait SignatureAuthContext: DbContext {
+pub trait SignatureAuthContext: DbContext + SessionContext {
     type AdditionalMetadata: DeserializeOwned + SignatureAuthMetadata + Send;
     type CheckPubkeyRes: Send;
     /// How far a key's persisted `last_active` may lag its latest request.
@@ -695,7 +695,7 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
         context: &C,
         message: &Value,
     ) -> Result<(), RpcResponse> {
-        if message.get(rpc::RPC_SIGNATURE_FIELD).is_some() {
+        if context.secure_session().is_none() && message.get(rpc::RPC_SIGNATURE_FIELD).is_some() {
             self.signer = Some(
                 rpc::verify_rpc_signature(context, message, &self.origin, self.loopback.clone())
                     .await
@@ -711,12 +711,14 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
         request: &mut RpcRequest,
     ) -> Result<(), RpcResponse> {
         async {
-            let verified = self.signer.take().transpose()?;
+            let verified = match context.secure_session() {
+                Some(session) => Some((session.peer().clone(), session.address().clone())),
+                None => self.signer.take().transpose()?,
+            };
             let signer = verified.as_ref().map(|(signer, _)| signer);
             let login = metadata.additional.is_login();
             let db = context.db().peek().await;
             let res = context.check_pubkey(&db, signer, metadata.additional)?;
-            // Another auth method may admit this request after signature authorization fails.
             if metadata.get_signer {
                 if let Some(signer) = signer {
                     request.params["__Auth_signer"] = to_value(signer)?;

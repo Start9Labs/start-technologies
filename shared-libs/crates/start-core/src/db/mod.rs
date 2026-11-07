@@ -227,6 +227,7 @@ pub async fn subscribe(
                 &ctx,
                 signer,
                 WebSocketPolicy::Authenticated,
+                ctx.secure_session().cloned(),
                 |mut ws| async move {
                     if let Err(e) = async {
                         loop {

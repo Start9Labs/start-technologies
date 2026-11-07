@@ -361,7 +361,7 @@ fn format_ram(bytes: u64) -> String {
     }
 }
 
-pub fn logs<C: Context + AsRef<RpcContinuations>>(
+pub fn logs<C: Context + AsRef<RpcContinuations> + SessionContext>(
     policy: WebSocketPolicy,
 ) -> ParentHandler<C, LogsParams> {
     crate::logs::logs(
@@ -370,7 +370,7 @@ pub fn logs<C: Context + AsRef<RpcContinuations>>(
     )
 }
 
-pub fn kernel_logs<C: Context + AsRef<RpcContinuations>>(
+pub fn kernel_logs<C: Context + AsRef<RpcContinuations> + SessionContext>(
     policy: WebSocketPolicy,
 ) -> ParentHandler<C, LogsParams> {
     crate::logs::logs(|_: &C, _| async { Ok(LogSource::Kernel) }, policy)
@@ -671,6 +671,7 @@ pub async fn metrics_follow(
                 ctx.clone(),
                 signer,
                 WebSocketPolicy::Authenticated,
+                ctx.secure_session().cloned(),
                 |mut ws| async move {
                     let res = async {
                         loop {

@@ -129,6 +129,7 @@ pub async fn update_system(
                 guid.clone(),
                 RpcContinuation::ws(
                     WebSocketPolicy::Authenticated,
+                    ctx.secure_session().cloned(),
                     |mut ws| async move {
                         if let Err(e) = async {
                             let mut sub = ctx

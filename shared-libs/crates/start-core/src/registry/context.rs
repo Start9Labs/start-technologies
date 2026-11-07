@@ -106,7 +106,28 @@ pub struct RegistryContextSeed {
 }
 
 #[derive(Clone)]
-pub struct RegistryContext(Arc<RegistryContextSeed>);
+pub struct RegistryContext(
+    Arc<RegistryContextSeed>,
+    Option<Arc<crate::middleware::auth::session::SecureSession>>,
+);
+
+impl SessionContext for RegistryContext {
+    fn secure_session(&self) -> Option<&crate::middleware::auth::session::SecureSession> {
+        self.1.as_deref()
+    }
+}
+impl crate::middleware::auth::session::SecureRpcContext for RegistryContext {
+    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+        Ok(self.server_identity.clone())
+    }
+    fn with_secure_session(
+        mut self,
+        session: crate::middleware::auth::session::SecureSession,
+    ) -> Self {
+        self.1 = Some(Arc::new(session));
+        self
+    }
+}
 impl RegistryContext {
     #[instrument(skip_all)]
     pub async fn init(config: &RegistryConfig) -> Result<Self, Error> {
@@ -168,30 +189,33 @@ impl RegistryContext {
                 ErrorKind::NotFound,
             ));
         }
-        Ok(Self(Arc::new(RegistryContextSeed {
-            hostnames: config.registry_hostname.clone(),
-            listen: config.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN),
-            db,
-            index_mirrors: IndexMirrors::default(),
-            datadir,
-            startwrt: config.startwrt,
-            rpc_continuations: RpcContinuations::new(),
-            open_authed_continuations: OpenAuthedContinuations::new(),
-            auth_sig_nonce_cache: SyncMutex::new(Default::default()),
-            client: Client::builder()
-                .proxy(Proxy::custom(move |url| {
-                    if url.host_str().map_or(false, |h| h.ends_with(".onion")) {
-                        Some(tor_proxy_url.clone())
-                    } else {
-                        None
-                    }
-                }))
-                .build()
-                .with_kind(crate::ErrorKind::ParseUrl)?,
-            server_identity,
-            shutdown,
-            metrics_db,
-        })))
+        Ok(Self(
+            Arc::new(RegistryContextSeed {
+                hostnames: config.registry_hostname.clone(),
+                listen: config.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN),
+                db,
+                index_mirrors: IndexMirrors::default(),
+                datadir,
+                startwrt: config.startwrt,
+                rpc_continuations: RpcContinuations::new(),
+                open_authed_continuations: OpenAuthedContinuations::new(),
+                auth_sig_nonce_cache: SyncMutex::new(Default::default()),
+                client: Client::builder()
+                    .proxy(Proxy::custom(move |url| {
+                        if url.host_str().map_or(false, |h| h.ends_with(".onion")) {
+                            Some(tor_proxy_url.clone())
+                        } else {
+                            None
+                        }
+                    }))
+                    .build()
+                    .with_kind(crate::ErrorKind::ParseUrl)?,
+                server_identity,
+                shutdown,
+                metrics_db,
+            }),
+            None,
+        ))
     }
 }
 impl AsRef<RpcContinuations> for RegistryContext {
@@ -504,21 +528,24 @@ pub(crate) async fn test_context(datadir: PathBuf, uploader: AnyVerifyingKey) ->
         },
     );
     db.put(&ROOT, &database).await.unwrap();
-    RegistryContext(Arc::new(RegistryContextSeed {
-        hostnames: vec!["localhost".into(), "127.0.0.1".into()],
-        listen: "127.0.0.1:0".parse().unwrap(),
-        db,
-        index_mirrors: Default::default(),
-        datadir,
-        startwrt: false,
-        rpc_continuations: RpcContinuations::new(),
-        open_authed_continuations: OpenAuthedContinuations::new(),
-        auth_sig_nonce_cache: SyncMutex::new(Default::default()),
-        client: Client::new(),
-        server_identity: crate::sign::AnySigningKey::generate().into(),
-        shutdown: tokio::sync::broadcast::channel(1).0,
-        metrics_db: SyncMutex::new(Connection::open_in_memory().unwrap()),
-    }))
+    RegistryContext(
+        Arc::new(RegistryContextSeed {
+            hostnames: vec!["localhost".into(), "127.0.0.1".into()],
+            listen: "127.0.0.1:0".parse().unwrap(),
+            db,
+            index_mirrors: Default::default(),
+            datadir,
+            startwrt: false,
+            rpc_continuations: RpcContinuations::new(),
+            open_authed_continuations: OpenAuthedContinuations::new(),
+            auth_sig_nonce_cache: SyncMutex::new(Default::default()),
+            client: Client::new(),
+            server_identity: crate::sign::AnySigningKey::generate().into(),
+            shutdown: tokio::sync::broadcast::channel(1).0,
+            metrics_db: SyncMutex::new(Connection::open_in_memory().unwrap()),
+        }),
+        None,
+    )
 }
 
 #[cfg(test)]

@@ -126,13 +126,16 @@ pub fn registry_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
+pub(crate) fn registry_server(ctx: RegistryContext) -> rpc_toolkit::HttpServer<RegistryContext> {
+    Server::new(move || ready(Ok(ctx.clone())), registry_api())
+        .middleware(Auth::new().with_local_auth().with_signature_auth())
+        .middleware(DeviceInfoMiddleware::new())
+}
+
 pub fn registry_router(ctx: RegistryContext) -> Router {
     use axum::extract as x;
     use axum::routing::{any, get};
-    let rpc_context = ctx.clone();
-    let server = Server::new(move || ready(Ok(rpc_context.clone())), registry_api())
-        .middleware(Auth::new().with_local_auth().with_signature_auth())
-        .middleware(DeviceInfoMiddleware::new());
+    let server = registry_server(ctx.clone());
     Router::new()
         .route("/rpc/{*path}", any(server.clone()).layer(cors::layer()))
         .route("/ws/rpc", get(server.for_websocket()).layer(cors::layer()))

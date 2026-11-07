@@ -252,6 +252,7 @@ pub async fn sideload(
                 &ctx,
                 signer,
                 WebSocketPolicy::Authenticated,
+                ctx.secure_session().cloned(),
                 |mut ws| async move {
                     if let Err(e) = async {
                         loop {

@@ -25,6 +25,26 @@ StartOS's account already owns its developer signing identity.
 This persistence is independent of enrolled client keys, authcookies, package
 signer trust, and networking/TLS keys.
 
+## Connection scope and negotiation
+
+`middleware/auth/session.rs::RpcSessionUpgrader` selects Noise with
+`noise=1&context=<server-name>`. Missing opt-in retains legacy RPC authentication;
+unsupported versions, failed exchanges and invalid contexts fail without a
+plaintext fallback. The selected name must pass the existing `request_identities`
+ingress/loopback policy. `prologue` binds that name to the Noise transcript.
+
+After completion the upgrader installs opaque `SecureSession` provenance on a
+clone of the actual RPC context, outside its shared seed. `SessionContext` exposes
+that provenance; setup, initialization and diagnostic contexts remain unscoped.
+The toolkit's connection-local factory supplies it to handlers and middleware.
+`SignatureAuth` uses the peer identity instead of per-message proofs while still
+running live `check_pubkey`, `post_auth_hook` and password-enrollment rate limits.
+Request-supplied proofs cannot switch the identity of an encrypted connection.
+Local/bearer authentication retains its separate precedence and policy.
+
+Product routes opt into this upgrader explicitly; the adapter and scope alone do
+not change an existing route.
+
 ## Admission
 
 `initiate` and `accept` return the verified peer identity only after the local
@@ -65,6 +85,25 @@ Ping, Pong and Close retain ordinary WebSocket control semantics and wire
 representation; they are not encrypted application data. Plaintext data frames,
 invalid kinds/UTF-8, failed authentication and truncated data messages fail the
 channel. There is no plaintext fallback.
+
+## WebSocket continuations
+
+`RpcContinuation::ws` and `ws_authed` capture optional `SecureSession` provenance
+from their issuing request. A secure-origin GUID requires a fresh exchange with
+the same client identity and server-name prologue, regardless of redemption URL
+claims. The stored provenance holds keys and name, not the RPC context or its
+background resources. A visible GUID alone cannot release application data.
+Legacy-origin GUIDs retain plaintext compatibility even when the same key also
+uses an encrypted connection. One-shot redemption still permits denial of service
+by consuming a visible GUID; it does not grant the initiating identity.
+
+The existing `WebSocketFuture` revocation owner wraps both admission and callback,
+including a stalled handshake. Resource policy remains independent: public
+payloads are limited to 1 KiB with 15-second writes; authenticated payloads retain
+the 64 MiB message allowance and bulk-write policy. Encrypted wire chunks use
+`wire_chunk_size`; framing overhead does not expand the plaintext budget. The
+same generic `WebSocket` wrapper owns both transports' keepalive and close flow.
+REST continuations and other HTTP resources retain their existing HTTPS policy.
 
 ## Bounds and ownership
 

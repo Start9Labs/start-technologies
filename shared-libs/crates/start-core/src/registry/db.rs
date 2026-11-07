@@ -239,6 +239,7 @@ async fn legacy_subscription(
             guid.clone(),
             RpcContinuation::ws(
                 WebSocketPolicy::Public,
+                ctx.secure_session().cloned(),
                 |mut ws| async move {
                     if let Err(e) = async {
                         loop {

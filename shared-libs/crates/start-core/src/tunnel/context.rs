@@ -231,7 +231,28 @@ async fn restrict_datadir(datadir: &Path) -> Result<(), Error> {
 }
 
 #[derive(Clone)]
-pub struct TunnelContext(Arc<TunnelContextSeed>);
+pub struct TunnelContext(
+    Arc<TunnelContextSeed>,
+    Option<Arc<crate::middleware::auth::session::SecureSession>>,
+);
+
+impl SessionContext for TunnelContext {
+    fn secure_session(&self) -> Option<&crate::middleware::auth::session::SecureSession> {
+        self.1.as_deref()
+    }
+}
+impl crate::middleware::auth::session::SecureRpcContext for TunnelContext {
+    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+        Ok(self.server_identity.clone())
+    }
+    fn with_secure_session(
+        mut self,
+        session: crate::middleware::auth::session::SecureSession,
+    ) -> Self {
+        self.1 = Some(Arc::new(session));
+        self
+    }
+}
 impl TunnelContext {
     #[instrument(skip_all)]
     pub async fn init(config: &TunnelConfig) -> Result<Self, Error> {
@@ -398,31 +419,34 @@ impl TunnelContext {
             }
         }
 
-        let ctx = Self(Arc::new(TunnelContextSeed {
-            listen,
-            db,
-            datadir,
-            rpc_continuations: RpcContinuations::new(),
-            open_authed_continuations: OpenAuthedContinuations::new(),
-            auth_sig_nonce_cache: SyncMutex::new(Default::default()),
-            server_identity,
-            net_iface,
-            forward,
-            dns_proxy,
-            sni,
-            dns_injector,
-            dns_allowed,
-            dns_keys,
-            active_forwards: SyncMutex::new(active_forwards),
-            forward_write_lock: tokio::sync::Mutex::new(()),
-            leases: SyncMutex::new(BTreeMap::new()),
-            lease_wake: tokio::sync::Notify::new(),
-            forward_ifindex: tokio::sync::watch::channel(current_ifindex()).0,
-            egress_lock: tokio::sync::Mutex::new(()),
-            v6_proxy: SyncMutex::new(BTreeMap::new()),
-            v6_lock: tokio::sync::Mutex::new(()),
-            shutdown,
-        }));
+        let ctx = Self(
+            Arc::new(TunnelContextSeed {
+                listen,
+                db,
+                datadir,
+                rpc_continuations: RpcContinuations::new(),
+                open_authed_continuations: OpenAuthedContinuations::new(),
+                auth_sig_nonce_cache: SyncMutex::new(Default::default()),
+                server_identity,
+                net_iface,
+                forward,
+                dns_proxy,
+                sni,
+                dns_injector,
+                dns_allowed,
+                dns_keys,
+                active_forwards: SyncMutex::new(active_forwards),
+                forward_write_lock: tokio::sync::Mutex::new(()),
+                leases: SyncMutex::new(BTreeMap::new()),
+                lease_wake: tokio::sync::Notify::new(),
+                forward_ifindex: tokio::sync::watch::channel(current_ifindex()).0,
+                egress_lock: tokio::sync::Mutex::new(()),
+                v6_proxy: SyncMutex::new(BTreeMap::new()),
+                v6_lock: tokio::sync::Mutex::new(()),
+                shutdown,
+            }),
+            None,
+        );
 
         ctx.resync_egress().await?;
         ctx.resync_v6().await?;

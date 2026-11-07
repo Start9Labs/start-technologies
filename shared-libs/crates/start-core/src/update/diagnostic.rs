@@ -167,6 +167,7 @@ async fn run_update(
                 guid.clone(),
                 RpcContinuation::ws(
                     WebSocketPolicy::Public,
+                    ctx.secure_session().cloned(),
                     move |ws| async move {
                         if let Err(e) = stream_progress(ws, tracker, done_rx).await {
                             tracing::error!(
@@ -191,7 +192,7 @@ async fn run_update(
 }
 
 async fn stream_progress(
-    mut ws: crate::util::net::WebSocket,
+    mut ws: crate::rpc_continuations::WebSocket,
     tracker: FullProgressTracker,
     mut done_rx: oneshot::Receiver<Result<(), Error>>,
 ) -> Result<(), Error> {

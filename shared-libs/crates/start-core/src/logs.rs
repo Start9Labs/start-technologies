@@ -30,8 +30,9 @@ use crate::PackageId;
 use crate::context::{CliContext, RpcContext};
 use crate::error::ResultExt;
 use crate::prelude::*;
-use crate::rpc_continuations::{Guid, RpcContinuation, RpcContinuations, WebSocketPolicy};
-use crate::util::net::WebSocket;
+use crate::rpc_continuations::{
+    Guid, RpcContinuation, RpcContinuations, WebSocket, WebSocketPolicy,
+};
 use crate::util::serde::Reversible;
 use crate::util::{FromStrParser, Invoke};
 
@@ -385,7 +386,7 @@ pub struct CliLogsParams<Extra: FromArgMatches + Args = Empty> {
 
 #[allow(private_bounds)]
 pub fn logs<
-    C: Context + AsRef<RpcContinuations>,
+    C: Context + AsRef<RpcContinuations> + SessionContext,
     Extra: FromArgMatches + Serialize + DeserializeOwned + Args + TS + Send + Sync + 'static,
 >(
     source: impl for<'a> LogSourceFn<'a, C, Extra>,
@@ -504,7 +505,7 @@ where
 }
 
 fn logs_follow<
-    C: Context + AsRef<RpcContinuations>,
+    C: Context + AsRef<RpcContinuations> + SessionContext,
     Extra: FromArgMatches + Args + Send + Sync + 'static,
 >(
     f: impl for<'a> LogSourceFn<'a, C, Extra>,
@@ -708,7 +709,7 @@ pub async fn fetch_logs(
 }
 
 #[instrument(skip_all)]
-pub async fn follow_logs<Context: AsRef<RpcContinuations>>(
+pub async fn follow_logs<Context: AsRef<RpcContinuations> + SessionContext>(
     ctx: Context,
     id: LogSource,
     cursor: Option<String>,
@@ -743,6 +744,7 @@ pub async fn follow_logs<Context: AsRef<RpcContinuations>>(
             guid.clone(),
             RpcContinuation::ws(
                 policy,
+                ctx.secure_session().cloned(),
                 move |socket| async move {
                     if let Err(e) = ws_handler(first_entry, stream, socket).await {
                         tracing::error!(

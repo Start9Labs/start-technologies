@@ -189,6 +189,7 @@ async fn inner_main() -> Result<(), Error> {
 
     let continuations = Arc::new(RpcContinuations::new());
     let ctx = ServerContext {
+        secure_session: None,
         continuations: continuations.clone(),
         auth: Arc::new(crate::auth::AuthState::open().await?),
         server_identity: startos::sign::instance::load(

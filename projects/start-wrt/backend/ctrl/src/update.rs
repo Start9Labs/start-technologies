@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use startos::middleware::auth::session::SessionContext;
 use startos::registry::asset::RegistryAsset;
 use startos::sign::commitment::blake3::Blake3Commitment;
 use startos::util::io::create_file;
@@ -135,6 +136,7 @@ pub async fn update_system(
             guid.clone(),
             RpcContinuation::ws(
                 WebSocketPolicy::Authenticated,
+                ctx.secure_session().cloned(),
                 move |mut ws| async move {
                     let stream = tracker_for_ws.stream(Some(Duration::from_millis(300)));
                     tokio::pin!(stream);

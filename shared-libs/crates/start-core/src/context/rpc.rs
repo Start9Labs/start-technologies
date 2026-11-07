@@ -134,7 +134,28 @@ impl CleanupInitPhases {
 }
 
 #[derive(Clone)]
-pub struct RpcContext(Arc<RpcContextSeed>);
+pub struct RpcContext(
+    Arc<RpcContextSeed>,
+    Option<Arc<crate::middleware::auth::session::SecureSession>>,
+);
+
+impl SessionContext for RpcContext {
+    fn secure_session(&self) -> Option<&crate::middleware::auth::session::SecureSession> {
+        self.1.as_deref()
+    }
+}
+impl crate::middleware::auth::session::SecureRpcContext for RpcContext {
+    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+        crate::middleware::auth::signature::SigningContext::signing_key(self)
+    }
+    fn with_secure_session(
+        mut self,
+        session: crate::middleware::auth::session::SecureSession,
+    ) -> Self {
+        self.1 = Some(Arc::new(session));
+        self
+    }
+}
 
 /// Clients acquired before a reload retain their previous trust configuration.
 pub struct ReloadableHttpClient {
@@ -492,7 +513,7 @@ impl RpcContext {
             crons,
         });
 
-        let res = Self(seed.clone());
+        let res = Self(seed.clone(), None);
         crate::update::signer_files::initialize(&res.db).await?;
         res.cleanup_and_initialize(cleanup_init).await?;
         tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
@@ -503,7 +524,7 @@ impl RpcContext {
         res.add_cron(crate::registry::sync::watch_registries(
             db,
             registry_refreshes,
-            move || weak.upgrade().map(Self),
+            move || weak.upgrade().map(|seed| Self(seed, None)),
         ));
         tracing::info!("{}", t!("context.rpc.completed-migrations"));
         let weak = Arc::downgrade(&res.0);

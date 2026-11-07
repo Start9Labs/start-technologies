@@ -367,6 +367,24 @@ pub struct ServerContext {
     pub continuations: Arc<continuations::RpcContinuations>,
     pub auth: Arc<auth::AuthState>,
     pub server_identity: startos::sign::Signer,
+    pub(crate) secure_session: Option<Arc<startos::middleware::auth::session::SecureSession>>,
+}
+impl startos::middleware::auth::session::SessionContext for ServerContext {
+    fn secure_session(&self) -> Option<&startos::middleware::auth::session::SecureSession> {
+        self.secure_session.as_deref()
+    }
+}
+impl startos::middleware::auth::session::SecureRpcContext for ServerContext {
+    fn server_identity(&self) -> Result<startos::sign::Signer, startos::Error> {
+        Ok(self.server_identity.clone())
+    }
+    fn with_secure_session(
+        mut self,
+        session: startos::middleware::auth::session::SecureSession,
+    ) -> Self {
+        self.secure_session = Some(Arc::new(session));
+        self
+    }
 }
 impl Default for ServerContext {
     fn default() -> Self {
@@ -374,6 +392,7 @@ impl Default for ServerContext {
             continuations: Arc::new(continuations::RpcContinuations::new()),
             auth: Arc::new(auth::AuthState::in_memory()),
             server_identity: startos::sign::AnySigningKey::generate().into(),
+            secure_session: None,
         }
     }
 }

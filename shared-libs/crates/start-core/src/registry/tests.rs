@@ -1,3 +1,4 @@
+mod session;
 mod versioned;
 
 use std::collections::BTreeMap;

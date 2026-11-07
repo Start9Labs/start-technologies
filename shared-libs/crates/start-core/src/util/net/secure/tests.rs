@@ -409,8 +409,7 @@ async fn server() -> (String, PeerContext, ServerGuard) {
     (url, context, guard)
 }
 
-async fn connect(url: &str, seed: u8) -> EncryptedSocket {
-    let identity = NoiseIdentity::new(&signer(seed)).await.unwrap();
+pub(crate) async fn raw_socket(url: &str) -> BoxWebSocket {
     let limits = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
         .max_frame_size(Some(64 * 1024 * 1024))
         .max_message_size(Some(64 * 1024 * 1024));
@@ -425,8 +424,13 @@ async fn connect(url: &str, seed: u8) -> EncryptedSocket {
         })
         .sink_map_err(axum::Error::new)
         .map(|result| result.map(to_server).map_err(axum::Error::new));
+    Box::new(raw)
+}
+
+async fn connect(url: &str, seed: u8) -> EncryptedSocket {
+    let identity = NoiseIdentity::new(&signer(seed)).await.unwrap();
     let (peer, socket) = EncryptedSocket::initiate(
-        Box::new(raw),
+        raw_socket(url).await,
         identity,
         PROLOGUE,
         NonZeroUsize::new(64 * 1024 * 1024).unwrap(),

@@ -62,6 +62,11 @@ pub fn wire_message_size(logical: NonZeroUsize) -> NonZeroUsize {
     .unwrap()
 }
 
+/// Raw chunk allowance for a bounded logical payload, including handshake and record framing.
+pub fn wire_chunk_size(logical: NonZeroUsize) -> NonZeroUsize {
+    wire_message_size(logical).min(NonZeroUsize::new(MAX_RECORD + RECORD_HEADER).unwrap())
+}
+
 struct NoiseCodec {
     state: TransportState,
     record_reader: LengthDelimitedCodec,
@@ -391,4 +396,4 @@ impl Sink<Message> for EncryptedSocket {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
