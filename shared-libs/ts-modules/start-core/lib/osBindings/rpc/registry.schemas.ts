@@ -442,12 +442,20 @@ export const AddAssetParams: z.ZodObject<{
   platform: z.ZodString
   url: z.ZodString
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
   commitment: typeof Blake3Commitment
 }> = /* @__PURE__ */ object({
   version: z.string(),
   platform: z.string(),
   url: z.string(),
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
   commitment: Blake3Commitment,
 }).meta({
   id: 'AddAssetParams',

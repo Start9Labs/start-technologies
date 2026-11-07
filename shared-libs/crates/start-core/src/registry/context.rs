@@ -551,7 +551,6 @@ pub(crate) async fn test_context(datadir: PathBuf, uploader: AnyVerifyingKey) ->
 #[cfg(test)]
 #[path = "package/ingestion_tests.rs"]
 mod ingestion_tests;
-
 #[cfg(test)]
 #[path = "redirect_tests.rs"]
 mod redirect_tests;
@@ -559,3 +558,9 @@ mod redirect_tests;
 #[cfg(test)]
 #[path = "os/asset/sign_tests.rs"]
 mod os_asset_sign_tests;
+#[cfg(test)]
+#[path = "os/ingestion_tests.rs"]
+mod os_ingestion_tests;
+#[cfg(test)]
+#[path = "test_utils.rs"]
+mod test_utils;

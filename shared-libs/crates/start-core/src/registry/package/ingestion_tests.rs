@@ -8,6 +8,7 @@ use axum::routing::get;
 use ed25519_dalek::SigningKey;
 use serde_json::Value;
 
+use super::test_utils::{context, registry_server};
 use super::*;
 use crate::registry::package::add::{AddMirrorParams, AddPackageParams, add_mirror, add_package};
 use crate::rpc_continuations::Guid;
@@ -42,8 +43,6 @@ fn larger_bound_fixture() -> (Vec<u8>, MerkleArchiveCommitment) {
     bytes[131..139].copy_from_slice(&commitment.root_maxsize.to_be_bytes());
     (bytes, commitment)
 }
-
-pub(super) use super::test_context as context;
 
 type Requests = Arc<Mutex<Vec<Option<(usize, usize)>>>>;
 
@@ -125,21 +124,6 @@ async fn local_package() -> S9pk {
     use tokio::io::AsyncWriteExt;
     file.write_all(&fixture("endorsed.s9pk")).await.unwrap();
     S9pk::from_file(file).await.unwrap()
-}
-
-async fn registry_server(
-    ctx: RegistryContext,
-) -> (Url, crate::util::future::NonDetachingJoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/", listener.local_addr().unwrap())
-        .parse()
-        .unwrap();
-    let task = tokio::spawn(async move {
-        axum::serve(listener, crate::registry::registry_router(ctx))
-            .await
-            .unwrap();
-    });
-    (url, task.into())
 }
 
 #[tokio::test]
