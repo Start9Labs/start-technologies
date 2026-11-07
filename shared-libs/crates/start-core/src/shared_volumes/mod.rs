@@ -129,10 +129,18 @@ pub struct SharedVolume {
 rpc_toolkit::reflect_ts!(SharedVolume);
 rpc_toolkit::ts_export!(SharedVolume, namespaces = [""]);
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SharedVolumeCredentials {
     pub password: Option<String>,
+}
+
+impl SharedVolumeCredentials {
+    pub(crate) fn update_password(&mut self, password: Option<String>) {
+        if let Some(password) = password {
+            self.password = (!password.is_empty()).then_some(password);
+        }
+    }
 }
 
 impl std::fmt::Debug for SharedVolumeCredentials {
@@ -224,36 +232,13 @@ pub async fn create(
             source::create_local_directory(&local_path(crate::DATA_DIR, &id)).await?;
             (SharedVolumeSource::Local, None)
         }
-        CreateSharedVolumeSource::Disk { logicalname, path } => {
-            let disks = crate::disk::util::list(&ctx.os_partitions, None).await?;
-            let logicalname = tokio::fs::canonicalize(logicalname).await?;
-            let (partition, label) = source::external_partition(&disks, &logicalname)?;
-            crate::disk::format::refuse_system_drive(
-                &ctx.os_partitions,
-                &crate::disk::format::parent_drive(&partition).await?,
-            )
-            .await?;
-            (
-                source::prepare_external_source(partition, path, label).await?,
-                None,
-            )
-        }
+        CreateSharedVolumeSource::Disk { logicalname, path } => (
+            source::prepare_disk_source(&ctx, logicalname, path).await?,
+            None,
+        ),
         CreateSharedVolumeSource::Cifs(cifs) => {
-            cifs.validate()?;
-            let Cifs {
-                hostname,
-                path,
-                username,
-                password,
-            } = cifs;
-            (
-                SharedVolumeSource::Cifs {
-                    hostname,
-                    path: Path::new("/").join(path),
-                    username,
-                },
-                Some(SharedVolumeCredentials { password }),
-            )
+            let (source, credentials) = source::prepare_cifs_source(cifs)?;
+            (source, Some(credentials))
         }
     };
     ctx.db
@@ -344,42 +329,29 @@ pub async fn update_cifs(
                     ErrorKind::InvalidRequest,
                 ));
             }
-            let stored = db
+            let mut credentials = db
                 .as_private()
                 .as_shared_volume_credentials()
                 .as_idx(&id)
                 .map(|credentials| credentials.de())
-                .transpose()?;
-            let password = match password {
-                Some(password) => (!password.is_empty()).then_some(password),
-                None => stored.and_then(|stored| stored.password),
-            };
-            let cifs = Cifs {
+                .transpose()?
+                .unwrap_or_default();
+            credentials.update_password(password);
+            let (source, credentials) = source::prepare_cifs_source(Cifs {
                 hostname,
                 path,
                 username,
-                password,
-            };
-            cifs.validate()?;
-            let Cifs {
-                hostname,
-                path,
-                username,
-                password,
-            } = cifs;
+                password: credentials.password,
+            })?;
             db.as_private_mut()
                 .as_shared_volume_credentials_mut()
-                .insert(&id, &SharedVolumeCredentials { password })?;
+                .insert(&id, &credentials)?;
             let volume = db
                 .as_public_mut()
                 .as_shared_volumes_mut()
                 .as_idx_mut(&id)
                 .or_not_found(&id)?;
-            volume.as_source_mut().ser(&SharedVolumeSource::Cifs {
-                hostname,
-                path: Path::new("/").join(path),
-                username,
-            })?;
+            volume.as_source_mut().ser(&source)?;
             volume.mutate(|volume| {
                 volume.inspection = SharedVolumeInspection::default();
                 Ok(())

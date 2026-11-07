@@ -36,16 +36,13 @@ impl SourceDefinition {
         db: &crate::db::model::DatabaseModel,
         id: &SharedVolumeId,
     ) -> Result<Self, Error> {
-        let mut source = db
+        let source = db
             .as_public()
             .as_shared_volumes()
             .as_idx(id)
             .or_not_found(id)?
             .as_source()
             .de()?;
-        if let SharedVolumeSource::Disk { label, .. } = &mut source {
-            *label = None;
-        }
         let credentials = if matches!(source, SharedVolumeSource::Cifs { .. }) {
             Some(
                 db.as_private()
@@ -57,9 +54,36 @@ impl SourceDefinition {
         } else {
             None
         };
-        Ok(Self {
+        Ok(Self::new(source, credentials))
+    }
+
+    pub(crate) fn new(
+        mut source: SharedVolumeSource,
+        credentials: Option<SharedVolumeCredentials>,
+    ) -> Self {
+        if let SharedVolumeSource::Disk { label, .. } = &mut source {
+            *label = None;
+        }
+        Self {
             source,
             credentials,
+        }
+    }
+
+    pub(crate) fn cifs(&self) -> Option<Cifs> {
+        let SharedVolumeSource::Cifs {
+            hostname,
+            path,
+            username,
+        } = &self.source
+        else {
+            return None;
+        };
+        Some(Cifs {
+            hostname: hostname.clone(),
+            path: path.clone(),
+            username: username.clone(),
+            password: self.credentials.as_ref().unwrap().password.clone(),
         })
     }
 
@@ -67,18 +91,8 @@ impl SourceDefinition {
         match &self.source {
             SharedVolumeSource::Local => SourceFilesystem::Local(local_path(crate::DATA_DIR, id)),
             SharedVolumeSource::Disk { logicalname, .. } => SourceFilesystem::external(logicalname),
-            SharedVolumeSource::Cifs {
-                hostname,
-                path,
-                username,
-            } => {
-                let credentials = self.credentials.as_ref().unwrap();
-                SourceFilesystem::Cifs(SharedCifs(Cifs {
-                    hostname: hostname.clone(),
-                    path: path.clone(),
-                    username: username.clone(),
-                    password: credentials.password.clone(),
-                }))
+            SharedVolumeSource::Cifs { .. } => {
+                SourceFilesystem::Cifs(SharedCifs(self.cifs().unwrap()))
             }
         }
     }
@@ -314,6 +328,42 @@ pub(crate) async fn measure_mount(path: &Path) -> Result<u64, Error> {
         .await
         .with_kind(ErrorKind::Timeout)
         .and_then(|result| result)
+}
+
+pub(crate) fn prepare_cifs_source(
+    cifs: Cifs,
+) -> Result<(SharedVolumeSource, SharedVolumeCredentials), Error> {
+    cifs.validate()?;
+    let Cifs {
+        hostname,
+        path,
+        username,
+        password,
+    } = cifs;
+    Ok((
+        SharedVolumeSource::Cifs {
+            hostname,
+            path: Path::new("/").join(path),
+            username,
+        },
+        SharedVolumeCredentials { password },
+    ))
+}
+
+pub(crate) async fn prepare_disk_source(
+    ctx: &RpcContext,
+    logicalname: PathBuf,
+    path: PathBuf,
+) -> Result<SharedVolumeSource, Error> {
+    let disks = crate::disk::util::list(&ctx.os_partitions, None).await?;
+    let logicalname = tokio::fs::canonicalize(logicalname).await?;
+    let (partition, label) = external_partition(&disks, &logicalname)?;
+    crate::disk::format::refuse_system_drive(
+        &ctx.os_partitions,
+        &crate::disk::format::parent_drive(&partition).await?,
+    )
+    .await?;
+    prepare_external_source(partition, path, label).await
 }
 
 pub(super) fn external_partition(

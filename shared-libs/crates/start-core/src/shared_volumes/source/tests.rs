@@ -1,6 +1,52 @@
 use super::*;
 
 #[test]
+fn cifs_preparation_separates_private_password_and_preserves_connection_details() {
+    for path in ["share/photos", "/share/photos"] {
+        let (source, credentials) = prepare_cifs_source(Cifs {
+            hostname: "nas.local".into(),
+            path: path.into(),
+            username: "family".into(),
+            password: Some("private-password".into()),
+        })
+        .unwrap();
+        let public = serde_json::to_value(&source).unwrap();
+        assert_eq!(public["path"], "/share/photos");
+        assert_eq!(public["username"], "family");
+        assert!(!public.to_string().contains("private-password"));
+        let definition = SourceDefinition::new(source, Some(credentials));
+        let cifs = definition.cifs().unwrap();
+        assert_eq!(cifs.hostname, "nas.local");
+        assert_eq!(cifs.username, "family");
+        assert_eq!(cifs.password.as_deref(), Some("private-password"));
+    }
+    assert!(
+        prepare_cifs_source(Cifs {
+            hostname: "nas.local".into(),
+            path: "share/../escape".into(),
+            username: "family".into(),
+            password: None,
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn password_edits_preserve_omissions_and_clear_explicit_empty_values() {
+    let mut credentials = SharedVolumeCredentials {
+        password: Some("original".into()),
+    };
+    credentials.update_password(None);
+    assert_eq!(credentials.password.as_deref(), Some("original"));
+    credentials.update_password(Some("replacement".into()));
+    assert_eq!(credentials.password.as_deref(), Some("replacement"));
+    credentials.update_password(Some(String::new()));
+    assert_eq!(credentials.password, None);
+    credentials.update_password(None);
+    assert_eq!(credentials.password, None);
+}
+
+#[test]
 fn observations_are_flattened_and_preserve_the_volume_definition() {
     let id = SharedVolumeId::new();
     let mut db = crate::db::model::DatabaseModel::from(
