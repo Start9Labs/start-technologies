@@ -123,6 +123,8 @@ impl RpcSessionUpgrader {
     }
 }
 
+pub mod client;
+
 #[cfg(test)]
 mod tests;
 

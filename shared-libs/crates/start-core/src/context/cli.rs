@@ -79,6 +79,7 @@ pub struct CliContextSeed {
     pub tunnel_addr: Option<SocketAddr>,
     pub tunnel_listen: Option<SocketAddr>,
     pub client: Client,
+    pub websocket_client: Client,
     pub id_key_path: PathBuf,
     pub id_key_gpg: Option<String>,
     pub id_key: OnceCell<Signer>,
@@ -109,6 +110,46 @@ impl CliContext {
             None => "http://localhost".parse()?,
         };
         let host_identity = url.host_str().map(InternedString::intern);
+        let proxy = config
+            .proxy
+            .clone()
+            .or_else(|| {
+                config
+                    .socks_listen
+                    .and_then(|socks| format!("socks5h://{socks}").parse::<Url>().log_err())
+            })
+            .map(Proxy::all)
+            .transpose()
+            .with_kind(ErrorKind::ParseUrl)?;
+        let certificates = config
+            .root_ca
+            .iter()
+            .flatten()
+            .map(|ca_path| {
+                let pem = std::fs::read(ca_path)
+                    .with_ctx(|_| (ErrorKind::Filesystem, ca_path.display()))?;
+                reqwest::Certificate::from_pem(&pem).with_kind(ErrorKind::OpenSsl)
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        let client_builder = || {
+            let mut builder = Client::builder();
+            if let Some(proxy) = &proxy {
+                builder = builder.proxy(proxy.clone());
+            }
+            if config.insecure {
+                builder = builder.danger_accept_invalid_certs(true);
+            }
+            for cert in &certificates {
+                builder = builder.add_root_certificate(cert.clone());
+            }
+            builder
+        };
+        let client = client_builder().build().with_kind(ErrorKind::Network)?;
+        let websocket_client = client_builder()
+            .http1_only()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .with_kind(ErrorKind::Network)?;
 
         Ok(CliContext(Arc::new(CliContextSeed {
             runtime: OnceCell::new(),
@@ -124,28 +165,8 @@ impl CliContext {
             tunnel_addr: config.tunnel,
             tunnel_listen: config.tunnel_listen,
             host_identity,
-            client: {
-                let mut builder = Client::builder();
-                if let Some(proxy) = config.proxy.or_else(|| {
-                    config
-                        .socks_listen
-                        .and_then(|socks| format!("socks5h://{socks}").parse::<Url>().log_err())
-                }) {
-                    builder =
-                        builder.proxy(Proxy::all(proxy).with_kind(crate::ErrorKind::ParseUrl)?)
-                }
-                if config.insecure {
-                    builder = builder.danger_accept_invalid_certs(true);
-                }
-                for ca_path in config.root_ca.iter().flatten() {
-                    let pem = std::fs::read(ca_path)
-                        .with_ctx(|_| (crate::ErrorKind::Filesystem, ca_path.display()))?;
-                    let cert = reqwest::Certificate::from_pem(&pem)
-                        .with_kind(crate::ErrorKind::OpenSsl)?;
-                    builder = builder.add_root_certificate(cert);
-                }
-                builder.build().expect("cannot fail")
-            },
+            client,
+            websocket_client,
             id_key_path: config.id_key_path.unwrap_or_else(default_id_key_path),
             id_key_gpg: config.id_key_gpg,
             id_key: OnceCell::new(),

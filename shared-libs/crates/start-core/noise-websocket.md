@@ -54,6 +54,23 @@ Identity preparation precedes the 30-second connection/exchange deadline. No RPC
 initiation is sent before admission completes; failed negotiation does not retry
 as plaintext. Package signatures remain the StartOS trust anchor.
 
+## Native CLI transport
+
+Keyed registry administration and promotion use `session::client` with the same
+opaque signer, session negotiation and encrypted socket as native subscriptions.
+Serialization precedes certificate preparation; GPG-agent unlocking and signing
+finish before connection/exchange deadlines. A refused admission never retries as
+plaintext. Local/bearer access and public calls without an initialized identity
+retain HTTP; malformed or unavailable configured identities fail closed.
+
+`CliContext` parses proxy and TLS policy once for its ordinary HTTP client and a
+separate HTTP/1-only, nonredirecting upgrade client. `reqwest-websocket` 0.5.0
+retains Reqwest's routing and trust policy while sharing the existing
+Tungstenite 0.26 message conversion. Logical responses use the shared 64 MiB
+limit; framing overhead stays separate. Versioned RPC URL conversion preserves
+deployment prefixes and queries. Other CLI contexts and legacy continuations
+retain their existing transport until explicitly migrated.
+
 ## Browser transport
 
 The binding generator emits `noise-profile.ts` from the native identity, session
@@ -83,8 +100,8 @@ OS route. Setup/init/diagnostic contexts remain unscoped. StartWRT uses the same
 transport for keyed RPC and DOM-style GUID sockets. Its existing reconnect/update
 owners abort a stalled shared session before bounded recovery probes; anonymous
 bootstrap retains aborting HTTP. Typed firmware metadata and the retained HTTP
-header feed its existing stale-UI detector. CLI migration and browser/administrator
-TOFU warnings remain unfinished. Maintained Noise/stream modules load lazily;
+header feed its existing stale-UI detector. Remaining CLI contexts and browser/administrator
+TOFU warnings still require migration. Maintained Noise/stream modules load lazily;
 identity signing still finishes before native connection and RPC-response deadlines.
 
 The browser adapter composes libp2p's message stream and length-prefixed stream

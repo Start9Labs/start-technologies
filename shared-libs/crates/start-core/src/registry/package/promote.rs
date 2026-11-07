@@ -32,6 +32,7 @@ pub fn registry_rpc_url(url: &Url) -> Result<Url, Error> {
     url.path_segments_mut()
         .map_err(|_| eyre!("Url cannot be base"))
         .with_kind(ErrorKind::ParseUrl)?
+        .pop_if_empty()
         .push("rpc")
         .push("v0");
     Ok(url)
@@ -54,15 +55,14 @@ pub async fn call_registry(
     ctx: &CliContext,
     url: Url,
     method: &str,
-    mut params: Value,
+    params: Value,
 ) -> Result<Value, Error> {
-    crate::registry::compat::pem_wire(&mut params);
     let sig_context = url.host().as_ref().map(InternedString::from_display);
-    crate::middleware::auth::signature::call_remote(
+    crate::registry::context::call_cli(
         ctx,
         url,
         HeaderMap::new(),
-        sig_context.as_deref(),
+        sig_context.as_deref().or_not_found("registry hostname")?,
         method,
         params,
     )

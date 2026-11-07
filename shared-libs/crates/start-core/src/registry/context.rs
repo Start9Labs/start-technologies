@@ -241,15 +241,52 @@ pub struct RegistryUrlParams {
 
 rpc_toolkit::reflect_ts!(RegistryUrlParams);
 
+pub(crate) async fn call_cli(
+    ctx: &CliContext,
+    url: Url,
+    headers: HeaderMap,
+    address: &str,
+    method: &str,
+    mut params: Value,
+) -> Result<Value, RpcError> {
+    super::compat::pem_wire(&mut params);
+    if !headers.contains_key(AUTHORIZATION) {
+        match ctx.signing_key() {
+            Ok(signer) => {
+                return crate::middleware::auth::session::client::call(
+                    &ctx.websocket_client,
+                    &signer,
+                    crate::middleware::auth::session::client::websocket_url(url)?,
+                    address,
+                    headers,
+                    method,
+                    params,
+                )
+                .await;
+            }
+            Err(error) if error.kind == ErrorKind::Uninitialized => (),
+            Err(error) => return Err(error.into()),
+        }
+    }
+    crate::middleware::auth::signature::call_remote_with_client(
+        None,
+        ctx.client.clone(),
+        url,
+        headers,
+        method,
+        params,
+    )
+    .await
+}
+
 impl CallRemote<RegistryContext> for CliContext {
     async fn call_remote(
         &self,
         mut method: &str,
         _: OrdMap<&'static str, Value>,
-        mut params: Value,
+        params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
-        super::compat::pem_wire(&mut params);
         let local_auth = local_auth_header::<RegistryContext>().await;
 
         let (url, is_local) = if let Some(url) = &self.registry_url {
@@ -287,11 +324,11 @@ impl CallRemote<RegistryContext> for CliContext {
             .cloned()
             .or_else(|| url.host().as_ref().map(InternedString::from_display));
 
-        crate::middleware::auth::signature::call_remote(
+        call_cli(
             self,
             url,
             headers,
-            sig_context.as_deref(),
+            sig_context.as_deref().or_not_found("registry hostname")?,
             method,
             params,
         )

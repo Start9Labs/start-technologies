@@ -754,6 +754,16 @@ pub async fn call_remote<Ctx: SigningContext + AsRef<Client>>(
     call_remote_with_client(signer, ctx.as_ref().clone(), url, headers, method, params).await
 }
 
+pub(crate) fn rpc_request_body(method: &str, params: Value) -> Result<String, RpcError> {
+    use rpc_toolkit::yajrc::{GenericRpcMethod, Id, RpcRequest};
+    serde_json::to_string(&RpcRequest {
+        id: Some(Id::Number(0.into())),
+        method: GenericRpcMethod::<_, _, Value>::new(method),
+        params,
+    })
+    .map_err(Into::into)
+}
+
 /// Signs the request when given a signer and the server identity to bind it to.
 pub(crate) async fn call_remote_with_client(
     signer: Option<(Signer, &str)>,
@@ -766,14 +776,7 @@ pub(crate) async fn call_remote_with_client(
     use reqwest::Method;
     use reqwest::header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE};
     use rpc_toolkit::RpcResponse;
-    use rpc_toolkit::yajrc::{GenericRpcMethod, Id, RpcRequest};
-
-    let rpc_req = RpcRequest {
-        id: Some(Id::Number(0.into())),
-        method: GenericRpcMethod::<_, _, Value>::new(method),
-        params,
-    };
-    let body = serde_json::to_vec(&rpc_req)?;
+    let body = rpc_request_body(method, params)?;
     let mut req = client
         .request(Method::POST, url)
         .header(CONTENT_TYPE, "application/json")
@@ -783,7 +786,7 @@ pub(crate) async fn call_remote_with_client(
     if let Some((key, sig_ctx)) = signer {
         req = req.header(
             AUTH_SIG_HEADER,
-            SignatureHeader::sign(&key, &body, sig_ctx)
+            SignatureHeader::sign(&key, body.as_bytes(), sig_ctx)
                 .await?
                 .to_header(),
         );

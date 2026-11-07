@@ -17,6 +17,9 @@ use crate::prelude::*;
 use crate::sign::AnyVerifyingKey;
 use crate::sign::noise::{NoiseIdentity, authenticate_peer};
 
+/// Logical RPC response limit before framing and encryption overhead.
+pub const DEFAULT_RPC_RESPONSE_LIMIT: usize = 64 * 1024 * 1024;
+
 const RECORD_HEADER: usize = 2;
 const MESSAGE_HEADER: usize = 4;
 const MESSAGE_KIND: usize = 1;
@@ -36,7 +39,7 @@ enum MessageKind {
 pub(crate) fn browser_profile() -> serde_json::Value {
     use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
-    let logical = NonZeroUsize::new(64 * 1024 * 1024).unwrap();
+    let logical = NonZeroUsize::new(DEFAULT_RPC_RESPONSE_LIMIT).unwrap();
     let mut close_codes: Vec<[u16; 2]> = Vec::new();
     for code in 0..=u16::MAX {
         if !CloseCode::from(code).is_allowed() {

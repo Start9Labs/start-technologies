@@ -35,7 +35,7 @@ argv ─▶ MultiExecutable ─▶ start_cli::main (in start-core)
                               ├─ build CliApp from start-core::main_api()
                               ├─ load ClientConfig (flags + -c + workspace + ~/.startos + /etc/startos)
                               └─ run:
-                                   • remote command  ─▶ CliContext ─HTTPS RPC─▶ StartOS server
+                                   • remote command  ─▶ CliContext ─HTTP RPC / Noise WebSocket─▶ server
                                    • local command   ─▶ executed in-process (s9pk, keys, util)
 ```
 
@@ -49,9 +49,13 @@ are unwrapped from the RPC envelope and printed to stderr; the process exits wit
 
 `main_api()` (in [`shared-libs/crates/start-core/src/lib.rs`](../../shared-libs/crates/start-core/src/lib.rs))
 registers every subcommand once with `with_call_remote::<CliContext>()` — those are dispatched
-over the network to a server's RPC endpoint, authenticated by signing each request with the
-enrolled identity key (or, on the server itself, the local authcookie sent as a Bearer token). Commands
-without a remote handler (`s9pk`, `init-key`, `pubkey`, `util`) execute locally. The `registry`
+over the network through the target context's transport. Keyed registry administration and
+promotion complete an identity-authenticated Noise exchange before sending encrypted RPC.
+The existing opaque signer supports both local keys and GPG-agent identities; certificate
+preparation precedes transport deadlines. Failed encrypted admission never falls back to HTTP.
+Local authcookies remain Bearer tokens over HTTP, as do public registry calls without an
+initialized identity. Other remote contexts retain their existing HTTP authentication.
+Commands without a remote handler (`s9pk`, `init-key`, `pubkey`, `util`) execute locally. The `registry`
 and `tunnel` groups can target a separate registry/tunnel host via `--registry`/`--tunnel`.
 
 ### Configuration
@@ -70,7 +74,9 @@ until it reaches a URL, which it parses only then. Its shared `resolve_profile` 
 resolves explicit `--from`/`--to` endpoints for registry package and OS promotion. `CliContext`
 retains the merged `registry` profiles for these endpoint selections. `ClientConfig` also carries
 tunnel, proxy, identity key path, root CAs, and the `--insecure` toggle. The loaded config becomes a
-`CliContext` that the RPC handlers use.
+`CliContext` that the RPC handlers use. Proxy/TLS policy is parsed once for the ordinary HTTP client and
+its HTTP/1-only, nonredirecting WebSocket-upgrade client; neither owns a separate reconnect
+lifecycle.
 
 ## Man pages
 

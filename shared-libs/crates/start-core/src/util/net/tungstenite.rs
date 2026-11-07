@@ -1,24 +1,37 @@
 use axum::extract::ws::Message;
-use futures::{SinkExt, StreamExt};
+use futures::{Sink, SinkExt, Stream, StreamExt};
 use rpc_toolkit::BoxWebSocket;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message as NativeMessage;
 
 /// Adapts a native socket to the shared message transport without adding a lifecycle.
-pub fn transport<S>(socket: WebSocketStream<S>) -> BoxWebSocket
+pub fn transport<S, E>(socket: S) -> BoxWebSocket
 where
-    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    S: Stream<Item = Result<NativeMessage, E>>
+        + Sink<NativeMessage, Error = E>
+        + Unpin
+        + Send
+        + 'static,
+    E: std::error::Error + Send + Sync + 'static,
 {
     Box::new(
         socket
-            .with(|message| {
-                futures::future::ready(Ok::<_, tokio_tungstenite::tungstenite::Error>(to_native(
-                    message,
-                )))
-            })
+            .with(|message| futures::future::ready(Ok::<_, E>(to_native(message))))
             .sink_map_err(axum::Error::new)
             .map(|result| result.map(from_native).map_err(axum::Error::new)),
+    )
+}
+
+/// Adapts the configured Reqwest WebSocket without another message mapping.
+pub fn reqwest_transport(socket: reqwest_websocket::WebSocket) -> BoxWebSocket {
+    transport(
+        socket
+            .sink_map_err(axum::Error::new)
+            .with(|message: NativeMessage| {
+                futures::future::ready(
+                    reqwest_websocket::Message::try_from(message).map_err(axum::Error::new),
+                )
+            })
+            .map(|message| message.map(NativeMessage::from).map_err(axum::Error::new)),
     )
 }
 

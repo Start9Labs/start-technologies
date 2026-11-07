@@ -11,10 +11,10 @@ use crate::context::rpc::ReloadableHttpClient;
 use crate::middleware::auth::session::{RpcSessionUpgrader, prologue, session_url};
 use crate::middleware::auth::signature::SigningContext;
 use crate::sign::noise::NoiseIdentity;
-use crate::util::net::secure::{EncryptedSocket, wire_message_size};
+use crate::util::net::secure::{
+    DEFAULT_RPC_RESPONSE_LIMIT as MAX_RESPONSE_SIZE, EncryptedSocket, wire_message_size,
+};
 use crate::util::net::tungstenite::transport;
-
-const MAX_RESPONSE_SIZE: usize = 64 * 1024 * 1024;
 
 pub(super) fn websocket_url(registry: &Url) -> Result<Url, Error> {
     let mut url = registry.clone();
