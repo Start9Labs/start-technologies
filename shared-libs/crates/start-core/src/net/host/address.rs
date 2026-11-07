@@ -942,6 +942,57 @@ mod test {
     }
 
     #[test]
+    fn adding_a_domain_preserves_an_already_public_plain_sibling() {
+        for selected in ["64.23.194.12:9090", "[2001:db8::1]:9090"] {
+            let selected: std::net::SocketAddr = selected.parse().unwrap();
+            let mut host = Host::default();
+            host.bindings.insert(8080, single(8080, Some(8443)));
+            let mut sibling = single(9090, None);
+            sibling.addresses.enabled.insert(selected);
+            if let std::net::SocketAddr::V6(gua) = selected {
+                sibling.addresses.gua_wan.insert(gua);
+            }
+            host.bindings.insert(9090, sibling);
+            let mut db = database(host);
+            let hostname = ServerHostname::load(db.as_public().as_server_info()).unwrap();
+            let mut gateways = db
+                .as_public()
+                .as_server_info()
+                .as_network()
+                .as_gateways()
+                .de()
+                .unwrap();
+            if selected.is_ipv6() {
+                let gateway = gateways.get_mut(&gw("wg1")).unwrap();
+                Arc::make_mut(gateway.ip_info.as_mut().unwrap()).wan_ip = None;
+                db.as_public_mut()
+                    .as_server_info_mut()
+                    .as_network_mut()
+                    .as_gateways_mut()
+                    .ser(&gateways)
+                    .unwrap();
+            }
+            let ports = db.as_private().as_available_ports().de().unwrap();
+            package_host(&mut db)
+                .update_addresses(&hostname, &gateways, &ports)
+                .unwrap();
+
+            add_domain(&mut db, 8080).unwrap();
+
+            let host = package_host(&mut db).de().unwrap();
+            let sibling = &host.bindings[&9090].addresses;
+            assert!(sibling.enabled.contains(&selected));
+            assert!(sibling.enabled().contains(&domain(false, 9090, "wg1")));
+            assert!(
+                host.bindings[&8080]
+                    .addresses
+                    .enabled()
+                    .contains(&domain(true, 8443, "wg1"))
+            );
+        }
+    }
+
+    #[test]
     fn single_port_target_prefers_tls_probe_and_enables_dual_stack_plaintext() {
         let mut host = Host::default();
         host.bindings.insert(8080, single(8080, Some(8443)));

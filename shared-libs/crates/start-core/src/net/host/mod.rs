@@ -1105,7 +1105,7 @@ mod tests {
     }
 
     #[test]
-    fn a_domain_enabled_over_tls_publishes_the_gua_when_its_binding_turns_plain() {
+    fn a_binding_turning_plain_publishes_nothing_without_public_bare_ips() {
         let server = ServerHostname::new(InternedString::intern("server")).unwrap();
         let mut eth0 = iface(NetworkInterfaceType::Ethernet, None);
         Arc::make_mut(eth0.ip_info.as_mut().unwrap()).subnets = [
@@ -1145,13 +1145,8 @@ mod tests {
         host.update_addresses(&server, &gateways, &ports).unwrap();
 
         let addresses = host.de().unwrap().bindings[&5223].addresses.clone();
-        let enabled = addresses.enabled();
-        let gua = enabled
-            .iter()
-            .find(|a| a.gua().is_some())
-            .expect("the GUA is enabled");
-        assert!(gua.public);
-        assert!(!gua.ssl);
+        assert!(addresses.gua_wan.is_empty());
+        assert!(addresses.enabled().iter().all(|a| !a.public));
     }
 
     #[test]
