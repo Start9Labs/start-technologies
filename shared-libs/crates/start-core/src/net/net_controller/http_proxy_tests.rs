@@ -127,7 +127,7 @@ fn plaintext_http_exposure_keeps_internal_addresses_and_gateway_security() {
         .into_iter()
         .collect();
         let target = binding_proxy_target(&options(), "10.0.3.2:8080".parse().unwrap(), None, None);
-        let target = plaintext_http_target(
+        let target = plaintext_proxy_target(
             target,
             8080,
             &BTreeSet::from([&bridge, &localhost, &lan, &ssl, &other_port]),
@@ -208,7 +208,7 @@ fn plaintext_http_public_scope_is_per_family_and_private_domains_keep_their_lan_
         BTreeSet::from([&private]),
     ] {
         let target = binding_proxy_target(&options(), "10.0.3.2:8080".parse().unwrap(), None, None);
-        let target = plaintext_http_target(target, 8080, &addresses, &interfaces, &requirements);
+        let target = plaintext_proxy_target(target, 8080, &addresses, &interfaces, &requirements);
         if addresses.contains(&gua) {
             assert_eq!(
                 target.public_v6,

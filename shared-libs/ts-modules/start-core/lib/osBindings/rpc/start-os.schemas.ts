@@ -4127,43 +4127,67 @@ export const PartitionInfo: z.ZodObject<{
 }).meta({
   id: 'PartitionInfo',
 })
-export const ProxyOptions: z.ZodIntersection<
-  z.ZodObject<{ type: z.ZodLiteral<'http'> }>,
-  z.ZodObject<{
-    /**
-     * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
-     * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
-     */
-    addXForwardedHeaders: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-    /**
-     * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
-     */
-    auth: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
-      z.ZodNullable<typeof ProxyAuth>
-    >
-  }>
+export const ProxyOptions: z.ZodUnion<
+  readonly [
+    z.ZodObject<{
+      /**
+       * Relays raw TCP streams without parsing application messages.
+       */
+      type: z.ZodLiteral<'tcp'>
+    }>,
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'http'> }>,
+      z.ZodObject<{
+        /**
+         * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+         * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+         */
+        addXForwardedHeaders: z.ZodCodec<
+          z.ZodOptional<z.ZodBoolean>,
+          z.ZodBoolean
+        >
+        /**
+         * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+         */
+        auth: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
+          z.ZodNullable<typeof ProxyAuth>
+        >
+      }>
+    >,
+  ]
 > = /* @__PURE__ */ z
-  .intersection(
-    object({ type: z.literal('http') }),
+  .union([
     object({
       /**
-       * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
-       * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+       * Relays raw TCP streams without parsing application messages.
        */
-      addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()).meta({
+      type: z.literal('tcp').meta({
         description:
-          'Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.',
-      }),
-      /**
-       * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
-       */
-      auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()).meta({
-        description:
-          'Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.',
+          'Relays raw TCP streams without parsing application messages.',
       }),
     }),
-  )
+    z.intersection(
+      object({ type: z.literal('http') }),
+      object({
+        /**
+         * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+         * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+         */
+        addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()).meta({
+          description:
+            'Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.',
+        }),
+        /**
+         * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+         */
+        auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()).meta({
+          description:
+            'Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.',
+        }),
+      }),
+    ),
+  ])
   .meta({
     id: 'ProxyOptions',
   })
@@ -4874,7 +4898,7 @@ export const BindOptions: z.ZodCodec<
     addSsl: z.ZodNullable<typeof AddSslOptions>
     secure: z.ZodNullable<typeof Security>
     /**
-     * HTTP request policy shared by every exposed leg of this binding.
+     * Proxy protocol shared by every exposed leg of this binding.
      */
     proxy: z.ZodNullable<typeof ProxyOptions>
   }>
@@ -4885,11 +4909,11 @@ export const BindOptions: z.ZodCodec<
     addSsl: AddSslOptions.nullable(),
     secure: Security.nullable(),
     /**
-     * HTTP request policy shared by every exposed leg of this binding.
+     * Proxy protocol shared by every exposed leg of this binding.
      */
     proxy: ProxyOptions.nullable().meta({
       description:
-        'HTTP request policy shared by every exposed leg of this binding.',
+        'Proxy protocol shared by every exposed leg of this binding.',
     }),
   }),
 ).meta({

@@ -1,7 +1,7 @@
 use librqbit::ListenerOptions;
 
 use crate::context::RpcContext;
-use crate::net::host::binding::BindOptions;
+use crate::net::host::binding::{BindInfo, BindOptions, ProxyOptions};
 use crate::net::service_interface::{AddressInfo, ServiceInterface, ServiceInterfaceType};
 use crate::prelude::*;
 use crate::{HostId, Id, ServiceInterfaceId};
@@ -37,7 +37,7 @@ pub(crate) async fn configure_incoming(
             .await?;
         return Ok(None);
     }
-    let binding: Option<crate::net::host::binding::BindInfo> = ctx
+    let binding: Option<BindInfo> = ctx
         .db
         .peek()
         .await
@@ -49,17 +49,15 @@ pub(crate) async fn configure_incoming(
         .as_idx(&INTERNAL_PORT)
         .map(|binding| binding.de())
         .transpose()?;
-    if !binding.as_ref().is_some_and(|binding| binding.enabled) {
-        let options = binding
-            .map(|binding| binding.options)
-            .unwrap_or(BindOptions {
-                preferred_external_port: INTERNAL_PORT,
-                add_ssl: None,
-                secure: None,
-                proxy: None,
-            });
+    if !binding.as_ref().is_some_and(|binding| {
+        binding.enabled && matches!(binding.options.proxy, Some(ProxyOptions::Tcp))
+    }) {
         ctx.os_net_service
-            .bind(HostId::admin(), INTERNAL_PORT, options)
+            .bind(
+                HostId::admin(),
+                INTERNAL_PORT,
+                binding_options(binding.as_ref().map(|binding| binding.options.clone())),
+            )
             .await?;
     }
     ctx.os_net_service.export_interface(interface()).await?;
@@ -82,6 +80,17 @@ pub(crate) async fn configure_incoming(
     )))
 }
 
+fn binding_options(existing: Option<BindOptions>) -> BindOptions {
+    let mut options = existing.unwrap_or(BindOptions {
+        preferred_external_port: INTERNAL_PORT,
+        add_ssl: None,
+        secure: None,
+        proxy: None,
+    });
+    options.proxy = Some(ProxyOptions::Tcp);
+    options
+}
+
 fn listener(assigned_port: u16) -> ListenerOptions {
     ListenerOptions {
         listen_addr: ([127, 0, 0, 1], INTERNAL_PORT).into(),
@@ -95,8 +104,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn existing_binding_keeps_its_port_and_switches_to_raw_tcp() {
+        let mut previous = binding_options(None);
+        previous.preferred_external_port = 45678;
+        previous.proxy = None;
+        let options = binding_options(Some(previous));
+        assert_eq!(options.preferred_external_port, 45678);
+        assert_eq!(options.proxy, Some(ProxyOptions::Tcp));
+    }
+
+    #[test]
     fn listener_uses_native_port_allocation_without_independent_upnp() {
         let interface = interface();
+        let options = binding_options(None);
+        assert_eq!(options.proxy, Some(ProxyOptions::Tcp));
         let listener = listener(45678);
         assert!(listener.listen_addr.ip().is_loopback());
         assert_eq!(

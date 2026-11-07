@@ -52,7 +52,7 @@ async fn proxy(
     backend: SocketAddr,
     proxy: ProxyOptions,
     max_connections: usize,
-) -> (SocketAddr, PlainHttpProxy) {
+) -> (SocketAddr, PlaintextProxy) {
     let listener = TcpListener::bind((ip, 0)).await.unwrap();
     let addr = listener.local_addr().unwrap();
     let gateway: GatewayId = "lo".parse().unwrap();
@@ -93,8 +93,37 @@ async fn proxy(
     };
     (
         addr,
-        PlainHttpProxy::serve(listener, target, max_connections),
+        PlaintextProxy::serve(listener, target, max_connections),
     )
+}
+
+#[tokio::test]
+async fn tcp_listener_relays_binary_streams_and_closes_them_on_drop() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        for ip in ["127.0.0.1", "::1"] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let upstream = listener.local_addr().unwrap();
+            let backend = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut bytes = [0; 8];
+                stream.read_exact(&mut bytes).await.unwrap();
+                assert_eq!(&bytes, b"\x00\xff\x13\x00peer");
+                stream.write_all(&bytes).await.unwrap();
+                assert_eq!(stream.read(&mut bytes).await.unwrap(), 0);
+            });
+            let (address, owner) = proxy(ip.parse().unwrap(), upstream, ProxyOptions::Tcp, 1).await;
+            let mut peer = TcpStream::connect(address).await.unwrap();
+            peer.write_all(b"\x00\xff\x13\x00peer").await.unwrap();
+            let mut bytes = [0; 8];
+            peer.read_exact(&mut bytes).await.unwrap();
+            assert_eq!(&bytes, b"\x00\xff\x13\x00peer");
+            drop(owner);
+            assert_eq!(peer.read(&mut bytes).await.unwrap(), 0);
+            backend.await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
 }
 
 async fn client(

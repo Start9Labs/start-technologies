@@ -31,7 +31,7 @@ use crate::net::service_interface::{
 };
 use crate::net::socks::SocksController;
 use crate::net::vhost::{
-    AlpnInfo, DynVHostTarget, PlainHttpProxy, ProxyTarget, VHostController, VHostKey,
+    AlpnInfo, DynVHostTarget, PlaintextProxy, ProxyTarget, VHostController, VHostKey,
 };
 use crate::net::web_server::WebServerAcceptorSetter;
 use crate::net::{SERVICE_OUTBOUND_REJECT_RULE_PRIORITY, SERVICE_OUTBOUND_RULE_PRIORITY};
@@ -431,7 +431,7 @@ fn binding_proxy_target(
     }
 }
 
-fn plaintext_http_target(
+fn plaintext_proxy_target(
     mut target: ProxyTarget,
     external: u16,
     addresses: &BTreeSet<&HostnameInfo>,
@@ -510,7 +510,7 @@ fn retired_hosts<'a>(held: impl Iterator<Item = &'a HostId>, current: &Hosts) ->
 #[derive(Debug)]
 enum ProxyHandle {
     Tls { _owner: Arc<()> },
-    Plaintext { _server: PlainHttpProxy },
+    Plaintext { _server: PlaintextProxy },
 }
 
 #[derive(Default, Debug)]
@@ -551,7 +551,7 @@ impl NetServiceData {
     async fn update(&mut self, ctrl: &NetController, id: HostId, host: Host) -> Result<(), Error> {
         let mut forwards: BTreeMap<u16, (SocketAddrV4, u16, ForwardRequirements)> = BTreeMap::new();
         let mut vhosts: BTreeMap<VHostKey, ProxyTarget> = BTreeMap::new();
-        let mut http_ports = BTreeSet::new();
+        let mut plaintext_proxy_ports = BTreeSet::new();
         let mut private_dns: BTreeMap<InternedString, BTreeSet<GatewayId>> = BTreeMap::new();
         // Non-SSL v6 DNAT forwards to the container — net_controller's concern (no
         // vhost owns them), but the forward controller opens their upstream pinhole
@@ -723,10 +723,10 @@ impl NetServiceData {
                     secure: bind.options.secure.is_some(),
                 };
                 if bind.options.proxy.is_some() {
-                    http_ports.insert(external);
+                    plaintext_proxy_ports.insert(external);
                     vhosts.insert(
                         (None, external, true),
-                        plaintext_http_target(
+                        plaintext_proxy_target(
                             target,
                             external,
                             &enabled_addresses,
@@ -1004,7 +1004,7 @@ impl NetServiceData {
                     } else {
                         (
                             target.clone(),
-                            if http_ports.contains(&key.1) {
+                            if plaintext_proxy_ports.contains(&key.1) {
                                 ProxyHandle::Plaintext {
                                     _server: ctrl.vhost.plaintext_proxy(key.1, target),
                                 }

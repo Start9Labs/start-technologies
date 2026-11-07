@@ -3728,7 +3728,7 @@
             },
             "proxy": {
               "anyOf": [{ "$ref": "#/$defs/ProxyOptions" }, { "type": "null" }],
-              "description": "HTTP request policy shared by every exposed leg of this binding."
+              "description": "Proxy protocol shared by every exposed leg of this binding."
             }
           },
           "required": ["preferredExternalPort", "addSsl", "secure", "proxy"],
@@ -3801,19 +3801,35 @@
           "additionalProperties": true
         },
         "ProxyOptions": {
-          "type": "object",
-          "properties": {
-            "type": { "type": "string", "const": "http" },
-            "addXForwardedHeaders": {
-              "description": "Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.",
-              "type": "boolean"
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tcp",
+                  "description": "Relays raw TCP streams without parsing application messages."
+                }
+              },
+              "required": ["type"],
+              "additionalProperties": true
             },
-            "auth": {
-              "description": "Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.",
-              "anyOf": [{ "$ref": "#/$defs/ProxyAuth" }, { "type": "null" }]
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "http" },
+                "addXForwardedHeaders": {
+                  "description": "Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.",
+                  "type": "boolean"
+                },
+                "auth": {
+                  "description": "Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.",
+                  "anyOf": [{ "$ref": "#/$defs/ProxyAuth" }, { "type": "null" }]
+                }
+              },
+              "required": ["type", "addXForwardedHeaders", "auth"]
             }
-          },
-          "required": ["type", "addXForwardedHeaders", "auth"]
+          ]
         },
         "ProxyAuth": {
           "anyOf": [
@@ -10068,7 +10084,7 @@
             },
             "proxy": {
               "anyOf": [{ "$ref": "#/$defs/ProxyOptions" }, { "type": "null" }],
-              "description": "HTTP request policy shared by every exposed leg of this binding."
+              "description": "Proxy protocol shared by every exposed leg of this binding."
             }
           },
           "required": ["preferredExternalPort", "addSsl", "secure", "proxy"],
@@ -10141,19 +10157,35 @@
           "additionalProperties": true
         },
         "ProxyOptions": {
-          "type": "object",
-          "properties": {
-            "type": { "type": "string", "const": "http" },
-            "addXForwardedHeaders": {
-              "description": "Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.",
-              "type": "boolean"
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tcp",
+                  "description": "Relays raw TCP streams without parsing application messages."
+                }
+              },
+              "required": ["type"],
+              "additionalProperties": true
             },
-            "auth": {
-              "description": "Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.",
-              "anyOf": [{ "$ref": "#/$defs/ProxyAuth" }, { "type": "null" }]
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "http" },
+                "addXForwardedHeaders": {
+                  "description": "Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.",
+                  "type": "boolean"
+                },
+                "auth": {
+                  "description": "Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.",
+                  "anyOf": [{ "$ref": "#/$defs/ProxyAuth" }, { "type": "null" }]
+                }
+              },
+              "required": ["type", "addXForwardedHeaders", "auth"]
             }
-          },
-          "required": ["type", "addXForwardedHeaders", "auth"]
+          ]
         },
         "ProxyAuth": {
           "anyOf": [
