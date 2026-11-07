@@ -3281,6 +3281,20 @@ service.mod.deleting-task-action-no-longer-exists:
   pl_PL: "Usuwanie zadania %{id}, ponieważ akcja już nie istnieje"
 
 # service/action.rs
+service.action-files.invalid-transfer:
+  en_US: "Invalid or expired action file transfer"
+  de_DE: "Ungültige oder abgelaufene Dateiübertragung einer Aktion"
+  es_ES: "Transferencia de archivo de acción no válida o caducada"
+  fr_FR: "Transfert de fichier d’action invalide ou expiré"
+  pl_PL: "Nieprawidłowy lub wygasły transfer pliku akcji"
+
+service.action-files.size-limit:
+  en_US: "The uploaded file exceeds the maximum size of %{max} bytes"
+  de_DE: "Die hochgeladene Datei überschreitet die maximale Größe von %{max} Bytes"
+  es_ES: "El archivo cargado supera el tamaño máximo de %{max} bytes"
+  fr_FR: "Le fichier envoyé dépasse la taille maximale de %{max} octets"
+  pl_PL: "Przesłany plik przekracza maksymalny rozmiar %{max} bajtów"
+
 service.action.action-request-invalid-state:
   en_US: "action request exists in an invalid state %{task}"
   de_DE: "Aktionsanfrage existiert in ungültigem Zustand %{task}"
