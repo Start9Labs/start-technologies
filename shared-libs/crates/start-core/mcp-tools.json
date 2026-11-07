@@ -12568,6 +12568,46 @@
     }
   },
   {
+    "name": "volumes.update-cifs",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "UpdateCifsSharedVolumeParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/SharedVolumeId" },
+            "hostname": { "type": "string" },
+            "path": { "type": "string" },
+            "username": { "type": "string" },
+            "password": {
+              "description": "Omitted keeps the stored password; empty clears it.",
+              "type": ["string", "null"]
+            }
+          },
+          "required": ["id", "hostname", "path", "username"],
+          "additionalProperties": true
+        },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/SharedVolumeId" },
+        "hostname": { "type": "string" },
+        "path": { "type": "string" },
+        "username": { "type": "string" },
+        "password": {
+          "description": "Omitted keeps the stored password; empty clears it.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["id", "hostname", "path", "username"],
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "wifi.add",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

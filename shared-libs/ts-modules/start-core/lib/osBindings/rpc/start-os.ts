@@ -614,6 +614,9 @@ export type UninstallParamsInput = z.input<typeof schemas.UninstallParams>
 export type UnsetGatewaySecureParamsInput = z.input<
   typeof schemas.UnsetGatewaySecureParams
 >
+export type UpdateCifsSharedVolumeParamsInput = z.input<
+  typeof schemas.UpdateCifsSharedVolumeParams
+>
 export type UpdateSystemRes = z.output<typeof schemas.UpdateSystemRes>
 export type UpdateTunnelParamsInput = z.input<typeof schemas.UpdateTunnelParams>
 export type VersionSignerParamsInput = z.input<
