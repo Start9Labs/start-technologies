@@ -78,11 +78,11 @@ fn credential_changes_reject_checks_of_the_previous_source() {
     let id = SharedVolumeId::new();
     let mut db = crate::db::model::DatabaseModel::from(to_value(&serde_json::json!({
         "public": {"sharedVolumes": { id.to_string(): {
-            "name": "Remote", "source": {"kind": "cifs", "hostname": "nas.local", "path": "/share"},
+            "name": "Remote", "source": {"kind": "cifs", "hostname": "nas.local", "path": "/share", "username": "user"},
             "grants": {}, "availability": "unknown"
         }}},
         "private": {"sharedVolumeCredentials": { id.to_string(): {
-            "username": "user", "password": "old-password"
+            "password": "old-password"
         }}}
     })).unwrap());
     let old = SourceDefinition::read(&db, &id).unwrap();
@@ -137,6 +137,21 @@ fn credential_changes_reject_checks_of_the_previous_source() {
             .available,
         Some(42)
     );
+}
+
+#[tokio::test]
+async fn checking_a_missing_local_directory_does_not_recreate_it() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("removed");
+    let target = root.path().join("mountpoint");
+    assert!(
+        SourceFilesystem::Local(path.clone())
+            .mount(&target, ReadWrite)
+            .await
+            .is_err()
+    );
+    assert!(!path.exists());
+    assert!(!target.exists());
 }
 
 #[test]

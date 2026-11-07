@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use tokio::sync::mpsc;
@@ -83,7 +83,10 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
     let mut mounted = mounted::MountedChecks::new(send.clone());
     let _listeners = events::subscribe(send);
     let mut catalog = db.watch("/public/sharedVolumes".parse().unwrap()).await;
-    let mut running: BTreeMap<SharedVolumeId, NonDetachingJoinHandle<()>> = BTreeMap::new();
+    let mut running: BTreeMap<
+        SharedVolumeId,
+        (source::SourceDefinition, NonDetachingJoinHandle<()>),
+    > = BTreeMap::new();
     let mut retries = BTreeMap::<SharedVolumeId, Retry>::new();
     let mut disk_scan: Option<NonDetachingJoinHandle<()>> = None;
     let mut retire_at: Option<Instant> = None;
@@ -108,9 +111,14 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
             }
             event => event,
         };
+        let snapshot = db.peek().await;
         let volumes: BTreeMap<SharedVolumeId, SharedVolume> =
-            db.peek().await.as_public().as_shared_volumes().de()?;
-        running.retain(|id, job| volumes.contains_key(id) && !job.is_finished());
+            snapshot.as_public().as_shared_volumes().de()?;
+        running.retain(|id, (definition, job)| {
+            !job.is_finished()
+                && source::SourceDefinition::read(&snapshot, id)
+                    .is_ok_and(|current| current == *definition)
+        });
         retries.retain(|id, _| volumes.get(id).is_some_and(retryable));
         if matches!(event, Some(Event::Disks))
             || retire_at.is_some_and(|deadline| deadline <= Instant::now())
@@ -118,9 +126,11 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
             let (retired, pending) =
                 crate::disk::mount::guard::TmpMountGuard::retire_changed_devices().await;
             retire_at = pending.then(|| Instant::now() + Duration::from_secs(1));
+            let mut affected = BTreeSet::new();
             for (id, volume) in &volumes {
                 if let SharedVolumeSource::Disk { logicalname, .. } = &volume.source {
                     if retired.contains(logicalname) {
+                        affected.extend(volume.grants.keys().cloned());
                         running.remove(id);
                         source::record_availability(
                             &ctx,
@@ -132,6 +142,12 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
                         .await?;
                     }
                 }
+            }
+            for package in affected {
+                ctx.callbacks
+                    .invalidate_shared_volumes(&package)
+                    .await
+                    .log_err();
             }
         }
         mounted.tick(&ctx, &volumes).await;
@@ -200,20 +216,24 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
                     .or_insert_with(|| Retry::new(Instant::now()))
                     .take(Instant::now());
             if full || tcp {
+                let definition = source::SourceDefinition::read(&snapshot, &id)?;
                 let ctx = ctx.clone();
                 let key = id.clone();
                 running.insert(
                     id,
-                    tokio::spawn(async move {
-                        if full {
-                            super::inspect(ctx, super::SharedVolumeParams { id: key })
-                                .await
-                                .log_err();
-                        } else {
-                            retry(ctx, key).await.log_err();
-                        }
-                    })
-                    .into(),
+                    (
+                        definition,
+                        tokio::spawn(async move {
+                            if full {
+                                super::inspect(ctx, super::SharedVolumeParams { id: key })
+                                    .await
+                                    .log_err();
+                            } else {
+                                retry(ctx, key).await.log_err();
+                            }
+                        })
+                        .into(),
+                    ),
                 );
             }
         }

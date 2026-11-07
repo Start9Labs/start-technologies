@@ -27,19 +27,25 @@ pub async fn create_local_directory(path: &Path) -> Result<(), Error> {
 }
 
 #[derive(Clone, PartialEq)]
-struct SourceDefinition {
+pub(crate) struct SourceDefinition {
     source: SharedVolumeSource,
     credentials: Option<SharedVolumeCredentials>,
 }
 impl SourceDefinition {
-    fn read(db: &crate::db::model::DatabaseModel, id: &SharedVolumeId) -> Result<Self, Error> {
-        let source = db
+    pub(crate) fn read(
+        db: &crate::db::model::DatabaseModel,
+        id: &SharedVolumeId,
+    ) -> Result<Self, Error> {
+        let mut source = db
             .as_public()
             .as_shared_volumes()
             .as_idx(id)
             .or_not_found(id)?
             .as_source()
             .de()?;
+        if let SharedVolumeSource::Disk { label, .. } = &mut source {
+            *label = None;
+        }
         let credentials = if matches!(source, SharedVolumeSource::Cifs { .. }) {
             Some(
                 db.as_private()

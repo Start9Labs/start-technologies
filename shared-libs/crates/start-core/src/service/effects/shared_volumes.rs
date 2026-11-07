@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
 
 use crate::PackageId;
+use crate::db::model::DatabaseModel;
 use crate::prelude::*;
 use crate::service::effects::callbacks::CallbackHandler;
 use crate::service::effects::prelude::*;
 use crate::service::rpc::CallbackId;
-use crate::shared_volumes::{
-    SharedVolume, SharedVolumeAvailability, SharedVolumeId, SharedVolumeSource,
-};
+use crate::shared_volumes::source::SourceDefinition;
+use crate::shared_volumes::{SharedVolume, SharedVolumeAvailability, SharedVolumeId};
 
 #[derive(Debug, Clone, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -51,45 +51,32 @@ fn granted_volumes(
         .collect())
 }
 
-/// What a consumer's mounts depend on: its granted volumes' access, availability and source.
-fn mount_inputs(
-    package: &PackageId,
-    catalog: &BTreeMap<SharedVolumeId, SharedVolume>,
-) -> Vec<(
+type MountInput = (
     SharedVolumeId,
     bool,
     SharedVolumeAvailability,
-    SharedVolumeSource,
-)> {
+    SourceDefinition,
+);
+
+fn mount_inputs(package: &PackageId, db: &DatabaseModel) -> Result<Vec<MountInput>, Error> {
+    let catalog = db.as_public().as_shared_volumes().de()?;
     catalog
-        .iter()
+        .into_iter()
         .filter_map(|(id, volume)| {
             let grant = volume.grants.get(package)?;
-            Some((
-                id.clone(),
-                grant.readonly,
-                volume.inspection.availability.clone(),
-                volume.source.clone(),
-            ))
+            Some(SourceDefinition::read(db, &id).map(|definition| {
+                (
+                    id,
+                    grant.readonly,
+                    volume.inspection.availability,
+                    definition,
+                )
+            }))
         })
         .collect()
 }
 
-/// Whether a consumer's mount inputs changed; a volume becoming unknown is not a change.
-fn mount_inputs_changed(
-    previous: &[(
-        SharedVolumeId,
-        bool,
-        SharedVolumeAvailability,
-        SharedVolumeSource,
-    )],
-    mut current: Vec<(
-        SharedVolumeId,
-        bool,
-        SharedVolumeAvailability,
-        SharedVolumeSource,
-    )>,
-) -> bool {
+fn mount_inputs_changed(previous: &[MountInput], mut current: Vec<MountInput>) -> bool {
     for input in &mut current {
         if input.2 == SharedVolumeAvailability::Unknown {
             if let Some(known) = previous.iter().find(|known| known.0 == input.0) {
@@ -109,12 +96,12 @@ pub async fn get_shared_volumes(
         .seed
         .ctx
         .db
-        .watch("/public/sharedVolumes".parse().unwrap())
+        .watch("".parse().unwrap())
         .await
-        .typed::<BTreeMap<SharedVolumeId, SharedVolume>>();
-    let catalog: BTreeMap<SharedVolumeId, SharedVolume> =
-        from_value(watch.as_mut().peek_and_mark_seen()?)?;
-    let inputs = mount_inputs(&service.seed.id, &catalog);
+        .typed::<DatabaseModel>();
+    let db = DatabaseModel::from(watch.as_mut().peek_and_mark_seen()?);
+    let catalog = db.as_public().as_shared_volumes().de()?;
+    let inputs = mount_inputs(&service.seed.id, &db)?;
     let result = granted_volumes(
         service
             .seed
@@ -132,9 +119,8 @@ pub async fn get_shared_volumes(
             service.seed.id.clone(),
             watch,
             move |value| {
-                from_value(value.clone()).map_or(true, |catalog| {
-                    mount_inputs_changed(&inputs, mount_inputs(&package, &catalog))
-                })
+                mount_inputs(&package, &DatabaseModel::from(value.clone()))
+                    .map_or(true, |current| mount_inputs_changed(&inputs, current))
             },
             CallbackHandler::new(&service, callback),
         );
@@ -318,11 +304,22 @@ mod tests {
                 inspection: crate::shared_volumes::SharedVolumeInspection::available(None),
             },
         );
-        let inputs = mount_inputs(&package, &catalog);
+        let database = |catalog: &BTreeMap<SharedVolumeId, SharedVolume>| {
+            DatabaseModel::from(
+                to_value(&serde_json::json!({
+                    "public": {"sharedVolumes": catalog},
+                    "private": {"sharedVolumeCredentials": {
+                        mine.to_string(): {"password": "old-password"}
+                    }}
+                }))
+                .unwrap(),
+            )
+        };
+        let inputs = mount_inputs(&package, &database(&catalog)).unwrap();
         let changed = |edit: &dyn Fn(&mut BTreeMap<SharedVolumeId, SharedVolume>)| {
             let mut edited = catalog.clone();
             edit(&mut edited);
-            mount_inputs_changed(&inputs, mount_inputs(&package, &edited))
+            mount_inputs_changed(&inputs, mount_inputs(&package, &database(&edited)).unwrap())
         };
         assert!(!changed(
             &|c| c.get_mut(&mine).unwrap().name = "Songs".into()
@@ -355,6 +352,58 @@ mod tests {
                 .grants
                 .insert(package.clone(), SharedVolumeGrant { readonly: true });
         }));
+        assert!(!changed(&|c| {
+            c.get_mut(&mine).unwrap().inspection =
+                crate::shared_volumes::SharedVolumeInspection::available(Some(4096));
+        }));
+        let mut updated = database(&catalog);
+        updated
+            .as_private_mut()
+            .as_shared_volume_credentials_mut()
+            .as_idx_mut(&mine)
+            .unwrap()
+            .mutate(|credentials| {
+                credentials.password = Some("new-password".into());
+                Ok(())
+            })
+            .unwrap();
+        assert!(mount_inputs_changed(
+            &inputs,
+            mount_inputs(&package, &updated).unwrap()
+        ));
+        updated
+            .as_public_mut()
+            .as_shared_volumes_mut()
+            .as_idx_mut(&mine)
+            .unwrap()
+            .mutate(|volume| {
+                volume.inspection = Default::default();
+                Ok(())
+            })
+            .unwrap();
+        assert!(mount_inputs_changed(
+            &inputs,
+            mount_inputs(&package, &updated).unwrap()
+        ));
+        assert!(
+            !serde_json::to_string(&granted_volumes(true, &package, catalog.clone()).unwrap())
+                .unwrap()
+                .contains("password")
+        );
+        catalog.get_mut(&mine).unwrap().source = SharedVolumeSource::Disk {
+            logicalname: "/dev/disk/by-uuid/photos".into(),
+            path: "music".into(),
+            label: Some("Photos".into()),
+        };
+        let inputs = mount_inputs(&package, &database(&catalog)).unwrap();
+        if let SharedVolumeSource::Disk { label, .. } = &mut catalog.get_mut(&mine).unwrap().source
+        {
+            *label = Some("Renamed drive".into());
+        }
+        assert!(!mount_inputs_changed(
+            &inputs,
+            mount_inputs(&package, &database(&catalog)).unwrap()
+        ));
     }
 
     #[test]
