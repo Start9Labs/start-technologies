@@ -469,6 +469,63 @@ describe('generated effects RPC boundary', () => {
     )
   })
 
+  test('file effects preserve their options and the action event', async () => {
+    const effects = makeEffects({ eventId: 'file-event' })
+    const upload = {
+      volume: 'data',
+      path: 'import.pem',
+      mode: 0o600,
+      maxSize: 1024,
+      uid: 1000,
+      gid: 1000,
+    }
+    const download = {
+      volume: 'data',
+      path: 'report.txt',
+      mime: 'text/plain',
+      filename: 'report.txt',
+    }
+    reply = { result: 'prepared-id' }
+    await expect(effects.prepareUpload(upload)).resolves.toBe('prepared-id')
+    await expect(effects.prepareDownload(download)).resolves.toBe('prepared-id')
+    reply = { result: { maxSize: 1024 } }
+    await expect(
+      effects.getUploadLimits({ id: 'prepared-id' }),
+    ).resolves.toEqual({ maxSize: 1024 })
+    const metadata = {
+      name: 'import.pem',
+      path: 'import.pem',
+      mime: null,
+      commitment: { hash: 'hash', size: 4 },
+    }
+    reply = { result: metadata }
+    await expect(effects.resolveUpload({ id: 'prepared-id' })).resolves.toEqual(
+      metadata,
+    )
+    expect(requests).toEqual([
+      {
+        id: expect.any(Number),
+        method: 'prepare-upload',
+        params: { ...upload, eventId: 'file-event' },
+      },
+      {
+        id: expect.any(Number),
+        method: 'prepare-download',
+        params: { ...download, eventId: 'file-event' },
+      },
+      {
+        id: expect.any(Number),
+        method: 'get-upload-limits',
+        params: { id: 'prepared-id', eventId: 'file-event' },
+      },
+      {
+        id: expect.any(Number),
+        method: 'resolve-upload',
+        params: { id: 'prepared-id', eventId: 'file-event' },
+      },
+    ])
+  })
+
   test('retains host error details and method attribution', async () => {
     const error = jest.spyOn(console, 'error').mockImplementation(() => {})
     reply = {
