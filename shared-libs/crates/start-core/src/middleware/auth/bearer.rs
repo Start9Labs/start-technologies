@@ -80,7 +80,8 @@ impl<C: LoginContext> Middleware<C> for BearerAuth {
                 ));
             }
             if metadata.get_signer {
-                request.params["__Auth_signer"] = to_value(&session)?;
+                crate::middleware::params_object(&mut request.params)?
+                    .insert("__Auth_signer".into(), to_value(&session)?);
             }
             touch_token(context, &session).await
         }

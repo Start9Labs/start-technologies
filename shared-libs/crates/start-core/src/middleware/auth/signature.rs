@@ -704,12 +704,14 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
             let res = context.check_pubkey(&db, signer, metadata.additional)?;
             if metadata.get_signer {
                 if let Some(signer) = signer {
-                    request.params["__Auth_signer"] = to_value(signer)?;
+                    crate::middleware::params_object(&mut request.params)?
+                        .insert("__Auth_signer".into(), to_value(signer)?);
                 }
             }
             if metadata.get_user_agent {
                 if let Some(user_agent) = self.user_agent.as_ref().and_then(|h| h.to_str().ok()) {
-                    request.params["__Auth_userAgent"] = to_value(&user_agent)?;
+                    crate::middleware::params_object(&mut request.params)?
+                        .insert("__Auth_userAgent".into(), to_value(&user_agent)?);
                 }
             }
             if login {

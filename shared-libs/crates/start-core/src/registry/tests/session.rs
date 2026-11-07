@@ -121,6 +121,38 @@ async fn encrypted_identity_reaches_live_auth_without_per_message_proofs() {
 }
 
 #[tokio::test]
+async fn non_object_subscription_params_are_rejected_without_losing_the_encrypted_session() {
+    let (_temp, ctx, _admin, reader, _) = fixture().await;
+    let (url, _task) = session_server(ctx).await;
+    let mut socket = encrypted(&secure_url(&url), &reader).await;
+    for (id, params) in [(10, json!([])), (11, json!(["value"]))] {
+        let reply = call(
+            &mut socket,
+            json!({"jsonrpc":"2.0","id":id,"method":"db.subscribe","params":params}),
+        )
+        .await;
+        assert_eq!(reply["id"], json!(id));
+        assert_eq!(
+            reply["error"]["code"],
+            json!(rpc_toolkit::yajrc::INVALID_PARAMS_ERROR.code)
+        );
+    }
+    let reply = call(
+        &mut socket,
+        json!({"jsonrpc":"2.0","id":12,"method":"db.subscribe"}),
+    )
+    .await;
+    assert!(reply.get("error").is_none(), "{reply}");
+    assert!(reply["result"]["guid"].is_string(), "{reply}");
+    let reply = call(
+        &mut socket,
+        json!({"jsonrpc":"2.0","id":13,"method":"index","params":{}}),
+    )
+    .await;
+    assert!(reply.get("error").is_none(), "{reply}");
+}
+
+#[tokio::test]
 async fn membership_and_package_access_remain_live_on_an_admitted_socket() {
     let (_temp, ctx, admin, reader, _) = fixture().await;
     let (url, _task) = session_server(ctx.clone()).await;

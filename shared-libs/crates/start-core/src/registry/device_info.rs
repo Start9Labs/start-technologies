@@ -306,7 +306,8 @@ impl DeviceInfoMiddleware {
             if let Some(device_info) = device_info {
                 self.wire = WireCompatibility::for_client(startwrt, Some(&device_info.os.version))?;
                 if metadata.get_device_info {
-                    request.params["__DeviceInfo_device_info"] = to_value(&device_info)?;
+                    crate::middleware::params_object(&mut request.params)?
+                        .insert("__DeviceInfo_device_info".into(), to_value(&device_info)?);
                     self.device_info = Some(device_info);
                 }
             }

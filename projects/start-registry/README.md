@@ -87,6 +87,8 @@ Configuration is read from CLI flags and a config file (`-c <path>`; default sea
 
 Clients synchronize registry metadata through `db.subscribe`: `rpcstream` opt-in uses the shared `/ws/rpc` socket, while ordinary requests retain the GUID WebSocket continuation. StartOS authenticates and encrypts this shared connection with Noise; the registry must support both Noise admission and `rpcstream`, and its configured hostnames must include the URL host used by clients. A subscription's optional `osVersion` selects a lazily shared backward-compatible index view; omitted versions retain the canonical format. StartOS maintains package, signer, and OS-update caches independently of open browser sessions. OS releases marked `security` generate notifications on compatible StartOS servers using that registry for updates.
 
+Ordinary RPC requests have a 1 MiB encoded-body limit, including JSON and base64 overhead. This also bounds inline registry icons sent by `registry info set-icon`; use a smaller image when its encoded request exceeds that budget. Large index responses and asset downloads retain their separate limits.
+
 Server state lives in `<datadir>/registry.db` (PatchDB) plus a SQLite metrics database and hosted asset files.
 
 > [!NOTE]

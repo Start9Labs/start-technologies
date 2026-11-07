@@ -200,6 +200,57 @@ test('a full data write budget still permits an independently bounded close', as
   assert.equal(socket.readyState, socket.CLOSING)
 })
 
+test('the transport ending after a local close dispatches no stale error or verified result', async context => {
+  const { socket, server } = await framedSocket(context)
+  let errors = 0
+  socket.addEventListener('error', () => errors++)
+  const closed = new Promise(resolve =>
+    socket.addEventListener('close', resolve, { once: true }),
+  )
+  socket.close()
+  void server.close()
+  const result = await closed
+  assert.equal(errors, 0)
+  assert.equal(result.code, NOISE_PROFILE.transport.abnormalCloseCode)
+  assert.equal(result.wasClean, false)
+})
+
+test('transport loss during an active connection still dispatches an error', async context => {
+  const { socket, server } = await framedSocket(context)
+  let errors = 0
+  socket.addEventListener('error', () => errors++)
+  const closed = new Promise(resolve =>
+    socket.addEventListener('close', resolve, { once: true }),
+  )
+  void server.close()
+  const result = await closed
+  assert.equal(errors, 1)
+  assert.equal(result.code, NOISE_PROFILE.transport.abnormalCloseCode)
+  assert.equal(result.wasClean, false)
+})
+
+for (const [name, fail] of [
+  [
+    'malformed peer data',
+    server => server.send(Uint8Array.of(0, 0, 0, 2, 0, 255)),
+  ],
+  ['a failed close write', server => server.abort(new Error('transport lost'))],
+])
+  test(`${name} after local close cannot report an authenticated result`, async context => {
+    const { socket, server } = await framedSocket(context)
+    let errors = 0
+    socket.addEventListener('error', () => errors++)
+    const closed = new Promise(resolve =>
+      socket.addEventListener('close', resolve, { once: true }),
+    )
+    socket.close()
+    fail(server)
+    const result = await closed
+    assert.equal(errors, 0)
+    assert.equal(result.code, NOISE_PROFILE.transport.abnormalCloseCode)
+    assert.equal(result.wasClean, false)
+  })
+
 test('authenticated close reasons retain their leading UTF-8 BOM', async context => {
   const { socket, server } = await framedSocket(context)
   const close = new Promise(resolve =>

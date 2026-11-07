@@ -271,8 +271,10 @@ export function noiseWebSocketConstructor(
 
     private fail(error: unknown) {
       if (this.readyState === this.CLOSED) return
-      this.readyState = this.CLOSING
-      this.dispatchEvent(new ErrorEvent('error', { error }))
+      if (this.readyState !== this.CLOSING) {
+        this.readyState = this.CLOSING
+        this.dispatchEvent(new ErrorEvent('error', { error }))
+      }
       this.finish(new CloseEvent('close', { code: profile.abnormalCloseCode }))
     }
 
