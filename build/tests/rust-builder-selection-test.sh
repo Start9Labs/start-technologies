@@ -44,6 +44,24 @@ assert_log_contains() {
     fi
 }
 
+entrypoint="$repo_root/build/rust-builder/entrypoint.sh"
+profile_flags=CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS
+default_flags=$(env -u DISABLE_RVA23 -u "$profile_flags" bash "$entrypoint" printenv "$profile_flags")
+[[ "$default_flags" != *'target-cpu='* ]]
+[[ "$default_flags" == *'+v,'* ]]
+[[ "$default_flags" == *'+supm'* ]]
+test "$(env -u "$profile_flags" DISABLE_RVA23=0 bash "$entrypoint" printenv "$profile_flags")" = "$default_flags"
+env -u "$profile_flags" DISABLE_RVA23=1 bash "$entrypoint" bash -c 'test ! -v "$1"' -- "$profile_flags"
+for disable_rva23 in 0 1; do
+    for flags in '' '-C target-cpu=sifive-u74'; do
+        test "$(env DISABLE_RVA23="$disable_rva23" "$profile_flags=$flags" bash "$entrypoint" printenv "$profile_flags")" = "$flags"
+    done
+done
+test "$(bash "$entrypoint" printf '%s\n' 'argument with spaces' '*')" = $'argument with spaces\n*'
+status=0
+bash "$entrypoint" bash -c 'exit 23' || status=$?
+test "$status" = 23
+
 image=$(./build/rust-builder/image.sh)
 if ! [[ "$image" =~ ^ghcr\.io/start9labs/cargo-zigbuild@sha256:[0-9a-f]{64}$ ]]; then
     printf 'Builder image is not pinned: %s\n' "$image" >&2
@@ -164,4 +182,4 @@ if MOCK_RUST_VERSION=1.91.7 MOCK_RUSTUP_EXIT=23 bash -e "$native_step"; then
 fi
 test ! -s "$GITHUB_ENV"
 
-printf 'Builder selection, overrides, native toolchain, derived images, and K1 disassembly checks passed.\n'
+printf 'Builder selection, RVA23 opt-out, overrides, native toolchain, derived images, and K1 disassembly checks passed.\n'

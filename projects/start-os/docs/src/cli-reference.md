@@ -115,6 +115,10 @@ Display StartOS system logs. These are also readable and downloadable in the web
 - `-B, --before` — Show logs before cursor
 - `-b, --boot <ID>` — Filter by boot ID
 
+### `start-cli server set-log-level <LEVEL>`
+
+Set the running daemon's verbosity for `start-core`/`start-os` code to `error`, `warn`, `info`, `debug`, or `trace`. Dependency logs keep their startup filter. Restarting the daemon restores the startup filter without changing saved configuration. Trace output may include sensitive details; see [Log Level](logs.md#log-level).
+
 ### `start-cli server kernel-logs`
 
 Display kernel logs. Same options as `server logs`.
