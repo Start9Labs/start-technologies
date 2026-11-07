@@ -569,4 +569,5 @@ export default {
   601: 'Cambiar perfil',
   602: 'Introduce tu contraseña de administrador para cifrar esta copia de seguridad.',
   603: 'Se sobrescribirán todos los ajustes actuales y el dispositivo se reiniciará. Introduce la contraseña de administrador vigente cuando se creó esta copia de seguridad.',
+  604: 'No se pudo comprobar si hay actualizaciones',
 } satisfies i18n

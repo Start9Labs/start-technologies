@@ -569,4 +569,5 @@ export default {
   601: 'Zmień profil',
   602: 'Wprowadź hasło administratora, aby zaszyfrować tę kopię zapasową.',
   603: 'Wszystkie bieżące ustawienia zostaną nadpisane, a urządzenie uruchomi się ponownie. Wprowadź hasło administratora obowiązujące w chwili utworzenia tej kopii zapasowej.',
+  604: 'Nie udało się sprawdzić aktualizacji',
 } satisfies i18n

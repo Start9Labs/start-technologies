@@ -9,6 +9,7 @@ use ed25519_dalek::SigningKey;
 use serde_json::Value;
 
 use super::*;
+use crate::registry::client::Product;
 use crate::registry::package::add::{AddMirrorParams, AddPackageParams, add_mirror, add_package};
 use crate::rpc_continuations::Guid;
 use crate::s9pk::S9pk;
@@ -66,7 +67,7 @@ pub(super) async fn context(datadir: PathBuf, uploader: AnyVerifyingKey) -> Regi
         listen: "127.0.0.1:0".parse().unwrap(),
         db,
         datadir,
-        startwrt: false,
+        product: Product::StartOs,
         rpc_continuations: RpcContinuations::new(),
         open_authed_continuations: OpenAuthedContinuations::new(),
         auth_sig_nonce_cache: SyncMutex::new(Default::default()),

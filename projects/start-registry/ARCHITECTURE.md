@@ -35,7 +35,7 @@ Defined in `shared-libs/crates/start-core/src/bins/registry.rs`:
 
 Defined in `shared-libs/crates/start-core/src/registry/mod.rs`:
 
-- `POST /rpc/{*path}` — JSON-RPC, wrapped in `Cors`, `Auth` (local + signature auth), and `DeviceInfoMiddleware`.
+- `POST /rpc/{*path}` — JSON-RPC, wrapped in `Cors`, `Auth` (local + signature auth), and `DeviceInfoMiddleware`. The middleware reads `X-StartOS-Device-Info` (`registry/device_info.rs`) to filter responses for the device, and `X-Start9-Registry-Client` (`registry/client.rs`) for the client's product and the signature formats it reads. A client of another product is rejected; one that declares no signature formats gets legacy labels on a StartWRT registry, and on a StartOS registry when it reports a version before 0.4.0.3.
 - `GET /ws/rpc/{*path}` — WebSocket RPC continuations, keyed by a `Guid`.
 - `GET /os/security` — public WebSocket sending a PatchDB dump of the security catalog followed by revisions.
 - `/rest/rpc/{*path}` — REST continuation channel (e.g. large asset streams), keyed by a `Guid`.

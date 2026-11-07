@@ -1,0 +1,2 @@
+- Der Router findet Updates in Registries mit start-registry ab 1.2.0.
+- Kann der Router nicht nach Updates suchen, zeigt **System > Einstellungen > Allgemein** eine fehlgeschlagene Update-Suche an statt eines vermeintlich fehlenden Updates.

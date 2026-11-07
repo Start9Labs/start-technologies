@@ -702,11 +702,12 @@ pub(crate) async fn call_remote_with_client(
     use rpc_toolkit::RpcResponse;
     use rpc_toolkit::yajrc::{GenericRpcMethod, Id, RpcRequest};
 
-    let rpc_req = RpcRequest {
+    let mut rpc_req = serde_json::to_value(RpcRequest {
         id: Some(Id::Number(0.into())),
         method: GenericRpcMethod::<_, _, Value>::new(method),
         params,
-    };
+    })?;
+    rpc_req["jsonrpc"] = "2.0".into();
     let body = serde_json::to_vec(&rpc_req)?;
     let mut req = client
         .request(Method::POST, url)
@@ -741,8 +742,9 @@ pub(crate) async fn call_remote_with_client(
         .headers()
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<new_mime_guess::Mime>().ok())
     {
-        Some("application/json") => {
+        Some(content_type) if content_type.essence_str() == "application/json" => {
             serde_json::from_slice::<RpcResponse>(&*res.bytes().await?)
                 .with_kind(ErrorKind::Deserialization)?
                 .result

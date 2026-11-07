@@ -569,4 +569,5 @@ export default {
   601: 'Changer de profil',
   602: 'Saisissez votre mot de passe administrateur pour chiffrer cette sauvegarde.',
   603: 'Tous les paramètres actuels seront écrasés et l’appareil redémarrera. Saisissez le mot de passe administrateur en vigueur lors de la création de cette sauvegarde.',
+  604: 'Échec de la recherche de mises à jour',
 } satisfies i18n

@@ -574,4 +574,5 @@ export const ENGLISH: Record<string, number> = {
   'Change Profile': 601,
   'Enter your admin password to encrypt this backup.': 602,
   'All current settings will be overwritten and the device will reboot. Enter the admin password in effect when this backup was created.': 603,
+  'Failed to check for updates': 604,
 }

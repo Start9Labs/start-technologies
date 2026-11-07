@@ -80,6 +80,7 @@ async fn listing(image: &Squashfs<Bytes>, temp: &TmpDir) -> String {
         .unwrap();
     String::from_utf8(
         Command::new("unsquashfs")
+            .env("TZ", "UTC")
             .arg("-lln")
             .arg(&path)
             .invoke(ErrorKind::Filesystem)

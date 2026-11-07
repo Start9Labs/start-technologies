@@ -569,4 +569,5 @@ export default {
   601: 'Profil ändern',
   602: 'Geben Sie Ihr Administrator-Passwort ein, um diese Sicherung zu verschlüsseln.',
   603: 'Alle aktuellen Einstellungen werden überschrieben und das Gerät startet neu. Geben Sie das Administrator-Passwort ein, das beim Erstellen dieser Sicherung galt.',
+  604: 'Suche nach Updates fehlgeschlagen',
 } satisfies i18n

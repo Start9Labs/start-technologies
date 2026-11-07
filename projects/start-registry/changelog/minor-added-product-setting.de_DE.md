@@ -1,0 +1,3 @@
+- Die Registry-Einstellung `product` (`startos` oder `startwrt`) bezeichnet das Betriebssystem, dessen Versionen sie bereitstellt. `startwrt: true` wählt weiterhin StartWRT.
+- Fragt ein aktueller StartOS-Server oder StartWRT-Router nach Updates bei einer Registry für das andere Produkt, benennt die Fehlermeldung das von ihr bereitgestellte Produkt.
+- Clients, die Unterstützung für aktuelle Signaturkennzeichnungen angeben, erhalten diese unabhängig von Produkt oder Version.

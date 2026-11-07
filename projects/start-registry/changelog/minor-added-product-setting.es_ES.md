@@ -1,0 +1,3 @@
+- La opción `product` del registro (`startos` o `startwrt`) identifica el sistema operativo cuyas versiones sirve. `startwrt: true` sigue seleccionando StartWRT.
+- Si un servidor StartOS o router StartWRT actual consulta actualizaciones en un registro del otro producto, recibe un error que identifica el producto servido.
+- Los clientes que declaran compatibilidad con las etiquetas de firma actuales las reciben independientemente de su producto o versión.

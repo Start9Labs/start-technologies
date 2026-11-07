@@ -1,0 +1,2 @@
+- Router znajduje aktualizacje w rejestrach z start-registry 1.2.0 lub nowszym.
+- Gdy nie można sprawdzić aktualizacji, **System > Ustawienia > Ogólne** pokazuje błąd sprawdzania aktualizacji, zamiast informować o braku aktualizacji.

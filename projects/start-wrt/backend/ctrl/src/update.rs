@@ -5,6 +5,9 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use startos::registry::asset::RegistryAsset;
+use startos::registry::client::Product;
+use startos::registry::os::index::OsVersionInfo;
+use startos::registry::os::SIG_CONTEXT;
 use startos::sign::commitment::blake3::Blake3Commitment;
 use startos::util::io::create_file;
 use tokio::io::AsyncWriteExt;
@@ -13,10 +16,7 @@ use tokio::process::Command;
 use crate::continuations::{Guid, RpcContinuation};
 use crate::error::Error;
 use crate::progress::{FullProgressTracker, ProgressUnits};
-use crate::registry::device_info::DeviceInfo;
-use crate::registry::os::{asset_for_platform, OsVersionInfo, SIG_CONTEXT};
-use crate::registry::{self};
-use crate::ServerContext;
+use crate::{registry, ServerContext};
 
 #[cfg(test)]
 mod tests;
@@ -43,25 +43,27 @@ rpc_toolkit::reflect_ts!(UpdateSystemRes);
 
 /// Uses the router's device identity for registry compatibility.
 pub async fn fetch_versions(registry_url: &str) -> Result<BTreeMap<String, OsVersionInfo>, Error> {
-    let device_info = DeviceInfo::load()?;
-    let device_info_header = device_info.to_header_value()?;
-    let client = reqwest::Client::new();
+    let registry_url = registry_url
+        .parse()
+        .map_err(|e| Error::other(format!("invalid registry URL: {e}")))?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| Error::other(format!("building HTTP client: {e}")))?;
 
-    let current_version = env!("CARGO_PKG_VERSION");
-    let params = serde_json::json!({
-        "sourceVersion": current_version,
-    });
-
-    let result = registry::call_registry_rpc(
-        &client,
+    let result = startos::registry::client::call(
+        client,
         registry_url,
+        Product::StartWrt,
+        Some(&registry::device_info()?),
         "os.version.get",
-        params,
-        Some(device_info_header),
+        imbl_value::json!({
+            "sourceVersion": env!("CARGO_PKG_VERSION"),
+        }),
     )
     .await?;
 
-    let versions: BTreeMap<String, OsVersionInfo> = serde_json::from_value(result)
+    let versions: BTreeMap<String, OsVersionInfo> = imbl_value::from_value(result)
         .map_err(|e| Error::other(format!("parsing registry version response: {e}")))?;
 
     Ok(versions)
@@ -75,7 +77,7 @@ pub async fn update_system(
         target_version,
     }: UpdateSystemParams,
 ) -> Result<UpdateSystemRes, Error> {
-    let platform = DeviceInfo::load()?.os.platform;
+    let platform = registry::platform();
     let registry = registry.unwrap_or_else(|| {
         crate::system::read_registry_url()
             .unwrap_or_else(|| crate::system::DEFAULT_REGISTRY_URL.to_string())
@@ -322,4 +324,15 @@ async fn do_update(
     apply_phase.complete();
 
     Ok(())
+}
+
+/// Prefers squashfs, then img, then iso.
+pub(crate) fn asset_for_platform<'a>(
+    info: &'a OsVersionInfo,
+    platform: &str,
+) -> Option<&'a RegistryAsset<Blake3Commitment>> {
+    info.squashfs
+        .get(platform)
+        .or_else(|| info.img.get(platform))
+        .or_else(|| info.iso.get(platform))
 }
