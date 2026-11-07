@@ -54,6 +54,7 @@ use crate::volume::{PKG_VOLUME_DIR, data_dir};
 use crate::{ActionId, CAP_1_KiB, DATA_DIR, ImageId, PackageId};
 
 pub mod action;
+pub mod action_files;
 mod attach_environment;
 mod attach_input;
 pub mod cli;
@@ -455,6 +456,7 @@ impl Service {
             backup: SyncMutex::new(None),
             backup_phase,
             init_phase: SyncMutex::new(init_progress),
+            action_files: Arc::new(action_files::ActionFiles::default()),
         });
         Self {
             actor: ConcurrentActor::new(ServiceActor(seed.clone())),
@@ -942,6 +944,7 @@ impl Service {
 }
 
 struct ServiceActorSeed {
+    action_files: Arc<action_files::ActionFiles>,
     ctx: RpcContext,
     id: PackageId,
     /// Needed to interact with the container for the service

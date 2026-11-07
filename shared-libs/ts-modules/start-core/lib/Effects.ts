@@ -25,6 +25,7 @@ import {
   Manifest,
   HostnameInfo,
   Progress,
+  UploadedFile,
 } from './osBindings'
 import {
   PackageId,
@@ -68,6 +69,21 @@ export type Effects = {
       options: { only: string[] } | { except: string[] },
     ): Promise<null>
   }
+
+  /** Prepares a one-shot upload into a service volume for a File input. */
+  prepareUpload(
+    options: RPC.RpcParamType<RPC.Effects, 'prepare-upload'>,
+  ): Promise<string>
+  /** Prepares a volume file to return as a File action result. */
+  prepareDownload(
+    options: RPC.RpcParamType<RPC.Effects, 'prepare-download'>,
+  ): Promise<string>
+  /** @internal Reads host-owned limits while building a prepared File input. */
+  getUploadLimits(options: {
+    id: string
+  }): Promise<RPC.RpcReturnType<RPC.Effects, 'get-upload-limits'>>
+  /** @internal Resolves a completed File input in its originating action event. */
+  resolveUpload(options: { id: string }): Promise<UploadedFile>
 
   // control
   /** restart this service's main function */
