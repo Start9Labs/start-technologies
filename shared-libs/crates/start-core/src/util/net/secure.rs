@@ -4,14 +4,15 @@ use std::pin::Pin;
 use std::task::{Context, Poll, ready};
 use std::time::Duration;
 
-use axum::extract::ws::{Message, Utf8Bytes};
-use bytes::{Buf, Bytes, BytesMut};
+use axum::extract::ws::{CloseFrame, Message, Utf8Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use rpc_toolkit::BoxWebSocket;
 use snow::{HandshakeState, TransportState};
 use tokio_util::codec::length_delimited::Builder;
 use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 
+use super::{MAX_CLOSE_PAYLOAD_BYTES, MAX_CLOSE_REASON_BYTES};
 use crate::prelude::*;
 use crate::sign::AnyVerifyingKey;
 use crate::sign::noise::{NoiseIdentity, authenticate_peer};
@@ -24,8 +25,37 @@ const MAX_RECORD: usize = u16::MAX as usize;
 const MAX_PLAINTEXT: usize = MAX_RECORD - TAG_SIZE;
 const MAX_HANDSHAKE_RECORD: usize = 1024;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
-const TEXT: u8 = 0;
-const BINARY: u8 = 1;
+#[derive(num_enum::IntoPrimitive, num_enum::TryFromPrimitive)]
+#[repr(u8)]
+enum MessageKind {
+    Text = 0,
+    Binary = 1,
+    Close = 2,
+}
+
+fn validate_close(frame: &CloseFrame) -> Result<(), Error> {
+    use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+
+    if frame.reason.len() > MAX_CLOSE_REASON_BYTES || !CloseCode::from(frame.code).is_allowed() {
+        return Err(invalid_message());
+    }
+    Ok(())
+}
+
+fn decode_close(mut payload: Bytes) -> Result<Option<CloseFrame>, Error> {
+    if payload.is_empty() {
+        return Ok(None);
+    }
+    if payload.len() < std::mem::size_of::<u16>() {
+        return Err(invalid_message());
+    }
+    let frame = CloseFrame {
+        code: payload.get_u16(),
+        reason: Utf8Bytes::try_from(payload).map_err(|_| invalid_message())?,
+    };
+    validate_close(&frame)?;
+    Ok(Some(frame))
+}
 
 fn framing(header: usize, maximum: usize) -> Builder {
     let mut builder = LengthDelimitedCodec::builder();
@@ -69,6 +99,7 @@ pub fn wire_chunk_size(logical: NonZeroUsize) -> NonZeroUsize {
 
 struct NoiseCodec {
     state: TransportState,
+    incoming: NonZeroUsize,
     record_reader: LengthDelimitedCodec,
     record_writer: LengthDelimitedCodec,
     records: BytesMut,
@@ -82,12 +113,16 @@ impl NoiseCodec {
     fn new(state: TransportState, incoming: NonZeroUsize, records: BytesMut) -> Self {
         Self {
             state,
+            incoming,
             record_reader: retaining_decoder(RECORD_HEADER, MAX_RECORD),
             record_writer: framing(RECORD_HEADER, MAX_RECORD).new_codec(),
             records,
             message_reader: retaining_decoder(
                 MESSAGE_HEADER,
-                incoming.get().saturating_add(MESSAGE_KIND),
+                incoming
+                    .get()
+                    .max(MAX_CLOSE_PAYLOAD_BYTES)
+                    .saturating_add(MESSAGE_KIND),
             ),
             message_writer: framing(MESSAGE_HEADER, u32::MAX as usize).new_codec(),
             messages: BytesMut::new(),
@@ -114,12 +149,17 @@ impl NoiseCodec {
                 if message.is_empty() {
                     return Err(invalid_message());
                 }
-                return Ok(Some(match message.get_u8() {
-                    TEXT => Message::Text(
+                let kind =
+                    MessageKind::try_from(message.get_u8()).map_err(|_| invalid_message())?;
+                if !matches!(kind, MessageKind::Close) && message.len() > self.incoming.get() {
+                    return Err(invalid_message());
+                }
+                return Ok(Some(match kind {
+                    MessageKind::Text => Message::Text(
                         Utf8Bytes::try_from(message.freeze()).map_err(|_| invalid_message())?,
                     ),
-                    BINARY => Message::Binary(message.freeze()),
-                    _ => return Err(invalid_message()),
+                    MessageKind::Binary => Message::Binary(message.freeze()),
+                    MessageKind::Close => Message::Close(decode_close(message.freeze())?),
                 }));
             }
             let Some(mut record) = self
@@ -139,13 +179,23 @@ impl NoiseCodec {
     }
 
     fn seal(&mut self, message: Message) -> Result<VecDeque<Message>, Error> {
-        let (kind, data): (u8, Bytes) = match message {
-            Message::Text(text) => (TEXT, text.into()),
-            Message::Binary(data) => (BINARY, data),
+        let (kind, data): (MessageKind, Bytes) = match message {
+            Message::Text(text) => (MessageKind::Text, text.into()),
+            Message::Binary(data) => (MessageKind::Binary, data),
+            Message::Close(frame) => {
+                let mut payload = BytesMut::new();
+                if let Some(frame) = frame {
+                    validate_close(&frame)?;
+                    payload.put_u16(frame.code);
+                    payload.extend_from_slice(frame.reason.as_bytes());
+                }
+                (MessageKind::Close, payload.freeze())
+            }
             control => return Ok(VecDeque::from([control])),
         };
+        let closing = matches!(kind, MessageKind::Close);
         let mut body = BytesMut::with_capacity(MESSAGE_KIND + data.len());
-        body.extend_from_slice(&[kind]);
+        body.extend_from_slice(&[kind.into()]);
         body.extend_from_slice(&data);
         let mut framed = BytesMut::new();
         self.message_writer
@@ -163,6 +213,9 @@ impl NoiseCodec {
                 .encode(Bytes::copy_from_slice(&encrypted[..length]), &mut record)
                 .map_err(|_| invalid_message())?;
             output.push_back(Message::Binary(record.freeze()));
+        }
+        if closing {
+            output.push_back(Message::Close(None));
         }
         Ok(output)
     }
@@ -238,12 +291,13 @@ async fn send_handshake(
 }
 
 /// An authenticated Noise channel retaining WebSocket text, binary and control semantics.
-/// Controls retain their WebSocket wire representation; application messages are encrypted.
+/// Close results are encrypted; physical controls carry no application close reason.
 /// Peer authentication does not enroll keys or grant RPC roles.
 pub struct EncryptedSocket {
     inner: BoxWebSocket,
     codec: NoiseCodec,
     pending: VecDeque<Message>,
+    closing: Option<Message>,
     fused: bool,
 }
 
@@ -264,6 +318,7 @@ impl EncryptedSocket {
                 records.buffered,
             ),
             pending: VecDeque::new(),
+            closing: None,
             fused: false,
         })
     }
@@ -343,7 +398,23 @@ impl Stream for EncryptedSocket {
             return Poll::Ready(None);
         }
         loop {
+            if this.closing.is_some() {
+                // Authenticated close results survive failed transport acknowledgements.
+                if ready!(this.poll_pending(cx)).is_ok() {
+                    let _ = ready!(this.inner.poll_flush_unpin(cx));
+                }
+                this.fused = true;
+                return Poll::Ready(Some(Ok(this.closing.take().unwrap())));
+            }
             match this.codec.next_message() {
+                Ok(Some(message @ Message::Close(_))) => {
+                    if this.codec.has_partial_message() {
+                        return Poll::Ready(Some(Err(this.fail(invalid_message()))));
+                    }
+                    this.closing = Some(message);
+                    this.pending.push_back(Message::Close(None));
+                    continue;
+                }
                 Ok(Some(message)) => return Poll::Ready(Some(Ok(message))),
                 Ok(None) => (),
                 Err(error) => return Poll::Ready(Some(Err(this.fail(error)))),
@@ -355,6 +426,10 @@ impl Stream for EncryptedSocket {
                 }
                 Some(Ok(Message::Close(_))) | None if this.codec.has_partial_message() => {
                     return Poll::Ready(Some(Err(this.fail(invalid_message()))));
+                }
+                Some(Ok(Message::Close(_))) => {
+                    this.fused = true;
+                    return Poll::Ready(Some(Ok(Message::Close(None))));
                 }
                 other => return Poll::Ready(other),
             }

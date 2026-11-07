@@ -64,15 +64,21 @@ application responsibilities, using the admitted connection context.
 All lengths are big-endian. `tokio_util::codec::LengthDelimitedCodec` owns both
 framing layers.
 
-| Layer                                        | Length field | Content                                                         |
-| -------------------------------------------- | ------------ | --------------------------------------------------------------- |
-| Noise record                                 | 2 bytes      | Handshake message or transport ciphertext, at most 65,535 bytes |
-| Logical data message, inside Noise plaintext | 4 bytes      | Kind byte followed by original payload bytes                    |
+| Layer                                   | Length field | Content                                                         |
+| --------------------------------------- | ------------ | --------------------------------------------------------------- |
+| Noise record                            | 2 bytes      | Handshake message or transport ciphertext, at most 65,535 bytes |
+| Logical message, inside Noise plaintext | 4 bytes      | Kind byte followed by original payload bytes                    |
 
-Kind `0` is UTF-8 text and kind `1` is binary. The logical length includes the kind
-byte. The configured application receive budget counts the payload alone. JSON
-is not decoded or serialized by this adapter, preserving original numeric tokens
-and full-width request IDs.
+`secure.rs::MessageKind` owns the kind values: `0` is UTF-8 text, `1` is binary and
+`2` is a close result. The logical length includes the kind byte. The configured
+application receive budget counts text/binary payload alone. Close results retain
+the independent WebSocket control allowance of 125 bytes: an empty payload means
+no status, otherwise a two-byte status code precedes a UTF-8 reason of at most
+123 bytes. Reserved status codes, malformed UTF-8 and oversized close results are
+rejected. The control allowance does not enlarge the text/binary budget.
+
+JSON is not decoded or serialized by this adapter, preserving original numeric
+tokens and full-width request IDs.
 
 Transport plaintext is split into records of at most 65,519 bytes. A complete
 outgoing record, including its prefix, is a binary WebSocket message of at most
@@ -81,10 +87,19 @@ records and logical messages spanning records; WebSocket message boundaries do
 not delimit logical application messages. Bytes read beyond the last handshake
 record remain available to the transport decoder.
 
-Ping, Pong and Close retain ordinary WebSocket control semantics and wire
-representation; they are not encrypted application data. Plaintext data frames,
-invalid kinds/UTF-8, failed authentication and truncated data messages fail the
-channel. There is no plaintext fallback.
+An application close sends its encrypted result before an empty physical Close
+frame. The receiver acknowledges through the existing sink before delivering the
+authenticated logical Close, retaining its status and reason for `close_result`
+and continuation consumers. A failed transport acknowledgement does not discard
+a result that was already authenticated. The deferred close result lives only
+until acknowledgement or terminal delivery, without a separate task or heartbeat.
+The existing socket wrapper still owns send and close deadlines.
+
+Ping and Pong retain ordinary WebSocket representation. Physical Close controls
+can terminate the transport, but their unauthenticated status/reason never become
+an application result. Plaintext data frames, invalid kinds/UTF-8, failed
+authentication and truncated messages fail the channel. There is no plaintext
+fallback.
 
 ## WebSocket continuations
 

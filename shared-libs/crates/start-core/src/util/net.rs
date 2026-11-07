@@ -14,7 +14,8 @@ pub mod secure;
 
 const PING_INTERVAL: Duration = Duration::from_secs(30);
 const PING_TIMEOUT: Duration = Duration::from_secs(300);
-const MAX_CLOSE_REASON_BYTES: usize = 125 - std::mem::size_of::<u16>();
+const MAX_CLOSE_PAYLOAD_BYTES: usize = 125;
+const MAX_CLOSE_REASON_BYTES: usize = MAX_CLOSE_PAYLOAD_BYTES - std::mem::size_of::<u16>();
 
 fn truncate_close_reason(reason: impl Into<Utf8Bytes>) -> Utf8Bytes {
     let reason = reason.into();
@@ -149,13 +150,13 @@ impl<S: rpc_toolkit::WebSocketTransport> WebSocket<S> {
         futures::future::poll_fn(|cx| self.poll_recv(cx)).await
     }
 
-    /// Close the websocket connection normally.
+    /// Closes with a successful application result.
     pub async fn normal_close(self, msg: impl Into<Utf8Bytes>) -> Result<(), Error> {
         self.close_result(Ok::<_, std::convert::Infallible>(msg.into()))
             .await
     }
 
-    /// Close the websocket connection with a result.
+    /// Sends the outcome, then waits for the peer's close.
     pub async fn close_result(
         mut self,
         result: Result<impl Into<Utf8Bytes> + Send, impl fmt::Display + Send>,

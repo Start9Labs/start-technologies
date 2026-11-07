@@ -96,6 +96,130 @@ async fn text_binary_fragmentation_and_message_boundaries_are_preserved() {
 }
 
 #[tokio::test]
+async fn profile_kind_values_match_frozen_wire_messages() {
+    let (mut sender, mut receiver) = codecs(1024).await;
+    for (plaintext, expected) in [
+        (&[0, 0, 0, 2, 0, b'x'][..], Message::Text("x".into())),
+        (
+            &[0, 0, 0, 2, 1, 0xff][..],
+            Message::Binary(Bytes::from_static(&[0xff])),
+        ),
+        (
+            &[0, 0, 0, 3, 2, 0x03, 0xe8][..],
+            Message::Close(Some(CloseFrame {
+                code: 1000,
+                reason: "".into(),
+            })),
+        ),
+    ] {
+        receiver.feed(&encrypted_plaintext(&mut sender, plaintext));
+        assert_eq!(receiver.next_message().unwrap(), Some(expected));
+    }
+    assert!(!receiver.has_partial_message());
+}
+
+#[tokio::test]
+async fn close_results_are_encrypted_and_preserve_control_payload_boundaries() {
+    for (code, reason) in [
+        (1000, "complete".to_owned()),
+        (1011, "private failure details".to_owned()),
+        (1000, "雪".repeat(MAX_CLOSE_REASON_BYTES / 3)),
+    ] {
+        let (mut sender, mut receiver) = codecs(1).await;
+        let close = Message::Close(Some(CloseFrame {
+            code,
+            reason: reason.clone().into(),
+        }));
+        let mut records = sender.seal(close.clone()).unwrap();
+        assert_eq!(records.pop_back(), Some(Message::Close(None)));
+        let wire = wire_bytes(records);
+        assert!(
+            !wire
+                .windows(reason.len())
+                .any(|part| part == reason.as_bytes())
+        );
+        receiver.feed(&wire);
+        assert_eq!(receiver.next_message().unwrap(), Some(close));
+        assert!(!receiver.has_partial_message());
+    }
+    let (mut sender, mut receiver) = codecs(1).await;
+    let mut records = sender.seal(Message::Close(None)).unwrap();
+    assert_eq!(records.pop_back(), Some(Message::Close(None)));
+    receiver.feed(&wire_bytes(records));
+    assert_eq!(receiver.next_message().unwrap(), Some(Message::Close(None)));
+}
+
+#[tokio::test]
+async fn malformed_authenticated_close_results_are_rejected() {
+    for payload in [
+        vec![3],
+        vec![0x03, 0xed],
+        vec![0x03, 0xe8, 0xff],
+        [vec![0x03, 0xe8], vec![b'x'; MAX_CLOSE_REASON_BYTES + 1]].concat(),
+    ] {
+        let (mut sender, mut receiver) = codecs(1024).await;
+        let mut message = Vec::new();
+        message.extend_from_slice(
+            &u32::try_from(payload.len() + MESSAGE_KIND)
+                .unwrap()
+                .to_be_bytes(),
+        );
+        message.push(MessageKind::Close.into());
+        message.extend_from_slice(&payload);
+        receiver.feed(&encrypted_plaintext(&mut sender, &message));
+        assert_eq!(
+            receiver.next_message().unwrap_err().kind,
+            ErrorKind::InvalidRequest
+        );
+    }
+    for close in [
+        CloseFrame {
+            code: 1005,
+            reason: "".into(),
+        },
+        CloseFrame {
+            code: 1000,
+            reason: "x".repeat(MAX_CLOSE_REASON_BYTES + 1).into(),
+        },
+    ] {
+        let (mut sender, _) = codecs(1024).await;
+        assert_eq!(
+            sender.seal(Message::Close(Some(close))).unwrap_err().kind,
+            ErrorKind::InvalidRequest
+        );
+    }
+}
+
+#[tokio::test]
+async fn close_allowance_does_not_expand_small_data_budgets() {
+    for message in [
+        Message::Text("ab".into()),
+        Message::Binary(Bytes::from_static(b"ab")),
+    ] {
+        let (mut sender, mut receiver) = codecs(1).await;
+        receiver.feed(&wire_bytes(sender.seal(message).unwrap()));
+        assert_eq!(
+            receiver.next_message().unwrap_err().kind,
+            ErrorKind::InvalidRequest
+        );
+    }
+}
+
+#[tokio::test]
+async fn keepalive_controls_remain_ordinary_websocket_messages() {
+    let (mut sender, _) = codecs(1024).await;
+    for message in [
+        Message::Ping(Bytes::from_static(b"ping")),
+        Message::Pong(Bytes::from_static(b"pong")),
+    ] {
+        assert_eq!(
+            sender.seal(message.clone()).unwrap(),
+            VecDeque::from([message])
+        );
+    }
+}
+
+#[tokio::test]
 async fn large_outgoing_messages_are_independent_of_incoming_budget() {
     let (a, b) = states().await;
     let mut sender = NoiseCodec::new(a, NonZeroUsize::new(1024).unwrap(), BytesMut::new());
@@ -247,12 +371,35 @@ async fn existing_send_deadline_covers_stalled_encrypted_transport() {
         inner: Box::new(StalledSocket),
         codec: NoiseCodec::new(state, NonZeroUsize::new(1024).unwrap(), BytesMut::new()),
         pending: VecDeque::new(),
+        closing: None,
         fused: false,
     };
     let mut socket = crate::util::net::WebSocket::new(encrypted);
     socket.set_send_timeout(Duration::from_secs(15));
     assert!(socket.send(Message::Text("hello".into())).await.is_err());
     assert!(socket.recv().await.is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn close_result_reuses_the_existing_send_deadline() {
+    let (state, _) = states().await;
+    let encrypted = EncryptedSocket {
+        inner: Box::new(StalledSocket),
+        codec: NoiseCodec::new(state, NonZeroUsize::new(1024).unwrap(), BytesMut::new()),
+        pending: VecDeque::new(),
+        closing: None,
+        fused: false,
+    };
+    let mut socket = crate::util::net::WebSocket::new(encrypted);
+    socket.set_send_timeout(Duration::from_secs(15));
+    let started = tokio::time::Instant::now();
+    assert!(
+        socket
+            .close_result(Ok::<_, &str>("private result"))
+            .await
+            .is_err()
+    );
+    assert_eq!(started.elapsed(), Duration::from_secs(15));
 }
 
 #[tokio::test(start_paused = true)]
@@ -407,6 +554,146 @@ async fn server() -> (String, PeerContext, ServerGuard) {
             .unwrap();
     }));
     (url, context, guard)
+}
+
+async fn closing_server(
+    result: Result<&'static str, &'static str>,
+) -> (
+    String,
+    tokio::sync::oneshot::Receiver<Result<(), Error>>,
+    ServerGuard,
+) {
+    let (done, completion) = tokio::sync::oneshot::channel();
+    let done = Arc::new(std::sync::Mutex::new(Some(done)));
+    let route = get(move |upgrade: axum::extract::ws::WebSocketUpgrade| {
+        let done = done.clone();
+        async move {
+            upgrade.on_upgrade(move |socket| async move {
+                let identity = NoiseIdentity::new(&signer(42)).await.unwrap();
+                let (_, socket) = EncryptedSocket::accept(
+                    Box::new(socket),
+                    identity,
+                    PROLOGUE,
+                    NonZeroUsize::new(1024).unwrap(),
+                    None,
+                )
+                .await
+                .unwrap();
+                let socket = crate::util::net::WebSocket::new(socket);
+                let result =
+                    tokio::time::timeout(Duration::from_secs(3), socket.close_result(result))
+                        .await
+                        .unwrap();
+                done.lock().unwrap().take().unwrap().send(result).unwrap();
+            })
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}/close", listener.local_addr().unwrap());
+    let guard = ServerGuard(tokio::spawn(async move {
+        axum::serve(listener, Router::new().route("/close", route))
+            .await
+            .unwrap();
+    }));
+    (url, completion, guard)
+}
+
+#[tokio::test]
+async fn actual_close_result_keeps_application_outcomes_inside_noise() {
+    for result in [
+        Ok("private close-result success"),
+        Err("private close-result failure"),
+    ] {
+        let (url, completion, _server) = closing_server(result).await;
+        let received = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let copy = received.clone();
+        let raw = raw_socket(&url).await.inspect(move |result| {
+            if let Ok(message) = result {
+                copy.lock().unwrap().push(message.clone());
+            }
+        });
+        let (_, mut socket) = EncryptedSocket::initiate(
+            Box::new(raw),
+            NoiseIdentity::new(&signer(41)).await.unwrap(),
+            PROLOGUE,
+            NonZeroUsize::new(1).unwrap(),
+        )
+        .await
+        .unwrap();
+        let Some(Ok(Message::Close(Some(frame)))) =
+            tokio::time::timeout(Duration::from_secs(3), socket.next())
+                .await
+                .unwrap()
+        else {
+            panic!("expected authenticated close result")
+        };
+        assert_eq!(frame.code, if result.is_err() { 1011 } else { 1000 });
+        assert_eq!(frame.reason.as_str(), result.unwrap_or_else(|error| error));
+        assert!(socket.next().await.is_none());
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(3), socket.inner.next())
+                .await
+                .unwrap(),
+            Some(Ok(Message::Close(None)))
+        ));
+        for message in received.lock().unwrap().iter() {
+            match message {
+                Message::Binary(bytes) => assert!(
+                    !bytes
+                        .windows(frame.reason.len())
+                        .any(|part| part == frame.reason.as_bytes())
+                ),
+                Message::Close(frame) => assert!(frame.is_none()),
+                _ => panic!("unexpected plaintext message"),
+            }
+        }
+        completion.await.unwrap().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn authenticated_close_result_survives_failed_transport_acknowledgement() {
+    let (url, completion, _server) = closing_server(Ok("completed result")).await;
+    let mut socket = connect(&url, 41).await;
+    socket.inner = Box::new(socket.inner.with(|_: Message| {
+        futures::future::ready(Err::<Message, _>(axum::Error::new(std::io::Error::from(
+            std::io::ErrorKind::BrokenPipe,
+        ))))
+    }));
+    let Some(Ok(Message::Close(Some(frame)))) =
+        tokio::time::timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+    else {
+        panic!("expected verified result despite failed acknowledgement")
+    };
+    assert_eq!(frame.code, 1000);
+    assert_eq!(frame.reason, "completed result");
+    drop(socket);
+    assert!(completion.await.unwrap().is_err());
+}
+
+#[tokio::test]
+async fn plaintext_close_cannot_fabricate_an_authenticated_success() {
+    let (url, _context, _server) = server().await;
+    let mut socket = connect(&url, 41).await;
+    socket.inner = Box::new(socket.inner.map(|result| {
+        result.map(|_| {
+            Message::Close(Some(CloseFrame {
+                code: 1000,
+                reason: "forged result".into(),
+            }))
+        })
+    }));
+    socket
+        .inner
+        .send(Message::Ping(Bytes::from_static(b"trigger")))
+        .await
+        .unwrap();
+    let message = tokio::time::timeout(Duration::from_secs(3), socket.next())
+        .await
+        .unwrap();
+    assert!(matches!(message, Some(Ok(Message::Close(None)))));
 }
 
 pub(crate) async fn raw_socket(url: &str) -> BoxWebSocket {
