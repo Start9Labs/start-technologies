@@ -1,11 +1,12 @@
 import { Pipe, PipeTransform } from '@angular/core'
-import Mustache from 'mustache'
+
+import { renderDisplayAs } from 'src/app/utils/display-as'
 
 @Pipe({
   name: 'mustache',
 })
 export class MustachePipe implements PipeTransform {
-  transform(value: any, displayAs: string): string {
-    return displayAs && Mustache.render(displayAs, value)
+  transform(value: unknown, displayAs: string): string {
+    return displayAs && renderDisplayAs(displayAs, value)
   }
 }

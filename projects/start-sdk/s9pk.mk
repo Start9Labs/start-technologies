@@ -54,6 +54,9 @@ endef
 
 all: $(TARGETS)
 
+# Removed manifest inputs must not block rebuilding the bundle.
+$(INGREDIENTS):
+
 arches: $(ARCHES)
 
 print-%:
