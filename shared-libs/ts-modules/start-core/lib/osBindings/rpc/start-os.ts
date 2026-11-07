@@ -200,6 +200,11 @@ export type ListVersionSignersParamsInput = z.input<
 export type LocaleString = z.output<typeof schemas.LocaleString>
 export type LocaleStringInput = z.input<typeof schemas.LocaleString>
 export type LogEntry = z.output<typeof schemas.LogEntry>
+
+/**
+ * Verbosity accepted by the server's runtime logging control.
+ */
+export type LogLevelInput = z.input<typeof schemas.LogLevel>
 export type LogoutParamsInput = z.input<typeof schemas.LogoutParams>
 export type LshwDisplay = z.output<typeof schemas.LshwDisplay>
 export type LshwProcessor = z.output<typeof schemas.LshwProcessor>
@@ -542,6 +547,11 @@ export type SetGatewaySecureParamsInput = z.input<
   typeof schemas.SetGatewaySecureParams
 >
 export type SetIconParamsInput = z.input<typeof schemas.SetIconParams>
+
+/**
+ * Sets verbosity for StartOS backend code in the running daemon.
+ */
+export type SetLogLevelParamsInput = z.input<typeof schemas.SetLogLevelParams>
 export type SetOsUpdateSignerParamsInput = z.input<
   typeof schemas.SetOsUpdateSignerParams
 >
