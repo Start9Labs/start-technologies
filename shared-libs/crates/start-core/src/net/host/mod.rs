@@ -151,7 +151,30 @@ fn secure_gateways<'a>(
 }
 
 impl Model<Host> {
+    /// Runs for service, network and operator changes alike. An operator action
+    /// that groups addresses applies its intent first through `derive_addresses`.
     pub fn update_addresses(
+        &mut self,
+        mdns: &ServerHostname,
+        gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+        available_ports: &AvailablePorts,
+    ) -> Result<(), Error> {
+        let previous = self.as_bindings().de()?;
+        self.derive_addresses(mdns, gateways, available_ports)?;
+        self.as_bindings_mut().mutate(|bindings| {
+            for (port, binding) in bindings.iter_mut() {
+                let addresses = previous
+                    .get(port)
+                    .map_or_else(Default::default, |info| info.addresses.clone());
+                binding.addresses.resolve_address_groups(&addresses);
+            }
+            Ok(())
+        })?;
+        self.derive_addresses(mdns, gateways, available_ports)
+    }
+
+    /// Rebuilds the address rows and port forwards from the stored selections.
+    fn derive_addresses(
         &mut self,
         mdns: &ServerHostname,
         gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>,
@@ -354,7 +377,7 @@ impl Model<Host> {
                 }
             }
             let mut addresses = bind.as_addresses().de()?;
-            addresses.update_available(available);
+            addresses.set_available(available);
             bind.as_addresses_mut().ser(&addresses)?;
         }
 

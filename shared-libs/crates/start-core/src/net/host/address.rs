@@ -395,14 +395,6 @@ impl Host {
                 if let Some(port) = nonssl_port {
                     set_nonssl_wan_group(addresses, gateway, port, true);
                 }
-                for address in addresses
-                    .available
-                    .iter()
-                    .filter(|address| address.ssl && &address.hostname == fqdn)
-                {
-                    let Some(port) = address.port else { continue };
-                    addresses.disabled.remove(&(fqdn.clone(), port));
-                }
             } else {
                 reconcile_public_domain_on_sibling(addresses, fqdn, gateway);
             }
@@ -513,7 +505,8 @@ fn configure_public_domain<Kind: HostApiKind>(
         .de()?;
     let available_ports = db.as_private().as_available_ports().de()?;
     let host = Kind::host_for(inheritance, db)?;
-    host.update_addresses(&hostname, &gateways, &available_ports)?;
+    // Adding a domain groups addresses by an operator action, which enables them.
+    host.derive_addresses(&hostname, &gateways, &available_ports)?;
 
     let ext_port = host.mutate(|host| {
         let (target, port) = host.public_domain_target(*internal_port, fqdn)?;
@@ -990,6 +983,51 @@ mod test {
                     .contains(&domain(true, 8443, "wg1"))
             );
         }
+    }
+
+    #[test]
+    fn adding_a_domain_flips_a_mixed_sibling_on_and_leaves_an_all_off_sibling_off() {
+        let mut host = Host::default();
+        host.bindings.insert(8080, single(8080, None));
+        let mut mixed = single(9090, None);
+        mixed
+            .addresses
+            .enabled
+            .insert("64.23.194.12:9090".parse().unwrap());
+        host.bindings.insert(9090, mixed);
+        host.bindings.insert(7070, single(7070, None));
+        let mut db = database(host);
+        let hostname = ServerHostname::load(db.as_public().as_server_info()).unwrap();
+        let gateways = db
+            .as_public()
+            .as_server_info()
+            .as_network()
+            .as_gateways()
+            .de()
+            .unwrap();
+        let ports = db.as_private().as_available_ports().de().unwrap();
+        package_host(&mut db)
+            .update_addresses(&hostname, &gateways, &ports)
+            .unwrap();
+
+        add_domain(&mut db, 8080).unwrap();
+
+        let host = package_host(&mut db).de().unwrap();
+        let mixed = &host.bindings[&9090].addresses;
+        assert!(
+            mixed
+                .enabled
+                .contains(&"64.23.194.12:9090".parse().unwrap())
+        );
+        assert!(
+            mixed
+                .gua_wan
+                .contains(&"[2001:db8::1]:9090".parse().unwrap())
+        );
+        assert!(mixed.enabled().contains(&domain(false, 9090, "wg1")));
+        let off = &host.bindings[&7070].addresses;
+        assert!(off.gua_wan.is_empty());
+        assert!(!off.enabled().contains(&domain(false, 7070, "wg1")));
     }
 
     #[test]
