@@ -960,4 +960,9 @@ export default {
   1108: 'Format de fichier non valide',
   1109: 'Réponse du serveur non valide',
   1110: 'Taille maximale du fichier',
+  1111: 'Une sauvegarde est en cours. L’interrompre maintenant peut corrompre la sauvegarde du service en cours d’écriture.',
+  1112: 'Attendre la fin de la sauvegarde',
+  1113: 'Éteindre maintenant',
+  1114: 'Une sauvegarde est en cours. Votre serveur redémarrera une fois celle-ci terminée.',
+  1115: 'Une sauvegarde est en cours. Votre serveur s’éteindra une fois celle-ci terminée.',
 } satisfies i18n

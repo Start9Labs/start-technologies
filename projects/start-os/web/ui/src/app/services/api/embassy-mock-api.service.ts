@@ -54,7 +54,10 @@ import {
   UIData,
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
-import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
+import {
+  PATCH_CACHE,
+  waitForPatchSequence,
+} from 'src/app/services/patch-db/patch-db-source'
 import { toAuthorityUrl } from 'src/app/utils/acme'
 import { parsePemPublicKey, parsePublicKeys } from 'src/app/utils/public-keys'
 import { Mock } from './api.fixures'
@@ -128,6 +131,8 @@ export class MockApiService extends ApiService {
   readonly mockWsSource$ = new Subject<Revision>()
   private readonly storage = inject(WA_SESSION_STORAGE)
   private readonly cache = inject(PATCH_CACHE)
+  private backingUp = false
+  private deferredPowerAction: T.PowerAction | null = null
   private readonly revertTime = 1800
   private readonly conversionJobs: T.ServerStatus['backupConversions'] = {}
   private readonly pushSubscriptions = new Map<
@@ -414,8 +419,14 @@ export class MockApiService extends ApiService {
         progress: null,
       }
     },
+    'server.cancel-deferred-power': async () => {
+      await pauseFor(1000)
+      return this.deferPower(null)
+    },
     'server.restart': async params => {
       await pauseFor(2000)
+      if (!params.force && this.backingUp) return this.deferPower('restart')
+      await this.deferPower(null)
 
       const patch = [
         {
@@ -441,6 +452,8 @@ export class MockApiService extends ApiService {
     },
     'server.shutdown': async params => {
       await pauseFor(2000)
+      if (!params.force && this.backingUp) return this.deferPower('shutdown')
+      await this.deferPower(null)
 
       const patch = [
         {
@@ -915,6 +928,7 @@ export class MockApiService extends ApiService {
     },
     'backup.create': async params => {
       await pauseFor(2000)
+      this.backingUp = true
       const serverPath = '/serverInfo/statusInfo/backupProgress'
       const ids = params.packageIds || []
       // One phase per package plus a trailing "OS Data" phase (the host
@@ -993,6 +1007,13 @@ export class MockApiService extends ApiService {
             },
           ]
         this.mockRevision(lastPatch)
+        this.backingUp = false
+        if (this.deferredPowerAction) {
+          const action = this.deferredPowerAction
+          await this.handlers[
+            action === 'restart' ? 'server.restart' : 'server.shutdown'
+          ]!({})
+        }
 
         // Feature 1: a completed backup whose target still holds a legacy (V1)
         // folder raises a warning notification — bumps the unread badge and
@@ -2441,6 +2462,19 @@ export class MockApiService extends ApiService {
       { op: PatchOp.ADD, path: `${basePath}/available`, value: available },
     ]
     this.mockRevision(patch)
+  }
+
+  private async deferPower(action: T.PowerAction | null): Promise<null> {
+    this.deferredPowerAction = action
+    this.mockRevision([
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/statusInfo/deferredPowerAction',
+        value: action,
+      },
+    ])
+    await waitForPatchSequence(this.cache, this.sequence)
+    return null
   }
 
   private mockDnsServers(servers: string[] | null): string[] | null {

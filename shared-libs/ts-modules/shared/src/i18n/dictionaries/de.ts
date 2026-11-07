@@ -960,4 +960,9 @@ export default {
   1108: 'Ungültiges Dateiformat',
   1109: 'Ungültige Antwort vom Server',
   1110: 'Maximale Dateigröße',
+  1111: 'Derzeit läuft eine Sicherung. Eine Unterbrechung kann jetzt die Sicherung des gerade geschriebenen Dienstes beschädigen.',
+  1112: 'Auf Abschluss der Sicherung warten',
+  1113: 'Jetzt herunterfahren',
+  1114: 'Eine Sicherung läuft. Ihr Server wird nach deren Abschluss neu gestartet.',
+  1115: 'Eine Sicherung läuft. Ihr Server wird nach deren Abschluss heruntergefahren.',
 } satisfies i18n

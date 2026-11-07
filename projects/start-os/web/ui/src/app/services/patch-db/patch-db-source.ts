@@ -1,6 +1,6 @@
 import { inject, Injectable, InjectionToken } from '@angular/core'
 import { Dump, Revision, Update } from 'patch-db-client'
-import { BehaviorSubject, EMPTY, Observable, throwError, timer } from 'rxjs'
+import { BehaviorSubject, EMPTY, firstValueFrom, Observable } from 'rxjs'
 import {
   bufferTime,
   catchError,
@@ -23,6 +23,13 @@ export const PATCH_CACHE = new InjectionToken('', {
       value: {} as DataModel,
     }),
 })
+
+export async function waitForPatchSequence(
+  cache$: Observable<Dump<DataModel>>,
+  sequence: number,
+): Promise<void> {
+  await firstValueFrom(cache$.pipe(filter(({ id }) => id >= sequence)))
+}
 
 @Injectable({
   providedIn: 'root',

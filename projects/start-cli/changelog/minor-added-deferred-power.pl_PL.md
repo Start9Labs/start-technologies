@@ -1,0 +1,1 @@
+- **`server restart` i `server shutdown` domyślnie czekają na zakończenie trwającej kopii zapasowej.** `--force` ją przerywa. `server cancel-deferred-power` anuluje oczekującą operację. Polecenia te wymagają StartOS 0.4.2 lub nowszego.

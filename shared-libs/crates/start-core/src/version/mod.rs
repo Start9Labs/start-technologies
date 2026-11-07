@@ -851,34 +851,157 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revision_three_migrates_and_rolls_back_without_changing_service_data() {
+    async fn revision_three_upgrades_and_rolls_back_to_revision_two() {
         let previous = v0_4_0_2::Version;
         let current = v0_4_0_3::Version;
-        let registered = Version::from_exver_version(current.semver())
-            .as_version_t()
-            .unwrap();
-        assert_eq!(registered.previous().semver(), previous.semver());
+        let resolved = Version::from_exver_version(current.semver());
+        assert!(matches!(resolved, Version::V0_4_0_3(_)));
+        let target = resolved.as_version_t().unwrap();
+        assert_eq!(target.previous().semver(), previous.semver());
         let mut db = json!({ "public": { "serverInfo": {
             "version": "0.4.0.2",
             "packageVersionCompat": ">=0.3.0 <0.5.0",
             "postInitMigrationTodos": {},
-        }, "packageData": { "service": { "setting": "preserved" } } } });
+            "latestMigrationRevision": 4,
+        }, "packageData": { "service": { "setting": "preserved" } } },
+            "payload": { "unchanged": true } });
+        let payload = db["payload"].clone();
         let packages = json!({ "service": { "setting": "preserved", "outboundDns": null } });
-        let pre_ups = PreUps::load(&previous, &registered).await.unwrap();
-        migrate_from_unchecked(&previous, &registered, pre_ups, &mut db).unwrap();
+        let pre_ups = PreUps::load(&previous, &target).await.unwrap();
+        migrate_from_unchecked(&previous, &target, pre_ups, &mut db).unwrap();
         assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.3"));
         assert_eq!(
             db["public"]["serverInfo"]["packageVersionCompat"],
-            to_value(current.compat()).unwrap()
+            to_value(previous.compat()).unwrap()
         );
         assert_eq!(
             db["public"]["serverInfo"]["postInitMigrationTodos"]["0.4.0.3"],
             Value::Null
         );
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 3);
+        assert_eq!(db["payload"], payload);
         assert_eq!(db["public"]["packageData"], packages);
-        rollback_to_unchecked(&registered, &previous, &mut db).unwrap();
+        rollback_to_unchecked(&target, &previous, &mut db).unwrap();
         assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.2"));
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 4);
+        assert_eq!(db["payload"], payload);
         assert_eq!(db["public"]["packageData"], packages);
+    }
+
+    #[tokio::test]
+    async fn current_upgrades_and_rolls_back_to_revision_five() {
+        let previous = v0_4_0_5::Version;
+        let current = Current::default();
+        let resolved = Version::from_exver_version(current.semver());
+        assert!(matches!(resolved, Version::V0_4_2(_)));
+        let target = resolved.as_version_t().unwrap();
+        assert_eq!(target.previous().semver(), v0_4_1_3::Version.semver());
+        let mut db = json!({ "private": { "sessionPubkeys": {} }, "public": { "serverInfo": {
+            "version": "0.4.0.5",
+            "packageVersionCompat": ">=0.3.0 <0.5.0",
+            "postInitMigrationTodos": {},
+            "latestMigrationRevision": 0,
+        }, "packageData": { "service": { "setting": "preserved" } } } });
+        let packages = db["public"]["packageData"].clone();
+        let pre_ups = PreUps::load(&previous, &target).await.unwrap();
+        migrate_from_unchecked(&previous, &target, pre_ups, &mut db).unwrap();
+        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.2"));
+        assert_eq!(
+            db["public"]["serverInfo"]["packageVersionCompat"],
+            to_value(current.compat()).unwrap()
+        );
+        assert_eq!(
+            db["public"]["serverInfo"]["postInitMigrationTodos"],
+            json!({ "0.4.1": null, "0.4.1.1": null, "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null })
+        );
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
+        assert_eq!(db["public"]["packageData"], packages);
+        rollback_to_unchecked(&target, &previous, &mut db).unwrap();
+        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.5"));
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 3);
+        assert_eq!(db["public"]["packageData"], packages);
+    }
+
+    #[tokio::test]
+    async fn current_commits_after_trust_migration_without_changing_service_or_private_data() {
+        let current = Current::default();
+        assert_eq!(current.previous().semver(), v0_4_1_3::Version.semver());
+        assert!(matches!(
+            Version::from_exver_version(current.semver()),
+            Version::V0_4_2(_)
+        ));
+        for (from, revision, todos, trust) in [
+            (
+                "0.4.1",
+                2,
+                json!({ "0.4.1.1": null, "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null }),
+                to_value(&crate::trusted_keys::legacy::initial_keyrings()).unwrap(),
+            ),
+            (
+                "0.4.1.1",
+                0,
+                json!({ "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null }),
+                to_value(&crate::trusted_keys::legacy::initial_keyrings()).unwrap(),
+            ),
+            (
+                "0.4.1.2",
+                0,
+                json!({ "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null }),
+                to_value(&crate::trusted_keys::initial_trusted_keys()).unwrap(),
+            ),
+            (
+                "0.4.1.2",
+                1,
+                json!({ "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null }),
+                to_value(&crate::trusted_keys::initial_trusted_keys()).unwrap(),
+            ),
+            (
+                "0.4.1.2",
+                2,
+                json!({ "0.4.1.3": null, "0.4.2": null }),
+                to_value(&crate::trusted_keys::initial_trusted_keys()).unwrap(),
+            ),
+            (
+                "0.4.1.3",
+                0,
+                json!({ "0.4.2": null }),
+                to_value(&crate::trusted_keys::initial_trusted_keys()).unwrap(),
+            ),
+        ] {
+            let previous = from_value::<Version>(json!(from))
+                .unwrap()
+                .as_version_t()
+                .unwrap();
+            let mut db = json!({ "private": { "sessions": { "pubkeys": {}, "tokens": {} } },
+                "public": { "serverInfo": {
+                    "version": from,
+                    "trustedKeys": trust,
+                    "packageVersionCompat": ">=0.3.0 <0.5.0",
+                    "postInitMigrationTodos": {},
+                    "latestMigrationRevision": revision,
+                }, "packageData": { "service": { "setting": "preserved" } } } });
+            let private = db["private"].clone();
+            let packages = db["public"]["packageData"].clone();
+            let upgrade = Upgrade::load(&previous, &current, revision).await.unwrap();
+            upgrade.apply(&previous, &current, &mut db).unwrap();
+            assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.2"));
+            assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
+            assert_eq!(
+                db["public"]["serverInfo"]["packageVersionCompat"],
+                to_value(current.compat()).unwrap()
+            );
+            assert_eq!(db["public"]["serverInfo"]["postInitMigrationTodos"], todos);
+            assert_eq!(db["private"], private);
+            assert_eq!(db["public"]["packageData"], packages);
+            rollback_to_unchecked(&current, &previous, &mut db).unwrap();
+            assert_eq!(db["public"]["serverInfo"]["version"], json!(from));
+            assert_eq!(
+                applied_migration_revision(&mut db).unwrap(),
+                previous.migration_revision()
+            );
+            assert_eq!(db["private"], private);
+            assert_eq!(db["public"]["packageData"], packages);
+        }
     }
 
     #[tokio::test]

@@ -961,4 +961,9 @@ export const ENGLISH: Record<string, number> = {
   'Invalid file format': 1108,
   'Invalid response from server': 1109,
   'Maximum file size': 1110,
+  'A backup is currently running. Interrupting it now can corrupt the backup of the service being written.': 1111,
+  'Wait for backup to complete': 1112,
+  'Shut down now': 1113,
+  'A backup is running. Your server will restart when it finishes.': 1114,
+  'A backup is running. Your server will shut down when it finishes.': 1115,
 }

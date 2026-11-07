@@ -960,4 +960,9 @@ export default {
   1108: 'Nieprawidłowy format pliku',
   1109: 'Nieprawidłowa odpowiedź serwera',
   1110: 'Maksymalny rozmiar pliku',
+  1111: 'Trwa tworzenie kopii zapasowej. Przerwanie jej teraz może uszkodzić kopię zapasową aktualnie zapisywanej usługi.',
+  1112: 'Poczekaj na zakończenie kopii zapasowej',
+  1113: 'Wyłącz teraz',
+  1114: 'Trwa tworzenie kopii zapasowej. Serwer zostanie ponownie uruchomiony po jej zakończeniu.',
+  1115: 'Trwa tworzenie kopii zapasowej. Serwer zostanie wyłączony po jej zakończeniu.',
 } satisfies i18n

@@ -30,6 +30,8 @@ A [gateway](gateways.md) carries your server's traffic. Your home router and a S
 
 StartOS [backs up](backup-create.md) the whole server, or only the services you choose, to a drive plugged into the server or to a shared folder on another computer on your network. Backups are encrypted with your master password; the server's own data drive is not encrypted with it, so anyone holding the server or its drive can read your services' data. Each new backup to a target updates the one already there. Keep backups on multiple targets to protect against losing a drive or network share; advanced users can also retain [read-only snapshots](backup-create.md#read-only-snapshots) on one target. You can [restore](backup-restore.md) a single service, or the whole server, including onto new hardware.
 
+By default, restart and shutdown requests wait for running backups. You can cancel the queued action or explicitly force interruption.
+
 ## The command line
 
 For what no action covers, you can [SSH](ssh.md) into your server and run commands inside a service's container with `start-cli package attach`. The package's README names its subcontainers. Changing files there can break the service or lose data; see [Accessing Service Containers](service-containers.md).

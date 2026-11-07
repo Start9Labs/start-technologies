@@ -960,4 +960,9 @@ export default {
   1108: 'Formato de archivo no válido',
   1109: 'Respuesta del servidor no válida',
   1110: 'Tamaño máximo del archivo',
+  1111: 'Hay una copia de seguridad en curso. Interrumpirla ahora puede dañar la copia de seguridad del servicio que se está escribiendo.',
+  1112: 'Esperar a que termine la copia de seguridad',
+  1113: 'Apagar ahora',
+  1114: 'Hay una copia de seguridad en curso. Su servidor se reiniciará cuando termine.',
+  1115: 'Hay una copia de seguridad en curso. Su servidor se apagará cuando termine.',
 } satisfies i18n

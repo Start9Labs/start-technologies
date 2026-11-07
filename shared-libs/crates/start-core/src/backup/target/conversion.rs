@@ -127,6 +127,22 @@ fn reserve(
     Ok(())
 }
 
+fn interrupted() -> Error {
+    Error::new(
+        eyre!(t!("backup.conversion.interrupted")),
+        ErrorKind::Backup,
+    )
+}
+
+pub(crate) fn interrupt_running(jobs: &mut ConversionJobs) {
+    let result = Err(interrupted());
+    for job in jobs.values_mut().flat_map(|entries| entries.values_mut()) {
+        if job.state == ConversionState::Running {
+            *job = ConversionJob::finished(job.progress.clone(), &result);
+        }
+    }
+}
+
 pub(crate) fn jobs(db: &DatabaseModel) -> Result<ConversionJobs, Error> {
     Ok(db
         .as_public()
@@ -259,7 +275,7 @@ impl<G: GenericMountGuard> PreparedConversion<G> {
             )));
         let result = tokio::select! {
             result = backupfs::convert(&data, &key, &mut progress) => result,
-            _ = shutdown.recv() => Err(Error::new(eyre!("{}", t!("backup.conversion.interrupted")), ErrorKind::Backup)),
+            _ = shutdown.recv() => Err(interrupted()),
         };
         drop(key);
         let _ = progress_sync.wait_for_abort().await;
