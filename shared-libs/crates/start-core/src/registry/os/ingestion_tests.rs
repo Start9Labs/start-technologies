@@ -150,8 +150,8 @@ async fn os_promotion_preserves_all_asset_signatures_and_destination_endorsement
         cli_os_promote(
             cli.clone(),
             CliOsPromoteParams {
-                from: Some(from.clone()),
-                to: Some(to.clone()),
+                from: Some(from.to_string()),
+                to: Some(to.to_string()),
                 version: version.clone(),
                 expected_git_hash: None,
             },
