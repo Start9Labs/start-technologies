@@ -74,6 +74,72 @@ fn a_finished_check_does_not_resurrect_a_removed_volume() {
 }
 
 #[test]
+fn credential_changes_reject_checks_of_the_previous_source() {
+    let id = SharedVolumeId::new();
+    let mut db = crate::db::model::DatabaseModel::from(to_value(&serde_json::json!({
+        "public": {"sharedVolumes": { id.to_string(): {
+            "name": "Remote", "source": {"kind": "cifs", "hostname": "nas.local", "path": "/share"},
+            "grants": {}, "availability": "unknown"
+        }}},
+        "private": {"sharedVolumeCredentials": { id.to_string(): {
+            "username": "user", "password": "old-password"
+        }}}
+    })).unwrap());
+    let old = SourceDefinition::read(&db, &id).unwrap();
+    db.as_private_mut()
+        .as_shared_volume_credentials_mut()
+        .as_idx_mut(&id)
+        .unwrap()
+        .mutate(|credentials| {
+            credentials.password = Some("new-password".into());
+            Ok(())
+        })
+        .unwrap();
+    assert!(
+        !write_checked(
+            &mut db,
+            &id,
+            &old,
+            None,
+            SharedVolumeInspection::available(Some(42))
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        db.as_public()
+            .as_shared_volumes()
+            .as_idx(&id)
+            .unwrap()
+            .as_inspection()
+            .de()
+            .unwrap(),
+        SharedVolumeInspection::default()
+    );
+    let current = SourceDefinition::read(&db, &id).unwrap();
+    assert!(
+        write_checked(
+            &mut db,
+            &id,
+            &current,
+            None,
+            SharedVolumeInspection::available(Some(42))
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        db.as_public()
+            .as_shared_volumes()
+            .as_idx(&id)
+            .unwrap()
+            .as_inspection()
+            .de()
+            .unwrap()
+            .available,
+        Some(42)
+    );
+}
+
+#[test]
 fn source_failures_keep_their_reason_kind_and_metadata() {
     for (kind, reason) in [
         (ErrorKind::Network, "DNS could not resolve the server"),

@@ -124,7 +124,7 @@ pub struct SharedVolume {
 rpc_toolkit::reflect_ts!(SharedVolume);
 rpc_toolkit::ts_export!(SharedVolume, namespaces = [""]);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SharedVolumeCredentials {
     pub username: String,
