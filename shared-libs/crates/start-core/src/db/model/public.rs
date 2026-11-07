@@ -41,6 +41,10 @@ pub static DB_UI_SEED_CELL: OnceLock<&'static str> = OnceLock::new();
 pub struct Public {
     pub server_info: ServerInfo,
     pub package_data: AllPackageData,
+    #[serde(default)]
+    pub registry_cache: BTreeMap<Url, crate::registry::sync::RegistryCache>,
+    #[serde(default)]
+    pub os_update_cache: Option<crate::registry::sync::OsUpdateCache>,
     pub ui: Value,
 }
 
@@ -152,6 +156,8 @@ impl Public {
                 keyboard,
             },
             package_data: AllPackageData::default(),
+            registry_cache: BTreeMap::new(),
+            os_update_cache: None,
             ui: serde_json::from_str(*DB_UI_SEED_CELL.get().unwrap_or(&"null"))
                 .with_kind(ErrorKind::Deserialization)?,
         })

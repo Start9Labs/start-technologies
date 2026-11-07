@@ -1,11 +1,15 @@
-use axum::body::Body;
+use std::error::Error;
+use std::num::NonZeroUsize;
+
+use axum::body::{Body, Bytes, HttpBody};
 use axum::extract::Request;
 use axum::handler::Handler;
 use axum::response::Response;
 use futures::future::{join_all, BoxFuture};
 use futures::{Future, FutureExt};
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
-use http_body_util::BodyExt;
+use http::StatusCode;
+use http_body_util::LengthLimitError;
 use imbl_value::imbl::Vector;
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
@@ -17,6 +21,49 @@ use crate::util::{internal_error, parse_error};
 use crate::{Context, HandleAny, Server};
 
 const FALLBACK_ERROR: &str = "{\"error\":{\"code\":-32603,\"message\":\"Internal error\",\"data\":\"Failed to serialize rpc response\"}}";
+
+/// Maximum request-body bytes, installed in HTTP request extensions before middleware runs.
+#[derive(Clone, Copy, Debug)]
+pub struct RequestBodyLimit(pub NonZeroUsize);
+
+impl Default for RequestBodyLimit {
+    fn default() -> Self {
+        Self(NonZeroUsize::new(1024 * 1024).unwrap())
+    }
+}
+
+fn payload_too_large() -> Response {
+    Response::builder()
+        .status(StatusCode::PAYLOAD_TOO_LARGE)
+        .body(Body::empty())
+        .unwrap()
+}
+
+async fn buffer_request_body(
+    req: &mut Request,
+    limit: RequestBodyLimit,
+) -> Result<Bytes, Response> {
+    if req.body().size_hint().lower() > limit.0.get() as u64 {
+        return Err(payload_too_large());
+    }
+    let body = axum::body::to_bytes(
+        std::mem::replace(req.body_mut(), Body::empty()),
+        limit.0.get(),
+    )
+    .await
+    .map_err(|error| {
+        if error
+            .source()
+            .is_some_and(|cause| cause.is::<LengthLimitError>())
+        {
+            payload_too_large()
+        } else {
+            json_http_response(&RpcResponse::from(internal_error(error)))
+        }
+    })?;
+    *req.body_mut() = Body::from(body.clone());
+    Ok(body)
+}
 
 pub fn fallback_rpc_error_response() -> Response {
     Response::builder()
@@ -40,6 +87,15 @@ pub fn json_http_response<T: Serialize>(t: &T) -> Response {
 
 pub trait Middleware<Context: Send + 'static>: Clone + Send + Sync + 'static {
     type Metadata: DeserializeOwned + Send + 'static;
+    /// Inspects the original per-call JSON before typed request middleware mutates parameters.
+    #[allow(unused_variables)]
+    fn process_rpc_message(
+        &mut self,
+        context: &Context,
+        message: &Value,
+    ) -> impl Future<Output = Result<(), RpcResponse>> + Send {
+        async { Ok(()) }
+    }
     #[allow(unused_variables)]
     fn process_http_request(
         &mut self,
@@ -78,6 +134,11 @@ pub trait Middleware<Context: Send + 'static>: Clone + Send + Sync + 'static {
 #[allow(private_bounds)]
 trait _Middleware<Context>: Send + Sync {
     fn dyn_clone(&self) -> DynMiddleware<Context>;
+    fn process_rpc_message<'a>(
+        &'a mut self,
+        context: &'a Context,
+        message: &'a Value,
+    ) -> BoxFuture<'a, Result<(), RpcResponse>>;
     fn process_http_request<'a>(
         &'a mut self,
         context: &'a Context,
@@ -104,6 +165,13 @@ trait _Middleware<Context>: Send + Sync {
 impl<Context: Send + 'static, T: Middleware<Context> + Send + Sync> _Middleware<Context> for T {
     fn dyn_clone(&self) -> DynMiddleware<Context> {
         DynMiddleware(Box::new(<Self as Clone>::clone(&self)))
+    }
+    fn process_rpc_message<'a>(
+        &'a mut self,
+        context: &'a Context,
+        message: &'a Value,
+    ) -> BoxFuture<'a, Result<(), RpcResponse>> {
+        <Self as Middleware<Context>>::process_rpc_message(self, context, message).boxed()
     }
     fn process_http_request<'a>(
         &'a mut self,
@@ -150,6 +218,13 @@ impl<C: Context> DynMiddleware<C> {
     pub fn new<M: Middleware<C>>(middleware: M) -> Self {
         Self(Box::new(middleware))
     }
+    pub fn process_rpc_message<'a>(
+        &'a mut self,
+        context: &'a C,
+        message: &'a Value,
+    ) -> BoxFuture<'a, Result<(), RpcResponse>> {
+        self.0.process_rpc_message(context, message)
+    }
     pub fn process_http_request<'a>(
         &'a mut self,
         context: &'a C,
@@ -189,12 +264,14 @@ impl<Context> Clone for DynMiddleware<Context> {
 pub struct HttpServer<Context: crate::Context> {
     pub(crate) inner: Server<Context>,
     middleware: Vector<DynMiddleware<Context>>,
+    request_body_limit: RequestBodyLimit,
 }
 impl<Context: crate::Context> Clone for HttpServer<Context> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
             middleware: self.middleware.clone(),
+            request_body_limit: self.request_body_limit,
         }
     }
 }
@@ -203,6 +280,7 @@ impl<Context: crate::Context> Server<Context> {
         HttpServer {
             inner: self,
             middleware: Vector::new(),
+            request_body_limit: RequestBodyLimit::default(),
         }
     }
     pub fn middleware<T: Middleware<Context>>(self, middleware: T) -> HttpServer<Context> {
@@ -214,23 +292,30 @@ impl<Context: crate::Context> HttpServer<Context> {
         self.middleware.push_back(DynMiddleware::new(middleware));
         self
     }
-    /// Builds the request's context and runs every middleware's
-    /// `process_http_request`; an `Err` is the response to send instead.
+    /// Caps the HTTP body before context creation, middleware, and JSON parsing.
+    /// Applies to JSON-RPC, MCP, and WebSocket upgrade requests. Defaults to 1 MiB.
+    pub fn with_max_request_body_size(mut self, max_bytes: NonZeroUsize) -> Self {
+        self.request_body_limit = RequestBodyLimit(max_bytes);
+        self
+    }
+
+    /// Bounds the request body, builds its context, and runs HTTP request middleware.
     pub(crate) async fn begin_http_request(
         &self,
         req: &mut Request,
-    ) -> Result<(Context, Vector<DynMiddleware<Context>>), Response> {
-        let ctx = (self.inner.make_ctx)().await.map_err(|e| {
-            json_http_response(&RpcResponse {
-                id: None,
-                result: Err(e),
-            })
-        })?;
+    ) -> Result<(Context, Vector<DynMiddleware<Context>>, Bytes), Response> {
+        let limit = self.request_body_limit;
+        req.extensions_mut().insert(limit);
+        buffer_request_body(req, limit).await?;
+        let ctx = (self.inner.make_ctx)()
+            .await
+            .map_err(|e| json_http_response(&RpcResponse::from(e)))?;
         let mut mid = self.middleware.clone();
         for middleware in mid.iter_mut().rev() {
             middleware.process_http_request(&ctx, req).await?;
         }
-        Ok((ctx, mid))
+        let body = buffer_request_body(req, limit).await?;
+        Ok((ctx, mid, body))
     }
     pub(crate) async fn finish_http_response(
         ctx: &Context,
@@ -242,31 +327,43 @@ impl<Context: crate::Context> HttpServer<Context> {
         }
     }
     async fn process_http_request(&self, mut req: Request) -> Response {
-        let (ctx, mut mid) = match self.begin_http_request(&mut req).await {
+        let (ctx, mut mid, body) = match self.begin_http_request(&mut req).await {
             Ok(a) => a,
             Err(res) => return res,
         };
+        drop(req);
         let mid = &mut mid;
         match async {
-            let (_, body) = req.into_parts();
-            match serde_json::from_slice::<SingleOrBatchRpcRequest>(
-                &*body.collect().await.map_err(internal_error)?.to_bytes(),
-            )
-            .map_err(parse_error)?
+            let message: Value = serde_json::from_slice(&body).map_err(parse_error)?;
+            drop(body);
+            match imbl_value::from_value::<SingleOrBatchRpcRequest>(message.clone())
+                .map_err(parse_error)?
             {
                 SingleOrBatchRpcRequest::Single(rpc_req) => {
-                    let mut res =
-                        json_http_response(&self.process_rpc_request(&ctx, mid, rpc_req).await);
+                    let mut res = json_http_response(
+                        &self
+                            .process_rpc_request_with_stream(&ctx, mid, rpc_req, &message, None)
+                            .await,
+                    );
                     Self::finish_http_response(&ctx, mid, &mut res).await;
                     Ok::<_, RpcError>(res)
                 }
                 SingleOrBatchRpcRequest::Batch(rpc_reqs) => {
                     let (mids, rpc_res): (Vec<_>, Vec<_>) =
-                        join_all(rpc_reqs.into_iter().map(|rpc_req| async {
-                            let mut mid = mid.clone();
-                            let res = self.process_rpc_request(&ctx, &mut mid, rpc_req).await;
-                            (mid, res)
-                        }))
+                        join_all(rpc_reqs.into_iter().zip(message.as_array().unwrap()).map(
+                            |(rpc_req, message)| {
+                                let mut mid = mid.clone();
+                                let ctx = &ctx;
+                                async move {
+                                    let res = self
+                                        .process_rpc_request_with_stream(
+                                            ctx, &mut mid, rpc_req, message, None,
+                                        )
+                                        .await;
+                                    (mid, res)
+                                }
+                            },
+                        ))
                         .await
                         .into_iter()
                         .unzip();
@@ -291,28 +388,16 @@ impl<Context: crate::Context> HttpServer<Context> {
         .await
         {
             Ok(a) => a,
-            Err(e) => json_http_response(&RpcResponse {
-                id: None,
-                result: Err(e),
-            }),
+            Err(e) => json_http_response(&RpcResponse::from(e)),
         }
     }
-    /// Runs one call through the RPC middleware and the handler tree.
-    pub(crate) async fn process_rpc_request(
-        &self,
-        ctx: &Context,
-        mid: &mut Vector<DynMiddleware<Context>>,
-        req: RpcRequest,
-    ) -> RpcResponse {
-        self.process_rpc_request_with_stream(ctx, mid, req, None)
-            .await
-    }
-
+    /// Runs one call through message hooks, typed middleware, and the handler tree.
     pub(crate) async fn process_rpc_request_with_stream(
         &self,
         ctx: &Context,
         mid: &mut Vector<DynMiddleware<Context>>,
         mut req: RpcRequest,
+        message: &Value,
         rpc_stream: Option<crate::RpcStream>,
     ) -> RpcResponse {
         let metadata = Value::Object(
@@ -326,10 +411,7 @@ impl<Context: crate::Context> HttpServer<Context> {
                     {
                         Some(a) => a,
                         None => {
-                            return RpcResponse {
-                                id: req.id,
-                                result: Err(yajrc::METHOD_NOT_FOUND_ERROR),
-                            }
+                            return RpcResponse::new(req.id, Err(yajrc::METHOD_NOT_FOUND_ERROR));
                         }
                     },
                 )
@@ -337,7 +419,13 @@ impl<Context: crate::Context> HttpServer<Context> {
                 .map(|(key, value)| (key.into(), value))
                 .collect(),
         );
+        let id = req.id.clone();
         let mut res = async {
+            for middleware in mid.iter_mut().rev() {
+                if let Err(response) = middleware.process_rpc_message(ctx, message).await {
+                    return response;
+                }
+            }
             for middleware in mid.iter_mut().rev() {
                 if let Err(res) = middleware
                     .process_rpc_request(ctx, metadata.clone(), &mut req)
@@ -354,6 +442,7 @@ impl<Context: crate::Context> HttpServer<Context> {
         for middleware in mid.iter_mut() {
             middleware.process_rpc_response(ctx, &mut res).await;
         }
+        res.id = id;
         res
     }
     pub fn handle(&self, req: Request) -> BoxFuture<'static, Response> {

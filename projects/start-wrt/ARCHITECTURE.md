@@ -8,8 +8,8 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 - **Frontend:** Angular + TypeScript + Taiga UI
 - **Router OS:** OpenWrt (SpacemiT K1 / BananaPi F3 target)
 - **Config storage:** UCI files (`/etc/config/`) — no separate database
-- **API:** JSON-RPC 2.0 over HTTP POST at `/rpc/v1`
-- **Auth:** Password login enrolls a browser-held Ed25519 key that signs every request (`start-core` signature auth); the CLI on the router uses a local token
+- **API:** JSON-RPC 2.0 over encrypted WebSocket sessions at `/ws/rpc`, with HTTP compatibility at `/rpc/v1`
+- **Auth:** Password login enrolls a browser-held Ed25519 key used for signature-authenticated Noise admission and live per-call authorization; the CLI on the router retains local-token/legacy-signature compatibility
 
 ## Project Structure
 
@@ -55,9 +55,9 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 
 ```
 Browser (Angular SPA)
-  → HTTP POST /rpc/v1  (JSON-RPC 2.0, X-Start-Auth-Sig request signature)
+  → Noise WebSocket /ws/rpc (keyed JSON-RPC); anonymous HTTP /rpc/v1
   → Axum router on port 80/443
-  → start-core Auth middleware (verifies signature or local token, rate-limits login)
+  → start-core Auth middleware (checks verified peer or compatibility credentials, rate-limits login)
   → rpc-toolkit handler dispatch
   → Handler reads/writes UCI files via uciedit (arena-based, atomic writes)
   → Handler calls /etc/init.d/<service> reload to apply changes

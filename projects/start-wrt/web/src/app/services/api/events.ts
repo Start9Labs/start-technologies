@@ -1,5 +1,15 @@
 import type { z } from 'zod'
 import type * as schemas from './events.schemas'
+
+/**
+ * Firmware build identity attached to each RPC reply.
+ */
+export type FirmwareMetadata = z.output<typeof schemas.FirmwareMetadata>
+
+/**
+ * Firmware build identity attached to each RPC reply.
+ */
+export type FirmwareMetadataInput = z.input<typeof schemas.FirmwareMetadata>
 export type FlashMode = z.output<typeof schemas.FlashMode>
 export type FlashModeInput = z.input<typeof schemas.FlashMode>
 export type ProgressUnits = z.output<typeof schemas.ProgressUnits>

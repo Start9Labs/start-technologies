@@ -151,6 +151,7 @@ impl<Context: crate::Context> McpServer<Context> {
 /// The context and middleware of the HTTP request carrying an MCP message.
 struct McpRequest<Context> {
     context: Context,
+    body: axum::body::Bytes,
     middleware: Mutex<Vector<DynMiddleware<Context>>>,
 }
 
@@ -197,12 +198,27 @@ impl<Context: crate::Context> ServerHandler for McpServer<Context> {
             method: GenericRpcMethod::new(InternedString::intern(&*tool.name)),
             params,
         };
+        let message: Value = serde_json::from_slice(&http_request.body)
+            .map_err(|error| McpError::invalid_params(error.to_string(), None))?;
         let mut middleware = http_request.middleware.lock().await;
         let response = self
             .http
-            .process_rpc_request(&http_request.context, &mut middleware, rpc_request)
+            .process_rpc_request_with_stream(
+                &http_request.context,
+                &mut middleware,
+                rpc_request,
+                &message,
+                None,
+            )
             .await;
-        Ok(Self::tool_result(tool, response.result).into())
+        let mut result = Self::tool_result(tool, response.result);
+        if !response.meta.is_empty() {
+            result.meta = Some(
+                imbl_value::from_value(Value::Object(response.meta))
+                    .map_err(|error| McpError::internal_error(error.to_string(), None))?,
+            );
+        }
+        Ok(result.into())
     }
 }
 
@@ -224,12 +240,13 @@ impl<Context: crate::Context> McpService<Context> {
     pub fn handle(&self, mut req: Request) -> BoxFuture<'static, Response> {
         let this = self.clone();
         async move {
-            let (context, middleware) = match this.http.begin_http_request(&mut req).await {
+            let (context, middleware, body) = match this.http.begin_http_request(&mut req).await {
                 Ok(a) => a,
                 Err(res) => return res,
             };
             let state = Arc::new(McpRequest {
                 context,
+                body,
                 middleware: Mutex::new(middleware),
             });
             req.extensions_mut().insert(state.clone());

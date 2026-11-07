@@ -960,4 +960,9 @@ export default {
   1108: 'Format de fichier non valide',
   1109: 'Réponse du serveur non valide',
   1110: 'Taille maximale du fichier',
+  1111: 'URL de registre invalide',
+  1112: 'Les URL des registres doivent utiliser HTTP ou HTTPS et ne peuvent contenir ni identifiants, ni paramètres de requête, ni fragment.',
+  1113: 'Connectez ce registre pour parcourir son catalogue. Les nouvelles clés de signature de ce registre seront approuvées pour les paquets.',
+  1114: 'Actualiser le registre',
+  1115: 'Connectez ce registre avant de le rafraîchir.',
 } satisfies i18n

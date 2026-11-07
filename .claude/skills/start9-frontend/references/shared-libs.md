@@ -1,6 +1,8 @@
 # Shared libraries — @start9labs/\*
 
-`@start9labs/shared` (monorepo apps): `HttpService` (JSON-RPC), `ErrorService` +
+`@start9labs/shared` (monorepo apps): `HttpService` (HTTP JSON-RPC/resources),
+`RpcSocketService` (encrypted local RPC/continuations), `AuthKeyService` (device-key leases),
+`rpcWebSocketUrl` (shared RPC/continuation endpoint selection), `ErrorService` +
 `getErrorMessage`, **`TaskService.run`** (the async-action wrapper), **`DialogService`**
 (responsive + i18n prompt/confirm/alert/component), `CopyService` (clipboard + toast),
 `DownloadHTMLService`, `Exver` (version algebra façade), `SetupLogsService` +
@@ -34,8 +36,8 @@ DTOs may contain required nullable fields absent from inputs. **Never hand-edit
 then rebuild core and SDK before checking consumers.
 
 StartWRT uses its own generated `Api` in `services/api/bindings.ts` and streaming
-schemas in `events.ts`; run `make start-wrt-rpc-bindings`. Keep its aborting
-transport. Shared `HttpService` remains a JSON-RPC transport boundary; product
+schemas in `events.ts`; run `make start-wrt-rpc-bindings`. It composes shared Noise
+RPC/DOM continuations while retaining anonymous HTTP cancellation and its own reconnect owners. Shared `HttpService` remains a JSON-RPC transport boundary; product
 wrappers infer results rather than accepting caller-selected return types.
 
 Library authoring (when you add to `shared`/`marketplace`): configurability layers in order —

@@ -10,12 +10,33 @@ complete out of order; notifications execute without response messages. Missing
 `params` means an empty object. Binary RPC messages are rejected. WebSocket
 Ping/Pong frames provide keepalive.
 
+## Connection upgraders
+
+`WebSocketServer::with_upgrader` installs an application-owned `WebSocketUpgrader`.
+After the HTTP upgrade middleware, it receives the connection context, request
+parts, raw socket, and logical limits. No RPC is dispatched until it returns `UpgradedWebSocket`;
+an error drops the connection. The upgrader owns its handshake deadline and returns
+both a connection-scoped `Arc<Context>` and a `BoxWebSocket` message transport.
+RPC middleware reads that context; `request_context` creates owned handler context
+from it for each call. The connection's private server clone uses this factory,
+while HTTP response middleware retains its pre-handshake context. Context changes
+do not affect the original server's factory or another connection.
+
+`WebSocketTransport` retains text, binary and control-frame semantics. An adapter
+can authenticate or transform wire data without replacing RPC dispatch, stream
+ownership, cancellation or heartbeat handling. `max_wire_message_size` supplies
+the raw frame/message allowance for the configured logical budget. The RPC actor
+also enforces the logical data-message limit after adaptation and before parsing;
+wire overhead must not expand the RPC payload budget. Adapters must bound partial
+message buffering and preserve control frames. Without an upgrader, the raw socket
+and its original context are used directly.
+
 ## Opting into a response stream
 
 A client adds `rpcstream: "1.0"` to an ordinary request with a non-null ID:
 
 ```json
-{ "jsonrpc": "2.0", "rpcstream": "1.0", "id": 42, "method": "db.watch", "params": {} }
+{ "jsonrpc": "2.0", "rpcstream": "1.0", "id": 42, "method": "db.subscribe", "params": { "osVersion": "0.4.1.3" } }
 ```
 
 The initiating response is an ordinary JSON-RPC response, with its own result type:
@@ -29,6 +50,10 @@ Subsequent events use the same request ID and a separate protocol discriminator:
 ```json
 { "rpcstream": "1.0", "id": 42, "result": { "id": 101, "patch": [] }, "end": false }
 ```
+
+Rust clients decode initiating replies with `RpcResponse` and subsequent replies with
+`RpcStreamResponse`. The latter owns the stream envelope's encoding and validation for
+both the server and clients, including non-null IDs and exclusive result/error fields.
 
 ## Producer handle
 
@@ -121,19 +146,36 @@ Applications must also bound upstream queues such as database subscriptions.
 `WebSocketOptions` bounds in-flight calls/buffered initiating responses, active
 streams, queued events per stream, inbound message/frame size, and stalled sends.
 Defaults are 64 in-flight calls, 64 streams, 16 queued events per stream plus its
-terminal slot, 1 MiB inbound messages/frames, and a 15-second send deadline. The
+terminal slot, 1 MiB inbound logical messages, and a 15-second send deadline. Plain
+connections apply that same byte limit to raw messages/frames; an upgrader derives
+the raw allowance for its wire format. The
 buffer limit counts serialized values, not bytes, and must fit Tokio's bounded
-channel capacity. These are resource limits, not authentication decisions.
+channel capacity. These are resource limits, not authentication decisions. The message/frame byte limit is
+server-inbound: outgoing dumps, results, and events may be larger. Native receiving clients must
+configure both their own message and frame limits for the expected response size; a large dump
+can exceed a client's frame limit even when it fits its message limit.
+
+HTTP upgrade bodies use the separate `HttpServer` request-body limit (1 MiB by default),
+enforced before upgrade middleware runs. `with_max_request_body_size` configures that HTTP limit.
 
 A batch larger than the in-flight limit closes the connection with policy code 1008. Capacity rejection does not execute rejected calls. Receivers are polled
 fairly; a stalled network write ends the connection after its send deadline.
 
 HTTP middleware runs once during upgrade. Each RPC call clones that prepared
-middleware state and runs the existing RPC middleware pipeline. Per-call state
+middleware state and runs `process_rpc_message` on the original JSON before typed request
+hooks or parameter injection. The original message retains omitted parameters and extension
+fields, including `rpcstream`. Per-call state
 mutations do not leak to other calls or batch members. Middleware response
 rewrites apply to the initiating result; stream event payloads follow their own
 handler-defined contract. HTTP-response middleware runs on the upgrade response,
-not on later WebSocket frames.
+not on later WebSocket frames. RPC response middleware can add per-call fields with
+`RpcResponse::add_meta`; initiating replies carry them in a top-level `meta` object on both
+HTTP and WebSocket transports. Stream events and terminal replies retain their handler-defined
+contract and do not rerun RPC response middleware.
+
+`WebSocketRequest` marks the upgrade request in HTTP extensions. It identifies the transport,
+not an authenticated caller; HTTP body-authentication adapters can avoid treating the upgrade
+body as proof for later messages.
 
 Applications own authentication, authorization, origin policy, and revocation.
 Authentication of an upgrade must authorize the connection, not merely an

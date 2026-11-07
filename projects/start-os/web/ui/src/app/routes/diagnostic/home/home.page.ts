@@ -15,7 +15,7 @@ import { T, Version } from '@start9labs/start-core'
 import { TuiButton } from '@taiga-ui/core'
 import { TuiProgress } from '@taiga-ui/kit'
 import { filter, lastValueFrom, tap } from 'rxjs'
-import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { StartupApiService } from 'src/app/services/api/startup-api.service'
 import { ConfigService } from 'src/app/services/config.service'
 
 @Component({
@@ -26,7 +26,7 @@ import { ConfigService } from 'src/app/services/config.service'
 })
 export default class HomePage implements OnInit {
   private readonly tasks = inject(TaskService)
-  private readonly api = inject(ApiService)
+  private readonly api = inject(StartupApiService)
   private readonly dialog = inject(DialogService)
   private readonly errorService = inject(ErrorService)
   private readonly window = inject(WA_WINDOW)

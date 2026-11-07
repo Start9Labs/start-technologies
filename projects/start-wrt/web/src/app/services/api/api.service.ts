@@ -3,10 +3,17 @@ import type * as Bindings from './bindings'
 import type * as Events from './events'
 import type { Api, RpcParamType, RpcReturnType } from './bindings'
 
+export type ContinuationSocket = Pick<
+  WebSocket,
+  'onopen' | 'onmessage' | 'onclose' | 'onerror' | 'close'
+>
+
 @Injectable({
   providedIn: 'root',
 })
 export abstract class ApiService {
+  /** Opens a JSON continuation while the caller owns its event handlers and closure. */
+  abstract openWebsocket(guid: string): ContinuationSocket
   abstract login(params: LoginReq): Promise<RpcReturnType<Api, 'auth.login'>>
   abstract logout(): Promise<RpcReturnType<Api, 'auth.logout'>>
   abstract exec(params: ExecReq): Promise<ExecRes>

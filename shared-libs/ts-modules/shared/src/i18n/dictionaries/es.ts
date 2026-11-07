@@ -960,4 +960,9 @@ export default {
   1108: 'Formato de archivo no válido',
   1109: 'Respuesta del servidor no válida',
   1110: 'Tamaño máximo del archivo',
+  1111: 'URL del registro no válida',
+  1112: 'Las URL de los registros deben usar HTTP o HTTPS y no pueden contener credenciales, consultas ni fragmentos.',
+  1113: 'Conecta este registro para explorar su catálogo. Se confiará en las nuevas claves de firma de este registro para los paquetes.',
+  1114: 'Actualizar registro',
+  1115: 'Conecta este registro antes de actualizarlo.',
 } satisfies i18n

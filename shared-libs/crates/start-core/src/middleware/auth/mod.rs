@@ -15,6 +15,7 @@ use crate::util::serde::const_true;
 pub mod bearer;
 pub mod local;
 mod login_rate_limit;
+pub mod session;
 pub mod signature;
 
 #[cfg(test)]
@@ -99,6 +100,16 @@ impl<C: Context> Middleware<C> for Auth<C> {
         }
         Ok(())
     }
+    async fn process_rpc_message(
+        &mut self,
+        context: &C,
+        message: &Value,
+    ) -> Result<(), RpcResponse> {
+        for middleware in self.methods() {
+            middleware.process_rpc_message(context, message).await?;
+        }
+        Ok(())
+    }
     async fn process_rpc_request(
         &mut self,
         context: &C,
@@ -107,6 +118,9 @@ impl<C: Context> Middleware<C> for Auth<C> {
     ) -> Result<(), RpcResponse> {
         let m: Metadata =
             from_value(metadata.clone()).map_err(|e| RpcResponse::from_result(Err(e)))?;
+        if let Some(params) = request.params.as_object_mut() {
+            params.retain(|key, _| !key.starts_with("__Auth_"));
+        }
         let mut authorized = false;
         let mut err = None;
         if let Some(local) = &mut self.local {

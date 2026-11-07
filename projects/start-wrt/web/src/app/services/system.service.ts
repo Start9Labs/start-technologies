@@ -5,9 +5,15 @@ import {
   FullProgress,
   SystemInfoRes,
   VersionInfo,
+  type ContinuationSocket,
 } from './api/api.service'
 import { AuthService } from './auth.service'
-import { ConnectionService, isNetworkError } from './connection.service'
+import {
+  ConnectionService,
+  isNetworkError,
+  PROBE_TIMEOUT_MS,
+} from './connection.service'
+import { RpcSocketService } from '@start9labs/shared'
 import { StaleUiService } from './stale-ui.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { fill } from 'src/app/i18n/validation-errors'
@@ -24,9 +30,10 @@ export class SystemService {
   private readonly auth = inject(AuthService)
   private readonly alerts = inject(TuiNotificationService)
   private readonly connection = inject(ConnectionService)
+  private readonly sockets = inject(RpcSocketService)
   private readonly staleUi = inject(StaleUiService)
   private readonly i18n = inject(i18nPipe)
-  private ws: WebSocket | null = null
+  private ws: ContinuationSocket | null = null
   private targetVersion = ''
 
   readonly info = signal<SystemInfoRes | null>(null)
@@ -36,14 +43,7 @@ export class SystemService {
   readonly rebooting = signal(false)
 
   constructor() {
-    // Detection floor for idle pages: stale-UI detection rides the
-    // x-startwrt-git-hash header on RPC responses, but non-FormService pages
-    // (e.g. Settings General) make no requests while idle, so a firmware
-    // deploy would go unnoticed until navigation. Skipped while hidden
-    // (background tabs throttle timers anyway), while the in-tab update flow
-    // owns polling (preserves its latch-then-reload-synchronously invariant,
-    // no dialog flash), and while the reconnect loop is already probing
-    // system.info every 3s.
+    // Idle pages need firmware checks even without form polling.
     setInterval(() => {
       if (
         document.visibilityState === 'hidden' ||
@@ -105,9 +105,10 @@ export class SystemService {
     this.connection.suppress()
 
     try {
-      const { progress } = await this.api.systemUpdate({
+      const { progress, target } = await this.api.systemUpdate({
         targetVersion,
       })
+      this.targetVersion = target ?? targetVersion
 
       if (progress) {
         this.subscribeToProgress(progress)
@@ -125,15 +126,14 @@ export class SystemService {
   }
 
   private subscribeToProgress(guid: string): void {
-    const protocol = location.protocol === 'http:' ? 'ws' : 'wss'
-    const ws = new WebSocket(`${protocol}://${location.host}/ws/rpc/${guid}`)
+    const ws = this.api.openWebsocket(guid)
 
     ws.onmessage = event => {
       try {
         const progress = JSON.parse(event.data) as FullProgress
         if (progress.overall === true) {
           ws.close()
-          this.onUpdateComplete()
+          this.awaitReboot()
         } else if (progress.overall === false) {
           ws.close()
           this.onUpdateFailed()
@@ -145,11 +145,9 @@ export class SystemService {
 
     ws.onclose = () => {
       this.ws = null
-      // Still "updating" means the socket dropped without a terminal progress
-      // message — an explicit failure already cleared `updating` via
-      // onUpdateFailed, so reaching here means the device is rebooting.
+      // A dropped stream starts recovery; a verified response confirms the update.
       if (this.updating()) {
-        this.onUpdateComplete()
+        this.awaitReboot()
       }
     }
 
@@ -160,7 +158,7 @@ export class SystemService {
     this.ws = ws
   }
 
-  private onUpdateComplete(): void {
+  private awaitReboot(): void {
     this.updating.set(false)
     this.rebooting.set(true)
     this.pollForReconnect()
@@ -180,7 +178,7 @@ export class SystemService {
   }
 
   private async pollForReconnect(): Promise<void> {
-    const maxAttempts = 60 // ~5 minutes with 5s interval
+    const maxAttempts = 60
     // A successful update reboots the device, so a poll throws a network
     // error before it comes back; a failed update reaches here via
     // ws.onclose without the device ever going unreachable.
@@ -188,11 +186,15 @@ export class SystemService {
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(r => setTimeout(r, 5000))
       try {
-        const info = await this.api.systemInfo()
+        const info = await this.api.systemInfo(PROBE_TIMEOUT_MS)
         // Device is reachable again.
         this.rebooting.set(false)
         this.connection.resume()
         if (wentOffline) {
+          if (info.version !== this.targetVersion) {
+            this.onUpdateFailed()
+            return
+          }
           // It really rebooted — sysupgrade wiped the session store, so the
           // user is headed to login either way. If the new firmware ships a
           // different UI bundle, reload outright to land there on the NEW
@@ -224,6 +226,7 @@ export class SystemService {
       } catch (e) {
         if (isNetworkError(e)) {
           wentOffline = true
+          this.sockets.disconnect()
         }
         // A non-network error means the device responded — keep polling.
       }

@@ -31,6 +31,8 @@ pub struct Private {
     #[serde(default)]
     pub os_security_notifications: SecurityNotifications,
     #[serde(default)]
+    pub registry_indexes: BTreeMap<url::Url, crate::registry::FullIndex>,
+    #[serde(default)]
     pub push: crate::notifications::push::PushState,
     pub cifs: CifsTargets,
     #[serde(default)]

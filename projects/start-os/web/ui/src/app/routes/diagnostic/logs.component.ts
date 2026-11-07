@@ -16,7 +16,7 @@ import { convertAnsi, ErrorService } from '@start9labs/shared'
 import { tuiProvide } from '@taiga-ui/cdk'
 import { TuiButton, TuiLoader, TuiScrollbar } from '@taiga-ui/core'
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
-import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { StartupApiService } from 'src/app/services/api/startup-api.service'
 
 @Component({
   template: `
@@ -73,7 +73,7 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
 export default class LogsPage implements OnInit {
   @ViewChild(TuiScrollbar, { read: ElementRef })
   private readonly scrollbar?: ElementRef<HTMLElement>
-  private readonly api = inject(ApiService)
+  private readonly api = inject(StartupApiService)
   private readonly errorService = inject(ErrorService)
 
   startCursor?: string | null

@@ -960,4 +960,9 @@ export default {
   1108: 'Nieprawidłowy format pliku',
   1109: 'Nieprawidłowa odpowiedź serwera',
   1110: 'Maksymalny rozmiar pliku',
+  1111: 'Nieprawidłowy URL rejestru',
+  1112: 'Adresy URL rejestrów muszą używać HTTP lub HTTPS i nie mogą zawierać danych logowania, zapytania ani fragmentu.',
+  1113: 'Połącz ten rejestr, aby przeglądać jego katalog. Nowe klucze podpisujące z tego rejestru będą zaufane dla pakietów.',
+  1114: 'Odśwież rejestr',
+  1115: 'Połącz ten rejestr przed jego odświeżeniem.',
 } satisfies i18n

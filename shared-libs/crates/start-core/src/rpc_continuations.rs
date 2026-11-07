@@ -6,7 +6,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use axum::extract::Request;
-use axum::extract::ws::WebSocket as AxumWebSocket;
+use axum::extract::ws::{WebSocket as AxumWebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use clap::builder::ValueParserFactory;
 use futures::future::BoxFuture;
@@ -14,10 +14,12 @@ use futures::{Future, FutureExt};
 use imbl_value::InternedString;
 use tokio::sync::{Mutex as AsyncMutex, broadcast};
 
+use crate::middleware::auth::session::SecureSession;
 #[allow(unused_imports)]
 use crate::prelude::*;
 use crate::util::future::TimedResource;
-use crate::util::net::WebSocket;
+
+pub type WebSocket = crate::util::net::WebSocket<rpc_toolkit::BoxWebSocket>;
 use crate::util::{FromStrParser, new_guid};
 
 #[derive(
@@ -119,7 +121,64 @@ impl Future for WebSocketFuture {
         }
     }
 }
-pub type WebSocketHandler = Box<dyn FnOnce(AxumWebSocket) -> WebSocketFuture + Send>;
+type WebSocketCallback = Box<dyn FnOnce(WebSocket) -> BoxFuture<'static, ()> + Send>;
+
+/// Resource policy of the RPC issuing a WebSocket continuation.
+#[derive(Clone, Copy, Debug)]
+pub enum WebSocketPolicy {
+    /// Available without caller authentication, including optional signed browsing.
+    Public,
+    /// Requires caller authentication before issuing the continuation.
+    Authenticated,
+}
+
+pub struct WebSocketHandler {
+    callback: WebSocketCallback,
+    policy: WebSocketPolicy,
+    secure: Option<SecureSession>,
+    kill: Option<BoxFuture<'static, ()>>,
+}
+impl WebSocketHandler {
+    pub fn on_upgrade(self, ws: WebSocketUpgrade) -> Response {
+        let incoming = std::num::NonZeroUsize::new(match self.policy {
+            WebSocketPolicy::Public => 1024,
+            WebSocketPolicy::Authenticated => 64 * 1024 * 1024,
+        })
+        .unwrap();
+        let (mut ws, send_timeout) = match self.policy {
+            WebSocketPolicy::Public => (
+                ws.read_buffer_size(2048)
+                    .write_buffer_size(0)
+                    .max_frame_size(incoming.get()),
+                Some(Duration::from_secs(15)),
+            ),
+            WebSocketPolicy::Authenticated => (ws, None),
+        };
+        ws = ws.max_message_size(incoming.get());
+        if self.secure.is_some() {
+            let wire = crate::util::net::secure::wire_chunk_size(incoming).get();
+            ws = ws.max_message_size(wire).max_frame_size(wire);
+        }
+        ws.on_upgrade(move |socket: AxumWebSocket| WebSocketFuture {
+            kill: self.kill,
+            fut: async move {
+                let socket: rpc_toolkit::BoxWebSocket = match self.secure {
+                    Some(secure) => match secure.accept(Box::new(socket), incoming).await {
+                        Ok(socket) => Box::new(socket),
+                        Err(_) => return,
+                    },
+                    None => Box::new(socket),
+                };
+                let mut socket = WebSocket::new(socket);
+                if let Some(timeout) = send_timeout {
+                    socket.set_send_timeout(timeout);
+                }
+                (self.callback)(socket).await;
+            }
+            .boxed(),
+        })
+    }
+}
 
 pub enum RpcContinuation {
     Rest(TimedResource<RestHandler>),
@@ -139,16 +198,23 @@ impl RpcContinuation {
             timeout,
         ))
     }
-    pub fn ws<F, Fut>(handler: F, timeout: Duration) -> Self
+    pub fn ws<F, Fut>(
+        policy: WebSocketPolicy,
+        secure: Option<SecureSession>,
+        handler: F,
+        timeout: Duration,
+    ) -> Self
     where
         F: FnOnce(WebSocket) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
         RpcContinuation::WebSocket(TimedResource::new(
-            Box::new(|ws| WebSocketFuture {
+            WebSocketHandler {
+                callback: Box::new(|ws| handler(ws).boxed()),
+                policy,
+                secure,
                 kill: None,
-                fut: handler(ws.into()).boxed(),
-            }),
+            },
             timeout,
         ))
     }
@@ -168,7 +234,14 @@ impl RpcContinuation {
             timeout,
         ))
     }
-    pub fn ws_authed<Ctx, T, F, Fut>(ctx: Ctx, session: T, handler: F, timeout: Duration) -> Self
+    pub fn ws_authed<Ctx, T, F, Fut>(
+        ctx: Ctx,
+        session: T,
+        policy: WebSocketPolicy,
+        secure: Option<SecureSession>,
+        handler: F,
+        timeout: Duration,
+    ) -> Self
     where
         Ctx: AsRef<OpenAuthedContinuations<T>>,
         T: Eq + Ord,
@@ -177,10 +250,12 @@ impl RpcContinuation {
     {
         let kill = Some(ctx.as_ref().subscribe_to_kill(session));
         RpcContinuation::WebSocket(TimedResource::new(
-            Box::new(|ws| WebSocketFuture {
+            WebSocketHandler {
+                callback: Box::new(|ws| handler(ws).boxed()),
+                policy,
+                secure,
                 kill,
-                fut: handler(ws.into()).boxed(),
-            }),
+            },
             timeout,
         ))
     }
@@ -322,5 +397,410 @@ mod tests {
         revoke_pending(&open, &mut future);
         let error = future.now_or_never().unwrap().unwrap_err();
         assert_eq!(error.kind, ErrorKind::Authorization);
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod websocket_tests {
+    use std::sync::Arc;
+
+    use axum::Router;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::routing::get;
+    use futures::{SinkExt, StreamExt};
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::protocol::frame::Frame;
+    use tokio_tungstenite::tungstenite::protocol::frame::coding::{Data, OpCode};
+
+    use super::*;
+    use crate::util::future::NonDetachingJoinHandle;
+
+    pub(crate) async fn serve(cont: RpcContinuation) -> (String, NonDetachingJoinHandle<()>) {
+        let continuations = Arc::new(RpcContinuations::new());
+        let guid = Guid::new();
+        continuations.add(guid.clone(), cont).await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}/ws", listener.local_addr().unwrap());
+        let router = Router::new().route(
+            "/ws",
+            get(move |ws: WebSocketUpgrade| {
+                let continuations = continuations.clone();
+                let guid = guid.clone();
+                async move {
+                    match continuations.get_ws_handler(&guid).await {
+                        Some(handler) => handler.on_upgrade(ws),
+                        None => StatusCode::NOT_FOUND.into_response(),
+                    }
+                }
+            }),
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        (url, server.into())
+    }
+
+    pub(crate) async fn echo(mut socket: WebSocket) {
+        while let Some(Ok(message)) = socket.recv().await {
+            if socket.send(message).await.is_err() {
+                break;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_frame_limit_and_one_shot_upgrade() {
+        let (url, _server) = serve(RpcContinuation::ws(
+            WebSocketPolicy::Public,
+            None,
+            echo,
+            Duration::from_secs(30),
+        ))
+        .await;
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        assert!(connect_async(&url).await.is_err());
+        socket
+            .send(Message::Text("x".repeat(1024).into()))
+            .await
+            .unwrap();
+        assert_eq!(socket.next().await.unwrap().unwrap().len(), 1024);
+        socket
+            .send(Message::Text("x".repeat(1025).into()))
+            .await
+            .unwrap();
+        assert!(!matches!(socket.next().await, Some(Ok(Message::Text(_)))));
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_message_limit_covers_fragmented_frames() {
+        let (url, _server) = serve(RpcContinuation::ws(
+            WebSocketPolicy::Public,
+            None,
+            echo,
+            Duration::from_secs(30),
+        ))
+        .await;
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        for (opcode, last) in [
+            (OpCode::Data(Data::Text), false),
+            (OpCode::Data(Data::Continue), true),
+        ] {
+            socket
+                .send(Message::Frame(Frame::message(
+                    vec![b'x'; 600],
+                    opcode,
+                    last,
+                )))
+                .await
+                .unwrap();
+        }
+        assert!(!matches!(socket.next().await, Some(Ok(Message::Text(_)))));
+    }
+
+    #[tokio::test]
+    async fn authenticated_local_session_retains_bulk_frames_and_revocation() {
+        let open = Arc::new(OpenAuthedContinuations::new());
+        let (url, _server) = serve(RpcContinuation::ws_authed(
+            open.clone(),
+            None::<&str>,
+            WebSocketPolicy::Authenticated,
+            None,
+            echo,
+            Duration::from_secs(30),
+        ))
+        .await;
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        let data = "x".repeat(2 * 1024 * 1024);
+        socket
+            .send(Message::Text(data.clone().into()))
+            .await
+            .unwrap();
+        assert_eq!(
+            socket.next().await.unwrap().unwrap().into_text().unwrap(),
+            data
+        );
+        open.kill(&None);
+        assert!(!matches!(socket.next().await, Some(Ok(Message::Text(_)))));
+    }
+
+    #[tokio::test]
+    async fn authenticated_nonrevocable_continuations_retain_bulk_frames() {
+        let (url, _server) = serve(RpcContinuation::ws(
+            WebSocketPolicy::Authenticated,
+            None,
+            echo,
+            Duration::from_secs(30),
+        ))
+        .await;
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        let data = "x".repeat(2 * 1024 * 1024);
+        socket
+            .send(Message::Text(data.clone().into()))
+            .await
+            .unwrap();
+        assert_eq!(
+            socket.next().await.unwrap().unwrap().into_text().unwrap(),
+            data
+        );
+    }
+
+    #[tokio::test]
+    async fn revocation_tracking_does_not_exempt_public_continuations_from_limits() {
+        let open = Arc::new(OpenAuthedContinuations::new());
+        let (url, _server) = serve(RpcContinuation::ws_authed(
+            open.clone(),
+            "public",
+            WebSocketPolicy::Public,
+            None,
+            echo,
+            Duration::from_secs(30),
+        ))
+        .await;
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        socket
+            .send(Message::Text("x".repeat(1024).into()))
+            .await
+            .unwrap();
+        assert_eq!(socket.next().await.unwrap().unwrap().len(), 1024);
+        socket
+            .send(Message::Text("x".repeat(1025).into()))
+            .await
+            .unwrap();
+        assert!(!matches!(socket.next().await, Some(Ok(Message::Text(_)))));
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_outbound_bulk_remains_allowed() {
+        let (url, _server) = serve(RpcContinuation::ws(
+            WebSocketPolicy::Public,
+            None,
+            |mut socket| async move {
+                socket
+                    .send(axum::extract::ws::Message::Text(
+                        "x".repeat(2 * 1024 * 1024).into(),
+                    ))
+                    .await
+                    .unwrap();
+            },
+            Duration::from_secs(30),
+        ))
+        .await;
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        assert_eq!(socket.next().await.unwrap().unwrap().len(), 2 * 1024 * 1024);
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_blocked_sends_time_out_including_split_sink() {
+        for split in [false, true] {
+            let (pending_send, pending_recv) = oneshot::channel();
+            let (done_send, done_recv) = oneshot::channel();
+            let (url, _server) = serve(RpcContinuation::ws(
+                WebSocketPolicy::Public,
+                None,
+                move |mut socket| async move {
+                    let message =
+                        axum::extract::ws::Message::Binary(vec![0; 16 * 1024 * 1024].into());
+                    let result = if split {
+                        let (mut sink, _stream) = socket.split();
+                        let mut send = Box::pin(sink.send(message));
+                        assert!(futures::poll!(&mut send).is_pending());
+                        pending_send.send(()).unwrap();
+                        send.await
+                    } else {
+                        let mut send = Box::pin(socket.send(message));
+                        assert!(futures::poll!(&mut send).is_pending());
+                        pending_send.send(()).unwrap();
+                        send.await
+                    };
+                    done_send.send(result.unwrap_err().to_string()).unwrap();
+                },
+                Duration::from_secs(30),
+            ))
+            .await;
+            let (_socket, _) = connect_async(&url).await.unwrap();
+            pending_recv.await.unwrap();
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(14)).await;
+            let mut done_recv = Box::pin(done_recv);
+            assert!(futures::poll!(&mut done_recv).is_pending());
+            tokio::time::advance(Duration::from_secs(1)).await;
+            assert!(
+                tokio::time::timeout(Duration::from_secs(1), done_recv)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .contains("timed out")
+            );
+            tokio::time::resume();
+        }
+    }
+
+    #[tokio::test]
+    async fn flushed_keepalive_does_not_leave_a_send_deadline() {
+        let (started_send, started_recv) = oneshot::channel();
+        let (done_send, mut done_recv) = oneshot::channel();
+        let (url, _server) = serve(RpcContinuation::ws(
+            WebSocketPolicy::Public,
+            None,
+            move |mut socket| async move {
+                let mut receive = Box::pin(socket.recv());
+                assert!(futures::poll!(&mut receive).is_pending());
+                started_send.send(()).unwrap();
+                let _ = receive.await;
+                let _ = done_send.send(());
+            },
+            Duration::from_secs(30),
+        ))
+        .await;
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        started_recv.await.unwrap();
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(30)).await;
+        tokio::task::yield_now().await;
+        tokio::time::resume();
+        assert!(matches!(socket.next().await, Some(Ok(Message::Ping(_)))));
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(16)).await;
+        tokio::task::yield_now().await;
+        assert!(matches!(
+            done_recv.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        tokio::time::resume();
+        drop(socket);
+        tokio::time::timeout(Duration::from_secs(2), done_recv)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_successful_send_resets_deadline() {
+        let (next_send, next_recv) = oneshot::channel();
+        let (url, _server) = serve(RpcContinuation::ws(
+            WebSocketPolicy::Public,
+            None,
+            move |mut socket| async move {
+                socket
+                    .send(axum::extract::ws::Message::Text("first".into()))
+                    .await
+                    .unwrap();
+                next_recv.await.unwrap();
+                socket
+                    .send(axum::extract::ws::Message::Text("second".into()))
+                    .await
+                    .unwrap();
+            },
+            Duration::from_secs(30),
+        ))
+        .await;
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        assert_eq!(
+            socket.next().await.unwrap().unwrap().into_text().unwrap(),
+            "first"
+        );
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(16)).await;
+        next_send.send(()).unwrap();
+        tokio::task::yield_now().await;
+        tokio::time::resume();
+        assert_eq!(
+            socket.next().await.unwrap().unwrap().into_text().unwrap(),
+            "second"
+        );
+    }
+
+    #[tokio::test]
+    async fn authenticated_blocked_send_has_no_deadline_and_is_revocable() {
+        let open = Arc::new(OpenAuthedContinuations::new());
+        let (pending_send, pending_recv) = oneshot::channel();
+        let (dropped_send, mut dropped_recv) = oneshot::channel::<()>();
+        let (url, _server) = serve(RpcContinuation::ws_authed(
+            open.clone(),
+            Some("key"),
+            WebSocketPolicy::Authenticated,
+            None,
+            move |mut socket| async move {
+                let _dropped = dropped_send;
+                let mut send = Box::pin(socket.send(axum::extract::ws::Message::Binary(
+                    vec![0; 16 * 1024 * 1024].into(),
+                )));
+                assert!(futures::poll!(&mut send).is_pending());
+                pending_send.send(()).unwrap();
+                let _ = send.await;
+            },
+            Duration::from_secs(30),
+        ))
+        .await;
+        let (_socket, _) = connect_async(&url).await.unwrap();
+        pending_recv.await.unwrap();
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(16)).await;
+        tokio::task::yield_now().await;
+        assert!(matches!(
+            dropped_recv.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        open.kill(&Some("key"));
+        assert!(dropped_recv.await.is_err());
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_close_handshake_is_bounded() {
+        let (started_send, started_recv) = oneshot::channel();
+        let (done_send, done_recv) = oneshot::channel();
+        let (url, _server) = serve(RpcContinuation::ws(
+            WebSocketPolicy::Public,
+            None,
+            move |socket| async move {
+                let mut close = Box::pin(socket.normal_close("complete"));
+                assert!(futures::poll!(&mut close).is_pending());
+                started_send.send(()).unwrap();
+                done_send.send(close.await.is_err()).unwrap();
+            },
+            Duration::from_secs(30),
+        ))
+        .await;
+        let (_socket, _) = connect_async(&url).await.unwrap();
+        started_recv.await.unwrap();
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(15)).await;
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), done_recv)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expired_websocket_is_unavailable_without_consuming_rest() {
+        let continuations = RpcContinuations::new();
+        let guid = Guid::new();
+        continuations
+            .add(
+                guid.clone(),
+                RpcContinuation::ws(WebSocketPolicy::Public, None, echo, Duration::from_secs(1)),
+            )
+            .await;
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(2)).await;
+        tokio::task::yield_now().await;
+        assert!(continuations.get_ws_handler(&guid).await.is_none());
+        let rest = Guid::new();
+        continuations
+            .add(
+                rest.clone(),
+                RpcContinuation::rest(
+                    |_| async { Ok(StatusCode::OK.into_response()) },
+                    Duration::from_secs(30),
+                ),
+            )
+            .await;
+        assert!(continuations.get_ws_handler(&rest).await.is_none());
+        assert!(continuations.get_rest_handler(&rest).await.is_some());
+        assert!(continuations.get_rest_handler(&rest).await.is_none());
     }
 }

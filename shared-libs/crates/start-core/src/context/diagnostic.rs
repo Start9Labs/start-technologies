@@ -25,6 +25,8 @@ pub struct DiagnosticContextSeed {
 
 #[derive(Clone)]
 pub struct DiagnosticContext(Arc<DiagnosticContextSeed>);
+
+impl crate::middleware::auth::session::SessionContext for DiagnosticContext {}
 impl DiagnosticContext {
     #[instrument(skip_all)]
     pub async fn init(

@@ -132,6 +132,20 @@ Metadata tags are processed by different middleware. Group them logically:
 | ------------ | ------- | ------------------------------------------------------- |
 | `get_signer` | `false` | Inject signer public key into params as `__Auth_signer` |
 
+`signature::rpc::rpc_signing_body` and TypeScript `auth.rpcSigningBody` encode the complete
+request object except its root `signature` field. The signing body uses length-first
+deterministic CBOR: integers remain integers; floating-point values become eight big-endian
+IEEE-754 bytes. This retains numeric type distinctions and signed zero. The TypeScript helper
+accepts raw JSON and requires source-aware `JSON.parse` to retain full-u64 integers. These
+helpers encode the signing body only. `SignatureHeader::sign_rpc` and TypeScript
+`auth.signRpcRequest` produce the query-encoded proof stored in root `signature`.
+`SignatureAuth` checks that proof per call through `process_rpc_message`, using the
+`Start-RPC-Auth-Sig v1` domain, current signing identities, enrollment policy, clock and nonce
+cache. An explicit JSON proof takes precedence over a compatibility header. Legacy HTTP
+proofs remain valid for HTTP calls and resources, but an upgrade-body proof does not authorize
+later WebSocket messages. MCP tool calls verify the original MCP message, not a reconstructed
+backend call.
+
 ### Registry Auth (extends Signature Auth)
 
 | Metadata          | Default | Description                                             |
@@ -141,9 +155,16 @@ Metadata tags are processed by different middleware. Group them logically:
 
 ### Database Middleware (`middleware/db.rs`)
 
-| Metadata  | Default | Description                                                 |
-| --------- | ------- | ----------------------------------------------------------- |
-| `sync_db` | `false` | Sync database after mutation, add `X-Patch-Sequence` header |
+| Metadata  | Default | Description                                     |
+| --------- | ------- | ----------------------------------------------- |
+| `sync_db` | `false` | Publish the database sequence after an RPC call |
+
+`SyncDb` writes `meta.patchSequence` and advances StartOS's filtered database subscribers in
+RPC response middleware, including when a handler returns an error after committing changes.
+HTTP and WebSocket initiating replies use the same metadata; MCP projects it to tool-result
+`_meta`. `SyncDbHeaderCompat` projects the greatest sequence in an HTTP batch into
+`X-Patch-Sequence` for older clients. The shared frontend HTTP adapter accepts that header from
+older servers; StartOS and StartTunnel clients wait on the typed JSON metadata.
 
 ## Context Types
 

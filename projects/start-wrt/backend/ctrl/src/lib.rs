@@ -34,6 +34,7 @@ pub mod profiles;
 pub mod progress;
 pub mod published_ports;
 pub mod registry;
+pub mod rpc;
 pub mod setup;
 pub use startos::sign;
 pub mod ssh_keys;
@@ -366,12 +367,33 @@ impl CallRemote<ServerContext> for CliContext {
 pub struct ServerContext {
     pub continuations: Arc<continuations::RpcContinuations>,
     pub auth: Arc<auth::AuthState>,
+    pub server_identity: startos::sign::Signer,
+    pub(crate) secure_session: Option<Arc<startos::middleware::auth::session::SecureSession>>,
+}
+impl startos::middleware::auth::session::SessionContext for ServerContext {
+    fn secure_session(&self) -> Option<&startos::middleware::auth::session::SecureSession> {
+        self.secure_session.as_deref()
+    }
+}
+impl startos::middleware::auth::session::SecureRpcContext for ServerContext {
+    fn server_identity(&self) -> Result<startos::sign::Signer, startos::Error> {
+        Ok(self.server_identity.clone())
+    }
+    fn with_secure_session(
+        mut self,
+        session: startos::middleware::auth::session::SecureSession,
+    ) -> Self {
+        self.secure_session = Some(Arc::new(session));
+        self
+    }
 }
 impl Default for ServerContext {
     fn default() -> Self {
         Self {
             continuations: Arc::new(continuations::RpcContinuations::new()),
             auth: Arc::new(auth::AuthState::in_memory()),
+            server_identity: startos::sign::AnySigningKey::generate().into(),
+            secure_session: None,
         }
     }
 }
@@ -383,6 +405,42 @@ impl CtrlContext for ServerContext {
 
     fn effectful(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod server_identity_tests {
+    use super::*;
+
+    #[test]
+    fn image_preserves_the_server_identity_during_sysupgrade() {
+        let path = PathBuf::from(auth::AUTH_DB_PATH)
+            .parent()
+            .unwrap()
+            .join(startos::sign::instance::IDENTITY_FILE);
+        let stage = include_str!("../../../build/stage-files.sh");
+        let keep = stage
+            .split("<< 'KEEPEOF'")
+            .nth(1)
+            .unwrap()
+            .split("KEEPEOF")
+            .next()
+            .unwrap();
+        assert!(keep.lines().any(|line| line == path.to_str().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn cloned_context_retains_the_server_identity() {
+        let context = ServerContext::default();
+        assert_eq!(
+            context.server_identity.verifying_key().await.unwrap(),
+            context
+                .clone()
+                .server_identity
+                .verifying_key()
+                .await
+                .unwrap()
+        );
     }
 }
 

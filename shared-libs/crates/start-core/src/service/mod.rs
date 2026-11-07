@@ -33,7 +33,7 @@ use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
 use crate::lxc::ContainerId;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocket, WebSocketPolicy};
 use crate::s9pk::S9pk;
 use crate::service::action::update_tasks;
 use crate::service::rpc::{ExitParams, InitKind};
@@ -46,7 +46,6 @@ use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::{
     AsyncReadStream, AtomicFile, TermSize, delete_file, maybe_read_file_to_string,
 };
-use crate::util::net::WebSocket;
 use crate::util::serde::Der64;
 use crate::util::sync::SyncMutex;
 use crate::util::tui::choose;
@@ -1070,6 +1069,8 @@ pub async fn attach(
             RpcContinuation::ws_authed(
                 &ctx,
                 signer,
+                WebSocketPolicy::Authenticated,
+                ctx.secure_session().cloned(),
                 move |mut ws| async move {
                     if let Err(e) = handler(&mut ws, cmd).await {
                         if !crate::util::net::is_ws_reset_without_close(&e) {

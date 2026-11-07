@@ -36,6 +36,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let directory = Path::new(&directory);
     std::fs::create_dir_all(directory.join("rpc"))?;
     let rpc = directory.join("rpc");
+    std::fs::write(
+        directory.join("noise-profile.ts"),
+        format!(
+            "export const NOISE_PROFILE = {}\n",
+            serde_json::to_string_pretty(&start_core::middleware::auth::session::browser_profile())?,
+        ),
+    )?;
     write_api(&rpc, "start-os", start_core::main_api::<RpcContext>())?;
     write_api(&rpc, "setup", start_core::main_api::<SetupContext>())?;
     write_api(&rpc, "init", start_core::main_api::<InitContext>())?;

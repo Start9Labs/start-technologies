@@ -30,8 +30,9 @@ use crate::PackageId;
 use crate::context::{CliContext, RpcContext};
 use crate::error::ResultExt;
 use crate::prelude::*;
-use crate::rpc_continuations::{Guid, RpcContinuation, RpcContinuations};
-use crate::util::net::WebSocket;
+use crate::rpc_continuations::{
+    Guid, RpcContinuation, RpcContinuations, WebSocket, WebSocketPolicy,
+};
 use crate::util::serde::Reversible;
 use crate::util::{FromStrParser, Invoke};
 
@@ -385,16 +386,17 @@ pub struct CliLogsParams<Extra: FromArgMatches + Args = Empty> {
 
 #[allow(private_bounds)]
 pub fn logs<
-    C: Context + AsRef<RpcContinuations>,
+    C: Context + AsRef<RpcContinuations> + SessionContext,
     Extra: FromArgMatches + Serialize + DeserializeOwned + Args + TS + Send + Sync + 'static,
 >(
     source: impl for<'a> LogSourceFn<'a, C, Extra>,
+    policy: WebSocketPolicy,
 ) -> ParentHandler<C, LogsParams<Extra>> {
     ParentHandler::new()
         .root_handler(logs_nofollow::<C, Extra>(source.clone()).no_cli())
         .subcommand(
             "follow",
-            logs_follow::<C, Extra>(source)
+            logs_follow::<C, Extra>(source, policy)
                 .with_inherited(|params, _| params)
                 .no_cli(),
         )
@@ -503,10 +505,11 @@ where
 }
 
 fn logs_follow<
-    C: Context + AsRef<RpcContinuations>,
+    C: Context + AsRef<RpcContinuations> + SessionContext,
     Extra: FromArgMatches + Args + Send + Sync + 'static,
 >(
     f: impl for<'a> LogSourceFn<'a, C, Extra>,
+    policy: WebSocketPolicy,
 ) -> impl HandlerFor<
     C,
     Params = Empty,
@@ -530,7 +533,7 @@ fn logs_follow<
             let f = f.clone();
             async move {
                 let src = f.call(&context, extra).await?;
-                follow_logs(context, src, cursor, limit, boot.map(String::from)).await
+                follow_logs(context, src, cursor, limit, boot.map(String::from), policy).await
             }
         },
     )
@@ -545,7 +548,7 @@ async fn get_package_id(
 }
 
 pub fn package_logs() -> ParentHandler<RpcContext, LogsParams<PackageIdParams>> {
-    logs::<RpcContext, PackageIdParams>(get_package_id)
+    logs::<RpcContext, PackageIdParams>(get_package_id, WebSocketPolicy::Authenticated)
 }
 
 pub async fn journalctl(
@@ -706,12 +709,13 @@ pub async fn fetch_logs(
 }
 
 #[instrument(skip_all)]
-pub async fn follow_logs<Context: AsRef<RpcContinuations>>(
+pub async fn follow_logs<Context: AsRef<RpcContinuations> + SessionContext>(
     ctx: Context,
     id: LogSource,
     cursor: Option<String>,
     limit: Option<usize>,
     boot: Option<String>,
+    policy: WebSocketPolicy,
 ) -> Result<LogFollowResponse, Error> {
     let limit = if cursor.is_some() {
         None
@@ -739,6 +743,8 @@ pub async fn follow_logs<Context: AsRef<RpcContinuations>>(
         .add(
             guid.clone(),
             RpcContinuation::ws(
+                policy,
+                ctx.secure_session().cloned(),
                 move |socket| async move {
                     if let Err(e) = ws_handler(first_entry, stream, socket).await {
                         tracing::error!(

@@ -3,6 +3,15 @@ const wire = <A extends z.ZodType, B extends z.ZodType>(input: A, output: B) =>
   z.codec(input, output, { decode: v => v as never, encode: v => v as never })
 const object = <Shape extends z.core.$ZodLooseShape>(shape: Shape) =>
   z.object(shape).meta({ additionalProperties: true })
+
+/**
+ * Firmware build identity attached to each RPC reply.
+ */
+export const FirmwareMetadata: z.ZodObject<{ gitHash: z.ZodString }> =
+  /* @__PURE__ */ object({ gitHash: z.string() }).meta({
+    id: 'FirmwareMetadata',
+    description: 'Firmware build identity attached to each RPC reply.',
+  })
 export const FlashMode: z.ZodEnum<{
   update: 'update'
   'fresh-start': 'fresh-start'

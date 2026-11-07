@@ -960,4 +960,9 @@ export default {
   1108: 'Ungültiges Dateiformat',
   1109: 'Ungültige Antwort vom Server',
   1110: 'Maximale Dateigröße',
+  1111: 'Ungültige Registry-URL',
+  1112: 'Registry-URLs müssen HTTP oder HTTPS verwenden und dürfen keine Zugangsdaten, Abfrage oder Fragmentkennung enthalten.',
+  1113: 'Verbinde diese Registry, um ihren Katalog zu durchsuchen. Neuen Signaturschlüsseln dieser Registry wird für Pakete vertraut.',
+  1114: 'Registry aktualisieren',
+  1115: 'Verbinde diese Registry, bevor sie aktualisiert wird.',
 } satisfies i18n

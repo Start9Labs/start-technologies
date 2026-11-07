@@ -5710,7 +5710,7 @@
       "allOf": [
         { "type": "object", "properties": {}, "additionalProperties": true },
         { "$ref": "#/$defs/RegistryUrlParams" },
-        { "$ref": "#/$defs/DumpParams" }
+        { "$ref": "#/$defs/SubscribeIndexParams" }
       ],
       "$defs": {
         "RegistryUrlParams": {
@@ -5719,48 +5719,29 @@
           "required": ["registry"],
           "additionalProperties": true
         },
-        "DumpParams": {
+        "SubscribeIndexParams": {
+          "allOf": [
+            {
+              "type": "object",
+              "properties": {
+                "pointer": { "type": ["string", "null"] },
+                "osVersion": {
+                  "description": "Client StartOS version. Omission preserves the canonical index format.",
+                  "type": ["string", "null"]
+                }
+              },
+              "additionalProperties": true
+            },
+            { "$ref": "#/$defs/ReaderParams" }
+          ]
+        },
+        "ReaderParams": {
           "type": "object",
-          "properties": { "pointer": { "type": ["string", "null"] } },
+          "properties": {},
           "additionalProperties": true
         }
       },
       "type": "object"
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$defs": {
-        "SubscribeRes": {
-          "type": "object",
-          "properties": {
-            "dump": { "$ref": "#/$defs/Dump" },
-            "guid": { "$ref": "#/$defs/Guid" }
-          },
-          "required": ["dump", "guid"],
-          "additionalProperties": true
-        },
-        "Dump": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "value": {}
-          },
-          "required": ["id", "value"],
-          "additionalProperties": true
-        },
-        "Guid": { "type": "string" }
-      },
-      "type": "object",
-      "properties": {
-        "dump": { "$ref": "#/$defs/Dump" },
-        "guid": { "$ref": "#/$defs/Guid" }
-      },
-      "required": ["dump", "guid"],
-      "additionalProperties": true
     }
   },
   {
@@ -5780,7 +5761,7 @@
           "additionalProperties": true
         },
         { "type": "object", "properties": {}, "additionalProperties": true },
-        { "type": "object", "properties": {}, "additionalProperties": true }
+        { "$ref": "#/$defs/ReaderParams" }
       ],
       "$defs": {
         "RegistryUrlParams": {
@@ -5792,6 +5773,11 @@
         "IoFormat": {
           "type": "string",
           "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "ReaderParams": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
         }
       },
       "type": "object"
@@ -5867,22 +5853,29 @@
           "additionalProperties": true
         },
         "PackageInfo": {
-          "type": "object",
-          "properties": {
-            "authorized": {
+          "allOf": [
+            {
               "type": "object",
-              "propertyNames": { "type": "string" },
-              "additionalProperties": { "type": "string" }
+              "properties": {
+                "authorized": {
+                  "type": "object",
+                  "propertyNames": { "type": "string" },
+                  "additionalProperties": { "type": "string" }
+                },
+                "versions": {
+                  "type": "object",
+                  "propertyNames": { "type": "string" },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/PackageVersionInfo"
+                  }
+                },
+                "categories": { "type": "array", "items": { "type": "string" } }
+              },
+              "required": ["authorized", "versions", "categories"],
+              "additionalProperties": true
             },
-            "versions": {
-              "type": "object",
-              "propertyNames": { "type": "string" },
-              "additionalProperties": { "$ref": "#/$defs/PackageVersionInfo" }
-            },
-            "categories": { "type": "array", "items": { "type": "string" } }
-          },
-          "required": ["authorized", "versions", "categories"],
-          "additionalProperties": true
+            { "$ref": "#/$defs/PackageAccessControl" }
+          ]
         },
         "PackageVersionInfo": {
           "allOf": [
@@ -6185,6 +6178,16 @@
         "GitHash": { "type": "string" },
         "PluginId": { "type": "string", "enum": ["url-v0"] },
         "Version": { "type": "string" },
+        "PackageAccessControl": {
+          "type": "object",
+          "properties": {
+            "private": { "type": "boolean" },
+            "readers": { "type": "array", "items": { "$ref": "#/$defs/Guid" } }
+          },
+          "required": ["private", "readers"],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" },
         "OsIndex": {
           "type": "object",
           "properties": { "versions": { "$ref": "#/$defs/OsVersionInfoMap" } },
@@ -6285,7 +6288,6 @@
           ],
           "additionalProperties": true
         },
-        "Guid": { "type": "string" },
         "Blake3Commitment": {
           "type": "object",
           "properties": {
@@ -8264,6 +8266,257 @@
     }
   },
   {
+    "name": "registry.package.access.add-reader",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/RegistryUrlParams" },
+        { "$ref": "#/$defs/PackageReaderParams" }
+      ],
+      "$defs": {
+        "RegistryUrlParams": {
+          "type": "object",
+          "properties": { "registry": { "type": "string" } },
+          "required": ["registry"],
+          "additionalProperties": true
+        },
+        "PackageReaderParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/PackageId" },
+            "signer": { "$ref": "#/$defs/Guid" }
+          },
+          "required": ["id", "signer"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" },
+        "Guid": { "type": "string" }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "registry.package.access.get",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/RegistryUrlParams" },
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/GetPackageAccessParams" }
+      ],
+      "$defs": {
+        "RegistryUrlParams": {
+          "type": "object",
+          "properties": { "registry": { "type": "string" } },
+          "required": ["registry"],
+          "additionalProperties": true
+        },
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "GetPackageAccessParams": {
+          "type": "object",
+          "properties": { "id": { "$ref": "#/$defs/PackageId" } },
+          "required": ["id"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" }
+      },
+      "type": "object"
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "PackageAccess": {
+          "type": "object",
+          "properties": {
+            "private": { "type": "boolean" },
+            "readers": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/SignerInfo" }
+            }
+          },
+          "required": ["private", "readers"],
+          "additionalProperties": true
+        },
+        "SignerInfo": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "contact": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/ContactInfo" }
+            },
+            "keys": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/AnyVerifyingKey" }
+            },
+            "gpgExports": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/GpgPublicKeyExport" }
+            }
+          },
+          "required": ["name", "contact", "keys", "gpgExports"],
+          "additionalProperties": true
+        },
+        "ContactInfo": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "email": { "type": "string" } },
+              "required": ["email"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": { "matrix": { "type": "string" } },
+              "required": ["matrix"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": { "website": { "type": "string" } },
+              "required": ["website"],
+              "additionalProperties": true
+            }
+          ]
+        },
+        "AnyVerifyingKey": { "type": "string" },
+        "GpgPublicKeyExport": {
+          "type": "object",
+          "properties": {
+            "armored": {
+              "type": "string",
+              "description": "Original armor, preserving all certificate packets and headers."
+            },
+            "fingerprints": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Primary-key fingerprints of the certificates in this export."
+            },
+            "userIds": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Self-certified user IDs containing names, comments, and email addresses."
+            },
+            "identities": {
+              "description": "Self-certified claims indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "keyFingerprints": {
+              "description": "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          },
+          "required": [
+            "armored",
+            "fingerprints",
+            "userIds",
+            "identities",
+            "keyFingerprints"
+          ],
+          "additionalProperties": true,
+          "description": "An original public-key export and its self-certified identity claims."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "private": { "type": "boolean" },
+        "readers": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/SignerInfo" }
+        }
+      },
+      "required": ["private", "readers"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "registry.package.access.remove-reader",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/RegistryUrlParams" },
+        { "$ref": "#/$defs/PackageReaderParams" }
+      ],
+      "$defs": {
+        "RegistryUrlParams": {
+          "type": "object",
+          "properties": { "registry": { "type": "string" } },
+          "required": ["registry"],
+          "additionalProperties": true
+        },
+        "PackageReaderParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/PackageId" },
+            "signer": { "$ref": "#/$defs/Guid" }
+          },
+          "required": ["id", "signer"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" },
+        "Guid": { "type": "string" }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "registry.package.access.set-private",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/RegistryUrlParams" },
+        { "$ref": "#/$defs/SetPackagePrivateParams" }
+      ],
+      "$defs": {
+        "RegistryUrlParams": {
+          "type": "object",
+          "properties": { "registry": { "type": "string" } },
+          "required": ["registry"],
+          "additionalProperties": true
+        },
+        "SetPackagePrivateParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/PackageId" },
+            "private": { "type": "boolean" }
+          },
+          "required": ["id", "private"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" }
+      },
+      "type": "object"
+    }
+  },
+  {
     "name": "registry.package.add",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -8575,30 +8828,40 @@
           "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
         },
         "GetPackageParams": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "anyOf": [{ "$ref": "#/$defs/PackageId" }, { "type": "null" }]
+          "allOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "anyOf": [{ "$ref": "#/$defs/PackageId" }, { "type": "null" }]
+                },
+                "targetVersion": { "type": ["string", "null"] },
+                "sourceVersion": {
+                  "anyOf": [{ "$ref": "#/$defs/Version" }, { "type": "null" }]
+                },
+                "otherVersions": {
+                  "anyOf": [
+                    { "$ref": "#/$defs/PackageDetailLevel" },
+                    { "type": "null" }
+                  ]
+                },
+                "allRevisions": { "type": "boolean" }
+              },
+              "additionalProperties": true
             },
-            "targetVersion": { "type": ["string", "null"] },
-            "sourceVersion": {
-              "anyOf": [{ "$ref": "#/$defs/Version" }, { "type": "null" }]
-            },
-            "otherVersions": {
-              "anyOf": [
-                { "$ref": "#/$defs/PackageDetailLevel" },
-                { "type": "null" }
-              ]
-            },
-            "allRevisions": { "type": "boolean" }
-          },
-          "additionalProperties": true
+            { "$ref": "#/$defs/ReaderParams" }
+          ]
         },
         "PackageId": { "type": "string" },
         "Version": { "type": "string" },
         "PackageDetailLevel": {
           "type": "string",
           "enum": ["none", "short", "full"]
+        },
+        "ReaderParams": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
         }
       },
       "type": "object"
@@ -8621,7 +8884,7 @@
           "additionalProperties": true
         },
         { "type": "object", "properties": {}, "additionalProperties": true },
-        { "type": "object", "properties": {}, "additionalProperties": true }
+        { "$ref": "#/$defs/ReaderParams" }
       ],
       "$defs": {
         "RegistryUrlParams": {
@@ -8633,6 +8896,11 @@
         "IoFormat": {
           "type": "string",
           "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "ReaderParams": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
         }
       },
       "type": "object"
@@ -8674,22 +8942,29 @@
           ]
         },
         "PackageInfo": {
-          "type": "object",
-          "properties": {
-            "authorized": {
+          "allOf": [
+            {
               "type": "object",
-              "propertyNames": { "type": "string" },
-              "additionalProperties": { "type": "string" }
+              "properties": {
+                "authorized": {
+                  "type": "object",
+                  "propertyNames": { "type": "string" },
+                  "additionalProperties": { "type": "string" }
+                },
+                "versions": {
+                  "type": "object",
+                  "propertyNames": { "type": "string" },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/PackageVersionInfo"
+                  }
+                },
+                "categories": { "type": "array", "items": { "type": "string" } }
+              },
+              "required": ["authorized", "versions", "categories"],
+              "additionalProperties": true
             },
-            "versions": {
-              "type": "object",
-              "propertyNames": { "type": "string" },
-              "additionalProperties": { "$ref": "#/$defs/PackageVersionInfo" }
-            },
-            "categories": { "type": "array", "items": { "type": "string" } }
-          },
-          "required": ["authorized", "versions", "categories"],
-          "additionalProperties": true
+            { "$ref": "#/$defs/PackageAccessControl" }
+          ]
         },
         "PackageVersionInfo": {
           "allOf": [
@@ -8992,7 +9267,17 @@
         },
         "GitHash": { "type": "string" },
         "PluginId": { "type": "string", "enum": ["url-v0"] },
-        "Version": { "type": "string" }
+        "Version": { "type": "string" },
+        "PackageAccessControl": {
+          "type": "object",
+          "properties": {
+            "private": { "type": "boolean" },
+            "readers": { "type": "array", "items": { "$ref": "#/$defs/Guid" } }
+          },
+          "required": ["private", "readers"],
+          "additionalProperties": true
+        },
+        "Guid": { "type": "string" }
       },
       "type": "object",
       "properties": {
@@ -9189,12 +9474,22 @@
           "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
         },
         "ListPackageSignersParams": {
-          "type": "object",
-          "properties": { "id": { "$ref": "#/$defs/PackageId" } },
-          "required": ["id"],
-          "additionalProperties": true
+          "allOf": [
+            {
+              "type": "object",
+              "properties": { "id": { "$ref": "#/$defs/PackageId" } },
+              "required": ["id"],
+              "additionalProperties": true
+            },
+            { "$ref": "#/$defs/ReaderParams" }
+          ]
         },
-        "PackageId": { "type": "string" }
+        "PackageId": { "type": "string" },
+        "ReaderParams": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
+        }
       },
       "type": "object"
     },
@@ -11725,6 +12020,24 @@
         "url": { "type": "string" },
         "name": { "type": ["string", "null"] }
       },
+      "required": ["url"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "server.trusted-keys.refresh-registry",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "TrustedRegistryParams": {
+          "type": "object",
+          "properties": { "url": { "type": "string" } },
+          "required": ["url"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": { "url": { "type": "string" } },
       "required": ["url"],
       "additionalProperties": true
     }

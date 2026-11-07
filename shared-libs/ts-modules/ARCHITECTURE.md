@@ -24,13 +24,16 @@ Apps import the libs via the root `tsconfig.json` path aliases `@start9labs/shar
 
 ## API Layer (JSON-RPC)
 
-All backend communication uses JSON-RPC, not REST.
+Backend commands use JSON-RPC; prepared transfers and static resources retain HTTP.
 
-- **`HttpService`** (`shared/src/services/http.service.ts`) — Low-level HTTP wrapper. Sends JSON-RPC POST requests via `rpcRequest()`.
-- **`ApiService`** (`ui/src/app/services/api/embassy-api.service.ts`) — Abstract class defining 100+ RPC methods. Two implementations:
+- **`HttpService`** (`shared/src/services/http.service.ts`) — HTTP transport. `rpcRequest()` prepares an unsigned request; `rpcMessage()` sends an already serialized message unchanged. Both use the shared JSON headers and response-compatibility adapter.
+- **`AuthKeyService`** (`shared/src/services/auth-key.service.ts`) — Owns the browser's enrolled, nonextractable device key and its cancellation lifetime. Replacement, rollback and logout invalidate active leases. StartOS and Tunnel use leases for encrypted RPC. StartWRT composes the same encrypted transport through its own RPC/reconnect owners; its anonymous bootstrap retains aborting HTTP. Resource requests keep header signing.
+- **`RpcSocketService`** (`shared/src/services/rpc-socket.service.ts`) — StartOS/Tunnel/WRT's authenticated RPC and continuation transport. Its per-session abort primitive lets an existing recovery owner discard a wedged multiplexed socket without invalidating the enrolled key; DOM-style continuation sockets retain caller event ownership. Active RPC calls share an RxJS WebSocket subject; its last unsubscribe closes the socket. A completed Noise exchange precedes application traffic, without per-message proofs or plaintext fallback. Public bootstrap without a device key retains explicit HTTP transport. Request serialization precedes asynchronous identity lookup; JSON response metadata remains authoritative. Maintained `@libp2p/noise` lives only in Angular infrastructure, not the SDK. The binding generator emits its shared wire profile from Rust owners.
+- **`StartupApiService`** (`ui/src/app/services/api/startup-api.service.ts`) — Explicit unscoped HTTP/legacy-WebSocket boundary for StartOS initialization, diagnostics and the existing state/DNS probe. Those callers inject this contract; normal callers retain `ApiService` and its encrypted admission. An unauthenticated mode response never selects plaintext for a normal call. Mock mode aliases the existing API fixture rather than duplicating its state. Both transports share `rpcWebSocketUrl` and the native-generated endpoint.
+- **`ApiService`** (`ui/src/app/services/api/embassy-api.service.ts`) — Abstract contract over the generated typed RPC client and product-specific operations. Two implementations:
   - `LiveApiService` — Production, calls the real backend
   - `MockApiService` — Development with mocks
-- **`api.types.ts`** (`ui/src/app/services/api/api.types.ts`) — Namespace `RR` with all request/response type pairs.
+- **`api.types.ts`** (`ui/src/app/services/api/api.types.ts`) — `ApiClient`, `Params`, and result aliases selected from the generated `RPC.StartOS` method tree.
 
 **Calling an RPC endpoint from a component:**
 
@@ -38,18 +41,18 @@ All backend communication uses JSON-RPC, not REST.
 private readonly api = inject(ApiService)
 
 async doSomething() {
-  await this.api.someMethod({ param: value })
+  await this.api.rpc.echo({ message: 'ping' })
 }
 ```
 
-The live API handles `x-patch-sequence` headers — after a mutating call, it waits for the PatchDB WebSocket to catch up before resolving. This ensures the UI always reflects the result of the call.
+The live API reads `meta.patchSequence` — after a mutating call, it waits for the PatchDB WebSocket to catch up before resolving. The shared HTTP compatibility adapter projects older servers' `x-patch-sequence` headers when JSON metadata is absent. This ensures the UI always reflects the result of the call.
 
 ## PatchDB (Reactive State)
 
 The backend pushes state diffs to the frontend via WebSocket. This is the primary way components get data.
 
 - **`PatchDbSource`** (`ui/src/app/services/patch-db/patch-db-source.ts`) — Establishes a WebSocket subscription when authenticated. Buffers updates every 250ms.
-- **`DataModel`** (`ui/src/app/services/patch-db/data-model.ts`) — TypeScript type for the full database shape (`ui`, `serverInfo`, `packageData`).
+- **`DataModel`** (`ui/src/app/services/patch-db/data-model.ts`) — TypeScript type for the full database shape (`ui`, `serverInfo`, `packageData`, `registryCache`, `osUpdateCache`).
 - **`PatchDB<DataModel>`** — Injected service. Use `watch$()` to observe specific paths.
 
 **Watching data in a component:**

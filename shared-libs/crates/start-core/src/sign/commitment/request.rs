@@ -30,6 +30,34 @@ pub struct RequestCommitment {
 rpc_toolkit::reflect_ts!(RequestCommitment);
 rpc_toolkit::ts_export!(RequestCommitment, namespaces = [""]);
 impl RequestCommitment {
+    /// Commits the complete byte slice with a fresh timestamp and nonce.
+    pub fn for_bytes(body: &[u8]) -> Self {
+        Self {
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or_else(|e| e.duration().as_secs() as i64 * -1),
+            nonce: rand::random(),
+            size: body.len() as u64,
+            blake3: Base64(*blake3::hash(body).as_bytes()),
+        }
+    }
+
+    /// Checks all bytes, including any bytes beyond the declared size.
+    pub async fn verify_bytes(&self, body: &[u8]) -> Result<(), Error> {
+        use tokio::io::AsyncWriteExt;
+        let mut writer = VerifyingWriter::new(
+            tokio::io::sink(),
+            Some((blake3::Hash::from_bytes(*self.blake3), self.size)),
+        );
+        writer
+            .write_all(body)
+            .await
+            .with_kind(ErrorKind::InvalidSignature)?;
+        writer.verify().await?;
+        Ok(())
+    }
+
     pub fn append_query(&self, url: &mut Url) {
         use base64::Engine;
         url.query_pairs_mut()
@@ -94,15 +122,7 @@ impl<'a> Commitment<&'a mut Request> for RequestCommitment {
             .await
             .with_kind(ErrorKind::Network)?
             .to_bytes();
-        let res = Self {
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or_else(|e| e.duration().as_secs() as i64 * -1),
-            nonce: rand::random(),
-            size: body.len() as u64,
-            blake3: Base64(*blake3::hash(&*body).as_bytes()),
-        };
+        let res = Self::for_bytes(&body);
         *resource.body_mut() = Body::from(body);
         Ok(res)
     }

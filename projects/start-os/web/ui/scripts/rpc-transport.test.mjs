@@ -1,0 +1,341 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import '@angular/compiler'
+import { DOCUMENT, Injector } from '@angular/core'
+import { HttpHeaders } from '@angular/common/http'
+import { BehaviorSubject, Subject } from 'rxjs'
+import { loadTypeScript } from './typescript-loader.mjs'
+
+const shared = new URL(
+  '../../../../../shared-libs/ts-modules/shared/src/',
+  import.meta.url,
+)
+loadTypeScript(
+  new Map([
+    [
+      '@start9labs/shared',
+      `
+    export { AuthKeyService } from '${new URL('services/auth-key.service.ts', shared)}';
+    export { HttpService } from '${new URL('services/http.service.ts', shared)}';
+    export { RpcSocketService } from '${new URL('services/rpc-socket.service.ts', shared)}';
+    export { RELATIVE_URL } from '${new URL('tokens/relative-url.ts', shared)}';
+    export { RpcError } from '${new URL('classes/rpc-error.ts', shared)}';
+    export { isRpcError } from '${new URL('types/rpc.types.ts', shared)}';
+    export { rpcRequestBody, rpcWebSocketUrl } from '${new URL('services/rpc-request.ts', shared)}';
+    export { waitForPatchSequence } from '${new URL('services/rpc-response.ts', shared)}';
+  `,
+    ],
+    [
+      'rxjs/webSocket',
+      `
+    export const opened = [];
+    export const webSocket = config => { const socket = { config }; opened.push(socket); return socket; };
+  `,
+    ],
+    ['../auth.service', 'export class AuthService {}'],
+    [
+      'src/app/services/patch-db/patch-db-source',
+      'export const PATCH_CACHE = Symbol()',
+    ],
+  ]),
+)
+const { AuthKeyService, HttpService, RpcSocketService, RELATIVE_URL } =
+  await import('@start9labs/shared')
+const { opened } = await import('rxjs/webSocket')
+const { AuthService } = await import('../auth.service')
+const { PATCH_CACHE } =
+  await import('src/app/services/patch-db/patch-db-source')
+const { ApiService } =
+  await import('../src/app/services/api/embassy-api.service.ts')
+const { LiveApiService } =
+  await import('../src/app/services/api/embassy-live-api.service.ts')
+const { StartupApiService, StartupLiveApiService } =
+  await import('../src/app/services/api/startup-api.service.ts')
+
+function fixture(context) {
+  const calls = []
+  const cache = new BehaviorSubject({ id: 0, value: {} })
+  const lease = { key: {}, signal: new AbortController().signal }
+  let rejected = 0
+  const http = {
+    rpcRequest: async options => {
+      calls.push({ transport: 'startup', options })
+      return { body: { result: 'initializing' } }
+    },
+    rpcMessage: async (body, options, url) => {
+      calls.push({ transport: 'http', body, options, url })
+      return { body: { result: 'public' } }
+    },
+    httpRequest: async options => {
+      calls.push({ transport: 'resource', options })
+      return { body: 'resource', headers: new HttpHeaders() }
+    },
+  }
+  const sockets = {
+    message: async (body, options, identity) => {
+      calls.push({ transport: 'noise', body, options, identity })
+      return { result: 'encrypted' }
+    },
+    open: (guid, config) => {
+      const socket = new Subject()
+      calls.push({ transport: 'noise-guid', guid, config, socket })
+      return socket
+    },
+  }
+  const keys = {
+    lease: async () => {
+      calls.push({ transport: 'key' })
+      return lease
+    },
+    signHeader: async (body, headers) => {
+      calls.push({ transport: 'header', body, headers })
+      return new HttpHeaders({
+        ...headers,
+        'X-Start-Auth-Sig': 'resource proof',
+      })
+    },
+  }
+  const injector = Injector.create({
+    providers: [
+      { provide: ApiService, useClass: LiveApiService },
+      { provide: StartupApiService, useClass: StartupLiveApiService },
+      {
+        provide: DOCUMENT,
+        useValue: { location: { origin: 'http://os.test' }, defaultView: {} },
+      },
+      { provide: RELATIVE_URL, useValue: '/rpc/v1' },
+      { provide: HttpService, useValue: http },
+      { provide: RpcSocketService, useValue: sockets },
+      { provide: AuthKeyService, useValue: keys },
+      { provide: AuthService, useValue: { setUnverified: () => rejected++ } },
+      { provide: PATCH_CACHE, useValue: cache },
+    ],
+  })
+  context.after(() => injector.destroy())
+  return {
+    api: injector.get(ApiService),
+    startup: injector.get(StartupApiService),
+    http,
+    sockets,
+    keys,
+    calls,
+    cache,
+    lease,
+    rejected: () => rejected,
+  }
+}
+const flush = () => new Promise(setImmediate)
+
+test('startup probes remain public HTTP even with a saved device key', async context => {
+  const f = fixture(context)
+  f.keys.lease = () => {
+    throw new Error('private identity accessed')
+  }
+  assert.equal(
+    await f.startup.rpc.state({}, { timeout: 10000 }),
+    'initializing',
+  )
+  assert.equal(f.calls.length, 1)
+  assert.equal(f.calls[0].transport, 'startup')
+  assert.deepEqual(f.calls[0].options, {
+    method: 'state',
+    params: {},
+    timeout: 10000,
+  })
+})
+
+test('an untrusted startup-mode reply cannot downgrade a private login', async context => {
+  const f = fixture(context)
+  assert.equal(await f.startup.rpc.state({}), 'initializing')
+  assert.equal(
+    await f.api.rpc.auth.login({ password: 'fixture', pubkey: 'public' }),
+    'encrypted',
+  )
+  const message = f.calls.find(call => call.transport === 'noise')
+  assert.equal(message.identity, f.lease)
+  assert.deepEqual(JSON.parse(message.body), {
+    method: 'auth.login',
+    params: { password: 'fixture', pubkey: 'public' },
+  })
+  assert.equal(
+    f.calls.some(call => call.transport === 'http'),
+    false,
+  )
+})
+
+for (const method of ['init.subscribe', 'diagnostic.error', 'net.dns.status'])
+  test(`${method} uses the explicit startup client without credentials`, async context => {
+    const f = fixture(context)
+    f.keys.lease = () => {
+      throw new Error('private identity accessed')
+    }
+    const [namespace, ...path] = method.split('.')
+    let call = f.startup.rpc[namespace]
+    for (const segment of path) call = call[segment]
+    await call({})
+    assert.equal(f.calls.length, 1)
+    assert.equal(f.calls[0].transport, 'startup')
+    assert.equal(f.calls[0].options.method, method)
+  })
+
+test('startup GUIDs keep raw WebSocket callbacks and binary options', context => {
+  const f = fixture(context)
+  const config = {
+    binaryType: 'arraybuffer',
+    deserializer: event => event.data,
+    serializer: value => value,
+  }
+  const before = opened.length
+  const socket = f.startup.openWebsocket$('legacy-guid', config)
+  assert.equal(opened.length, before + 1)
+  assert.equal(socket.config.url, 'ws://os.test/ws/rpc/legacy-guid')
+  assert.equal(socket.config.serializer, config.serializer)
+  assert.equal(socket.config.deserializer, config.deserializer)
+  assert.equal(socket.config.binaryType, 'arraybuffer')
+  assert.deepEqual(f.calls, [])
+})
+
+test('normal GUIDs always use fresh encrypted admission regardless of startup state', async context => {
+  const f = fixture(context)
+  await f.startup.rpc.state({})
+  const config = {
+    binaryType: 'arraybuffer',
+    deserializer: event => event.data,
+  }
+  const socket = f.api.openWebsocket$('secure-guid', config)
+  const call = f.calls.at(-1)
+  assert.equal(call.transport, 'noise-guid')
+  assert.equal(call.config, config)
+  assert.equal(socket, call.socket)
+})
+
+test('normal public calls without a device key retain anonymous HTTP', async context => {
+  const f = fixture(context)
+  f.keys.lease = async () => null
+  assert.equal(await f.api.rpc.echo({ message: 'public' }), 'public')
+  assert.equal(f.calls.length, 1)
+  assert.equal(f.calls[0].transport, 'http')
+})
+
+test('failed encrypted admission never falls back to HTTP', async context => {
+  const f = fixture(context)
+  const failure = new Error('exchange rejected')
+  f.sockets.message = async () => {
+    throw failure
+  }
+  await assert.rejects(
+    f.api.rpc.echo({ message: 'secret' }),
+    error => error === failure,
+  )
+  assert.equal(
+    f.calls.some(
+      call => call.transport === 'http' || call.transport === 'startup',
+    ),
+    false,
+  )
+})
+
+test('foreign echoes stay unsigned and ignore the local cache sequence', async context => {
+  const f = fixture(context)
+  f.keys.lease = () => {
+    throw new Error('private identity accessed')
+  }
+  f.http.rpcMessage = async (body, options, url) => {
+    assert.equal(url, 'https://foreign.test/rpc')
+    assert.deepEqual(JSON.parse(body), {
+      method: 'echo',
+      params: { message: 'ping' },
+    })
+    return { body: { result: 'ping', meta: { patchSequence: 999 } } }
+  }
+  assert.equal(
+    await f.api.echo({ message: 'ping' }, 'https://foreign.test/rpc'),
+    'ping',
+  )
+  assert.deepEqual(f.calls, [])
+  assert.equal(f.cache.observed, false)
+})
+
+test('RPC bytes are captured before waiting for the device identity', async context => {
+  const f = fixture(context)
+  let identity
+  f.keys.lease = () =>
+    new Promise(resolve => {
+      identity = resolve
+    })
+  const params = { message: 'original' }
+  const pending = f.api.rpc.echo(params)
+  params.message = 'changed'
+  identity(f.lease)
+  assert.equal(await pending, 'encrypted')
+  const sent = f.calls.find(call => call.transport === 'noise')
+  assert.equal(JSON.parse(sent.body).params.message, 'original')
+})
+
+test('encrypted mutations still wait for the local committed sequence', async context => {
+  const f = fixture(context)
+  f.sockets.message = async () => ({
+    result: 'saved',
+    meta: { patchSequence: 4 },
+  })
+  let completed = false
+  const pending = f.api.rpc.echo({ message: 'test' }).then(value => {
+    completed = true
+    return value
+  })
+  await flush()
+  f.cache.next({ id: 3, value: {} })
+  await flush()
+  assert.equal(completed, false)
+  f.cache.next({ id: 4, value: {} })
+  assert.equal(await pending, 'saved')
+})
+
+test('startup errors preserve RPC details without discarding unrelated enrollment', async context => {
+  const f = fixture(context)
+  f.http.rpcRequest = async () => ({
+    body: {
+      error: {
+        code: 34,
+        message: 'startup failure',
+        data: { details: 'details' },
+      },
+    },
+  })
+  await assert.rejects(
+    f.startup.rpc.diagnostic.error({}),
+    error =>
+      error.code === 34 &&
+      error.message === 'RPC ERROR: startup failure\n\ndetails',
+  )
+  assert.equal(f.rejected(), 0)
+})
+
+test('HTTP resources preserve prepared-transfer cancellation, headers and signatures', async context => {
+  const f = fixture(context)
+  const signal = new AbortController().signal
+  const file = new Blob(['file'])
+  const progress = () => {}
+  await f.api.uploadFile('upload-guid', file, {
+    filename: 'a.txt',
+    signal,
+    progress,
+  })
+  const upload = f.calls.at(-1)
+  assert.equal(upload.options.url, '/rest/rpc/upload-guid')
+  assert.equal(upload.options.signal, signal)
+  assert.equal(upload.options.uploadProgress, progress)
+  assert.equal(upload.options.timeout, 0)
+  assert.equal(upload.options.headers['ngsw-bypass'], 'true')
+  assert.equal(upload.options.headers['X-File-Name'], 'a.txt')
+  assert.equal(
+    f.api.downloadFileUrl('download-guid'),
+    '/rest/rpc/download-guid?ngsw-bypass=true',
+  )
+  await f.api.getStatic(['/s9pk/file'], {})
+  assert.equal(f.calls.at(-2).transport, 'header')
+  assert.equal(
+    f.calls.at(-1).options.headers.get('X-Start-Auth-Sig'),
+    'resource proof',
+  )
+})

@@ -24,7 +24,7 @@ pub use crate::db::{
     ApplyWithPathParams as ApplyParams, DumpParams, SubscribeParams, SubscribeRes,
 };
 use crate::prelude::*;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::migrations;
 use crate::tunnel::web::WebserverInfo;
@@ -544,6 +544,8 @@ pub async fn subscribe(
             RpcContinuation::ws_authed(
                 &ctx,
                 signer,
+                WebSocketPolicy::Authenticated,
+                ctx.secure_session().cloned(),
                 |mut ws| async move {
                     if let Err(e) = async {
                         loop {

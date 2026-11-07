@@ -961,4 +961,9 @@ export const ENGLISH: Record<string, number> = {
   'Invalid file format': 1108,
   'Invalid response from server': 1109,
   'Maximum file size': 1110,
+  'Invalid registry URL': 1111,
+  'Registry URLs must use HTTP or HTTPS and cannot contain credentials, a query, or a fragment.': 1112,
+  'Connect this registry to browse its catalog. New signing keys from this registry will be trusted for packages.': 1113,
+  'Refresh registry': 1114,
+  'Connect this registry before refreshing it.': 1115,
 }

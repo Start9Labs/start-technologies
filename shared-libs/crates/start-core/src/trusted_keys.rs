@@ -10,8 +10,7 @@ use crate::registry::signer::{AcceptSigners, ContactInfo};
 use crate::sign::AnyVerifyingKey;
 use crate::sign::gpg::{GpgPublicKeyExport, ImportedPublicKeys, parse_public_keys};
 use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners};
-mod connection;
-pub use connection::check_registry;
+pub(crate) mod connection;
 pub(crate) mod legacy;
 
 pub type TrustedKeys = BTreeMap<InternedString, TrustedKey>;
@@ -343,6 +342,10 @@ pub fn api<C: Context>() -> ParentHandler<C> {
             from_fn_async(connection::connect)
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
+        )
+        .subcommand(
+            "refresh-registry",
+            from_fn_async(connection::refresh).no_cli(),
         )
         .subcommand(
             "set-os-registry",

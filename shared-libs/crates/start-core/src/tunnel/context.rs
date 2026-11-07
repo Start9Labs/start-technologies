@@ -27,7 +27,7 @@ use crate::db::model::public::{NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::middleware::auth::Auth;
 use crate::middleware::auth::local::{LocalAuthContext, dial_addr, local_auth_header};
 use crate::middleware::auth::signature::{NonceCache, url_host_str};
-use crate::middleware::cors::Cors;
+use crate::middleware::db::SyncDb;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord, UpdateAuth};
 use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6};
 use crate::net::static_server::{EMPTY_DIR, UiContext};
@@ -177,6 +177,7 @@ pub struct TunnelContextSeed {
     pub rpc_continuations: RpcContinuations,
     pub open_authed_continuations: OpenAuthedContinuations<Option<InternedString>>,
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
+    pub server_identity: crate::sign::Signer,
     pub net_iface: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     pub forward: PortForwardController,
     pub dns_proxy: DnsProxyController,
@@ -229,7 +230,28 @@ async fn restrict_datadir(datadir: &Path) -> Result<(), Error> {
 }
 
 #[derive(Clone)]
-pub struct TunnelContext(Arc<TunnelContextSeed>);
+pub struct TunnelContext(
+    Arc<TunnelContextSeed>,
+    Option<Arc<crate::middleware::auth::session::SecureSession>>,
+);
+
+impl SessionContext for TunnelContext {
+    fn secure_session(&self) -> Option<&crate::middleware::auth::session::SecureSession> {
+        self.1.as_deref()
+    }
+}
+impl crate::middleware::auth::session::SecureRpcContext for TunnelContext {
+    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+        Ok(self.server_identity.clone())
+    }
+    fn with_secure_session(
+        mut self,
+        session: crate::middleware::auth::session::SecureSession,
+    ) -> Self {
+        self.1 = Some(Arc::new(session));
+        self
+    }
+}
 impl TunnelContext {
     #[instrument(skip_all)]
     pub async fn init(config: &TunnelConfig) -> Result<Self, Error> {
@@ -241,6 +263,7 @@ impl TunnelContext {
             .unwrap_or_else(|| Path::new("/var/lib/start-tunnel"))
             .to_owned();
         restrict_datadir(&datadir).await?;
+        let server_identity = crate::sign::instance::load(&datadir).await?;
         let db_path = datadir.join("tunnel.db");
         let db = TypedPatchDb::<TunnelDatabase>::load_unchecked(PatchDb::open(&db_path).await?);
         if db.dump(&ROOT).await.value.is_null() {
@@ -395,30 +418,34 @@ impl TunnelContext {
             }
         }
 
-        let ctx = Self(Arc::new(TunnelContextSeed {
-            listen,
-            db,
-            datadir,
-            rpc_continuations: RpcContinuations::new(),
-            open_authed_continuations: OpenAuthedContinuations::new(),
-            auth_sig_nonce_cache: SyncMutex::new(Default::default()),
-            net_iface,
-            forward,
-            dns_proxy,
-            sni,
-            dns_injector,
-            dns_allowed,
-            dns_keys,
-            active_forwards: SyncMutex::new(active_forwards),
-            forward_write_lock: tokio::sync::Mutex::new(()),
-            leases: SyncMutex::new(BTreeMap::new()),
-            lease_wake: tokio::sync::Notify::new(),
-            forward_ifindex: tokio::sync::watch::channel(current_ifindex()).0,
-            egress_lock: tokio::sync::Mutex::new(()),
-            v6_proxy: SyncMutex::new(BTreeMap::new()),
-            v6_lock: tokio::sync::Mutex::new(()),
-            shutdown,
-        }));
+        let ctx = Self(
+            Arc::new(TunnelContextSeed {
+                listen,
+                db,
+                datadir,
+                rpc_continuations: RpcContinuations::new(),
+                open_authed_continuations: OpenAuthedContinuations::new(),
+                auth_sig_nonce_cache: SyncMutex::new(Default::default()),
+                server_identity,
+                net_iface,
+                forward,
+                dns_proxy,
+                sni,
+                dns_injector,
+                dns_allowed,
+                dns_keys,
+                active_forwards: SyncMutex::new(active_forwards),
+                forward_write_lock: tokio::sync::Mutex::new(()),
+                leases: SyncMutex::new(BTreeMap::new()),
+                lease_wake: tokio::sync::Notify::new(),
+                forward_ifindex: tokio::sync::watch::channel(current_ifindex()).0,
+                egress_lock: tokio::sync::Mutex::new(()),
+                v6_proxy: SyncMutex::new(BTreeMap::new()),
+                v6_lock: tokio::sync::Mutex::new(()),
+                shutdown,
+            }),
+            None,
+        );
 
         ctx.resync_egress().await?;
         ctx.resync_v6().await?;
@@ -904,8 +931,11 @@ impl UiContext for TunnelContext {
     }
     fn middleware(server: rpc_toolkit::Server<Self>) -> rpc_toolkit::HttpServer<Self> {
         server
-            .middleware(Cors::new())
             .middleware(Auth::new().with_local_auth().with_signature_auth())
+            .middleware(SyncDb::new())
+    }
+    fn rpc_server_routes(self, server: rpc_toolkit::HttpServer<Self>) -> axum::Router {
+        crate::net::static_server::session_rpc_router(self, server)
     }
 }
 

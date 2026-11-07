@@ -4,20 +4,20 @@ Rust crates powering the StartWRT router daemon and CLI. Three crates: `ctrl` (R
 
 ## Transport
 
-HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 at `POST /rpc/v1` via [rpc-toolkit](../../../shared-libs/crates/rpc-toolkit). Request-signature and local-token authentication from `start-core` (see [auth.rs](#authrs--authentication)).
+HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 uses optional Noise admission at `/ws/rpc`, with `POST /rpc/v1` compatibility, via [rpc-toolkit](../../../shared-libs/crates/rpc-toolkit). `rpc.rs` composes one dispatch/middleware stack, adds typed firmware metadata to replies and retains the CORS-exposed HTTP firmware header. Live authorization uses the verified connection peer; request-signature/local-token compatibility stays in `start-core` (see [auth.rs](#authrs--authentication)).
 
 Additional routes:
 
-| Route                                     | Purpose                                                           |
-| ----------------------------------------- | ----------------------------------------------------------------- |
-| `POST /api/setup/flash`                   | NDJSON streaming for setup wizard                                 |
-| `GET\|POST /rest/rpc/{guid}`              | Continuation endpoint for backup/restore/diagnostics (10MB limit) |
-| `GET /ws/rpc/{guid}`                      | WebSocket continuation endpoint (update progress, live logs)      |
-| `GET /luci`                               | Convenience redirect to `/cgi-bin/luci`                           |
-| `GET /static/local-root-ca.crt`           | Root CA certificate download (no auth)                            |
-| `GET /static/local-root-ca.mobileconfig`  | Root CA as an Apple configuration profile (no auth)               |
-| `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` | LuCI reverse proxy (localhost:8080)                               |
-| Fallback                                  | Serves embedded web UI via `include_dir`                          |
+| Route                                     | Purpose                                                             |
+| ----------------------------------------- | ------------------------------------------------------------------- |
+| `POST /api/setup/flash`                   | NDJSON streaming for setup wizard                                   |
+| `GET\|POST /rest/rpc/{guid}`              | Continuation endpoint for backup/restore/diagnostics (64 MiB limit) |
+| `GET /ws/rpc/{guid}`                      | WebSocket continuation endpoint (update progress, live logs)        |
+| `GET /luci`                               | Convenience redirect to `/cgi-bin/luci`                             |
+| `GET /static/local-root-ca.crt`           | Root CA certificate download (no auth)                              |
+| `GET /static/local-root-ca.mobileconfig`  | Root CA as an Apple configuration profile (no auth)                 |
+| `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` | LuCI reverse proxy (localhost:8080)                                 |
+| Fallback                                  | Serves embedded web UI via `include_dir`                            |
 
 Beside the wildcard listeners, port control binds the SNI demux to the WAN IPv4 on 443 while hostname routes hold it (SO_REUSEPORT; the kernel delivers a connection to the most specific bound socket).
 
@@ -35,7 +35,7 @@ pub trait CtrlContext: Context + Clone {
 }
 ```
 
-- **`ServerContext`**: always reads `/etc/config/`, always reloads services. Holds `start-core`'s `RpcContinuations` for long-running operations and the auth state (enrolled keys, nonce cache). `ServerContext::default()` carries an in-memory auth state that enrolls nothing; only the daemon opens `/etc/startwrt/auth.db`.
+- **`ServerContext`**: always reads `/etc/config/`, always reloads services. Holds `start-core`'s `RpcContinuations` for long-running operations and the auth state (enrolled keys, nonce cache). `ServerContext::default()` carries an in-memory auth state that enrolls nothing; only the daemon opens `/etc/startwrt/auth.db`. The daemon loads its separate server identity from `/etc/startwrt/rpc-identity.pem` through `start-core`'s instance-key loader; sysupgrade keeps that private file. In-memory contexts generate an ephemeral server identity. Optional immutable `SecureSession` provenance belongs to each context clone rather than the shared auth state; WebSocket continuation creators capture it independently of revocation and resource policy.
 - **`CliContext`**: configurable root (`--config-root`), calls server via HTTP when needed. Signs each request with the identity key at `~/.startwrt/id.key.pem` once one exists, and sends the local auth token from `/run/startwrt/rpc.authcookie` as `Authorization: Bearer` to loopback hosts only.
 
 The single binary `startwrt` uses `MultiExecutable` to dispatch based on the symlink name (`startwrt-ctrld` or `startwrt-cli`) or the first argument.
@@ -181,7 +181,7 @@ Handler metadata:
 - `login: true` — enroll the signing key by password; reject enrollment when a valid local auth token is supplied
 - `get_signer: true` — inject the signing key as `__Auth_signer`
 
-Every other call needs a valid signature or the local token; the peer address grants nothing.
+Every other call needs an enrolled Noise peer, a valid compatibility signature or the local token; the peer address grants nothing. A secure-origin GUID requires fresh same-peer encrypted admission, independently of live revocation and resource budgets.
 
 Returns RPC error code 34 on auth failure (frontend auto-logs out).
 

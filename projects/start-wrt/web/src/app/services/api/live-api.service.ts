@@ -81,6 +81,7 @@ import {
   DiagnosticsCreateRes,
 } from './api.service'
 import { RpcService } from '../rpc.service'
+import { RpcSocketService } from '@start9labs/shared'
 import type { Api, RpcParamType, RpcReturnType } from './bindings'
 
 @Injectable({
@@ -88,6 +89,11 @@ import type { Api, RpcParamType, RpcReturnType } from './bindings'
 })
 export class LiveApiService extends ApiService {
   private readonly rpc = inject(RpcService)
+  private readonly sockets = inject(RpcSocketService)
+
+  openWebsocket(guid: string) {
+    return this.sockets.openSocket(guid)
+  }
 
   async login(params: LoginReq): Promise<RpcReturnType<Api, 'auth.login'>> {
     return this.rpc.request({ method: 'auth.login', params })

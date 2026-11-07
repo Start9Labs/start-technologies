@@ -3,6 +3,9 @@ const fs = require('node:fs')
 const path = require('node:path')
 const test = require('node:test')
 const vm = require('node:vm')
+require('@angular/compiler')
+const httpAngular = require('@angular/common/http')
+const { HttpClient, HttpHeaders, HttpXhrBackend } = httpAngular
 const ts = require('typescript')
 const {
   BehaviorSubject,
@@ -25,7 +28,7 @@ const compilerOptions = ts.parseJsonConfigFileContent(
   root,
 ).options
 
-function harness(moduleOverrides = new Map()) {
+function harness(moduleOverrides = new Map(), globals = {}) {
   const dependencies = new Map()
   const tokens = Object.fromEntries(
     [
@@ -35,16 +38,30 @@ function harness(moduleOverrides = new Map()) {
       'HttpService',
       'AuthKeyService',
       'AuthService',
+      'RpcSocketService',
+      'i18nPipe',
       'StaleUiService',
       'PATCH_CACHE',
       'RELATIVE_URL',
     ].map(name => [name, Symbol(name)]),
   )
+  tokens.HttpClient = HttpClient
+  tokens.HttpXhrBackend = HttpXhrBackend
+  dependencies.set(tokens.HttpXhrBackend, {
+    handle() {
+      throw new Error('Unexpected XHR request')
+    },
+  })
+  dependencies.set(tokens.RpcSocketService, {})
+  dependencies.set(tokens.StaleUiService, { checkHash() {} })
+  dependencies.set(tokens.i18nPipe, { transform: value => value })
   const modules = new Map()
   const angular = {
     DOCUMENT: tokens.DOCUMENT,
     Injector: tokens.Injector,
     Injectable: () => value => value,
+    Service: () => value => value,
+    InjectionToken: class {},
     Component: () => value => value,
     signal: initial => {
       const stream$ = new BehaviorSubject(initial)
@@ -75,13 +92,14 @@ function harness(moduleOverrides = new Map()) {
       ...load('shared-libs/ts-modules/shared/src/util/misc.util.ts'),
       pauseFor: async () => {},
       ...load('shared-libs/ts-modules/shared/src/types/rpc.types.ts'),
+      ...load('shared-libs/ts-modules/shared/src/services/rpc-request.ts'),
+      ...load('shared-libs/ts-modules/shared/src/services/rpc-response.ts'),
       ...load('shared-libs/ts-modules/shared/src/classes/rpc-error.ts'),
     })
     const requireSource = request => {
       if (moduleOverrides.has(request)) return moduleOverrides.get(request)
       if (request === '@angular/core') return angular
-      if (request === '@angular/common/http')
-        return { HttpClient: tokens.HttpClient }
+      if (request === '@angular/common/http') return httpAngular
       if (request === '@start9labs/shared') return shared()
       if (request === '@start9labs/marketplace')
         return load('shared-libs/ts-modules/marketplace/src/types.ts')
@@ -93,6 +111,8 @@ function harness(moduleOverrides = new Map()) {
         return { StaleUiService: tokens.StaleUiService }
       if (request.endsWith('patch-db-source'))
         return { PATCH_CACHE: tokens.PATCH_CACHE }
+      if (request.endsWith('tokens/relative-url'))
+        return { RELATIVE_URL: tokens.RELATIVE_URL }
       if (request.startsWith('src/')) {
         const app = filename.slice(
           0,
@@ -118,7 +138,9 @@ function harness(moduleOverrides = new Map()) {
         console: { ...console, error() {} },
         Buffer,
         URL,
+        TextEncoder,
         structuredClone,
+        ...globals,
       },
       { filename },
     )
@@ -132,6 +154,165 @@ function harness(moduleOverrides = new Map()) {
   return { dependencies, tokens, load }
 }
 
+function mockPatchFixture(data) {
+  return {
+    mockPatchData: data,
+    mockRegistryCache: () => ({
+      info: {
+        name: 'Fixture registry',
+        description: null,
+        icon: null,
+        categories: {},
+        trustSigners: {},
+      },
+      packages: {},
+      connected: true,
+    }),
+    mockOsUpdateCache: registry => ({
+      registry,
+      versions: {},
+      connected: true,
+    }),
+  }
+}
+
+function deviceSigner() {
+  const { load } = harness(new Map([['@ng-web-apis/common', {}]]))
+  const { AuthKeyService } = load(
+    'shared-libs/ts-modules/shared/src/services/auth-key.service.ts',
+  )
+  return AuthKeyService.prototype
+}
+
+function assertRpcProof(body) {
+  const { auth } = require('@start9labs/start-core')
+  const { blake3 } = require('@noble/hashes/blake3')
+  const proof = new URLSearchParams(JSON.parse(body).signature)
+  const bytes = auth.rpcSigningBody(body)
+  assert.equal(proof.get('commitment'), 'request')
+  assert.equal(proof.get('size'), String(bytes.length))
+  assert.equal(
+    proof.get('blake3'),
+    Buffer.from(blake3(bytes)).toString('base64url'),
+  )
+}
+
+for (const enrolled of [false, true]) {
+  test(`RPC serialization captures params before asynchronous ${enrolled ? 'signing' : 'key lookup'}`, async () => {
+    const { auth } = require('@start9labs/start-core')
+    const key = enrolled ? await auth.generateAuthKey() : null
+    let finish
+    const lookup = new Promise(resolve => {
+      finish = resolve
+    })
+    let serialized = 0
+    const params = {
+      value: 'original',
+      toJSON() {
+        serialized++
+        return { value: this.value }
+      },
+    }
+    const pending = deviceSigner().signRpcBody.call(
+      { get: () => lookup, host: 'server.test' },
+      { method: 'test', params },
+    )
+    params.value = 'changed'
+    finish(key)
+    const body = await pending
+    assert.equal(serialized, 1)
+    assert.equal(JSON.parse(body).params.value, 'original')
+    if (enrolled) assertRpcProof(body)
+    else assert.equal(JSON.parse(body).signature, undefined)
+  })
+}
+
+test('RPC proofs preserve raw integer and floating-point tokens', async () => {
+  const { auth } = require('@start9labs/start-core')
+  const key = await auth.generateAuthKey()
+  const body = await deviceSigner().signRpcBody.call(
+    { get: async () => key, host: 'server.test' },
+    {
+      method: 'test',
+      params: {
+        integer: JSON.rawJSON('18446744073709551615'),
+        float: JSON.rawJSON('1.0'),
+        zero: JSON.rawJSON('-0'),
+      },
+    },
+  )
+  assert.ok(body.includes('18446744073709551615'))
+  assert.ok(body.includes('"float":1.0'))
+  assert.ok(body.includes('"zero":-0'))
+  assertRpcProof(body)
+})
+
+test('resource headers retain legacy signing and caller headers without mutation', async () => {
+  const { auth } = require('@start9labs/start-core')
+  const key = await auth.generateAuthKey()
+  const original = new HttpHeaders({
+    'x-trace': ['one', 'two'],
+    'x-start-auth-sig': 'caller',
+  })
+  const headers = await deviceSigner().signHeader.call(
+    { get: async () => key, host: 'server.test' },
+    '',
+    original,
+  )
+  assert.deepEqual(headers.getAll('x-trace'), ['one', 'two'])
+  assert.equal(headers.getAll(auth.AUTH_SIG_HEADER).length, 1)
+  assert.notEqual(headers.get(auth.AUTH_SIG_HEADER), 'caller')
+  assert.equal(
+    new URLSearchParams(headers.get(auth.AUTH_SIG_HEADER)).get('size'),
+    '0',
+  )
+  assert.equal(original.get(auth.AUTH_SIG_HEADER), 'caller')
+  const withoutKey = await deviceSigner().signHeader.call(
+    { get: async () => null },
+    '',
+    original,
+  )
+  assert.equal(withoutKey.get(auth.AUTH_SIG_HEADER), 'caller')
+})
+
+test('shared HTTP sends captured RPC bodies as JSON and preserves response compatibility', async () => {
+  const { HttpResponse } = require('@angular/common/http')
+  const { dependencies, tokens, load } = harness()
+  const calls = []
+  dependencies.set(tokens.HttpClient, {
+    request: (method, url, options) => {
+      assert.equal(method, 'POST')
+      calls.push({ url, body: options.body, options })
+      return of(
+        new HttpResponse({
+          body: { result: null },
+          headers: new HttpHeaders({ 'x-patch-sequence': '0' }),
+        }),
+      )
+    },
+  })
+  const client = new (load(
+    'shared-libs/ts-modules/shared/src/services/http.service.ts',
+  ).HttpService)()
+  const body =
+    '{"signature":"proof","method":"test","params":{"integer":18446744073709551615}}'
+  const response = await client.rpcMessage(body, {
+    headers: { 'content-type': 'text/plain', 'x-trace': 'keep' },
+  })
+  assert.equal(calls[0].url, 'https://router.test/rpc/v1')
+  assert.equal(calls[0].body, body)
+  assert.equal(calls[0].options.headers.get('Content-Type'), 'application/json')
+  assert.equal(calls[0].options.headers.get('x-trace'), 'keep')
+  assert.equal(calls[0].options.headers.has('X-Start-Auth-Sig'), false)
+  assert.equal(response.body.meta.patchSequence, 0)
+  await client.rpcRequest(
+    { method: 'public', params: { value: 1 } },
+    'https://registry.test/rpc',
+  )
+  assert.equal(calls[1].url, 'https://registry.test/rpc')
+  assert.equal(calls[1].body, '{"method":"public","params":{"value":1}}')
+})
+
 for (const [name, file, className, deauthMethod] of [
   [
     'StartOS',
@@ -139,33 +320,29 @@ for (const [name, file, className, deauthMethod] of [
     'LiveApiService',
     'setUnverified',
   ],
-  [
-    'Tunnel',
-    'projects/start-tunnel/web/src/app/services/api/live-api.service.ts',
-    'LiveApiService',
-    'deauthenticate',
-  ],
 ]) {
-  test(`${name} signs local calls, excludes foreign origins and waits for patches`, async () => {
+  test(`${name} encrypts local calls, excludes foreign origins and waits for patches`, async () => {
     const { dependencies, tokens, load } = harness()
     const cache = new BehaviorSubject({ id: 1 })
     const calls = []
-    const signed = []
-    let patchSequence = '3'
+    const lease = { key: {}, signal: new AbortController().signal }
+    let patchSequence = 3
     dependencies.set(tokens.PATCH_CACHE, cache)
     dependencies.set(tokens.AuthService, { deauthenticate() {} })
     dependencies.set(tokens.AuthKeyService, {
-      signRpcHeaders: async options => {
-        signed.push(options)
-        return { signature: 'signed' }
+      lease: async () => lease,
+    })
+    dependencies.set(tokens.RpcSocketService, {
+      message: async (request, options, identity) => {
+        calls.push({ request, options, lease: identity })
+        return { result: null, meta: { patchSequence } }
       },
     })
     dependencies.set(tokens.HttpService, {
-      rpcRequest: async (options, url) => {
-        calls.push({ options, url })
+      rpcMessage: async (request, options, url) => {
+        calls.push({ request, options, url })
         return {
-          body: { result: null },
-          headers: { get: () => patchSequence },
+          body: { result: null, meta: { patchSequence } },
         }
       },
     })
@@ -184,21 +361,23 @@ for (const [name, file, className, deauthMethod] of [
     })
     await new Promise(resolve => setImmediate(resolve))
     assert.equal(settled, false)
-    assert.equal(signed[0], options)
+    assert.equal(calls[0].lease, lease)
     assert.equal(calls[0].options.headers.existing, 'preserved')
-    assert.equal(calls[0].options.headers.signature, 'signed')
+    assert.equal(calls[0].options.headers.signature, undefined)
+    assert.equal(JSON.parse(calls[0].request).signature, undefined)
     cache.next({ id: 2 })
     await new Promise(resolve => setImmediate(resolve))
     assert.equal(settled, false)
     cache.next({ id: 3 })
     assert.equal(await pending, null)
-    patchSequence = null
+    patchSequence = 999
     assert.equal(
       await client.rpcRequest(options, 'https://foreign.test/rpc'),
       null,
     )
-    assert.equal(signed.length, 1)
+    assert.equal(calls[1].lease, undefined)
     assert.equal(calls[1].options, options)
+    assert.equal(JSON.parse(calls[1].request).signature, undefined)
     assert.equal(calls[1].url, 'https://foreign.test/rpc')
     cache.complete()
   })
@@ -211,18 +390,16 @@ for (const [name, file, className, deauthMethod] of [
       [deauthMethod]: () => deauthenticated++,
     })
     dependencies.set(tokens.AuthKeyService, {
-      signRpcHeaders: async () => ({}),
+      lease: async () => ({ key: {}, signal: new AbortController().signal }),
     })
-    dependencies.set(tokens.HttpService, {
-      rpcRequest: async () => ({
-        body: {
-          error: {
-            code: 34,
-            message: 'unauthorized',
-            data: { details: 'session expired' },
-          },
+    dependencies.set(tokens.HttpService, {})
+    dependencies.set(tokens.RpcSocketService, {
+      message: async () => ({
+        error: {
+          code: 34,
+          message: 'unauthorized',
+          data: { details: 'session expired' },
         },
-        headers: { get: () => '999' },
       }),
     })
     const client = new (load(file)[className])()
@@ -378,7 +555,7 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
       ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: fixtures }],
-      ['./mock-patch', { mockPatchData: {} }],
+      ['./mock-patch', mockPatchFixture({})],
       ['./md-sample.md', ''],
     ]),
   )
@@ -451,7 +628,7 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
       ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: {} }],
-      ['./mock-patch', { mockPatchData: data }],
+      ['./mock-patch', mockPatchFixture(data)],
       ['./md-sample.md', ''],
     ]),
   )
@@ -506,12 +683,10 @@ test('StartOS DNS mock updates the selected gateway using live gateway state', a
       ['./api.fixures', { Mock: {} }],
       [
         './mock-patch',
-        {
-          mockPatchData: {
-            ui: { registries: {} },
-            serverInfo: { trustedKeys: {}, registryKeys: {} },
-          },
-        },
+        mockPatchFixture({
+          ui: { registries: {}, startosRegistry: 'https://registry.test/' },
+          serverInfo: { trustedKeys: {}, registryKeys: {} },
+        }),
       ],
       ['./md-sample.md', ''],
     ]),
@@ -1469,9 +1644,15 @@ test('WRT lazily invalidates authentication and preserves host errors and nullab
   let invalidated = 0
   let lookups = 0
   let response = { result: null }
-  dependencies.set(tokens.AuthKeyService, { signRpcHeaders: async () => ({}) })
+  const requests = []
+  dependencies.set(tokens.AuthKeyService, {
+    lease: async () => null,
+  })
   dependencies.set(tokens.HttpService, {
-    request: async () => ({ body: response }),
+    request: async options => {
+      requests.push(options)
+      return { body: response }
+    },
   })
   dependencies.set(tokens.Injector, {
     get: token => {
@@ -1484,9 +1665,18 @@ test('WRT lazily invalidates authentication and preserves host errors and nullab
     'projects/start-wrt/web/src/app/services/rpc.service.ts',
   ).RpcService)()
   assert.equal(
-    await client.request({ method: 'auth.logout', params: {} }),
+    await client.request({
+      method: 'auth.logout',
+      params: {},
+      headers: { trace: 'keep' },
+      timeout: 450,
+    }),
     null,
   )
+  assert.equal(requests[0].body, '{"method":"auth.logout","params":{}}')
+  assert.equal(requests[0].headers.get('Content-Type'), 'application/json')
+  assert.equal(requests[0].headers.get('trace'), 'keep')
+  assert.equal(requests[0].timeout, 450)
   assert.equal(lookups, 0)
   response = { error: { code: 34, message: 'unauthorized', data: 'expired' } }
   await assert.rejects(
@@ -1509,6 +1699,223 @@ test('WRT lazily invalidates authentication and preserves host errors and nullab
   )
 })
 
+test('WRT encrypted calls capture bytes, inspect firmware metadata and never downgrade', async () => {
+  const { dependencies, tokens, load } = harness()
+  const lease = { key: {}, signal: new AbortController().signal }
+  let resolveLease
+  dependencies.set(tokens.AuthKeyService, {
+    lease: () =>
+      new Promise(resolve => {
+        resolveLease = resolve
+      }),
+  })
+  const hashes = []
+  const calls = []
+  let response = { result: null, meta: { gitHash: 'firmware' } }
+  dependencies.set(tokens.StaleUiService, {
+    checkHash: hash => hashes.push(hash),
+  })
+  dependencies.set(tokens.HttpService, {
+    request: () => assert.fail('encrypted calls cannot fall back'),
+  })
+  dependencies.set(tokens.RpcSocketService, {
+    message: async (body, options, key) => {
+      calls.push({ body, options, key })
+      return response
+    },
+  })
+  let revoked = 0
+  dependencies.set(tokens.Injector, {
+    get: () => ({ setUnverified: () => revoked++ }),
+  })
+  const rpc = new (load(
+    'projects/start-wrt/web/src/app/services/rpc.service.ts',
+  ).RpcService)()
+  const params = { password: 'original' }
+  const pending = rpc.request({ method: 'auth.verify-password', params })
+  params.password = 'changed'
+  resolveLease(lease)
+  await pending
+  assert.equal(JSON.parse(calls[0].body).params.password, 'original')
+  assert.equal(calls[0].key, lease)
+  assert.deepEqual(hashes, ['firmware'])
+  response = {
+    error: { code: 34, message: 'revoked' },
+    meta: { gitHash: 'replacement' },
+  }
+  const rejected = rpc.request({ method: 'auth.logout', params: {} })
+  resolveLease(lease)
+  await assert.rejects(rejected, error => error.code === 34)
+  assert.deepEqual(hashes, ['firmware', 'replacement'])
+  assert.equal(revoked, 1)
+  dependencies.get(tokens.RpcSocketService).message = async () => {
+    throw Object.assign(new Error('network'), { code: 0 })
+  }
+  const failed = rpc.request({ method: 'system.info', params: {} })
+  resolveLease(lease)
+  await assert.rejects(failed, error => error.code === 0)
+})
+
+test('WRT mock continuations emit local events and close asynchronously without networking', async () => {
+  const { load } = harness(new Map(), {
+    queueMicrotask,
+    Event,
+    MessageEvent,
+    CloseEvent: class extends Event {
+      constructor(type, init) {
+        super(type)
+        Object.assign(this, init)
+      }
+    },
+  })
+  const { MockContinuation } = load(
+    'projects/start-wrt/web/src/app/services/api/mock-continuation.ts',
+  )
+  const progress = { overall: true, phases: [] }
+  const socket = new MockContinuation(progress)
+  const events = []
+  const closed = Promise.withResolvers()
+  socket.onopen = () => events.push('open')
+  socket.onmessage = event => {
+    assert.deepEqual(JSON.parse(event.data), progress)
+    events.push('message')
+    socket.close()
+    events.push('after-close')
+  }
+  socket.onclose = () => {
+    events.push('close')
+    closed.resolve()
+  }
+  await closed.promise
+  assert.deepEqual(events, ['open', 'message', 'after-close', 'close'])
+  socket.close()
+})
+
+function wrtFlowHarness(globals = {}) {
+  return harness(
+    new Map([
+      [
+        '@taiga-ui/core',
+        {
+          TuiLoader: class {},
+          TuiTitle: class {},
+          TuiNotificationService: class {},
+        },
+      ],
+      ['@taiga-ui/polymorpheus', { PolymorpheusComponent: class {} }],
+      ['src/app/i18n/i18n.pipe', { i18nPipe: class {} }],
+      [
+        'src/app/i18n/validation-errors',
+        {
+          fill: () =>
+            assert.fail('an unconfirmed update cannot report success'),
+        },
+      ],
+      ['src/app/services/network.service', { NetworkService: class {} }],
+      [
+        'src/app/utils/workspace-config',
+        { IS_MOCK: Symbol(), GIT_HASH: Symbol() },
+      ],
+    ]),
+    globals,
+  )
+}
+
+test('WRT outage ownership aborts a stalled RPC session only on the first declaration', () => {
+  const { load } = wrtFlowHarness({ setInterval: () => 1 })
+  const service = Object.create(
+    load('projects/start-wrt/web/src/app/services/connection.service.ts')
+      .ConnectionService.prototype,
+  )
+  let unreachable = false
+  let aborted = 0
+  Object.assign(service, {
+    unreachable: Object.assign(() => unreachable, {
+      set: value => {
+        unreachable = value
+      },
+    }),
+    message: { set() {} },
+    sockets: { disconnect: () => aborted++ },
+    i18n: { transform: value => value },
+    alerts: { open: () => of(null) },
+    poll() {},
+  })
+  service.reportUnreachable()
+  service.reportUnreachable()
+  assert.equal(aborted, 1)
+  assert.equal(unreachable, true)
+})
+
+test('WRT every failed recovery probe discards its stalled multiplexed session', async () => {
+  const { load } = wrtFlowHarness()
+  const service = Object.create(
+    load('projects/start-wrt/web/src/app/services/connection.service.ts')
+      .ConnectionService.prototype,
+  )
+  let aborted = 0
+  Object.assign(service, {
+    api: {
+      systemInfo: async timeout => {
+        assert.equal(timeout, 5000)
+        throw { code: 0 }
+      },
+    },
+    sockets: { disconnect: () => aborted++ },
+    staleUi: { check: () => assert.fail('no firmware response') },
+    recover: () => assert.fail('still offline'),
+  })
+  await service.poll()
+  await service.poll()
+  assert.equal(aborted, 2)
+})
+
+test('WRT interrupted-update recovery cannot claim the requested version from an old firmware reply', async () => {
+  const { load } = wrtFlowHarness({
+    setTimeout: callback => queueMicrotask(callback),
+    sessionStorage: { setItem: () => assert.fail('no success confirmation') },
+    window: {
+      location: { reload: () => assert.fail('no successful-update reload') },
+    },
+  })
+  const service = Object.create(
+    load('projects/start-wrt/web/src/app/services/system.service.ts')
+      .SystemService.prototype,
+  )
+  let attempts = 0
+  let rebooting = true
+  const messages = []
+  Object.assign(service, {
+    targetVersion: '1.5.0',
+    updating: { set() {} },
+    rebooting: {
+      set: value => {
+        rebooting = value
+      },
+    },
+    api: {
+      systemInfo: async () => {
+        if (++attempts === 1) throw { code: 0 }
+        return { version: '1.4.0' }
+      },
+    },
+    connection: { resume() {} },
+    sockets: { disconnect() {} },
+    i18n: { transform: value => value },
+    alerts: {
+      open: message => {
+        messages.push(message)
+        return of(null)
+      },
+    },
+    staleUi: { isStale: () => true },
+  })
+  await service.pollForReconnect()
+  assert.equal(attempts, 2)
+  assert.equal(rebooting, false)
+  assert.deepEqual(messages, ['Update failed — check device logs'])
+})
+
 function startupStateHarness() {
   const rxjs = require('rxjs')
   const ticks = new rxjs.Subject()
@@ -1526,7 +1933,10 @@ function startupStateHarness() {
       ['@taiga-ui/cdk', {}],
       ['@taiga-ui/core', { TuiNotificationService: keys.alerts }],
       ['@taiga-ui/polymorpheus', { PolymorpheusComponent: class {} }],
-      ['src/app/services/api/embassy-api.service', { ApiService: keys.api }],
+      [
+        'src/app/services/api/startup-api.service',
+        { StartupApiService: keys.api },
+      ],
       ['src/app/services/network.service', { NetworkService: keys.network }],
     ]),
   )

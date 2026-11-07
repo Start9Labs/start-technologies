@@ -24,7 +24,7 @@ use crate::net::gateway::WildcardListener;
 use crate::net::web_server::{WebServer, WebServerAcceptorSetter};
 use crate::prelude::*;
 use crate::progress::FullProgressTracker;
-use crate::rpc_continuations::{Guid, RpcContinuation, RpcContinuations};
+use crate::rpc_continuations::{Guid, RpcContinuation, RpcContinuations, WebSocketPolicy};
 use crate::setup::{SetupInfo, SetupProgress};
 use crate::shutdown::Shutdown;
 use crate::system::KeyboardOptions;
@@ -71,6 +71,8 @@ pub struct SetupContextSeed {
 
 #[derive(Clone)]
 pub struct SetupContext(Arc<SetupContextSeed>);
+
+impl crate::middleware::auth::session::SessionContext for SetupContext {}
 impl SetupContext {
     #[instrument(skip_all)]
     pub fn init(
@@ -165,6 +167,8 @@ impl SetupContext {
             .add(
                 guid.clone(),
                 RpcContinuation::ws(
+                    WebSocketPolicy::Public,
+                    self.secure_session().cloned(),
                     |mut ws| async move {
                         if let Err(e) = async {
                             let mut stream =

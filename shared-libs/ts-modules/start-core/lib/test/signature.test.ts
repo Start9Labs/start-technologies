@@ -1,10 +1,25 @@
 import { webcrypto } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   ed25519PublicKeyDer64,
   normalizeDer64,
   parseEd25519PublicKey,
   signRequest,
+  signRpcRequest,
 } from '../auth/signature'
+
+const rpcFixture: {
+  request: string
+  context: string
+  timestamp: number
+  nonce: string
+  pkcs8: string
+  pubkeyPem: string
+  proof: string
+} = JSON.parse(
+  readFileSync(join(__dirname, '../auth/fixtures/rpc-signature.json'), 'utf8'),
+)
 
 const der64 = 'MCowBQYDK2VwAyEAgTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q='
 const pem = `-----BEGIN PUBLIC KEY-----\n${der64}\n-----END PUBLIC KEY-----\n`
@@ -38,6 +53,34 @@ test('public-key decoding rejects off-curve points but retains backend ZIP-215 e
     expect(parseEd25519PublicKey(ed25519PublicKeyDer64(key))).toEqual(key)
   }
   expect(parseEd25519PublicKey(pem)).toEqual(parseEd25519PublicKey(der64))
+})
+
+test('JSON RPC signatures match the shared cryptographic fixture', async () => {
+  const privateKey = await crypto.subtle.importKey(
+    'pkcs8',
+    new Uint8Array(Buffer.from(rpcFixture.pkcs8, 'base64')),
+    'Ed25519',
+    false,
+    ['sign'],
+  )
+  const clock = jest
+    .spyOn(Date, 'now')
+    .mockReturnValue(rpcFixture.timestamp * 1000)
+  const random = jest
+    .spyOn(crypto, 'getRandomValues')
+    .mockReturnValueOnce(new BigUint64Array([BigInt(rpcFixture.nonce)]))
+  try {
+    expect(
+      await signRpcRequest(
+        { privateKey, pubkeyPem: rpcFixture.pubkeyPem },
+        rpcFixture.context,
+        rpcFixture.request,
+      ),
+    ).toBe(rpcFixture.proof)
+  } finally {
+    clock.mockRestore()
+    random.mockRestore()
+  }
 })
 
 test('HTTP signature headers retain their base64url envelope', async () => {

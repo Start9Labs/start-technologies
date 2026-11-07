@@ -1,3 +1,4 @@
+import { defaultRegistries, registryUrl, sameUrl } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import {
   DataModel,
@@ -71,7 +72,33 @@ function mockStart9Key(
   }
 }
 
+export function mockRegistryCache(
+  info: T.RegistryInfo,
+): DataModel['registryCache'][string] {
+  return { info, packages: Mock.RegistryPackages, connected: true }
+}
+
+export function mockOsUpdateCache(
+  registry: string,
+): NonNullable<DataModel['osUpdateCache']> {
+  return {
+    registry: registryUrl(registry),
+    versions: sameUrl(registry, defaultRegistries.community)
+      ? {}
+      : Mock.RegistryOSUpdate,
+    connected: true,
+  }
+}
+
 export const mockPatchData: DataModel = {
+  registryCache: {
+    'https://registry.start9.com/': mockRegistryCache(Mock.RegistryInfo),
+    'https://community-registry.start9.com/': mockRegistryCache({
+      ...Mock.RegistryInfo,
+      name: 'Community Registry',
+    }),
+  },
+  osUpdateCache: mockOsUpdateCache(defaultRegistries.start9),
   ui: {
     registries: {
       'https://registry.start9.com/': 'Start9 Registry',

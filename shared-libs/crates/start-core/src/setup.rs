@@ -110,7 +110,10 @@ pub fn setup<C: Context>() -> ParentHandler<C> {
                 .with_about("about.setup-exit")
                 .with_call_remote::<CliContext>(),
         )
-        .subcommand("logs", crate::system::logs::<SetupContext>())
+        .subcommand(
+            "logs",
+            crate::system::logs::<SetupContext>(crate::rpc_continuations::WebSocketPolicy::Public),
+        )
         .subcommand(
             "logs",
             from_fn_async(crate::logs::cli_logs::<SetupContext, Empty>)

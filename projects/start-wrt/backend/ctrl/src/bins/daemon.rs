@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::OsString;
-use std::future::ready;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -10,17 +9,13 @@ use axum::body::Body;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{header, Response};
 use axum::routing::{any, get, post};
-use axum::{Extension, Json, Router};
-use rpc_toolkit::Server;
+use axum::{Extension, Json};
 use serde::Deserialize;
 use startos::middleware::auth::local::LocalAuthContext;
-use startos::middleware::auth::Auth;
 use startos::net::tls::TlsListener;
 use startos::net::web_server::{Accept, Acceptor, DynAccept, MetadataVisitor, WebServer};
 use tokio::signal::unix::SignalKind;
 use tokio::sync::mpsc;
-use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
-use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::instrument;
 use visit_rs::Visit;
 
@@ -29,7 +24,7 @@ use crate::embedded_web::serve_embedded;
 use crate::luci_proxy::{self, ProxyClient};
 use crate::prelude::*;
 use crate::setup::{self, FlashMode, SetupEvent};
-use crate::{init_logging, main_api, ssl, ServerContext};
+use crate::{init_logging, ssl, ServerContext};
 
 /// Shared state passed to HTTP handlers via Extension.
 #[derive(Clone)]
@@ -63,7 +58,6 @@ fn ndjson_error(message: &str) -> Response<Body> {
         .unwrap()
 }
 
-/// GET /ws/rpc/{guid} — WebSocket continuation handler (e.g., update progress).
 async fn ws_continuation_handler(
     axum::extract::Path(guid): axum::extract::Path<String>,
     ws: axum::extract::ws::WebSocketUpgrade,
@@ -77,7 +71,7 @@ async fn ws_continuation_handler(
         None => None,
     };
     match handler {
-        Some(handler) => ws.on_upgrade(handler),
+        Some(handler) => handler.on_upgrade(ws),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -191,8 +185,15 @@ async fn inner_main() -> Result<(), Error> {
 
     let continuations = Arc::new(RpcContinuations::new());
     let ctx = ServerContext {
+        secure_session: None,
         continuations: continuations.clone(),
         auth: Arc::new(crate::auth::AuthState::open().await?),
+        server_identity: startos::sign::instance::load(
+            std::path::Path::new(crate::auth::AUTH_DB_PATH)
+                .parent()
+                .unwrap(),
+        )
+        .await?,
     };
     let app_state;
 
@@ -388,9 +389,6 @@ async fn inner_main() -> Result<(), Error> {
     if !setup_mode {
         tokio::spawn(crate::auth::reap_idle_keys(ctx.clone()));
     }
-    let handler = Server::new(move || ready(Ok(ctx.clone())), main_api())
-        .middleware(Auth::new().with_local_auth().with_signature_auth());
-
     let proxy_client = ProxyClient(
         reqwest::Client::builder()
             .no_proxy()
@@ -402,29 +400,9 @@ async fn inner_main() -> Result<(), Error> {
             .expect("failed to build proxy HTTP client"),
     );
 
-    // Firmware build stamp on every RPC response. The UI checks it against its
-    // baked-in config.json gitHash on each response, so an open tab notices a
-    // firmware update within one background poll (~5s) even when the daemon
-    // restart was too quick to drop any request (e.g. a CLI deploy). Exposed
-    // through CORS for the cross-origin dev serve.
-    let git_hash_header = header::HeaderName::from_static("x-startwrt-git-hash");
+    let cors = startos::middleware::cors::layer().expose_headers([crate::rpc::GIT_HASH_HEADER]);
 
-    let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::mirror_request())
-        .allow_methods(AllowMethods::mirror_request())
-        .allow_headers(AllowHeaders::mirror_request())
-        .expose_headers([git_hash_header.clone()])
-        .allow_credentials(true);
-
-    let app = Router::new()
-        // RPC API at /rpc/v1 (matches frontend's RELATIVE_URL)
-        .route(
-            "/rpc/v1",
-            post(handler).layer(SetResponseHeaderLayer::overriding(
-                git_hash_header,
-                header::HeaderValue::from_static(env!("STARTWRT_GIT_HASH")),
-            )),
-        )
+    let app = crate::rpc::router(ctx)
         // RPC continuation endpoint (binary I/O for backup/restore/diagnostics)
         .route(
             "/rest/rpc/{guid}",

@@ -8,14 +8,12 @@ use futures::stream::BoxStream;
 #[cfg(feature = "websocket")]
 use futures::StreamExt;
 use imbl_value::Value;
-use serde::Serialize;
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::sync::{mpsc, oneshot};
-#[cfg(feature = "websocket")]
-use yajrc::Id;
-use yajrc::RpcError;
+use yajrc::{Id, RpcError};
 
 use crate::util::internal_error;
-#[cfg(feature = "websocket")]
 use crate::RpcResponse;
 
 /// Version of the opt-in response-stream envelope.
@@ -27,6 +25,66 @@ pub const RPCSTREAM_CANCELLED_ERROR: RpcError = RpcError {
     message: Cow::Borrowed("Response stream canceled"),
     data: None,
 };
+
+/// An event or terminal reply correlated to its initiating JSON-RPC call.
+#[derive(Clone, Debug)]
+pub struct RpcStreamResponse {
+    /// The initiating call's ID.
+    pub id: Id,
+    /// Event payload, terminal value, or error.
+    pub result: Result<Value, RpcError>,
+    /// Whether this reply terminates the response stream.
+    pub end: bool,
+}
+
+impl RpcStreamResponse {
+    fn into_value(self) -> Value {
+        let mut value =
+            imbl_value::to_value(&RpcResponse::new(Some(self.id), self.result)).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("jsonrpc");
+        object.insert("rpcstream".into(), RPCSTREAM_VERSION.into());
+        object.insert("end".into(), self.end.into());
+        value
+    }
+}
+
+impl Serialize for RpcStreamResponse {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.clone().into_value().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for RpcStreamResponse {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = Value::deserialize(deserializer)?;
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| D::Error::custom("expected a response-stream object"))?;
+        if object.remove("rpcstream").as_ref().and_then(Value::as_str) != Some(RPCSTREAM_VERSION) {
+            return Err(D::Error::custom("unsupported response-stream version"));
+        }
+        if object.contains_key("jsonrpc") {
+            return Err(D::Error::custom(
+                "a response-stream reply cannot contain jsonrpc",
+            ));
+        }
+        let end = object
+            .remove("end")
+            .ok_or_else(|| D::Error::missing_field("end"))?;
+        let end = imbl_value::from_value(end).map_err(D::Error::custom)?;
+        object.insert("jsonrpc".into(), "2.0".into());
+        let response: RpcResponse = imbl_value::from_value(value).map_err(D::Error::custom)?;
+        let id = response
+            .id
+            .ok_or_else(|| D::Error::custom("a response-stream reply requires an ID"))?;
+        Ok(Self {
+            id,
+            result: response.result,
+            end,
+        })
+    }
+}
 
 #[cfg(feature = "websocket")]
 pub(crate) type ResponseEvents = BoxStream<'static, (Result<Value, RpcError>, bool)>;
@@ -113,17 +171,11 @@ fn serialize<T: Serialize>(value: T) -> Result<Value, RpcError> {
 
 #[cfg(feature = "websocket")]
 pub(crate) fn stream_event(id: Id, result: Result<Value, RpcError>, end: bool) -> Value {
-    let mut value = imbl_value::to_value(&RpcResponse {
-        id: Some(id),
-        result,
-    })
-    .unwrap();
-    let object = value.as_object_mut().unwrap();
-    object.remove("jsonrpc");
-    object.insert("rpcstream".into(), RPCSTREAM_VERSION.into());
-    object.insert("end".into(), end.into());
-    value
+    RpcStreamResponse { id, result, end }.into_value()
 }
+
+#[cfg(test)]
+mod codec_tests;
 
 #[cfg(all(test, feature = "websocket"))]
 mod tests {

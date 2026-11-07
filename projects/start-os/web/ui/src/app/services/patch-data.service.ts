@@ -3,8 +3,8 @@ import { Observable } from 'rxjs'
 import { filter, map, share, switchMap } from 'rxjs/operators'
 import { PatchDB } from 'patch-db-client'
 import { DataModel } from 'src/app/services/patch-db/data-model'
-import { OSService } from 'src/app/services/os.service'
 import { ConnectionService } from 'src/app/services/connection.service'
+import { OSService } from 'src/app/services/os.service'
 import { LocalStorageBootstrap } from './patch-db/local-storage-bootstrap'
 
 @Injectable({
@@ -21,7 +21,7 @@ export class PatchDataService extends Observable<void> {
       this.bootstrapper.update(cache)
 
       if (index === 0) {
-        this.os.loadOS()
+        this.os.loadOS().catch(console.error)
       }
     }),
     share(),

@@ -1,5 +1,8 @@
 #![cfg(feature = "websocket")]
 
+#[path = "websocket/upgrade.rs"]
+mod upgrade;
+
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -259,7 +262,7 @@ fn rpc_server(context: TestContext) -> Server<TestContext> {
     )
 }
 
-async fn serve(server: rpc_toolkit::WebSocketServer<TestContext>) -> (String, ServerGuard) {
+async fn serve<C: Context>(server: rpc_toolkit::WebSocketServer<C>) -> (String, ServerGuard) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}/rpc", listener.local_addr().unwrap());
     let router = Router::new().route("/rpc", get(server));
@@ -942,6 +945,54 @@ async fn upgrade_middleware_can_refuse_the_socket_before_rpc_dispatch() {
     );
     assert_eq!(context.http_calls.load(Ordering::SeqCst), 1);
     assert_eq!(context.echo_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn large_dumps_and_events_are_independent_of_the_inbound_request_limit() {
+    const SNAPSHOT_BYTES: usize = 17 * 1024 * 1024;
+    const EVENT_BYTES: usize = 5 * 1024 * 1024;
+
+    async fn large(args: HandlerArgs<TestContext, rpc_toolkit::Empty>) -> Result<Value, RpcError> {
+        let producer = args.rpc_stream.unwrap();
+        tokio::spawn(async move {
+            let event = wire!({"id":1, "patch":[{"op":"add", "path":"/large", "value":"y".repeat(EVENT_BYTES)}]});
+            producer.send(event).await.unwrap();
+            producer.close(Ok::<_, RpcError>(())).unwrap();
+        });
+        Ok(wire!({"id":0, "value":{"text":"x".repeat(SNAPSHOT_BYTES)}}))
+    }
+
+    let server = Server::new(
+        || async { Ok(TestContext::default()) },
+        ParentHandler::new().subcommand("large", from_fn_async(large).no_cli().no_ts()),
+    )
+    .for_websocket();
+    let (url, _server) = serve(server).await;
+    let receive_limit = 64 * 1024 * 1024;
+    let config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(receive_limit))
+        .max_frame_size(Some(receive_limit));
+    let (mut socket, _) = tokio_tungstenite::connect_async_with_config(url, Some(config), false)
+        .await
+        .unwrap();
+    send(
+        &mut socket,
+        wire!({"jsonrpc":"2.0", "rpcstream":"1.0", "id":90, "method":"large", "params":{}}),
+    )
+    .await;
+    let initial = receive(&mut socket).await;
+    assert_eq!(initial["id"], 90);
+    assert_eq!(
+        initial["result"]["value"]["text"].as_str().unwrap().len(),
+        SNAPSHOT_BYTES
+    );
+    let event = receive(&mut socket).await;
+    assert_eq!(event["id"], 90);
+    assert_eq!(
+        event["result"]["patch"][0]["value"].as_str().unwrap().len(),
+        EVENT_BYTES
+    );
+    assert_eq!(receive(&mut socket).await["end"], true);
 }
 
 #[derive(Clone, Default)]
