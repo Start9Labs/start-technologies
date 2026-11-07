@@ -942,6 +942,20 @@ export const LogEntry: z.ZodObject<{
 }).meta({
   id: 'LogEntry',
 })
+
+/**
+ * Verbosity accepted by the server's runtime logging control.
+ */
+export const LogLevel: z.ZodEnum<{
+  error: 'error'
+  warn: 'warn'
+  info: 'info'
+  debug: 'debug'
+  trace: 'trace'
+}> = /* @__PURE__ */ z.enum(['error', 'warn', 'info', 'debug', 'trace']).meta({
+  id: 'LogLevel',
+  description: "Verbosity accepted by the server's runtime logging control.",
+})
 export const LogoutParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'LogoutParams',
 })
@@ -3258,6 +3272,26 @@ export const SetIconParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ icon: DataUrl.nullable() }).meta({
   id: 'SetIconParams',
 })
+
+/**
+ * Sets verbosity for StartOS backend code in the running daemon.
+ */
+export const SetLogLevelParams: z.ZodObject<{
+  /**
+   * Applies to start-core/start-os until the daemon restarts.
+   */
+  level: typeof LogLevel
+}> = /* @__PURE__ */ object({
+  /**
+   * Applies to start-core/start-os until the daemon restarts.
+   */
+  level: LogLevel.meta({
+    description: 'Applies to start-core/start-os until the daemon restarts.',
+  }),
+}).meta({
+  id: 'SetLogLevelParams',
+  description: 'Sets verbosity for StartOS backend code in the running daemon.',
+})
 export const SetOsUpdateSignerParams: z.ZodObject<{
   key: typeof AnyVerifyingKey
   label: z.ZodString
@@ -4191,6 +4225,13 @@ export const SideloadParams: z.ZodObject<{
     z.ZodNullable<typeof AcceptSigners>
   >
   /**
+   * DER64 supplemental signatures for the uploaded archive.
+   */
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
+  /**
    * Accepts an untrusted signer without skipping signature or integrity verification.
    */
   trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
@@ -4199,6 +4240,15 @@ export const SideloadParams: z.ZodObject<{
     AcceptSigners.nullable().optional(),
     AcceptSigners.nullable(),
   ),
+  /**
+   * DER64 supplemental signatures for the uploaded archive.
+   */
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ).meta({
+    description: 'DER64 supplemental signatures for the uploaded archive.',
+  }),
   /**
    * Accepts an untrusted signer without skipping signature or integrity verification.
    */
@@ -6709,6 +6759,10 @@ export const Api = {
         },
         'set-language': {
           _PARAMS: /* @__PURE__ */ SetLanguageParams,
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        'set-log-level': {
+          _PARAMS: /* @__PURE__ */ SetLogLevelParams,
           _RETURN: /* @__PURE__ */ z.null(),
         },
         'set-smtp': {

@@ -163,7 +163,6 @@ pub struct Epp(Cow<'static, str>);
 rpc_toolkit::reflect_ts!(Epp);
 rpc_toolkit::ts_export!(Epp, namespaces = [""]);
 
-const LIBREM_MINI_V2: &str = "librem_mini_v2";
 const LIBREM_MINI_V2_EPP: Epp = Epp(Cow::Borrowed("balance_power"));
 
 impl std::str::FromStr for Epp {
@@ -236,7 +235,8 @@ pub(crate) fn preferred_epp(
     system_product_name: Option<&str>,
 ) -> Option<Epp> {
     selected.or_else(|| {
-        (system_product_name == Some(LIBREM_MINI_V2)).then(|| LIBREM_MINI_V2_EPP.clone())
+        (system_product_name == Some(crate::firmware::LIBREM_MINI_V2))
+            .then(|| LIBREM_MINI_V2_EPP.clone())
     })
 }
 
