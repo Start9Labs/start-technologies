@@ -458,12 +458,16 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'activity.clear', params: {} })
   }
 
-  async backupCreate(): Promise<BackupCreateRes> {
-    return this.rpc.request({ method: 'backup.create', params: {} })
+  async backupCreate(
+    params: RpcParamType<Api, 'backup.create'>,
+  ): Promise<BackupCreateRes> {
+    return this.rpc.request({ method: 'backup.create', params })
   }
 
-  async backupRestore(): Promise<BackupRestoreRes> {
-    return this.rpc.request({ method: 'backup.restore', params: {} })
+  async backupRestore(
+    params: RpcParamType<Api, 'backup.restore'>,
+  ): Promise<BackupRestoreRes> {
+    return this.rpc.request({ method: 'backup.restore', params })
   }
 
   async diagnosticsCreate(): Promise<DiagnosticsCreateRes> {
