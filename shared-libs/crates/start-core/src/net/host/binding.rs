@@ -100,6 +100,46 @@ fn mdns_covers(mdns: &HostnameInfo, ip: &HostnameInfo) -> bool {
 }
 
 impl DerivedAddressInfo {
+    pub(super) fn update_available(&mut self, available: BTreeSet<HostnameInfo>) {
+        let established_domains: BTreeSet<_> = self
+            .enabled()
+            .into_iter()
+            .filter_map(|a| match &a.metadata {
+                HostnameMetadata::PublicDomain { gateway } => {
+                    Some((a.hostname.clone(), gateway.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        self.available = available;
+        let public_domains: BTreeSet<_> = self
+            .enabled()
+            .into_iter()
+            .filter(|a| !a.ssl)
+            .filter_map(|a| match &a.metadata {
+                // New bindings and domains reconcile their defaults before inheriting WAN exposure.
+                HostnameMetadata::PublicDomain { gateway }
+                    if established_domains.contains(&(a.hostname.clone(), gateway.clone())) =>
+                {
+                    Some((gateway.clone(), a.port?))
+                }
+                _ => None,
+            })
+            .collect();
+        for (gateway, port) in public_domains {
+            set_nonssl_wan_group(self, &gateway, port, true);
+        }
+        self.available = std::mem::take(&mut self.available)
+            .into_iter()
+            .map(|mut address| {
+                if let Some(gua) = address.gua() {
+                    address.public = self.gua_wan.contains(&gua);
+                }
+                address
+            })
+            .collect();
+    }
+
     fn public_ip_on(&self, address: &HostnameInfo) -> bool {
         address.to_socket_addr().map_or(
             true, // should never happen, but would rather see them if it does
@@ -2115,6 +2155,124 @@ mod test {
         assert!(!info.enabled.contains(&v4_sa));
         assert!(!info.gua_wan.contains(&gua_v6));
         assert!(!info.enabled.contains(&SocketAddr::V6(gua_v6)));
+    }
+
+    #[test]
+    fn refreshed_gua_inherits_an_enabled_plain_public_domain() {
+        let domain = HostnameInfo {
+            ssl: false,
+            public: true,
+            hostname: InternedString::intern("smp.example.com"),
+            port: Some(5223),
+            metadata: HostnameMetadata::PublicDomain {
+                gateway: GatewayId::from(InternedString::intern("eth0")),
+            },
+        };
+        let gua = HostnameInfo {
+            ssl: false,
+            ..ipv6_addr("2001:db8::1", 5223)
+        };
+        let mut info = DerivedAddressInfo::default();
+        info.available.insert(domain.clone());
+        info.disabled.insert(override_key(&gua));
+        info.update_available(BTreeSet::from([domain.clone(), gua.clone()]));
+        let published = info.available.iter().find(|a| a.gua().is_some()).unwrap();
+        assert!(published.public);
+        assert!(info.enabled().contains(published));
+
+        let next_gua = HostnameInfo {
+            ssl: false,
+            ..ipv6_addr("2001:db8::2", 5223)
+        };
+        info.update_available(BTreeSet::from([domain.clone(), next_gua.clone()]));
+        let published = info.available.iter().find(|a| a.gua().is_some()).unwrap();
+        assert!(published.public);
+        assert!(info.enabled().contains(published));
+
+        set_nonssl_wan_group(
+            &mut info,
+            &GatewayId::from(InternedString::intern("eth0")),
+            5223,
+            false,
+        );
+        info.update_available(BTreeSet::from([domain, next_gua]));
+        assert!(
+            info.available
+                .iter()
+                .all(|a| a.gua().is_none() || !a.public)
+        );
+    }
+
+    #[test]
+    fn a_new_public_domain_does_not_preempt_sibling_reconciliation() {
+        let domain = HostnameInfo {
+            ssl: false,
+            public: true,
+            hostname: InternedString::intern("smp.example.com"),
+            port: Some(5223),
+            metadata: HostnameMetadata::PublicDomain {
+                gateway: GatewayId::from(InternedString::intern("eth0")),
+            },
+        };
+        let gua = HostnameInfo {
+            ssl: false,
+            ..ipv6_addr("2001:db8::1", 5223)
+        };
+        let mut info = DerivedAddressInfo::default();
+        info.update_available(BTreeSet::from([domain, gua]));
+        assert!(info.gua_wan.is_empty());
+        assert!(info.enabled.is_empty());
+        assert!(
+            info.available
+                .iter()
+                .all(|a| a.gua().is_none() || !a.public)
+        );
+    }
+
+    #[test]
+    fn a_public_domain_does_not_publish_other_exposures() {
+        let domain = HostnameInfo {
+            ssl: false,
+            public: true,
+            hostname: InternedString::intern("smp.example.com"),
+            port: Some(5223),
+            metadata: HostnameMetadata::PublicDomain {
+                gateway: GatewayId::from(InternedString::intern("eth0")),
+            },
+        };
+        let other_port = HostnameInfo {
+            ssl: false,
+            ..ipv6_addr("2001:db8::1", 443)
+        };
+        let other_gateway = HostnameInfo {
+            ssl: false,
+            metadata: HostnameMetadata::Ipv6 {
+                gateway: GatewayId::from(InternedString::intern("eth1")),
+                scope_id: 0,
+            },
+            ..ipv6_addr("2001:db8::2", 5223)
+        };
+        let mut info = DerivedAddressInfo::default();
+        info.available.insert(domain.clone());
+        info.update_available(BTreeSet::from([domain.clone(), other_port, other_gateway]));
+        assert!(
+            info.available
+                .iter()
+                .all(|a| a.gua().is_none() || !a.public)
+        );
+
+        info.update_available(BTreeSet::from([
+            HostnameInfo {
+                ssl: true,
+                ..domain
+            },
+            ipv6_addr("2001:db8::1", 5223),
+        ]));
+        assert!(
+            info.available
+                .iter()
+                .all(|a| a.gua().is_none() || !a.public)
+        );
     }
 
     #[test]

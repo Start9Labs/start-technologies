@@ -324,22 +324,6 @@ fn ssl_vhost_public_v4<'a>(
         .collect()
 }
 
-/// Gateways of the public domains served on a port.
-fn public_domain_gateways<'a>(
-    enabled_addresses: impl IntoIterator<Item = &'a &'a HostnameInfo>,
-    port: u16,
-) -> BTreeSet<GatewayId> {
-    enabled_addresses
-        .into_iter()
-        .filter(|a| {
-            a.public
-                && a.port == Some(port)
-                && matches!(a.metadata, HostnameMetadata::PublicDomain { .. })
-        })
-        .flat_map(|a| a.metadata.gateways().cloned())
-        .collect()
-}
-
 /// The loopback and bridge addresses of a binding's SSL port. Every name the
 /// binding serves accepts them.
 fn ssl_vhost_internal_ips<'a>(
@@ -825,13 +809,6 @@ impl NetServiceData {
                         // DNAT (see the reconcile below).
                         gua_forwards
                             .insert((*gua.ip(), gua.port()), (container_v6, *port, src_filter));
-                    }
-                    // A public domain's AAAA records name its gateways' GUAs.
-                    if requirements.secure {
-                        let gws = public_domain_gateways(&enabled_addresses, external);
-                        for gua in crate::net::utils::gua_ips(&net_ifaces, &gws) {
-                            gua_forwards.insert((gua, external), (container_v6, *port, None));
-                        }
                     }
                 }
             }
@@ -2080,29 +2057,6 @@ mod tests {
             ssl_vhost_public_v4(addrs.iter()),
             BTreeSet::from([wg.clone()]),
             "an SSL-port bare IP does mark it public"
-        );
-    }
-
-    #[test]
-    fn a_public_domain_contributes_its_gateways_on_its_own_port() {
-        let domain = |port, public, gateway: &str| HostnameInfo {
-            ssl: false,
-            public,
-            hostname: InternedString::intern("smp.example.com"),
-            port: Some(port),
-            metadata: HostnameMetadata::PublicDomain {
-                gateway: gw(gateway),
-            },
-        };
-        let own = domain(5223, true, "wg1");
-        let other_port = domain(443, true, "eth0");
-        let private = domain(5223, false, "eth1");
-        let bare = bare_v4(false, 5223, &gw("eth2"));
-
-        assert_eq!(
-            public_domain_gateways(&[&own, &other_port, &private, &bare], 5223),
-            BTreeSet::from([gw("wg1")]),
-            "only a public domain on the port counts"
         );
     }
 
