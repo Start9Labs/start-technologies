@@ -276,6 +276,10 @@ export type RemoveVersionParamsInput = z.input<
 >
 export type ReplayIdInput = z.input<typeof schemas.ReplayId>
 export type RequiresReboot = z.output<typeof schemas.RequiresReboot>
+
+/**
+ * A protocol safe to expose on enabled public addresses.
+ */
 export type Security = z.output<typeof schemas.Security>
 export type ServerHostname = z.output<typeof schemas.ServerHostname>
 export type ServiceInterfaceId = z.output<typeof schemas.ServiceInterfaceId>

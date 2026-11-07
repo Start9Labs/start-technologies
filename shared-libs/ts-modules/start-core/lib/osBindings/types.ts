@@ -376,7 +376,15 @@ export type RequestCommitment = z.output<typeof schemas.RequestCommitment>
 export type RequestCommitmentInput = z.input<typeof schemas.RequestCommitment>
 export type RestartReason = z.output<typeof schemas.RestartReason>
 export type RestartReasonInput = z.input<typeof schemas.RestartReason>
+
+/**
+ * A protocol safe to expose on enabled public addresses.
+ */
 export type Security = z.output<typeof schemas.Security>
+
+/**
+ * A protocol safe to expose on enabled public addresses.
+ */
 export type SecurityInput = z.input<typeof schemas.Security>
 export type ServerBackupReport = z.output<typeof schemas.ServerBackupReport>
 export type ServerBackupReportInput = z.input<typeof schemas.ServerBackupReport>

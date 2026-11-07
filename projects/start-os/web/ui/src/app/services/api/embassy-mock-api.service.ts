@@ -147,8 +147,8 @@ function mockBitTorrentBinding(): T.BindInfo {
     options: {
       preferredExternalPort: port,
       addSsl: null,
-      secure: null,
-      proxy: null,
+      secure: { ssl: false },
+      proxy: { type: 'tcp' },
     },
     net: { assignedPort: port, assignedSslPort: null },
     interfaces: { [BITTORRENT_INTERFACE.id]: BITTORRENT_INTERFACE },

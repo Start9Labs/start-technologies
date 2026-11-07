@@ -1244,10 +1244,26 @@ export const ReplayId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 export const RequiresReboot: z.ZodBoolean = /* @__PURE__ */ z.boolean().meta({
   id: 'RequiresReboot',
 })
-export const Security: z.ZodObject<{ ssl: z.ZodBoolean }> =
-  /* @__PURE__ */ object({ ssl: z.boolean() }).meta({
-    id: 'Security',
-  })
+
+/**
+ * A protocol safe to expose on enabled public addresses.
+ */
+export const Security: z.ZodObject<{
+  /**
+   * Whether TLS precedes application bytes.
+   */
+  ssl: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  /**
+   * Whether TLS precedes application bytes.
+   */
+  ssl: z.boolean().meta({
+    description: 'Whether TLS precedes application bytes.',
+  }),
+}).meta({
+  id: 'Security',
+  description: 'A protocol safe to expose on enabled public addresses.',
+})
 export const ServerHostname: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'ServerHostname',
 })

@@ -543,9 +543,11 @@ impl BindInfo {
     }
 }
 
+/// A protocol safe to expose on enabled public addresses.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct Security {
+    /// Whether TLS precedes application bytes.
     pub ssl: bool,
 }
 

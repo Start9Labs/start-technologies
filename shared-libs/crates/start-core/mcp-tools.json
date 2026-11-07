@@ -3796,9 +3796,15 @@
         },
         "Security": {
           "type": "object",
-          "properties": { "ssl": { "type": "boolean" } },
+          "properties": {
+            "ssl": {
+              "type": "boolean",
+              "description": "Whether TLS precedes application bytes."
+            }
+          },
           "required": ["ssl"],
-          "additionalProperties": true
+          "additionalProperties": true,
+          "description": "A protocol safe to expose on enabled public addresses."
         },
         "ProxyOptions": {
           "anyOf": [
@@ -10152,9 +10158,15 @@
         },
         "Security": {
           "type": "object",
-          "properties": { "ssl": { "type": "boolean" } },
+          "properties": {
+            "ssl": {
+              "type": "boolean",
+              "description": "Whether TLS precedes application bytes."
+            }
+          },
           "required": ["ssl"],
-          "additionalProperties": true
+          "additionalProperties": true,
+          "description": "A protocol safe to expose on enabled public addresses."
         },
         "ProxyOptions": {
           "anyOf": [

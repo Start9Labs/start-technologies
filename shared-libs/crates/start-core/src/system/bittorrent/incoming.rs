@@ -1,7 +1,7 @@
 use librqbit::ListenerOptions;
 
 use crate::context::RpcContext;
-use crate::net::host::binding::{BindInfo, BindOptions, ProxyOptions};
+use crate::net::host::binding::{BindInfo, BindOptions, ProxyOptions, Security};
 use crate::net::service_interface::{AddressInfo, ServiceInterface, ServiceInterfaceType};
 use crate::prelude::*;
 use crate::{HostId, Id, ServiceInterfaceId};
@@ -50,7 +50,9 @@ pub(crate) async fn configure_incoming(
         .map(|binding| binding.de())
         .transpose()?;
     if !binding.as_ref().is_some_and(|binding| {
-        binding.enabled && matches!(binding.options.proxy, Some(ProxyOptions::Tcp))
+        binding.enabled
+            && matches!(binding.options.proxy, Some(ProxyOptions::Tcp))
+            && binding.options.secure.is_some_and(|security| !security.ssl)
     }) {
         ctx.os_net_service
             .bind(
@@ -88,6 +90,7 @@ fn binding_options(existing: Option<BindOptions>) -> BindOptions {
         proxy: None,
     });
     options.proxy = Some(ProxyOptions::Tcp);
+    options.secure = Some(Security { ssl: false });
     options
 }
 
@@ -108,9 +111,11 @@ mod tests {
         let mut previous = binding_options(None);
         previous.preferred_external_port = 45678;
         previous.proxy = None;
+        previous.secure = None;
         let options = binding_options(Some(previous));
         assert_eq!(options.preferred_external_port, 45678);
         assert_eq!(options.proxy, Some(ProxyOptions::Tcp));
+        assert!(options.secure.is_some_and(|security| !security.ssl));
     }
 
     #[test]

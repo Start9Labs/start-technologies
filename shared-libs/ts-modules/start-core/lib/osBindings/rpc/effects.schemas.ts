@@ -563,10 +563,26 @@ export const ProgressUnits: z.ZodEnum<{ bytes: 'bytes'; steps: 'steps' }> =
 export const ReplayId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'ReplayId',
 })
-export const Security: z.ZodObject<{ ssl: z.ZodBoolean }> =
-  /* @__PURE__ */ object({ ssl: z.boolean() }).meta({
-    id: 'Security',
-  })
+
+/**
+ * A protocol safe to expose on enabled public addresses.
+ */
+export const Security: z.ZodObject<{
+  /**
+   * Whether TLS precedes application bytes.
+   */
+  ssl: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  /**
+   * Whether TLS precedes application bytes.
+   */
+  ssl: z.boolean().meta({
+    description: 'Whether TLS precedes application bytes.',
+  }),
+}).meta({
+  id: 'Security',
+  description: 'A protocol safe to expose on enabled public addresses.',
+})
 export const ServiceInterfaceId: typeof literal_0 =
   /* @__PURE__ */ literal_0.meta({
     id: 'ServiceInterfaceId',
