@@ -258,6 +258,12 @@ fn parse_tree(header: &str, lines: &[&str], state: &SessionState) -> Option<Tree
             u32::from_str_radix(serial.split_whitespace().next()?, 16).ok()?;
             status = Some(value);
             disconnected |= has_disconnect_flag(tail);
+        } else if let Some(capabilities) = line.strip_prefix("Share Capabilities:") {
+            supported &= !capabilities.split_whitespace().any(|word| word == "DFS,");
+            disconnected |= has_disconnect_flag(capabilities);
+        } else if let Some(details) = line.strip_prefix("tid: 0x") {
+            u32::from_str_radix(details.split_whitespace().next()?, 16).ok()?;
+            disconnected |= has_disconnect_flag(details);
         } else if line.starts_with("DFS origin fullpath:") {
             supported = false;
         } else {
@@ -396,6 +402,32 @@ mod tests {
 
     fn observe(input: &str, unc: &str) -> Option<bool> {
         DebugData::parse(input).and_then(|data| data.health(unc))
+    }
+
+    #[test]
+    fn captured_smb3_share_details_preserve_failure_and_recovery() {
+        for (input, expected) in [
+            (include_str!("cifs/fixtures/linux-7.2-connected.txt"), true),
+            (
+                include_str!("cifs/fixtures/linux-7.2-disconnected.txt"),
+                false,
+            ),
+            (include_str!("cifs/fixtures/linux-7.2-recovered.txt"), true),
+            (
+                include_str!("cifs/fixtures/linux-7.2-auth-failed.txt"),
+                false,
+            ),
+        ] {
+            assert_eq!(observe(input, "//192.0.2.10/volume"), Some(expected));
+        }
+        let input = include_str!("cifs/fixtures/linux-7.2-connected.txt");
+        let disconnected = input.replace(
+            "Maximal Access: 0x1f01ff",
+            "Maximal Access: 0x1f01ff DISCONNECTED",
+        );
+        assert_eq!(observe(&disconnected, "//192.0.2.10/volume"), Some(false));
+        let dfs = input.replace("Share Capabilities: None", "Share Capabilities: DFS,");
+        assert_eq!(observe(&dfs, "//192.0.2.10/volume"), None);
     }
 
     #[test]
