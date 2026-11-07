@@ -18,11 +18,11 @@ The entrypoint executes the requested command directly. Replacing it with Docker
 
 ## Consumers
 
-`image.sh` resolves the published image from `repository` and `reference`, or returns a `RUST_BUILDER_IMAGE` override. Shared compiler commands, StartWRT's compiler/test/disassembly commands, and the formatter use that selection. StartWRT's native bindings CI reads `RUST_VERSION` from the selected image and installs that toolchain with rustup. Rust binary Make prerequisites track the selection files, so a pin change invalidates existing binaries.
+`image.sh` resolves the published image from `repository` and `reference`, or returns a `RUST_BUILDER_IMAGE` override. Shared compiler commands, StartWRT's compiler/bindings/test/disassembly commands, and the formatter use that selection. StartWRT's shared builder alias disables the default RVA23 profile; native bindings generation uses the image's pinned Rust compiler, while router cross-compilation retains its scalar K1 flags and compiler wrappers. Rust binary Make prerequisites track the selection files, so a pin change invalidates existing binaries.
 
 The formatter and core-test Dockerfiles receive the base as a build argument. Docker's build cache refreshes derived images when their base or recipe changes. Core tests keep their separate `RUST_BUILDER_IMAGE` contract: a custom value selects a prebuilt test image; the default test image is built over the pinned builder with Node and SquashFS tools.
 
-Run `make rust-builder-selection-test` for shell checks of the entrypoint's profile defaults, opt-out, explicit flags and command forwarding, plus Docker-mocked checks of image selection, overrides, native toolchain derivation and installation failures, derived-image build arguments, and the K1 disassembler's native override.
+Run `make rust-builder-selection-test` for shell checks of the entrypoint's profile defaults, opt-out, explicit flags and command forwarding, plus Docker-mocked checks of image selection, containerized bindings generation and failure cleanup, overrides, derived-image build arguments, and the K1 disassembler's native override.
 
 ## Local build
 

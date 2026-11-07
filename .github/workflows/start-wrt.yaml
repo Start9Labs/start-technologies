@@ -103,12 +103,6 @@ jobs:
           SCCACHE_GHA_ENABLED: on
           SCCACHE_GHA_VERSION: 0
 
-      - name: Use repository Rust toolchain
-        run: |
-          toolchain=$(docker run --rm "$(./build/rust-builder/image.sh)" printenv RUST_VERSION)
-          rustup toolchain install "$toolchain" --profile minimal --no-self-update
-          printf 'RUSTUP_TOOLCHAIN=%s\n' "$toolchain" >> "$GITHUB_ENV"
-
       - name: Check StartWRT bindings up to date
         run: make start-wrt-rpc-bindings-check
 
