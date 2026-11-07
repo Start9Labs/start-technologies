@@ -100,6 +100,7 @@ pub struct RegistryContextSeed {
     pub open_authed_continuations: OpenAuthedContinuations<Option<InternedString>>,
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
     pub client: Client,
+    pub server_identity: crate::sign::Signer,
     pub shutdown: Sender<()>,
     pub metrics_db: SyncMutex<Connection>,
 }
@@ -118,6 +119,7 @@ impl RegistryContext {
         if tokio::fs::metadata(&datadir).await.is_err() {
             tokio::fs::create_dir_all(&datadir).await?;
         }
+        let server_identity = crate::sign::instance::load(&datadir).await?;
         let db_path = datadir.join("registry.db");
         let db = TypedPatchDb::<RegistryDatabase>::load_unchecked(PatchDb::open(&db_path).await?);
         if db.dump(&ROOT).await.value.is_null() {
@@ -186,6 +188,7 @@ impl RegistryContext {
                 }))
                 .build()
                 .with_kind(crate::ErrorKind::ParseUrl)?,
+            server_identity,
             shutdown,
             metrics_db,
         })))
@@ -512,6 +515,7 @@ pub(crate) async fn test_context(datadir: PathBuf, uploader: AnyVerifyingKey) ->
         open_authed_continuations: OpenAuthedContinuations::new(),
         auth_sig_nonce_cache: SyncMutex::new(Default::default()),
         client: Client::new(),
+        server_identity: crate::sign::AnySigningKey::generate().into(),
         shutdown: tokio::sync::broadcast::channel(1).0,
         metrics_db: SyncMutex::new(Connection::open_in_memory().unwrap()),
     }))

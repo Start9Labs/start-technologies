@@ -19,6 +19,7 @@ pub mod compat;
 pub mod ed25519;
 pub(crate) mod gpg;
 pub mod gpg_agent;
+pub mod instance;
 pub mod noise;
 
 /// Signatures serialized in signer order.
@@ -119,6 +120,13 @@ pub enum AnySigningKey {
 rpc_toolkit::reflect_ts!(AnySigningKey);
 rpc_toolkit::ts_export!(AnySigningKey, namespaces = [""]);
 impl AnySigningKey {
+    /// Generates an Ed25519 identity using OS randomness.
+    pub fn generate() -> Self {
+        Self::Ed25519(ed25519_dalek::SigningKey::generate(
+            &mut crate::util::crypto::os_rng(),
+        ))
+    }
+
     pub fn verifying_key(&self) -> AnyVerifyingKey {
         match self {
             Self::Ed25519(k) => AnyVerifyingKey::Ed25519(k.into()),

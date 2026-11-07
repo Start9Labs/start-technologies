@@ -191,6 +191,12 @@ async fn inner_main() -> Result<(), Error> {
     let ctx = ServerContext {
         continuations: continuations.clone(),
         auth: Arc::new(crate::auth::AuthState::open().await?),
+        server_identity: startos::sign::instance::load(
+            std::path::Path::new(crate::auth::AUTH_DB_PATH)
+                .parent()
+                .unwrap(),
+        )
+        .await?,
     };
     let app_state;
 

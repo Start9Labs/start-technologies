@@ -178,6 +178,7 @@ pub struct TunnelContextSeed {
     pub rpc_continuations: RpcContinuations,
     pub open_authed_continuations: OpenAuthedContinuations<Option<InternedString>>,
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
+    pub server_identity: crate::sign::Signer,
     pub net_iface: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     pub forward: PortForwardController,
     pub dns_proxy: DnsProxyController,
@@ -242,6 +243,7 @@ impl TunnelContext {
             .unwrap_or_else(|| Path::new("/var/lib/start-tunnel"))
             .to_owned();
         restrict_datadir(&datadir).await?;
+        let server_identity = crate::sign::instance::load(&datadir).await?;
         let db_path = datadir.join("tunnel.db");
         let db = TypedPatchDb::<TunnelDatabase>::load_unchecked(PatchDb::open(&db_path).await?);
         if db.dump(&ROOT).await.value.is_null() {
@@ -403,6 +405,7 @@ impl TunnelContext {
             rpc_continuations: RpcContinuations::new(),
             open_authed_continuations: OpenAuthedContinuations::new(),
             auth_sig_nonce_cache: SyncMutex::new(Default::default()),
+            server_identity,
             net_iface,
             forward,
             dns_proxy,

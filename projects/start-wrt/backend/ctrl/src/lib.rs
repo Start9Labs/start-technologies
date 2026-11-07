@@ -366,12 +366,14 @@ impl CallRemote<ServerContext> for CliContext {
 pub struct ServerContext {
     pub continuations: Arc<continuations::RpcContinuations>,
     pub auth: Arc<auth::AuthState>,
+    pub server_identity: startos::sign::Signer,
 }
 impl Default for ServerContext {
     fn default() -> Self {
         Self {
             continuations: Arc::new(continuations::RpcContinuations::new()),
             auth: Arc::new(auth::AuthState::in_memory()),
+            server_identity: startos::sign::AnySigningKey::generate().into(),
         }
     }
 }
@@ -383,6 +385,42 @@ impl CtrlContext for ServerContext {
 
     fn effectful(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod server_identity_tests {
+    use super::*;
+
+    #[test]
+    fn image_preserves_the_server_identity_during_sysupgrade() {
+        let path = PathBuf::from(auth::AUTH_DB_PATH)
+            .parent()
+            .unwrap()
+            .join(startos::sign::instance::IDENTITY_FILE);
+        let stage = include_str!("../../../build/stage-files.sh");
+        let keep = stage
+            .split("<< 'KEEPEOF'")
+            .nth(1)
+            .unwrap()
+            .split("KEEPEOF")
+            .next()
+            .unwrap();
+        assert!(keep.lines().any(|line| line == path.to_str().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn cloned_context_retains_the_server_identity() {
+        let context = ServerContext::default();
+        assert_eq!(
+            context.server_identity.verifying_key().await.unwrap(),
+            context
+                .clone()
+                .server_identity
+                .verifying_key()
+                .await
+                .unwrap()
+        );
     }
 }
 

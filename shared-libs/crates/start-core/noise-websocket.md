@@ -11,6 +11,20 @@ continuations can retain `util/net.rs::WebSocket` around it: that generic wrappe
 still owns their keepalive, send deadline and close lifecycle. The cipher adapter
 adds no parallel heartbeat or producer task.
 
+## Identity ownership
+
+`sign/instance.rs` owns private server-key persistence for registry, Tunnel and
+WRT contexts. Each loads `rpc-identity.pem` from its persistent directory. Creation
+uses `AtomicFile::save_no_replace` with a unique temporary path: concurrent starts
+read the same completed winner rather than replacing one another's identity.
+Existing invalid keys fail startup without rotation. Files use mode `0600`, and
+both contents and directory metadata are synced before return. WRT's sysupgrade
+keep list includes its identity; in-memory test contexts use ephemeral keys.
+StartOS's account already owns its developer signing identity.
+
+This persistence is independent of enrolled client keys, authcookies, package
+signer trust, and networking/TLS keys.
+
 ## Admission
 
 `initiate` and `accept` return the verified peer identity only after the local
