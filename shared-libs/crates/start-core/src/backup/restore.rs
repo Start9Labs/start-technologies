@@ -249,7 +249,7 @@ pub async fn recover_full_server(
     Ok((
         SetupResult {
             hostname: os_backup.account.hostname,
-            root_ca: Pem(os_backup.account.root_ca_cert),
+            root_ca: Pem(rpc_ctx.account.peek(|account| account.root_ca_cert.clone())),
             needs_restart: ctx.install_rootfs.peek(|a| a.is_some()),
         },
         rpc_ctx,

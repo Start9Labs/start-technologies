@@ -4,7 +4,7 @@ Trusted Keys lists the individual public keys whose signatures your server accep
 
 ## Viewing Keys
 
-Open **System → Trusted Keys**. Each row shows a key's label and first identity, its type (GPG or PEM), whether it is trusted for **Packages** and for **StartOS updates**, and its **Linked registries**, the connected registries that offer it. An identity is a GPG user ID, or for a PEM key the email address its registry publishes.
+Open **System → Trusted Keys**. Each row shows a key's label and first identity, its type (GPG or PEM), whether it is trusted for **Packages** and for **StartOS updates**, and its **Linked registries**, the connected registries that offer it. Identities include GPG user IDs and the contact email addresses registries publish for the key.
 
 Choose **View details** from a key's menu to see every identity, who added it and when, its linked registries, its fingerprint, and its full public key, which you can copy, with separate **Enabled for service packages** and **Enabled for StartOS updates** toggle rows. The same details open from the **Signed by** list of a package or StartOS update, and from a key notification. GPG keys show their complete OpenPGP fingerprints; PEM keys show a SHA-256 fingerprint of their canonical public-key encoding. A registry's **Manage keys** action in **System → Registries** opens Trusted Keys filtered to the keys that registry offers.
 
@@ -12,7 +12,7 @@ Choose **View details** from a key's menu to see every identity, who added it an
 
 Use the **Packages** and **StartOS updates** switches in the table to change a key's trust. The active switch shows a spinner while the request runs. On mobile, these actions move into the key's overflow menu. Each key's menu also offers **Edit label** and, when permitted, **Remove**. At least one key must stay trusted for StartOS updates. Keys offered by a connected registry cannot be removed; distrust them instead.
 
-New installations include the drbonez, matthill, and Start9 signing keys, trusted for packages and StartOS updates. The Alpha and community-registry build keys start untrusted. Upgrades preserve existing trust selections, including intentionally untrusted keys.
+New installations include the drbonez, matthill, and Start9 signing keys, trusted for packages and StartOS updates. Registry build keys come from connected registries. The 0.4.1.2 migration removes previously seeded Alpha build keys; connected registries can offer them again as untrusted keys. Other existing trust selections are preserved.
 
 ## Adding Keys
 
@@ -45,7 +45,7 @@ start-cli server update https://registry.start9.com --trust
 > [!WARNING]
 > Untrusted software can steal private keys and passwords, compromise your server, or destroy data. The override bypasses signer trust, not signature or integrity verification.
 
-Diagnostic mode cannot access the saved trust list. Diagnostic updates require a built-in Start9 key unless explicitly overridden with `start-cli diagnostic update --trust`.
+Diagnostic updates use PEM keys in `/etc/startos/os-signers`, seeded with the drbonez, matthill, and Start9 keys. Changes to StartOS-update trust save the selected keys in the config overlay, where diagnostic mode can read them without the data drive. The saved selection replaces the defaults. To accept an untrusted signer in diagnostic mode, run `start-cli diagnostic update --trust` locally on the server as root or a member of the `startos` group. The server authorizes that override through its protected local authentication cookie; ordinary remote login credentials do not authorize it.
 
 The existing OS-signer CLI commands continue to manage StartOS-update trust:
 

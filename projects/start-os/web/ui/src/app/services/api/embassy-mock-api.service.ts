@@ -82,7 +82,7 @@ import {
   ServerState,
   WebsocketConfig,
 } from './api.types'
-import { ApiService } from './embassy-api.service'
+import { ApiService, FileUploadOptions } from './embassy-api.service'
 import { mockPatchData } from './mock-patch'
 
 import markdown from './md-sample.md'
@@ -1163,6 +1163,14 @@ export class MockApiService extends ApiService {
         }
       }
 
+      if (params.actionId === 'file-upload') {
+        return {
+          eventId: 'ANZXNWIFRTTBZ6T52KQPZILIQQODDHXQ',
+          value: null,
+          spec: await Mock.getFileInputSpec(),
+        }
+      }
+
       return {
         eventId: 'ANZXNWIFRTTBZ6T52KQPZILIQQODDHXQ',
         value: Mock.MockConfig,
@@ -1181,8 +1189,13 @@ export class MockApiService extends ApiService {
       ]
       this.mockRevision(patch)
 
-      // return Mock.ActionResGroup
-      // return Mock.ActionResSingle
+      if (params.actionId === 'file-result')
+        return {
+          version: '1',
+          title: 'Diagnostics',
+          message: 'Download the generated report.',
+          result: { type: 'file', value: 'mock-download', delete: true },
+        }
       if (params.actionId === 'big-qr') return Mock.ActionResBigQr
       if (params.actionId === 'unencodable-qr')
         return Mock.ActionResUnencodableQr
@@ -1721,8 +1734,24 @@ export class MockApiService extends ApiService {
   }
   readonly rpc = createRpcClient<ApiClient>(tableTransport<Api>(this.handlers))
 
-  async uploadFile(guid: string, body: Blob): Promise<void> {
-    await pauseFor(2000)
+  async uploadFile(
+    guid: string,
+    body: Blob,
+    options: FileUploadOptions = {},
+  ): Promise<void> {
+    for (let step = 1; step <= 20; step++) {
+      options.signal?.throwIfAborted()
+      await pauseFor(100)
+      options.progress?.(Math.floor((body.size * step) / 20), body.size)
+    }
+    options.signal?.throwIfAborted()
+  }
+
+  downloadFileUrl(guid: string): string {
+    return (
+      'data:text/plain;charset=utf-8,' +
+      encodeURIComponent('StartOS action file download\n')
+    )
   }
 
   async getStatic(

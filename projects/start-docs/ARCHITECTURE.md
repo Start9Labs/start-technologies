@@ -21,10 +21,10 @@ start-technologies/ (monorepo root)
 └── projects/start-docs/           ← THIS project: site build + landing + bitcoin-guides + support
     ├── build.sh          ← builds all books into docs/ output
     ├── serve.sh          ← build + local dev server
-    ├── versions.conf     ← book → version list (single source of truth)
+    ├── versions.conf     ← books, their current and archived versions (single source of truth)
     ├── theme/            ← shared theme (CSS, JS, favicon); books symlink here
-    ├── landing/          ← static landing page at docs.start9.com/
-    ├── scripts/          ← build-time tooling (llms.txt generator)
+    ├── landing/          ← landing page, archives page and 404 router
+    ├── scripts/          ← build-time tooling (index check, llms.txt generator)
     ├── bitcoin-guides/   ← Bitcoin Guides book
     │   ├── book.toml
     │   ├── theme -> ../theme
@@ -40,21 +40,21 @@ This multi-book design was chosen over a single monolithic book because:
 
 ## Book name → source dir mapping
 
-`build.sh` decouples the book name (used in URLs and `versions.conf`) from its source directory:
+`build.sh` decouples the book name (used in URLs and `versions.conf`) from its source directory, given relative to the repo root so the same path resolves in a release tag's tree:
 
 ```sh
-book_dir() {
+book_path() {
   case "$1" in
-    start-os) echo "$ROOT/../start-os/docs" ;;
-    start-tunnel) echo "$ROOT/../start-tunnel/docs" ;;
-    packaging) echo "$ROOT/../start-sdk/docs" ;;
-    start-wrt) echo "$ROOT/../start-wrt/docs" ;;
-    *) echo "$ROOT/$1" ;;            # bitcoin-guides etc. live in docs/
+    start-os) echo projects/start-os/docs ;;
+    start-tunnel) echo projects/start-tunnel/docs ;;
+    packaging) echo projects/start-sdk/docs ;;
+    start-wrt) echo projects/start-wrt/docs ;;
+    *) echo "projects/start-docs/$1" ;;   # bitcoin-guides, support
   esac
 }
 ```
 
-So `packaging` is served from `projects/start-sdk/docs`, and any book not explicitly mapped is expected to live directly under this project (`projects/start-docs/`). To move or add a book, edit `book_dir()` and `versions.conf`.
+So `packaging` is served from `projects/start-sdk/docs`, and any book not explicitly mapped is expected to live directly under this project. To move or add a book, edit `book_path()` (and its mirror `bookPath()` in `scripts/generate-llms-txt.ts`) and `versions.conf`.
 
 ## Shared Theme
 
@@ -69,30 +69,42 @@ Each book's `book.toml` references these under `additional-css` / `additional-js
 
 ## Versioning
 
-Each book is versioned independently via `versions.conf` in this project:
+Product books get one book per minor release — `0.4.0.x` and `0.4.1.x` for StartOS, whose versions carry an extra leading `0`, and `1.5.x` for StartTunnel. Patch releases update their minor's book in place. The other books (`packaging`, `bitcoin-guides`, `support`) are unversioned. `versions.conf` lists them all:
 
 ```
-start-os=0.4.0.x
-start-tunnel=1.0.x
-packaging=0.4.0.x
-bitcoin-guides=1.0.x
+start-os=0.4.1.x
+start-os=0.4.0.x@start-os/v0.4.0.4
+start-tunnel=1.5.x
 start-wrt=1.3.x
-support=1.0.x
+packaging
+bitcoin-guides
+support
 ```
 
-`versions.conf` is the single source of truth — `build.sh` and the routing it writes into the tree (the redirect stubs and `404.html`) derive from it. Adding a book takes one line here (plus a `book_dir()` mapping if it lives outside this project).
+- `book=version` is the product's current version, built from this tree into `docs/<book>/<version>/`.
+- `book=version@tag` is an archived version, built from that release tag's tree into `docs/<book>/<version>/`. It gets a banner pointing at the current version and a link from `/archives/`.
+- A bare `book` is built straight into `docs/<book>/`.
 
-Build output goes to `docs/<book>/<version>/` (e.g. `docs/start-os/0.4.0.x/`). `MDBOOK_OUTPUT__HTML__SITE_URL` is set per-book at build time so mdBook generates correct search indexes and canonical URLs for the versioned path.
+`MDBOOK_OUTPUT__HTML__SITE_URL` is set per build so mdBook generates correct search indexes and canonical URLs for the versioned path.
+
+### Routing
+
+Unversioned URLs (`/start-os/`, `/start-os/<page>.html`) are stubs that redirect to the current version — or, when the page exists only in an archive, to the newest archive that has it. A stub honours a `?version=` query: the StartOS UI's docs links send the server's version (`?version=0.4.0.4`), and the stub sends it to the archived book whose version prefix matches (`0.4.0.x`), falling back to the default. A path naming a version that isn't built (`/start-tunnel/1.0.x/…`, `/packaging/0.4.0.x/…`) is sent by `404.html` to the same page's unversioned URL.
+
+The copy on `live-docs` is what the site publishes: on a tag, `docs-sync-on-tag.yml` (through `scripts/docs-versions.mjs`) updates only the released product's current line there, deriving the StartOS and StartWRT labels from the tag, and takes archive lines from the tree it publishes.
+
+`/versions.json` publishes each book's current version and archives (`current` is `null` for an unversioned book). The support bot reads it to find the archived books' `llms-full.txt`.
 
 ## Build Pipeline
 
 `build.sh`:
 
-1. Wipes and recreates the `docs/` output dir
-2. Iterates over `versions.conf`, resolves each book's source dir via `book_dir()`, and runs `mdbook build -d docs/<book>/<version>` with the versioned `SITE_URL`
-3. Writes redirect stubs for the unversioned URLs: `docs/<book>/index.html` → `/<book>/<version>/` and `docs/<book>/<page>.html` → `/<book>/<version>/<page>.html` for every page, fragment preserved
-4. Copies `landing/index.html` to `docs/index.html`, and writes `docs/404.html` from `landing/404.html` with the book list filled in. A static host serves that page for every path it has no file for, and its script applies the remaining routing rules: `/latest/*`, `/packaging-guide`, the one-off legacy redirects, extensionless page URLs, and unknown paths onto the `0.3.5.x` site
-5. Runs the llms.txt generator (`scripts/generate-llms-txt.ts`, installing its deps on first use) to produce `llms.txt` (index) and `llms-full.txt` (full content) for LLM consumption, for the site and for each book
+1. Fails if a book's `README.md` index does not list its `SUMMARY.md` pages in sidebar order (`scripts/check-indexes.ts`)
+2. Wipes and recreates the `docs/` output dir and the gitignored `.archive/` source dir
+3. Builds each book in `versions.conf` with `mdbook build` and the matching `SITE_URL`. For an archived version it first fetches the release tag if the checkout lacks it (CI's is shallow), extracts the book and `theme/` from that tag into `.archive/<book>/<version>/` with `git archive`, builds from there, and injects the archive banner into each page
+4. Writes the redirect stubs for each versioned book's unversioned URLs (see Routing)
+5. Writes `docs/index.html` from `landing/index.html` with each product's current version filled in, `docs/archives/index.html` from `landing/archives.html` with a section per product that has archives (StartOS's also links the `0.3.5.x` site), `docs/versions.json`, and `docs/404.html` from `landing/404.html` with the versions filled in. A static host serves that page for every path it has no file for, and its script applies the remaining routing rules: `/latest/*`, `/packaging-guide`, the one-off legacy redirects, unbuilt version paths, extensionless page URLs, and unknown paths onto the `0.3.5.x` site
+6. Runs the llms.txt generator (`scripts/generate-llms-txt.ts`, installing its deps on first use) to produce `llms.txt` (index) and `llms-full.txt` (full content) for each book — an archived version's under `docs/<book>/<version>/`, with versioned page URLs — and for the site, which covers the current books and lists the archives' indexes
 
 `docs/` is then the whole site: what the deploy publishes is what `./build.sh` leaves on disk.
 
@@ -112,9 +124,10 @@ Pages serves files and nothing else, which is why every redirect the site needs 
 
 | Script                         | Purpose                                                                            |
 | ------------------------------ | ---------------------------------------------------------------------------------- |
+| `scripts/check-indexes.ts`     | Fails when a book's `README.md` index differs from its `SUMMARY.md`                |
 | `scripts/generate-llms-txt.ts` | Produces `llms.txt` (index) and `llms-full.txt` (full content) for LLM consumption |
 
-Run via `cd scripts && npm run generate-llms-txt` (uses `tsx`).
+Run the check with `node scripts/check-indexes.ts` (CI runs it on every pull request), and the generator via `cd scripts && npm run generate-llms-txt` (uses `tsx`) after `./build.sh`, which extracts the archived sources it reads.
 
 ## Cross-Book Links
 

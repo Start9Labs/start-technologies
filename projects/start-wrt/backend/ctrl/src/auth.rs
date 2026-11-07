@@ -276,7 +276,9 @@ fn signing_identities(
     addresses: impl IntoIterator<Item = IpAddr>,
     ddns: Option<InternedString>,
 ) -> BTreeSet<InternedString> {
-    std::iter::once(InternedString::intern(crate::ssl::ROUTER_HOSTNAME))
+    crate::ssl::ROUTER_NAMES
+        .into_iter()
+        .map(InternedString::intern)
         .chain(addresses.into_iter().map(url_host_str))
         .chain(ddns)
         .collect()
@@ -379,6 +381,10 @@ pub async fn check_password(shadow: &Path, password: &str) -> Result<(), Error> 
     tokio::task::spawn_blocking(move || check_password_sync(&shadow, &password)).await?
 }
 
+pub async fn check_admin_password(password: &str) -> Result<(), Error> {
+    check_password(Path::new(SHADOW_PATH), password).await
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifyPasswordParams {
@@ -391,7 +397,7 @@ pub async fn verify_password_impl(
     _ctx: ServerContext,
     VerifyPasswordParams { password }: VerifyPasswordParams,
 ) -> Result<(), Error> {
-    check_password(Path::new(SHADOW_PATH), &password).await
+    check_admin_password(&password).await
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
@@ -713,11 +719,16 @@ mod tests {
             ["192.168.0.1".parse().unwrap(), "fd00::1".parse().unwrap()],
             Some("home.example.com".into()),
         );
-        let expected: BTreeSet<InternedString> =
-            ["router.lan", "192.168.0.1", "[fd00::1]", "home.example.com"]
-                .into_iter()
-                .map(InternedString::intern)
-                .collect();
+        let expected: BTreeSet<InternedString> = [
+            "router.lan",
+            "router.local",
+            "192.168.0.1",
+            "[fd00::1]",
+            "home.example.com",
+        ]
+        .into_iter()
+        .map(InternedString::intern)
+        .collect();
         assert_eq!(identities, expected);
     }
 

@@ -357,6 +357,13 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .with_about("about.display-os-logs"),
         )
         .subcommand(
+            "set-log-level",
+            from_fn(system::log_level::set_log_level)
+                .no_display()
+                .with_about("about.set-log-level")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
             "kernel-logs",
             system::kernel_logs::<RpcContext>().with_about("about.display-kernel-logs"),
         )

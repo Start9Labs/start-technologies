@@ -53,6 +53,7 @@ pub mod mime;
 pub mod mok;
 pub mod net;
 pub(crate) mod output;
+pub(crate) mod percent_encoding;
 pub mod rpc;
 pub mod rpc_client;
 pub mod rsync;

@@ -1,0 +1,1 @@
+- Cambiar el perfil de seguridad de un puerto Ethernet pide confirmación y explica cómo reconectar los dispositivos que pierdan la conexión, como los conectados mediante un switch.

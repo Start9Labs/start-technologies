@@ -52,7 +52,7 @@ enum Protocol {
 
 A request is authorized if either credential is valid:
 
-- **Request signature** — an `X-Start-Auth-Sig` header carrying an Ed25519 signature, by a key enrolled through `auth.login`, over a timestamp, a nonce, the body's BLAKE3 hash, and the server identity the client addressed (`router.lan`, any non-loopback address on the router's interfaces, or the enabled DDNS hostname; a loopback address only from a loopback peer). The protocol is `start-core`'s `SignatureAuth`; the browser holds a non-extractable WebCrypto key in IndexedDB. Timestamps must fall within 30 seconds of the router's clock once ntpd reports valid time; a replayed nonce is rejected.
+- **Request signature** — an `X-Start-Auth-Sig` header carrying an Ed25519 signature, by a key enrolled through `auth.login`, over a timestamp, a nonce, the body's BLAKE3 hash, and the server identity the client addressed (`router.lan`, `router.local`, any non-loopback address on the router's interfaces, or the enabled DDNS hostname; a loopback address only from a loopback peer). The protocol is `start-core`'s `SignatureAuth`; the browser holds a non-extractable WebCrypto key in IndexedDB. Timestamps must fall within 30 seconds of the router's clock once ntpd reports valid time; a replayed nonce is rejected.
 - **Local auth token** — `Authorization: Bearer <token>`, where the token is the contents of `/run/startwrt/rpc.authcookie` (regenerated at daemon start, mode `0640`, `root:root`). `startwrt-cli` sends it only to loopback hosts.
 
 Endpoints registered with `authenticated: false` metadata answer without either. Enrolled keys persist in `/etc/startwrt/auth.db`, which sysupgrade keeps, and stay valid until revoked by `auth.logout`, `auth.session.kill`, or a password change, or until 24 hours after their `loggedIn` time, however recently they were used. The microSD wizard's Keep settings reflash does not carry them over. An expired key is rejected as unauthorized (code 34) on its next request. Before ntpd reports valid time the check judges age alone; afterwards a `loggedIn` more than 5 minutes in the future also counts as expired. The sweep that unenrolls expired keys runs hourly and waits for ntpd to report valid time.
@@ -2154,30 +2154,52 @@ struct ActivityDeleteParams {
 ### `backup.create`
 
 ```rust
-// Request: {}
+#[derive(Deserialize)]
+struct BackupCreateParams {
+    password: String,  // the current admin password; IncorrectPassword (7) otherwise
+}
 
 #[derive(Serialize)]
 struct BackupCreateRes {
-    /// Download the archive via GET /rest/rpc/{guid}
+    /// Download the backup via GET /rest/rpc/{guid}
     guid: String,
-    filename: String,  // "backup-<hostname>-<YYYY-MM-DD>.tar.gz"
+    filename: String,  // "backup-<hostname>-<YYYY-MM-DD>.swbk"
 }
-// Backend: runs `sysupgrade --create-backup -`, buffers the archive, and
-// registers a one-shot download continuation at /rest/rpc/{guid}
+// Backend: checks the password against /etc/shadow, runs
+// `sysupgrade --create-backup -`, encrypts the archive, and registers a
+// one-shot download continuation at /rest/rpc/{guid}
 ```
+
+An encrypted backup is one file:
+
+```
+"STARTWRT-BACKUP" | version (u8 = 1) | header length (u32 BE) | header JSON
+| nonce (12 bytes) | AES-256-GCM ciphertext of the .tar.gz | tag (16 bytes)
+```
+
+The header JSON holds StartOS's `unencrypted-metadata.json` fields:
+`passwordHash`, an Argon2id hash of the admin password, and `wrappedKey`, a
+random 32-byte key wrapped under that password by start-core's
+`wrap_backup_key`. That key encrypts the archive, authenticating every byte
+before the nonce.
 
 ### `backup.restore`
 
 ```rust
-// Request: {}
+#[derive(Deserialize)]
+struct BackupRestoreParams {
+    password: Option<String>,  // the admin password when the backup was created
+}
 
 #[derive(Serialize)]
 struct BackupRestoreRes {
-    /// POST the .tar.gz to /rest/rpc/{guid} (64 MiB body limit)
+    /// POST the backup to /rest/rpc/{guid} (64 MiB body limit)
     upload: String,
 }
-// Backend: the upload continuation validates the archive (`tar -tzf`), applies
-// it with `sysupgrade --restore-backup`, keeps the router's own system log
+// Backend: the upload continuation decrypts an encrypted backup, failing with
+// IncorrectPassword before anything changes, and takes a plain .tar.gz from an
+// earlier release as is. It validates the archive (`tar -tzf`), applies it
+// with `sysupgrade --restore-backup`, keeps the router's own system log
 // preceded by any older history the backup carried, then reboots after a
 // short delay
 ```

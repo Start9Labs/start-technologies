@@ -50,10 +50,10 @@ use crate::util::io::{maybe_open_file, open_file};
 use crate::util::serde::BASE64;
 use crate::{PackageId, main_api};
 
-const NOT_FOUND: &[u8] = b"Not Found";
+const NOT_FOUND: &str = "Not Found";
 const METHOD_NOT_ALLOWED: &[u8] = b"Method Not Allowed";
 const NOT_AUTHORIZED: &[u8] = b"Not Authorized";
-const INTERNAL_SERVER_ERROR: &[u8] = b"Internal Server Error";
+const INTERNAL_SERVER_ERROR: &str = "Internal Server Error";
 const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL: &str = "no-cache";
 const PRIVATE_IMMUTABLE_CACHE_CONTROL: &str = "private, max-age=31536000, immutable";
@@ -176,10 +176,12 @@ impl UiContext for DiagnosticContext {
         UI_CELL.get().unwrap_or(&EMPTY_DIR)
     }
     fn api() -> ParentHandler<Self> {
-        main_api()
+        main_api().with_metadata("authenticated", Value::Bool(false))
     }
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
-        server.middleware(RequireJson)
+        server
+            .middleware(RequireJson)
+            .middleware(Auth::new().with_local_auth())
     }
     fn apply_outer_layers(self, router: Router) -> Router {
         local_hosts_only(router)
@@ -261,7 +263,7 @@ pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
                 move |x::Path(guid): x::Path<Guid>, request: x::Request| async move {
                     match AsRef::<RpcContinuations>::as_ref(&ctx).get_rest_handler(&guid).await {
                         None => not_found(),
-                        Some(cont) => cont(request).await.unwrap_or_else(server_error),
+                        Some(cont) => cont(request).await.unwrap_or_else(rest_continuation_error),
                     }
                 }
             }),
@@ -585,10 +587,7 @@ pub fn unauthorized(err: Error, path: &str) -> Response {
 
 /// HTTP status code 404
 pub fn not_found() -> Response {
-    Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .body(NOT_FOUND.into())
-        .unwrap()
+    (StatusCode::NOT_FOUND, NOT_FOUND).into_response()
 }
 
 /// HTTP status code 405
@@ -602,10 +601,15 @@ pub fn method_not_allowed() -> Response {
 pub fn server_error(err: Error) -> Response {
     tracing::error!("internal server error: {}", err);
     tracing::debug!("{:?}", err);
-    Response::builder()
-        .status(StatusCode::INTERNAL_SERVER_ERROR)
-        .body(INTERNAL_SERVER_ERROR.into())
-        .unwrap()
+    (StatusCode::INTERNAL_SERVER_ERROR, INTERNAL_SERVER_ERROR).into_response()
+}
+
+fn rest_continuation_error(err: Error) -> Response {
+    if matches!(err.kind, ErrorKind::InvalidRequest) {
+        (StatusCode::BAD_REQUEST, err.source.to_string()).into_response()
+    } else {
+        server_error(err)
+    }
 }
 
 pub fn bad_request() -> Response {
@@ -1549,6 +1553,118 @@ mod tests {
 
         assert!(get("dependencies/lnd/icon").await.unwrap().is_none());
         assert!(get("LICENSE.md").await.unwrap().is_some());
+    }
+
+    #[derive(Clone)]
+    struct ContinuationTestContext(Arc<RpcContinuations>);
+
+    impl Context for ContinuationTestContext {}
+
+    impl AsRef<RpcContinuations> for ContinuationTestContext {
+        fn as_ref(&self) -> &RpcContinuations {
+            &self.0
+        }
+    }
+
+    fn continuation_test_router() -> (Arc<RpcContinuations>, Router) {
+        let continuations = Arc::new(RpcContinuations::new());
+        let context = ContinuationTestContext(continuations.clone());
+        let factory_context = context.clone();
+        let server = Server::new(
+            move || ready(Ok(factory_context.clone())),
+            ParentHandler::new(),
+        )
+        .for_http();
+        (continuations, rpc_router(context, server))
+    }
+
+    #[tokio::test]
+    async fn rest_continuation_errors_expose_only_invalid_request_messages() {
+        use tower_service::Service;
+
+        use crate::rpc_continuations::RpcContinuation;
+
+        let (continuations, mut router) = continuation_test_router();
+        for (kind, status) in [
+            (ErrorKind::InvalidRequest, StatusCode::BAD_REQUEST),
+            (ErrorKind::Filesystem, StatusCode::INTERNAL_SERVER_ERROR),
+            (ErrorKind::Network, StatusCode::INTERNAL_SERVER_ERROR),
+            (ErrorKind::Authorization, StatusCode::INTERNAL_SERVER_ERROR),
+        ] {
+            let guid = Guid::new();
+            let message = t!("service.action-files.size-limit", max = 3).into_owned();
+            let error_message = message.clone();
+            continuations
+                .add(
+                    guid.clone(),
+                    RpcContinuation::rest(
+                        move |_| ready(Err(Error::new(eyre!(error_message), kind))),
+                        Duration::from_secs(30),
+                    ),
+                )
+                .await;
+            let request = || {
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/rest/rpc/{guid}"))
+                    .body(Body::empty())
+                    .unwrap()
+            };
+            let response = router.call(request()).await.unwrap();
+            assert_eq!(response.status(), status);
+            assert_eq!(
+                response.headers()[CONTENT_TYPE],
+                "text/plain; charset=utf-8"
+            );
+            let expected = if status == StatusCode::BAD_REQUEST {
+                message.as_str()
+            } else {
+                INTERNAL_SERVER_ERROR
+            };
+            assert_eq!(body(response).await, expected);
+            let replay = router.call(request()).await.unwrap();
+            assert_eq!(replay.status(), StatusCode::NOT_FOUND);
+            assert_eq!(replay.headers()[CONTENT_TYPE], "text/plain; charset=utf-8");
+            assert_eq!(body(replay).await, NOT_FOUND);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expired_rest_continuations_return_a_plaintext_not_found() {
+        use tower_service::Service;
+
+        use crate::rpc_continuations::RpcContinuation;
+
+        let (continuations, mut router) = continuation_test_router();
+        let guid = Guid::new();
+        continuations
+            .add(
+                guid.clone(),
+                RpcContinuation::rest(
+                    |_| ready(Ok(StatusCode::NO_CONTENT.into_response())),
+                    Duration::from_secs(30),
+                ),
+            )
+            .await;
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(31)).await;
+        tokio::task::yield_now().await;
+        let response = router
+            .call(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/rest/rpc/{guid}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            response.headers()[CONTENT_TYPE],
+            "text/plain; charset=utf-8"
+        );
+        assert_eq!(body(response).await, NOT_FOUND);
     }
 
     async fn status_for_host(host: &str) -> StatusCode {

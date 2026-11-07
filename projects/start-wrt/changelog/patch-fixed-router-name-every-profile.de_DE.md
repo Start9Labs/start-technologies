@@ -1,0 +1,2 @@
+- Das Zertifikat der Weboberfläche enthält den verwendeten Namen oder die verwendete Adresse: `router.lan`, `router.local`, die Gateway-Adresse jedes Profils, die WAN-Adresse und den DDNS-Hostnamen. Geräte, die der Root-CA vertrauen, erhalten dort keine Namenswarnung mehr.
+- `router.lan` löst zur eigenen IPv4-Gateway-Adresse des anfragenden Profils auf, nicht mehr zu den Gateways aller Profile.
