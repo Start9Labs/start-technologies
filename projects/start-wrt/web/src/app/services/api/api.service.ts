@@ -118,8 +118,12 @@ export abstract class ApiService {
   ): Promise<ActivityListResponse>
   abstract activityDelete(params: { id: number }): Promise<null>
   abstract activityClear(): Promise<null>
-  abstract backupCreate(): Promise<BackupCreateRes>
-  abstract backupRestore(): Promise<BackupRestoreRes>
+  abstract backupCreate(
+    params: RpcParamType<Api, 'backup.create'>,
+  ): Promise<BackupCreateRes>
+  abstract backupRestore(
+    params: RpcParamType<Api, 'backup.restore'>,
+  ): Promise<BackupRestoreRes>
   abstract diagnosticsCreate(): Promise<DiagnosticsCreateRes>
 }
 

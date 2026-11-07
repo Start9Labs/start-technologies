@@ -10,7 +10,6 @@ use tokio::process::Command;
 use crate::Error;
 use crate::context::config::ServerConfig;
 use crate::context::{CliContext, SetupContext};
-use crate::disk::OsPartitionInfo;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::efivarfs::EfiVarFs;
@@ -18,6 +17,7 @@ use crate::disk::mount::filesystem::overlayfs::OverlayFs;
 use crate::disk::mount::filesystem::{MountType, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard, TmpMountGuard};
 use crate::disk::util::{DiskInfo, PartitionTable, is_startos_pool_guid};
+use crate::disk::{LIVE_MEDIUM_PATH, OsPartitionInfo};
 use crate::prelude::*;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::setup::SetupInfo;
@@ -143,6 +143,38 @@ enum DataDrivePlan {
     Create,
     /// Attach the existing pool with this VG guid (the user chose "Preserve").
     Attach(InternedString),
+}
+
+/// The whole disk holding the installer's live medium, which may be mounted from a partition.
+async fn live_medium_disk() -> Result<Option<PathBuf>, Error> {
+    let Some(source) = crate::disk::util::get_mount_source(LIVE_MEDIUM_PATH).await? else {
+        return Ok(None);
+    };
+    let sys = crate::util::io::canonicalize(
+        Path::new("/sys/class/block").join(source.file_name().unwrap_or_default()),
+        false,
+    )
+    .await?;
+    Ok(containing_disk(&sys).await)
+}
+
+/// The `/dev` path of the whole disk owning a canonical sysfs block device directory.
+async fn containing_disk(sys: &Path) -> Option<PathBuf> {
+    let disk = if tokio::fs::metadata(sys.join("partition")).await.is_ok() {
+        sys.parent().unwrap_or(sys)
+    } else {
+        sys
+    };
+    disk.file_name().map(|d| Path::new("/dev").join(d))
+}
+
+/// Every disk StartOS may be installed to or provision as a data drive.
+pub async fn installable_disks(os: &OsPartitionInfo) -> Result<Vec<DiskInfo>, Error> {
+    let mut disks = crate::disk::util::list(os, None).await?;
+    if let Some(live) = live_medium_disk().await? {
+        disks.retain(|disk| disk.logicalname != live);
+    }
+    Ok(disks)
 }
 
 fn unknown_disk(requested: &Path) -> Error {
@@ -668,7 +700,7 @@ async fn install_os_inner(
         data_drive,
     }: InstallOsParams,
 ) -> Result<SetupInfo, Error> {
-    let disks = crate::disk::util::list(&Default::default(), None).await?;
+    let disks = installable_disks(&Default::default()).await?;
     let os_disk = os_drive
         .as_deref()
         .map(|requested| {
@@ -854,6 +886,23 @@ mod tests {
 
     use super::*;
     use crate::disk::util::PartitionInfo;
+
+    #[tokio::test]
+    async fn containing_disk_resolves_partitions_to_their_disk() {
+        let root = tempfile::tempdir().unwrap();
+        let partition = root.path().join("nvme0n1/nvme0n1p1");
+        std::fs::create_dir_all(&partition).unwrap();
+        std::fs::write(partition.join("partition"), "1\n").unwrap();
+
+        let disk = Path::new("/dev/nvme0n1");
+        assert_eq!(containing_disk(&partition).await.as_deref(), Some(disk));
+        assert_eq!(
+            containing_disk(&root.path().join("nvme0n1"))
+                .await
+                .as_deref(),
+            Some(disk)
+        );
+    }
 
     fn partition(logicalname: &str, guid: Option<&str>) -> PartitionInfo {
         partition_with_stable(logicalname, logicalname, guid)

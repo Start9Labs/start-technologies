@@ -22,6 +22,7 @@ required-features = ["ts"]
 [dependencies]
 async_cell = "0.2.2"
 axum = { version = "0.8.6", features = ["ws", "multipart", "http2"] }
+base32 = "0.5.0"
 base64 = "0.22"
 chrono = { version = "0.4.42", features = ["serde", "std"] }
 clap = "4.5.37"
@@ -62,6 +63,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 rpassword = "7.3.1"
 rpc-toolkit = { path = "../../../../shared-libs/crates/rpc-toolkit", default-features = false }
 rusqlite = { version = "0.34", features = ["bundled"] }
+rust-argon2 = "3.0.0"
 rustls = "0.23"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
@@ -98,6 +100,7 @@ uciedit = { path = "../uciedit" }
 url = { version = "2", features = ["serde"] }
 visit-rs = { path = "../../../../shared-libs/crates/visit-rs" }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
+zeroize = "1"
 
 [dev-dependencies]
 blake3 = "1"

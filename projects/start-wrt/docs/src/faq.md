@@ -14,6 +14,12 @@ Stock OpenWrt exposes raw networking primitives through the LuCI interface, requ
 
 StartWRT uses WPA2's identity PSK feature. A single SSID (`StartWRT`) accepts multiple passwords, each mapped to a different Security Profile. When a device connects, the router identifies which password was used and places the device on the corresponding VLAN and subnet automatically. See [Wi-Fi](wifi.md) for details.
 
+## Can I extend Wi-Fi coverage with my own access points?
+
+Using external access points to extend coverage isn't a supported configuration. StartWRT gives each device a [Security Profile](security-profiles.md) based on how it connects: the password it used on the router's own Wi-Fi, or the [Ethernet port](ethernet.md) it is plugged into. An access point handles its devices' passwords itself, so the router sees only the port the access point is plugged into. Every device connected to the access point gets that port's profile, whichever password it used. This is true even for an access point with several passwords or networks.
+
+StartWRT's Wi-Fi uses WPA2 because with WPA3, the router could not tell which of several passwords a device used. An access point that uses the router's network name must also allow WPA2, or devices treat the two as different networks.
+
 ## Is VPN chaining really more private?
 
 Yes, with caveats. VPN chaining routes traffic through multiple providers so that no single provider sees both your identity (home IP) and your destination. However, if the providers collaborate or are compelled by law enforcement across jurisdictions, correlation is still theoretically possible. For most users, the practical benefit is significant — especially when chaining providers in different legal jurisdictions. See [Outbound VPNs](outbound-vpn.md) for setup instructions.
