@@ -12,9 +12,10 @@ use tracing::instrument;
 
 use super::filesystem::{FileSystem, MountType, ReadOnly, ReadWrite};
 use super::util::{is_mountpoint, unmount};
+use crate::prelude::{eyre, t};
 use crate::util::sync::SyncMutex;
 use crate::util::{Invoke, Never};
-use crate::{Error, ResultExt};
+use crate::{Error, ErrorKind, ResultExt};
 
 pub const TMP_MOUNTPOINT: &'static str = "/media/startos/tmp";
 
@@ -241,6 +242,21 @@ lazy_static! {
         SyncMutex::new(BTreeMap::new());
 }
 
+fn mount_slot(mountpoint: PathBuf, mount_type: MountType) -> MountSlot {
+    TMP_MOUNTS.mutate(|mounts| {
+        // In-flight mounts and teardown retain their slots.
+        mounts.retain(|_, slot| Arc::strong_count(slot) > 1);
+        mounts
+            .entry(mountpoint)
+            .or_insert_with(|| Arc::new(Mutex::new((mount_type, Weak::new()))))
+            .clone()
+    })
+}
+
+pub(crate) struct UnusedMountSource {
+    _slot: tokio::sync::OwnedMutexGuard<(MountType, Weak<MountGuard>)>,
+}
+
 #[derive(Debug, Clone)]
 pub struct TmpMountGuard {
     guard: Arc<MountGuard>,
@@ -251,13 +267,7 @@ impl TmpMountGuard {
     pub async fn mount(filesystem: &impl FileSystem, mount_type: MountType) -> Result<Self, Error> {
         let device = capture_device(filesystem).await?;
         let mountpoint = tmp_mountpoint(filesystem).await?;
-        let slot_handle = TMP_MOUNTS.mutate(|m| {
-            // In-flight mounts and teardown retain their slots.
-            m.retain(|_, slot| Arc::strong_count(slot) > 1);
-            m.entry(mountpoint.clone())
-                .or_insert_with(|| Arc::new(Mutex::new((mount_type, Weak::new()))))
-                .clone()
-        });
+        let slot_handle = mount_slot(mountpoint.clone(), mount_type);
         let mut slot = slot_handle.lock().await;
         let (prev_mt, weak_slot) = &mut *slot;
         if let Some(guard) = weak_slot.upgrade() {
@@ -292,6 +302,21 @@ impl TmpMountGuard {
         *weak_slot = Arc::downgrade(&guard);
         *prev_mt = mount_type;
         Ok(TmpMountGuard { guard })
+    }
+
+    pub(crate) async fn reserve_unmounted(
+        filesystem: &impl FileSystem,
+    ) -> Result<UnusedMountSource, Error> {
+        let slot = mount_slot(tmp_mountpoint(filesystem).await?, ReadOnly)
+            .lock_owned()
+            .await;
+        if slot.1.upgrade().is_some() {
+            return Err(Error::new(
+                eyre!(t!("backup.target.in-use")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        Ok(UnusedMountSource { _slot: slot })
     }
 
     pub(crate) async fn existing(
@@ -415,25 +440,23 @@ impl<G: GenericMountGuard> GenericMountGuard for SubPath<G> {
 mod tests {
     use super::*;
 
+    struct UnmountedFilesystem {
+        id: String,
+        attempted: AtomicBool,
+    }
+    impl FileSystem for UnmountedFilesystem {
+        async fn mount<P: AsRef<Path> + Send>(&self, _: P, _: MountType) -> Result<(), Error> {
+            self.attempted.store(true, Ordering::Release);
+            Err(Error::new(eyre!("unavailable"), ErrorKind::Filesystem))
+        }
+        async fn source_hash(&self) -> Result<digest::Output<sha2::Sha256>, Error> {
+            use digest::Digest;
+            Ok(sha2::Sha256::digest(self.id.as_bytes()))
+        }
+    }
+
     #[tokio::test]
     async fn existing_lookup_does_not_mount_an_unseen_filesystem() {
-        use digest::Digest;
-        struct UnmountedFilesystem {
-            id: String,
-            attempted: AtomicBool,
-        }
-        impl FileSystem for UnmountedFilesystem {
-            async fn mount<P: AsRef<Path> + Send>(&self, _: P, _: MountType) -> Result<(), Error> {
-                self.attempted.store(true, Ordering::Release);
-                Err(Error::new(
-                    color_eyre::eyre::eyre!("unavailable"),
-                    crate::ErrorKind::Filesystem,
-                ))
-            }
-            async fn source_hash(&self) -> Result<digest::Output<sha2::Sha256>, Error> {
-                Ok(sha2::Sha256::digest(self.id.as_bytes()))
-            }
-        }
         let filesystem = UnmountedFilesystem {
             id: crate::shared_volumes::SharedVolumeId::new().to_string(),
             attempted: AtomicBool::new(false),
@@ -444,6 +467,26 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        assert!(!filesystem.attempted.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn removing_an_unused_source_excludes_mounts_until_reservation_release() {
+        let filesystem = UnmountedFilesystem {
+            id: crate::shared_volumes::SharedVolumeId::new().to_string(),
+            attempted: AtomicBool::new(false),
+        };
+        let reservation = TmpMountGuard::reserve_unmounted(&filesystem).await.unwrap();
+        {
+            let mount = TmpMountGuard::mount(&filesystem, ReadOnly);
+            tokio::pin!(mount);
+            assert!(futures::poll!(&mut mount).is_pending());
+        }
+        let next = TmpMountGuard::reserve_unmounted(&filesystem);
+        tokio::pin!(next);
+        assert!(futures::poll!(&mut next).is_pending());
+        drop(reservation);
+        let _reservation = next.await.unwrap();
         assert!(!filesystem.attempted.load(Ordering::Acquire));
     }
 

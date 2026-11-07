@@ -26,7 +26,18 @@ pub async fn create_local_directory(path: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Clone, PartialEq)]
+// The directory must be newly allocated for this publication.
+pub(crate) async fn finish_directory_publication(
+    path: &Path,
+    result: Result<(), Error>,
+) -> Result<(), Error> {
+    if result.is_err() {
+        crate::util::io::delete_dir(path).await.log_err();
+    }
+    result
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SourceDefinition {
     source: SharedVolumeSource,
     credentials: Option<SharedVolumeCredentials>,
@@ -223,7 +234,7 @@ pub async fn open_source(
     );
     let inspection = match &result {
         Ok(available) => SharedVolumeInspection::available(Some(*available)),
-        Err(error) => SharedVolumeInspection::unavailable(error.to_string()),
+        Err(error) => SharedVolumeInspection::unavailable(public_error_message(error)),
     };
     let mount = prepared.as_ref().map(|source| source.mount().downgrade());
     let accepted = ctx
@@ -281,6 +292,19 @@ fn write_checked(
     }
 }
 
+pub(crate) fn public_error_message(error: impl std::fmt::Display) -> String {
+    static MOUNT_PATH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(&format!(
+            r#"{}/[^/\s:;,'"()]+"#,
+            regex::escape(crate::disk::mount::guard::TMP_MOUNTPOINT)
+        ))
+        .unwrap()
+    });
+    MOUNT_PATH
+        .replace_all(&error.to_string(), "[source]")
+        .into_owned()
+}
+
 fn source_result<T>(result: Result<T, Error>) -> Result<T, Error> {
     result.with_ctx(|error| {
         (
@@ -334,20 +358,28 @@ pub(crate) fn prepare_cifs_source(
     cifs: Cifs,
 ) -> Result<(SharedVolumeSource, SharedVolumeCredentials), Error> {
     cifs.validate()?;
+    Ok(cifs_definition(cifs))
+}
+
+pub(crate) fn cifs_definition(cifs: Cifs) -> (SharedVolumeSource, SharedVolumeCredentials) {
     let Cifs {
         hostname,
         path,
         username,
         password,
     } = cifs;
-    Ok((
+    (
         SharedVolumeSource::Cifs {
             hostname,
             path: Path::new("/").join(path),
             username,
         },
         SharedVolumeCredentials { password },
-    ))
+    )
+}
+
+pub(crate) async fn open_local(path: &Path, mount_type: MountType) -> Result<TmpMountGuard, Error> {
+    TmpMountGuard::mount(&SourceFilesystem::Local(path.to_owned()), mount_type).await
 }
 
 pub(crate) async fn prepare_disk_source(

@@ -135,8 +135,14 @@ export const ApiState: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['error', 'initializing', 'running']).meta({
   id: 'ApiState',
 })
+
+/**
+ * A registered-target identity; migrated CIFS targets retain their existing IDs.
+ */
 export const BackupTargetId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'BackupTargetId',
+  description:
+    'A registered-target identity; migrated CIFS targets retain their existing IDs.',
 })
 export const Base64: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Base64',
@@ -4868,28 +4874,39 @@ export const BackupReport: z.ZodObject<{
 }).meta({
   id: 'BackupReport',
 })
-export const CifsBackupTarget: z.ZodObject<{
-  hostname: z.ZodString
-  path: z.ZodString
-  username: z.ZodString
-  mountable: z.ZodBoolean
-  available: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
-  startOs: z.ZodRecord<z.ZodString, typeof StartOsRecoveryInfo>
-  legacyBackup: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  hostname: z.string(),
-  path: z.string(),
-  username: z.string(),
-  mountable: z.boolean(),
-  available: wire(z.int().nullable().optional(), z.int().nullable()),
-  startOs: z.record(z.string(), StartOsRecoveryInfo),
-  legacyBackup: z.boolean(),
-}).meta({
-  id: 'CifsBackupTarget',
-})
+
+/**
+ * A registered backup destination and its last source observation.
+ */
+export const BackupTarget: z.ZodIntersection<
+  z.ZodObject<{
+    name: z.ZodString
+    source: typeof SharedVolumeSource
+    startOs: z.ZodCodec<
+      z.ZodOptional<z.ZodRecord<z.ZodString, typeof StartOsRecoveryInfo>>,
+      z.ZodRecord<z.ZodString, typeof StartOsRecoveryInfo>
+    >
+    legacyBackup: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  }>,
+  typeof SharedVolumeInspection
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      name: z.string(),
+      source: SharedVolumeSource,
+      startOs: wire(
+        z.record(z.string(), StartOsRecoveryInfo).optional(),
+        z.record(z.string(), StartOsRecoveryInfo),
+      ),
+      legacyBackup: wire(z.boolean().optional(), z.boolean()),
+    }),
+    SharedVolumeInspection,
+  )
+  .meta({
+    id: 'BackupTarget',
+    description:
+      'A registered backup destination and its last source observation.',
+  })
 export const ClearBindingsParams: z.ZodObject<{
   except: z.ZodCodec<
     z.ZodOptional<z.ZodArray<typeof BindId>>,
@@ -5938,46 +5955,29 @@ export const AddSslOptions: z.ZodCodec<
 ).meta({
   id: 'AddSslOptions',
 })
-export const BackupTarget: z.ZodUnion<
-  readonly [
-    z.ZodIntersection<
-      z.ZodObject<{ type: z.ZodLiteral<'disk'> }>,
-      z.ZodIntersection<
-        z.ZodObject<{
-          vendor: z.ZodCodec<
-            z.ZodOptional<z.ZodNullable<z.ZodString>>,
-            z.ZodNullable<z.ZodString>
-          >
-          model: z.ZodCodec<
-            z.ZodOptional<z.ZodNullable<z.ZodString>>,
-            z.ZodNullable<z.ZodString>
-          >
-        }>,
-        typeof PartitionInfo
-      >
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ type: z.ZodLiteral<'cifs'> }>,
-      typeof CifsBackupTarget
-    >,
-  ]
-> = /* @__PURE__ */ z
-  .union([
-    z.intersection(
-      object({ type: z.literal('disk') }),
-      z.intersection(
-        object({
-          vendor: wire(z.string().nullable().optional(), z.string().nullable()),
-          model: wire(z.string().nullable().optional(), z.string().nullable()),
-        }),
-        PartitionInfo,
-      ),
-    ),
-    z.intersection(object({ type: z.literal('cifs') }), CifsBackupTarget),
-  ])
-  .meta({
-    id: 'BackupTarget',
-  })
+
+/**
+ * A completed background backup with its original target name and final report.
+ */
+export const BackupRun: z.ZodObject<{
+  id: z.ZodString
+  targetId: typeof BackupTargetId
+  targetName: z.ZodString
+  startedAt: z.ZodString
+  completedAt: z.ZodString
+  report: typeof BackupReport
+}> = /* @__PURE__ */ object({
+  id: z.string(),
+  targetId: BackupTargetId,
+  targetName: z.string(),
+  startedAt: z.string(),
+  completedAt: z.string(),
+  report: BackupReport,
+}).meta({
+  id: 'BackupRun',
+  description:
+    'A completed background backup with its original target name and final report.',
+})
 export const BindingSetAddressEnabledParams: z.ZodObject<{
   internalPort: z.ZodInt
   address: typeof HostnameInfo
@@ -7061,6 +7061,10 @@ export const Public: z.ZodObject<{
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof SharedVolume>>,
     z.ZodRecord<z.ZodString, typeof SharedVolume>
   >
+  backupTargets: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof BackupTarget>>,
+    z.ZodRecord<z.ZodString, typeof BackupTarget>
+  >
   ui: z.ZodUnknown
 }> = /* @__PURE__ */ object({
   serverInfo: ServerInfo,
@@ -7069,6 +7073,10 @@ export const Public: z.ZodObject<{
   sharedVolumes: wire(
     z.record(z.string(), SharedVolume).optional(),
     z.record(z.string(), SharedVolume),
+  ),
+  backupTargets: wire(
+    z.record(z.string(), BackupTarget).optional(),
+    z.record(z.string(), BackupTarget),
   ),
   ui: z.unknown(),
 }).meta({

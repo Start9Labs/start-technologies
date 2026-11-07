@@ -46,6 +46,9 @@ pub struct Public {
     #[serde(default)]
     pub shared_volumes:
         BTreeMap<crate::shared_volumes::SharedVolumeId, crate::shared_volumes::SharedVolume>,
+    #[serde(default)]
+    pub backup_targets:
+        BTreeMap<crate::backup::target::BackupTargetId, crate::backup::target::BackupTarget>,
     pub ui: Value,
 }
 
@@ -159,6 +162,7 @@ impl Public {
             package_data: AllPackageData::default(),
             disks: Vec::new(),
             shared_volumes: BTreeMap::new(),
+            backup_targets: BTreeMap::new(),
             ui: serde_json::from_str(*DB_UI_SEED_CELL.get().unwrap_or(&"null"))
                 .with_kind(ErrorKind::Deserialization)?,
         })

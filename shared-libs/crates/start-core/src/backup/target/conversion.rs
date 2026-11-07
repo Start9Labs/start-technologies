@@ -9,12 +9,12 @@ use tokio::task;
 use tracing::instrument;
 use zeroize::Zeroizing;
 
-use super::{BackupTargetFS, BackupTargetId};
+use super::{BackupTargetId, TargetMount};
 use crate::context::RpcContext;
 use crate::db::model::{Database, DatabaseModel};
 use crate::disk::mount::backup::BackupMountGuard;
-use crate::disk::mount::filesystem::{FileSystem, ReadWrite, backupfs};
-use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
+use crate::disk::mount::filesystem::{ReadWrite, backupfs};
+use crate::disk::mount::guard::GenericMountGuard;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::progress::FullProgress;
@@ -149,19 +149,11 @@ pub async fn start(
     let shutdown = ctx.shutdown.subscribe();
     let password = Zeroizing::new(password.decrypt(&ctx)?);
     let fs = target_id.clone().load(&ctx.db.peek().await)?;
-    let label = match &fs {
-        BackupTargetFS::Disk(disk) => {
-            let source = disk.source().await?.unwrap();
-            crate::disk::util::get_label(&source)
-                .await?
-                .unwrap_or_else(|| source.as_ref().display().to_string())
-        }
-        BackupTargetFS::Cifs(cifs) => format!("{}:{}", cifs.hostname, cifs.path.display()),
-    };
-    let guard = TmpMountGuard::mount(&fs, ReadWrite).await?;
+    let label = fs.name.clone();
+    let guard = fs.mount(ReadWrite).await?;
     let _disk_refresh = target_id.refresh_disks_on_drop(ctx.disk_updates.clone());
     let prepared =
-        BackupMountGuard::<TmpMountGuard>::prepare_conversion(guard.path(), &server_id, &password)
+        BackupMountGuard::<TargetMount>::prepare_conversion(guard.path(), &server_id, &password)
             .await;
     let (data, key) = match prepared {
         Ok(prepared) => prepared,
@@ -292,6 +284,8 @@ impl<G: GenericMountGuard> PreparedConversion<G> {
             notify(db, None, level, title, message, ())
         })
         .await
-        .result
+        .result?;
+        super::catalog::refresh(&db, &target_id).await.log_err();
+        Ok(())
     }
 }

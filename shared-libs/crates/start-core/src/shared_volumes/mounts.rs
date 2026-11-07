@@ -63,7 +63,7 @@ pub struct PreparedSource {
 }
 
 impl PreparedSource {
-    pub(super) fn mount(&self) -> &TmpMountGuard {
+    pub(crate) fn mount(&self) -> &TmpMountGuard {
         &self.guard
     }
 

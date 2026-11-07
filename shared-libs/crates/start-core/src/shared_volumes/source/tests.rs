@@ -1,5 +1,49 @@
 use super::*;
 
+#[tokio::test]
+async fn failed_publications_remove_new_directories_and_successful_ones_preserve_contents() {
+    let root = tempfile::tempdir().unwrap();
+    let failed = root.path().join("failed");
+    tokio::fs::create_dir(&failed).await.unwrap();
+    let error = finish_directory_publication(
+        &failed,
+        Err(Error::new(
+            eyre!("database unavailable"),
+            ErrorKind::Database,
+        )),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Database);
+    assert!(!failed.exists());
+    let published = root.path().join("published");
+    tokio::fs::create_dir(&published).await.unwrap();
+    tokio::fs::write(published.join("data"), b"preserved")
+        .await
+        .unwrap();
+    finish_directory_publication(&published, Ok(()))
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::fs::read(published.join("data")).await.unwrap(),
+        b"preserved"
+    );
+}
+
+#[test]
+fn public_observations_hide_private_cache_identity_without_losing_failure_details() {
+    let private = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let error = format!("mount: /media/startos/tmp/{private}: permission denied (13)");
+    let public = public_error_message(error);
+    assert!(public.contains("[source]"));
+    assert!(public.contains("permission denied (13)"));
+    assert!(!public.contains(private));
+    assert_eq!(
+        public_error_message("DNS could not resolve nas.local"),
+        "DNS could not resolve nas.local"
+    );
+}
+
 #[test]
 fn cifs_preparation_separates_private_password_and_preserves_connection_details() {
     for path in ["share/photos", "/share/photos"] {

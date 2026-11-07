@@ -2057,6 +2057,13 @@ backup.restore.package-installed:
   fr_FR: "Impossible de restaurer %{id} : il est déjà installé. Désinstallez-le d’abord."
   pl_PL: "Nie można przywrócić %{id}: jest już zainstalowany. Najpierw go odinstaluj."
 
+backup.target.in-use:
+  en_US: "This backup target is in use. Unmount it and wait for its operations to finish before removing it."
+  de_DE: "Dieses Sicherungsziel wird verwendet. Hänge es aus und warte, bis seine Vorgänge abgeschlossen sind, bevor du es entfernst."
+  es_ES: "Este destino de copia de seguridad está en uso. Desmóntalo y espera a que terminen sus operaciones antes de eliminarlo."
+  fr_FR: "Cette cible de sauvegarde est utilisée. Démontez-la et attendez la fin de ses opérations avant de la supprimer."
+  pl_PL: "Ten cel kopii zapasowej jest używany. Odmontuj go i poczekaj na zakończenie operacji, zanim go usuniesz."
+
 backup.target.partial-mount:
   en_US: "The base filesystem mounted successfully at %{path}."
   de_DE: "Das Basisdateisystem wurde erfolgreich unter %{path} eingehängt."
@@ -2064,7 +2071,6 @@ backup.target.partial-mount:
   fr_FR: "Le système de fichiers de base a été monté avec succès sur %{path}."
   pl_PL: "Bazowy system plików został pomyślnie zamontowany w %{path}."
 
-# backup/target/cifs.rs
 backup.target.cifs.target-not-found:
   en_US: "Backup Target ID %{id} Not Found"
   de_DE: "Sicherungsziel-ID %{id} nicht gefunden"

@@ -19,35 +19,15 @@ export const VOLUME_STATUSES: Record<T.SharedVolumeAvailability, i18nKey> = {
   unavailable: 'Unavailable',
 }
 
-export type DiskSource = Extract<T.SharedVolumeSource, { kind: 'disk' }> & {
-  label?: string | null
-}
-
 export const volumeLocation = (source: T.SharedVolumeSource): string | null => {
   switch (source.kind) {
     case 'local':
       return null
     case 'disk': {
-      const { label, path } = source as DiskSource
+      const { label, path } = source
       return label ? [label, path].filter(Boolean).join('/') : `/${path}`
     }
     case 'cifs':
       return `${source.hostname}${source.path}`
   }
-}
-
-export type CifsSource = Extract<T.SharedVolumeSource, { kind: 'cifs' }> & {
-  username?: string
-}
-
-type UpdateCifsParams = {
-  id: string
-  hostname: string
-  path: string
-  username: string
-  password?: string
-}
-
-export type UpdateCifsClient = {
-  updateCifs: (params: UpdateCifsParams) => Promise<null>
 }

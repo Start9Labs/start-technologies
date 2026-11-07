@@ -9,7 +9,7 @@ use super::*;
 use crate::util::Invoke;
 
 fn target(id: u32) -> BackupTargetId {
-    BackupTargetId::Cifs { id }
+    format!("cifs-{id}").parse().unwrap()
 }
 
 #[test]

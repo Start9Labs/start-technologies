@@ -11,6 +11,7 @@ use crate::prelude::*;
 use crate::util::serde::HandlerExtSerde;
 
 pub mod backup_bulk;
+pub mod history;
 pub mod os;
 pub mod restore;
 pub mod target;
@@ -81,6 +82,7 @@ fn read_password() -> Result<String, Error> {
 
 pub fn backup<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
+        .subcommand("history", history::handler::<C>().no_cli())
         .subcommand(
             "create",
             from_fn_async(backup_bulk::backup_all)

@@ -211,7 +211,7 @@ pub struct CreateSharedVolumeParams {
 
 rpc_toolkit::reflect_ts!(CreateSharedVolumeParams);
 
-fn validate_name(name: &str) -> Result<(), Error> {
+pub(crate) fn validate_name(name: &str) -> Result<(), Error> {
     if name.trim().is_empty() {
         return Err(Error::new(
             eyre!(t!("shared-volumes.name-required")),
@@ -241,7 +241,10 @@ pub async fn create(
             (source, Some(credentials))
         }
     };
-    ctx.db
+    let directory =
+        matches!(source, SharedVolumeSource::Local).then(|| local_path(crate::DATA_DIR, &id));
+    let publication = ctx
+        .db
         .mutate(|db| {
             if let Some(credentials) = &credentials {
                 db.as_private_mut()
@@ -260,7 +263,12 @@ pub async fn create(
             Ok(())
         })
         .await
-        .result?;
+        .result;
+    if let Some(directory) = directory {
+        source::finish_directory_publication(&directory, publication).await?;
+    } else {
+        publication?;
+    }
     Ok(id)
 }
 

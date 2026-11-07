@@ -27,7 +27,7 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { getCurrentManifest } from 'src/app/utils/get-package-data'
 import { GrantChoice, grantFor, GrantLabel, permission } from './grant'
-import { SourceClient, SourceFields, sourceEdit } from './source-fields'
+import { SourceFields, sourceEdit } from './source-fields'
 
 @Component({
   template: `
@@ -250,7 +250,7 @@ export class VolumeManage {
       this.isChanged(pkg),
     )
     const saved = await this.tasks.run(async () => {
-      await this.edit.save(id, this.api.rpc.volumes as unknown as SourceClient)
+      await this.edit.save(id, this.api.rpc.volumes)
       for (const packageId of grants) {
         await this.api.rpc.volumes.setGrant({
           id,

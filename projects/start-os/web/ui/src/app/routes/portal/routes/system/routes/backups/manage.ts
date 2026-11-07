@@ -19,7 +19,6 @@ import {
 import { VOLUME_TYPES } from 'src/app/routes/portal/routes/system/routes/volumes/types'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { BackupService } from './backup.service'
-import { targetRpc } from './backup.types'
 
 @Component({
   template: `
@@ -169,7 +168,7 @@ export class BackupTargetManage {
   protected async save() {
     if (
       !(await this.tasks.run(
-        () => this.edit.save(this.context.data.id, targetRpc(this.api)),
+        () => this.edit.save(this.context.data.id, this.api.rpc.backup.target),
         'Saving',
       ))
     )

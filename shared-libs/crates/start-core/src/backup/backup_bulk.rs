@@ -13,7 +13,7 @@ use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 
 use super::PackageBackupReport;
-use super::target::{BackupTargetId, PackageBackupInfo};
+use super::target::{BackupTargetId, BackupTargetSource, PackageBackupInfo, TargetMount};
 use crate::PackageId;
 use crate::auth::LoginContext;
 use crate::backup::os::OsBackup;
@@ -22,7 +22,7 @@ use crate::context::RpcContext;
 use crate::db::model::{Database, DatabaseModel};
 use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::BackupWrite;
-use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
+use crate::disk::mount::guard::GenericMountGuard;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, PhaseProgressTrackerHandle};
@@ -55,100 +55,107 @@ pub struct BackupParams {
 rpc_toolkit::reflect_ts!(BackupParams);
 rpc_toolkit::ts_export!(BackupParams, namespaces = [""]);
 
-struct BackupStatusGuard(Option<TypedPatchDb<Database>>);
+struct BackupStatusGuard {
+    db: Option<TypedPatchDb<Database>>,
+    target_id: BackupTargetId,
+    target_name: String,
+    started_at: chrono::DateTime<chrono::Utc>,
+}
 impl BackupStatusGuard {
-    fn new(db: TypedPatchDb<Database>) -> Self {
-        Self(Some(db))
+    fn new(db: TypedPatchDb<Database>, target_id: BackupTargetId, target_name: String) -> Self {
+        Self {
+            db: Some(db),
+            target_id,
+            target_name,
+            started_at: chrono::Utc::now(),
+        }
     }
+
     async fn handle_result(
         mut self,
         legacy_backup: bool,
         result: Result<BackupReport, Error>,
     ) -> Result<(), Error> {
-        if let Some(db) = self.0.as_ref() {
-            db.mutate(|v| {
-                v.as_public_mut()
-                    .as_server_info_mut()
-                    .as_status_info_mut()
-                    .as_backup_progress_mut()
-                    .ser(&None)
+        let failed = result.is_err();
+        let report = match result {
+            Ok(report) => report,
+            Err(error) => {
+                tracing::error!("{}", t!("backup.bulk.failed-error", error = error));
+                tracing::debug!(?error);
+                BackupReport {
+                    server: ServerBackupReport {
+                        attempted: true,
+                        error: Some(error.to_string()),
+                    },
+                    packages: BTreeMap::new(),
+                    shared_volumes: BTreeMap::new(),
+                }
+            }
+        };
+        let (level, title, message) = if failed {
+            (
+                NotificationLevel::Error,
+                t!("backup.bulk.failed-title"),
+                t!("backup.bulk.failed-message"),
+            )
+        } else if report.has_failures() {
+            (
+                NotificationLevel::Warning,
+                t!("backup.bulk.complete-title"),
+                t!("backup.bulk.complete-with-failures"),
+            )
+        } else {
+            (
+                NotificationLevel::Success,
+                t!("backup.bulk.complete-title"),
+                t!("backup.bulk.complete-message"),
+            )
+        };
+        let run = super::history::BackupRun::finished(
+            self.target_id.clone(),
+            self.target_name.clone(),
+            self.started_at,
+            report,
+        );
+        self.db
+            .as_ref()
+            .unwrap()
+            .mutate(|db| {
+                super::history::record(db, &run)?;
+                clear_backup_progress(db)?;
+                notify(
+                    db,
+                    None,
+                    level,
+                    title.to_string(),
+                    message.to_string(),
+                    run.report,
+                )?;
+                if !failed && legacy_backup {
+                    notify_legacy_present(db)?;
+                }
+                Ok(())
             })
             .await
             .result?;
-        }
-        if let Some(db) = self.0.take() {
-            match result {
-                Ok(report) => {
-                    let (level, message) = if report.has_failures() {
-                        (
-                            NotificationLevel::Warning,
-                            t!("backup.bulk.complete-with-failures"),
-                        )
-                    } else {
-                        (
-                            NotificationLevel::Success,
-                            t!("backup.bulk.complete-message"),
-                        )
-                    };
-                    db.mutate(|db| {
-                        notify(
-                            db,
-                            None,
-                            level,
-                            t!("backup.bulk.complete-title").to_string(),
-                            message.to_string(),
-                            report,
-                        )?;
-                        if legacy_backup {
-                            notify_legacy_present(db)?;
-                        }
-                        Ok(())
-                    })
-                    .await
-                }
-                Err(e) => {
-                    tracing::error!("{}", t!("backup.bulk.failed-error", error = e));
-                    tracing::debug!("{:?}", e);
-                    let err_string = e.to_string();
-                    db.mutate(|db| {
-                        notify(
-                            db,
-                            None,
-                            NotificationLevel::Error,
-                            t!("backup.bulk.failed-title").to_string(),
-                            t!("backup.bulk.failed-message").to_string(),
-                            BackupReport {
-                                server: ServerBackupReport {
-                                    attempted: true,
-                                    error: Some(err_string),
-                                },
-                                packages: BTreeMap::new(),
-                                shared_volumes: BTreeMap::new(),
-                            },
-                        )
-                    })
-                    .await
-                }
-            }
-            .result?;
-        }
+        self.db.take();
         Ok(())
     }
 }
+
+fn clear_backup_progress(db: &mut DatabaseModel) -> Result<(), Error> {
+    db.as_public_mut()
+        .as_server_info_mut()
+        .as_status_info_mut()
+        .as_backup_progress_mut()
+        .ser(&None)
+}
+
 impl Drop for BackupStatusGuard {
     fn drop(&mut self) {
-        if let Some(db) = self.0.take() {
+        if let Some(db) = self.db.take() {
             tokio::spawn(async move {
-                db.mutate(|v| {
-                    v.as_public_mut()
-                        .as_server_info_mut()
-                        .as_status_info_mut()
-                        .as_backup_progress_mut()
-                        .ser(&None)
-                })
-                .await
-                .result
-                .log_err()
+                db.mutate(clear_backup_progress).await.result.log_err();
             });
         }
     }
@@ -192,40 +199,39 @@ pub async fn backup_all(
     // Watch channels cannot cross Patch-DB's catch_unwind boundary.
     let init_progress = progress.snapshot();
 
-    let ((fs, package_ids, shared_volume_ids, server_id), status_guard) = (
-        ctx.db
-            .mutate(|db| {
-                <RpcContext as LoginContext>::check_password(db, &password)?;
-                let fs = target_id.clone().load(db)?;
-                let package_ids = if let Some(ids) = package_ids {
-                    ids.into_iter().collect()
-                } else {
-                    db.as_public()
-                        .as_package_data()
-                        .as_entries()?
-                        .into_iter()
-                        .filter(|(_, m)| m.as_state_info().expect_installed().is_ok())
-                        .map(|(id, _)| id)
-                        .collect()
-                };
-                let shared_volume_ids = volume::selected_ids(
-                    shared_volume_ids,
-                    db.as_public().as_shared_volumes().de()?.into_keys(),
-                );
-                let server_id = db.as_public().as_server_info().as_id().de()?;
-                assure_backing_up(db, &init_progress, &target_id, &server_id)?;
-                Ok((fs, package_ids, shared_volume_ids, server_id))
-            })
-            .await
-            .result?,
-        BackupStatusGuard::new(ctx.db.clone()),
-    );
+    let (fs, package_ids, shared_volume_ids, server_id) = ctx
+        .db
+        .mutate(|db| {
+            <RpcContext as LoginContext>::check_password(db, &password)?;
+            let fs = target_id.clone().load(db)?;
+            let package_ids = if let Some(ids) = package_ids {
+                ids.into_iter().collect()
+            } else {
+                db.as_public()
+                    .as_package_data()
+                    .as_entries()?
+                    .into_iter()
+                    .filter(|(_, m)| m.as_state_info().expect_installed().is_ok())
+                    .map(|(id, _)| id)
+                    .collect()
+            };
+            let shared_volume_ids = volume::selected_ids(
+                shared_volume_ids,
+                db.as_public().as_shared_volumes().de()?.into_keys(),
+            );
+            let server_id = db.as_public().as_server_info().as_id().de()?;
+            assure_backing_up(db, &init_progress, &target_id, &server_id)?;
+            Ok((fs, package_ids, shared_volume_ids, server_id))
+        })
+        .await
+        .result?;
+    let status_guard = BackupStatusGuard::new(ctx.db.clone(), target_id.clone(), fs.name.clone());
 
-    let disk_guard = TmpMountGuard::mount(&fs, BackupWrite).await?;
+    let disk_guard = fs.mount(BackupWrite).await?;
     let disk_refresh = target_id.refresh_disks_on_drop(ctx.disk_updates.clone());
 
     // The master password is validated; this failure identifies the target's password.
-    BackupMountGuard::<TmpMountGuard>::validate_password(
+    BackupMountGuard::<TargetMount>::validate_password(
         disk_guard.path(),
         &server_id,
         &old_password_decrypted,
@@ -257,37 +263,37 @@ pub async fn backup_all(
     tokio::task::spawn(async move {
         let _disk_refresh = disk_refresh;
         let _progress_db_sync = progress_db_sync;
-        let mut backup_guard =
-            match BackupMountGuard::mount(disk_guard.clone(), &server_id, &old_password_decrypted)
-                .await
-            {
-                Ok(guard) => guard,
-                Err(e) => return status_guard.handle_result(false, Err(e)).await.unwrap(),
-            };
-        if old_password.is_some() {
-            if let Err(e) = backup_guard.change_password(&password) {
-                return status_guard.handle_result(false, Err(e)).await.unwrap();
+        let mut legacy_present = false;
+        let result = async {
+            let mut backup_guard =
+                BackupMountGuard::mount(disk_guard.clone(), &server_id, &old_password_decrypted)
+                    .await?;
+            if old_password.is_some() {
+                backup_guard.change_password(&password)?;
             }
-        }
-        let legacy_present =
-            crate::disk::util::has_legacy_backup(backup_guard.backup_disk_path(), &server_id).await;
-        status_guard
-            .handle_result(
-                legacy_present,
-                perform_backup(
-                    &ctx,
-                    progress,
-                    init_phase,
-                    backup_guard,
-                    disk_guard,
-                    &package_ids,
-                    &shared_volume_ids,
-                    &fs,
-                )
-                .await,
+            legacy_present =
+                crate::disk::util::has_legacy_backup(backup_guard.backup_disk_path(), &server_id)
+                    .await;
+            perform_backup(
+                &ctx,
+                progress,
+                init_phase,
+                backup_guard,
+                disk_guard,
+                &package_ids,
+                &shared_volume_ids,
+                &fs,
             )
             .await
-            .unwrap();
+        }
+        .await;
+        super::target::catalog::refresh(&ctx.db, &target_id)
+            .await
+            .log_err();
+        status_guard
+            .handle_result(legacy_present, result)
+            .await
+            .log_err();
     });
     Ok(())
 }
@@ -330,11 +336,11 @@ async fn perform_backup(
     ctx: &RpcContext,
     progress: FullProgressTracker,
     mut init_phase: PhaseProgressTrackerHandle,
-    backup_guard: BackupMountGuard<TmpMountGuard>,
-    disk_guard: TmpMountGuard,
+    backup_guard: BackupMountGuard<TargetMount>,
+    disk_guard: TargetMount,
     package_ids: &OrdSet<PackageId>,
     shared_volume_ids: &OrdSet<SharedVolumeId>,
-    destination: &super::target::BackupTargetFS,
+    destination: &BackupTargetSource,
 ) -> Result<BackupReport, Error> {
     let db = ctx.db.peek().await;
     let mut backup_report = BTreeMap::new();

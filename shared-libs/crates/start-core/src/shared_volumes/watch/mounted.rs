@@ -173,11 +173,7 @@ impl MountedChecks {
                     let operation = async {
                         crate::disk::util::get_available(&path)
                             .await
-                            .map_err(|error| {
-                                error
-                                    .to_string()
-                                    .replace(&*path.to_string_lossy(), "[source]")
-                            })
+                            .map_err(source::public_error_message)
                     };
                     observe_space(operation, source::SPACE_QUERY_TIMEOUT, move |observation| {
                         let sender = sender.clone();

@@ -1,27 +1,23 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use clap::Parser;
-use color_eyre::eyre::eyre;
 use imbl_value::InternedString;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
-use super::{BackupTarget, BackupTargetId};
+use super::{BackupTarget, BackupTargetId, catalog};
 use crate::context::{CliContext, RpcContext};
-use crate::db::model::DatabaseModel;
-use crate::disk::mount::filesystem::ReadOnly;
 use crate::disk::mount::filesystem::cifs::Cifs;
-use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
-use crate::disk::util::{StartOsRecoveryInfo, get_available, has_legacy_backup, recovery_info};
 use crate::prelude::*;
+use crate::shared_volumes::{CreateSharedVolumeParams, CreateSharedVolumeSource};
 use crate::util::serde::KeyVal;
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CifsTargets(pub BTreeMap<u32, Cifs>);
 impl CifsTargets {
     pub fn new() -> Self {
-        Self(BTreeMap::new())
+        Self::default()
     }
 }
 impl Map for CifsTargets {
@@ -32,48 +28,6 @@ impl Map for CifsTargets {
     }
     fn key_string(key: &Self::Key) -> Result<InternedString, Error> {
         Ok(InternedString::from_display(key))
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, VisitFields)]
-#[serde(rename_all = "camelCase")]
-pub struct CifsBackupTarget {
-    hostname: String,
-    path: PathBuf,
-    username: String,
-    mountable: bool,
-    available: Option<u64>,
-    start_os: BTreeMap<String, StartOsRecoveryInfo>,
-    legacy_backup: bool,
-}
-
-rpc_toolkit::reflect_ts!(CifsBackupTarget);
-rpc_toolkit::ts_export!(CifsBackupTarget, namespaces = [""]);
-
-#[cfg(test)]
-mod password_cli_tests {
-    use super::*;
-
-    #[test]
-    fn cifs_password_is_not_a_cli_argument_but_remains_in_rpc_params() {
-        let mut add = CifsAddParams::try_parse_from(["add", "nas", "share", "user"]).unwrap();
-        assert!(add.password.is_none());
-        assert!(CifsAddParams::try_parse_from(["add", "nas", "share", "user", "secret"]).is_err());
-        add.password = Some("provided out of band".into());
-        assert_eq!(
-            serde_json::to_value(&add).unwrap()["password"],
-            "provided out of band"
-        );
-
-        let update =
-            CifsUpdateParams::try_parse_from(["update", "cifs-0", "nas", "share", "user"]).unwrap();
-        assert!(update.password.is_none());
-        assert!(
-            CifsUpdateParams::try_parse_from([
-                "update", "cifs-0", "nas", "share", "user", "secret"
-            ])
-            .is_err()
-        );
     }
 }
 
@@ -118,7 +72,6 @@ pub struct CifsAddParams {
     #[arg(skip)]
     pub password: Option<String>,
 }
-
 rpc_toolkit::reflect_ts!(CifsAddParams);
 rpc_toolkit::ts_export!(CifsAddParams, namespaces = [""]);
 
@@ -127,7 +80,6 @@ fn read_password() -> Result<Option<String>, Error> {
     Ok((!password.is_empty()).then_some(password))
 }
 
-#[tracing::instrument(skip_all)]
 async fn cli_add(
     mut args: rpc_toolkit::HandlerArgs<CliContext, CifsAddParams>,
 ) -> Result<(), Error> {
@@ -147,50 +99,30 @@ pub async fn add(
 ) -> Result<KeyVal<BackupTargetId, BackupTarget>, Error> {
     let cifs = Cifs {
         hostname,
-        path: Path::new("/").join(path),
+        path,
         username,
         password,
     };
-    let server_id = ctx
+    let name = catalog::cifs_name(&cifs);
+    let id = catalog::create(
+        ctx.clone(),
+        CreateSharedVolumeParams {
+            name,
+            source: CreateSharedVolumeSource::Cifs(cifs),
+        },
+    )
+    .await?;
+    catalog::inspect(ctx.clone(), catalog::TargetParams { id: id.clone() }).await?;
+    let value = ctx
         .db
         .peek()
         .await
         .as_public()
-        .as_server_info()
-        .as_id()
+        .as_backup_targets()
+        .as_idx(&id)
+        .or_not_found(&id)?
         .de()?;
-    let guard = TmpMountGuard::mount(&cifs, ReadOnly).await?;
-    let start_os = recovery_info(guard.path()).await?;
-    let available = get_available(guard.path()).await.ok();
-    let legacy_backup = has_legacy_backup(guard.path(), &server_id).await;
-    guard.unmount().await?;
-    let id = ctx
-        .db
-        .mutate(|db| {
-            let id = db
-                .as_private()
-                .as_cifs()
-                .keys()?
-                .into_iter()
-                .max()
-                .map_or(0, |a| a + 1);
-            db.as_private_mut().as_cifs_mut().insert(&id, &cifs)?;
-            Ok(id)
-        })
-        .await
-        .result?;
-    Ok(KeyVal {
-        key: BackupTargetId::Cifs { id },
-        value: BackupTarget::Cifs(CifsBackupTarget {
-            hostname: cifs.hostname,
-            path: cifs.path,
-            username: cifs.username,
-            mountable: true,
-            available,
-            start_os,
-            legacy_backup,
-        }),
-    })
+    Ok(KeyVal { key: id, value })
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
@@ -209,11 +141,9 @@ pub struct CifsUpdateParams {
     #[arg(skip)]
     pub password: Option<String>,
 }
-
 rpc_toolkit::reflect_ts!(CifsUpdateParams);
 rpc_toolkit::ts_export!(CifsUpdateParams, namespaces = [""]);
 
-#[tracing::instrument(skip_all)]
 async fn cli_update(
     mut args: rpc_toolkit::HandlerArgs<CliContext, CifsUpdateParams>,
 ) -> Result<(), Error> {
@@ -232,66 +162,28 @@ pub async fn update(
         password,
     }: CifsUpdateParams,
 ) -> Result<KeyVal<BackupTargetId, BackupTarget>, Error> {
-    let id = if let BackupTargetId::Cifs { id } = id {
-        id
-    } else {
-        return Err(Error::new(
-            eyre!("{}", t!("backup.target.cifs.target-not-found", id = id)),
-            ErrorKind::NotFound,
-        ));
-    };
-    let cifs = Cifs {
-        hostname,
-        path: Path::new("/").join(path),
-        username,
-        password,
-    };
-    let server_id = ctx
+    catalog::update_cifs(
+        ctx.clone(),
+        catalog::UpdateCifsTargetParams {
+            id: id.clone(),
+            hostname,
+            path,
+            username,
+            password,
+        },
+    )
+    .await?;
+    catalog::inspect(ctx.clone(), catalog::TargetParams { id: id.clone() }).await?;
+    let value = ctx
         .db
         .peek()
         .await
         .as_public()
-        .as_server_info()
-        .as_id()
+        .as_backup_targets()
+        .as_idx(&id)
+        .or_not_found(&id)?
         .de()?;
-    let guard = TmpMountGuard::mount(&cifs, ReadOnly).await?;
-    let start_os = recovery_info(guard.path()).await?;
-    let available = get_available(guard.path()).await.ok();
-    let legacy_backup = has_legacy_backup(guard.path(), &server_id).await;
-    guard.unmount().await?;
-    ctx.db
-        .mutate(|db| {
-            db.as_private_mut()
-                .as_cifs_mut()
-                .as_idx_mut(&id)
-                .ok_or_else(|| {
-                    Error::new(
-                        eyre!(
-                            "{}",
-                            t!(
-                                "backup.target.cifs.target-not-found",
-                                id = BackupTargetId::Cifs { id }
-                            )
-                        ),
-                        ErrorKind::NotFound,
-                    )
-                })?
-                .ser(&cifs)
-        })
-        .await
-        .result?;
-    Ok(KeyVal {
-        key: BackupTargetId::Cifs { id },
-        value: BackupTarget::Cifs(CifsBackupTarget {
-            hostname: cifs.hostname,
-            path: cifs.path,
-            username: cifs.username,
-            mountable: true,
-            available,
-            start_os,
-            legacy_backup,
-        }),
-    })
+    Ok(KeyVal { key: id, value })
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
@@ -302,7 +194,6 @@ pub struct CifsRemoveParams {
     #[arg(help = "help.arg.backup-target-id")]
     pub id: BackupTargetId,
 }
-
 rpc_toolkit::reflect_ts!(CifsRemoveParams);
 rpc_toolkit::ts_export!(CifsRemoveParams, namespaces = [""]);
 
@@ -310,65 +201,32 @@ pub async fn remove(
     ctx: RpcContext,
     CifsRemoveParams { id }: CifsRemoveParams,
 ) -> Result<(), Error> {
-    let id = if let BackupTargetId::Cifs { id } = id {
-        id
-    } else {
-        return Err(Error::new(
-            eyre!("{}", t!("backup.target.cifs.target-not-found", id = id)),
-            ErrorKind::NotFound,
-        ));
-    };
-    ctx.db
-        .mutate(|db| db.as_private_mut().as_cifs_mut().remove(&id))
-        .await
-        .result?;
-    Ok(())
+    catalog::ensure_cifs(&ctx.db.peek().await, &id)?;
+    catalog::remove(ctx, catalog::TargetParams { id }).await
 }
 
-pub fn load(db: &DatabaseModel, id: u32) -> Result<Cifs, Error> {
-    db.as_private()
-        .as_cifs()
-        .as_idx(&id)
-        .ok_or_else(|| {
-            Error::new(
-                eyre!("{}", t!("backup.target.cifs.target-not-found-id", id = id)),
-                ErrorKind::NotFound,
-            )
-        })?
-        .de()
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-pub async fn list(
-    db: &DatabaseModel,
-    server_id: &str,
-) -> Result<Vec<(u32, CifsBackupTarget)>, Error> {
-    let mut cifs = Vec::new();
-    for (id, model) in db.as_private().as_cifs().as_entries()? {
-        let mount_info = model.de()?;
-        let info = async {
-            let guard = TmpMountGuard::mount(&mount_info, ReadOnly).await?;
-            let start_os = recovery_info(guard.path()).await?;
-            let available = get_available(guard.path()).await.ok();
-            let legacy_backup = has_legacy_backup(guard.path(), server_id).await;
-            guard.unmount().await?;
-            Ok::<_, Error>((start_os, available, legacy_backup))
-        }
-        .await;
-        let mountable = info.is_ok();
-        let (start_os, available, legacy_backup) = info.ok().unwrap_or_default();
-        cifs.push((
-            id,
-            CifsBackupTarget {
-                hostname: mount_info.hostname,
-                path: mount_info.path,
-                username: mount_info.username,
-                mountable,
-                available,
-                start_os,
-                legacy_backup,
-            },
-        ));
+    #[test]
+    fn cifs_password_is_not_a_cli_argument_but_remains_in_rpc_params() {
+        let mut add = CifsAddParams::try_parse_from(["add", "nas", "share", "user"]).unwrap();
+        assert!(add.password.is_none());
+        assert!(CifsAddParams::try_parse_from(["add", "nas", "share", "user", "secret"]).is_err());
+        add.password = Some("provided out of band".into());
+        assert_eq!(
+            serde_json::to_value(&add).unwrap()["password"],
+            "provided out of band"
+        );
+        let update =
+            CifsUpdateParams::try_parse_from(["update", "cifs-0", "nas", "share", "user"]).unwrap();
+        assert!(update.password.is_none());
+        assert!(
+            CifsUpdateParams::try_parse_from([
+                "update", "cifs-0", "nas", "share", "user", "secret"
+            ])
+            .is_err()
+        );
     }
-
-    Ok(cifs)
 }

@@ -2301,6 +2301,45 @@ test('production mocks support inspection, independent failed backups and new-lo
     injector.destroy()
   })
   t.mock.timers.enable({ apis: ['setTimeout'] })
+  const targetId = await api.rpc.backup.target.create({
+    name: 'Archive',
+    source: { kind: 'local' },
+  })
+  assert.match(targetId, /^[A-Z2-7]{32}$/)
+  assert.deepEqual(
+    await api.rpc.backup.target.list({}),
+    cache.value.value.backupTargets,
+  )
+  await assert.rejects(
+    api.rpc.backup.target.cifs.remove({ id: targetId }),
+    /CIFS target/,
+  )
+  const cifs = await api.rpc.backup.target.cifs.add({
+    hostname: 'nas.local',
+    path: '/archive',
+    username: 'family',
+    password: 'private-password',
+  })
+  const [cifsId] = Object.keys(cifs)
+  assert.match(cifsId, /^[A-Z2-7]{32}$/)
+  await api.rpc.backup.target.updateCifs({
+    id: cifsId,
+    hostname: 'new-nas.local',
+    path: '/new-archive',
+    username: 'family',
+  })
+  assert.deepEqual(cache.value.value.backupTargets[cifsId].source, {
+    kind: 'cifs',
+    hostname: 'new-nas.local',
+    path: '/new-archive',
+    username: 'family',
+  })
+  assert.doesNotMatch(
+    JSON.stringify(cache.value.value.backupTargets),
+    /private-password/,
+  )
+  await api.rpc.backup.target.cifs.remove({ id: cifsId })
+  assert.equal(cache.value.value.backupTargets[cifsId], undefined)
   const local = await api.rpc.volumes.create({
     name: 'Photos',
     source: { kind: 'local' },
@@ -2359,12 +2398,13 @@ test('production mocks support inspection, independent failed backups and new-lo
     generation: 'previous',
   }
   await api.rpc.backup.create({
-    targetId: 'csgashbdjkasnd',
+    targetId,
     packageIds: [],
     sharedVolumeIds: [local, remote],
     password: 'password',
     oldPassword: null,
   })
+  await api.rpc.backup.target.rename({ id: targetId, name: 'Later name' })
   t.mock.timers.tick(500)
   await tick()
   assert.equal(
@@ -2383,8 +2423,13 @@ test('production mocks support inspection, independent failed backups and new-lo
   assert.equal(report.sharedVolumes[local].error, null)
   assert.ok(report.sharedVolumes[remote].error)
   assert.deepEqual(report.packages, {})
+  const history = await api.rpc.backup.history.list({ offset: 0, limit: 1 })
+  assert.equal(history.runs[0].targetId, targetId)
+  assert.equal(history.runs[0].targetName, 'Archive')
+  assert.deepEqual(history.runs[0].report, report)
+  assert.equal(cache.value.value.backupTargets[targetId].name, 'Later name')
   const restored = await api.rpc.backup.volume.restore({
-    targetId: 'csgashbdjkasnd',
+    targetId,
     serverId: '1234-5678-9876-5432',
     password: 'password',
     ids: [local],

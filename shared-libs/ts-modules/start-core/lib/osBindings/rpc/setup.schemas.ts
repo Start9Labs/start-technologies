@@ -863,6 +863,7 @@ export const Api = {
     backup: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
+        history: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         target: {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {
