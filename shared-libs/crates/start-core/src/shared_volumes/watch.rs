@@ -9,6 +9,7 @@ use crate::context::RpcContext;
 use crate::prelude::*;
 use crate::util::future::NonDetachingJoinHandle;
 
+mod cifs;
 mod events;
 
 #[derive(Debug)]
