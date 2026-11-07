@@ -93,6 +93,8 @@ pub struct AddAssetParams {
     #[visit(ts(skip))]
     pub signer: AnyVerifyingKey,
     pub signature: AnySignature,
+    #[serde(default)]
+    pub signatures: SignatureMap,
     pub commitment: Blake3Commitment,
 }
 
@@ -115,6 +117,7 @@ async fn add_asset(
         torrent,
         signer,
         signature,
+        signatures,
         commitment,
     }: AddAssetParams,
     accessor: impl FnOnce(
@@ -127,8 +130,13 @@ async fn add_asset(
     if let Some(torrent) = &torrent {
         crate::registry::bittorrent::validate_torrent_url(torrent)?;
     }
-    let signature =
-        crate::sign::compat::verify_commitment(&signer, &commitment, SIG_CONTEXT, &signature)?;
+    let signatures = crate::sign::compat::verify_signatures(
+        &commitment,
+        SIG_CONTEXT,
+        &signatures,
+        &signer,
+        &signature,
+    )?;
     ctx.db
         .mutate(|db| {
             let signer_guid = db.as_index().as_signers().get_signer(&signer)?;
@@ -156,7 +164,7 @@ async fn add_asset(
                             ErrorKind::InvalidSignature,
                         ))
                     } else {
-                        s.signatures.insert(signer, signature);
+                        s.merge_signatures(&commitment, signatures);
                         s.merge_torrent(torrent);
                         for url in urls {
                             if !s.urls.contains(&url) {
@@ -410,6 +418,7 @@ mod tests {
             torrent: None,
             signer: AnyVerifyingKey::Ed25519(key.verifying_key()),
             signature: AnySignature::Ed25519ph(ed25519_dalek::Signature::from_bytes(&[0; 64])),
+            signatures: Default::default(),
             commitment: Blake3Commitment {
                 hash: Base64([7; 32]),
                 size: 1,

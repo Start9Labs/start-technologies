@@ -232,6 +232,7 @@ async fn promote_assets(
                 "urls": &asset.urls,
                 "torrent": &asset.torrent,
                 "signature": signature,
+                "signatures": &asset.signatures,
                 "commitment": commitment,
             }),
         )

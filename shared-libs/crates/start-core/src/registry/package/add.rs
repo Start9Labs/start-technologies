@@ -125,21 +125,13 @@ fn merge_submitted_signatures(
     signatures: SignatureMap,
 ) -> Result<(), Error> {
     for (_, asset) in &mut info.s9pks {
-        let verified = signatures
-            .iter()
-            .chain(std::iter::once((uploader, signature)))
-            .map(|(key, signature)| {
-                Ok((
-                    key.clone(),
-                    crate::sign::compat::verify_commitment(
-                        key,
-                        &asset.commitment,
-                        SIG_CONTEXT,
-                        signature,
-                    )?,
-                ))
-            })
-            .collect::<Result<SignatureMap, Error>>()?;
+        let verified = crate::sign::compat::verify_signatures(
+            &asset.commitment,
+            SIG_CONTEXT,
+            &signatures,
+            uploader,
+            signature,
+        )?;
         let commitment = asset.commitment;
         asset.merge_signatures(&commitment, verified);
     }

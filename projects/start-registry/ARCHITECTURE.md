@@ -106,6 +106,8 @@ Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hol
 
 Each asset retains its HTTP `urls` and an optional `torrent` magnet link or HTTP(S) metadata URL. Publication validates the torrent URL format; consumers verify downloaded bytes against the existing commitment. Promotion carries the source metadata through unchanged. The registry stores these locations; external hosts own the asset files and BitTorrent seeding.
 
+Package and OS asset ingestion accept a default-empty `signatures` map alongside the authenticated uploader's `signature`. Each submitted signature is verified against the asset commitment and signature context before merging with existing signatures. The fresh uploader signature takes precedence over a submitted signature for the same key; stored signatures remain unchanged. Promotion forwards every source mirror URL and the source signature map, and adds the promoter's signature. Endorsements do not register signers, change trust proposals, or grant publishing authorization; the authenticated uploader must retain permission to publish. Deploy the updated registry before the promoting CLI: older registries ignore the additional map.
+
 OS versions use the shared `LocaleString` for `releaseNotes`, as package metadata does:
 a plain string or a locale-to-Markdown map. The compiler includes `en_US` in translated
 maps. Current clients receive the complete map and select locally with `LocalizePipe`.

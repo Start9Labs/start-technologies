@@ -447,6 +447,10 @@ export const AddAssetParams: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
   commitment: typeof Blake3Commitment
 }> = /* @__PURE__ */ object({
   version: z.string(),
@@ -460,6 +464,10 @@ export const AddAssetParams: z.ZodObject<{
   urls: wire(z.array(z.string()).optional(), z.array(z.string())),
   torrent: wire(z.string().nullable().optional(), z.string().nullable()),
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
   commitment: Blake3Commitment,
 }).meta({
   id: 'AddAssetParams',
