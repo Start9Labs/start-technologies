@@ -275,20 +275,24 @@ fn find_workspace_config() -> Result<Option<ClientConfig>, Error> {
     }
 }
 
-/// Resolve a profile namespace to a URL by following the `default` profile: its value
-/// is either a URL or the name of another profile, which is chased (guarding against
-/// cycles) until a URL is reached. `None` when there's no namespace or no `default` — so
-/// an unqualified command with no config falls back to localhost / no registry. The final
-/// value is parsed here, so a bad or unknown target errors only when it's the one selected.
+/// Resolve the `default` profile, or return `None` when it is unset.
 pub fn resolve_target(profiles: Option<&Profiles>) -> Result<Option<Url>, Error> {
     let Some(profiles) = profiles else {
         return Ok(None);
     };
-    let Some(mut target) = profiles.0.get(DEFAULT_PROFILE) else {
+    if !profiles.0.contains_key(DEFAULT_PROFILE) {
         return Ok(None);
-    };
-    let mut visited = BTreeSet::from([DEFAULT_PROFILE]);
-    while let Some((name, value)) = profiles.0.get_key_value(target.as_str()) {
+    }
+    resolve_profile(Some(profiles), DEFAULT_PROFILE).map(Some)
+}
+
+/// Resolve a URL or named profile, rejecting unknown names and reference cycles.
+pub fn resolve_profile<'a>(
+    profiles: Option<&'a Profiles>,
+    mut target: &'a str,
+) -> Result<Url, Error> {
+    let mut visited = BTreeSet::new();
+    while let Some((name, value)) = profiles.and_then(|profiles| profiles.0.get_key_value(target)) {
         if !visited.insert(name.as_str()) {
             return Err(Error::new(
                 eyre!("{}", t!("context.cli.profile-cycle", value = name)),
@@ -297,7 +301,7 @@ pub fn resolve_target(profiles: Option<&Profiles>) -> Result<Option<Url>, Error>
         }
         target = value;
     }
-    Url::parse(target).map(Some).map_err(|_| {
+    Url::parse(target).map_err(|_| {
         Error::new(
             eyre!(
                 "{}",
@@ -561,16 +565,18 @@ mod tests {
         config.merge_with(parse("host:\n  home-only: https://home-only/"));
 
         let ns = config.host.unwrap();
-        // -H set `default`; it outranks every file's `default`.
         assert_eq!(resolved(&ns), Some("https://flag/".into()));
-        // a shared alias resolves at its highest tier, and every tier's unique aliases survive.
-        let follow = |name: &str| {
-            let mut ns = ns.clone();
-            ns.0.insert("default".into(), name.into());
-            resolved(&ns)
-        };
-        assert_eq!(follow("shared"), Some("https://cli-shared/".into()));
-        assert_eq!(follow("ws-only"), Some("https://ws-only/".into()));
-        assert_eq!(follow("home-only"), Some("https://home-only/".into()));
+        assert_eq!(
+            resolve_profile(Some(&ns), "shared").unwrap().as_str(),
+            "https://cli-shared/",
+        );
+        assert_eq!(
+            resolve_profile(Some(&ns), "ws-only").unwrap().as_str(),
+            "https://ws-only/",
+        );
+        assert_eq!(
+            resolve_profile(Some(&ns), "home-only").unwrap().as_str(),
+            "https://home-only/",
+        );
     }
 }
