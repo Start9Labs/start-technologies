@@ -70,7 +70,6 @@ export const ENGLISH: Record<string, number> = {
   'Logout': 72,
   'User manual': 73,
   'Contact support': 74,
-  'Donate to Start9': 75,
   'Are you sure you want to restart your server? It can take several minutes to come back online.': 76,
   'Are you sure you want to power down your server? This can take several minutes, and your server will not come back online automatically. To power on again, You will need to physically unplug your server and plug it back in.': 77,
   'Services': 78, // as in, server-side software applications
@@ -972,4 +971,5 @@ export const ENGLISH: Record<string, number> = {
   'The connection continues. The new identity is now remembered.': 1119,
   'Previous fingerprint': 1120,
   'Current fingerprint': 1121,
+  'View in Marketplace': 1122,
 }

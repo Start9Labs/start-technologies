@@ -71,7 +71,6 @@ export default {
   72: 'Wyloguj się',
   73: 'Podręcznik użytkownika',
   74: 'Kontakt ze wsparciem',
-  75: 'Wesprzyj Start9',
   76: 'Czy na pewno chcesz ponownie uruchomić serwer? Może to potrwać kilka minut, zanim będzie ponownie dostępny.',
   77: 'Czy na pewno chcesz wyłączyć serwer? Może to potrwać kilka minut, a serwer nie włączy się automatycznie. Aby go ponownie uruchomić, będziesz musiał fizycznie odłączyć i ponownie podłączyć zasilanie.',
   78: 'Serwisy',
@@ -971,4 +970,5 @@ export default {
   1119: 'Połączenie jest kontynuowane. Nowa tożsamość została zapamiętana.',
   1120: 'Poprzedni odcisk',
   1121: 'Obecny odcisk',
+  1122: 'Zobacz w sklepie',
 } satisfies i18n
