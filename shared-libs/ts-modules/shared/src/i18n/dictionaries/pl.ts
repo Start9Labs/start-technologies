@@ -71,7 +71,6 @@ export default {
   72: 'Wyloguj się',
   73: 'Podręcznik użytkownika',
   74: 'Kontakt ze wsparciem',
-  75: 'Wesprzyj Start9',
   76: 'Czy na pewno chcesz ponownie uruchomić serwer? Może to potrwać kilka minut, zanim będzie ponownie dostępny.',
   77: 'Czy na pewno chcesz wyłączyć serwer? Może to potrwać kilka minut, a serwer nie włączy się automatycznie. Aby go ponownie uruchomić, będziesz musiał fizycznie odłączyć i ponownie podłączyć zasilanie.',
   78: 'Serwisy',
@@ -960,4 +959,5 @@ export default {
   1108: 'Nieprawidłowy format pliku',
   1109: 'Nieprawidłowa odpowiedź serwera',
   1110: 'Maksymalny rozmiar pliku',
+  1111: 'Zobacz w sklepie',
 } satisfies i18n
