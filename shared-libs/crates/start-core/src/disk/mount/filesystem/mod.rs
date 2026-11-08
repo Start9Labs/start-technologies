@@ -116,6 +116,13 @@ pub trait FileSystem: Send + Sync {
     ) -> impl Future<Output = Result<(), Error>> + Send {
         default_mount_impl(self, mountpoint, mount_type)
     }
+    /// Rejects known unavailability without retiring an existing mount.
+    fn check_mount(
+        &self,
+        #[allow(unused_variables)] mountpoint: &Path,
+    ) -> impl Future<Output = Result<(), Error>> + Send {
+        async { Ok(()) }
+    }
     fn source_hash(&self) -> impl Future<Output = Result<digest::Output<Sha256>, Error>> + Send;
     /// Temporary-mount identity, including immutable mount policy.
     fn mount_hash(

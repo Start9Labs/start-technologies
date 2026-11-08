@@ -15,6 +15,9 @@ use crate::Error;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::util::Invoke;
 
+#[cfg(target_os = "linux")]
+pub(crate) mod health;
+
 const SMB_PORT: u16 = 445;
 
 async fn resolve_hostname(hostname: &str) -> Result<IpAddr, Error> {
@@ -661,6 +664,11 @@ impl FileSystem for Cifs {
         )
         .await
     }
+    async fn check_mount(&self, _mountpoint: &Path) -> Result<(), Error> {
+        #[cfg(target_os = "linux")]
+        health::KernelState::read().await.check(_mountpoint)?;
+        Ok(())
+    }
     async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         let mut sha = Sha256::new();
         sha.update("Cifs");
@@ -689,6 +697,9 @@ impl FileSystem for SharedCifs {
         )).await.map_err(|error| Error::new(error, crate::ErrorKind::Timeout))?
     }
 
+    async fn check_mount(&self, mountpoint: &Path) -> Result<(), Error> {
+        self.0.check_mount(mountpoint).await
+    }
     async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         let mut sha = Sha256::new();
         sha.update("SharedCifs");

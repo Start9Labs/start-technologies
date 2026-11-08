@@ -157,6 +157,12 @@ impl FileSystem for BackupTargetFS {
             BackupTargetFS::Cifs(a) => a.mount(mountpoint, mount_type).await,
         }
     }
+    async fn check_mount(&self, mountpoint: &Path) -> Result<(), Error> {
+        match self {
+            Self::Cifs(cifs) => cifs.check_mount(mountpoint).await,
+            _ => Ok(()),
+        }
+    }
     async fn device(&self) -> Result<Option<PathBuf>, Error> {
         match self {
             Self::Disk(disk) => disk.device().await,

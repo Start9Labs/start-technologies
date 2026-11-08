@@ -103,6 +103,7 @@ impl MountGuard {
             slot: None,
         };
         guard.check_device().await?;
+        filesystem.check_mount(guard.path()).await?;
         Ok(guard)
     }
     fn as_unmounted(&self) -> Self {
@@ -272,6 +273,7 @@ impl TmpMountGuard {
         let (prev_mt, weak_slot) = &mut *slot;
         if let Some(guard) = weak_slot.upgrade() {
             if guard.is_mounted() && guard.device_is_current().await? {
+                filesystem.check_mount(&mountpoint).await?;
                 if *prev_mt == ReadOnly && mount_type != ReadOnly {
                     tokio::process::Command::new("mount")
                         .arg("-o")
@@ -298,6 +300,7 @@ impl TmpMountGuard {
         };
         filesystem.mount(&mountpoint, mount_type).await?;
         mount_guard.check_device().await?;
+        filesystem.check_mount(&mountpoint).await?;
         let guard = Arc::new(mount_guard);
         *weak_slot = Arc::downgrade(&guard);
         *prev_mt = mount_type;
@@ -455,6 +458,64 @@ mod tests {
             use digest::Digest;
             Ok(sha2::Sha256::digest(self.id.as_bytes()))
         }
+    }
+
+    #[tokio::test]
+    async fn unavailable_cached_mount_rejects_reuse_without_retirement_and_recovers() {
+        struct CheckedFilesystem {
+            inner: UnmountedFilesystem,
+            available: AtomicBool,
+        }
+        impl FileSystem for CheckedFilesystem {
+            async fn source_hash(&self) -> Result<digest::Output<sha2::Sha256>, Error> {
+                self.inner.source_hash().await
+            }
+            async fn mount<P: AsRef<Path> + Send>(
+                &self,
+                path: P,
+                mode: MountType,
+            ) -> Result<(), Error> {
+                self.inner.mount(path, mode).await
+            }
+            async fn check_mount(&self, _: &Path) -> Result<(), Error> {
+                if self.available.load(Ordering::Acquire) {
+                    Ok(())
+                } else {
+                    Err(Error::new(eyre!("disconnected"), ErrorKind::Filesystem))
+                }
+            }
+        }
+        let filesystem = CheckedFilesystem {
+            inner: UnmountedFilesystem {
+                id: crate::shared_volumes::SharedVolumeId::new().to_string(),
+                attempted: AtomicBool::new(false),
+            },
+            available: AtomicBool::new(false),
+        };
+        let mountpoint = tmp_mountpoint(&filesystem, ReadOnly).await.unwrap();
+        let slot = mount_slot(mountpoint.clone(), ReadOnly);
+        let guard = Arc::new(MountGuard {
+            mountpoint,
+            mounted: AtomicBool::new(true),
+            device: None,
+            slot: Some(slot.clone()),
+        });
+        slot.lock().await.1 = Arc::downgrade(&guard);
+        assert!(TmpMountGuard::mount(&filesystem, ReadWrite).await.is_err());
+        assert!(guard.is_mounted());
+        assert_eq!(slot.lock().await.0, ReadOnly);
+        assert!(
+            TmpMountGuard::existing(&filesystem, ReadOnly)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(!filesystem.inner.attempted.load(Ordering::Acquire));
+        filesystem.available.store(true, Ordering::Release);
+        let recovered = TmpMountGuard::mount(&filesystem, ReadOnly).await.unwrap();
+        assert!(Arc::ptr_eq(&guard, &recovered.guard));
+        assert!(!filesystem.inner.attempted.load(Ordering::Acquire));
+        guard.mounted.store(false, Ordering::Release);
     }
 
     #[tokio::test]

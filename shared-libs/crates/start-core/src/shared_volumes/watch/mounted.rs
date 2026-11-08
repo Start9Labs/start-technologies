@@ -7,8 +7,8 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use super::Event;
-use super::cifs::DebugData;
 use crate::context::RpcContext;
+use crate::disk::mount::filesystem::cifs::health::KernelState;
 use crate::disk::mount::guard::WeakMountGuard;
 use crate::prelude::*;
 use crate::shared_volumes::source::{self, MountedSource};
@@ -108,13 +108,7 @@ impl MountedChecks {
             self.next_capacity = now + CAPACITY_INTERVAL;
         }
 
-        let debug = tokio::fs::read_to_string("/proc/fs/cifs/DebugData")
-            .await
-            .ok()
-            .and_then(|input| DebugData::parse(&input));
-        let mounts = procfs::process::Process::myself()
-            .and_then(|process| process.mountinfo())
-            .ok();
+        let kernel = KernelState::read().await;
         let mut groups = BTreeMap::<usize, Group>::new();
         for (id, volume) in volumes {
             let Some(source) = source::existing_source(ctx, id).await.log_err().flatten() else {
@@ -136,16 +130,7 @@ impl MountedChecks {
         }
         for (key, group) in groups {
             let connection = if group.cifs {
-                debug
-                    .as_ref()
-                    .zip(mounts.as_ref())
-                    .and_then(|(debug, mounts)| {
-                        let mount = mounts
-                            .0
-                            .iter()
-                            .find(|mount| mount.mount_point == group.path)?;
-                        debug.health(mount.mount_source.as_deref()?)
-                    })
+                kernel.health(&group.path)
             } else {
                 None
             };

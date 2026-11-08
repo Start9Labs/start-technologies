@@ -1,6 +1,47 @@
 use std::net::IpAddr;
+use std::path::Path;
 
-pub(super) struct DebugData {
+pub(crate) struct KernelState {
+    debug: Option<DebugData>,
+    mounts: Option<procfs::process::MountInfos>,
+}
+
+impl KernelState {
+    pub(crate) async fn read() -> Self {
+        Self {
+            debug: tokio::fs::read_to_string("/proc/fs/cifs/DebugData")
+                .await
+                .ok()
+                .and_then(|input| DebugData::parse(&input)),
+            mounts: procfs::process::Process::myself()
+                .and_then(|process| process.mountinfo())
+                .ok(),
+        }
+    }
+
+    pub(crate) fn health(&self, path: &Path) -> Option<bool> {
+        let mount = self
+            .mounts
+            .as_ref()?
+            .0
+            .iter()
+            .find(|mount| mount.mount_point == path)?;
+        self.debug.as_ref()?.health(mount.mount_source.as_deref()?)
+    }
+
+    pub(crate) fn check(&self, path: &Path) -> Result<(), crate::Error> {
+        if self.health(path) == Some(false) {
+            Err(crate::Error::new(
+                color_eyre::eyre::eyre!(rust_i18n::t!("shared-volumes.source-unavailable")),
+                crate::ErrorKind::Filesystem,
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+struct DebugData {
     trees: Vec<Tree>,
 }
 
@@ -29,7 +70,7 @@ struct SessionState {
 }
 
 impl DebugData {
-    pub(super) fn parse(input: &str) -> Option<Self> {
+    fn parse(input: &str) -> Option<Self> {
         let mut lines = input
             .lines()
             .skip_while(|line| !line.trim_start().starts_with("Servers:"));
@@ -69,7 +110,7 @@ impl DebugData {
     }
 
     /// Accepts the raw mountinfo source field, before octal unescaping.
-    pub(super) fn health(&self, mounted_unc: &str) -> Option<bool> {
+    fn health(&self, mounted_unc: &str) -> Option<bool> {
         let mounted = Unc::parse(&unescape_mountinfo(mounted_unc)?)?;
         let mut result = None;
         for tree in &self.trees {
@@ -372,7 +413,34 @@ fn unescape_mountinfo(input: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::DebugData;
+    use super::{DebugData, KernelState};
+
+    #[test]
+    fn mount_checks_reject_only_correlated_kernel_disconnections() {
+        use procfs::FromRead;
+        let mountinfo = "31 20 0:40 / /mounted rw - cifs //192.0.2.10/Archive rw\n32 20 0:41 / /healthy rw - cifs //192.0.2.10/Team\\040Files rw\n";
+        let state = KernelState {
+            debug: DebugData::parse(&fixture()),
+            mounts: Some(procfs::process::MountInfos::from_read(mountinfo.as_bytes()).unwrap()),
+        };
+        assert_eq!(state.health(std::path::Path::new("/mounted")), Some(false));
+        assert!(matches!(
+            state
+                .check(std::path::Path::new("/mounted"))
+                .unwrap_err()
+                .kind,
+            crate::ErrorKind::Filesystem
+        ));
+        assert_eq!(state.health(std::path::Path::new("/healthy")), Some(true));
+        assert!(state.check(std::path::Path::new("/healthy")).is_ok());
+        assert_eq!(state.health(std::path::Path::new("/absent")), None);
+        assert!(state.check(std::path::Path::new("/absent")).is_ok());
+        let unknown = KernelState {
+            debug: None,
+            mounts: state.mounts,
+        };
+        assert!(unknown.check(std::path::Path::new("/mounted")).is_ok());
+    }
 
     const HEADER: &str = "CIFS Version 2.52\nFeatures: DFS,FSCACHE,ACL\nActive VFS Requests: 0\nServers:\n1) ConnectionId: 0x1 Hostname: 192.0.2.10\nClientGUID: 11111111-1111-1111-1111-111111111111\nNumber of credits: 32,1,1 Dialect 0x311\nTCP status: 1 Instance: 1\nLocal Users To Server: 1 SecMode: 0x1 Req On Wire: 0\n\tSessions:\n";
 
@@ -407,20 +475,26 @@ mod tests {
     #[test]
     fn captured_smb3_share_details_preserve_failure_and_recovery() {
         for (input, expected) in [
-            (include_str!("cifs/fixtures/linux-7.2-connected.txt"), true),
             (
-                include_str!("cifs/fixtures/linux-7.2-disconnected.txt"),
+                include_str!("health/fixtures/linux-7.2-connected.txt"),
+                true,
+            ),
+            (
+                include_str!("health/fixtures/linux-7.2-disconnected.txt"),
                 false,
             ),
-            (include_str!("cifs/fixtures/linux-7.2-recovered.txt"), true),
             (
-                include_str!("cifs/fixtures/linux-7.2-auth-failed.txt"),
+                include_str!("health/fixtures/linux-7.2-recovered.txt"),
+                true,
+            ),
+            (
+                include_str!("health/fixtures/linux-7.2-auth-failed.txt"),
                 false,
             ),
         ] {
             assert_eq!(observe(input, "//192.0.2.10/volume"), Some(expected));
         }
-        let input = include_str!("cifs/fixtures/linux-7.2-connected.txt");
+        let input = include_str!("health/fixtures/linux-7.2-connected.txt");
         let disconnected = input.replace(
             "Maximal Access: 0x1f01ff",
             "Maximal Access: 0x1f01ff DISCONNECTED",
