@@ -3,7 +3,7 @@ use axum::http::{Request, StatusCode, header};
 use ed25519_dalek::SigningKey;
 use tower_service::Service;
 
-use super::ingestion_tests::context;
+use super::test_utils::context;
 use crate::registry::registry_router;
 use crate::sign::AnyVerifyingKey;
 

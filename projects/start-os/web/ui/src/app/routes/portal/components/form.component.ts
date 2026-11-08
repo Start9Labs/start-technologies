@@ -16,6 +16,7 @@ import { FormService, trim } from 'src/app/services/form.service'
 
 export interface ActionButton<T> {
   text: string
+  /** May destroy the form before native button activation. */
   handler?: (value: T) => Promise<boolean | void> | void
   link?: string
 }
@@ -63,7 +64,7 @@ export interface FormContext<T> {
               tuiButton
               [appearance]="$last ? 'primary' : 'flat-grayscale'"
               [type]="$last ? 'submit' : 'button'"
-              (click)="onClick(button.handler)"
+              (click.prevent)="onClick(button.handler)"
             >
               {{ button.text }}
             </button>

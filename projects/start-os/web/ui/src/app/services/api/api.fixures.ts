@@ -535,7 +535,13 @@ export namespace Mock {
                     'https://github.com/Start9Labs/bitcoind-startos/releases/download/v26.1.0/bitcoind.s9pk',
                   ],
                   commitment: mockMerkleArchiveCommitment,
-                  signatures: { [unknownSigner]: 'mock-signature' },
+                  signatures: {
+                    'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=':
+                      'mock-signature',
+                    'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=':
+                      'mock-signature',
+                    [unknownSigner]: 'mock-signature',
+                  },
                   publishedAt: Date.now().toString(),
                 },
               ],

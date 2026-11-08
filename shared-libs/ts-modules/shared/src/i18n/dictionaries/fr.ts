@@ -71,7 +71,6 @@ export default {
   72: 'Déconnexion',
   73: 'Manuel utilisateur',
   74: 'Contacter le support',
-  75: 'Faire un don à Start9',
   76: 'Voulez-vous vraiment redémarrer votre serveur ? Cela peut prendre plusieurs minutes avant qu’il soit de nouveau en ligne.',
   77: 'Voulez-vous vraiment éteindre votre serveur ? Cela peut prendre plusieurs minutes et il ne redémarrera pas automatiquement. Pour le rallumer, il faudra le débrancher puis le rebrancher.',
   78: 'Services',
@@ -924,7 +923,7 @@ export default {
   1108: 'Format de fichier non valide',
   1109: 'Réponse du serveur non valide',
   1110: 'Taille maximale du fichier',
-  1111: 'Volumes partagés',
+  1111: 'Voir dans la bibliothèque de services',
   1112: 'Lecture',
   1113: 'Lecture/écriture',
   1114: 'Ajouter un volume partagé',
@@ -1016,4 +1015,5 @@ export default {
   1205: 'Cette action est irréversible.',
   1206: 'Pour confirmer, saisissez le nom',
   1207: 'Supprimer définitivement',
+  1208: 'Volumes partagés',
 } satisfies i18n
