@@ -440,6 +440,7 @@ export class SubContainerEager<
   private teardown: Promise<void> | null = null
   private readonly fileMounts = new FileMounts()
   private sharedMounts = false
+  private sharedVolumeDependency = false
 
   private leader: cp.ChildProcess
   private leaderExited: boolean = false
@@ -659,6 +660,11 @@ export class SubContainerEager<
     return this
   }
 
+  /** @internal Includes unsuccessful optional shared-volume mount attempts. */
+  get dependsOnSharedVolumes(): boolean {
+    return this.sharedVolumeDependency
+  }
+
   /**
    * Try an optional shared-volume mount. Only source unavailability returns an outcome;
    * authorization, invalid paths, and internal failures reject.
@@ -671,6 +677,7 @@ export class SubContainerEager<
         'Shared-volume mountpoint must stay within the subcontainer',
       )
     }
+    this.sharedVolumeDependency = true
     await prepBind(null, this.subpath(options.mountpoint), 'directory')
     return this.effects.mountSharedVolume({
       ...options,
@@ -988,6 +995,14 @@ export class SubContainerLazy<
   readonly name: string
   /** The mounts declared at construction. Read by `Daemons.dynamic`'s configHash. */
   readonly mounts: Mounts<Manifest> | null
+
+  /** @internal Declared or attempted shared-volume dependencies of this container. */
+  get dependsOnSharedVolumes(): boolean {
+    return (
+      !!this.mounts?.sharedVolumes.length ||
+      !!this.created?.dependsOnSharedVolumes
+    )
+  }
 
   private materialized: Promise<SubContainerEager<Manifest, Effects>> | null =
     null
