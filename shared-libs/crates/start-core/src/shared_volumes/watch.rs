@@ -4,13 +4,14 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use super::{SharedVolume, SharedVolumeAvailability, SharedVolumeId, SharedVolumeSource, source};
+use super::{SharedVolumeAvailability, SharedVolumeSource, source};
 use crate::context::RpcContext;
 use crate::prelude::*;
 use crate::util::future::NonDetachingJoinHandle;
 
 mod events;
 mod mounted;
+mod registered;
 
 #[derive(Debug)]
 enum Event {
@@ -58,27 +59,6 @@ impl Retry {
     }
 }
 
-fn retryable(volume: &SharedVolume) -> bool {
-    matches!(volume.source, SharedVolumeSource::Cifs { .. })
-        && volume.inspection.availability == SharedVolumeAvailability::Unavailable
-        && !volume.grants.is_empty()
-}
-
-async fn retry(ctx: RpcContext, id: SharedVolumeId) -> Result<(), Error> {
-    let volumes = ctx.db.peek().await.as_public().as_shared_volumes().de()?;
-    let Some(SharedVolume {
-        source: SharedVolumeSource::Cifs { hostname, .. },
-        ..
-    }) = volumes.get(&id)
-    else {
-        return Ok(());
-    };
-    if crate::disk::mount::filesystem::cifs::reachable(hostname).await {
-        super::inspect(ctx, super::SharedVolumeParams { id }).await?;
-    }
-    Ok(())
-}
-
 pub(crate) async fn run(context: impl Fn() -> Option<RpcContext>) {
     if let Err(error) = watch(context).await {
         tracing::error!(
@@ -97,11 +77,12 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
     let mut mounted = mounted::MountedChecks::new(send.clone());
     let _listeners = events::subscribe(send);
     let mut catalog = db.watch("/public/sharedVolumes".parse().unwrap()).await;
+    let mut targets = db.watch("/public/backupTargets".parse().unwrap()).await;
     let mut running: BTreeMap<
-        SharedVolumeId,
+        registered::SourceId,
         (source::SourceDefinition, NonDetachingJoinHandle<()>),
     > = BTreeMap::new();
-    let mut retries = BTreeMap::<SharedVolumeId, Retry>::new();
+    let mut retries = BTreeMap::<registered::SourceId, Retry>::new();
     let mut disk_scan: Option<NonDetachingJoinHandle<()>> = None;
     let mut retire_at: Option<Instant> = None;
     let mut tick = tokio::time::interval(Duration::from_secs(1));
@@ -113,6 +94,7 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
             tokio::select! {
                 event = recv.recv() => event,
                 changed = catalog.changed() => { changed?; None },
+                changed = targets.changed() => { changed?; None },
                 changed = disk_updates.changed() => { changed.with_kind(ErrorKind::Unknown)?; Some(Event::RescanDisks) },
                 _ = tick.tick() => None,
             }
@@ -126,14 +108,14 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
             event => event,
         };
         let snapshot = db.peek().await;
-        let volumes: BTreeMap<SharedVolumeId, SharedVolume> =
-            snapshot.as_public().as_shared_volumes().de()?;
+        let sources = registered::snapshot(&snapshot)?;
         running.retain(|id, (definition, job)| {
             !job.is_finished()
-                && source::SourceDefinition::read(&snapshot, id)
-                    .is_ok_and(|current| current == *definition)
+                && sources
+                    .get(id)
+                    .is_some_and(|source| source.definition == *definition)
         });
-        retries.retain(|id, _| volumes.get(id).is_some_and(retryable));
+        retries.retain(|id, _| sources.get(id).is_some_and(|source| source.retryable));
         if matches!(event, Some(Event::Network)) {
             retries.clear();
         }
@@ -144,19 +126,31 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
                 crate::disk::mount::guard::TmpMountGuard::retire_changed_devices().await;
             retire_at = pending.then(|| Instant::now() + Duration::from_secs(1));
             let mut affected = BTreeSet::new();
-            for (id, volume) in &volumes {
-                if let SharedVolumeSource::Disk { logicalname, .. } = &volume.source {
+            for (id, source) in &sources {
+                if let SharedVolumeSource::Disk { logicalname, .. } = source.definition.source() {
                     if retired.contains(logicalname) {
-                        affected.extend(volume.grants.keys().cloned());
+                        if let registered::SourceId::Volume(id) = id {
+                            affected.extend(
+                                snapshot
+                                    .as_public()
+                                    .as_shared_volumes()
+                                    .as_idx(id)
+                                    .or_not_found(id)?
+                                    .as_grants()
+                                    .de()?
+                                    .into_keys(),
+                            );
+                        }
                         running.remove(id);
-                        source::record_availability(
-                            &ctx,
-                            id,
-                            super::SharedVolumeInspection::unavailable(
-                                t!("shared-volumes.source-unavailable").to_string(),
-                            ),
-                        )
-                        .await?;
+                        source
+                            .record(
+                                &ctx,
+                                None,
+                                super::SharedVolumeInspection::unavailable(
+                                    t!("shared-volumes.source-unavailable").to_string(),
+                                ),
+                            )
+                            .await?;
                     }
                 }
             }
@@ -167,7 +161,7 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
                     .log_err();
             }
         }
-        mounted.tick(&ctx, &volumes).await;
+        mounted.tick(&ctx, &sources).await;
         if startup || matches!(event, Some(Event::Disks | Event::RescanDisks)) {
             if let Some(scan) = disk_scan.take() {
                 let _ = scan.wait_for_abort().await;
@@ -183,20 +177,20 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
                 .into(),
             );
         }
-        for (id, volume) in volumes {
-            let trigger = inspection_event(event.as_ref(), &volume.source);
+        for (id, source) in sources {
+            let trigger = inspection_event(event.as_ref(), source.definition.source());
             let full = startup
                 || trigger != InspectionEvent::None
-                || volume.inspection.availability == SharedVolumeAvailability::Unknown;
-            if matches!(volume.source, SharedVolumeSource::Cifs { .. })
-                && (full || retryable(&volume))
-                && source::existing_source(&ctx, &id)
+                || source.inspection.availability == SharedVolumeAvailability::Unknown;
+            if matches!(source.definition.source(), SharedVolumeSource::Cifs { .. })
+                && (full || source.retryable)
+                && source
+                    .existing()
                     .await
                     .log_err()
-                    .flatten()
-                    .is_some()
+                    .is_some_and(|mounts| !mounts.is_empty())
             {
-                if volume.inspection.availability == SharedVolumeAvailability::Unknown {
+                if source.inspection.availability == SharedVolumeAvailability::Unknown {
                     mounted.invalidate();
                 }
                 continue;
@@ -205,17 +199,18 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
                 running.remove(&id);
             }
             if full {
-                if let SharedVolumeSource::Disk { logicalname, .. } = &volume.source {
+                if let SharedVolumeSource::Disk { logicalname, .. } = source.definition.source() {
                     if !tokio::fs::try_exists(logicalname).await? {
                         running.remove(&id);
-                        source::record_availability(
-                            &ctx,
-                            &id,
-                            super::SharedVolumeInspection::unavailable(
-                                t!("shared-volumes.source-unavailable").to_string(),
-                            ),
-                        )
-                        .await?;
+                        source
+                            .record(
+                                &ctx,
+                                None,
+                                super::SharedVolumeInspection::unavailable(
+                                    t!("shared-volumes.source-unavailable").to_string(),
+                                ),
+                            )
+                            .await?;
                         continue;
                     }
                 }
@@ -223,26 +218,22 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
             if running.contains_key(&id) {
                 continue;
             }
-            let tcp = retryable(&volume)
+            let tcp = source.retryable
                 && retries
                     .entry(id.clone())
                     .or_insert_with(|| Retry::new(Instant::now()))
                     .take(Instant::now());
             if full || tcp {
-                let definition = source::SourceDefinition::read(&snapshot, &id)?;
                 let ctx = ctx.clone();
-                let key = id.clone();
                 running.insert(
                     id,
                     (
-                        definition,
+                        source.definition.clone(),
                         tokio::spawn(async move {
                             if full {
-                                super::inspect(ctx, super::SharedVolumeParams { id: key })
-                                    .await
-                                    .log_err();
+                                source.inspect(ctx).await.log_err();
                             } else {
-                                retry(ctx, key).await.log_err();
+                                source.retry(ctx).await.log_err();
                             }
                         })
                         .into(),
@@ -305,35 +296,5 @@ mod tests {
         let next = retry.next;
         assert!(retry.take(next));
         assert_eq!(retry.next - next, Duration::from_secs(300));
-    }
-
-    #[test]
-    fn retry_requires_an_unavailable_granted_cifs_share() {
-        let mut volume = SharedVolume {
-            name: "NAS".into(),
-            source: SharedVolumeSource::Cifs {
-                hostname: "nas.local".into(),
-                path: "/share".into(),
-                username: String::new(),
-            },
-            grants: BTreeMap::new(),
-            inspection: super::super::SharedVolumeInspection {
-                availability: SharedVolumeAvailability::Unavailable,
-                ..Default::default()
-            },
-        };
-        assert!(!retryable(&volume));
-        volume.grants.insert(
-            "consumer".parse().unwrap(),
-            super::super::SharedVolumeGrant { readonly: true },
-        );
-        assert!(retryable(&volume));
-        volume.inspection.availability = SharedVolumeAvailability::Available;
-        assert!(!retryable(&volume));
-        volume.inspection.availability = SharedVolumeAvailability::Unknown;
-        assert!(!retryable(&volume));
-        volume.inspection.availability = SharedVolumeAvailability::Unavailable;
-        volume.source = SharedVolumeSource::Local;
-        assert!(!retryable(&volume));
     }
 }

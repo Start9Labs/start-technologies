@@ -29,6 +29,24 @@ fn database() -> DatabaseModel {
     })).unwrap())
 }
 
+#[tokio::test]
+async fn registered_filesystem_preserves_inline_backup_cifs_policy_identity() {
+    use crate::backup::target::BackupTargetFS;
+    use crate::disk::mount::filesystem::{BackupWrite, FileSystem, ReadWrite};
+    let mut db = database();
+    initialize(&mut db).unwrap();
+    let id = "cifs-7".parse().unwrap();
+    let target = BackupTargetSource::read(&db, &id).unwrap();
+    let filesystem = filesystem(&id, &target.definition);
+    let inline = BackupTargetFS::Cifs(target.definition.cifs().unwrap());
+    for mode in [ReadOnly, ReadWrite, BackupWrite] {
+        assert_eq!(
+            filesystem.mount_hash(mode).await.unwrap(),
+            inline.mount_hash(mode).await.unwrap()
+        );
+    }
+}
+
 #[test]
 fn migration_preserves_identity_intent_and_secrets_without_a_second_catalog() {
     let mut db = database();

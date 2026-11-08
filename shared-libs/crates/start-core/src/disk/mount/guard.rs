@@ -340,6 +340,18 @@ impl TmpMountGuard {
             .map(|guard| WeakMountGuard(Arc::downgrade(&guard))))
     }
 
+    pub(crate) async fn existing_all(
+        filesystem: &impl FileSystem,
+    ) -> Result<Vec<WeakMountGuard>, Error> {
+        let mut mounts = BTreeMap::new();
+        for mode in [ReadOnly, ReadWrite, super::filesystem::BackupWrite] {
+            if let Some(mount) = Self::existing(filesystem, mode).await? {
+                mounts.insert(mount.key(), mount);
+            }
+        }
+        Ok(mounts.into_values().collect())
+    }
+
     pub(crate) async fn retire_changed_devices() -> (Vec<PathBuf>, bool) {
         let slots = TMP_MOUNTS.mutate(|mounts| mounts.values().cloned().collect::<Vec<_>>());
         let mut retired = Vec::new();
@@ -530,7 +542,47 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        assert!(
+            TmpMountGuard::existing_all(&filesystem)
+                .await
+                .unwrap()
+                .is_empty()
+        );
         assert!(!filesystem.attempted.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn existing_lookup_finds_both_cifs_policies_without_duplicating_access_upgrades() {
+        use crate::disk::mount::filesystem::cifs::Cifs;
+        let filesystem = Cifs {
+            hostname: crate::shared_volumes::SharedVolumeId::new().to_string(),
+            path: "/share".into(),
+            username: "user".into(),
+            password: Some("private".into()),
+        };
+        let mut guards = Vec::new();
+        for mode in [ReadOnly, super::super::filesystem::BackupWrite] {
+            let mountpoint = tmp_mountpoint(&filesystem, mode).await.unwrap();
+            let slot = mount_slot(mountpoint.clone(), mode);
+            let guard = Arc::new(MountGuard {
+                mountpoint,
+                mounted: AtomicBool::new(true),
+                device: None,
+                slot: Some(slot.clone()),
+            });
+            slot.lock().await.1 = Arc::downgrade(&guard);
+            guards.push(guard);
+        }
+        let mounts = TmpMountGuard::existing_all(&filesystem).await.unwrap();
+        assert_eq!(mounts.len(), 2);
+        for guard in guards {
+            assert!(
+                mounts
+                    .iter()
+                    .any(|mount| mount.key() == Arc::as_ptr(&guard) as usize)
+            );
+            guard.mounted.store(false, Ordering::Release);
+        }
     }
 
     #[tokio::test]

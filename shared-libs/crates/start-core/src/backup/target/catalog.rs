@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::{BackupTargetFS, BackupTargetId};
+use super::BackupTargetId;
 use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
 use crate::disk::mount::filesystem::bind::Bind;
@@ -15,7 +15,7 @@ use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard, WeakMountGuard
 use crate::disk::util::{StartOsRecoveryInfo, has_legacy_backup, recovery_info};
 use crate::prelude::*;
 use crate::shared_volumes::mounts::PreparedSource;
-use crate::shared_volumes::source::{self, SourceDefinition};
+use crate::shared_volumes::source::{self, PreparedFilesystem, SourceDefinition};
 use crate::shared_volumes::{
     CreateSharedVolumeParams, CreateSharedVolumeSource, SharedVolumeInspection, SharedVolumeSource,
 };
@@ -45,7 +45,20 @@ pub(crate) struct BackupTargetSource {
     id: BackupTargetId,
     pub name: String,
     pub source: SharedVolumeSource,
-    definition: SourceDefinition,
+    pub(crate) definition: SourceDefinition,
+}
+
+pub(crate) fn filesystem(
+    id: &BackupTargetId,
+    definition: &SourceDefinition,
+) -> PreparedFilesystem<BlockDev<PathBuf>, Cifs> {
+    match definition.source() {
+        SharedVolumeSource::Local => PreparedFilesystem::Local(local_path(crate::DATA_DIR, id)),
+        SharedVolumeSource::Disk { logicalname, .. } => {
+            PreparedFilesystem::Disk(BlockDev::new(logicalname.clone()))
+        }
+        SharedVolumeSource::Cifs { .. } => PreparedFilesystem::Cifs(definition.cifs().unwrap()),
+    }
 }
 
 pub fn local_path(data_dir: impl AsRef<Path>, id: &BackupTargetId) -> PathBuf {
@@ -80,36 +93,10 @@ impl BackupTargetSource {
         })
     }
 
-    pub(crate) fn local_path(&self) -> PathBuf {
-        local_path(crate::DATA_DIR, &self.id)
-    }
-
     pub(crate) async fn mount(&self, mount_type: MountType) -> Result<TargetMount, Error> {
-        let (mount, subpath) = match &self.source {
-            SharedVolumeSource::Local => (
-                source::open_local(&self.local_path(), mount_type).await?,
-                None,
-            ),
-            SharedVolumeSource::Disk {
-                logicalname, path, ..
-            } => (
-                TmpMountGuard::mount(
-                    &BackupTargetFS::Disk(BlockDev::new(logicalname.clone())),
-                    mount_type,
-                )
-                .await?,
-                Some(path.clone()),
-            ),
-            SharedVolumeSource::Cifs { .. } => (
-                TmpMountGuard::mount(
-                    &BackupTargetFS::Cifs(self.definition.cifs().unwrap()),
-                    mount_type,
-                )
-                .await?,
-                None,
-            ),
-        };
-        let prepared = PreparedSource::open(mount, subpath).await?;
+        let mount =
+            TmpMountGuard::mount(&filesystem(&self.id, &self.definition), mount_type).await?;
+        let prepared = PreparedSource::open(mount, self.definition.subpath()).await?;
         if !prepared.mount().is_active() {
             return Err(Error::new(
                 eyre!(t!("shared-volumes.source-unavailable")),
@@ -400,7 +387,7 @@ pub(crate) async fn refresh(
     cleanup
 }
 
-fn write_inspection(
+pub(crate) fn write_inspection(
     db: &mut DatabaseModel,
     id: &BackupTargetId,
     definition: &SourceDefinition,

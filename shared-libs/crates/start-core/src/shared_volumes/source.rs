@@ -98,7 +98,18 @@ impl SourceDefinition {
         })
     }
 
-    fn filesystem(&self, id: &SharedVolumeId) -> SourceFilesystem {
+    pub(crate) fn source(&self) -> &SharedVolumeSource {
+        &self.source
+    }
+
+    pub(crate) fn subpath(&self) -> Option<PathBuf> {
+        match &self.source {
+            SharedVolumeSource::Disk { path, .. } => Some(path.clone()),
+            _ => None,
+        }
+    }
+
+    pub(super) fn filesystem(&self, id: &SharedVolumeId) -> SourceFilesystem {
         match &self.source {
             SharedVolumeSource::Local => SourceFilesystem::Local(local_path(crate::DATA_DIR, id)),
             SharedVolumeSource::Disk { logicalname, .. } => SourceFilesystem::external(logicalname),
@@ -109,11 +120,12 @@ impl SourceDefinition {
     }
 }
 
-enum SourceFilesystem {
+pub(crate) enum PreparedFilesystem<D, C> {
     Local(PathBuf),
-    Disk(IdMapped<BlockDev<PathBuf>>),
-    Cifs(SharedCifs),
+    Disk(D),
+    Cifs(C),
 }
+pub(super) type SourceFilesystem = PreparedFilesystem<IdMapped<BlockDev<PathBuf>>, SharedCifs>;
 impl SourceFilesystem {
     fn external(device: &Path) -> Self {
         Self::Disk(IdMapped::new(
@@ -122,7 +134,7 @@ impl SourceFilesystem {
         ))
     }
 }
-impl FileSystem for SourceFilesystem {
+impl<D: FileSystem, C: FileSystem> FileSystem for PreparedFilesystem<D, C> {
     async fn mount<P: AsRef<Path> + Send>(
         &self,
         mountpoint: P,
@@ -145,13 +157,15 @@ impl FileSystem for SourceFilesystem {
     async fn check_mount(&self, mountpoint: &Path) -> Result<(), Error> {
         match self {
             Self::Cifs(filesystem) => filesystem.check_mount(mountpoint).await,
-            _ => Ok(()),
+            Self::Disk(filesystem) => filesystem.check_mount(mountpoint).await,
+            Self::Local(_) => Ok(()),
         }
     }
     async fn device(&self) -> Result<Option<PathBuf>, Error> {
         match self {
             Self::Disk(filesystem) => filesystem.device().await,
-            _ => Ok(None),
+            Self::Cifs(filesystem) => filesystem.device().await,
+            Self::Local(_) => Ok(None),
         }
     }
     async fn source_hash(&self) -> Result<digest::Output<sha2::Sha256>, Error> {
@@ -167,64 +181,10 @@ impl FileSystem for SourceFilesystem {
     ) -> Result<digest::Output<sha2::Sha256>, Error> {
         match self {
             Self::Cifs(filesystem) => filesystem.mount_hash(mount_type).await,
-            _ => self.source_hash().await,
+            Self::Disk(filesystem) => filesystem.mount_hash(mount_type).await,
+            Self::Local(path) => Bind::new(path).mount_hash(mount_type).await,
         }
     }
-}
-
-pub(super) struct MountedSource {
-    id: SharedVolumeId,
-    definition: SourceDefinition,
-    pub(super) mount: WeakMountGuard,
-}
-impl MountedSource {
-    pub(super) fn id(&self) -> &SharedVolumeId {
-        &self.id
-    }
-
-    pub(super) async fn record_connection(
-        &self,
-        ctx: &RpcContext,
-        healthy: bool,
-    ) -> Result<(), Error> {
-        ctx.db
-            .mutate(|db| write_connection(db, &self.id, &self.definition, &self.mount, healthy))
-            .await
-            .result
-    }
-
-    pub(super) async fn record(
-        &self,
-        ctx: &RpcContext,
-        inspection: SharedVolumeInspection,
-    ) -> Result<(), Error> {
-        ctx.db
-            .mutate(|db| {
-                write_checked(
-                    db,
-                    &self.id,
-                    &self.definition,
-                    Some(&self.mount),
-                    inspection,
-                )
-            })
-            .await
-            .result
-            .map(|_| ())
-    }
-}
-
-pub(super) async fn existing_source(
-    ctx: &RpcContext,
-    id: &SharedVolumeId,
-) -> Result<Option<MountedSource>, Error> {
-    let definition = SourceDefinition::read(&ctx.db.peek().await, id)?;
-    let mount = TmpMountGuard::existing(&definition.filesystem(id), ReadWrite).await?;
-    Ok(mount.map(|mount| MountedSource {
-        id: id.clone(),
-        definition,
-        mount,
-    }))
 }
 
 /// Capacity failures do not invalidate a successfully opened source.
@@ -235,10 +195,7 @@ pub async fn open_source(
 ) -> Result<PreparedSource, Error> {
     let definition = SourceDefinition::read(&ctx.db.peek().await, id)?;
     let filesystem = definition.filesystem(id);
-    let subpath = match &definition.source {
-        SharedVolumeSource::Disk { path, .. } => Some(path.clone()),
-        _ => None,
-    };
+    let subpath = definition.subpath();
     let mut prepared = None;
     let result = source_result(
         async {
@@ -275,26 +232,7 @@ pub async fn open_source(
     result.map(|_| prepared.unwrap())
 }
 
-fn write_connection(
-    db: &mut crate::db::model::DatabaseModel,
-    id: &SharedVolumeId,
-    definition: &SourceDefinition,
-    mount: &WeakMountGuard,
-    healthy: bool,
-) -> Result<(), Error> {
-    let Some(volume) = db.as_public().as_shared_volumes().as_idx(id) else {
-        return Ok(());
-    };
-    let previous = volume.as_inspection().de()?;
-    let inspection = if healthy {
-        SharedVolumeInspection::available(previous.available)
-    } else {
-        SharedVolumeInspection::unavailable(t!("shared-volumes.source-unavailable").to_string())
-    };
-    write_checked(db, id, definition, Some(mount), inspection).map(|_| ())
-}
-
-fn write_checked(
+pub(super) fn write_checked(
     db: &mut crate::db::model::DatabaseModel,
     id: &SharedVolumeId,
     definition: &SourceDefinition,
@@ -335,17 +273,6 @@ fn source_result<T>(result: Result<T, Error>) -> Result<T, Error> {
             t!("shared-volumes.source-unavailable"),
         )
     })
-}
-
-pub(crate) async fn record_availability(
-    ctx: &RpcContext,
-    id: &SharedVolumeId,
-    inspection: SharedVolumeInspection,
-) -> Result<(), Error> {
-    ctx.db
-        .mutate(|db| write_inspection(db, id, inspection))
-        .await
-        .result
 }
 
 fn write_inspection(
@@ -396,10 +323,6 @@ pub(crate) fn cifs_definition(cifs: Cifs) -> (SharedVolumeSource, SharedVolumeCr
         },
         SharedVolumeCredentials { password },
     )
-}
-
-pub(crate) async fn open_local(path: &Path, mount_type: MountType) -> Result<TmpMountGuard, Error> {
-    TmpMountGuard::mount(&SourceFilesystem::Local(path.to_owned()), mount_type).await
 }
 
 pub(crate) async fn prepare_disk_source(
