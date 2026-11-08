@@ -1,5 +1,25 @@
 use super::*;
 
+#[tokio::test]
+async fn content_inspection_validates_backup_metadata_before_legacy_edits_publish() {
+    let root = tempfile::tempdir().unwrap();
+    let (inspection, backups, legacy) = inspect_contents(root.path(), "server").await.unwrap();
+    assert_eq!(
+        inspection.availability,
+        crate::shared_volumes::SharedVolumeAvailability::Available
+    );
+    assert!(inspection.checked_at.is_some());
+    assert!(backups.is_empty());
+    assert!(!legacy);
+    let metadata = crate::disk::util::BackupUnencryptedMetadata::path(root.path(), "server");
+    tokio::fs::create_dir_all(metadata.parent().unwrap())
+        .await
+        .unwrap();
+    tokio::fs::write(metadata, b"{broken").await.unwrap();
+    let error = inspect_contents(root.path(), "server").await.unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Deserialization);
+}
+
 fn database() -> DatabaseModel {
     DatabaseModel::from(to_value(&serde_json::json!({
         "public": {"backupTargets": {}},

@@ -332,6 +332,29 @@ pub async fn inspect(
         .de()
 }
 
+pub(super) async fn inspect_contents(
+    path: &Path,
+    server_id: &str,
+) -> Result<
+    (
+        SharedVolumeInspection,
+        BTreeMap<String, StartOsRecoveryInfo>,
+        bool,
+    ),
+    Error,
+> {
+    let capacity = source::measure_mount(path)
+        .await
+        .map_err(source::public_error_message);
+    let start_os = recovery_info(path).await?;
+    let legacy_backup = has_legacy_backup(path, server_id).await;
+    Ok((
+        SharedVolumeInspection::available_capacity(capacity),
+        start_os,
+        legacy_backup,
+    ))
+}
+
 pub(crate) async fn refresh(
     database: &TypedPatchDb<crate::db::model::Database>,
     id: &BackupTargetId,
@@ -345,18 +368,11 @@ pub(crate) async fn refresh(
     let mut guard = None;
     let result = async {
         guard = Some(target.mount(ReadOnly).await?);
-        let path = guard.as_ref().unwrap().path();
-        let available = source::measure_mount(path).await?;
-        let start_os = recovery_info(path).await?;
-        let legacy_backup = has_legacy_backup(path, &server_id).await;
-        Ok::<_, Error>((available, start_os, legacy_backup))
+        inspect_contents(guard.as_ref().unwrap().path(), &server_id).await
     }
     .await;
     let (inspection, metadata) = match result {
-        Ok((available, start_os, legacy_backup)) => (
-            SharedVolumeInspection::available(Some(available)),
-            Some((start_os, legacy_backup)),
-        ),
+        Ok((inspection, start_os, legacy_backup)) => (inspection, Some((start_os, legacy_backup))),
         Err(error) => (
             SharedVolumeInspection::unavailable(source::public_error_message(error)),
             None,

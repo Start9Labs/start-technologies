@@ -1,3 +1,5 @@
+//! Legacy CIFS edits check the share and existing backup metadata before saving.
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -8,7 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{BackupTarget, BackupTargetId, catalog};
 use crate::context::{CliContext, RpcContext};
+use crate::disk::mount::filesystem::ReadOnly;
 use crate::disk::mount::filesystem::cifs::Cifs;
+use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::prelude::*;
 use crate::shared_volumes::{CreateSharedVolumeParams, CreateSharedVolumeSource};
 use crate::util::serde::KeyVal;
@@ -103,7 +107,7 @@ pub async fn add(
         username,
         password,
     };
-    cifs.mountable().await?;
+    validate_target(&ctx, &cifs).await?;
     let name = catalog::cifs_name(&cifs);
     let id = catalog::create(
         ctx.clone(),
@@ -170,7 +174,7 @@ pub async fn update(
         username,
         password,
     };
-    cifs.mountable().await?;
+    validate_target(&ctx, &cifs).await?;
     catalog::update_cifs(ctx.clone(), legacy_replacement(id.clone(), cifs)).await?;
     catalog::inspect(ctx.clone(), catalog::TargetParams { id: id.clone() }).await?;
     let value = ctx
@@ -183,6 +187,23 @@ pub async fn update(
         .or_not_found(&id)?
         .de()?;
     Ok(KeyVal { key: id, value })
+}
+
+async fn validate_target(ctx: &RpcContext, cifs: &Cifs) -> Result<(), Error> {
+    cifs.validate()?;
+    let server_id = ctx
+        .db
+        .peek()
+        .await
+        .as_public()
+        .as_server_info()
+        .as_id()
+        .de()?;
+    let guard = TmpMountGuard::mount(cifs, ReadOnly).await?;
+    let contents = catalog::inspect_contents(guard.path(), &server_id).await;
+    let cleanup = guard.unmount().await;
+    contents?;
+    cleanup
 }
 
 fn legacy_replacement(id: BackupTargetId, cifs: Cifs) -> catalog::UpdateCifsTargetParams {
