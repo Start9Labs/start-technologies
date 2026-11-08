@@ -7157,6 +7157,11 @@
             "platform": { "type": "string" },
             "url": { "type": "string" },
             "signature": { "$ref": "#/$defs/AnySignature" },
+            "signatures": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/AnySignature" }
+            },
             "commitment": { "$ref": "#/$defs/Blake3Commitment" }
           },
           "required": ["version", "platform", "url", "signature", "commitment"],
@@ -7203,6 +7208,11 @@
             "platform": { "type": "string" },
             "url": { "type": "string" },
             "signature": { "$ref": "#/$defs/AnySignature" },
+            "signatures": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/AnySignature" }
+            },
             "commitment": { "$ref": "#/$defs/Blake3Commitment" }
           },
           "required": ["version", "platform", "url", "signature", "commitment"],
@@ -7249,6 +7259,11 @@
             "platform": { "type": "string" },
             "url": { "type": "string" },
             "signature": { "$ref": "#/$defs/AnySignature" },
+            "signatures": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/AnySignature" }
+            },
             "commitment": { "$ref": "#/$defs/Blake3Commitment" }
           },
           "required": ["version", "platform", "url", "signature", "commitment"],

@@ -70,7 +70,6 @@ export const ENGLISH: Record<string, number> = {
   'Logout': 72,
   'User manual': 73,
   'Contact support': 74,
-  'Donate to Start9': 75,
   'Are you sure you want to restart your server? It can take several minutes to come back online.': 76,
   'Are you sure you want to power down your server? This can take several minutes, and your server will not come back online automatically. To power on again, You will need to physically unplug your server and plug it back in.': 77,
   'Services': 78, // as in, server-side software applications
@@ -961,9 +960,10 @@ export const ENGLISH: Record<string, number> = {
   'Invalid file format': 1108,
   'Invalid response from server': 1109,
   'Maximum file size': 1110,
-  'A backup is currently running. Interrupting it now can corrupt the backup of the service being written.': 1111,
-  'Wait for backup to complete': 1112,
-  'Shut down now': 1113,
-  'A backup is running. Your server will restart when it finishes.': 1114,
-  'A backup is running. Your server will shut down when it finishes.': 1115,
+  'View in Marketplace': 1111,
+  'A backup is currently running. Interrupting it now can corrupt the backup of the service being written.': 1112,
+  'Wait for backup to complete': 1113,
+  'Shut down now': 1114,
+  'A backup is running. Your server will restart when it finishes.': 1115,
+  'A backup is running. Your server will shut down when it finishes.': 1116,
 }

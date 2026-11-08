@@ -87,6 +87,8 @@ pub struct AddAssetParams {
     #[visit(ts(skip))]
     pub signer: AnyVerifyingKey,
     pub signature: AnySignature,
+    #[serde(default)]
+    pub signatures: SignatureMap,
     pub commitment: Blake3Commitment,
 }
 
@@ -101,6 +103,7 @@ async fn add_asset(
         url,
         signer,
         signature,
+        signatures,
         commitment,
     }: AddAssetParams,
     accessor: impl FnOnce(
@@ -109,8 +112,13 @@ async fn add_asset(
     + UnwindSafe
     + Send,
 ) -> Result<(), Error> {
-    let signature =
-        crate::sign::compat::verify_commitment(&signer, &commitment, SIG_CONTEXT, &signature)?;
+    let signatures = crate::sign::compat::verify_signatures(
+        &commitment,
+        SIG_CONTEXT,
+        &signatures,
+        &signer,
+        &signature,
+    )?;
     ctx.db
         .mutate(|db| {
             let signer_guid = db.as_index().as_signers().get_signer(&signer)?;
@@ -137,7 +145,7 @@ async fn add_asset(
                             ErrorKind::InvalidSignature,
                         ))
                     } else {
-                        s.signatures.insert(signer, signature);
+                        s.merge_signatures(&commitment, signatures);
                         if !s.urls.contains(&url) {
                             s.urls.push(url);
                         }
