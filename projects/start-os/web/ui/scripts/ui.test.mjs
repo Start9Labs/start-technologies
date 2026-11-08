@@ -9,7 +9,7 @@ import {
   runInInjectionContext,
   signal,
 } from '@angular/core'
-import { FormBuilder, NonNullableFormBuilder } from '@angular/forms'
+import { FormBuilder, NonNullableFormBuilder, Validators } from '@angular/forms'
 import { BehaviorSubject, EMPTY, firstValueFrom, map, of, Subject } from 'rxjs'
 
 const boundaries = new Map()
@@ -1546,6 +1546,7 @@ function volumeFixture(t, packageData = {}, disks = VolumeMock.Disks) {
   const patch = new PatchDB(source, cache)
   patch.start()
   const query = new BehaviorSubject({})
+  let revision = 1
   const requests = [],
     results = [],
     errors = [],
@@ -1765,7 +1766,10 @@ function volumeFixture(t, packageData = {}, disks = VolumeMock.Disks) {
     query,
     attach(disks) {
       source.next([
-        { id: 2, patch: [{ op: 'replace', path: '/disks', value: disks }] },
+        {
+          id: ++revision,
+          patch: [{ op: 'replace', path: '/disks', value: disks }],
+        },
       ])
     },
     make: Class => runInInjectionContext(injector, () => new Class()),
@@ -1918,6 +1922,90 @@ test('the external drive form follows the attached drives', async t => {
   await tick()
   assert.equal(model.drives().length, VolumeMock.Disks.length)
   assert.ok(model.spec())
+})
+
+function editingDriveForm(t, partition = '/dev/sdc1') {
+  const f = volumeFixture(t)
+  const model = f.make(DriveVolumeForm)
+  const builder = new FormBuilder()
+  const form = builder.group({
+    name: ['Edited name'],
+    path: ['library/photos'],
+    drive: builder.group({
+      selection: ['/dev/sdc', Validators.required],
+      value: builder.group({ partition: [partition, Validators.required] }),
+    }),
+  })
+  model.form = () => ({ form })
+  return { ...f, model, form }
+}
+
+test('a removed drive clears only the source choice even when reinsertion supersedes asynchronous specs', async t => {
+  const f = editingDriveForm(t)
+  await tick()
+  f.attach([])
+  f.attach(VolumeMock.Disks)
+  await tick()
+  assert.equal(f.form.get('drive.selection').value, null)
+  assert.equal(f.form.valid, false)
+  assert.equal(f.model.value.name, 'Edited name')
+  assert.equal(f.model.value.path, 'library/photos')
+  assert.equal(f.model.value.drive.selection, null)
+  assert.ok(f.model.spec())
+})
+
+test('metadata updates retain valid drive choices and edits made while specs are rebuilding', async t => {
+  const f = editingDriveForm(t)
+  await tick()
+  f.attach(structuredClone(VolumeMock.Disks))
+  f.form.get('name').setValue('Edited during rebuild')
+  f.form.get('path').setValue('new/path')
+  await tick()
+  assert.equal(f.model.value.name, 'Edited during rebuild')
+  assert.equal(f.model.value.path, 'new/path')
+  assert.equal(f.model.value.drive.selection, '/dev/sdc')
+  assert.equal(f.model.value.drive.value.partition, '/dev/sdc1')
+})
+
+test('a missing selected partition invalidates the source without selecting erase-and-format', async t => {
+  const f = editingDriveForm(t)
+  await tick()
+  f.attach(
+    VolumeMock.Disks.map(disk =>
+      disk.logicalname === '/dev/sdc' ? { ...disk, partitions: [] } : disk,
+    ),
+  )
+  await tick()
+  assert.equal(f.form.get('drive.selection').value, null)
+  assert.equal(f.form.get('drive.value.partition').value, null)
+  assert.equal(f.model.value.name, 'Edited name')
+  assert.equal(f.model.value.path, 'library/photos')
+})
+
+test('a stale selected partition cannot be submitted after the drive disappears', async t => {
+  const f = editingDriveForm(t)
+  await tick()
+  const selected = f.form.getRawValue()
+  f.attach([])
+  await tick()
+  assert.equal(await f.model.buttons[0].handler(selected), false)
+  assert.deepEqual(f.requests, [])
+})
+
+test('remove/reinsert while erase confirmation is open requires a fresh choice before formatting', async t => {
+  const f = editingDriveForm(t, 'format')
+  await tick()
+  const confirmation = new Subject()
+  f.model.dialogs.openConfirm = () => confirmation
+  const saving = f.model.buttons[0].handler(f.form.getRawValue())
+  f.attach([])
+  f.attach(VolumeMock.Disks)
+  confirmation.next(true)
+  confirmation.complete()
+  assert.equal(await saving, false)
+  assert.deepEqual(f.requests, [])
+  assert.equal(f.form.get('name').value, 'Edited name')
+  assert.equal(f.form.get('path').value, 'library/photos')
 })
 
 test('volume sources map blank optional fields to their wire defaults', () => {
