@@ -161,7 +161,8 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
                     .log_err();
             }
         }
-        mounted.tick(&ctx, &sources).await;
+        let server_id = snapshot.as_public().as_server_info().as_id().de()?;
+        mounted.tick(&ctx, &sources, &server_id).await;
         if startup || matches!(event, Some(Event::Disks | Event::RescanDisks)) {
             if let Some(scan) = disk_scan.take() {
                 let _ = scan.wait_for_abort().await;

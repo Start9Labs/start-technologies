@@ -21,7 +21,7 @@ struct AttachedMount {
 
 impl AttachedMount {
     fn bind(
-        source: &OwnedFd,
+        source: &impl AsFd,
         destination: &OwnedFd,
         readonly: bool,
         namespace: Arc<MountNamespace>,
@@ -55,11 +55,39 @@ impl Drop for AttachedMount {
     }
 }
 
+/// Pins directory identity without retaining mount-cache ownership.
+#[derive(Debug)]
+pub(crate) struct PinnedDirectory {
+    directory: OwnedFd,
+    path: PathBuf,
+}
+
+impl PinnedDirectory {
+    pub(crate) fn open(root: &Path, relative: &Path) -> Result<Self, Error> {
+        let directory = open_beneath(root, &confined_relative(relative)?)?;
+        let path = PathBuf::from(format!(
+            "/proc/{}/fd/{}",
+            std::process::id(),
+            directory.as_raw_fd()
+        ));
+        Ok(Self { directory, path })
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl AsFd for PinnedDirectory {
+    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        self.directory.as_fd()
+    }
+}
+
 #[derive(Debug)]
 pub struct PreparedSource {
-    directory: OwnedFd,
+    directory: PinnedDirectory,
     guard: TmpMountGuard,
-    path: PathBuf,
 }
 
 impl PreparedSource {
@@ -67,24 +95,11 @@ impl PreparedSource {
         &self.guard
     }
 
-    fn from_directory(guard: TmpMountGuard, directory: OwnedFd) -> Self {
-        let path = PathBuf::from(format!(
-            "/proc/{}/fd/{}",
-            std::process::id(),
-            directory.as_raw_fd()
-        ));
-        Self {
-            directory,
-            guard,
-            path,
-        }
-    }
-
     pub async fn open(guard: TmpMountGuard, subpath: Option<PathBuf>) -> Result<Self, Error> {
         tokio::task::spawn_blocking(move || {
-            let relative = confined_relative(subpath.as_deref().unwrap_or(Path::new("")))?;
-            let directory = open_beneath(guard.path(), &relative)?;
-            Ok(Self::from_directory(guard, directory))
+            let directory =
+                PinnedDirectory::open(guard.path(), subpath.as_deref().unwrap_or(Path::new("")))?;
+            Ok(Self { directory, guard })
         })
         .await
         .with_kind(ErrorKind::Unknown)?
@@ -95,8 +110,11 @@ impl PreparedSource {
             return Ok(self);
         };
         tokio::task::spawn_blocking(move || {
-            let directory = open_beneath(self.path(), &confined_relative(&subpath)?)?;
-            Ok(Self::from_directory(self.guard, directory))
+            let directory = PinnedDirectory::open(self.path(), &subpath)?;
+            Ok(Self {
+                directory,
+                guard: self.guard,
+            })
         })
         .await
         .with_kind(ErrorKind::Unknown)?
@@ -105,7 +123,7 @@ impl PreparedSource {
 
 impl GenericMountGuard for PreparedSource {
     fn path(&self) -> &Path {
-        &self.path
+        self.directory.path()
     }
 
     async fn unmount(self) -> Result<(), Error> {
@@ -288,6 +306,30 @@ pub fn confined_relative(path: &Path) -> Result<PathBuf, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn pinned_directory_keeps_identity_after_name_replacement() {
+        let root = tempfile::tempdir().unwrap();
+        let selected = root.path().join("selected");
+        std::fs::create_dir(&selected).unwrap();
+        std::fs::write(selected.join("marker"), b"original").unwrap();
+        let directory =
+            super::PinnedDirectory::open(root.path(), std::path::Path::new("selected")).unwrap();
+        std::fs::rename(&selected, root.path().join("old")).unwrap();
+        std::fs::create_dir(&selected).unwrap();
+        std::fs::write(selected.join("marker"), b"replacement").unwrap();
+        assert_eq!(
+            tokio::fs::read(directory.path().join("marker"))
+                .await
+                .unwrap(),
+            b"original"
+        );
+        assert_eq!(
+            std::fs::read(selected.join("marker")).unwrap(),
+            b"replacement"
+        );
+    }
 
     #[test]
     fn volume_paths_reject_traversal_and_normalize_container_roots() {

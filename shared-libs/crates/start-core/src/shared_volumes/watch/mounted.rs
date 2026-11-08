@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use super::Event;
-use super::registered::{MountedSource, RegisteredSource, SourceId};
+use super::registered::{DirectoryContents, MountedSource, RegisteredSource, SourceId};
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::cifs::health::KernelState;
 use crate::disk::mount::guard::WeakMountGuard;
@@ -27,7 +27,7 @@ enum Observation<T> {
 #[derive(Debug)]
 enum ProbeObservation {
     Space(Observation<u64>),
-    Directory(PathBuf, Observation<()>),
+    Directory(PathBuf, Observation<DirectoryContents>),
 }
 
 #[derive(Debug)]
@@ -43,10 +43,18 @@ struct Group {
     sources: Vec<MountedSource>,
 }
 
-#[derive(Default)]
 struct Query<T> {
     result: Option<Result<T, String>>,
     task: Option<NonDetachingJoinHandle<()>>,
+}
+
+impl<T> Default for Query<T> {
+    fn default() -> Self {
+        Self {
+            result: None,
+            task: None,
+        }
+    }
 }
 
 impl<T> Query<T> {
@@ -65,41 +73,65 @@ impl<T> Query<T> {
     }
 }
 
+impl Query<DirectoryContents> {
+    fn take_contents(&mut self) -> Option<DirectoryContents> {
+        match self.result.as_mut() {
+            Some(Ok(contents @ DirectoryContents::Target(_))) => {
+                Some(std::mem::replace(contents, DirectoryContents::Folder))
+            }
+            _ => None,
+        }
+    }
+}
+
 struct Probe {
     mount: WeakMountGuard,
     connection: Option<bool>,
     sources: Vec<MountedSource>,
     space: Query<u64>,
     // Folder recovery remains independent of unfinished capacity queries.
-    directories: BTreeMap<PathBuf, Query<()>>,
+    directories: BTreeMap<PathBuf, Query<DirectoryContents>>,
 }
 
 impl Probe {
-    async fn publish_source(&self, ctx: &RpcContext, source: &MountedSource) {
+    async fn publish(&mut self, ctx: &RpcContext) {
+        let paths: BTreeSet<_> = self
+            .sources
+            .iter()
+            .map(MountedSource::relative_path)
+            .collect();
+        for path in paths {
+            self.publish_directory(ctx, &path).await;
+        }
+    }
+
+    async fn publish_directory(&mut self, ctx: &RpcContext, path: &Path) {
         let directory = self
             .directories
-            .get(&source.relative_path())
+            .get(path)
             .and_then(|probe| probe.result.as_ref());
-        if let Some(inspection) =
+        let Some(inspection) =
             source_inspection(self.connection, directory, self.space.result.as_ref())
-        {
-            source.record(ctx, inspection).await.log_err();
-        }
-    }
-
-    async fn publish(&self, ctx: &RpcContext) {
-        for source in &self.sources {
-            self.publish_source(ctx, source).await;
-        }
-    }
-
-    async fn publish_directory(&self, ctx: &RpcContext, path: &Path) {
+        else {
+            return;
+        };
+        // Capacity and kernel updates cannot replay old content validation.
+        let contents = self
+            .directories
+            .get_mut(path)
+            .and_then(Query::take_contents);
         for source in self
             .sources
             .iter()
             .filter(|source| source.relative_path() == path)
         {
-            self.publish_source(ctx, source).await;
+            match &contents {
+                Some(contents) => source
+                    .record_directory(ctx, inspection.clone(), contents)
+                    .await
+                    .log_err(),
+                None => source.record(ctx, inspection.clone()).await.log_err(),
+            };
         }
     }
 }
@@ -149,6 +181,7 @@ impl MountedChecks {
         &mut self,
         ctx: &RpcContext,
         sources: &BTreeMap<SourceId, RegisteredSource>,
+        server_id: &str,
     ) {
         self.probes
             .retain(|_, probe| probe.mount.active_path().is_some());
@@ -246,13 +279,23 @@ impl MountedChecks {
                 let sender = self.send.clone();
                 let mount = probe.mount.clone();
                 let root = group.path.clone();
-                let selected = relative.clone();
+                let registration = super::registered::directory_inspector(
+                    probe
+                        .sources
+                        .iter()
+                        .filter(|source| source.relative_path() == relative)
+                        .map(|source| &source.source),
+                )
+                .unwrap()
+                .clone();
+                let server_id = server_id.to_owned();
                 directory.task = Some(
                     tokio::spawn(async move {
                         let operation = async {
-                            tokio::task::spawn_blocking(move || check_directory(&root, &selected))
+                            registration
+                                .check_directory(root, server_id)
                                 .await
-                                .map_err(source::public_error_message)?
+                                .map_err(source::public_error_message)
                         };
                         observe_query(operation, source::SPACE_QUERY_TIMEOUT, move |observation| {
                             let sender = sender.clone();
@@ -321,17 +364,17 @@ fn should_measure_capacity(
     connection != Some(false) && (deadline_elapsed || inspection.checked_at.is_none())
 }
 
+#[cfg(test)]
 fn check_directory(root: &Path, path: &Path) -> Result<(), String> {
-    crate::shared_volumes::mounts::confined_relative(path)
-        .and_then(|relative| crate::disk::mount::filesystem::syscall::open_beneath(root, &relative))
+    crate::shared_volumes::mounts::PinnedDirectory::open(root, path)
         .map(drop)
         .map_err(source::public_error_message)
 }
 
 // Parent-filesystem health cannot establish selected-folder availability.
-fn source_inspection(
+fn source_inspection<T>(
     connection: Option<bool>,
-    directory: Option<&Result<(), String>>,
+    directory: Option<&Result<T, String>>,
     capacity: Option<&Result<u64, String>>,
 ) -> Option<SharedVolumeInspection> {
     if connection == Some(false) {
@@ -341,7 +384,7 @@ fn source_inspection(
     }
     match directory? {
         Err(error) => Some(SharedVolumeInspection::unavailable(error.clone())),
-        Ok(()) => match (connection, capacity) {
+        Ok(_) => match (connection, capacity) {
             (Some(true), Some(result)) => {
                 Some(SharedVolumeInspection::available_capacity(result.clone()))
             }
@@ -432,7 +475,7 @@ mod tests {
         );
         assert_eq!(inspection.available, None);
         assert_eq!(inspection.error, missing.err());
-        assert!(source_inspection(Some(true), None, Some(&Ok(1024))).is_none());
+        assert!(source_inspection::<()>(Some(true), None, Some(&Ok(1024))).is_none());
         std::fs::create_dir(root.path().join("selected")).unwrap();
         let recovered = check_directory(root.path(), Path::new("selected"));
         let inspection = source_inspection(
@@ -499,6 +542,30 @@ mod tests {
                 .available,
             Some(42)
         );
+    }
+
+    #[tokio::test]
+    async fn target_contents_wait_for_combined_observation_and_cannot_be_replayed() {
+        let root = tempfile::tempdir().unwrap();
+        let contents = crate::backup::target::catalog::read_contents(root.path(), "server")
+            .await
+            .unwrap();
+        let mut query = Query::<DirectoryContents>::default();
+        query.update(Observation::Finished(Ok(DirectoryContents::Target(
+            contents,
+        ))));
+        assert!(source_inspection(None, query.result.as_ref(), None).is_none());
+        assert!(matches!(
+            query.result,
+            Some(Ok(DirectoryContents::Target(_)))
+        ));
+        assert!(source_inspection(None, query.result.as_ref(), Some(&Ok(123))).is_some());
+        assert!(matches!(
+            query.take_contents(),
+            Some(DirectoryContents::Target(_))
+        ));
+        assert!(query.take_contents().is_none());
+        assert!(matches!(query.result, Some(Ok(DirectoryContents::Folder))));
     }
 
     #[tokio::test]

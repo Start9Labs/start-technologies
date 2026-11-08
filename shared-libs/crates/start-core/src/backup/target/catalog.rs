@@ -319,26 +319,30 @@ pub async fn inspect(
         .de()
 }
 
+#[derive(Debug)]
+pub(crate) struct TargetContents {
+    start_os: BTreeMap<String, StartOsRecoveryInfo>,
+    legacy_backup: bool,
+}
+
+pub(crate) async fn read_contents(path: &Path, server_id: &str) -> Result<TargetContents, Error> {
+    Ok(TargetContents {
+        start_os: recovery_info(path).await?,
+        legacy_backup: has_legacy_backup(path, server_id).await,
+    })
+}
+
 pub(super) async fn inspect_contents(
     path: &Path,
     server_id: &str,
-) -> Result<
-    (
-        SharedVolumeInspection,
-        BTreeMap<String, StartOsRecoveryInfo>,
-        bool,
-    ),
-    Error,
-> {
+) -> Result<(SharedVolumeInspection, TargetContents), Error> {
     let capacity = source::measure_mount(path)
         .await
         .map_err(source::public_error_message);
-    let start_os = recovery_info(path).await?;
-    let legacy_backup = has_legacy_backup(path, server_id).await;
+    let contents = read_contents(path, server_id).await?;
     Ok((
         SharedVolumeInspection::available_capacity(capacity),
-        start_os,
-        legacy_backup,
+        contents,
     ))
 }
 
@@ -359,7 +363,7 @@ pub(crate) async fn refresh(
     }
     .await;
     let (inspection, metadata) = match result {
-        Ok((inspection, start_os, legacy_backup)) => (inspection, Some((start_os, legacy_backup))),
+        Ok((inspection, contents)) => (inspection, Some(contents)),
         Err(error) => (
             SharedVolumeInspection::unavailable(source::public_error_message(error)),
             None,
@@ -374,7 +378,7 @@ pub(crate) async fn refresh(
                 &target.definition,
                 mount.as_ref(),
                 inspection,
-                metadata,
+                metadata.as_ref(),
             )
         })
         .await
@@ -387,13 +391,17 @@ pub(crate) async fn refresh(
     cleanup
 }
 
+pub(crate) fn needs_content_validation(inspection: &SharedVolumeInspection) -> bool {
+    inspection.availability != crate::shared_volumes::SharedVolumeAvailability::Available
+}
+
 pub(crate) fn write_inspection(
     db: &mut DatabaseModel,
     id: &BackupTargetId,
     definition: &SourceDefinition,
     mount: Option<&WeakMountGuard>,
     inspection: SharedVolumeInspection,
-    metadata: Option<(BTreeMap<String, StartOsRecoveryInfo>, bool)>,
+    metadata: Option<&TargetContents>,
 ) -> Result<(), Error> {
     if db.as_public().as_backup_targets().as_idx(id).is_none() {
         return Ok(());
@@ -403,15 +411,29 @@ pub(crate) fn write_inspection(
     {
         return Ok(());
     }
+    let previous = db
+        .as_public()
+        .as_backup_targets()
+        .as_idx(id)
+        .or_not_found(id)?
+        .as_inspection()
+        .de()?;
+    // Availability recovery requires revalidating target contents.
+    if inspection.availability == crate::shared_volumes::SharedVolumeAvailability::Available
+        && needs_content_validation(&previous)
+        && metadata.is_none()
+    {
+        return Ok(());
+    }
     db.as_public_mut()
         .as_backup_targets_mut()
         .as_idx_mut(id)
         .or_not_found(id)?
         .mutate(|target| {
             target.inspection = inspection;
-            if let Some((start_os, legacy_backup)) = metadata {
-                target.start_os = start_os;
-                target.legacy_backup = legacy_backup;
+            if let Some(contents) = metadata {
+                target.start_os = contents.start_os.clone();
+                target.legacy_backup = contents.legacy_backup;
             }
             Ok(())
         })

@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use crate::backup::target::{BackupTargetId, catalog};
 use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
 use crate::disk::mount::guard::{TmpMountGuard, WeakMountGuard};
 use crate::prelude::*;
+use crate::shared_volumes::mounts::PinnedDirectory;
 use crate::shared_volumes::source::{self, SourceDefinition};
 use crate::shared_volumes::{
     SharedVolumeAvailability, SharedVolumeId, SharedVolumeInspection, SharedVolumeSource,
@@ -23,6 +25,12 @@ impl SourceId {
             Self::Target(id) => Ok(catalog::BackupTargetSource::read(db, id)?.definition),
         }
     }
+}
+
+#[derive(Debug)]
+pub(super) enum DirectoryContents {
+    Folder,
+    Target(catalog::TargetContents),
 }
 
 #[derive(Clone)]
@@ -65,7 +73,37 @@ pub(super) fn snapshot(db: &DatabaseModel) -> Result<BTreeMap<SourceId, Register
     Ok(sources)
 }
 
+pub(super) fn directory_inspector<'a>(
+    sources: impl Iterator<Item = &'a RegisteredSource>,
+) -> Option<&'a RegisteredSource> {
+    sources.min_by_key(|source| !source.needs_contents())
+}
+
 impl RegisteredSource {
+    pub fn needs_contents(&self) -> bool {
+        matches!(self.id, SourceId::Target(_))
+            && catalog::needs_content_validation(&self.inspection)
+    }
+
+    pub async fn check_directory(
+        &self,
+        root: PathBuf,
+        server_id: String,
+    ) -> Result<DirectoryContents, Error> {
+        let relative = self.definition.subpath().unwrap_or_default();
+        let directory =
+            tokio::task::spawn_blocking(move || PinnedDirectory::open(&root, &relative))
+                .await
+                .with_kind(ErrorKind::Unknown)??;
+        if self.needs_contents() {
+            Ok(DirectoryContents::Target(
+                catalog::read_contents(directory.path(), &server_id).await?,
+            ))
+        } else {
+            Ok(DirectoryContents::Folder)
+        }
+    }
+
     pub async fn inspect(&self, ctx: RpcContext) -> Result<(), Error> {
         match &self.id {
             SourceId::Volume(id) => {
@@ -144,6 +182,32 @@ impl MountedSource {
         inspection: SharedVolumeInspection,
     ) -> Result<(), Error> {
         self.source.record(ctx, Some(&self.mount), inspection).await
+    }
+
+    pub async fn record_directory(
+        &self,
+        ctx: &RpcContext,
+        inspection: SharedVolumeInspection,
+        directory: &DirectoryContents,
+    ) -> Result<(), Error> {
+        match (&self.source.id, directory) {
+            (SourceId::Target(id), DirectoryContents::Target(contents)) => {
+                ctx.db
+                    .mutate(|db| {
+                        catalog::write_inspection(
+                            db,
+                            id,
+                            &self.source.definition,
+                            Some(&self.mount),
+                            inspection,
+                            Some(contents),
+                        )
+                    })
+                    .await
+                    .result
+            }
+            _ => self.record(ctx, inspection).await,
+        }
     }
 }
 

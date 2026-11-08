@@ -3,14 +3,14 @@ use super::*;
 #[tokio::test]
 async fn content_inspection_validates_backup_metadata_before_legacy_edits_publish() {
     let root = tempfile::tempdir().unwrap();
-    let (inspection, backups, legacy) = inspect_contents(root.path(), "server").await.unwrap();
+    let (inspection, contents) = inspect_contents(root.path(), "server").await.unwrap();
     assert_eq!(
         inspection.availability,
         crate::shared_volumes::SharedVolumeAvailability::Available
     );
     assert!(inspection.checked_at.is_some());
-    assert!(backups.is_empty());
-    assert!(!legacy);
+    assert!(contents.start_os.is_empty());
+    assert!(!contents.legacy_backup);
     let metadata = crate::disk::util::BackupUnencryptedMetadata::path(root.path(), "server");
     tokio::fs::create_dir_all(metadata.parent().unwrap())
         .await
@@ -18,6 +18,99 @@ async fn content_inspection_validates_backup_metadata_before_legacy_edits_publis
     tokio::fs::write(metadata, b"{broken").await.unwrap();
     let error = inspect_contents(root.path(), "server").await.unwrap_err();
     assert_eq!(error.kind, ErrorKind::Deserialization);
+}
+
+#[tokio::test]
+async fn target_initialization_and_content_recovery_require_validated_contents() {
+    let mut db = database();
+    initialize(&mut db).unwrap();
+    let id = "cifs-7".parse().unwrap();
+    let source = BackupTargetSource::read(&db, &id).unwrap();
+    let available = SharedVolumeInspection::available(Some(123));
+    write_inspection(
+        &mut db,
+        &id,
+        &source.definition,
+        None,
+        available.clone(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        db.as_public()
+            .as_backup_targets()
+            .as_idx(&id)
+            .unwrap()
+            .as_inspection()
+            .de()
+            .unwrap(),
+        SharedVolumeInspection::default()
+    );
+
+    let root = tempfile::tempdir().unwrap();
+    let contents = read_contents(root.path(), "server").await.unwrap();
+    write_inspection(
+        &mut db,
+        &id,
+        &source.definition,
+        None,
+        available.clone(),
+        Some(&contents),
+    )
+    .unwrap();
+    let metadata_path = crate::disk::util::BackupUnencryptedMetadata::path(root.path(), "server");
+    tokio::fs::create_dir_all(metadata_path.parent().unwrap())
+        .await
+        .unwrap();
+    tokio::fs::write(&metadata_path, b"{broken").await.unwrap();
+    let error = read_contents(root.path(), "server").await.unwrap_err();
+    let failed = SharedVolumeInspection::unavailable(source::public_error_message(error));
+    write_inspection(&mut db, &id, &source.definition, None, failed.clone(), None).unwrap();
+    write_inspection(&mut db, &id, &source.definition, None, available, None).unwrap();
+    assert_eq!(
+        db.as_public()
+            .as_backup_targets()
+            .as_idx(&id)
+            .unwrap()
+            .as_inspection()
+            .de()
+            .unwrap(),
+        failed
+    );
+
+    let metadata = crate::disk::util::BackupUnencryptedMetadata {
+        hostname: crate::hostname::ServerHostname::new("fixture".into()).unwrap(),
+        version: "0.4.2".parse().unwrap(),
+        timestamp: chrono::Utc::now(),
+        password_hash: Some("private-hash".into()),
+        wrapped_key: Some("private-key".into()),
+    };
+    tokio::fs::write(&metadata_path, serde_json::to_vec(&metadata).unwrap())
+        .await
+        .unwrap();
+    let contents = read_contents(root.path(), "server").await.unwrap();
+    let inspection = SharedVolumeInspection::available_capacity(Err("capacity diagnostic".into()));
+    write_inspection(
+        &mut db,
+        &id,
+        &source.definition,
+        None,
+        inspection.clone(),
+        Some(&contents),
+    )
+    .unwrap();
+    let target = db
+        .as_public()
+        .as_backup_targets()
+        .as_idx(&id)
+        .unwrap()
+        .de()
+        .unwrap();
+    assert_eq!(target.inspection, inspection);
+    assert_eq!(target.start_os["server"].hostname.to_string(), "fixture");
+    let public = serde_json::to_string(&target).unwrap();
+    assert!(!public.contains("private-hash"));
+    assert!(!public.contains("private-key"));
 }
 
 fn database() -> DatabaseModel {
@@ -181,7 +274,10 @@ fn stale_and_removed_target_observations_cannot_replace_current_state() {
         &before.definition,
         None,
         SharedVolumeInspection::available(Some(123)),
-        Some((BTreeMap::new(), true)),
+        Some(&TargetContents {
+            start_os: BTreeMap::new(),
+            legacy_backup: true,
+        }),
     )
     .unwrap();
     assert_eq!(
@@ -202,7 +298,10 @@ fn stale_and_removed_target_observations_cannot_replace_current_state() {
         &current.definition,
         None,
         inspection.clone(),
-        Some((BTreeMap::new(), true)),
+        Some(&TargetContents {
+            start_os: BTreeMap::new(),
+            legacy_backup: true,
+        }),
     )
     .unwrap();
     let target = db

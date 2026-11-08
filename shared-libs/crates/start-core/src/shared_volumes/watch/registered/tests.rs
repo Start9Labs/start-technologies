@@ -120,6 +120,63 @@ fn target_definition_tracks_private_password_but_not_names_or_observations() {
 }
 
 #[tokio::test]
+async fn mounted_directory_checks_initialize_and_revalidate_target_contents_without_mounting() {
+    let (db, volume_id, target_id) = database();
+    let sources = snapshot(&db).unwrap();
+    let target = sources[&SourceId::Target(target_id)].clone();
+    let volume = &sources[&SourceId::Volume(volume_id)];
+    let mut available_alias = target.clone();
+    available_alias.inspection = SharedVolumeInspection::available(Some(123));
+    assert!(!available_alias.needs_contents());
+    assert!(!volume.needs_contents());
+    let inspector = directory_inspector([&available_alias, volume, &target].into_iter()).unwrap();
+    assert!(inspector.needs_contents());
+    let root = tempfile::tempdir().unwrap();
+    assert!(matches!(
+        inspector
+            .check_directory(root.path().to_owned(), "server".into())
+            .await
+            .unwrap(),
+        DirectoryContents::Target(_)
+    ));
+    let metadata = crate::disk::util::BackupUnencryptedMetadata::path(root.path(), "server");
+    tokio::fs::create_dir_all(metadata.parent().unwrap())
+        .await
+        .unwrap();
+    tokio::fs::write(&metadata, b"{broken").await.unwrap();
+    assert_eq!(
+        inspector
+            .check_directory(root.path().to_owned(), "server".into())
+            .await
+            .unwrap_err()
+            .kind,
+        ErrorKind::Deserialization
+    );
+    assert!(matches!(
+        volume
+            .check_directory(root.path().to_owned(), "server".into())
+            .await
+            .unwrap(),
+        DirectoryContents::Folder
+    ));
+    assert!(matches!(
+        available_alias
+            .check_directory(root.path().to_owned(), "server".into())
+            .await
+            .unwrap(),
+        DirectoryContents::Folder
+    ));
+    tokio::fs::remove_file(metadata).await.unwrap();
+    assert!(matches!(
+        inspector
+            .check_directory(root.path().to_owned(), "server".into())
+            .await
+            .unwrap(),
+        DirectoryContents::Target(_)
+    ));
+}
+
+#[tokio::test]
 async fn existing_registered_sources_do_not_cold_mount() {
     let (db, _, _) = database();
     for source in snapshot(&db).unwrap().into_values() {
