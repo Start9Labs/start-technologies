@@ -71,7 +71,6 @@ export default {
   72: 'Abmelden',
   73: 'Benutzerhandbuch',
   74: 'Support kontaktieren',
-  75: 'An Start9 spenden',
   76: 'Möchten Sie den Server wirklich neu starten? Es kann einige Minuten dauern, bis er wieder online ist.',
   77: 'Möchten Sie den Server wirklich herunterfahren? Dies kann einige Minuten dauern, und der Server wird nicht automatisch wieder eingeschaltet. Um ihn erneut einzuschalten, müssen Sie das Gerät physisch vom Stromnetz trennen und wieder anschließen.',
   78: 'Dienste',
@@ -960,7 +959,7 @@ export default {
   1108: 'Ungültiges Dateiformat',
   1109: 'Ungültige Antwort vom Server',
   1110: 'Maximale Dateigröße',
-  1111: 'Software teilen',
+  1111: 'Im Marktplatz anzeigen',
   1112: 'S9PKs und OS-Images teilen',
   1113: 'Kompatible installierte S9PKs und OS-Images teilen, die bereits auf diesem Server gespeichert sind.',
   1114: 'HTTP-Downloads zeigen dem Server eine IP-Adresse. BitTorrent erweitert diesen Empfängerkreis auf Tracker und andere Peers.',
@@ -978,4 +977,5 @@ export default {
   1126: 'Standard-Gateway für StartOS',
   1127: 'Keine Standardroute verfügbar.',
   1128: 'Adressen für eingehende Peers',
+  1129: 'Software teilen',
 } satisfies i18n

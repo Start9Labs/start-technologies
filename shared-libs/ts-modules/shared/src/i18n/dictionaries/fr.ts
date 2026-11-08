@@ -71,7 +71,6 @@ export default {
   72: 'Déconnexion',
   73: 'Manuel utilisateur',
   74: 'Contacter le support',
-  75: 'Faire un don à Start9',
   76: 'Voulez-vous vraiment redémarrer votre serveur ? Cela peut prendre plusieurs minutes avant qu’il soit de nouveau en ligne.',
   77: 'Voulez-vous vraiment éteindre votre serveur ? Cela peut prendre plusieurs minutes et il ne redémarrera pas automatiquement. Pour le rallumer, il faudra le débrancher puis le rebrancher.',
   78: 'Services',
@@ -960,7 +959,7 @@ export default {
   1108: 'Format de fichier non valide',
   1109: 'Réponse du serveur non valide',
   1110: 'Taille maximale du fichier',
-  1111: 'Partage de logiciels',
+  1111: 'Voir dans la bibliothèque de services',
   1112: 'Partager les S9PK et les images système',
   1113: 'Partager les S9PK installés et les images système compatibles déjà stockés sur ce serveur.',
   1114: 'Les téléchargements HTTP révèlent une adresse IP au serveur. BitTorrent élargit ce public aux trackers et aux autres pairs.',
@@ -978,4 +977,5 @@ export default {
   1126: 'Passerelle par défaut de StartOS',
   1127: 'Aucune route par défaut disponible.',
   1128: 'Adresses des pairs entrants',
+  1129: 'Partage de logiciels',
 } satisfies i18n

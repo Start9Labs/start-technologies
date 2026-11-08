@@ -70,7 +70,6 @@ export const ENGLISH: Record<string, number> = {
   'Logout': 72,
   'User manual': 73,
   'Contact support': 74,
-  'Donate to Start9': 75,
   'Are you sure you want to restart your server? It can take several minutes to come back online.': 76,
   'Are you sure you want to power down your server? This can take several minutes, and your server will not come back online automatically. To power on again, You will need to physically unplug your server and plug it back in.': 77,
   'Services': 78, // as in, server-side software applications
@@ -961,7 +960,7 @@ export const ENGLISH: Record<string, number> = {
   'Invalid file format': 1108,
   'Invalid response from server': 1109,
   'Maximum file size': 1110,
-  'Software sharing': 1111,
+  'View in Marketplace': 1111,
   'Share S9PKs and OS images': 1112,
   'Share compatible installed S9PKs and OS images already stored on this server.': 1113,
   'HTTP downloads reveal an IP address to the server. BitTorrent widens the audience to trackers and other peers.': 1114,
@@ -979,4 +978,5 @@ export const ENGLISH: Record<string, number> = {
   'Default gateway for StartOS': 1126,
   'No default route is available.': 1127,
   'Incoming peer addresses': 1128,
+  'Software sharing': 1129,
 }

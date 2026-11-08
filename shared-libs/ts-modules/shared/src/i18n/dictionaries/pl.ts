@@ -71,7 +71,6 @@ export default {
   72: 'Wyloguj się',
   73: 'Podręcznik użytkownika',
   74: 'Kontakt ze wsparciem',
-  75: 'Wesprzyj Start9',
   76: 'Czy na pewno chcesz ponownie uruchomić serwer? Może to potrwać kilka minut, zanim będzie ponownie dostępny.',
   77: 'Czy na pewno chcesz wyłączyć serwer? Może to potrwać kilka minut, a serwer nie włączy się automatycznie. Aby go ponownie uruchomić, będziesz musiał fizycznie odłączyć i ponownie podłączyć zasilanie.',
   78: 'Serwisy',
@@ -960,7 +959,7 @@ export default {
   1108: 'Nieprawidłowy format pliku',
   1109: 'Nieprawidłowa odpowiedź serwera',
   1110: 'Maksymalny rozmiar pliku',
-  1111: 'Udostępnianie oprogramowania',
+  1111: 'Zobacz w sklepie',
   1112: 'Udostępniaj pliki S9PK i obrazy systemu',
   1113: 'Udostępniaj zgodne z torrentem zainstalowane pliki S9PK i obrazy systemu przechowywane już na tym serwerze.',
   1114: 'Pobieranie HTTP ujawnia serwerowi adres IP. BitTorrent rozszerza grono odbiorców o trackery i inne peery.',
@@ -978,4 +977,5 @@ export default {
   1126: 'Domyślna brama StartOS',
   1127: 'Brak dostępnej trasy domyślnej.',
   1128: 'Adresy dla połączeń przychodzących peerów',
+  1129: 'Udostępnianie oprogramowania',
 } satisfies i18n
