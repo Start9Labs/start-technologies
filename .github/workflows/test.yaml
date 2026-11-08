@@ -79,6 +79,11 @@ jobs:
           for product in $products; do
             node scripts/changelog.mjs check-version "projects/${product#projects/}"
           done
+      - &apt-test-dependencies
+        name: Install APT test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends apt-utils
       - name: Check changelog and release tooling
         run: make release-notes-test
 
@@ -138,6 +143,7 @@ jobs:
           npm --prefix .github/actions/upload-each run build
           test -z "$(git status --porcelain --untracked-files=all -- .github/actions/upload-each/dist)"
 
+      - *apt-test-dependencies
       - name: Install Bash completion test dependency
         run: sudo apt-get install -y bash-completion
 
