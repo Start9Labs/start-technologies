@@ -62,13 +62,6 @@ import { ABOUT } from './about.component'
         >
           {{ 'Contact support' | i18n }}
         </a>
-        <a
-          tuiOption
-          iconStart="@tui.dollar-sign"
-          href="https://donate.start9.com"
-        >
-          {{ 'Donate to Start9' | i18n }}
-        </a>
         <hr />
         <a tuiOption iconStart="@tui.settings" routerLink="/system">
           {{ 'System Settings' | i18n }}

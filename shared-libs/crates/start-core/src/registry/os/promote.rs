@@ -19,9 +19,9 @@ use crate::sign::commitment::blake3::Blake3Commitment;
 #[serde(rename_all = "camelCase")]
 pub struct CliOsPromoteParams {
     #[arg(long, help = "help.arg.from-registry-url")]
-    pub from: Option<Url>,
+    pub from: Option<String>,
     #[arg(long, help = "help.arg.to-registry-url")]
-    pub to: Option<Url>,
+    pub to: Option<String>,
     #[arg(help = "help.arg.os-version")]
     pub version: Version,
     #[arg(long, help = "help.arg.expected-os-git-hash")]
@@ -44,8 +44,8 @@ pub async fn cli_os_promote(
         ));
     }
 
-    let from_url = resolve_registry_url(from.as_ref(), &ctx)?;
-    let to_url = resolve_registry_url(to.as_ref(), &ctx)?;
+    let from_url = resolve_registry_url(from.as_deref(), &ctx)?;
+    let to_url = resolve_registry_url(to.as_deref(), &ctx)?;
 
     let res: Value = call_registry(&ctx, from_url, "os.index", imbl_value::json!({})).await?;
     let os_index: OsIndex = from_value(res)?;
@@ -144,19 +144,22 @@ async fn promote_assets(
             .sign_commitment(commitment, SIG_CONTEXT)
             .await?;
 
-        call_registry(
-            ctx,
-            to_url.clone(),
-            method,
-            imbl_value::json!({
-                "version": version,
-                "platform": platform,
-                "url": &asset.urls[0],
-                "signature": signature,
-                "commitment": commitment,
-            }),
-        )
-        .await?;
+        for url in &asset.urls {
+            call_registry(
+                ctx,
+                to_url.clone(),
+                method,
+                imbl_value::json!({
+                    "version": version,
+                    "platform": platform,
+                    "url": url,
+                    "signature": signature,
+                    "signatures": &asset.signatures,
+                    "commitment": commitment,
+                }),
+            )
+            .await?;
+        }
     }
     Ok(())
 }

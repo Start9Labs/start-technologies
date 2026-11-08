@@ -70,7 +70,6 @@ export const ENGLISH: Record<string, number> = {
   'Logout': 72,
   'User manual': 73,
   'Contact support': 74,
-  'Donate to Start9': 75,
   'Are you sure you want to restart your server? It can take several minutes to come back online.': 76,
   'Are you sure you want to power down your server? This can take several minutes, and your server will not come back online automatically. To power on again, You will need to physically unplug your server and plug it back in.': 77,
   'Services': 78, // as in, server-side software applications
@@ -961,7 +960,8 @@ export const ENGLISH: Record<string, number> = {
   'Invalid file format': 1108,
   'Invalid response from server': 1109,
   'Maximum file size': 1110,
-  'Force stop': 1111,
-  'Force stopping': 1112,
-  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 1113,
+  'View in Marketplace': 1111,
+  'Force stop': 1112,
+  'Force stopping': 1113,
+  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 1114,
 }
