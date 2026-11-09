@@ -1235,7 +1235,7 @@ export type CommandOptions = {
 }
 
 export type StdioOptions = {
-  stdio?: cp.IOType
+  stdio?: cp.StdioOptions
 }
 
 /** UID/GID mapping for mount id-remapping (see kernel idmappings docs) */

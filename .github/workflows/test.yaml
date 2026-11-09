@@ -79,6 +79,7 @@ jobs:
           for product in $products; do
             node scripts/changelog.mjs check-version "projects/${product#projects/}"
           done
+      - uses: ./.github/actions/setup-release-tests
       - name: Check changelog and release tooling
         run: make release-notes-test
 
@@ -127,7 +128,6 @@ jobs:
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
-          free-space: 'false'
           setup-docker: 'false'
           setup-sccache: 'false'
 
@@ -138,6 +138,7 @@ jobs:
           npm --prefix .github/actions/upload-each run build
           test -z "$(git status --porcelain --untracked-files=all -- .github/actions/upload-each/dist)"
 
+      - uses: ./.github/actions/setup-release-tests
       - name: Install Bash completion test dependency
         run: sudo apt-get install -y bash-completion
 

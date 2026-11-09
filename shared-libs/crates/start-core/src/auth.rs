@@ -1,5 +1,6 @@
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::BTreeMap;
+use std::net::IpAddr;
 use std::path::Path;
 
 use chrono::{DateTime, TimeDelta, Utc};
@@ -108,7 +109,25 @@ pub trait LoginContext: SignatureAuthContext {
     fn post_login_hook(&self, password: &str) -> impl Future<Output = Result<(), Error>> + Send {
         async { Ok(()) }
     }
+    /// Observes each correctly signed login with its outcome.
+    #[allow(unused_variables)]
+    fn login_attempt_hook(
+        &self,
+        attempt: &LoginAttempt,
+        result: Result<(), &Error>,
+    ) -> impl Future<Output = ()> + Send {
+        async {}
+    }
 }
+
+/// Where a login came from.
+#[derive(Debug, Clone, Default)]
+pub struct LoginAttempt {
+    /// The client's address, through any relay that recorded it.
+    pub peer: Option<IpAddr>,
+    pub user_agent: Option<String>,
+}
+
 /// Removes bearer tokens and kills the continuations they opened. For call sites
 /// already inside a db transaction.
 pub fn revoke_tokens<C: LoginContext>(
@@ -253,6 +272,7 @@ pub fn auth<C: Context, AC: LoginContext, CC: IdKeyContext + CallRemote<AC>>() -
                 .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .with_metadata("get_signer", Value::Bool(true))
                 .with_metadata("get_user_agent", Value::Bool(true))
+                .with_metadata("get_peer", Value::Bool(true))
                 .no_cli(),
         )
         .subcommand(
@@ -568,6 +588,9 @@ pub struct LoginParams {
     #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
     signer: AnyVerifyingKey,
+    #[visit(ts(skip))]
+    #[serde(rename = "__Auth_peer", default)]
+    peer: Option<IpAddr>,
     /// Enroll in memory only, never persisted (kiosk mode, which re-enrolls
     /// on every browser restart and would otherwise accumulate keys).
     #[serde(default)]
@@ -585,6 +608,7 @@ pub async fn login_impl<C: LoginContext>(
         user_agent,
         pubkey,
         signer,
+        peer,
         ephemeral,
     }: LoginParams,
 ) -> Result<(), Error> {
@@ -595,6 +619,23 @@ pub async fn login_impl<C: LoginContext>(
         ));
     }
 
+    let attempt = LoginAttempt {
+        peer,
+        user_agent: user_agent.clone(),
+    };
+    let result = enroll(&ctx, &password, &pubkey, user_agent, ephemeral).await;
+    ctx.login_attempt_hook(&attempt, result.as_ref().map(|_| ()))
+        .await;
+    result
+}
+
+async fn enroll<C: LoginContext>(
+    ctx: &C,
+    password: &str,
+    pubkey: &AnyVerifyingKey,
+    user_agent: Option<String>,
+    ephemeral: bool,
+) -> Result<(), Error> {
     let now = Utc::now();
     let pubkey = pubkey.interned_der64();
     let record = Session {
@@ -610,14 +651,14 @@ pub async fn login_impl<C: LoginContext>(
                 ErrorKind::InvalidRequest,
             ));
         };
-        C::check_password(&ctx.db().peek().await, &password)?;
+        C::check_password(&ctx.db().peek().await, password)?;
         ephemeral_keys.mutate(|keys| {
             keys.0.insert(pubkey.clone(), record);
         });
     } else {
         ctx.db()
             .mutate(|db| {
-                C::check_password(db, &password)?;
+                C::check_password(db, password)?;
                 C::access_auth_keys(db).insert(&pubkey, &record)?;
                 Ok(())
             })
@@ -625,9 +666,7 @@ pub async fn login_impl<C: LoginContext>(
             .result?;
     }
 
-    ctx.post_login_hook(&password).await?;
-
-    Ok(())
+    ctx.post_login_hook(password).await
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
