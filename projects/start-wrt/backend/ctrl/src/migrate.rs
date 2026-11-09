@@ -124,7 +124,7 @@ impl Migration {
             }
             Migration::ReissueRootCa => "reissue the Root CA in a form iOS can install",
             Migration::NameProfileFirewallSections => {
-                "keep firewall rules added in LuCI when a profile is saved"
+                "name each profile's firewall sections so saving a profile keeps changes made in LuCI"
             }
             Migration::BindLuciToLoopback => "serve LuCI only over HTTPS",
         }
