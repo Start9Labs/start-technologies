@@ -39,6 +39,10 @@ import {
 
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { MarketplacePkg } from '../types'
+import {
+  compatibleVersions,
+  satisfiesWithAliases,
+} from '../util/compatible-versions'
 import { MarketplaceAboutComponent } from './about.component'
 import { MarketplaceDependenciesComponent } from './dependencies.component'
 import { MarketplaceFlavorsComponent } from './flavors.component'
@@ -177,13 +181,12 @@ export class MarketplacePreviewComponent {
         tap(pkg => {
           if (!pkg || version) return
           const range = this.targetRange()
-          if (!range || this.satisfiesWithAliases(pkg, range)) return
-          const flv = this.exver.getFlavor(pkg.version)
-          const candidate = this.compatibleVersions(pkg, range)[0]
+          if (!range || satisfiesWithAliases(this.exver, pkg, range)) return
+          const candidate = compatibleVersions(this.exver, pkg, range)[0]
           if (candidate) {
             this.selectedVersion.set(candidate)
           } else {
-            this.selectSatisfyingFlavor(flv, range)
+            this.selectSatisfyingFlavor(pkg.flavor, range)
           }
         }),
         filter(pkg => {
@@ -191,7 +194,9 @@ export class MarketplacePreviewComponent {
 
           return (
             !!pkg &&
-            (!!version || !range || this.satisfiesWithAliases(pkg, range))
+            (!!version ||
+              !range ||
+              satisfiesWithAliases(this.exver, pkg, range))
           )
         }),
         startWith<MarketplacePkg | null>(null),
@@ -208,7 +213,6 @@ export class MarketplacePreviewComponent {
       : this.marketplaceService.getPackage$(this.pkgId(), version, flavor)
   }
 
-  // No-match covers every listed flavor and version of the package.
   private async selectSatisfyingFlavor(current: string | null, range: string) {
     const { packages } = await firstValueFrom(
       this.marketplaceService.currentRegistry$,
@@ -217,7 +221,7 @@ export class MarketplacePreviewComponent {
       p =>
         p.id === this.pkgId() &&
         p.flavor !== current &&
-        !!this.compatibleVersions(p, range).length,
+        !!compatibleVersions(this.exver, p, range).length,
     )
 
     if (match) {
@@ -230,21 +234,6 @@ export class MarketplacePreviewComponent {
     } else {
       this.noMatch.set(true)
     }
-  }
-
-  private satisfiesWithAliases(pkg: MarketplacePkg, range: string): boolean {
-    return this.exver.releaseSatisfies(pkg.version, pkg.satisfies || [], range)
-  }
-
-  private compatibleVersions(pkg: MarketplacePkg, range: string | null) {
-    return [pkg.version, ...Object.keys(pkg.otherVersions)]
-      .filter(v => this.exver.getFlavor(v) === pkg.flavor)
-      .filter(v =>
-        v === pkg.version
-          ? !range || this.satisfiesWithAliases(pkg, range)
-          : !range || this.exver.satisfies(v, range),
-      )
-      .sort((a, b) => -1 * (this.exver.compareExver(a, b) || 0))
   }
 
   readonly flavors$ = this.flavor$.pipe(
@@ -264,7 +253,7 @@ export class MarketplacePreviewComponent {
     switchMap(flavor =>
       this.marketplaceService.getPackage$(this.pkgId(), null, flavor).pipe(
         filter(Boolean),
-        map(pkg => this.compatibleVersions(pkg, this.targetRange())),
+        map(pkg => compatibleVersions(this.exver, pkg, this.targetRange())),
       ),
     ),
   )
