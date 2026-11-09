@@ -54,6 +54,23 @@ packaging
   )
 })
 
+const NEXT = `start-os=0.4.3.x
+start-os=0.4.2.x@start-os/v0.4.2
+start-os=0.4.1.x@start-os/v0.4.1.2
+start-os=0.4.0.x@start-os/v0.4.0.4
+start-tunnel=1.6.x
+start-wrt=1.4.x
+packaging
+`
+
+test('the next StartOS minor archives the shipped 0.4.2 book', () => {
+  assert.equal(reconcile(NEXT, TAGGED, 'start-os', '0.4.3'), NEXT)
+})
+
+test('another product release does not publish the pending 0.4.3 book', () => {
+  assert.equal(reconcile(TAGGED, TAGGED, 'start-wrt', '1.4.1', NEXT), TAGGED)
+})
+
 test('a hand-labelled book uses its current entry', () => {
   const tunnel = `start-tunnel=1.6.x
 start-tunnel=1.5.x@start-tunnel/v1.5.0

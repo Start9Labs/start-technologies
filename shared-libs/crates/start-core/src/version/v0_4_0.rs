@@ -123,7 +123,7 @@ mod test {
             } });
             let pre_ups = PreUps::load(&previous, &current).await.unwrap();
             migrate_from_unchecked(&previous, &current, pre_ups, &mut db).unwrap();
-            assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.2"));
+            assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.3"));
             assert_eq!(
                 db["public"]["serverInfo"]["postInitMigrationTodos"]["0.4.0"],
                 json!(eligible),

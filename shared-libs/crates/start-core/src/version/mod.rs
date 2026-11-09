@@ -86,10 +86,11 @@ mod v0_4_1_1;
 mod v0_4_1_2;
 mod v0_4_1_3;
 mod v0_4_2;
+mod v0_4_3;
 #[cfg(test)]
 pub(crate) use v0_4_1_2::retired_alpha_keys;
 
-pub type Current = v0_4_2::Version; // VERSION_BUMP
+pub type Current = v0_4_3::Version; // VERSION_BUMP
 
 impl Current {
     #[instrument(skip(self, db))]
@@ -239,7 +240,8 @@ enum Version {
     V0_4_1_1(Wrapper<v0_4_1_1::Version>),
     V0_4_1_2(Wrapper<v0_4_1_2::Version>),
     V0_4_1_3(Wrapper<v0_4_1_3::Version>),
-    V0_4_2(Wrapper<v0_4_2::Version>), // VERSION_BUMP
+    V0_4_2(Wrapper<v0_4_2::Version>),
+    V0_4_3(Wrapper<v0_4_3::Version>), // VERSION_BUMP
     Other(exver::Version),
 }
 
@@ -327,7 +329,8 @@ impl Version {
             Self::V0_4_1_1(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_1_2(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_1_3(v) => DynVersion(Box::new(v.0)),
-            Self::V0_4_2(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
+            Self::V0_4_2(v) => DynVersion(Box::new(v.0)),
+            Self::V0_4_3(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
             Self::Other(v) => {
                 return Err(Error::new(
                     eyre!("unknown version {v}"),
@@ -407,7 +410,8 @@ impl Version {
             Version::V0_4_1_1(Wrapper(x)) => x.semver(),
             Version::V0_4_1_2(Wrapper(x)) => x.semver(),
             Version::V0_4_1_3(Wrapper(x)) => x.semver(),
-            Version::V0_4_2(Wrapper(x)) => x.semver(), // VERSION_BUMP
+            Version::V0_4_2(Wrapper(x)) => x.semver(),
+            Version::V0_4_3(Wrapper(x)) => x.semver(), // VERSION_BUMP
             Version::Other(x) => x.clone(),
         }
     }
@@ -893,9 +897,9 @@ mod tests {
         let previous = v0_4_0_5::Version;
         let current = Current::default();
         let resolved = Version::from_exver_version(current.semver());
-        assert!(matches!(resolved, Version::V0_4_2(_)));
+        assert!(matches!(resolved, Version::V0_4_3(_)));
         let target = resolved.as_version_t().unwrap();
-        assert_eq!(target.previous().semver(), v0_4_1_3::Version.semver());
+        assert_eq!(target.previous().semver(), v0_4_2::Version.semver());
         let mut db = json!({ "private": { "sessionPubkeys": {} }, "public": { "serverInfo": {
             "version": "0.4.0.5",
             "packageVersionCompat": ">=0.3.0 <0.5.0",
@@ -905,14 +909,14 @@ mod tests {
         let packages = db["public"]["packageData"].clone();
         let pre_ups = PreUps::load(&previous, &target).await.unwrap();
         migrate_from_unchecked(&previous, &target, pre_ups, &mut db).unwrap();
-        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.2"));
+        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.3"));
         assert_eq!(
             db["public"]["serverInfo"]["packageVersionCompat"],
             to_value(current.compat()).unwrap()
         );
         assert_eq!(
             db["public"]["serverInfo"]["postInitMigrationTodos"],
-            json!({ "0.4.1": null, "0.4.1.1": null, "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null })
+            json!({ "0.4.1": null, "0.4.1.1": null, "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null, "0.4.3": null })
         );
         assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
         assert_eq!(db["public"]["packageData"], packages);
@@ -925,46 +929,52 @@ mod tests {
     #[tokio::test]
     async fn current_commits_after_trust_migration_without_changing_service_or_private_data() {
         let current = Current::default();
-        assert_eq!(current.previous().semver(), v0_4_1_3::Version.semver());
+        assert_eq!(current.previous().semver(), v0_4_2::Version.semver());
         assert!(matches!(
             Version::from_exver_version(current.semver()),
-            Version::V0_4_2(_)
+            Version::V0_4_3(_)
         ));
         for (from, revision, todos, trust) in [
             (
                 "0.4.1",
                 2,
-                json!({ "0.4.1.1": null, "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null }),
+                json!({ "0.4.1.1": null, "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null, "0.4.3": null }),
                 to_value(&crate::trusted_keys::legacy::initial_keyrings()).unwrap(),
             ),
             (
                 "0.4.1.1",
                 0,
-                json!({ "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null }),
+                json!({ "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null, "0.4.3": null }),
                 to_value(&crate::trusted_keys::legacy::initial_keyrings()).unwrap(),
             ),
             (
                 "0.4.1.2",
                 0,
-                json!({ "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null }),
+                json!({ "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null, "0.4.3": null }),
                 to_value(&crate::trusted_keys::initial_trusted_keys()).unwrap(),
             ),
             (
                 "0.4.1.2",
                 1,
-                json!({ "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null }),
+                json!({ "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null, "0.4.3": null }),
                 to_value(&crate::trusted_keys::initial_trusted_keys()).unwrap(),
             ),
             (
                 "0.4.1.2",
                 2,
-                json!({ "0.4.1.3": null, "0.4.2": null }),
+                json!({ "0.4.1.3": null, "0.4.2": null, "0.4.3": null }),
                 to_value(&crate::trusted_keys::initial_trusted_keys()).unwrap(),
             ),
             (
                 "0.4.1.3",
                 0,
-                json!({ "0.4.2": null }),
+                json!({ "0.4.2": null, "0.4.3": null }),
+                to_value(&crate::trusted_keys::initial_trusted_keys()).unwrap(),
+            ),
+            (
+                "0.4.2",
+                0,
+                json!({ "0.4.3": null }),
                 to_value(&crate::trusted_keys::initial_trusted_keys()).unwrap(),
             ),
         ] {
@@ -984,7 +994,7 @@ mod tests {
             let packages = db["public"]["packageData"].clone();
             let upgrade = Upgrade::load(&previous, &current, revision).await.unwrap();
             upgrade.apply(&previous, &current, &mut db).unwrap();
-            assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.2"));
+            assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.3"));
             assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
             assert_eq!(
                 db["public"]["serverInfo"]["packageVersionCompat"],
@@ -1011,6 +1021,7 @@ mod tests {
             ("0.4.0.4", "0.4.0.5", 3),
             ("0.4.1.2", "0.4.1.3", 0),
             ("0.4.1.3", "0.4.2", 0),
+            ("0.4.2", "0.4.3", 0),
         ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
