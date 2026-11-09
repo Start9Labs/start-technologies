@@ -195,7 +195,7 @@ Kieruj jeden VPN przez drugi w celu dodatkowej prywatności. Twój ruch wychodzi
 Prześlij plik konfiguracyjny WireGuard od swojego dostawcy VPN (Mullvad, ProtonVPN, IVPN itp.), aby utworzyć nowego klienta VPN.`,
   '/outbound/vpn': `## Wychodzące VPN
 
-<details><summary>Etykieta</summary> Przyjazna nazwa identyfikująca to połączenie VPN. Użyj czegoś opisowego, jak „Mullvad Szwecja” lub „Praca VPN”. </details> <details><summary>Łączy się z</summary> Dokąd powinien być kierowany ruch z tego VPN:<ul><li><b>Internet:</b> Ruch wychodzi bezpośrednio do internetu przez ten VPN.</li><li><b>Inny VPN:</b> Najpierw połącz łańcuchowo przez inny VPN dla dodatkowej prywatności. Twój ruch zostanie zaszyfrowany wielokrotnie i wyjdzie przez wiele serwerów.</li></ul><b>Uwaga:</b> Łańcuchowanie VPN zwiększa opóźnienia i może zmniejszyć prędkości. </details> <details><summary>Serwery DNS</summary> Serwery, z którymi przez tunel łączą się profile kierowane przez tę sieć VPN, niemające własnych serwerów DNS. Pozostaw puste, aby używać własnych systemowych serwerów DNS przez tunel — lub, gdy system używa DNS dostawcy internetu, jego serwerów poza tunelem. </details> <details><summary>Ścieżka połączenia</summary> Pokazuje szyfrowane tunele, przez które przechodzi Twój ruch w drodze do internetu. Każdy tunel zaczyna się na routerze i kończy na swoim serwerze VPN. Gdy ten VPN łączy się przez inny, jego tunel biegnie wewnątrz tamtego: serwer tamtego VPN otwiera tunel zewnętrzny i przekazuje wewnętrzny do serwera tego VPN, skąd Twój ruch wychodzi do internetu.</details>`,
+<details><summary>Etykieta</summary> Przyjazna nazwa identyfikująca to połączenie VPN. Użyj czegoś opisowego, jak „Mullvad Szwecja” lub „Praca VPN”. </details> <details><summary>Łączy się przez</summary> Dokąd powinien być kierowany ruch z tego VPN:<ul><li><b>Internet:</b> Ruch wychodzi bezpośrednio do internetu przez ten VPN.</li><li><b>Inny VPN:</b> Najpierw połącz łańcuchowo przez inny VPN dla dodatkowej prywatności. Twój ruch zostanie zaszyfrowany wielokrotnie i wyjdzie przez wiele serwerów.</li></ul><b>Uwaga:</b> Łańcuchowanie VPN zwiększa opóźnienia i może zmniejszyć prędkości. </details> <details><summary>Serwery DNS</summary> Serwery, z którymi przez tunel łączą się profile kierowane przez tę sieć VPN, niemające własnych serwerów DNS. Pozostaw puste, aby używać własnych systemowych serwerów DNS przez tunel — lub, gdy system używa DNS dostawcy internetu, jego serwerów poza tunelem. </details> <details><summary>Ścieżka połączenia</summary> Pokazuje szyfrowane tunele, przez które przechodzi Twój ruch w drodze do internetu. Każdy tunel zaczyna się na routerze i kończy na swoim serwerze VPN. Gdy ten VPN łączy się przez inny, jego tunel biegnie wewnątrz tamtego: serwer tamtego VPN otwiera tunel zewnętrzny i przekazuje wewnętrzny do serwera tego VPN, skąd Twój ruch wychodzi do internetu.</details>`,
   '/outbound/dialog': `## Wychodzące VPN
 
 Klienci VPN tworzą wychodzące połączenie z serwerem VPN, umożliwiając urządzeniom wysyłanie i odbieranie danych tak, jakby były bezpośrednio połączone z siecią prywatną. Maskuje Twój adres IP, omija ograniczenia geograficzne i chroni poufne dane w publicznych sieciach Wi-Fi.
@@ -208,9 +208,9 @@ Jasna i opisowa nazwa połączenia VPN, taka jak „Mullvad Szwecja” lub „Pr
 
 Prześlij plik **.conf** WireGuard od swojego dostawcy VPN. Plik ten zawiera adres serwera, klucze i ustawienia połączenia potrzebne do nawiązania tunelu. Większość dostawców (Mullvad, ProtonVPN, IVPN itp.) udostępnia pliki konfiguracyjne WireGuard do pobrania ze swojej witryny lub aplikacji.
 
-### Cel
+### Łączy się przez
 
-Następny przeskok na ścieżce warstwowego połączenia VPN.
+Jak ten VPN dociera do własnego serwera VPN: bezpośrednio przez internet albo przez tunel innego VPN.
 
 ### Serwery DNS
 

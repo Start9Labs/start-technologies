@@ -242,7 +242,7 @@ export class VPNChain {
 
   protected readonly shade = tuiGenerateId()
 
-  /** The VPN, then each VPN it connects through. */
+  /** The VPN, then each VPN that it connects via. */
   readonly chain = input.required<readonly string[]>()
 
   protected readonly layout = computed(() => {

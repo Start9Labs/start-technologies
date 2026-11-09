@@ -195,7 +195,7 @@ export function getSafeTargets(
   ]
 }
 
-/** The VPN, then each VPN it connects through. Stops at a cycle. */
+/** The VPN, then each VPN that it connects via. Stops at a cycle. */
 export function buildChain(vpnLabel: string, allVpns: OutboundVpn[]): string[] {
   const chain = [vpnLabel]
   let current = allVpns.find(v => v.label === vpnLabel)

@@ -195,7 +195,7 @@ Route one VPN through another for additional privacy. Your traffic exits through
 Upload a WireGuard configuration file from your VPN provider (Mullvad, ProtonVPN, IVPN, etc.) to create a new VPN client.`,
   '/outbound/vpn': `## Outbound VPNs
 
-<details><summary>Label</summary> A friendly name to identify this VPN connection. Use something descriptive like "Mullvad Sweden" or "Work VPN". </details> <details><summary>Connects to</summary> Where traffic from this VPN should be routed:<ul><li><b>Internet:</b> Traffic exits directly to the internet through this VPN.</li><li><b>Another VPN:</b> Chain through another VPN first for extra privacy. Your traffic will be encrypted multiple times and exit through multiple servers.</li></ul><b>Note:</b> Chaining VPNs increases latency and may reduce speeds. </details> <details><summary>DNS Servers</summary> Resolvers reached through the tunnel by profiles routed through this VPN that have no DNS servers of their own. Leave blank to use the system's custom DNS servers through the tunnel — or, when the system uses your ISP's DNS, your ISP's servers outside it. </details> <details><summary>Connection Path</summary> Shows the encrypted tunnels your traffic travels through on its way to the internet. Each tunnel starts at the router and ends at its VPN server. When this VPN connects through another, its tunnel runs inside the other one: that VPN's server opens the outer tunnel and passes the inner one on to this VPN's server, where your traffic leaves for the internet.</details>`,
+<details><summary>Label</summary> A friendly name to identify this VPN connection. Use something descriptive like "Mullvad Sweden" or "Work VPN". </details> <details><summary>Connects via</summary> Where traffic from this VPN should be routed:<ul><li><b>Internet:</b> Traffic exits directly to the internet through this VPN.</li><li><b>Another VPN:</b> Chain through another VPN first for extra privacy. Your traffic will be encrypted multiple times and exit through multiple servers.</li></ul><b>Note:</b> Chaining VPNs increases latency and may reduce speeds. </details> <details><summary>DNS Servers</summary> Resolvers reached through the tunnel by profiles routed through this VPN that have no DNS servers of their own. Leave blank to use the system's custom DNS servers through the tunnel — or, when the system uses your ISP's DNS, your ISP's servers outside it. </details> <details><summary>Connection Path</summary> Shows the encrypted tunnels your traffic travels through on its way to the internet. Each tunnel starts at the router and ends at its VPN server. When this VPN connects through another, its tunnel runs inside the other one: that VPN's server opens the outer tunnel and passes the inner one on to this VPN's server, where your traffic leaves for the internet.</details>`,
   '/outbound/dialog': `## Outbound VPNs
 
 VPN clients create an outbound connection to a VPN server, allowing devices to send and receive data as if they were directly connected to the private network. Masks your IP address, bypasses geographic restrictions, and protects sensitive data on public Wi-Fi networks.
@@ -208,9 +208,9 @@ A clear and descriptive name for the VPN connection, such as "Mullvad Sweden" or
 
 Upload a WireGuard **.conf** file from your VPN provider. This file contains the server address, keys, and connection settings needed to establish the tunnel. Most providers (Mullvad, ProtonVPN, IVPN, etc.) offer WireGuard config file downloads from their website or app.
 
-### Target
+### Connects via
 
-The next hop in the path of a layered VPN connection.
+How this VPN reaches its own VPN server: directly over the Internet, or through another VPN's tunnel.
 
 ### DNS Servers
 

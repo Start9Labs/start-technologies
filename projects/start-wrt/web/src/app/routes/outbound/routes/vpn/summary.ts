@@ -4,6 +4,7 @@ import { Summary } from 'src/app/components/summary'
 import { buildChain } from 'src/app/routes/outbound/utils'
 import OutboundVPN from 'src/app/routes/outbound/routes/vpn/index'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { VPNChain } from './chain'
 import { i18nKey } from 'src/app/i18n/i18n.providers'
 import { i18nService } from 'src/app/i18n/i18n.service'
 import { OutboundVpn } from 'src/app/services/api/api.service'
@@ -33,7 +34,6 @@ const STATUS: Record<
     hint: "Turned off. Profiles can't use it until it's enabled again.",
   },
 }
-import { VPNChain } from './chain'
 
 @Component({
   selector: '[vpnSummary]',
