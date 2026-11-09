@@ -408,6 +408,18 @@ impl startos::middleware::auth::session::SessionContext for ServerContext {
     }
 }
 impl startos::middleware::auth::session::SecureRpcContext for ServerContext {
+    fn replay_check(&self) -> startos::middleware::auth::signature::RequestReplayCheck {
+        let continuations = Arc::downgrade(&self.continuations);
+        let server_identity = self.server_identity.clone();
+        startos::middleware::auth::signature::RequestReplayCheck::new(&self.auth, move |auth| {
+            Some(Self {
+                continuations: continuations.upgrade()?,
+                auth,
+                server_identity: server_identity.clone(),
+                secure_session: None,
+            })
+        })
+    }
     fn server_identity(&self) -> Result<startos::sign::Signer, startos::Error> {
         Ok(self.server_identity.clone())
     }
@@ -442,6 +454,8 @@ impl CtrlContext for ServerContext {
 
 #[cfg(test)]
 mod cli_tests;
+#[cfg(test)]
+mod replay_tests;
 
 #[cfg(test)]
 mod server_identity_tests {

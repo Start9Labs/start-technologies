@@ -117,6 +117,11 @@ impl SessionContext for RegistryContext {
     }
 }
 impl crate::middleware::auth::session::SecureRpcContext for RegistryContext {
+    fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
+        crate::middleware::auth::signature::RequestReplayCheck::new(&self.0, |seed| {
+            Some(Self(seed, None))
+        })
+    }
     fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
         Ok(self.server_identity.clone())
     }
@@ -511,8 +516,9 @@ impl SignatureAuthContext for RegistryContext {
     fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T {
         self.auth_sig_nonce_cache.mutate(f)
     }
+    /// Trusts the registry host clock.
     async fn clock_synced(&self) -> bool {
-        true // Assume. Validating registry clock sync out of scope for now,
+        true
     }
     fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
         &self.open_authed_continuations

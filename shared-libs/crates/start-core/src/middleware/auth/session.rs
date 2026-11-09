@@ -64,6 +64,8 @@ pub trait SessionContext {
 /// Supplies the server identity and installs verified, connection-local provenance.
 pub trait SecureRpcContext: SignatureAuthContext + Clone {
     fn server_identity(&self) -> Result<Signer, Error>;
+    /// Acquires admission replay policy without retaining its context.
+    fn replay_check(&self) -> super::signature::RequestReplayCheck;
     fn with_secure_session(self, session: SecureSession) -> Self;
 }
 

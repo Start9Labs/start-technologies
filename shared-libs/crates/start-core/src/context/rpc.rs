@@ -146,6 +146,11 @@ impl SessionContext for RpcContext {
     }
 }
 impl crate::middleware::auth::session::SecureRpcContext for RpcContext {
+    fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
+        crate::middleware::auth::signature::RequestReplayCheck::new(&self.0, |seed| {
+            Some(Self(seed, None))
+        })
+    }
     fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
         crate::middleware::auth::signature::SigningContext::signing_key(self)
     }

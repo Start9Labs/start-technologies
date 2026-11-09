@@ -1,11 +1,14 @@
 use std::collections::{BTreeSet, HashSet};
 use std::future::Future;
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::Request;
 use chrono::TimeDelta;
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use http::header::USER_AGENT;
 use http::{Extensions, HeaderMap, HeaderValue};
 use itertools::Itertools;
@@ -517,6 +520,49 @@ async fn verify_request_signature_with_address<C: SignatureAuthContext>(
 
     Ok((signer, address))
 }
+
+/// Live replay and clock policy without retaining the authentication owner.
+#[derive(Clone)]
+pub struct RequestReplayCheck(
+    Arc<dyn Fn(RequestCommitment) -> BoxFuture<'static, Result<(), Error>> + Send + Sync>,
+);
+
+impl RequestReplayCheck {
+    /// Additional owners captured by the context factory must be weak.
+    pub fn new<S, C>(
+        owner: &Arc<S>,
+        context: impl Fn(Arc<S>) -> Option<C> + Clone + Send + Sync + 'static,
+    ) -> Self
+    where
+        S: Send + Sync + 'static,
+        C: SignatureAuthContext + 'static,
+    {
+        let owner = Arc::downgrade(owner);
+        Self(Arc::new(move |commitment| {
+            let owner = owner.clone();
+            let context = context.clone();
+            async move {
+                let context = owner.upgrade().and_then(context).ok_or_else(|| {
+                    Error::new(
+                        eyre!("{}", t!("middleware.auth.invalid-request-signature")),
+                        ErrorKind::InvalidSignature,
+                    )
+                })?;
+                accept_nonce(&context, &commitment).await
+            }
+            .boxed()
+        }))
+    }
+
+    /// The caller must verify identity and complete body before consuming the nonce.
+    pub fn check(&self, commitment: RequestCommitment) -> BoxFuture<'static, Result<(), Error>> {
+        (self.0)(commitment)
+    }
+}
+
+#[cfg(test)]
+#[path = "signature/replay_tests.rs"]
+mod replay_tests;
 
 async fn accept_nonce<C: SignatureAuthContext>(
     context: &C,
