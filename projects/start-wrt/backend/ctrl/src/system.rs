@@ -782,12 +782,14 @@ async fn factory_reset(_ctx: ServerContext) -> Result<(), Error> {
 async fn restart(_ctx: ServerContext) -> Result<(), Error> {
     crate::activity::log("system", "restart", true, "System restart initiated", None);
 
+    crate::boot::record_reboot(crate::boot::RunState::Restarting);
     tokio::spawn(async {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         if let Err(e) = tokio::process::Command::new("reboot")
             .invoke(ErrorKind::Filesystem.into())
             .await
         {
+            crate::boot::record_running();
             tracing::error!("failed to reboot: {e}");
         }
     });

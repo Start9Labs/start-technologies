@@ -579,4 +579,5 @@ export default {
   615: 'Opublikowane porty usuwane wraz z tym profilem: {list}.',
   616: 'Poza podsiecią profilu tego urządzenia',
   617: 'To nie jest użyteczny adres hosta',
+  618: 'To urządzenie próbuje opublikować rekordy DNS. Zezwól na publikowanie rekordów DNS, aby były rozpoznawane w Twojej sieci.',
 } satisfies i18n
