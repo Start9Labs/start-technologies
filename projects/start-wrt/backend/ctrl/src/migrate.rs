@@ -39,6 +39,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::EnableFlowOffloading,
     Migration::ScopeReservedNames,
     Migration::ReissueRootCa,
+    Migration::NameProfileFirewallSections,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -70,6 +71,8 @@ enum Migration {
     /// Earlier releases issued Root CAs whose authority key identifier lacks a
     /// key ID; iOS refuses to install them.
     ReissueRootCa,
+    /// Earlier releases generated a profile's firewall sections without names.
+    NameProfileFirewallSections,
 }
 
 impl Migration {
@@ -87,6 +90,7 @@ impl Migration {
             Migration::EnableFlowOffloading => enable_flow_offloading(root).await,
             Migration::ScopeReservedNames => scope_reserved_names(root).await,
             Migration::ReissueRootCa => reissue_root_ca(root).await,
+            Migration::NameProfileFirewallSections => name_profile_firewall_sections(root).await,
         }
     }
 }
@@ -328,6 +332,15 @@ async fn pppoe_wan_ipv6(root: &Path) -> Result<(), Error> {
         break;
     }
     if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+async fn name_profile_firewall_sections(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["firewall", "network", "startwrt"]).await?;
+    if crate::profiles::name_profile_firewall_sections(&mut cfgs)? {
         dump_all(uci_root(root), cfgs).await?;
     }
     Ok(())
