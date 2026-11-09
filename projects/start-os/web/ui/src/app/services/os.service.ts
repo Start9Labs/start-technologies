@@ -94,13 +94,13 @@ export class OSService {
     return Object.keys(versions).length > 0
   }
 
-  async loadOS(): Promise<void> {
+  async loadOS(registry?: string): Promise<void> {
     const { id } = await getServerInfo(this.patch)
-    const { startosRegistry } = await firstValueFrom(this.patch.watch$('ui'))
+    registry ??= (await firstValueFrom(this.patch.watch$('ui'))).startosRegistry
 
     const [versions, gitHash] = await Promise.all([
       this.api.rpc.registry.os.version.get({
-        registry: startosRegistry,
+        registry,
         serverId: id,
       }),
       this.api.rpc.gitInfo({}),

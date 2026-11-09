@@ -284,6 +284,7 @@ export default class Registries {
     }, 'Saving')
 
     if (saved) {
+      void this.os.loadOS(url)
       await this.notify(
         'StartOS updates',
         enabled.length
