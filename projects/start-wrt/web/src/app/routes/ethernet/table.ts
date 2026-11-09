@@ -20,7 +20,7 @@ import { firstValueFrom } from 'rxjs'
 import { Placeholder } from 'src/app/components/placeholder'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { fill } from 'src/app/i18n/validation-errors'
-import { publishedPortDeletionMessage } from 'src/app/services/published-port-deletion'
+import { leavingProfileMessage } from 'src/app/services/leaving-profile'
 
 import { EthernetPortView, EthernetService } from './service'
 
@@ -133,9 +133,9 @@ export class EthernetTable {
     item.profile = profile
     const items = [...this.ethernetTable()]
 
-    let pending
+    let leaving
     try {
-      pending = await this.service.previewPorts(items)
+      leaving = await this.service.previewPorts(items)
     } catch {
       this.service.refresh()
       return
@@ -147,20 +147,13 @@ export class EthernetTable {
       ),
       { port: item.name, profile: fullname },
     )
-    const deletion = publishedPortDeletionMessage(
-      this.i18n.transform(
-        'This change breaks the following published port(s), so they will be deleted: {list}.',
-      ),
-      pending,
-    )
+    const kept = leavingProfileMessage(this.i18n, leaving)
     const confirmed = await firstValueFrom(
       this.dialogs.open<boolean>(TUI_CONFIRM, {
         label: this.i18n.transform('Change Security Profile?'),
         data: {
-          content: deletion ? `${move} ${deletion}` : move,
-          yes: this.i18n.transform(
-            pending.length ? 'Delete & Continue' : 'Change Profile',
-          ),
+          content: kept ? `${move} ${kept}` : move,
+          yes: this.i18n.transform('Change Profile'),
           no: this.i18n.transform('Cancel'),
         },
       }),

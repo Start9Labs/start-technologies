@@ -66,8 +66,10 @@ under the flags: a `-c` chain, the discovered workspace (only its `host`/`regist
 then `/etc/startos`. A bare URL is shorthand for `default`, and the layers combine into one
 namespace — a union of aliases where a name defined at more than one level takes the higher tier's
 value. `resolve_target` follows the `default` profile, chasing a value that names another profile
-until it reaches a URL, which it parses only then. `ClientConfig` also carries tunnel, proxy,
-identity key path, root CAs, and the `--insecure` toggle. The loaded config becomes a
+until it reaches a URL, which it parses only then. Its shared `resolve_profile` primitive also
+resolves explicit `--from`/`--to` endpoints for registry package and OS promotion. `CliContext`
+retains the merged `registry` profiles for these endpoint selections. `ClientConfig` also carries
+tunnel, proxy, identity key path, root CAs, and the `--insecure` toggle. The loaded config becomes a
 `CliContext` that the RPC handlers use.
 
 ## Man pages

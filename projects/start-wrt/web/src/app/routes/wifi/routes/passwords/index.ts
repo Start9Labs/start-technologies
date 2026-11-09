@@ -14,7 +14,7 @@ import { Masked } from 'src/app/components/masked'
 import { Placeholder } from 'src/app/components/placeholder'
 import { ApiService } from 'src/app/services/api/api.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
-import { confirmPublishedPortDeletion } from 'src/app/services/published-port-deletion'
+import { confirmLeavingProfile } from 'src/app/services/leaving-profile'
 import { WifiService } from '../../service'
 import {
   ADD_WIFI_PASSWORD,
@@ -194,20 +194,13 @@ export default class WifiPasswords {
         }
         const newConfig = { ...current, passwords }
 
-        // A profile move strands its Wi-Fi devices' published ports.
-        let pending
+        let leaving
         try {
-          pending = await this.service.previewWifi(newConfig)
+          leaving = await this.service.previewWifi(newConfig)
         } catch {
           return
         }
-        if (
-          !(await confirmPublishedPortDeletion(
-            this.dialogs,
-            this.i18n,
-            pending,
-          ))
-        )
+        if (!(await confirmLeavingProfile(this.dialogs, this.i18n, leaving)))
           return
 
         this.service.save(newConfig)
@@ -220,15 +213,13 @@ export default class WifiPasswords {
     const passwords = current.passwords.filter(p => p.password !== password)
     const newConfig = { ...current, passwords }
 
-    // Removing a profile's last password strands its devices' published ports.
-    let pending
+    let leaving
     try {
-      pending = await this.service.previewWifi(newConfig)
+      leaving = await this.service.previewWifi(newConfig)
     } catch {
       return
     }
-    if (!(await confirmPublishedPortDeletion(this.dialogs, this.i18n, pending)))
-      return
+    if (!(await confirmLeavingProfile(this.dialogs, this.i18n, leaving))) return
 
     this.service.deletePassword(password)
   }

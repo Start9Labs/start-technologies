@@ -302,11 +302,7 @@ pub async fn handle_http_on_https(stream: impl ReadWriter + Unpin + 'static) -> 
                     .await
                     {
                         Ok(a) => a,
-                        Err(e) => {
-                            tracing::warn!("Error redirecting http request on ssl port: {e}");
-                            tracing::error!("{e:?}");
-                            server_error(Error::new(e, ErrorKind::Network))
-                        }
+                        Err(e) => server_error(Error::new(e, ErrorKind::Network)),
                     }
                 }),
             )),
@@ -594,10 +590,9 @@ where
     loop {
         tokio::select! {
             res = from.as_mut() => return Ok(res?),
-            res = to.as_mut() => {
-                if let Err(e) = res {
-                    tracing::warn!("Error proxying http2 connection to backend: {e}");
-                    tracing::debug!("{e:?}");
+            result = to.as_mut() => {
+                if let Err(error) = result {
+                    tracing::trace!(?error, "HTTP/2 backend connection failed");
                 }
                 from.as_mut().graceful_shutdown();
             }

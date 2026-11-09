@@ -19,14 +19,15 @@ use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use tracing::instrument;
 
 use super::setup::CURRENT_SECRET;
-use crate::context::config::{ClientConfig, resolve_target};
+use crate::context::config::{ClientConfig, Profiles, resolve_target};
 use crate::context::{DiagnosticContext, InitContext, RpcContext, SetupContext};
 use crate::developer::{
     OS_ID_KEY_PATH, default_id_key_path, load_signing_key, migrate_legacy_key_file,
 };
-use crate::middleware::auth::local::{is_loopback, local_auth_header};
+use crate::middleware::auth::local::local_auth_header_for_url;
 use crate::net::mdns::pin_mdns_host;
 use crate::prelude::*;
+use crate::registry::package::promote::registry_rpc_url;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::init::{
     BUILD_KEY_FILE, STARTOS_DIR, complete_signing_workspace, find_signing_workspace,
@@ -70,6 +71,7 @@ pub struct CliContextSeed {
     /// transport address, which the server does not necessarily recognize.
     pub host_identity: Option<InternedString>,
     pub registry_url: Option<LazyUrl>,
+    pub registry_profiles: Option<Profiles>,
     pub registry_hostname: Vec<InternedString>,
     pub registry_listen: Option<SocketAddr>,
     pub s9pk_s3base: Option<Url>,
@@ -102,9 +104,6 @@ impl CliContext {
         if let Ok(cwd) = std::env::current_dir() {
             complete_signing_workspace(&cwd);
         }
-        // Follow each namespace's `default` profile to a URL (`load` already seeded
-        // -H/-r as `default` and layered every config file in), then localhost / no
-        // registry when unset.
         let url = match resolve_target(config.host.as_ref())? {
             Some(url) => url,
             None => "http://localhost".parse()?,
@@ -115,16 +114,9 @@ impl CliContext {
             runtime: OnceCell::new(),
             base_url: url.into(),
             registry_url: resolve_target(config.registry.as_ref())?
-                .map(|mut registry| {
-                    registry
-                        .path_segments_mut()
-                        .map_err(|_| eyre!("Url cannot be base"))
-                        .with_kind(crate::ErrorKind::ParseUrl)?
-                        .push("rpc")
-                        .push("v0");
-                    Ok::<_, Error>(registry.into())
-                })
+                .map(|registry| registry_rpc_url(&registry).map(LazyUrl::from))
                 .transpose()?,
+            registry_profiles: config.registry,
             registry_hostname: config.registry_hostname.unwrap_or_default(),
             registry_listen: config.registry_listen,
             s9pk_s3base: config.s9pk_s3base,
@@ -382,10 +374,8 @@ impl CallRemote<RpcContext> for CliContext {
     ) -> Result<Value, RpcError> {
         let rpc_url = self.rpc_url()?;
         let mut headers = HeaderMap::new();
-        if is_loopback(&rpc_url) {
-            if let Some(auth) = local_auth_header::<RpcContext>().await {
-                headers.insert(AUTHORIZATION, auth);
-            }
+        if let Some(auth) = local_auth_header_for_url::<RpcContext>(&rpc_url).await {
+            headers.insert(AUTHORIZATION, auth);
         }
         let call = || {
             crate::middleware::auth::signature::call_remote(
@@ -429,10 +419,15 @@ impl CallRemote<DiagnosticContext> for CliContext {
         params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
+        let rpc_url = self.rpc_url()?;
+        let mut headers = HeaderMap::new();
+        if let Some(auth) = local_auth_header_for_url::<DiagnosticContext>(&rpc_url).await {
+            headers.insert(AUTHORIZATION, auth);
+        }
         crate::middleware::auth::signature::call_remote(
             self,
-            self.rpc_url()?,
-            HeaderMap::new(),
+            rpc_url,
+            headers,
             self.host_identity.as_deref(),
             method,
             params,
