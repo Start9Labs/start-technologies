@@ -8,6 +8,7 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { GatewayPlus } from 'src/app/services/gateway.service'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
+import { readWireguardConfig, wireguardConfigInput } from './config-input'
 
 import EditGateway from './edit'
 import { PORT_FORWARDS_MODAL } from './port-forwards.component'
@@ -186,34 +187,7 @@ export class GatewaysItemComponent {
   async updateConfig() {
     const { id } = this.gateway()
     const spec = ISB.InputSpec.of({
-      config: ISB.Value.union({
-        name: this.i18n.transform('WireGuard Config File'),
-        default: 'paste',
-        variants: ISB.Variants.of({
-          paste: {
-            name: this.i18n.transform('Copy/Paste'),
-            spec: ISB.InputSpec.of({
-              file: ISB.Value.textarea({
-                name: this.i18n.transform('File Contents'),
-                default: null,
-                required: true,
-                minRows: 8,
-                maxRows: 8,
-              }),
-            }),
-          },
-          select: {
-            name: this.i18n.transform('Upload'),
-            spec: ISB.InputSpec.of({
-              file: ISB.Value.file({
-                name: this.i18n.transform('File'),
-                required: true,
-                extensions: ['.conf'],
-              }),
-            }),
-          },
-        }),
-      }),
+      config: wireguardConfigInput(this.i18n),
     })
 
     this.formDialog.open(FormComponent, {
@@ -228,10 +202,7 @@ export class GatewaysItemComponent {
                 async () =>
                   await this.api.rpc.net.tunnel.update({
                     id,
-                    config:
-                      input.config.selection === 'paste'
-                        ? input.config.value.file
-                        : await (input.config.value.file as any as File).text(),
+                    config: await readWireguardConfig(input.config),
                   }),
                 'Saving',
               ),

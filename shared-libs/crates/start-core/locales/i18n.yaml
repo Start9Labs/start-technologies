@@ -3147,6 +3147,20 @@ service.mod.deleting-task-action-no-longer-exists:
   pl_PL: "Usuwanie zadania %{id}, ponieważ akcja już nie istnieje"
 
 # service/action.rs
+service.action-files.invalid-transfer:
+  en_US: "Invalid or expired action file transfer"
+  de_DE: "Ungültige oder abgelaufene Dateiübertragung einer Aktion"
+  es_ES: "Transferencia de archivo de acción no válida o caducada"
+  fr_FR: "Transfert de fichier d’action invalide ou expiré"
+  pl_PL: "Nieprawidłowy lub wygasły transfer pliku akcji"
+
+service.action-files.size-limit:
+  en_US: "The uploaded file exceeds the maximum size of %{max} bytes"
+  de_DE: "Die hochgeladene Datei überschreitet die maximale Größe von %{max} Bytes"
+  es_ES: "El archivo cargado supera el tamaño máximo de %{max} bytes"
+  fr_FR: "Le fichier envoyé dépasse la taille maximale de %{max} octets"
+  pl_PL: "Przesłany plik przekracza maksymalny rozmiar %{max} bajtów"
+
 service.action.action-request-invalid-state:
   en_US: "action request exists in an invalid state %{task}"
   de_DE: "Aktionsanfrage existiert in ungültigem Zustand %{task}"
@@ -4356,11 +4370,11 @@ help.arg.format-label:
   pl_PL: "Etykieta systemu plików o długości najwyżej 255 bajtów (domyślnie: StartOS Backups)"
 
 help.arg.from-registry-url:
-  en_US: "Source registry URL to promote from"
-  de_DE: "Quell-Registry-URL zum Heraufstufen"
-  es_ES: "URL del registro de origen para promover"
-  fr_FR: "URL du registre source pour la promotion"
-  pl_PL: "URL rejestru źródłowego do promowania"
+  en_US: "Source registry URL or profile name to promote from"
+  de_DE: "Quell-Registry-URL oder Profilname zum Heraufstufen"
+  es_ES: "URL o nombre de perfil del registro de origen para promover"
+  fr_FR: "URL ou nom de profil du registre source pour la promotion"
+  pl_PL: "URL lub nazwa profilu rejestru źródłowego do promowania"
 
 help.arg.host-url:
   en_US: "URL of the StartOS server"
@@ -4473,6 +4487,13 @@ help.arg.log-follow:
   es_ES: "Seguir la salida del registro en tiempo real"
   fr_FR: "Suivre la sortie des journaux en temps réel"
   pl_PL: "Śledź wyjście logów w czasie rzeczywistym"
+
+help.arg.log-level:
+  en_US: "Verbosity for start-core/start-os until the daemon restarts"
+  de_DE: "Protokollierungsstufe für start-core/start-os bis zum Neustart des Daemons"
+  es_ES: "Nivel de registro para start-core/start-os hasta que se reinicie el daemon"
+  fr_FR: "Niveau de journalisation de start-core/start-os jusqu'au redémarrage du démon"
+  pl_PL: "Poziom logowania start-core/start-os do ponownego uruchomienia demona"
 
 help.arg.log-limit:
   en_US: "Maximum number of log entries"
@@ -4945,11 +4966,11 @@ help.arg.target-version-range:
   pl_PL: "Ograniczenie zakresu wersji docelowej"
 
 help.arg.to-registry-url:
-  en_US: "Destination registry URL to promote to"
-  de_DE: "Ziel-Registry-URL zum Heraufstufen"
-  es_ES: "URL del registro de destino para promover"
-  fr_FR: "URL du registre de destination pour la promotion"
-  pl_PL: "URL rejestru docelowego do promowania"
+  en_US: "Destination registry URL or profile name to promote to"
+  de_DE: "Ziel-Registry-URL oder Profilname zum Heraufstufen"
+  es_ES: "URL o nombre de perfil del registro de destino para promover"
+  fr_FR: "URL ou nom de profil du registre de destination pour la promotion"
+  pl_PL: "URL lub nazwa profilu rejestru docelowego do promowania"
 
 help.arg.token-name:
   en_US: "Name shown for the token in the session list"
@@ -7453,6 +7474,13 @@ about.set-listen-address-for-webserver:
   es_ES: "Establecer la dirección de escucha del servidor web"
   fr_FR: "Définir l'adresse d'écoute du serveur web"
   pl_PL: "Ustaw adres nasłuchiwania serwera internetowego"
+
+about.set-log-level:
+  en_US: "Set the running daemon's StartOS backend log level"
+  de_DE: "Protokollierungsstufe des StartOS-Backends im laufenden Daemon festlegen"
+  es_ES: "Establecer el nivel de registro del backend de StartOS en el daemon en ejecución"
+  fr_FR: "Définir le niveau de journalisation du backend StartOS du démon en cours d'exécution"
+  pl_PL: "Ustaw poziom logowania backendu StartOS w uruchomionym demonie"
 
 about.set-outbound-gateway-package:
   en_US: "Set the outbound gateway for a package"

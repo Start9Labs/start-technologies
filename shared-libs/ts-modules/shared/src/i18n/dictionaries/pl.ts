@@ -956,4 +956,8 @@ export default {
   1104: 'Sprawdzanie podpisów pakietu',
   1105: 'Włączony dla pakietów usług',
   1106: 'Włączony dla aktualizacji StartOS',
+  1107: 'Każdy plik musi mieć własne miejsce docelowe przesyłania.',
+  1108: 'Nieprawidłowy format pliku',
+  1109: 'Nieprawidłowa odpowiedź serwera',
+  1110: 'Maksymalny rozmiar pliku',
 } satisfies i18n
