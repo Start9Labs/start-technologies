@@ -21,6 +21,7 @@ pub(crate) mod gpg;
 pub mod gpg_agent;
 pub mod instance;
 pub mod noise;
+pub mod session;
 
 /// Signatures serialized in signer order.
 pub type SignatureMap = std::collections::BTreeMap<AnyVerifyingKey, AnySignature>;

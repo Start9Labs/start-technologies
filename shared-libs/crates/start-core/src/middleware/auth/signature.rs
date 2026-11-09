@@ -1,12 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::future::Future;
 use std::net::IpAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::Request;
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::TimeDelta;
 use http::header::USER_AGENT;
 use http::{Extensions, HeaderMap, HeaderValue};
@@ -29,7 +27,6 @@ use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::commitment::Commitment;
 use crate::sign::commitment::request::RequestCommitment;
 use crate::sign::{AnySignature, AnySigningKey, AnyVerifyingKey, Signer};
-use crate::util::serde::DerEncoding;
 use crate::util::sync::SyncMutex;
 
 pub const AUTH_SIG_HEADER: &str = "X-Start-Auth-Sig";
@@ -559,33 +556,9 @@ fn verified_address(
     })
 }
 
-pub struct SignatureHeader {
-    pub commitment: RequestCommitment,
-    pub signer: AnyVerifyingKey,
-    pub signature: AnySignature,
-}
+pub use crate::sign::commitment::request::RequestProof as SignatureHeader;
+
 impl SignatureHeader {
-    pub fn to_header(&self) -> HeaderValue {
-        let mut url: Url = "http://localhost".parse().unwrap();
-        self.commitment.append_query(&mut url);
-        url.query_pairs_mut().append_pair(
-            "signer",
-            &encode_header_der(&self.signer).expect("encode verifying key"),
-        );
-        url.query_pairs_mut().append_pair(
-            "signature",
-            &encode_header_der(&self.signature).expect("encode signature"),
-        );
-        HeaderValue::from_str(url.query().unwrap_or_default()).unwrap()
-    }
-    pub fn from_header(header: &HeaderValue) -> Result<Self, Error> {
-        let query: BTreeMap<_, _> = form_urlencoded::parse(header.as_bytes()).collect();
-        Ok(Self {
-            commitment: RequestCommitment::from_query(&header)?,
-            signer: decode_header_der(query.get("signer").or_not_found("signer")?)?,
-            signature: decode_header_der(query.get("signature").or_not_found("signature")?)?,
-        })
-    }
     pub async fn sign(signer: &Signer, body: &[u8], context: &str) -> Result<Self, Error> {
         let commitment = RequestCommitment::for_bytes(body);
         let signature = signer
@@ -597,21 +570,6 @@ impl SignatureHeader {
             signature,
         })
     }
-}
-
-fn encode_header_der(value: &impl DerEncoding) -> Result<String, Error> {
-    Ok(URL_SAFE_NO_PAD.encode(
-        value
-            .to_der::<serde_json::Error>()
-            .with_kind(ErrorKind::Serialization)?,
-    ))
-}
-
-fn decode_header_der<T: DerEncoding>(value: &str) -> Result<T, Error> {
-    let der = URL_SAFE_NO_PAD
-        .decode(value)
-        .with_kind(ErrorKind::Deserialization)?;
-    T::from_der::<serde_json::Error>(&der).with_kind(ErrorKind::Deserialization)
 }
 
 const REQUEST_AUTH_TAG: &[u8] = b"Start-Auth-Sig v2\0";
@@ -817,6 +775,8 @@ pub(crate) async fn send_http(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use http::HeaderValue;
 
     use super::*;
