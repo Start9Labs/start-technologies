@@ -8,6 +8,7 @@ import { Drop } from '@start9labs/start-core/util/Drop'
 import { logErrorOnce } from '@start9labs/start-core/util/logErrorOnce'
 import { Mounts } from '../mainFn/Mounts'
 import { FileMounts } from './fileMounts'
+import { jsonEnv } from './jsonEnv'
 
 export const execFile = promisify(cp.execFile)
 const False = () => false
@@ -746,34 +747,12 @@ export class SubContainerEager<
       })
       .catch(() => '{}')
       .then(JSON.parse)
-    let extra: string[] = []
-    // what's left of `spawnOptions` is forwarded to cp.spawn; copied so the
-    // deletes below can't strip the caller's object for its next call
     const { timeout = 30000, abort, ...spawnOptions } = options ?? {}
-    let user = imageMeta.user || 'root'
-    if (spawnOptions.user) {
-      user = spawnOptions.user
-      delete spawnOptions.user
-    }
-    let workdir = imageMeta.workdir || '/'
-    if (spawnOptions.cwd) {
-      workdir = spawnOptions.cwd
-      delete spawnOptions.cwd
-    }
-    if (spawnOptions.env) extra.push(...envArgs(spawnOptions.env))
+    const prepared = commandOptions(imageMeta, this.imageId, spawnOptions)
     const child = cp.spawn(
       'start-container',
-      [
-        'subcontainer',
-        'exec',
-        `--env-file=/media/startos/images/${this.imageId}.env`,
-        `--user=${user}`,
-        `--workdir=${workdir}`,
-        ...extra,
-        this.rootfs,
-        ...command,
-      ],
-      spawnOptions,
+      ['subcontainer', 'exec', ...prepared.args, this.rootfs, ...command],
+      prepared.options,
     )
     const stdout = { data: '' as string }
     const stderr = { data: '' as string }
@@ -832,7 +811,8 @@ export class SubContainerEager<
       }
       abort?.signal.addEventListener('abort', kill, { once: true })
       if (abort?.signal.aborted) kill()
-      // Observe completion before stdin can cause the command to exit.
+      // EOF-reading commands require closed stdin, including empty input.
+      // Completion is observed before stdin closes, which can end the command.
       try {
         child.stdin?.end(spawnOptions.input)
       } catch (error) {
@@ -875,33 +855,13 @@ export class SubContainerEager<
       })
       .catch(() => '{}')
       .then(JSON.parse)
-    let extra: string[] = []
-    let user = imageMeta.user || 'root'
-    if (options?.user) {
-      user = options.user
-      delete options.user
-    }
-    let workdir = imageMeta.workdir || '/'
-    if (options?.cwd) {
-      workdir = options.cwd
-      delete options.cwd
-    }
-    if (options?.env) extra.push(...envArgs(options.env))
+    const prepared = commandOptions(imageMeta, this.imageId, options ?? {})
     await this.killLeader()
     this.leaderExited = false
     this.leader = cp.spawn(
       'start-container',
-      [
-        'subcontainer',
-        'launch',
-        `--env-file=/media/startos/images/${this.imageId}.env`,
-        `--user=${user}`,
-        `--workdir=${workdir}`,
-        ...extra,
-        this.rootfs,
-        ...command,
-      ],
-      { ...options, stdio: 'inherit' },
+      ['subcontainer', 'launch', ...prepared.args, this.rootfs, ...command],
+      { ...prepared.options, stdio: 'inherit' },
     )
     this.leader.on('exit', () => {
       this.leaderExited = true
@@ -927,31 +887,11 @@ export class SubContainerEager<
       })
       .catch(() => '{}')
       .then(JSON.parse)
-    let extra: string[] = []
-    let user = imageMeta.user || 'root'
-    if (options?.user) {
-      user = options.user
-      delete options.user
-    }
-    let workdir = imageMeta.workdir || '/'
-    if (options.cwd) {
-      workdir = options.cwd
-      delete options.cwd
-    }
-    if (options?.env) extra.push(...envArgs(options.env))
+    const prepared = commandOptions(imageMeta, this.imageId, options)
     return cp.spawn(
       'start-container',
-      [
-        'subcontainer',
-        'exec',
-        `--env-file=/media/startos/images/${this.imageId}.env`,
-        `--user=${user}`,
-        `--workdir=${workdir}`,
-        ...extra,
-        this.rootfs,
-        ...command,
-      ],
-      options,
+      ['subcontainer', 'exec', ...prepared.args, this.rootfs, ...command],
+      prepared.options,
     )
   }
 
@@ -1244,7 +1184,7 @@ export type CommandOptions = {
 }
 
 export type StdioOptions = {
-  stdio?: cp.IOType
+  stdio?: cp.StdioOptions
 }
 
 /** UID/GID mapping for mount id-remapping (see kernel idmappings docs) */
@@ -1284,10 +1224,25 @@ export type MountOptionsPointer = {
   idmap: { fromId: number; toId: number; range: number }[]
 }
 
-function envArgs(env: NonNullable<CommandOptions['env']>): string[] {
-  return Object.entries(env).map(([k, v]) =>
-    v === undefined ? `--env=${k}` : `--env=${k}=${v}`,
-  )
+function commandOptions<Options extends CommandOptions>(
+  image: T.ImageMetadata,
+  imageId: string,
+  options: Options,
+) {
+  const { user, cwd, env, ...spawnOptions } = options
+  return {
+    args: [
+      ...(image.env == null
+        ? [`--env-file=/media/startos/images/${imageId}.env`]
+        : []),
+      `--user=${user || image.user || 'root'}`,
+      `--workdir=${cwd || image.workdir || '/'}`,
+    ],
+    options: {
+      ...spawnOptions,
+      env: jsonEnv({ ...image.env, ...env }),
+    },
+  }
 }
 
 function wait(time: number) {

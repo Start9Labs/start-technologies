@@ -167,6 +167,13 @@ ${make.run.replaceAll('${{ inputs.triple }}', hostTriple)}
     ),
     'current commit',
   )
+  for (const step of steps.filter(step => step.run)) {
+    const syntax = run('bash', ['-n'], {
+      input: step.run.replaceAll('${{ inputs.triple }}', hostTriple),
+      encoding: 'utf8',
+    })
+    assert.equal(syntax.status, 0, syntax.stderr)
+  }
 })
 
 for (const [file, product] of [
@@ -174,14 +181,10 @@ for (const [file, product] of [
   ['start-wrt.yaml', 'start-wrt'],
 ]) {
   const source = workflow(file)
-  const publisher = source.jobs['publisher-cli']
   const deploy = source.jobs.deploy
-  test(`${product} builds a host CLI only for eligible deployments after successful images`, () => {
-    assert.equal(publisher.uses, helper)
-    assert.deepEqual(publisher.needs, ['image'])
-    assert.deepEqual(publisher.with, { triple: hostTriple })
-    assert.equal(publisher.concurrency, undefined)
-    assert.deepEqual(deploy.needs, ['image', 'publisher-cli'])
+  test(`${product} deploys only for eligible channels after successful images`, () => {
+    assert.equal(source.jobs['publisher-cli'], undefined)
+    assert.deepEqual(deploy.needs, ['image'])
     const allowedChannel = product === 'start-os' ? 'beta' : 'release'
     const cases = [
       [context('pull_request'), false],
@@ -211,57 +214,32 @@ for (const [file, product] of [
         true,
       ])
     for (const [ctx, expected] of cases) {
-      assert.equal(evaluate(publisher.if, ctx), expected, JSON.stringify(ctx))
+      assert.equal(evaluate(deploy.if, ctx), expected, JSON.stringify(ctx))
       for (const result of ['failure', 'cancelled', 'skipped'])
         assert.equal(
-          evaluate(publisher.if, { ...ctx, needs: { image: { result } } }),
+          evaluate(deploy.if, { ...ctx, needs: { image: { result } } }),
           false,
         )
       assert.equal(
-        evaluate(publisher.if, { ...ctx, cancelled: () => true }),
+        evaluate(deploy.if, { ...ctx, cancelled: () => true }),
         false,
       )
     }
-    for (const image of ['success', 'failure', 'cancelled', 'skipped'])
-      for (const tool of ['success', 'failure', 'cancelled', 'skipped'])
-        assert.equal(
-          evaluate(deploy.if, {
-            needs: {
-              image: { result: image },
-              'publisher-cli': { result: tool },
-            },
-          }),
-          image === 'success' && tool === 'success',
-        )
-    assert.equal(
-      evaluate(deploy.if, {
-        cancelled: () => true,
-        needs: {
-          image: { result: 'success' },
-          'publisher-cli': { result: 'success' },
-        },
-      }),
-      false,
-    )
   })
 
-  test(`${product} installs the current-run artifact and capability-checks before all writes`, t => {
+  test(`${product} installs the released CLI and capability-checks before all writes`, () => {
     const steps = deploy.steps
-    const download = steps.find(step => step.name === 'Download publisher CLI')
-    assert.equal(download.uses, 'actions/download-artifact@v8')
-    assert.deepEqual(download.with, {
-      name: `start-cli_${hostTriple}`,
-      path: '${{ runner.temp }}/publisher-cli',
-    })
-    assert.equal(deploy['runs-on'], 'ubuntu-latest')
     const install = steps.find(step => step.name === 'Install start-cli')
-    assert.equal(steps.indexOf(download) + 1, steps.indexOf(install))
-    const commands = install.run.trim().split('\n')
     assert.equal(
-      commands[1],
+      install.uses,
+      'Start9Labs/start-technologies/.github/actions/install-start-cli@master',
+    )
+    assert.equal(deploy['runs-on'], 'ubuntu-latest')
+    const check = steps[steps.indexOf(install) + 1]
+    assert.equal(
+      check.run.trim(),
       `./scripts/manage-release.sh check-registry-notes-cli ${product}`,
     )
-    assert.equal(commands.length, 2)
     const compiler = steps.findIndex(
       step => step.name === 'Compile release notes',
     )
@@ -273,47 +251,7 @@ for (const [file, product] of [
     )
     assert.ok(writes.length >= 3)
     for (const step of writes)
-      assert.ok(steps.indexOf(install) < steps.indexOf(step))
-    const { root, write, run } = fixture(t)
-    write(
-      'runner/publisher-cli/start-cli',
-      '#!/bin/bash\nprintf "same-commit-cli\\n"\n',
-    )
-    write(
-      'scripts/manage-release.sh',
-      `#!/bin/bash\n[ "$1 $2" = 'check-registry-notes-cli ${product}' ] && [ "$(start-cli)" = same-commit-cli ]\n`,
-    )
-    const result = run(
-      'bash',
-      [
-        '-e',
-        '-c',
-        `
-sudo() { [ "$1 $2 $3 $4" = 'install -m 755 ${root}/runner/publisher-cli/start-cli' ] && [ "$5" = /usr/local/bin/start-cli ] || return 1; install -m 755 "$4" ./start-cli; }
-chmod +x scripts/manage-release.sh
-${install.run}
-`,
-      ],
-      {
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          RUNNER_TEMP: join(root, 'runner'),
-          PATH: `${root}:${process.env.PATH}`,
-        },
-      },
-    )
-    assert.equal(result.status, 0, result.stderr)
-    for (const step of [
-      install,
-      ...compile.jobs.compile.steps.filter(step => step.run),
-    ]) {
-      const syntax = run('bash', ['-n'], {
-        input: step.run.replaceAll('${{ inputs.triple }}', hostTriple),
-        encoding: 'utf8',
-      })
-      assert.equal(syntax.status, 0, syntax.stderr)
-    }
+      assert.ok(steps.indexOf(check) < steps.indexOf(step))
   })
 }
 
@@ -351,17 +289,18 @@ test('release-note catalog changes trigger image assembly without rebuilding ima
   }
 })
 
-test('artifact consumers track shared inputs without CLI-only image rebuilds', () => {
+test('image workflows track shared inputs without CLI-only rebuilds', () => {
   for (const [file, source] of [
     ['start-cli.yaml', cli],
     ['startos-iso.yaml', workflow('startos-iso.yaml')],
     ['start-wrt.yaml', workflow('start-wrt.yaml')],
   ])
     for (const event of ['push', 'pull_request']) {
-      assert.ok(
+      assert.equal(
         source.on[event].paths.includes(
           '.github/workflows/compile-start-cli.yaml',
         ),
+        file === 'start-cli.yaml',
       )
       assert.equal(
         source.on[event].paths.includes('projects/start-cli/**'),

@@ -8,18 +8,32 @@ All commands below assume your `start-cli` is pointed at your registry — eithe
 
 A **signer** is a public key authorized to publish a specific package, OS version, or asset. Admins are themselves signers — when you added the first admin, you registered a signer identity with admin privileges.
 
+Publishing authorization does not configure users' package trust. When adding or changing a package-signing key, [publish its public key](host-registry-setup.md#publish-signing-keys) so users can verify it and configure package trust. Put registry ownership and support contacts in the registry description; registering an administrator's contact details is not a substitute.
+
 Register a new signer (without admin rights):
 
 ```sh
 start-cli registry admin signer add \
   --name "Alice" \
-  --contact "alice@example.com" \
+  --contact "mailto:alice@example.com" \
   --key "$(cat alice.pub.pem)"
 ```
 
 The registry returns the signer's ID. Use that ID with `start-cli registry admin signer edit` to update contact info or keys, or `start-cli registry admin signer list` to see everyone registered.
 
 To grant a signer admin privileges (or revoke them), use `start-cli registry admin add <SIGNER_ID>` / `... admin remove <SIGNER_ID>`.
+
+## Offering signing keys to users
+
+Registry 1.4.0 and start-cli 2.7.0 support selecting registered signers whose keys the registry offers to StartOS 0.4.1.2 and later. New and upgraded registries start with no selection; registering an administrator or authorizing a package publisher does not select them.
+
+As an administrator, list your registered signers and use the [trust-signer selection command](/start-os/cli-reference.html#start-cli-registry-info-set-trust-signers-signer) to select their IDs. Each call replaces the entire selection; passing no IDs clears it. The registry offers all keys belonging to the selected signers, along with their names and contact details. Select the signers whose signatures users should accept, not every identity allowed to upload.
+
+For GPG identities and fingerprints, register the armored public-key export with `admin signer add --key` or reimport it with `admin signer edit --add-key`. A record containing only a DER public key needs the complete GPG export to supply those details.
+
+Remove a retained GPG export with `start-cli registry admin signer edit <SIGNER_ID> --remove-gpg-export <PRIMARY_FINGERPRINT>`. Find primary-key fingerprints under `gpgExports[].fingerprints` in `admin signer list --format json`. Matching is case-insensitive and removes each whole export containing that fingerprint, including exports containing multiple certificates. Repeat the flag to select more fingerprints. The signer's signing keys and publishing permissions remain unchanged; use `--remove-key` to revoke a signing key.
+
+When users connect the registry, StartOS trusts offered keys it does not already have for packages; existing keys keep their trust. Newly discovered keys are imported untrusted when StartOS next fetches packages or OS updates from the registry, with notifications for users to review. Dropping an offered key does not revoke users' trust. Choosing the registry for StartOS updates separately trusts its offered keys for that purpose. See [Keys From Registries](/start-os/trusted-keys.html#keys-from-registries) for the client behavior and trust controls.
 
 ## Packages
 
@@ -39,12 +53,24 @@ start-cli registry package signer add <PACKAGE_ID> <SIGNER_ID> \
 From the directory containing the `.s9pk`:
 
 ```sh
-start-cli s9pk publish \
-  --url https://my-registry.example.com \
-  myservice_1.2.0_x86_64.s9pk
+start-cli s9pk publish myservice_1.2.0_x86_64.s9pk
 ```
 
-`publish` signs the `.s9pk` with the local identity key, uploads it to the registry, and registers it in the index. If your registry already has the same `(package id, version, sighash)` indexed, the upload is a no-op except for any new signatures merging in.
+`publish` uploads the original file to the configured S3 bucket and adds its URL and identity-key endorsement to the configured registry index. Configure the S3 destination and registry before publishing. To index an already hosted file, use `start-cli registry package add <S9PK_FILE> --url <PACKAGE_URL>`.
+
+For package add and add-mirror, the CLI submits verified endorsements from `<S9PK_FILE>` separately from the authenticated uploader's signature. The registry verifies every submitted endorsement against the indexed package's exact Merkle root, signed bound, and `s9pk` context before adding it to the asset signature map. An invalid entry rejects the request atomically. The hosted file may contain only the base archive, and its bytes remain unchanged. Promotion forwards the indexed signature map to the destination registry.
+
+Supplemental keys do not become registered signers, proposed trust keys, or authorized uploaders. Publishing authorization remains tied to the registered uploader.
+
+### Promoting a package
+
+Copy a version's indexed assets to another registry with `start-cli registry package promote <PACKAGE_ID> <VERSION> --from <SOURCE> --to <DESTINATION>`. Both endpoints accept URLs or named `registry:` profiles, using the same configuration as `-r`. For example, with profiles named `alpha` and `production`:
+
+```sh
+start-cli registry package promote myservice 1.2.0:0 --from alpha --to production
+```
+
+At least one endpoint is required; an omitted endpoint uses the configured registry selected by `-r` or the `default` profile. `start-cli registry os promote <VERSION>` accepts the same endpoint options for OS versions.
 
 ### Removing a package
 
@@ -72,6 +98,17 @@ start-cli registry package remove-mirror <PACKAGE_ID> <VERSION> --url <MIRROR_UR
 ```
 
 You can't remove the last remaining URL for a package — every indexed version needs at least one reachable URL.
+
+### Cosigning
+
+Any signer known to the registry can add their signature to a version already in the index:
+
+```sh
+start-cli registry package sign <S9PK_FILE>
+start-cli registry package sign --no-verify --id <PACKAGE_ID> --version <VERSION>
+```
+
+The first form verifies a local copy of the `.s9pk` and adds its endorsement to the registry index. To embed an endorsement in a file for sideloading, use `start-cli s9pk sign <S9PK_FILE>`. With `--no-verify`, it signs the commitments the registry lists for that version without checking them against a local file.
 
 ## Categories
 

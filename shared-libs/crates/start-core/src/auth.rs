@@ -250,6 +250,7 @@ pub fn auth<C: Context, AC: LoginContext, CC: IdKeyContext + CallRemote<AC>>() -
             "login",
             from_fn_async(login_impl::<AC>)
                 .with_metadata("login", Value::Bool(true))
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .with_metadata("get_signer", Value::Bool(true))
                 .with_metadata("get_user_agent", Value::Bool(true))
                 .no_cli(),
@@ -264,6 +265,7 @@ pub fn auth<C: Context, AC: LoginContext, CC: IdKeyContext + CallRemote<AC>>() -
             "logout",
             from_fn_async(logout::<AC>)
                 .with_metadata("get_signer", Value::Bool(true))
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .no_display()
                 .with_about("about.logout-current-auth-session")
                 .with_call_remote::<CC>(),
@@ -282,6 +284,7 @@ where
     ParentHandler::new().subcommand(
         "create",
         from_fn_async(create_token::<AC>)
+            .with_metadata(crate::mcp::MCP, Value::Bool(false))
             .with_display_serializable()
             .with_custom_display_fn(|handle, result| {
                 if let Some(format) = handle.params.format {
@@ -517,11 +520,7 @@ pub fn login<'a, AC: LoginContext, CC: IdKeyContext + CallRemote<AC>>(
 /// Prompts for the password and returns `auth.login` params enrolling the
 /// identity key, generating it first when it cannot be loaded.
 pub async fn login_params<C: IdKeyContext>(ctx: &C) -> Result<Value, Error> {
-    let password = if let Ok(password) = std::env::var("PASSWORD") {
-        password
-    } else {
-        rpassword::prompt_password("Password: ")?
-    };
+    let password = crate::util::tui::read_password("PASSWORD", "Password: ")?;
 
     if ctx.id_key().is_err() {
         let secret = ed25519_dalek::SigningKey::generate(&mut crate::util::crypto::os_rng());

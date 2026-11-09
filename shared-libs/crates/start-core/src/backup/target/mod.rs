@@ -32,6 +32,29 @@ use crate::util::serde::{
 use crate::util::{FromStrParser, VersionString};
 
 pub mod cifs;
+pub mod conversion;
+
+#[cfg(test)]
+mod password_cli_tests {
+    use super::*;
+
+    #[test]
+    fn backup_password_is_not_a_cli_argument_but_remains_in_rpc_params() {
+        let mut info = InfoParams::try_parse_from(["info", "cifs-0", "server-id"]).unwrap();
+        assert!(info.password.is_empty());
+        assert!(InfoParams::try_parse_from(["info", "cifs-0", "server-id", "secret"]).is_err());
+        info.password = "provided out of band".into();
+        assert_eq!(
+            serde_json::to_value(&info).unwrap()["password"],
+            "provided out of band"
+        );
+
+        let mount = MountParams::try_parse_from(["mount", "cifs-0", "--allow-partial"]).unwrap();
+        assert!(mount.password.is_empty());
+        assert!(mount.allow_partial);
+        assert!(MountParams::try_parse_from(["mount", "cifs-0", "secret"]).is_err());
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(tag = "type")]
@@ -144,7 +167,6 @@ impl FileSystem for BackupTargetFS {
     }
 }
 
-// #[command(subcommands(cifs::cifs, list, info, mount, umount))]
 pub fn target<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand(
@@ -160,19 +182,25 @@ pub fn target<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "info",
-            from_fn_async(info)
+            from_fn_async(info).with_display_serializable().no_cli(),
+        )
+        .subcommand(
+            "info",
+            from_fn_async(cli_info)
+                .no_ts()
                 .with_display_serializable()
                 .with_custom_display_fn::<CliContext, _>(|params, info| {
                     display_backup_info(params.params, info)
                 })
-                .with_about("about.display-package-backup-information")
-                .with_call_remote::<CliContext>(),
+                .with_about("about.display-package-backup-information"),
         )
+        .subcommand("convert", from_fn_async(conversion::start).no_cli())
+        .subcommand("mount", from_fn_async(mount).no_cli())
         .subcommand(
             "mount",
-            from_fn_async(mount)
-                .with_about("about.mount-backup-target")
-                .with_call_remote::<CliContext>(),
+            from_fn_async(cli_mount)
+                .no_ts()
+                .with_about("about.mount-backup-target"),
         )
         .subcommand(
             "umount",
@@ -293,12 +321,20 @@ pub struct InfoParams {
     target_id: BackupTargetId,
     #[arg(help = "help.arg.server-id")]
     server_id: String,
-    #[arg(help = "help.arg.backup-password")]
+    #[arg(skip)]
     password: String,
 }
 
 rpc_toolkit::reflect_ts!(InfoParams);
 rpc_toolkit::ts_export!(InfoParams, namespaces = [""]);
+
+#[instrument(skip_all)]
+async fn cli_info(
+    mut args: rpc_toolkit::HandlerArgs<CliContext, InfoParams>,
+) -> Result<BackupInfo, Error> {
+    args.params.password = crate::backup::read_password()?;
+    Ok(from_value(crate::backup::call_remote(args).await?)?)
+}
 
 #[instrument(skip(ctx, password))]
 pub async fn info(
@@ -337,13 +373,21 @@ pub struct MountParams {
     target_id: BackupTargetId,
     #[arg(long, help = "help.arg.server-id")]
     server_id: Option<String>,
-    #[arg(help = "help.arg.backup-password")]
-    password: String, // TODO: rpassword
+    #[arg(skip)]
+    password: String,
     #[arg(long, help = "help.arg.allow-partial-backup")]
     allow_partial: bool,
 }
 
 rpc_toolkit::reflect_ts!(MountParams);
+
+#[instrument(skip_all)]
+async fn cli_mount(
+    mut args: rpc_toolkit::HandlerArgs<CliContext, MountParams>,
+) -> Result<String, Error> {
+    args.params.password = crate::backup::read_password()?;
+    Ok(from_value(crate::backup::call_remote(args).await?)?)
+}
 
 #[instrument(skip_all)]
 pub async fn mount(
@@ -384,22 +428,7 @@ pub async fn mount(
         Err(e) => {
             if allow_partial {
                 mounts.insert(target_id, Err(base.clone()));
-                let enc_key = BackupMountGuard::<TmpMountGuard>::load_metadata(
-                    base.path(),
-                    &server_id,
-                    &password,
-                )
-                .await
-                .map(|(_, k)| k);
-                return Err(e)
-                    .with_ctx(|e| (
-                        e.kind,
-                        format!(
-                            "\nThe base filesystem did successfully mount at {:?}\nWrapped Key: {:?}",
-                            base.path(),
-                            enc_key
-                        )
-                    ));
+                return Err(partial_mount_error(e, base.path()));
             } else {
                 return Err(e);
             }
@@ -411,6 +440,31 @@ pub async fn mount(
     mounts.insert(target_id, Ok(guard));
 
     Ok(res)
+}
+
+fn partial_mount_error(error: Error, path: &Path) -> Error {
+    Err::<(), _>(error)
+        .with_ctx(|error| {
+            (
+                error.kind,
+                t!("backup.target.partial-mount", path = path.display()).to_string(),
+            )
+        })
+        .unwrap_err()
+}
+
+#[test]
+fn partial_mount_diagnostic_contains_path_without_key_material() {
+    let error = partial_mount_error(
+        Error::new(eyre!("encrypted mount failed"), ErrorKind::Backup),
+        Path::new("/media/backup"),
+    );
+    assert!(error.to_string().contains("encrypted mount failed"));
+    for message in [format!("{error}"), format!("{error:?}")] {
+        assert!(message.contains("/media/backup"));
+        assert!(!message.contains("Wrapped Key"));
+        assert!(!message.contains(crate::util::crypto::backup_key_tests::KEY));
+    }
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]

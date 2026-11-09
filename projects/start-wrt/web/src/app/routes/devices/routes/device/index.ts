@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject } from '@angular/core'
+import { Component, computed, effect, inject, signal } from '@angular/core'
 import { toObservable, toSignal } from '@angular/core/rxjs-interop'
 import {
   FormControl,
@@ -9,6 +9,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import {
   TuiButton,
+  TuiCell,
   TuiError,
   TuiHintDirective,
   TuiInput,
@@ -113,64 +114,68 @@ import { i18nKey } from 'src/app/i18n/i18n.providers'
             <input tuiInput [readonly]="true" [value]="data()?.ipv6 ?? ''" />
           </tui-textfield>
         </div>
-        <div class="g-secondary">
-          {{
-            'Chosen by the device — IPv6 addresses cannot be reserved' | i18n
-          }}
-        </div>
       </section>
+      @if (inactiveReservations().length) {
+        <div>
+          <header tuiHeader="h6">
+            <hgroup tuiTitle>
+              <h3>{{ 'Inactive reservations' | i18n }}</h3>
+              <p tuiSubtitle>
+                {{ 'Each applies when the device is on its profile.' | i18n }}
+              </p>
+            </hgroup>
+          </header>
+          @for (reservation of inactiveReservations(); track reservation.ipv4) {
+            <div tuiCell="s">
+              <span tuiTitle>
+                {{ reservation.ipv4 }}
+                <span tuiSubtitle>
+                  {{ reservation.profile || ('No profile' | i18n) }}
+                </span>
+              </span>
+              <button
+                tuiIconButton
+                type="button"
+                size="xs"
+                appearance="icon"
+                iconStart="@tui.x"
+                [disabled]="portTargets().includes(reservation.ipv4)"
+                (click)="removeReservation(reservation.ipv4)"
+              >
+                {{ 'Remove reservation' | i18n }}
+              </button>
+            </div>
+          }
+        </div>
+      }
       <fieldset>
         <legend>{{ 'Permissions' | i18n }}</legend>
-        <section>
-          <label tuiLabel>
-            <input
-              tuiSwitch
-              type="checkbox"
-              formControlName="allowAutoPortForward"
-            />
-            {{ 'Allow automatic port forwarding' | i18n }}
-          </label>
-          <div class="g-secondary">
-            {{
-              'Lets this device open and renew its own port forwards via UPnP/PCP (used by StartOS servers, game consoles, and similar). Off by default; active forwards appear on the Published Ports page.'
-                | i18n
-            }}
-          </div>
-        </section>
-        <section>
-          <label tuiLabel>
-            <input
-              tuiSwitch
-              type="checkbox"
-              formControlName="allowDnsInjection"
-              (click)="onDnsInjectionToggle($event)"
-            />
-            {{ 'Allow DNS record publishing' | i18n }}
-          </label>
-          <div class="g-secondary">
-            {{
-              'Lets this device publish DNS names for itself into the router, so every device on your network can resolve them (used by StartOS servers for private domains). Off by default; published names appear below.'
-                | i18n
-            }}
-          </div>
-        </section>
-        <section>
-          <label tuiLabel>
-            <input
-              tuiSwitch
-              type="checkbox"
-              formControlName="allowRouterAdvertisements"
-              (click)="onRouterAdvertisementsToggle($event)"
-            />
-            {{ 'Allow IPv6 router advertisements' | i18n }}
-          </label>
-          <div class="g-secondary">
-            {{
-              'Lets this device announce IPv6 routes to your other devices (needed by Thread border routers such as an Apple TV, HomePod, or Home Assistant). Off by default.'
-                | i18n
-            }}
-          </div>
-        </section>
+        <label tuiLabel>
+          <input
+            tuiSwitch
+            type="checkbox"
+            formControlName="allowAutoPortForward"
+          />
+          {{ 'Allow automatic port forwarding' | i18n }}
+        </label>
+        <label tuiLabel>
+          <input
+            tuiSwitch
+            type="checkbox"
+            formControlName="allowDnsInjection"
+            (click)="onDnsInjectionToggle($event)"
+          />
+          {{ 'Allow DNS record publishing' | i18n }}
+        </label>
+        <label tuiLabel>
+          <input
+            tuiSwitch
+            type="checkbox"
+            formControlName="allowRouterAdvertisements"
+            (click)="onRouterAdvertisementsToggle($event)"
+          />
+          {{ 'Allow IPv6 router advertisements' | i18n }}
+        </label>
       </fieldset>
       @if (data()) {
         <footer appFooter></footer>
@@ -199,6 +204,11 @@ import { i18nKey } from 'src/app/i18n/i18n.providers'
       align-items: center;
     }
 
+    form fieldset {
+      grid-template-columns: none;
+      justify-items: start;
+    }
+
     header[tuiHeader='h6'],
     table {
       max-width: 50rem;
@@ -220,6 +230,7 @@ import { i18nKey } from 'src/app/i18n/i18n.providers'
     TuiInput,
     TuiError,
     TuiHintDirective,
+    TuiCell,
     TuiSwitch,
     InjectedRecordsTable,
     i18nPipe,
@@ -238,6 +249,24 @@ export default class DeviceDetail {
   readonly form = getDeviceForm(inject(NonNullableFormBuilder))
   readonly data = computed(
     () => this.service.data()?.find(d => d.mac === this.mac) ?? null,
+  )
+
+  /** Addresses this device's enabled IPv4 published ports forward to. */
+  readonly portTargets = signal<string[]>([])
+  /** Inactive reservations marked for removal on save. */
+  private readonly removing = signal<string[]>([])
+  readonly inactiveReservations = computed(
+    () =>
+      this.data()?.ipv4Reservations.filter(
+        r => !r.active && !this.removing().includes(r.ipv4),
+      ) ?? [],
+  )
+  private readonly taken = computed(
+    () =>
+      this.service
+        .data()
+        ?.filter(d => d.mac !== this.mac)
+        .flatMap(d => d.ipv4Reservations.map(r => r.ipv4)) ?? [],
   )
 
   readonly ipv4Static = toSignal(
@@ -283,13 +312,29 @@ export default class DeviceDetail {
             ipv4: data.ipv4 ?? '',
           },
         })
-        updateDeviceValidators(this.form, data.ipv4Static)
+        updateDeviceValidators(this.form, data.ipv4Static, data, this.taken())
       }
     })
 
     // Update validators when the static toggle changes
     effect(() => {
-      updateDeviceValidators(this.form, this.ipv4Static())
+      updateDeviceValidators(
+        this.form,
+        this.ipv4Static(),
+        this.data(),
+        this.taken(),
+      )
+    })
+
+    // A port forwarding to the reservation keeps it in place.
+    effect(() => {
+      const data = this.data()
+      const control = this.form.controls.ip.controls.ipv4Static
+      if (data?.ipv4Static && this.portTargets().includes(data.ipv4 ?? '')) {
+        control.disable({ emitEvent: false })
+      } else {
+        control.enable({ emitEvent: false })
+      }
     })
   }
 
@@ -340,12 +385,18 @@ export default class DeviceDetail {
   private async loadDependencies() {
     const ports = await this.api.publishedPortsList()
     const macUpper = this.mac.toUpperCase()
-    const devicePorts = ports.filter(
-      p => p.device_mac.toUpperCase() === macUpper && p.enabled,
+    this.portTargets.set(
+      ports
+        .filter(
+          p => p.device_mac.toUpperCase() === macUpper && p.enabled && p.ipv4,
+        )
+        .flatMap(p => p.device_ipv4 ?? []),
     )
-    if (devicePorts.some(p => p.ipv4)) {
-      this.form.controls.ip.controls.ipv4Static.disable()
-    }
+  }
+
+  protected removeReservation(ipv4: string) {
+    this.removing.update(list => [...list, ipv4])
+    this.form.markAsDirty()
   }
 
   async onSave() {
@@ -369,7 +420,10 @@ export default class DeviceDetail {
       {
         name: formValue.name,
         ipv4Static: formValue.ip.ipv4Static,
-        ipv4: formValue.ip.ipv4,
+        ipv4: formValue.ip.ipv4Static
+          ? formValue.ip.ipv4
+          : (this.data()?.ipv4 ?? ''),
+        removeIpv4Reservations: this.removing(),
       },
       {
         allowAutoPortForward: changed('allowAutoPortForward'),
@@ -379,7 +433,10 @@ export default class DeviceDetail {
     )
 
     if (success) {
+      this.removing.set([])
       this.form.markAsPristine()
+      // A replaced reservation moved the ports that forwarded to it.
+      this.loadDependencies()
       if (ipv4Changed) this.showIpChangedDialog()
     }
   }
@@ -399,6 +456,7 @@ export default class DeviceDetail {
   }
 
   onCancel() {
+    this.removing.set([])
     const data = this.data()
     if (data) {
       this.form.reset({

@@ -46,6 +46,8 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODEJS_VERSION }}
+      - name: Check each book's README index against its SUMMARY
+        run: node projects/start-docs/scripts/check-indexes.ts
       - name: Check formatting
         run: npx --yes --package="prettier@$(node -p "require('./package.json').devDependencies.prettier")" -- npm run format:check
 
@@ -77,6 +79,7 @@ jobs:
           for product in $products; do
             node scripts/changelog.mjs check-version "projects/${product#projects/}"
           done
+      - uses: ./.github/actions/setup-release-tests
       - name: Check changelog and release tooling
         run: make release-notes-test
 
@@ -136,6 +139,7 @@ jobs:
           npm --prefix .github/actions/upload-each run build
           test -z "$(git status --porcelain --untracked-files=all -- .github/actions/upload-each/dist)"
 
+      - uses: ./.github/actions/setup-release-tests
       - name: Install Bash completion test dependency
         run: sudo apt-get install -y bash-completion
 
@@ -212,11 +216,8 @@ jobs:
       # The bindings regen prettifies generated .ts via start-core's node deps.
       - name: Install start-core node deps
         run: npm --prefix shared-libs/ts-modules/start-core ci
-      - name: Check man pages up to date
-        run: make manpages-check
-      - name: Check TS bindings up to date
-        if: '!cancelled()'
-        run: make start-core-ts-bindings-check
+      - name: Check generated artifacts
+        run: make -k generated-artifacts-check
       # A failed gate leaves its regenerated files in the working tree.
       - name: Upload regenerated artifacts
         if: failure()
@@ -225,6 +226,7 @@ jobs:
           name: generated-artifacts
           path: |
             shared-libs/ts-modules/start-core/lib/osBindings
+            shared-libs/crates/start-core/mcp-tools.json
             projects/start-cli/man
             projects/start-registry/man
             projects/start-tunnel/man

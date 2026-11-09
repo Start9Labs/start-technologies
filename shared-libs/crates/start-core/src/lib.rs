@@ -66,6 +66,7 @@ pub mod init;
 pub mod install;
 pub mod logs;
 pub mod lxc;
+pub mod mcp;
 pub mod middleware;
 pub mod net;
 pub mod notifications;
@@ -83,6 +84,7 @@ pub mod sound;
 pub mod ssh;
 pub mod status;
 pub mod system;
+pub mod trusted_keys;
 pub mod tunnel;
 pub mod update;
 pub mod upload;
@@ -190,7 +192,9 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
             auth::auth::<C, RpcContext, CliContext>()
                 .subcommand(
                     "reset-password",
-                    from_fn_async(auth::reset_password_impl).no_cli(),
+                    from_fn_async(auth::reset_password_impl)
+                        .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                        .no_cli(),
                 )
                 .subcommand(
                     "reset-password",
@@ -202,6 +206,7 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
                     "get-pubkey",
                     from_fn_async(auth::get_pubkey)
                         .with_metadata("authenticated", Value::Bool(false))
+                        .with_metadata(crate::mcp::MCP, Value::Bool(false))
                         .no_display()
                         .with_about("about.get-pubkey-from-server")
                         .with_call_remote::<CliContext>(),
@@ -352,6 +357,13 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .with_about("about.display-os-logs"),
         )
         .subcommand(
+            "set-log-level",
+            from_fn(system::log_level::set_log_level)
+                .no_display()
+                .with_about("about.set-log-level")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
             "kernel-logs",
             system::kernel_logs::<RpcContext>().with_about("about.display-kernel-logs"),
         )
@@ -375,6 +387,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                     "follow",
                     from_fn_async(system::metrics_follow)
                         .with_metadata("get_signer", Value::Bool(true))
+                        .with_metadata(crate::mcp::MCP, Value::Bool(false))
                         .no_cli(),
                 ),
         )
@@ -415,6 +428,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
             "update-signers",
             update::signers::api::<C>().with_about("about.commands-os-update-signers"),
         )
+        .subcommand("trusted-keys", trusted_keys::api::<C>().no_cli())
         .subcommand(
             "update-firmware",
             from_fn_async(|_: RpcContext| async {
@@ -512,6 +526,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
             "sideload",
             from_fn_async(install::sideload)
                 .with_metadata("get_signer", Value::Bool(true))
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .no_cli(),
         )
         .subcommand(
@@ -646,6 +661,13 @@ pub fn package<C: Context>() -> ParentHandler<C> {
             "attach",
             from_fn_async(service::attach)
                 .with_metadata("get_signer", Value::Bool(true))
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                .with_about("about.execute-commands-container")
+                .no_cli(),
+        )
+        .subcommand(
+            "exec",
+            from_fn_async(service::exec::exec)
                 .with_about("about.execute-commands-container")
                 .no_cli(),
         )

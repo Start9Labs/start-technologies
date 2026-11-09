@@ -24,7 +24,7 @@ import { SSHTableComponent } from './table.component'
         <a routerLink=".." tuiIconButton iconStart="@tui.arrow-left">
           {{ 'Back' | i18n }}
         </a>
-        SSH
+        {{ 'SSH Access' | i18n }}
         <a
           tuiIconButton
           size="xs"
@@ -38,7 +38,17 @@ import { SSHTableComponent } from './table.component'
     @let keys = keys$ | async;
     <section class="g-card">
       <header>
-        {{ 'SSH Keys' | i18n }}
+        {{ 'SSH Access' | i18n }}
+        <a
+          tuiIconButton
+          size="xs"
+          docsLink
+          path="/start-os/ssh.html"
+          appearance="icon"
+          iconStart="@tui.book-open-text"
+        >
+          {{ 'Documentation' | i18n }}
+        </a>
         @if (tableKeys()?.selected()?.length) {
           <button
             tuiButton

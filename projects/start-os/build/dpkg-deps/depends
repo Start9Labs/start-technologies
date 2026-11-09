@@ -47,7 +47,7 @@ nftables
 nvme-cli
 nyx
 openssh-server
-podman
+pciutils
 psmisc
 qemu-guest-agent
 qemu-user-static
@@ -67,6 +67,7 @@ systemd-resolved
 systemd-sysv
 systemd-timesyncd
 tor
+usbutils
 util-linux
 vim
 wireguard-tools

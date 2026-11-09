@@ -1,1 +1,0 @@
-- **`start-tunnel auth session kill` usa `--pubkey <key>` para cada sesión que se quiera cerrar**, en lugar de identificadores posicionales. El RPC `auth.session.kill` recibe `pubkeys` en lugar de `ids` y `auth.session.list` devuelve `{ pubkeys, tokens }`.

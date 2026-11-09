@@ -44,6 +44,14 @@ Vergeben Sie einen benutzerdefinierten Namen, um dieses Gerät einfach zu identi
 
 Reservieren Sie eine IP-Adresse, um eine feste IPv4-Adresse zuzuweisen, die sich zwischen Neustarts nicht ändert. Nützlich für Server, Drucker, NAS-Geräte oder alles, was Sie über eine gleichbleibende IP-Adresse erreichen müssen. IPv6-Adressen können nicht reserviert werden: Jedes Gerät wählt seine IPv6-Adresse selbst, der Router hat darauf keinen Einfluss.
 
+### Berechtigungen
+
+**Automatische Portweiterleitung erlauben**: Erlaubt diesem Gerät, eigene Portweiterleitungen über UPnP/PCP zu öffnen und zu erneuern (genutzt von StartOS-Servern, Spielkonsolen und Ähnlichem). Standardmäßig aus; aktive Weiterleitungen erscheinen auf der Seite „Veröffentlichte Ports“.
+
+**DNS-Einträge veröffentlichen erlauben**: Erlaubt diesem Gerät, DNS-Namen für sich selbst im Router zu veröffentlichen, sodass jedes Gerät in Ihrem Netzwerk sie auflösen kann (von StartOS-Servern für private Domains genutzt). Standardmäßig aus; veröffentlichte Namen erscheinen unterhalb der Einstellungen.
+
+**IPv6-Router-Advertisements erlauben**: Erlaubt diesem Gerät, Ihren anderen Geräten IPv6-Routen anzukündigen (erforderlich für Thread-Border-Router wie Apple TV, HomePod oder Home Assistant). Standardmäßig aus.
+
 ### Entfernen
 
 Entfernt ein Offline-Gerät aus Ihrer Geräteliste. Alle benutzerdefinierten Namen oder reservierten IP-Einstellungen gehen dabei verloren. Verbindet sich das Gerät erneut, erscheint es als neues Gerät.`,
@@ -409,11 +417,11 @@ Erweiterte Optionen für fortgeschrittene Benutzer. LuCI bietet direkten Zugriff
 
 ### Sicherung erstellen
 
-Laden Sie eine Sicherung aller Router-Einstellungen herunter, einschließlich Sicherheitsprofilen, WiFi-Konfiguration, SSL-Zertifikaten und Systemeinstellungen. Bewahren Sie die Sicherungsdatei an einem sicheren Ort auf.
+Laden Sie eine Sicherung aller Router-Einstellungen herunter, einschließlich Sicherheitsprofilen, WiFi-Konfiguration, SSL-Zertifikaten und Systemeinstellungen. Die Sicherung wird mit Ihrem Administrator-Passwort verschlüsselt. Bewahren Sie die Sicherungsdatei an einem sicheren Ort auf.
 
 ### Sicherung wiederherstellen
 
-Laden Sie eine zuvor erstellte Sicherungsdatei hoch, um alle Einstellungen wiederherzustellen. Der Router wird nach der Wiederherstellung neu gestartet, und alle aktuellen Einstellungen werden überschrieben.`,
+Laden Sie eine zuvor erstellte Sicherungsdatei hoch, um alle Einstellungen wiederherzustellen. Geben Sie das Administrator-Passwort ein, das beim Erstellen der Sicherung galt. Der Router wird nach der Wiederherstellung neu gestartet, und alle aktuellen Einstellungen werden überschrieben.`,
   '/settings/general': `## Einstellungen – Allgemein
 
 <details><summary>Einstellungen</summary> Allgemeine Einstellungen für die Benutzeroberfläche und das Verhalten des Routers.<h3>Design</h3>Wählen Sie zwischen dunklem oder hellem Design, oder behalten Sie die für die Benutzeroberfläche übernommenen Systemeinstellungen bei.<h3>Sprache</h3>Konfigurieren Sie die bevorzugte Sprache für die Benutzeroberfläche des Routers. Diese Einstellung beeinflusst die für alle Menüs, Optionen und sonstigen Textelemente angezeigte Sprache innerhalb der Weboberfläche des Routers.<h3>Zeitzone</h3>Legen Sie die lokale Zeitzone für den Router fest. Dies beeinflusst geplante Ereignisse wie WAN-Sperrzeiten und WiFi-Sperrzeitpläne. </details> <details><summary>Fernzugriff</summary> Ermöglicht den Fernzugriff zur Verwaltung der Einstellungen und Konfigurationen des Routers von außerhalb des lokalen Netzwerks.<ul><li><b>Wenn hinter NAT</b> (Network Address Translation): Erlaubt den Fernzugriff nur, wenn der Router Teil eines privaten Netzwerks ist, das NAT verwendet. NAT wird häufig in Heim- und Kleinunternehmensnetzwerken eingesetzt, in denen sich mehrere Geräte eine einzige öffentliche IP-Adresse teilen.</li><li><b>Nie:</b> Deaktiviert den Fernzugriff vollständig. Geeignet für Umgebungen, in denen Sicherheit oberste Priorität hat, etwa in hochsensiblen oder isolierten Netzwerken.</li><li><b>Immer:</b> Aktiviert den Fernzugriff jederzeit. Ideal für Umgebungen, in denen kontinuierliche Fernverwaltung erforderlich ist, etwa in einem Unternehmensnetzwerk, in dem IT-Administratoren ständigen Zugriff auf den Router für Überwachung und Aktualisierungen benötigen.</li></ul></details><details><summary>Sicherheit</summary> Laden Sie Ihr Root-CA-Zertifikat herunter, um HTTPS-Verbindungen von weiteren Geräten zu vertrauen. Durch die Installation dieses Zertifikats können Browser und Apps die Identität des Routers ohne Sicherheitswarnungen überprüfen. </details> <details><summary>Aktualisierungen</summary> Wenn eine Aktualisierung verfügbar ist, erscheint oben auf dieser Seite ein Banner. Sie können vor dem Aktualisieren die Versionshinweise einsehen. Der Router ist während des Aktualisierungsvorgangs kurzzeitig nicht erreichbar.</details>`,

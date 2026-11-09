@@ -44,6 +44,14 @@ Asigna un nombre personalizado para identificar fácilmente este dispositivo. Si
 
 Reserva una dirección IP para asignar una dirección IPv4 fija que no cambiará entre reinicios. Útil para servidores, impresoras, dispositivos NAS o cualquier cosa a la que necesites acceder mediante una dirección IP constante. Las direcciones IPv6 no se pueden reservar: cada dispositivo elige su propia dirección IPv6, por lo que el router no interviene.
 
+### Permisos
+
+**Permitir el reenvío automático de puertos**: Permite a este dispositivo abrir y renovar sus propios reenvíos de puertos mediante UPnP/PCP (usado por servidores StartOS, consolas de juegos y similares). Desactivado por defecto; los reenvíos activos aparecen en la página de Puertos publicados.
+
+**Permitir publicación de registros DNS**: Permite a este dispositivo publicar nombres DNS para sí mismo en el router, de modo que todos los dispositivos de su red puedan resolverlos (lo usan los servidores StartOS para dominios privados). Desactivado por defecto; los nombres publicados aparecen debajo de la configuración.
+
+**Permitir anuncios de router IPv6**: Permite que este dispositivo anuncie rutas IPv6 a tus otros dispositivos (necesario para routers de borde Thread como un Apple TV, HomePod o Home Assistant). Desactivado de forma predeterminada.
+
 ### Olvidar
 
 Elimina un dispositivo sin conexión de tu lista de dispositivos. Se perderá cualquier nombre personalizado o ajuste de IP reservada. Si el dispositivo vuelve a conectarse, aparecerá como un dispositivo nuevo.`,
@@ -409,11 +417,11 @@ Opciones avanzadas para usuarios expertos. LuCI proporciona acceso directo a la 
 
 ### Crear copia de seguridad
 
-Descarga una copia de seguridad de todos los ajustes del router, incluidos los perfiles de seguridad, la configuración de WiFi, los certificados SSL y las preferencias del sistema. Guarda el archivo de copia de seguridad en un lugar seguro.
+Descarga una copia de seguridad de todos los ajustes del router, incluidos los perfiles de seguridad, la configuración de WiFi, los certificados SSL y las preferencias del sistema. La copia de seguridad se cifra con tu contraseña de administrador. Guarda el archivo de copia de seguridad en un lugar seguro.
 
 ### Restaurar copia de seguridad
 
-Sube un archivo de copia de seguridad creado previamente para restaurar todos los ajustes. El router se reiniciará tras la restauración y se sobrescribirán todos los ajustes actuales.`,
+Sube un archivo de copia de seguridad creado previamente para restaurar todos los ajustes. Introduce la contraseña de administrador vigente cuando se creó la copia de seguridad. El router se reiniciará tras la restauración y se sobrescribirán todos los ajustes actuales.`,
   '/settings/general': `## Ajustes – General
 
 <details><summary>Preferencias</summary> Preferencias generales para la interfaz de usuario y el comportamiento del router.<h3>Tema</h3>Elige entre tema oscuro o claro, o mantén la configuración de tu sistema aplicada a la interfaz.<h3>Idioma</h3>Configura el idioma preferido para la interfaz de usuario del router. Este ajuste afecta al idioma mostrado en todos los menús, opciones y demás elementos de texto dentro de la interfaz web del router.<h3>Zona horaria</h3>Establece la zona horaria local del router. Afecta a los eventos programados como los apagados de WAN y las programaciones de apagado de WiFi. </details> <details><summary>Acceso remoto</summary> Habilita el acceso remoto para gestionar los ajustes y configuraciones del router desde fuera de la red local.<ul><li><b>Cuando esté detrás de NAT</b> (Network Address Translation): Permite el acceso remoto solo cuando el router forma parte de una red privada que usa NAT. NAT se usa habitualmente en redes domésticas y de pequeñas empresas donde varios dispositivos comparten una única dirección IP pública.</li><li><b>Nunca:</b> Deshabilita por completo el acceso remoto. Adecuado para entornos donde la seguridad es primordial, como en redes muy sensibles o aisladas.</li><li><b>Siempre:</b> Habilita el acceso remoto en todo momento. Ideal para entornos donde es necesaria una gestión remota continua, como en una red empresarial donde los administradores de TI necesitan mantener acceso constante al router para supervisión y actualizaciones.</li></ul></details><details><summary>Seguridad</summary> Descarga tu certificado Root CA para confiar en las conexiones HTTPS desde dispositivos adicionales. Instalar este certificado permite a los navegadores y aplicaciones verificar la identidad del router sin advertencias de seguridad. </details> <details><summary>Actualizaciones</summary> Cuando haya una actualización disponible, aparecerá un aviso en la parte superior de esta página. Puedes consultar las notas de la versión antes de actualizar. El router experimentará una breve interrupción durante el proceso de actualización.</details>`,

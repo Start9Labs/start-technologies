@@ -87,6 +87,7 @@ Effects are organized by subsystem:
 | ---------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
 | **Action**       | `export`, `clear`, `getInput`, `run`, `createTask`, `clearTasks`                                                   | Register and invoke user actions    |
 | **Control**      | `restart`, `shutdown`, `getStatus`, `setMainStatus`                                                                | Service lifecycle control           |
+| **Files**        | `prepareUpload`, `prepareDownload`                                                                                 | Prepare volume file transfers       |
 | **Dependency**   | `setDependencies`, `getDependencies`, `checkDependencies`, `mount`, `getInstalledPackages`, `getServiceManifest`   | Inter-service dependency management |
 | **Health**       | `setHealth`                                                                                                        | Report health check results         |
 | **Subcontainer** | `createFs`, `destroyFs`                                                                                            | Container filesystem management     |
@@ -132,7 +133,10 @@ Supported field types via `Value`:
 - `list` — Repeatable array of sub-values
 - `color`, `datetime` — Specialized pickers
 - `object` — Nested sub-form
+- `file` / `dynamicFile` — Prepared volume uploads with nullable or required selection
 - `union` / `dynamicUnion` — Conditional fields based on a discriminator
+
+Built validators run asynchronously before the action handler. A File field reads host-owned byte limits through the internal `getUploadLimits` effect, then validates its prepared capability and resolves OS-authored `UploadedFile` metadata through `resolveUpload`. Filename extension filters belong to the field; the SDK and browser form share their suffix matcher. The form submission carries a string capability; the handler receives metadata after the host has installed the file. `FileInfo` aliases the generated metadata schema rather than defining a second wire shape.
 
 ### Dependencies
 
@@ -316,8 +320,7 @@ health/
 
 Health checks are paired with **triggers** that control polling behavior:
 
-- `defaultTrigger` — 1 s while `starting` or `failure`, 30 s otherwise
-- `daemonReadyTrigger` — a daemon's `ready` check without its own trigger: `defaultTrigger`, except that `loading` or `waiting` before the first `success` backs off from 1 s, doubling to 30 s (selected in `HealthDaemon`, not exported on `sdk.trigger`)
+- `defaultTrigger` — 1 s while `starting` or `failure`, 30 s otherwise (including `starting` with `waiting: true`), except that `loading` or `waiting: true` before the first `success` backs off from 1 s, doubling to 30 s
 - `cooldownTrigger` — Fixed interval between checks
 - `statusTrigger` — Per-status polling intervals with a default fallback
 - `onceTrigger` — One check at start

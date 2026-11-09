@@ -5,14 +5,19 @@ import {
   FALLBACK_ICON,
   GetPackageRes,
   GetPackagesRes,
+  registrySigningKeys,
 } from '@start9labs/marketplace'
 import {
+  defaultRegistries,
   FullKeyboard,
   pauseFor,
+  registryUrl,
+  sameUrl,
   RPCErrorDetails,
   SetLanguageParams,
 } from '@start9labs/shared'
 import {
+  auth,
   createRpcClient,
   RpcHandlers,
   T,
@@ -51,6 +56,7 @@ import {
 } from 'src/app/services/patch-db/data-model'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { toAuthorityUrl } from 'src/app/utils/acme'
+import { parsePemPublicKey, parsePublicKeys } from 'src/app/utils/public-keys'
 import { Mock } from './api.fixures'
 import { BTC_ICON, LND_ICON, PROXY_ICON } from './api-icons'
 import {
@@ -75,7 +81,7 @@ import {
   ServerState,
   WebsocketConfig,
 } from './api.types'
-import { ApiService } from './embassy-api.service'
+import { ApiService, FileUploadOptions } from './embassy-api.service'
 import { mockPatchData } from './mock-patch'
 
 import markdown from './md-sample.md'
@@ -108,13 +114,7 @@ const PROGRESS: T.FullProgress = {
   ],
 }
 
-// A service's own install-time progress (setInitProgress). The host nests this
-// inside the install's finalization ("Installing") phase as a FullProgress — but
-// only once finalization begins; until then that phase is null (waiting), so the
-// sub-phases must not appear before the download/validation phases finish.
-// installProgress injects this then. An indeterminate sub-phase (like HA's
-// "Generating Home Assistant configuration", a value-less animated bar) plus a
-// determinate one exercise both render branches of the install card's sub-phases.
+// Nested under finalization after download and validation complete.
 const INIT_PROGRESS: T.FullProgress = {
   overall: { done: 0, total: 8, units: 'steps' },
   phases: [
@@ -129,8 +129,14 @@ export class MockApiService extends ApiService {
   private readonly storage = inject(WA_SESSION_STORAGE)
   private readonly cache = inject(PATCH_CACHE)
   private readonly revertTime = 1800
+  private readonly conversionJobs: T.ServerStatus['backupConversions'] = {}
+  private readonly pushSubscriptions = new Map<
+    string,
+    Params<'notification.push.subscribe'>
+  >()
   sequence = 1
   private readonly handlers: RpcHandlers<Api> = {
+    'git-info': async () => 'mock-os-build',
     state: async () => {
       await pauseFor(1000)
 
@@ -147,6 +153,7 @@ export class MockApiService extends ApiService {
         mockPatchData.ui = { ...mockPatchData.ui, ...JSON.parse(stored) }
       }
 
+      this.protectTrust()
       return {
         dump: { id: this.sequence, value: mockPatchData },
         guid: 'db-guid',
@@ -206,7 +213,7 @@ export class MockApiService extends ApiService {
     },
     'diagnostic.update': async () => {
       await pauseFor(1000)
-      return { target: '0.4.1', progress: 'update-progress-guid' }
+      return { target: '0.4.2', progress: 'update-progress-guid' }
     },
     'diagnostic.logs': async params => {
       return this.handlers['server.logs']!(params)
@@ -282,6 +289,106 @@ export class MockApiService extends ApiService {
       },
       hardware: null,
     }),
+    'server.trusted-keys.connect-registry': async ({ url, name }) => {
+      await pauseFor(2000)
+      const normalized = registryUrl(url)
+      const info = this.mockRegistryInfo(normalized)
+      const { added } = this.importRegistryKeys(normalized, info)
+      for (const id of added)
+        mockPatchData.serverInfo.trustedKeys[id]!.marketplace = true
+      for (const saved of Object.keys(mockPatchData.ui.registries)) {
+        if (sameUrl(saved, normalized))
+          delete mockPatchData.ui.registries[saved]
+      }
+      mockPatchData.ui.registries[normalized] = name ?? info.name
+      await this.publishTrust()
+      return added
+    },
+    'server.trusted-keys.remove-registry': async ({ url }) => {
+      await pauseFor(2000)
+      if (sameUrl(url, mockPatchData.ui.startosRegistry))
+        throw new Error(
+          'This registry provides StartOS updates. Choose another registry for StartOS updates before removing it.',
+        )
+      const offered = this.offeredKeys(url)
+      for (const saved of Object.keys(mockPatchData.ui.registries)) {
+        if (sameUrl(saved, url)) delete mockPatchData.ui.registries[saved]
+      }
+      for (const saved of Object.keys(mockPatchData.serverInfo.registryKeys)) {
+        if (sameUrl(saved, url))
+          delete mockPatchData.serverInfo.registryKeys[saved]
+      }
+      await this.publishTrust()
+      return offered.filter(id => {
+        const key = mockPatchData.serverInfo.trustedKeys[id]
+        return key?.removable && key.origin !== 'manual'
+      })
+    },
+    'server.trusted-keys.set-os-registry': async ({ url }) => {
+      await pauseFor(2000)
+      if (
+        !Object.keys(mockPatchData.ui.registries).some(saved =>
+          sameUrl(saved, url),
+        )
+      )
+        throw new Error('Add this registry before using it for StartOS updates')
+      const enabled = this.offeredKeys(url).filter(
+        id => mockPatchData.serverInfo.trustedKeys[id]?.os === false,
+      )
+      for (const id of enabled)
+        mockPatchData.serverInfo.trustedKeys[id]!.os = true
+      mockPatchData.ui.startosRegistry = registryUrl(url)
+      await this.publishTrust()
+      return enabled
+    },
+    'server.trusted-keys.add': async ({ name, publicKeys, trustFor }) => {
+      await pauseFor(2000)
+      const keys = structuredClone(mockPatchData.serverInfo.trustedKeys)
+      const added: string[] = []
+      const existing: string[] = []
+      for (const key of parsePublicKeys(publicKeys.join('\n'))) {
+        const id = auth.normalizeDer64(parsePemPublicKey(key))
+        if (keys[id]) {
+          existing.push(id)
+        } else {
+          added.push(id)
+          keys[id] = {
+            name,
+            origin: 'manual',
+            originRegistry: null,
+            gpgExports: [],
+            contact: [],
+            addedAt: new Date().toISOString(),
+            publicKey: id,
+            removable: true,
+            marketplace: true,
+            os: false,
+          }
+        }
+        if (trustFor) keys[id]![trustFor] = true
+      }
+      mockPatchData.serverInfo.trustedKeys = keys
+      await this.publishTrust()
+      return { added, existing }
+    },
+    'server.trusted-keys.update': async ({ id, name, marketplace, os }) => {
+      await pauseFor(2000)
+      const key = mockPatchData.serverInfo.trustedKeys[id]
+      if (!key) throw new Error('Key not found')
+      if (!os) this.keepOsKeys([id])
+      const value = { ...key, name, marketplace, os }
+      mockPatchData.serverInfo.trustedKeys[id] = value
+      await this.mockRevision([
+        {
+          op: PatchOp.REPLACE,
+          path: pathFromArray(['serverInfo', 'trustedKeys', id]),
+          value,
+        },
+      ])
+      return null
+    },
+    'server.trusted-keys.remove': async ({ id }) => this.removeKeys([id]),
+    'server.trusted-keys.remove-many': async ({ ids }) => this.removeKeys(ids),
     'server.update': async params => {
       await pauseFor(2000)
       const initialProgress = {
@@ -485,12 +592,28 @@ export class MockApiService extends ApiService {
     },
     'registry.os.version.get': async params => {
       await pauseFor(2000)
-      return Mock.RegistryOSUpdate as Result<'registry.os.version.get'>
+      return (
+        sameUrl(params.registry, defaultRegistries.community)
+          ? {}
+          : Mock.RegistryOSUpdate
+      ) as Result<'registry.os.version.get'>
     },
     'registry.info': async params => {
       await pauseFor(2000)
       return Mock.RegistryInfo
     },
+    'notification.push.key': async () =>
+      'BMPJ4K-bgv51B65CU1VyQTEkdx1KpAEwNW1yBT1s1L897jXuwArMYD6evcHvlejf27P-ouK7X_LwifLqyBkL6Hs',
+    'notification.push.list': async () => [...this.pushSubscriptions.values()],
+    'notification.push.subscribe': async params => {
+      this.pushSubscriptions.set(params.endpoint, params)
+      return null
+    },
+    'notification.push.unsubscribe': async ({ endpoint }) => {
+      this.pushSubscriptions.delete(endpoint)
+      return null
+    },
+    'notification.push.test': async () => null,
     'notification.list': async params => {
       await pauseFor(2000)
 
@@ -730,7 +853,23 @@ export class MockApiService extends ApiService {
     },
     'backup.target.list': async params => {
       await pauseFor(2000)
-      return Mock.BackupTargets
+      return structuredClone(Mock.BackupTargets)
+    },
+    'backup.target.convert': async params => {
+      const backup =
+        Mock.BackupTargets[params.targetId]?.startOs[params.serverId]
+      if (!backup) throw new Error('Backup not found')
+      const jobs = (this.conversionJobs[params.targetId] ??= {})
+      if (jobs[params.serverId]?.state === 'running')
+        throw new Error('Conversion already running')
+      jobs[params.serverId] = {
+        state: 'running',
+        progress: { overall: false, phases: [] },
+        error: null,
+      }
+      backup.formatStatus = 'interrupted'
+      void this.simulateConversion(params, backup)
+      return null
     },
     'backup.target.cifs.add': async params => {
       await pauseFor(2000)
@@ -1023,6 +1162,14 @@ export class MockApiService extends ApiService {
         }
       }
 
+      if (params.actionId === 'file-upload') {
+        return {
+          eventId: 'ANZXNWIFRTTBZ6T52KQPZILIQQODDHXQ',
+          value: null,
+          spec: await Mock.getFileInputSpec(),
+        }
+      }
+
       return {
         eventId: 'ANZXNWIFRTTBZ6T52KQPZILIQQODDHXQ',
         value: Mock.MockConfig,
@@ -1041,8 +1188,13 @@ export class MockApiService extends ApiService {
       ]
       this.mockRevision(patch)
 
-      // return Mock.ActionResGroup
-      // return Mock.ActionResSingle
+      if (params.actionId === 'file-result')
+        return {
+          version: '1',
+          title: 'Diagnostics',
+          message: 'Download the generated report.',
+          result: { type: 'file', value: 'mock-download', delete: true },
+        }
       if (params.actionId === 'big-qr') return Mock.ActionResBigQr
       if (params.actionId === 'unencodable-qr')
         return Mock.ActionResUnencodableQr
@@ -1121,6 +1273,7 @@ export class MockApiService extends ApiService {
                 'chain-state': {
                   name: 'Chain State',
                   result: 'loading',
+                  waiting: false,
                   message:
                     'Bitcoin is syncing from genesis. Downloading block headers and verifying chain integrity, please wait',
                 },
@@ -1175,6 +1328,7 @@ export class MockApiService extends ApiService {
                 'ephemeral-health-check': {
                   name: 'Ephemeral Health Check',
                   result: 'starting',
+                  waiting: false,
                   message: null,
                 },
                 'unnecessary-health-check': {
@@ -1185,6 +1339,7 @@ export class MockApiService extends ApiService {
                 'chain-state': {
                   name: 'Chain State',
                   result: 'loading',
+                  waiting: false,
                   message: 'Bitcoin is syncing from genesis',
                 },
                 'p2p-interface': {
@@ -1551,8 +1706,24 @@ export class MockApiService extends ApiService {
   }
   readonly rpc = createRpcClient<ApiClient>(tableTransport<Api>(this.handlers))
 
-  async uploadFile(guid: string, body: Blob): Promise<void> {
-    await pauseFor(2000)
+  async uploadFile(
+    guid: string,
+    body: Blob,
+    options: FileUploadOptions = {},
+  ): Promise<void> {
+    for (let step = 1; step <= 20; step++) {
+      options.signal?.throwIfAborted()
+      await pauseFor(100)
+      options.progress?.(Math.floor((body.size * step) / 20), body.size)
+    }
+    options.signal?.throwIfAborted()
+  }
+
+  downloadFileUrl(guid: string): string {
+    return (
+      'data:text/plain;charset=utf-8,' +
+      encodeURIComponent('StartOS action file download\n')
+    )
   }
 
   async getStatic(
@@ -2306,6 +2477,178 @@ export class MockApiService extends ApiService {
           ? 'gateway'
           : 'public-fallback',
     }
+  }
+
+  private offeredKeys(url: string): string[] {
+    return Object.entries(mockPatchData.serverInfo.registryKeys)
+      .filter(([saved]) => sameUrl(saved, url))
+      .flatMap(([, keys]) => keys)
+  }
+
+  private keepOsKeys(ids: readonly string[]): void {
+    const keys = Object.entries(mockPatchData.serverInfo.trustedKeys)
+    const removed = new Set(ids)
+    if (
+      keys.some(([, key]) => key.os) &&
+      !keys.some(([id, key]) => !removed.has(id) && key.os)
+    )
+      throw new Error('At least one key must stay trusted for StartOS updates')
+  }
+
+  private async removeKeys(ids: readonly string[]): Promise<null> {
+    await pauseFor(2000)
+    const keys = structuredClone(mockPatchData.serverInfo.trustedKeys)
+    this.protectTrust(keys)
+    for (const id of ids) {
+      if (!keys[id]) throw new Error('Key not found')
+      if (!keys[id].removable) throw new Error('Protected key')
+    }
+    this.keepOsKeys(ids)
+    for (const id of ids) delete keys[id]
+    mockPatchData.serverInfo.trustedKeys = keys
+    await this.publishTrust()
+    return null
+  }
+
+  private importRegistryKeys(
+    url: string,
+    info: T.RegistryInfo,
+  ): { added: string[] } {
+    const proposed = registrySigningKeys(info)
+    const added: string[] = []
+    for (const [id, identity] of Object.entries(proposed)) {
+      const trusted = mockPatchData.serverInfo.trustedKeys[id]
+      if (trusted) {
+        trusted.contact = [
+          ...new Set([...trusted.contact, ...identity.contact]),
+        ]
+        if (!trusted.gpgExports.length) trusted.gpgExports = identity.gpgExports
+        continue
+      }
+      added.push(id)
+      mockPatchData.serverInfo.trustedKeys[id] = {
+        ...identity,
+        origin: url.replace(/\/$/, ''),
+        originRegistry: { name: info.name, icon: info.icon },
+        addedAt: new Date().toISOString(),
+        removable: false,
+        marketplace: false,
+        os: false,
+      }
+    }
+    for (const saved of Object.keys(mockPatchData.serverInfo.registryKeys)) {
+      if (sameUrl(saved, url))
+        delete mockPatchData.serverInfo.registryKeys[saved]
+    }
+    mockPatchData.serverInfo.registryKeys[url] = Object.keys(proposed)
+    return { added }
+  }
+
+  private mockRegistryInfo(url: string): T.RegistryInfo {
+    return {
+      ...Mock.RegistryInfo,
+      name:
+        Object.entries(mockPatchData.ui.registries).find(([saved]) =>
+          sameUrl(saved, url),
+        )?.[1] || 'Example Registry',
+    }
+  }
+
+  private protectTrust(keys = mockPatchData.serverInfo.trustedKeys): void {
+    const listed = new Set(
+      Object.entries(mockPatchData.serverInfo.registryKeys)
+        .filter(([url]) =>
+          Object.keys(mockPatchData.ui.registries).some(saved =>
+            sameUrl(saved, url),
+          ),
+        )
+        .flatMap(([, ids]) => ids.map(auth.normalizeDer64)),
+    )
+    for (const key of Object.values(keys)) {
+      key.removable = !listed.has(auth.normalizeDer64(key.publicKey))
+    }
+  }
+
+  private async publishTrust(): Promise<void> {
+    this.protectTrust()
+    await this.mockRevision<unknown>([
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/trustedKeys',
+        value: structuredClone(mockPatchData.serverInfo.trustedKeys),
+      },
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/registryKeys',
+        value: structuredClone(mockPatchData.serverInfo.registryKeys),
+      },
+      {
+        op: PatchOp.REPLACE,
+        path: '/ui/registries',
+        value: structuredClone(mockPatchData.ui.registries),
+      },
+      {
+        op: PatchOp.REPLACE,
+        path: '/ui/startosRegistry',
+        value: mockPatchData.ui.startosRegistry,
+      },
+    ])
+  }
+
+  private async publishConversions(): Promise<void> {
+    await this.mockRevision<T.ServerStatus['backupConversions']>([
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/statusInfo/backupConversions',
+        value: structuredClone(this.conversionJobs),
+      },
+    ])
+  }
+
+  private async simulateConversion(
+    params: Params<'backup.target.convert'>,
+    backup: T.StartOsRecoveryInfo,
+  ): Promise<void> {
+    const job = this.conversionJobs[params.targetId]![params.serverId]!
+    const progress = new utils.FullProgressTracker()
+    const phases = [
+      ['Inspecting backup', 'steps', 5],
+      ['Converting metadata', 'bytes', 20],
+      ['Scanning backup objects', 'steps', 10],
+      ['Converting data objects', 'steps', 60],
+      ['Finalizing conversion', 'steps', 5],
+    ] as const
+    const handles = phases.map(([name, , weight]) =>
+      progress.addPhase(name, weight),
+    )
+    for (const [index, [name, units]] of phases.entries()) {
+      const phase = handles[index]!
+      phase.setUnits(units)
+      phase.setTotal(100)
+      for (const done of [0, 25, 50, 75, 100]) {
+        phase.setDone(done)
+        job.progress = progress.snapshot()
+        if (
+          name === 'Converting data objects' &&
+          done === 25 &&
+          params.password === 'interrupt'
+        ) {
+          job.state = 'failed'
+          job.error =
+            'Conversion interrupted. Resume it when the target is available.'
+          await this.publishConversions()
+          return
+        }
+        await this.publishConversions()
+        await pauseFor(700)
+      }
+      phase.complete()
+    }
+    backup.formatStatus = 'current'
+    job.state = 'complete'
+    progress.complete()
+    job.progress = progress.snapshot()
+    await this.publishConversions()
   }
 
   private mockData(path: string): any {

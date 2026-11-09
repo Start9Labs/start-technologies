@@ -271,9 +271,13 @@ start-wrt's targets live in [`build.mk`](build.mk) (included by the root `Makefi
 
 `make start-wrt-rpc-bindings` regenerates the committed RPC and streaming bindings;
 `make start-wrt-rpc-bindings-check` regenerates them and rejects drift. Both run the
-host generator with Cargo's `bindings` profile (unoptimized, no debug info,
-nonincremental). Product builds consume the committed bindings and retain their
-selected `PROFILE`.
+native-target generator inside the selected shared Rust builder with Cargo's `bindings`
+profile (unoptimized, no debug info, nonincremental), then format the output with the
+host's Prettier. Native bindings and tests select the host sysroot independently of
+cross-build `ARCH`. StartWRT's shared builder alias sets `DISABLE_RVA23=1` for bindings,
+tests and cross-compilation. The router binary retains its explicit scalar K1 flags,
+compiler wrappers and final ISA check. Product builds consume the committed bindings
+and retain their selected `PROFILE`.
 
 | Target                                          | Description                                                                        |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------- |
@@ -297,9 +301,9 @@ read from `backend/ctrl/Cargo.toml`; the git tag / GitHub release is `start-wrt/
 Releases stage through a beta registry before promotion to production, mirroring the OS.
 
 1. Set the release version in `backend/ctrl/Cargo.toml`, add changelog fragments under the
-   root rules, including each fragment's `user-facing` flag. The release manager may add
-   a lede and `## Important` at `release-notes/<version>.md`; Highlights compile from
-   fragments. Land release inputs on `master`.
+   root rules, including each fragment's explicit `release-notes` selection. The release
+   manager may add necessary `## Important` notices at `release-notes/<version>.md`;
+   Highlights compile from selected fragments. Land release inputs on `master`.
 2. Run the **start-wrt** workflow with `deploy: release`. It builds the OpenWrt image, uploads
    the images to `s3://startwrt-images`, and registers + indexes the version into the **beta
    registry** (signing with the `DEV_KEY` repo secret). Beta routers — any router whose UCI

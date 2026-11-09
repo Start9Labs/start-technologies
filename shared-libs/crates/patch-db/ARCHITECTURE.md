@@ -50,19 +50,20 @@ patch-db/
 
 The main database engine. Key types:
 
-| Type                 | Role                                                                                                                              |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `PatchDb`            | Thread-safe async handle (clone to share). All reads/writes go through this.                                                      |
-| `TypedPatchDb<T>`    | Generic wrapper that enforces a schema type `T` via `HasModel`.                                                                   |
-| `Store`              | Internal state container. Holds the current `Value`, revision counter, `Broadcast`, and optional CBOR file storage.               |
-| `Dump`               | Snapshot: `{ id: u64, value: Value }`                                                                                             |
-| `Revision`           | Incremental change: `{ id: u64, patch: DiffPatch }`                                                                               |
-| `DiffPatch`          | Newtype over `json_patch::Patch` with scoping, rebasing, and key-tracking methods.                                                |
-| `DbWatch`            | Combines a `Dump` + `Subscriber` into a `Stream` of values.                                                                       |
-| `TypedDbWatch<T>`    | Type-safe wrapper around `DbWatch`.                                                                                               |
-| `Subscriber`         | `tokio::sync::mpsc::UnboundedReceiver<Revision>`.                                                                                 |
-| `Broadcast`          | Fan-out dispatcher. Holds `ScopedSender`s that filter patches by JSON Pointer prefix. Automatically removes disconnected senders. |
-| `MutateResult<T, E>` | Pairs a `Result<T, E>` with an optional `Revision`, allowing callers to check both the outcome and whether a patch was produced.  |
+| Type                 | Role                                                                                                                                |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `PatchDb`            | Thread-safe async handle (clone to share). All reads/writes go through this.                                                        |
+| `TypedPatchDb<T>`    | Generic wrapper that enforces a schema type `T` via `HasModel`.                                                                     |
+| `Store`              | Internal state container. Holds the current `Value`, revision counter, `Broadcast`, and optional CBOR file storage.                 |
+| `Dump`               | Snapshot: `{ id: u64, value: Value }`                                                                                               |
+| `Revision`           | Incremental change: `{ id: u64, patch: DiffPatch }`                                                                                 |
+| `DiffPatch`          | Newtype over `json_patch::Patch` with scoping, rebasing, and key-tracking methods.                                                  |
+| `DbWatch`            | Combines a `Dump` + `Subscriber` into a `Stream` of values.                                                                         |
+| `TypedDbWatch<T>`    | Type-safe wrapper around `DbWatch`.                                                                                                 |
+| `Subscriber`         | `tokio::sync::mpsc::UnboundedReceiver<Revision>`.                                                                                   |
+| `JsonSubscriber`     | Bounded JSON revision receiver. Closes permanently on overflow.                                                                     |
+| `Broadcast`          | Per-pointer fan-out with shared JSON serialization and cached dumps. Reclaims dropped typed senders on send and typed subscription. |
+| `MutateResult<T, E>` | Pairs a `Result<T, E>` with an optional `Revision`, allowing callers to check both the outcome and whether a patch was produced.    |
 
 #### Write path
 
@@ -78,7 +79,9 @@ Store::apply(DiffPatch)
   ├─ For file-backed stores: serialize patch as CBOR, append to file
   ├─ For file-backed stores: compress (rewrite snapshot) every 4096 revisions
   └─ Broadcast::send(Revision)
-       └─ For each ScopedSender: scope patch to pointer, send if non-empty
+       ├─ Scope each patch once per subscribed pointer
+       ├─ Deliver typed revisions to unbounded subscribers
+       └─ Serialize once per pointer for shared bounded JSON broadcast rings
 ```
 
 #### Read path
@@ -100,6 +103,7 @@ Store (RwLock read guard)
 PatchDb::subscribe(ptr)    → Subscriber (mpsc receiver)
 PatchDb::watch(ptr)        → DbWatch (Dump + Subscriber, implements Stream)
 PatchDb::dump_and_sub(ptr) → (Dump, Subscriber)
+PatchDb::dump_and_sub_json(ptr, capacity) → Result<(Bytes, JsonSubscriber)>
 ```
 
 ### `macro` / `macro-internals`
@@ -218,6 +222,8 @@ is a sequence of CBOR values:
 ## Concurrency model
 
 - `PatchDb` wraps `Arc<RwLock<Store>>` — multiple concurrent readers, exclusive writer
-- `Broadcast` uses `mpsc::unbounded_channel` per subscriber — writes never block on slow consumers
+- Typed subscriptions use `mpsc::unbounded_channel`; bounded JSON subscriptions share Tokio broadcast rings grouped by pointer and capacity. Writes never block on slow consumers.
+- JSON overflow closes that receiver permanently; a fresh atomic dump/subscription recovers state. Other receivers remain independent.
+- JSON dumps are cached per pointer until any database revision. Scoped revisions serialize once per pointer and share immutable `Bytes` across all capacities and listeners. Dropped JSON receivers unregister from their ring without waiting for a database change.
 - `OPEN_STORES` static mutex prevents the same file from being opened twice in the same process
 - `FdLock` provides OS-level file locking for cross-process safety

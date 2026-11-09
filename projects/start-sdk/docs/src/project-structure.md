@@ -348,7 +348,11 @@ It has two sections:
 - **Determining the upstream version** — for each upstream this package pulls, the canonical place to find the latest version (e.g. `gh release view -R <org>/<repo> --json tagName -q .tagName`, a Docker Hub tags listing, etc.) and the manifest field where the current pin lives (typically `images.<name>.source.dockerTag` in `startos/manifest/index.ts`).
 - **Applying the bump** — the exact file and field to edit, including any tag-format quirks (e.g. drop the leading `v`, append `-alpine`, keep the major version aligned with a sibling image).
 
-Packages with multiple upstream sources (e.g. a service plus its database sidecar) get one subsection per source under each heading. The cross-cutting rule about renaming the file in `startos/versions/` versus creating a new one lives in [Versions](./versions.md).
+Packages with multiple upstream sources (e.g. a service plus its database sidecar) get one subsection per source under each heading. Bumping the package version itself — editing `current.ts` or spinning off a version file, migrations, release notes — lives in [Versions](./versions.md) and is not restated here.
+
+**Every package has one.** When the upstream is frozen, or the package builds only its own code, it says so and still covers every image it pins.
+
+**It holds the recipe and nothing else.** A fact the bump depends on stays: a carried patch that must keep applying, a cadence rule that decides whether to bump at all, a constraint between two pins. Everything else goes: this guide's rules, which it never restates; how to test a bump, which belongs to the reviewer and to the PR that needed it; how the package works, which is `README.md`; why it was built that way, which is the commit history; and repo mechanics a bump doesn't touch, which are `AGENTS.md`.
 
 ## assets/
 

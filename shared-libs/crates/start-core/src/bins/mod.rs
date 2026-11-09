@@ -125,6 +125,13 @@ pub fn translate_cli(mut cmd: clap::Command) -> clap::Command {
     cmd
 }
 
+#[cfg(test)]
+pub(crate) fn with_manifest_version(command: clap::Command, product: &Path) -> clap::Command {
+    let manifest = std::fs::read_to_string(product.join("Cargo.toml")).unwrap();
+    let manifest: serde_toml::Table = serde_toml::from_str(&manifest).unwrap();
+    command.version(manifest["package"]["version"].as_str().unwrap().to_owned())
+}
+
 #[derive(Default)]
 pub struct MultiExecutable {
     default: Option<&'static str>,

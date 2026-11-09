@@ -2,12 +2,15 @@
 .el .ds Aq '
 .TH start-cli-diagnostic-update 1  "update "
 .SH NAME
-start\-cli\-diagnostic\-update \- Check a given registry for StartOS updates and update if available
+start\-cli\-diagnostic\-update \- Check for StartOS updates and update if available
 .SH SYNOPSIS
-\fBstart\-cli diagnostic update\fR [\fB\-\-to\fR] [\fB\-\-no\-progress\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIREGISTRY\fR>
+\fBstart\-cli diagnostic update\fR [\fB\-\-trust\fR] [\fB\-\-to\fR] [\fB\-\-no\-progress\fR] [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
-Check a given registry for StartOS updates and update if available
+Check for StartOS updates and update if available
 .SH OPTIONS
+.TP
+\fB\-\-trust\fR
+Install without requiring a trusted signer; signature and integrity checks remain mandatory
 .TP
 \fB\-\-to\fR \fI<TARGET>\fR
 Target version for update
@@ -17,6 +20,3 @@ Disable progress display
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help
-.TP
-<\fIREGISTRY\fR>
-URL of the registry

@@ -1,0 +1,2 @@
+- Certyfikat interfejsu WWW obejmuje nazwę lub adres użyty do jego otwarcia: `router.lan`, `router.local`, bramę każdego profilu, adres WAN i nazwę DDNS. Urządzenia ufające głównemu CA nie otrzymują już ostrzeżeń o niezgodnej nazwie dla tych adresów.
+- `router.lan` wskazuje własną bramę IPv4 profilu wysyłającego zapytanie, zamiast bram wszystkich profili.

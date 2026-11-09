@@ -1,1 +1,0 @@
-- Okna dodawania urządzeń nie otwierają się przed załadowaniem danych podsieci.

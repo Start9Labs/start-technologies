@@ -433,31 +433,14 @@ class VersionRangeTable {
     return c_tables
   }
 
+  /** Goes through `and`, whose cross product puts the operands on a common flavor partition. */
   static or(...in_tables: VersionRangeTables[]): VersionRangeTables {
-    let out_tables: VersionRangeTables = false
-    for (let tables of in_tables) {
-      if (tables === false) {
-        continue
-      }
-      if (tables === true) {
-        return true
-      }
-      if (out_tables === false) {
-        out_tables = new DeepMap()
-      }
-      for (let [flavor, table] of tables) {
-        let prev = out_tables.get(flavor)
-        if (prev == null) {
-          out_tables.set(flavor, table)
-        } else {
-          out_tables.set(
-            flavor,
-            VersionRangeTable.zip(table, prev, (a, b) => a || b),
-          )
-        }
-      }
-    }
-    return out_tables
+    return VersionRangeTable.not(
+      in_tables.reduce<VersionRangeTables>(
+        (acc, t) => VersionRangeTable.and(acc, VersionRangeTable.not(t)),
+        true,
+      ),
+    )
   }
 
   /**

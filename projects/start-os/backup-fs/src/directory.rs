@@ -1,25 +1,19 @@
 //! Directory entry storage.
 //!
-//! A directory's `name -> child` map is stored one of two ways:
+//! A directory's `name -> child` map is stored one of three ways:
 //!
 //! * **Inline** — the whole `OrdMap` lives inside the directory inode's
-//!   sealed blob. This is the original layout and stays in force for small
-//!   directories, so the common case is byte-for-byte unchanged.
+//!   sealed blob, for directories up to the spill threshold
+//!   ([`Controller::dir_spill`]).
 //!
-//! * **Spilled** — once a directory grows past the spill threshold
-//!   ([`Controller::dir_spill`]) the listing is sharded across `buckets`
-//!   separate sealed bucket files, and
-//!   the inode keeps only a small marker (`gen`, `buckets`, and cached
-//!   `len`/`subdirs` counts). A name maps to exactly one bucket by a keyed
-//!   hash, so a single lookup/create/unlink reads or rewrites just *one*
-//!   bucket instead of re-serializing the entire listing. That turns the
-//!   O(n²) "rewrite the whole directory on every create" cost into O(1) per
-//!   operation — the small-file backup bottleneck.
+//! * **Spilled** (format 1) — the listing is sharded by a keyed hash across
+//!   `buckets` separate bucket objects, and the inode keeps a marker (`gen`,
+//!   `buckets`, cached `len`/`subdirs`). Spilling and re-sharding write a new
+//!   generation before the marker names it.
 //!
-//! Spilling and re-sharding write the new buckets under a fresh `gen` and
-//! then commit by saving the inode marker; a crash before the marker save
-//! leaves the new buckets as harmless orphans (the marker still points at
-//! the old generation / inline data), so the transition is atomic.
+//! * **Chunked** (format 2) — entries are appended to bounded chunks (see
+//!   [`crate::chunks`]), so adding names rewrites only the last chunk.
+//!   Format 2 moves a spilled directory into chunks on its first change.
 
 use std::ffi::{OsStr, OsString};
 
@@ -59,7 +53,7 @@ pub struct DirectoryEntry {
 }
 
 impl DirectoryEntry {
-    fn is_dir(&self) -> bool {
+    pub(crate) fn is_dir(&self) -> bool {
         self.ty == FileType::Directory
     }
 }
@@ -81,6 +75,12 @@ enum DirEntries {
         /// Cached total entry count (avoids scanning every bucket).
         len: u64,
         /// Cached count of child subdirectories (for `nlink`).
+        subdirs: u64,
+    },
+    Chunked {
+        generation: u64,
+        chunks: u32,
+        len: u64,
         subdirs: u64,
     },
 }
@@ -119,10 +119,20 @@ impl DirectoryContents {
         Self(DirEntries::Inline(OrdMap::new()))
     }
 
+    pub(crate) fn bucket_geometry(&self) -> (u64, u32) {
+        match self.0 {
+            DirEntries::Inline(_) => (0, 0),
+            DirEntries::Spilled { gen, buckets, .. } => (gen, buckets),
+            DirEntries::Chunked {
+                generation, chunks, ..
+            } => (generation, chunks),
+        }
+    }
+
     pub fn len(&self) -> u64 {
         match &self.0 {
             DirEntries::Inline(m) => m.len() as u64,
-            DirEntries::Spilled { len, .. } => *len,
+            DirEntries::Spilled { len, .. } | DirEntries::Chunked { len, .. } => *len,
         }
     }
 
@@ -134,7 +144,7 @@ impl DirectoryContents {
     pub fn nlink(&self) -> usize {
         let subdirs = match &self.0 {
             DirEntries::Inline(m) => m.values().filter(|e| e.is_dir()).count() as u64,
-            DirEntries::Spilled { subdirs, .. } => *subdirs,
+            DirEntries::Spilled { subdirs, .. } | DirEntries::Chunked { subdirs, .. } => *subdirs,
         };
         1 + subdirs as usize
     }
@@ -153,36 +163,67 @@ impl DirectoryContents {
                 let bucket = ctrl.load_dir_bucket(dir, *gen, idx)?;
                 Ok(bucket.get(name).cloned())
             }
+            DirEntries::Chunked {
+                generation, chunks, ..
+            } => Ok(ctrl
+                .chunk_cache()
+                .open(ctrl, dir, *generation, *chunks)?
+                .get(name)
+                .cloned()),
         }
+    }
+
+    /// Moves a format-2 directory's entries into new chunks.
+    fn rechunk(&mut self, ctrl: &Controller, dir: Inode) -> BkfsResult<()> {
+        let entries = self.snapshot(ctrl, dir)?;
+        let generation = match self.0 {
+            DirEntries::Spilled { gen, buckets, .. } => {
+                for idx in 0..buckets {
+                    ctrl.remove_dir_bucket(dir, gen, idx)?;
+                }
+                gen + 1
+            }
+            _ => 1,
+        };
+        let mut cache = ctrl.chunk_cache();
+        let chunks = cache.create(ctrl, dir, generation, &entries)?;
+        self.0 = DirEntries::Chunked {
+            generation,
+            chunks: chunks.count(),
+            len: chunks.len(),
+            subdirs: chunks.subdirs(),
+        };
+        Ok(())
+    }
+
+    /// Format 2 writes no hashed buckets.
+    fn prepare_change(&mut self, ctrl: &Controller, dir: Inode) -> BkfsResult<()> {
+        if !ctrl.is_legacy() && matches!(self.0, DirEntries::Spilled { .. }) {
+            self.rechunk(ctrl, dir)?;
+        }
+        Ok(())
     }
 
     /// Insert/replace one entry.
     ///
-    /// Returns `Some((gen, buckets))` of a now-superseded bucket generation
-    /// that a reshard produced — the caller MUST make the (new-generation)
-    /// inode marker durable via `save_inode_durable` and only *then* reap
-    /// that old generation (see [`Self::reap_generation`]); reaping it
-    /// before the marker is durable would, on crash, leave the marker
-    /// pointing at deleted buckets and lose the whole directory.
-    ///
-    /// `durable` forces the affected bucket to stable storage before
-    /// returning (ordering-sensitive callers); the marker is persisted by
-    /// the caller via `save_inode`.
+    /// Returns the superseded `(gen, buckets)` after a reshard. The caller
+    /// must log the new-generation inode before [`Self::reap_generation`].
     pub fn insert(
         &mut self,
         ctrl: &Controller,
         dir: Inode,
         name: OsString,
         entry: DirectoryEntry,
-        durable: bool,
     ) -> BkfsResult<Option<(u64, u32)>> {
-        // Spill an inline directory that is about to exceed the threshold.
-        // (Spilling never deletes the inline source — it lives in the inode
-        // blob until the marker is saved — so a torn spill only orphans the
-        // new buckets; no durable-ordering dance is needed here.)
+        ctrl.check_rw()?;
+        self.prepare_change(ctrl, dir)?;
         if let DirEntries::Inline(m) = &self.0 {
             if !m.contains_key(&name) && m.len() >= ctrl.dir_spill() {
-                self.spill(ctrl, dir, choose_buckets(m.len() as u64 + 1))?;
+                if ctrl.is_legacy() {
+                    self.spill(ctrl, dir, choose_buckets(m.len() as u64 + 1))?;
+                } else {
+                    self.rechunk(ctrl, dir)?;
+                }
             }
         }
         match &mut self.0 {
@@ -206,23 +247,40 @@ impl DirectoryContents {
                 }
                 *subdirs = (*subdirs + was_dir as u64).saturating_sub(prev_dir as u64);
                 let needs_reshard = bucket.len() > ctrl.dir_max_bucket() && *buckets < MAX_BUCKETS;
-                ctrl.save_dir_bucket(dir, *gen, idx, &bucket, durable)?;
+                ctrl.save_dir_bucket(dir, *gen, idx, &bucket)?;
                 if needs_reshard {
                     return self.reshard(ctrl, dir);
                 }
                 Ok(None)
             }
+            DirEntries::Chunked {
+                generation,
+                chunks,
+                len,
+                subdirs,
+            } => {
+                let mut cache = ctrl.chunk_cache();
+                let index = cache.open(ctrl, dir, *generation, *chunks)?;
+                let added = entry.is_dir() as u64;
+                let previous = index.insert(ctrl, dir, name, entry)?;
+                *subdirs = (*subdirs + added)
+                    .saturating_sub(previous.as_ref().is_some_and(DirectoryEntry::is_dir) as u64);
+                *len = index.len();
+                *chunks = index.count();
+                cache.evict(ctrl, dir)?;
+                Ok(None)
+            }
         }
     }
 
-    /// Reap a superseded bucket generation. Call ONLY after the new-gen
-    /// marker has been durably persisted (see [`Self::insert`]).
+    /// Requires the new-generation inode to be logged.
     pub fn reap_generation(
         ctrl: &Controller,
         dir: Inode,
         gen: u64,
         buckets: u32,
     ) -> BkfsResult<()> {
+        ctrl.sync_legacy()?;
         for idx in 0..buckets {
             ctrl.remove_dir_bucket(dir, gen, idx)?;
         }
@@ -235,8 +293,9 @@ impl DirectoryContents {
         ctrl: &Controller,
         dir: Inode,
         name: &OsStr,
-        durable: bool,
     ) -> BkfsResult<Option<DirectoryEntry>> {
+        ctrl.check_rw()?;
+        self.prepare_change(ctrl, dir)?;
         match &mut self.0 {
             DirEntries::Inline(m) => Ok(m.remove(name)),
             DirEntries::Spilled {
@@ -251,9 +310,24 @@ impl DirectoryContents {
                 if let Some(e) = &prev {
                     *len = len.saturating_sub(1);
                     *subdirs = subdirs.saturating_sub(e.is_dir() as u64);
-                    ctrl.save_dir_bucket(dir, *gen, idx, &bucket, durable)?;
+                    ctrl.save_dir_bucket(dir, *gen, idx, &bucket)?;
                 }
                 Ok(prev)
+            }
+            DirEntries::Chunked {
+                generation,
+                chunks,
+                len,
+                subdirs,
+            } => {
+                let mut cache = ctrl.chunk_cache();
+                let index = cache.open(ctrl, dir, *generation, *chunks)?;
+                let removed = index.remove(ctrl, dir, name)?;
+                *subdirs = subdirs
+                    .saturating_sub(removed.as_ref().is_some_and(DirectoryEntry::is_dir) as u64);
+                *len = index.len();
+                *chunks = index.count();
+                Ok(removed)
             }
         }
     }
@@ -273,6 +347,13 @@ impl DirectoryContents {
                 }
                 Ok(true)
             }
+            DirEntries::Chunked {
+                generation, chunks, ..
+            } => Ok(ctrl
+                .chunk_cache()
+                .open(ctrl, dir, *generation, *chunks)?
+                .len()
+                == 0),
         }
     }
 
@@ -290,6 +371,12 @@ impl DirectoryContents {
                 }
                 Ok(all)
             }
+            DirEntries::Chunked {
+                generation, chunks, ..
+            } => Ok(ctrl
+                .chunk_cache()
+                .open(ctrl, dir, *generation, *chunks)?
+                .snapshot()),
         }
     }
 
@@ -297,13 +384,15 @@ impl DirectoryContents {
     /// buckets (fsck uses this to repair counts that drifted across a crash
     /// between a bucket write and its marker save). Returns true if changed.
     pub fn recompute_counts(&mut self, ctrl: &Controller, dir: Inode) -> BkfsResult<bool> {
-        if !matches!(self.0, DirEntries::Spilled { .. }) {
+        if matches!(self.0, DirEntries::Inline(_)) {
             return Ok(false);
         }
         let entries = self.snapshot(ctrl, dir)?;
         let new_len = entries.len() as u64;
         let new_subdirs = entries.values().filter(|e| e.is_dir()).count() as u64;
-        if let DirEntries::Spilled { len, subdirs, .. } = &mut self.0 {
+        if let DirEntries::Spilled { len, subdirs, .. } | DirEntries::Chunked { len, subdirs, .. } =
+            &mut self.0
+        {
             if *len != new_len || *subdirs != new_subdirs {
                 *len = new_len;
                 *subdirs = new_subdirs;
@@ -316,9 +405,20 @@ impl DirectoryContents {
     /// Remove all on-disk bucket files for a (spilled) directory — called
     /// when the directory inode is garbage-collected.
     pub fn gc(&self, ctrl: &Controller, dir: Inode) -> BkfsResult<()> {
-        if let DirEntries::Spilled { gen, buckets, .. } = &self.0 {
-            for idx in 0..*buckets {
-                ctrl.remove_dir_bucket(dir, *gen, idx)?;
+        match &self.0 {
+            DirEntries::Inline(_) => {}
+            DirEntries::Spilled { gen, buckets, .. } => {
+                for idx in 0..*buckets {
+                    ctrl.remove_dir_bucket(dir, *gen, idx)?;
+                }
+            }
+            DirEntries::Chunked {
+                generation, chunks, ..
+            } => {
+                let cached = ctrl.chunk_cache().forget(dir).unwrap_or(0);
+                for idx in 0..cached.max(*chunks) {
+                    ctrl.remove_dir_bucket(dir, *generation, idx)?;
+                }
             }
         }
         Ok(())
@@ -341,12 +441,7 @@ impl DirectoryContents {
         Ok(())
     }
 
-    /// Grow a spilled directory's bucket count (rare). Writes a new
-    /// generation durably and switches the in-memory marker to it; returns
-    /// the OLD `(gen, buckets)` so the caller can reap it *after* making the
-    /// new marker durable. Does NOT delete the old generation itself —
-    /// deleting it before the new marker is on stable storage would lose the
-    /// whole directory on crash.
+    /// Returns the superseded generation for reclamation after logging the inode.
     fn reshard(&mut self, ctrl: &Controller, dir: Inode) -> BkfsResult<Option<(u64, u32)>> {
         let DirEntries::Spilled {
             gen, buckets, len, ..
@@ -380,11 +475,13 @@ impl DirectoryContents {
         match &self.0 {
             DirEntries::Inline(_) => (false, 0, 0),
             DirEntries::Spilled { gen, buckets, .. } => (true, *gen, *buckets),
+            DirEntries::Chunked {
+                generation, chunks, ..
+            } => (true, *generation, *chunks),
         }
     }
 
-    /// Distribute `entries` into `buckets` bucket files under `gen` and make
-    /// them durable (so the subsequent marker save is the atomic commit).
+    /// Distribute `entries` into `buckets` buckets under `gen`.
     fn write_generation(
         &self,
         ctrl: &Controller,
@@ -399,9 +496,9 @@ impl DirectoryContents {
             sharded[idx as usize].insert(name.clone(), entry.clone());
         }
         for (idx, bucket) in sharded.iter().enumerate() {
-            ctrl.save_dir_bucket(dir, gen, idx as u32, bucket, true)?;
+            ctrl.save_dir_bucket(dir, gen, idx as u32, bucket)?;
         }
-        Ok(())
+        ctrl.sync_legacy()
     }
 }
 
@@ -436,16 +533,244 @@ mod tests {
     /// it (after the simulated durable marker) removes the old buckets while
     /// the new generation still resolves everything.
     #[test]
-    fn spill_then_reshard_preserves_all_entries() {
+    fn bucket_updates_coalesce_until_commit() {
         let tmp = tempfile::TempDir::with_prefix("dirtest").unwrap();
         let c = ctrl(tmp.path());
+        let dir = Inode(2);
+        let mut dc = DirectoryContents::new();
+        for i in 0..1100 {
+            dc.insert(&c, dir, OsString::from(format!("f{i:05}")), entry(i))
+                .unwrap();
+        }
+        c.syncfs().unwrap();
+        let (_, _, buckets) = dc.debug_state();
+        let committed = c.indexed_storage();
+        let before = c.appended_bytes();
+        for i in 1100..1600 {
+            dc.insert(&c, dir, OsString::from(format!("f{i:05}")), entry(i))
+                .unwrap();
+        }
+        assert_eq!(c.indexed_storage(), committed);
+        assert_eq!(
+            dc.get(&c, dir, &OsString::from("f01599"))
+                .unwrap()
+                .unwrap()
+                .inode,
+            Inode(2599)
+        );
+        c.syncfs().unwrap();
+        let rewritten = c.indexed_storage();
+        assert_eq!(rewritten.len(), buckets as usize);
+        let largest = rewritten
+            .values()
+            .map(|&(_, _, len)| len as u64)
+            .max()
+            .unwrap();
+        assert!(c.appended_bytes() - before <= buckets as u64 * largest);
+        assert_eq!(dc.snapshot(&c, dir).unwrap().len(), 1600);
+    }
+
+    fn legacy_ctrl(dir: &std::path::Path, readonly: bool) -> Controller {
+        crate::legacy::fixture(dir);
+        Controller::new(BackupFSOptions {
+            data_dir: dir.to_owned(),
+            setuid_support: false,
+            password: "password".to_owned(),
+            file_size_padding: None,
+            readonly,
+            idmapped: false,
+        })
+        .unwrap()
+    }
+
+    fn name(i: u64) -> OsString {
+        OsString::from(format!("f{i:05}"))
+    }
+
+    fn fill(c: &Controller, dir: Inode, dc: &mut DirectoryContents, names: std::ops::Range<u64>) {
+        for i in names {
+            dc.insert(c, dir, name(i), entry(i)).unwrap();
+        }
+    }
+
+    #[test]
+    fn adding_names_appends_instead_of_rewriting_the_directory() {
+        let tmp = tempfile::TempDir::with_prefix("dirtest").unwrap();
+        let c = ctrl(tmp.path());
+        let dir = Inode(2);
+        let mut dc = DirectoryContents::new();
+        fill(&c, dir, &mut dc, 0..50_000);
+        c.syncfs().unwrap();
+        let stored: u64 = c
+            .indexed_storage()
+            .values()
+            .map(|&(_, _, len)| len as u64)
+            .sum();
+        let before = c.appended_bytes();
+        fill(&c, dir, &mut dc, 50_000..52_000);
+        c.syncfs().unwrap();
+        let appended = c.appended_bytes() - before;
+        assert!(
+            appended * 4 < stored,
+            "appended {appended} of {stored} bytes"
+        );
+        assert_eq!(dc.snapshot(&c, dir).unwrap().len(), 52_000);
+    }
+
+    #[test]
+    fn chunked_directories_survive_reopen_with_replacements_and_removals() {
+        let tmp = tempfile::TempDir::with_prefix("dirtest").unwrap();
+        let dir = Inode(2);
+        let mut dc = DirectoryContents::new();
+        let mut expected = Bucket::new();
+        {
+            let c = ctrl(tmp.path());
+            fill(&c, dir, &mut dc, 0..20_000);
+            for i in 0..20_000 {
+                expected.insert(name(i), entry(i));
+            }
+            c.syncfs().unwrap();
+            for i in (0..20_000).step_by(3) {
+                dc.remove(&c, dir, &name(i)).unwrap();
+                expected.remove(&name(i));
+            }
+            for i in (1..20_000).step_by(7) {
+                let replacement = DirectoryEntry {
+                    inode: Inode(500_000 + i),
+                    ty: FileType::Directory,
+                };
+                dc.insert(&c, dir, name(i), replacement.clone()).unwrap();
+                expected.insert(name(i), replacement);
+            }
+            c.syncfs().unwrap();
+        }
+        let c = ctrl(tmp.path());
+        let restored = dc.snapshot(&c, dir).unwrap();
+        assert_eq!(restored.len(), expected.len());
+        for (name, entry) in expected.iter() {
+            let found = restored.get(name).unwrap();
+            assert_eq!((found.inode, found.ty), (entry.inode, entry.ty));
+        }
+        assert_eq!(dc.len(), expected.len() as u64);
+        assert_eq!(
+            dc.nlink() as u64,
+            1 + expected.values().filter(|e| e.is_dir()).count() as u64
+        );
+        assert!(!dc.recompute_counts(&c, dir).unwrap());
+    }
+
+    #[test]
+    fn removing_most_names_repacks_the_chunks() {
+        let tmp = tempfile::TempDir::with_prefix("dirtest").unwrap();
+        let c = ctrl(tmp.path());
+        let dir = Inode(2);
+        let mut dc = DirectoryContents::new();
+        fill(&c, dir, &mut dc, 0..40_000);
+        c.syncfs().unwrap();
+        let (_, _, full) = dc.debug_state();
+        for i in 0..39_000 {
+            dc.remove(&c, dir, &name(i)).unwrap();
+        }
+        c.syncfs().unwrap();
+        let (_, _, sparse) = dc.debug_state();
+        assert!(sparse * 4 <= full, "{sparse} chunks after repacking {full}");
+        assert_eq!(c.indexed_storage().len(), sparse as usize);
+        let listed = dc.snapshot(&c, dir).unwrap();
+        assert_eq!(listed.len(), 1_000);
+        assert!(listed.contains_key(&name(39_999)));
+    }
+
+    #[test]
+    fn a_hashed_directory_moves_into_chunks_on_its_first_change() {
+        let tmp = tempfile::TempDir::with_prefix("dirtest").unwrap();
+        let c = ctrl(tmp.path());
+        let dir = Inode(2);
+        let mut entries = Bucket::new();
+        for i in 0..2_000 {
+            entries.insert(name(i), entry(i));
+        }
+        let mut dc = DirectoryContents(DirEntries::Spilled {
+            gen: 3,
+            buckets: 64,
+            len: 2_000,
+            subdirs: 0,
+        });
+        dc.write_generation(&c, dir, 3, 64, &entries).unwrap();
+        c.syncfs().unwrap();
+        assert_eq!(
+            dc.get(&c, dir, &name(7)).unwrap().unwrap().inode,
+            Inode(1007)
+        );
+        dc.insert(&c, dir, name(2_000), entry(2_000)).unwrap();
+        c.syncfs().unwrap();
+        let (_, generation, chunks) = dc.debug_state();
+        assert_eq!(generation, 4);
+        assert!(matches!(dc.0, DirEntries::Chunked { .. }));
+        assert_eq!(c.indexed_storage().len(), chunks as usize);
+        assert_eq!(dc.snapshot(&c, dir).unwrap().len(), 2_001);
+    }
+
+    #[test]
+    fn evicted_directories_keep_their_unstaged_changes() {
+        let tmp = tempfile::TempDir::with_prefix("dirtest").unwrap();
+        let c = ctrl(tmp.path());
+        c.chunk_cache().set_limit(3_000);
+        let (first, second) = (Inode(2), Inode(3));
+        let mut a = DirectoryContents::new();
+        let mut b = DirectoryContents::new();
+        fill(&c, first, &mut a, 0..2_000);
+        fill(&c, second, &mut b, 0..2_000);
+        assert!(c.chunk_cache().entry_count() <= 3_000);
+        assert_eq!(
+            a.get(&c, first, &name(1_999)).unwrap().unwrap().inode,
+            Inode(2_999)
+        );
+        a.remove(&c, first, &name(5)).unwrap();
+        fill(&c, second, &mut b, 2_000..2_100);
+        assert!(a.get(&c, first, &name(5)).unwrap().is_none());
+        c.syncfs().unwrap();
+        drop(c);
+        let c = ctrl(tmp.path());
+        assert_eq!(a.snapshot(&c, first).unwrap().len(), 1_999);
+        assert_eq!(b.snapshot(&c, second).unwrap().len(), 2_100);
+    }
+
+    #[test]
+    fn growing_cached_directories_evicts_older_indexes() {
+        let tmp = tempfile::TempDir::with_prefix("dirtest").unwrap();
+        let c = ctrl(tmp.path());
+        c.chunk_cache().set_limit(3_000);
+        let (first, second) = (Inode(2), Inode(3));
+        let mut a = DirectoryContents::new();
+        let mut b = DirectoryContents::new();
+        fill(&c, first, &mut a, 0..1_200);
+        fill(&c, second, &mut b, 0..1_200);
+        assert_eq!(c.chunk_cache().entry_count(), 2_400);
+
+        fill(&c, second, &mut b, 1_200..2_200);
+        assert!(c.chunk_cache().entry_count() <= 3_000);
+        c.syncfs().unwrap();
+        assert!(c.chunk_cache().entry_count() <= 3_000);
+        drop(c);
+
+        let c = ctrl(tmp.path());
+        c.chunk_cache().set_limit(3_000);
+        assert_eq!(a.snapshot(&c, first).unwrap().len(), 1_200);
+        assert_eq!(b.snapshot(&c, second).unwrap().len(), 2_200);
+        assert!(c.chunk_cache().entry_count() <= 3_000);
+    }
+
+    #[test]
+    fn spill_then_reshard_preserves_all_entries() {
+        let tmp = tempfile::TempDir::with_prefix("dirtest").unwrap();
+        let c = legacy_ctrl(tmp.path(), false);
         let dir = Inode(2);
         let mut dc = DirectoryContents::new();
         let n: u64 = 3000; // > 1024 → spills
 
         for i in 0..n {
             let reap = dc
-                .insert(&c, dir, OsString::from(format!("f{i:05}")), entry(i), false)
+                .insert(&c, dir, OsString::from(format!("f{i:05}")), entry(i))
                 .unwrap();
             assert!(reap.is_none(), "no reshard expected during initial fill");
         }
@@ -510,8 +835,57 @@ mod tests {
         }
     }
 
-    /// Removing entries keeps counts non-negative and exact, and recompute
-    /// repairs a deliberately corrupted cached count.
+    #[test]
+    fn legacy_reaping_publishes_the_replacement_marker_first() {
+        use crate::handle::Handler;
+        use crate::inode::{FileData, InodeAttributes};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let c = legacy_ctrl(tmp.path(), false);
+        assert!(c.is_legacy());
+        let dir = Inode(90_000);
+        let entries: Bucket = [(OsString::from("retained"), entry(1))]
+            .into_iter()
+            .collect();
+        let mut dc = DirectoryContents(DirEntries::Spilled {
+            gen: 1,
+            buckets: MIN_BUCKETS,
+            len: 1,
+            subdirs: 0,
+        });
+        dc.write_generation(&c, dir, 1, MIN_BUCKETS, &entries)
+            .unwrap();
+        let mut attrs = InodeAttributes::new(dir, None, FileData::Directory(dc.clone()));
+        c.save(&attrs).unwrap();
+        c.syncfs().unwrap();
+
+        let (generation, buckets) = dc.reshard(&c, dir).unwrap().unwrap();
+        attrs.attrs.contents = FileData::Directory(dc);
+        Handler::new(c.clone()).save_inode_logged(&attrs).unwrap();
+        DirectoryContents::reap_generation(&c, dir, generation, buckets).unwrap();
+
+        // Reopen before dropping the writer, whose Drop would flush pending markers.
+        let reopened = Controller::new(BackupFSOptions {
+            data_dir: tmp.path().to_owned(),
+            setuid_support: false,
+            password: "password".to_owned(),
+            file_size_padding: None,
+            readonly: true,
+            idmapped: false,
+        })
+        .unwrap();
+        let restored = reopened.load::<InodeAttributes>(dir).unwrap();
+        let FileData::Directory(restored) = restored.attrs.contents else {
+            panic!("expected a directory");
+        };
+        let restored = restored.snapshot(&reopened, dir).unwrap();
+        assert_eq!(restored.len(), 1);
+        assert_eq!(
+            restored.get(OsStr::new("retained")).unwrap().inode,
+            Inode(1001)
+        );
+    }
+
     #[test]
     fn counts_saturate_and_recompute() {
         let tmp = tempfile::TempDir::with_prefix("dirtest").unwrap();
@@ -520,16 +894,16 @@ mod tests {
         let mut dc = DirectoryContents::new();
         let n: u64 = 1500;
         for i in 0..n {
-            dc.insert(&c, dir, OsString::from(format!("f{i:05}")), entry(i), false)
+            dc.insert(&c, dir, OsString::from(format!("f{i:05}")), entry(i))
                 .unwrap();
         }
         for i in 0..500 {
-            dc.remove(&c, dir, &OsString::from(format!("f{i:05}")), false)
+            dc.remove(&c, dir, &OsString::from(format!("f{i:05}")))
                 .unwrap();
         }
         assert_eq!(dc.len(), n - 500);
         // Corrupt the cached count, then recompute from buckets.
-        if let DirEntries::Spilled { len, .. } = &mut dc.0 {
+        if let DirEntries::Spilled { len, .. } | DirEntries::Chunked { len, .. } = &mut dc.0 {
             *len = 7;
         }
         assert!(dc.recompute_counts(&c, dir).unwrap());

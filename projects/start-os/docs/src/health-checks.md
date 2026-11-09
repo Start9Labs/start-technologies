@@ -6,11 +6,12 @@ Health checks monitor whether a service is ready and functioning. They appear on
 
 Each health check displays one of the following statuses:
 
-- **Waiting** — The health check is waiting for another health check to complete before it begins.
 - **Starting** — The health check is actively running but has not yet passed. Each health check has a grace period defined by the service developer. If the check does not pass within this period, it transitions to an error state.
-- **Loading** — The health check is long-running and intentional. Rather than a pass/fail gate, it serves as a status monitor — a window into some ongoing activity in the service. For example, a Bitcoin node might display sync progress as a percentage. Loading checks can display arbitrary information to the user.
+- **Loading** — The health check is long-running and intentional. Rather than a pass/fail gate, it serves as a status monitor — a window into some ongoing activity in the service. For example, a Bitcoin node might display sync progress as a percentage.
 - **Success** — The health check has passed. The service is ready and operational.
 - **Error** — The health check has failed. The message will describe the problem.
+
+Starting and loading checks show a clock when waiting for another condition and a spinner while actively progressing. Every status can display a message supplied by the service as-is. Empty or absent messages use the status label.
 
 ## What Gets Checked
 

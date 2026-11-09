@@ -52,218 +52,6 @@ export const ActionResultV0: z.ZodObject<{
 }).meta({
   id: 'ActionResultV0',
 })
-export const ActionResultValue: z.ZodUnion<
-  readonly [
-    z.ZodIntersection<
-      z.ZodObject<{ type: z.ZodLiteral<'single'> }>,
-      z.ZodObject<{
-        /**
-         * The actual string value to display. The UI renders it as a single-line field —
-         * multi-line text belongs in a `multiline` value.
-         */
-        value: z.ZodString
-        /**
-         * (optional) Whether or not to include a copy to clipboard icon to copy the value
-         */
-        copyable: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Whether or not to also display the value as a QR code
-         */
-        qr: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
-         */
-        masked: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
-         */
-        launchable: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-      }>
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ type: z.ZodLiteral<'multiline'> }>,
-      z.ZodObject<{
-        /**
-         * The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
-         */
-        value: z.ZodString
-        /**
-         * (optional) Whether or not to include a copy to clipboard icon to copy the value
-         */
-        copyable: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Whether or not to also display the value as a QR code
-         */
-        qr: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
-         */
-        masked: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
-         */
-        filename: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodString>>,
-          z.ZodNullable<z.ZodString>
-        >
-      }>
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ type: z.ZodLiteral<'group'> }>,
-      z.ZodObject<{
-        /**
-         * An new group of nested values, experienced by the user as an accordion dropdown
-         */
-        value: z.ZodArray<typeof ActionResultMember>
-      }>
-    >,
-  ]
-> = /* @__PURE__ */ z
-  .union([
-    z.intersection(
-      object({ type: z.literal('single') }),
-      object({
-        /**
-         * The actual string value to display. The UI renders it as a single-line field —
-         * multi-line text belongs in a `multiline` value.
-         */
-        value: z.string().meta({
-          description:
-            'The actual string value to display. The UI renders it as a single-line field —\nmulti-line text belongs in a `multiline` value.',
-        }),
-        /**
-         * (optional) Whether or not to include a copy to clipboard icon to copy the value
-         */
-        copyable: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to include a copy to clipboard icon to copy the value',
-        }),
-        /**
-         * (optional) Whether or not to also display the value as a QR code
-         */
-        qr: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to also display the value as a QR code',
-        }),
-        /**
-         * (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
-         */
-        masked: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information',
-        }),
-        /**
-         * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
-         */
-        launchable: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL',
-        }),
-      }),
-    ),
-    z.intersection(
-      object({ type: z.literal('multiline') }),
-      object({
-        /**
-         * The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
-         */
-        value: z.string().meta({
-          description:
-            'The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks',
-        }),
-        /**
-         * (optional) Whether or not to include a copy to clipboard icon to copy the value
-         */
-        copyable: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to include a copy to clipboard icon to copy the value',
-        }),
-        /**
-         * (optional) Whether or not to also display the value as a QR code
-         */
-        qr: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to also display the value as a QR code',
-        }),
-        /**
-         * (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
-         */
-        masked: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information',
-        }),
-        /**
-         * (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
-         */
-        filename: wire(
-          z.string().nullable().optional(),
-          z.string().nullable(),
-        ).meta({
-          description:
-            '(optional) Also offer the value as a download under this file name, such as "diagnostics.txt"',
-        }),
-      }),
-    ),
-    z.intersection(
-      object({ type: z.literal('group') }),
-      object({
-        /**
-         * An new group of nested values, experienced by the user as an accordion dropdown
-         */
-        get value(): z.ZodArray<typeof ActionResultMember> {
-          return z.array(ActionResultMember).meta({
-            description:
-              'An new group of nested values, experienced by the user as an accordion dropdown',
-          })
-        },
-      }),
-    ),
-  ])
-  .meta({
-    id: 'ActionResultValue',
-  })
 export const ActionVisibility: z.ZodUnion<
   readonly [
     z.ZodLiteral<'hidden'>,
@@ -362,6 +150,23 @@ export const ErrorData: z.ZodObject<{
 }).meta({
   id: 'ErrorData',
 })
+export const FileCommitment: z.ZodObject<{
+  /**
+   * BLAKE3 digest encoded with padded standard Base64.
+   */
+  hash: z.ZodString
+  size: z.ZodInt
+}> = /* @__PURE__ */ object({
+  /**
+   * BLAKE3 digest encoded with padded standard Base64.
+   */
+  hash: z.string().meta({
+    description: 'BLAKE3 digest encoded with padded standard Base64.',
+  }),
+  size: z.int(),
+}).meta({
+  id: 'FileCommitment',
+})
 export const GatewayId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'GatewayId',
 })
@@ -403,6 +208,24 @@ export const IoFormat: z.ZodEnum<{
   .meta({
     id: 'IoFormat',
   })
+export const LegacyHealthCheckResultKind: z.ZodIntersection<
+  z.ZodObject<{ result: z.ZodLiteral<'waiting'> }>,
+  z.ZodObject<{
+    message: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+  }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({ result: z.literal('waiting') }),
+    object({
+      message: wire(z.string().nullable().optional(), z.string().nullable()),
+    }),
+  )
+  .meta({
+    id: 'LegacyHealthCheckResultKind',
+  })
 export const LocaleString: typeof literal_8 = /* @__PURE__ */ literal_8.meta({
   id: 'LocaleString',
 })
@@ -438,20 +261,15 @@ export const NamedHealthCheckResultKind: z.ZodUnion<
           z.ZodOptional<z.ZodNullable<z.ZodString>>,
           z.ZodNullable<z.ZodString>
         >
-      }>
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ result: z.ZodLiteral<'waiting'> }>,
-      z.ZodObject<{
-        message: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodString>>,
-          z.ZodNullable<z.ZodString>
-        >
+        waiting: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
       }>
     >,
     z.ZodIntersection<
       z.ZodObject<{ result: z.ZodLiteral<'loading'> }>,
-      z.ZodObject<{ message: z.ZodString }>
+      z.ZodObject<{
+        message: z.ZodString
+        waiting: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+      }>
     >,
     z.ZodIntersection<
       z.ZodObject<{ result: z.ZodLiteral<'failure'> }>,
@@ -476,17 +294,15 @@ export const NamedHealthCheckResultKind: z.ZodUnion<
       object({ result: z.literal('starting') }),
       object({
         message: wire(z.string().nullable().optional(), z.string().nullable()),
-      }),
-    ),
-    z.intersection(
-      object({ result: z.literal('waiting') }),
-      object({
-        message: wire(z.string().nullable().optional(), z.string().nullable()),
+        waiting: wire(z.boolean().optional(), z.boolean()),
       }),
     ),
     z.intersection(
       object({ result: z.literal('loading') }),
-      object({ message: z.string() }),
+      object({
+        message: z.string(),
+        waiting: wire(z.boolean().optional(), z.boolean()),
+      }),
     ),
     z.intersection(
       object({ result: z.literal('failure') }),
@@ -633,6 +449,25 @@ export const TaskSeverity: z.ZodEnum<{
   critical: 'critical'
 }> = /* @__PURE__ */ z.enum(['optional', 'important', 'critical']).meta({
   id: 'TaskSeverity',
+})
+export const UploadLimits: z.ZodObject<{
+  /**
+   * Maximum uploaded bytes, inclusive; null leaves the size unbounded.
+   */
+  maxSize: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Maximum uploaded bytes, inclusive; null leaves the size unbounded.
+   */
+  maxSize: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description:
+      'Maximum uploaded bytes, inclusive; null leaves the size unbounded.',
+  }),
+}).meta({
+  id: 'UploadLimits',
 })
 
 /**
@@ -811,93 +646,250 @@ export const ActionMetadata: z.ZodObject<{
 }).meta({
   id: 'ActionMetadata',
 })
-export const ActionResultMember: z.ZodIntersection<
-  z.ZodObject<{
-    /**
-     * A human-readable name or title of the value, such as "Last Active" or "Login Password"
-     */
-    name: z.ZodString
-    /**
-     * (optional) A description of the value, such as an explaining why it exists or how to use it
-     */
-    description: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
-  }>,
-  typeof ActionResultValue
+export const ActionResultValue: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'file'> }>,
+      z.ZodObject<{
+        /**
+         * The capability prepared by this action's prepare-download effect.
+         */
+        value: typeof Guid
+        /**
+         * Removes the exported file after completion, failure, cancellation, or expiry.
+         */
+        delete: z.ZodBoolean
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'single'> }>,
+      z.ZodObject<{
+        /**
+         * The actual string value to display. The UI renders it as a single-line field —
+         * multi-line text belongs in a `multiline` value.
+         */
+        value: z.ZodString
+        /**
+         * (optional) Whether or not to include a copy to clipboard icon to copy the value
+         */
+        copyable: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Whether or not to also display the value as a QR code
+         */
+        qr: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
+         */
+        masked: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
+         */
+        launchable: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'multiline'> }>,
+      z.ZodObject<{
+        /**
+         * The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
+         */
+        value: z.ZodString
+        /**
+         * (optional) Whether or not to include a copy to clipboard icon to copy the value
+         */
+        copyable: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Whether or not to also display the value as a QR code
+         */
+        qr: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
+         */
+        masked: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
+         */
+        filename: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodString>>,
+          z.ZodNullable<z.ZodString>
+        >
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'group'> }>,
+      z.ZodObject<{
+        /**
+         * An new group of nested values, experienced by the user as an accordion dropdown
+         */
+        value: z.ZodArray<typeof ActionResultMember>
+      }>
+    >,
+  ]
 > = /* @__PURE__ */ z
-  .intersection(
-    object({
-      /**
-       * A human-readable name or title of the value, such as "Last Active" or "Login Password"
-       */
-      name: z.string().meta({
-        description:
-          'A human-readable name or title of the value, such as "Last Active" or "Login Password"',
+  .union([
+    z.intersection(
+      object({ type: z.literal('file') }),
+      object({
+        /**
+         * The capability prepared by this action's prepare-download effect.
+         */
+        value: Guid.meta({
+          description:
+            "The capability prepared by this action's prepare-download effect.",
+        }),
+        /**
+         * Removes the exported file after completion, failure, cancellation, or expiry.
+         */
+        delete: z.boolean().meta({
+          description:
+            'Removes the exported file after completion, failure, cancellation, or expiry.',
+        }),
       }),
-      /**
-       * (optional) A description of the value, such as an explaining why it exists or how to use it
-       */
-      description: wire(
-        z.string().nullable().optional(),
-        z.string().nullable(),
-      ).meta({
-        description:
-          '(optional) A description of the value, such as an explaining why it exists or how to use it',
+    ),
+    z.intersection(
+      object({ type: z.literal('single') }),
+      object({
+        /**
+         * The actual string value to display. The UI renders it as a single-line field —
+         * multi-line text belongs in a `multiline` value.
+         */
+        value: z.string().meta({
+          description:
+            'The actual string value to display. The UI renders it as a single-line field —\nmulti-line text belongs in a `multiline` value.',
+        }),
+        /**
+         * (optional) Whether or not to include a copy to clipboard icon to copy the value
+         */
+        copyable: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to include a copy to clipboard icon to copy the value',
+        }),
+        /**
+         * (optional) Whether or not to also display the value as a QR code
+         */
+        qr: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to also display the value as a QR code',
+        }),
+        /**
+         * (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
+         */
+        masked: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information',
+        }),
+        /**
+         * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
+         */
+        launchable: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL',
+        }),
       }),
-    }),
-    ActionResultValue,
-  )
+    ),
+    z.intersection(
+      object({ type: z.literal('multiline') }),
+      object({
+        /**
+         * The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
+         */
+        value: z.string().meta({
+          description:
+            'The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks',
+        }),
+        /**
+         * (optional) Whether or not to include a copy to clipboard icon to copy the value
+         */
+        copyable: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to include a copy to clipboard icon to copy the value',
+        }),
+        /**
+         * (optional) Whether or not to also display the value as a QR code
+         */
+        qr: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to also display the value as a QR code',
+        }),
+        /**
+         * (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
+         */
+        masked: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information',
+        }),
+        /**
+         * (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
+         */
+        filename: wire(
+          z.string().nullable().optional(),
+          z.string().nullable(),
+        ).meta({
+          description:
+            '(optional) Also offer the value as a download under this file name, such as "diagnostics.txt"',
+        }),
+      }),
+    ),
+    z.intersection(
+      object({ type: z.literal('group') }),
+      object({
+        /**
+         * An new group of nested values, experienced by the user as an accordion dropdown
+         */
+        get value(): z.ZodArray<typeof ActionResultMember> {
+          return z.array(ActionResultMember).meta({
+            description:
+              'An new group of nested values, experienced by the user as an accordion dropdown',
+          })
+        },
+      }),
+    ),
+  ])
   .meta({
-    id: 'ActionResultMember',
+    id: 'ActionResultValue',
   })
-export const ActionResultV1: z.ZodObject<{
-  /**
-   * Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
-   */
-  title: z.ZodString
-  /**
-   * (optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.
-   */
-  message: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * (optional) Structured data to present inside the modal
-   */
-  result: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof ActionResultValue>>,
-    z.ZodNullable<typeof ActionResultValue>
-  >
-}> = /* @__PURE__ */ object({
-  /**
-   * Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
-   */
-  title: z.string().meta({
-    description:
-      'Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense',
-  }),
-  /**
-   * (optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.
-   */
-  message: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      '(optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.',
-  }),
-  /**
-   * (optional) Structured data to present inside the modal
-   */
-  result: wire(
-    ActionResultValue.nullable().optional(),
-    ActionResultValue.nullable(),
-  ).meta({
-    description: '(optional) Structured data to present inside the modal',
-  }),
-}).meta({
-  id: 'ActionResultV1',
-})
 export const AddressInfo: z.ZodObject<{
   username: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -977,6 +969,16 @@ export const ClearServiceInterfacesParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ except: z.array(ServiceInterfaceId) }).meta({
   id: 'ClearServiceInterfacesParams',
 })
+export const CompatibleHealthCheckResultKind: z.ZodUnion<
+  readonly [
+    typeof NamedHealthCheckResultKind,
+    typeof LegacyHealthCheckResultKind,
+  ]
+> = /* @__PURE__ */ z
+  .union([NamedHealthCheckResultKind, LegacyHealthCheckResultKind])
+  .meta({
+    id: 'CompatibleHealthCheckResultKind',
+  })
 export const CreateNotificationParams: z.ZodObject<{
   level: typeof NotificationLevel
   title: z.ZodString
@@ -1560,14 +1562,6 @@ export const MountTarget: z.ZodCodec<
 ).meta({
   id: 'MountTarget',
 })
-export const NamedHealthCheckResult: z.ZodIntersection<
-  z.ZodObject<{ name: z.ZodString }>,
-  typeof NamedHealthCheckResultKind
-> = /* @__PURE__ */ z
-  .intersection(object({ name: z.string() }), NamedHealthCheckResultKind)
-  .meta({
-    id: 'NamedHealthCheckResult',
-  })
 export const PluginHostnameInfo: z.ZodCodec<
   z.ZodObject<{
     /**
@@ -1681,6 +1675,132 @@ export const PreDownloadAlert: z.ZodObject<{
 }).meta({
   id: 'PreDownloadAlert',
 })
+export const PrepareDownloadParams: z.ZodObject<{
+  /**
+   * A volume declared by this service's manifest.
+   */
+  volume: typeof VolumeId
+  /**
+   * Volume-relative regular file with no symlinks or traversal. Keep it stable until cleanup.
+   */
+  path: z.ZodString
+  /**
+   * Download Content-Type; defaults to application/octet-stream.
+   */
+  mime: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * Suggested download name; defaults to the path's final component.
+   */
+  filename: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * A volume declared by this service's manifest.
+   */
+  volume: VolumeId.meta({
+    description: "A volume declared by this service's manifest.",
+  }),
+  /**
+   * Volume-relative regular file with no symlinks or traversal. Keep it stable until cleanup.
+   */
+  path: z.string().meta({
+    description:
+      'Volume-relative regular file with no symlinks or traversal. Keep it stable until cleanup.',
+  }),
+  /**
+   * Download Content-Type; defaults to application/octet-stream.
+   */
+  mime: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description: 'Download Content-Type; defaults to application/octet-stream.',
+  }),
+  /**
+   * Suggested download name; defaults to the path's final component.
+   */
+  filename: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      "Suggested download name; defaults to the path's final component.",
+  }),
+}).meta({
+  id: 'PrepareDownloadParams',
+})
+export const PrepareUploadParams: z.ZodIntersection<
+  z.ZodObject<{
+    /**
+     * A volume declared by this service's manifest.
+     */
+    volume: typeof VolumeId
+    /**
+     * Volume-relative file or existing directory; directories retain the uploaded basename.
+     */
+    path: z.ZodString
+    /**
+     * Installed file permissions; defaults to 0600.
+     */
+    mode: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+      z.ZodNullable<z.ZodInt>
+    >
+    /**
+     * Logical service UID; defaults to 0.
+     */
+    uid: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+      z.ZodNullable<z.ZodInt>
+    >
+    /**
+     * Logical service GID; defaults to 0.
+     */
+    gid: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+      z.ZodNullable<z.ZodInt>
+    >
+  }>,
+  typeof UploadLimits
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      /**
+       * A volume declared by this service's manifest.
+       */
+      volume: VolumeId.meta({
+        description: "A volume declared by this service's manifest.",
+      }),
+      /**
+       * Volume-relative file or existing directory; directories retain the uploaded basename.
+       */
+      path: z.string().meta({
+        description:
+          'Volume-relative file or existing directory; directories retain the uploaded basename.',
+      }),
+      /**
+       * Installed file permissions; defaults to 0600.
+       */
+      mode: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+        description: 'Installed file permissions; defaults to 0600.',
+      }),
+      /**
+       * Logical service UID; defaults to 0.
+       */
+      uid: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+        description: 'Logical service UID; defaults to 0.',
+      }),
+      /**
+       * Logical service GID; defaults to 0.
+       */
+      gid: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+        description: 'Logical service GID; defaults to 0.',
+      }),
+    }),
+    UploadLimits,
+  )
+  .meta({
+    id: 'PrepareUploadParams',
+  })
 
 /**
  * Auth gate enforced by the OS reverse proxy on incoming requests.
@@ -1782,6 +1902,10 @@ export const RangeServiceInterface: z.ZodObject<{
   description:
     "The single restricted service interface a port-range binding may export.\n\nUnlike [`ServiceInterface`], a range interface is always `api`-typed and\ncarries no `masked` / `username` / `path` / `query` and no per-address\n[`AddressInfo`] — its address is the host plus the range's external port\nspan, taken from the [`RangeBindInfo`](crate::net::host::binding::RangeBindInfo)\nit lives under. `scheme` is an optional transport prefix (e.g. `tcp` for\nbitcoin ZMQ endpoints); most ranges (coturn RTP, FTP data) omit it.",
 })
+export const ResolveUploadParams: z.ZodObject<{ id: typeof Guid }> =
+  /* @__PURE__ */ object({ id: Guid }).meta({
+    id: 'ResolveUploadParams',
+  })
 export const RetireBindingParams: z.ZodObject<{
   id: typeof HostId
   internalPort: z.ZodInt
@@ -1884,30 +2008,139 @@ export const TaskTrigger: z.ZodObject<{
 }).meta({
   id: 'TaskTrigger',
 })
+export const UploadedFile: z.ZodObject<{
+  /**
+   * Untrusted original filename supplied by the uploader.
+   */
+  name: z.ZodString
+  /**
+   * The actual volume-relative destination of the installed file.
+   */
+  path: z.ZodString
+  /**
+   * Untrusted Content-Type supplied by the uploader.
+   */
+  mime: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  commitment: typeof FileCommitment
+}> = /* @__PURE__ */ object({
+  /**
+   * Untrusted original filename supplied by the uploader.
+   */
+  name: z.string().meta({
+    description: 'Untrusted original filename supplied by the uploader.',
+  }),
+  /**
+   * The actual volume-relative destination of the installed file.
+   */
+  path: z.string().meta({
+    description:
+      'The actual volume-relative destination of the installed file.',
+  }),
+  /**
+   * Untrusted Content-Type supplied by the uploader.
+   */
+  mime: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description: 'Untrusted Content-Type supplied by the uploader.',
+  }),
+  commitment: FileCommitment,
+}).meta({
+  id: 'UploadedFile',
+})
 export const UrlPluginRegisterParams: z.ZodObject<{
   tableAction: typeof ActionId
 }> = /* @__PURE__ */ object({ tableAction: ActionId }).meta({
   id: 'UrlPluginRegisterParams',
 })
-export const ActionResult: z.ZodUnion<
-  readonly [
-    z.ZodIntersection<
-      z.ZodObject<{ version: z.ZodLiteral<'0'> }>,
-      typeof ActionResultV0
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ version: z.ZodLiteral<'1'> }>,
-      typeof ActionResultV1
-    >,
-  ]
+export const ActionResultMember: z.ZodIntersection<
+  z.ZodObject<{
+    /**
+     * A human-readable name or title of the value, such as "Last Active" or "Login Password"
+     */
+    name: z.ZodString
+    /**
+     * (optional) A description of the value, such as an explaining why it exists or how to use it
+     */
+    description: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+  }>,
+  typeof ActionResultValue
 > = /* @__PURE__ */ z
-  .union([
-    z.intersection(object({ version: z.literal('0') }), ActionResultV0),
-    z.intersection(object({ version: z.literal('1') }), ActionResultV1),
-  ])
+  .intersection(
+    object({
+      /**
+       * A human-readable name or title of the value, such as "Last Active" or "Login Password"
+       */
+      name: z.string().meta({
+        description:
+          'A human-readable name or title of the value, such as "Last Active" or "Login Password"',
+      }),
+      /**
+       * (optional) A description of the value, such as an explaining why it exists or how to use it
+       */
+      description: wire(
+        z.string().nullable().optional(),
+        z.string().nullable(),
+      ).meta({
+        description:
+          '(optional) A description of the value, such as an explaining why it exists or how to use it',
+      }),
+    }),
+    ActionResultValue,
+  )
   .meta({
-    id: 'ActionResult',
+    id: 'ActionResultMember',
   })
+export const ActionResultV1: z.ZodObject<{
+  /**
+   * Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
+   */
+  title: z.ZodString
+  /**
+   * (optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.
+   */
+  message: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * (optional) Structured data to present inside the modal
+   */
+  result: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof ActionResultValue>>,
+    z.ZodNullable<typeof ActionResultValue>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
+   */
+  title: z.string().meta({
+    description:
+      'Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense',
+  }),
+  /**
+   * (optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.
+   */
+  message: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      '(optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.',
+  }),
+  /**
+   * (optional) Structured data to present inside the modal
+   */
+  result: wire(
+    ActionResultValue.nullable().optional(),
+    ActionResultValue.nullable(),
+  ).meta({
+    description: '(optional) Structured data to present inside the modal',
+  }),
+}).meta({
+  id: 'ActionResultV1',
+})
 export const ClearBindingsParams: z.ZodObject<{
   except: z.ZodCodec<
     z.ZodOptional<z.ZodArray<typeof BindId>>,
@@ -2028,6 +2261,21 @@ export const MountParams: z.ZodObject<{
     id: 'MountParams',
   },
 )
+export const NamedHealthCheckResult: z.ZodCodec<
+  z.ZodIntersection<
+    z.ZodObject<{ name: z.ZodString }>,
+    typeof CompatibleHealthCheckResultKind
+  >,
+  z.ZodIntersection<
+    z.ZodObject<{ name: z.ZodString }>,
+    typeof NamedHealthCheckResultKind
+  >
+> = /* @__PURE__ */ wire(
+  z.intersection(object({ name: z.string() }), CompatibleHealthCheckResultKind),
+  z.intersection(object({ name: z.string() }), NamedHealthCheckResultKind),
+).meta({
+  id: 'NamedHealthCheckResult',
+})
 export const PackageMetadata: z.ZodObject<{
   title: z.ZodString
   description: typeof Description
@@ -2149,6 +2397,46 @@ export const Progress: z.ZodUnion<
   .meta({
     id: 'Progress',
   })
+export const ProxyOptions: z.ZodIntersection<
+  z.ZodObject<{ type: z.ZodLiteral<'http'> }>,
+  z.ZodObject<{
+    /**
+     * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+     * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+     */
+    addXForwardedHeaders: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+    /**
+     * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+     */
+    auth: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
+      z.ZodNullable<typeof ProxyAuth>
+    >
+  }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({ type: z.literal('http') }),
+    object({
+      /**
+       * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+       * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+       */
+      addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()).meta({
+        description:
+          'Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.',
+      }),
+      /**
+       * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+       */
+      auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()).meta({
+        description:
+          'Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.',
+      }),
+    }),
+  )
+  .meta({
+    id: 'ProxyOptions',
+  })
 export const ServiceInterface: z.ZodObject<{
   id: typeof ServiceInterfaceId
   name: z.ZodString
@@ -2188,33 +2476,6 @@ export const SetDependenciesParams: z.ZodObject<{
   dependencies: z.array(DependencyRequirement),
 }).meta({
   id: 'SetDependenciesParams',
-})
-export const SetHealth: z.ZodIntersection<
-  z.ZodObject<{ id: typeof HealthCheckId }>,
-  typeof NamedHealthCheckResult
-> = /* @__PURE__ */ z
-  .intersection(object({ id: HealthCheckId }), NamedHealthCheckResult)
-  .meta({
-    id: 'SetHealth',
-  })
-export const StatusInfo: z.ZodObject<{
-  health: z.ZodRecord<z.ZodString, typeof NamedHealthCheckResult>
-  error: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof ErrorData>>,
-    z.ZodNullable<typeof ErrorData>
-  >
-  started: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  desired: typeof DesiredStatus
-}> = /* @__PURE__ */ object({
-  health: z.record(z.string(), NamedHealthCheckResult),
-  error: wire(ErrorData.nullable().optional(), ErrorData.nullable()),
-  started: wire(z.string().nullable().optional(), z.string().nullable()),
-  desired: DesiredStatus,
-}).meta({
-  id: 'StatusInfo',
 })
 export const Task: z.ZodObject<{
   packageId: typeof PackageId
@@ -2261,15 +2522,28 @@ export const UrlPluginExportUrlParams: z.ZodObject<{
 }).meta({
   id: 'UrlPluginExportUrlParams',
 })
+export const ActionResult: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{ version: z.ZodLiteral<'0'> }>,
+      typeof ActionResultV0
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ version: z.ZodLiteral<'1'> }>,
+      typeof ActionResultV1
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.intersection(object({ version: z.literal('0') }), ActionResultV0),
+    z.intersection(object({ version: z.literal('1') }), ActionResultV1),
+  ])
+  .meta({
+    id: 'ActionResult',
+  })
 export const AddSslOptions: z.ZodCodec<
   z.ZodObject<{
     preferredExternalPort: z.ZodInt
-    /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.ZodOptional<z.ZodBoolean>
     /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
@@ -2282,25 +2556,9 @@ export const AddSslOptions: z.ZodCodec<
     upstreamCertValidation: z.ZodOptional<
       z.ZodNullable<typeof UpstreamCertValidation>
     >
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>
   }>,
   z.ZodObject<{
     preferredExternalPort: z.ZodInt
-    /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.ZodBoolean
     /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
@@ -2311,29 +2569,10 @@ export const AddSslOptions: z.ZodCodec<
      * `None` (the default) validates against the StartOS root CA.
      */
     upstreamCertValidation: z.ZodNullable<typeof UpstreamCertValidation>
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: z.ZodNullable<typeof ProxyAuth>
   }>
 > = /* @__PURE__ */ wire(
   object({
     preferredExternalPort: z.int(),
-    /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.boolean().optional().meta({
-      description:
-        'When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`\nand `X-Forwarded-For: <client-ip>` to incoming HTTP requests before\nforwarding them upstream. Setting this implies HTTP-aware proxying.',
-    }),
     /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
@@ -2350,31 +2589,9 @@ export const AddSslOptions: z.ZodCodec<
       description:
         'Certificate validation for the OS→container TLS leg when rewrapping.\n`None` (the default) validates against the StartOS root CA.',
     }),
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: ProxyAuth.nullable().optional().meta({
-      description:
-        'Optional reverse-proxy auth gate. When set, the OS reverse proxy\nwill validate the `Authorization` header on incoming HTTP requests\nagainst this configuration before forwarding them upstream.\nUnauthenticated requests get `401 Unauthorized` with an appropriate\n`WWW-Authenticate` challenge. For `Basic`, the authenticated\nusername is forwarded to the upstream service as `X-Forwarded-User`.\nSetting this implies HTTP-aware proxying.',
-    }),
   }),
   object({
     preferredExternalPort: z.int(),
-    /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.boolean().meta({
-      description:
-        'When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`\nand `X-Forwarded-For: <client-ip>` to incoming HTTP requests before\nforwarding them upstream. Setting this implies HTTP-aware proxying.',
-    }),
     /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
@@ -2390,19 +2607,6 @@ export const AddSslOptions: z.ZodCodec<
     upstreamCertValidation: UpstreamCertValidation.nullable().meta({
       description:
         'Certificate validation for the OS→container TLS leg when rewrapping.\n`None` (the default) validates against the StartOS root CA.',
-    }),
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: ProxyAuth.nullable().meta({
-      description:
-        'Optional reverse-proxy auth gate. When set, the OS reverse proxy\nwill validate the `Authorization` header on incoming HTTP requests\nagainst this configuration before forwarding them upstream.\nUnauthenticated requests get `401 Unauthorized` with an appropriate\n`WWW-Authenticate` challenge. For `Basic`, the authenticated\nusername is forwarded to the upstream service as `X-Forwarded-User`.\nSetting this implies HTTP-aware proxying.',
     }),
   }),
 ).meta({
@@ -2551,32 +2755,42 @@ export const SetBackupProgress: z.ZodObject<{ progress: typeof Progress }> =
   /* @__PURE__ */ object({ progress: Progress }).meta({
     id: 'SetBackupProgress',
   })
+export const SetHealth: z.ZodIntersection<
+  z.ZodObject<{ id: typeof HealthCheckId }>,
+  typeof NamedHealthCheckResult
+> = /* @__PURE__ */ z
+  .intersection(object({ id: HealthCheckId }), NamedHealthCheckResult)
+  .meta({
+    id: 'SetHealth',
+  })
 export const SetInitProgress: z.ZodObject<{ progress: typeof Progress }> =
   /* @__PURE__ */ object({ progress: Progress }).meta({
     id: 'SetInitProgress',
   })
+export const StatusInfo: z.ZodObject<{
+  health: z.ZodRecord<z.ZodString, typeof NamedHealthCheckResult>
+  error: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof ErrorData>>,
+    z.ZodNullable<typeof ErrorData>
+  >
+  started: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  desired: typeof DesiredStatus
+}> = /* @__PURE__ */ object({
+  health: z.record(z.string(), NamedHealthCheckResult),
+  error: wire(ErrorData.nullable().optional(), ErrorData.nullable()),
+  started: wire(z.string().nullable().optional(), z.string().nullable()),
+  desired: DesiredStatus,
+}).meta({
+  id: 'StatusInfo',
+})
 export const TaskEntry: z.ZodObject<{
   task: typeof Task
   active: z.ZodBoolean
 }> = /* @__PURE__ */ object({ task: Task, active: z.boolean() }).meta({
   id: 'TaskEntry',
-})
-export const BindOptions: z.ZodObject<{
-  preferredExternalPort: z.ZodInt
-  addSsl: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof AddSslOptions>>,
-    z.ZodNullable<typeof AddSslOptions>
-  >
-  secure: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Security>>,
-    z.ZodNullable<typeof Security>
-  >
-}> = /* @__PURE__ */ object({
-  preferredExternalPort: z.int(),
-  addSsl: wire(AddSslOptions.nullable().optional(), AddSslOptions.nullable()),
-  secure: wire(Security.nullable().optional(), Security.nullable()),
-}).meta({
-  id: 'BindOptions',
 })
 export const CheckDependenciesResult: z.ZodObject<{
   packageId: typeof PackageId
@@ -2606,6 +2820,26 @@ export const CheckDependenciesResult: z.ZodObject<{
 export const Dependencies: z.ZodRecord<z.ZodString, typeof DepInfo> =
   /* @__PURE__ */ z.record(z.string(), DepInfo).meta({
     id: 'Dependencies',
+  })
+export const LegacyProxySslOptions: z.ZodIntersection<
+  z.ZodObject<{
+    addXForwardedHeaders: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+    auth: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
+      z.ZodNullable<typeof ProxyAuth>
+    >
+  }>,
+  typeof AddSslOptions
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()),
+      auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()),
+    }),
+    AddSslOptions,
+  )
+  .meta({
+    id: 'LegacyProxySslOptions',
   })
 
 /**
@@ -2672,6 +2906,101 @@ export const RangeBindInfo: z.ZodObject<{
   description:
     'Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).\n\nKeyed by `internal_start_port` in [`BindingRanges`]. The range covers\n`internal_start_port..(internal_start_port + number_of_ports)` and is\nforwarded through a single iptables rule per protocol per gateway,\npreserving the destination port number.',
 })
+export const BindingRanges: z.ZodRecord<z.ZodString, typeof RangeBindInfo> =
+  /* @__PURE__ */ z.record(z.string(), RangeBindInfo).meta({
+    id: 'BindingRanges',
+  })
+export const CompatibleBindOptions: z.ZodObject<{
+  preferredExternalPort: z.ZodInt
+  addSsl: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>,
+    z.ZodNullable<typeof LegacyProxySslOptions>
+  >
+  secure: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Security>>,
+    z.ZodNullable<typeof Security>
+  >
+  proxy: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof ProxyOptions>>,
+    z.ZodNullable<typeof ProxyOptions>
+  >
+}> = /* @__PURE__ */ object({
+  preferredExternalPort: z.int(),
+  addSsl: wire(
+    LegacyProxySslOptions.nullable().optional(),
+    LegacyProxySslOptions.nullable(),
+  ),
+  secure: wire(Security.nullable().optional(), Security.nullable()),
+  proxy: wire(ProxyOptions.nullable().optional(), ProxyOptions.nullable()),
+}).meta({
+  id: 'CompatibleBindOptions',
+})
+export const Manifest: z.ZodIntersection<
+  z.ZodObject<{
+    id: typeof PackageId
+    version: typeof Version
+    canMigrateTo: z.ZodString
+    canMigrateFrom: z.ZodString
+    images: z.ZodRecord<z.ZodString, typeof ImageConfig>
+    volumes: z.ZodArray<typeof VolumeId>
+    dependencies: z.ZodCodec<
+      z.ZodOptional<typeof Dependencies>,
+      typeof Dependencies
+    >
+    hardwareRequirements: z.ZodCodec<
+      z.ZodOptional<typeof HardwareRequirements>,
+      typeof HardwareRequirements
+    >
+  }>,
+  typeof PackageMetadata
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      id: PackageId,
+      version: Version,
+      canMigrateTo: z.string(),
+      canMigrateFrom: z.string(),
+      images: z.record(z.string(), ImageConfig),
+      volumes: z.array(VolumeId),
+      dependencies: wire(Dependencies.optional(), Dependencies),
+      hardwareRequirements: wire(
+        HardwareRequirements.optional(),
+        HardwareRequirements,
+      ),
+    }),
+    PackageMetadata,
+  )
+  .meta({
+    id: 'Manifest',
+  })
+export const BindOptions: z.ZodCodec<
+  typeof CompatibleBindOptions,
+  z.ZodObject<{
+    preferredExternalPort: z.ZodInt
+    addSsl: z.ZodNullable<typeof AddSslOptions>
+    secure: z.ZodNullable<typeof Security>
+    /**
+     * HTTP request policy shared by every exposed leg of this binding.
+     */
+    proxy: z.ZodNullable<typeof ProxyOptions>
+  }>
+> = /* @__PURE__ */ wire(
+  CompatibleBindOptions,
+  object({
+    preferredExternalPort: z.int(),
+    addSsl: AddSslOptions.nullable(),
+    secure: Security.nullable(),
+    /**
+     * HTTP request policy shared by every exposed leg of this binding.
+     */
+    proxy: ProxyOptions.nullable().meta({
+      description:
+        'HTTP request policy shared by every exposed leg of this binding.',
+    }),
+  }),
+).meta({
+  id: 'BindOptions',
+})
 export const BindInfo: z.ZodObject<{
   enabled: z.ZodBoolean
   options: typeof BindOptions
@@ -2713,48 +3042,6 @@ export const BindParams: z.ZodIntersection<
   .intersection(object({ id: HostId, internalPort: z.int() }), BindOptions)
   .meta({
     id: 'BindParams',
-  })
-export const BindingRanges: z.ZodRecord<z.ZodString, typeof RangeBindInfo> =
-  /* @__PURE__ */ z.record(z.string(), RangeBindInfo).meta({
-    id: 'BindingRanges',
-  })
-export const Manifest: z.ZodIntersection<
-  z.ZodObject<{
-    id: typeof PackageId
-    version: typeof Version
-    canMigrateTo: z.ZodString
-    canMigrateFrom: z.ZodString
-    images: z.ZodRecord<z.ZodString, typeof ImageConfig>
-    volumes: z.ZodArray<typeof VolumeId>
-    dependencies: z.ZodCodec<
-      z.ZodOptional<typeof Dependencies>,
-      typeof Dependencies
-    >
-    hardwareRequirements: z.ZodCodec<
-      z.ZodOptional<typeof HardwareRequirements>,
-      typeof HardwareRequirements
-    >
-  }>,
-  typeof PackageMetadata
-> = /* @__PURE__ */ z
-  .intersection(
-    object({
-      id: PackageId,
-      version: Version,
-      canMigrateTo: z.string(),
-      canMigrateFrom: z.string(),
-      images: z.record(z.string(), ImageConfig),
-      volumes: z.array(VolumeId),
-      dependencies: wire(Dependencies.optional(), Dependencies),
-      hardwareRequirements: wire(
-        HardwareRequirements.optional(),
-        HardwareRequirements,
-      ),
-    }),
-    PackageMetadata,
-  )
-  .meta({
-    id: 'Manifest',
   })
 export const Bindings: z.ZodRecord<z.ZodString, typeof BindInfo> =
   /* @__PURE__ */ z.record(z.string(), BindInfo).meta({
@@ -2939,6 +3226,10 @@ export const Api = {
       _PARAMS: /* @__PURE__ */ GetSystemSmtpParams,
       _RETURN: /* @__PURE__ */ SmtpValue.nullable(),
     },
+    'get-upload-limits': {
+      _PARAMS: /* @__PURE__ */ ResolveUploadParams,
+      _RETURN: /* @__PURE__ */ UploadLimits,
+    },
     'git-info': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.string(),
@@ -2982,9 +3273,21 @@ export const Api = {
         },
       },
     },
+    'prepare-download': {
+      _PARAMS: /* @__PURE__ */ PrepareDownloadParams,
+      _RETURN: /* @__PURE__ */ Guid,
+    },
+    'prepare-upload': {
+      _PARAMS: /* @__PURE__ */ PrepareUploadParams,
+      _RETURN: /* @__PURE__ */ Guid,
+    },
     rebuild: {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.null(),
+    },
+    'resolve-upload': {
+      _PARAMS: /* @__PURE__ */ ResolveUploadParams,
+      _RETURN: /* @__PURE__ */ UploadedFile,
     },
     restart: {
       _PARAMS: /* @__PURE__ */ empty,
@@ -3040,4 +3343,62 @@ export const Api = {
       },
     },
   },
+}
+/**
+ * MCP tool descriptions of a schema tree's callable methods, the catalog
+ * `rpc_toolkit::mcp::McpServer` serves. Methods without bindings are omitted;
+ * an `outputSchema` describes object results only, as MCP requires.
+ */
+export function toolCatalog(tree: unknown): object[] {
+  type JsonSchema = {
+    type?: unknown
+    allOf?: unknown
+    $ref?: unknown
+    $defs?: { [name: string]: JsonSchema }
+    [keyword: string]: unknown
+  }
+  type Node = {
+    _PARAMS: z.ZodType
+    _RETURN?: z.ZodType
+    _CHILDREN?: { [name: string]: Node }
+    _OPAQUE?: true
+  }
+  const render = (schema: z.ZodType, io: 'input' | 'output'): JsonSchema => {
+    const rendered = z.toJSONSchema(schema, {
+      io,
+      unrepresentable: 'any',
+    }) as JsonSchema
+    const ref = rendered.$ref
+    const root =
+      typeof ref === 'string' && ref.startsWith('#/$defs/')
+        ? rendered.$defs?.[ref.slice('#/$defs/'.length)]
+        : undefined
+    if (!root) return rendered
+    const { $ref, ...rest } = rendered
+    return { ...rest, ...root }
+  }
+  const isObject = (schema: JsonSchema) =>
+    schema.type === 'object' ||
+    (schema.type === undefined && Array.isArray(schema.allOf))
+  const tools: object[] = []
+  const walk = (node: Node, path: string[]) => {
+    if (path.length && node._RETURN && !node._OPAQUE) {
+      const input = render(node._PARAMS, 'input')
+      if (input.type === undefined || input.type === 'object') {
+        const output = render(node._RETURN, 'output')
+        tools.push({
+          name: path.join('.'),
+          inputSchema: { ...input, type: 'object' },
+          ...(isObject(output)
+            ? { outputSchema: { ...output, type: 'object' } }
+            : {}),
+        })
+      }
+    }
+    for (const [name, child] of Object.entries(node._CHILDREN ?? {})) {
+      walk(child, [...path, name])
+    }
+  }
+  walk(tree as Node, [])
+  return tools
 }

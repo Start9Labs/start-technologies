@@ -41,6 +41,8 @@ use crate::net::forward::START9_BRIDGE_V6_SUBNET;
 use crate::net::gateway::{
     GatewayInfo, NetworkInterfaceController, NetworkInterfaceListenerAcceptMetadata,
 };
+use crate::net::host::binding::ProxyOptions;
+use crate::net::http::ForwardedHeaders;
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::ssl::{CertBranding, CertStore, RootCaTlsHandler};
 use crate::net::tls::{TlsHandler, TlsHandlerAction, TlsListener, TlsMetadata};
@@ -362,13 +364,7 @@ impl VHostController {
 
     fn create_server(&self, port: u16) -> VHostServer<VHostBindListener> {
         let bind_reqs = Watch::new(VHostBindRequirements::default());
-        let listener = VHostBindListener {
-            ip_info: self.interfaces.watcher.subscribe(),
-            port,
-            bind_reqs: bind_reqs.clone_unseen(),
-            listeners: BTreeMap::new(),
-            retry: None,
-        };
+        let listener = VHostBindListener::new(&self.interfaces, port, bind_reqs.clone_unseen());
         VHostServer::new(
             listener,
             bind_reqs,
@@ -377,6 +373,15 @@ impl VHostController {
             self.branding.clone(),
             self.acme_cache.clone(),
             self.report_acme_failure(),
+        )
+    }
+
+    pub fn plaintext_proxy(&self, port: u16, target: ProxyTarget) -> PlainHttpProxy {
+        PlainHttpProxy::new(
+            &self.interfaces,
+            port,
+            target,
+            self.max_proxy_conns_per_target,
         )
     }
 
@@ -400,8 +405,7 @@ impl VHostController {
             addr: backend,
             // A manual passthrough is not a container the box gateways.
             addr_v6: None,
-            add_x_forwarded_headers: false,
-            auth: None,
+            proxy: None,
             connect_ssl: None,
             alpn: None,
             passthrough: true,
@@ -768,6 +772,22 @@ pub struct VHostBindListener {
     retry: Option<Pin<Box<tokio::time::Sleep>>>,
 }
 
+impl VHostBindListener {
+    fn new(
+        interfaces: &NetworkInterfaceController,
+        port: u16,
+        bind_reqs: Watch<VHostBindRequirements>,
+    ) -> Self {
+        Self {
+            ip_info: interfaces.watcher.subscribe(),
+            port,
+            bind_reqs,
+            listeners: BTreeMap::new(),
+            retry: None,
+        }
+    }
+}
+
 /// The listeners `reqs` calls for: every IP of a required public gateway, plus
 /// each explicitly required private IP, bound on `port`.
 fn desired_listeners(
@@ -887,8 +907,8 @@ impl Accept for VHostBindListener {
                         Box::pin(stream),
                     )));
                 }
-                Poll::Ready(Err(e)) => {
-                    tracing::trace!("VHostBindListener accept error on {addr}: {e}");
+                Poll::Ready(Err(error)) => {
+                    tracing::trace!(%addr, ?error, "Vhost listener failed to accept connection");
                 }
                 Poll::Pending => {}
             }
@@ -1049,6 +1069,14 @@ impl<A: Accept + 'static> Preprocessed<A> {
     }
 }
 
+#[cfg(test)]
+#[path = "vhost/connection_error_tests.rs"]
+mod connection_error_tests;
+
+#[cfg(test)]
+#[path = "vhost/plain_http_tests.rs"]
+mod plain_http_tests;
+
 #[derive(Clone)]
 pub struct ProxyTarget {
     /// Gateways on which this address is WAN-public over bare IPv4 (drives the
@@ -1070,10 +1098,7 @@ pub struct ProxyTarget {
     /// source-preserving leg uses it — the plain connect stays on `addr` — since
     /// a v6 client's source can only be bound on a socket dialing v6.
     pub addr_v6: Option<SocketAddrV6>,
-    pub add_x_forwarded_headers: bool,
-    /// Optional `Authorization` header value to inject on upstream
-    /// requests. Implies HTTP-aware proxying (same path as forwarded headers).
-    pub auth: Option<crate::net::host::binding::ProxyAuth>,
+    pub proxy: Option<ProxyOptions>,
     /// The config StartOS dials the container with when the container serves
     /// its own TLS. `None` dials it in plaintext.
     pub connect_ssl: Option<Arc<ClientConfig>>,
@@ -1081,10 +1106,7 @@ pub struct ProxyTarget {
     /// for. `None` answers with whatever it asked for.
     pub alpn: Option<AlpnInfo>,
     pub passthrough: bool,
-    /// Open the internal leg with the client's source IP (`IP_TRANSPARENT`).
-    /// Only for targets the box gateways — service containers — whose replies
-    /// transit the box; a manual LAN passthrough's replies don't, so it connects
-    /// plainly and the backend sees the box IP.
+    /// Preserves the client source IP for containers whose replies transit StartOS.
     pub preserve_source_ip: bool,
 }
 impl PartialEq for ProxyTarget {
@@ -1096,8 +1118,7 @@ impl PartialEq for ProxyTarget {
             && self.acme == other.acme
             && self.addr == other.addr
             && self.addr_v6 == other.addr_v6
-            && self.add_x_forwarded_headers == other.add_x_forwarded_headers
-            && self.auth == other.auth
+            && self.proxy == other.proxy
             && self.passthrough == other.passthrough
             && self.preserve_source_ip == other.preserve_source_ip
             && self.alpn == other.alpn
@@ -1116,8 +1137,7 @@ impl fmt::Debug for ProxyTarget {
             .field("acme", &self.acme)
             .field("addr", &self.addr)
             .field("addr_v6", &self.addr_v6)
-            .field("add_x_forwarded_headers", &self.add_x_forwarded_headers)
-            .field("auth", &self.auth.as_ref().map(|_| "<redacted>"))
+            .field("proxy", &self.proxy.as_ref().map(|_| "<redacted>"))
             .field("connect_ssl", &self.connect_ssl.as_ref().map(|_| ()))
             .field("alpn", &self.alpn)
             .field("passthrough", &self.passthrough)
@@ -1183,22 +1203,146 @@ impl ProxyTarget {
         !client.is_loopback() && !self.private.contains(&client) && !on_container_bridge(client)
     }
 
-    /// The `(client, container)` pair to open the internal leg with when the
-    /// client's source address is to be preserved; `None` to connect plainly.
-    /// Both ends must be one family, so a v6 client needs the container's v6.
-    fn transparent_leg(&self, peer: Option<SocketAddr>) -> Option<(SocketAddr, SocketAddr)> {
-        if !self.preserve_source_ip {
-            return None;
-        }
-        let client = peer?;
-        if !self.gateways_client(client.ip()) {
-            return None;
-        }
-        let target = match client {
-            SocketAddr::V4(_) => matches!(self.addr, SocketAddr::V4(_)).then_some(self.addr)?,
-            SocketAddr::V6(_) => SocketAddr::V6(self.addr_v6?),
+    async fn connect_plain(&self) -> Option<(TcpStream, tokio::time::Instant)> {
+        let deadline = tokio::time::Instant::now() + BACKEND_DIAL_TIMEOUT;
+        let stream = tokio::time::timeout_at(deadline, TcpStream::connect(self.addr))
+            .await
+            .inspect_err(
+                |error| tracing::trace!(backend = %self.addr, ?error, "Backend dial timed out"),
+            )
+            .ok()?
+            .inspect_err(
+                |error| tracing::trace!(backend = %self.addr, ?error, "Backend dial failed"),
+            )
+            .ok()?;
+        Some((stream, deadline))
+    }
+
+    async fn connect_transparent(client: SocketAddr, target: SocketAddr) -> Option<TcpStream> {
+        let socket = match crate::net::transparent::transparent_socket(client, target) {
+            Ok(socket) => socket,
+            Err(e) => {
+                tracing::warn!(
+                    "transparent egress setup for {client} to {target} failed ({e}); refusing connection"
+                );
+                return None;
+            }
         };
-        Some((client, target))
+        socket
+            .bind(client)
+            .inspect_err(
+                |error| tracing::trace!(%client, %target, ?error, "Transparent source bind failed"),
+            )
+            .ok()?;
+        crate::net::transparent::ensure_divert_infra_once()
+            .await
+            .log_err()?;
+        socket.connect(target).await
+            .inspect_err(|error| tracing::trace!(%client, %target, ?error, "Transparent backend dial failed"))
+            .ok()
+    }
+
+    async fn connect_backend(
+        &self,
+        peer: Option<SocketAddr>,
+    ) -> Option<(TcpStream, tokio::time::Instant)> {
+        let Some(client) =
+            peer.filter(|client| self.preserve_source_ip && self.gateways_client(client.ip()))
+        else {
+            return self.connect_plain().await;
+        };
+        let Some(target) = (match client {
+            SocketAddr::V4(_) => self.addr.is_ipv4().then_some(self.addr),
+            SocketAddr::V6(_) => self.addr_v6.map(SocketAddr::V6),
+        }) else {
+            tracing::trace!(%client, backend = %self.addr, "No backend address for client IP family");
+            return None;
+        };
+        let stream = Self::connect_transparent(client, target).await?;
+        Some((stream, tokio::time::Instant::now() + BACKEND_DIAL_TIMEOUT))
+    }
+
+    fn register_origin<A>(
+        &self,
+        metadata: &A::Metadata,
+        stream: &TcpStream,
+    ) -> std::io::Result<Option<crate::util::GeneralBoxedGuard>>
+    where
+        A: Accept + 'static,
+        A::Metadata: Visit<ExtractVisitor<GatewayInfo>>
+            + Visit<ExtractVisitor<TcpMetadata>>
+            + Clone
+            + Send
+            + Sync,
+    {
+        if self.passthrough {
+            return Ok(None);
+        }
+        let tcp = extract::<TcpMetadata, _>(metadata);
+        let gateway = extract::<GatewayInfo, _>(metadata);
+        let mut origin = crate::net::request_origin::RequestOrigin::from_connection(
+            tcp.as_ref(),
+            gateway.as_ref(),
+        );
+        origin.public = !VHostTarget::<A>::filter_private(self, metadata);
+        let (local, peer) = stream.local_addr()
+            .and_then(|local| stream.peer_addr().map(|peer| (local, peer)))
+            .inspect_err(|error| tracing::trace!(backend = %self.addr, ?error, "Proxy origin registration failed"))?;
+        Ok(Some(origin.register_proxy(local, peer)))
+    }
+
+    async fn relay(
+        &self,
+        mut stream: AcceptStream,
+        mut backend: AcceptStream,
+        alpn: Option<MaybeUtf8String>,
+        source_ip: Option<IpAddr>,
+        ssl: bool,
+    ) {
+        match &self.proxy {
+            Some(ProxyOptions::Http {
+                add_x_forwarded_headers,
+                auth,
+            }) => {
+                let gate = match auth
+                    .as_ref()
+                    .map(crate::net::http::AuthGate::from_auth)
+                    .transpose()
+                {
+                    Ok(gate) => gate,
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to compile proxy auth gate; refusing connection: {e}"
+                        );
+                        return;
+                    }
+                };
+                let headers = match (*add_x_forwarded_headers, ssl) {
+                    (false, _) => ForwardedHeaders::Disabled,
+                    (true, false) => ForwardedHeaders::Plaintext,
+                    (true, true) => ForwardedHeaders::Ssl,
+                };
+                let result = if ssl {
+                    crate::net::http::run_http_proxy(
+                        stream, backend, alpn, source_ip, headers, gate,
+                    )
+                    .await
+                } else {
+                    crate::net::http::run_plain_http_proxy(
+                        stream, backend, source_ip, headers, gate,
+                    )
+                    .await
+                };
+                if let Err(error) = result {
+                    tracing::trace!(backend = %self.addr, ?error, "HTTP proxy connection failed");
+                }
+            }
+            None => {
+                tokio::io::copy_bidirectional(&mut stream, &mut backend)
+                    .await
+                    .ok();
+            }
+        }
     }
 }
 
@@ -1276,71 +1420,14 @@ where
         metadata: &'a <A as Accept>::Metadata,
     ) -> Option<(ServerConfig, Self::PreprocessRes)> {
         let peer = extract::<TcpMetadata, _>(metadata).map(|m| m.peer_addr);
-        let plain_connect = || async {
-            let deadline = tokio::time::Instant::now() + BACKEND_DIAL_TIMEOUT;
-            let stream = tokio::time::timeout_at(deadline, TcpStream::connect(self.addr))
-                .await
-                .with_ctx(|_| (ErrorKind::Network, self.addr))
-                .log_err()?
-                .with_ctx(|_| (ErrorKind::Network, self.addr))
-                .log_err()?;
-            Some((stream, deadline, self.addr))
-        };
-        // Source-preserving passthrough (container): open the internal leg from
-        // the client's own address so the backend sees the real peer (RFC §4.6).
-        // The box gateways the container, so replies transit it and the divert
-        // routes them back. Manual LAN passthroughs and terminating targets
-        // connect plainly — the box isn't their gateway.
-        let (tcp_stream, deadline, backend_addr) = match self.transparent_leg(peer) {
-            Some((client, target)) => {
-                crate::net::transparent::ensure_divert_infra_once()
-                    .await
-                    .log_err();
-                match crate::net::transparent::transparent_connect(client, target).await {
-                    Ok(stream) => (
-                        stream,
-                        tokio::time::Instant::now() + BACKEND_DIAL_TIMEOUT,
-                        target,
-                    ),
-                    // Degraded, not fatal: the backend sees this host rather than
-                    // the client. Better than dropping a working connection.
-                    Err(e) => {
-                        // A service bound to `0.0.0.0` refuses the v6 leg, which is
-                        // the common case and not worth warning about per
-                        // connection; anything else is a real misconfiguration.
-                        if e.kind() == std::io::ErrorKind::ConnectionRefused {
-                            tracing::debug!(
-                                "{target} has no listener for {client}'s family; connecting plainly"
-                            );
-                        } else {
-                            tracing::warn!(
-                                "transparent egress to {target} for {client} failed ({e}); connecting plainly, so the backend will see this host as the peer"
-                            );
-                        }
-                        plain_connect().await?
-                    }
-                }
-            }
-            None => plain_connect().await?,
-        };
+        let (tcp_stream, deadline) = self.connect_backend(peer).await?;
         if let Err(e) = socket2::SockRef::from(&tcp_stream)
             .set_tcp_keepalive(&crate::net::utils::default_keepalive())
         {
             tracing::error!("Failed to set tcp keepalive: {e}");
             tracing::debug!("{e:?}");
         }
-        let origin_registration = if self.passthrough {
-            None
-        } else {
-            let tcp = extract::<TcpMetadata, _>(metadata);
-            let gateway = extract::<GatewayInfo, _>(metadata);
-            let mut origin = crate::net::request_origin::RequestOrigin::from_connection(
-                tcp.as_ref(),
-                gateway.as_ref(),
-            );
-            origin.public = !VHostTarget::<A>::filter_private(self, metadata);
-            Some(origin.register_proxy(tcp_stream.local_addr().ok()?, tcp_stream.peer_addr().ok()?))
-        };
+        let origin_registration = self.register_origin::<A>(metadata, &tcp_stream).ok()?;
         let client_alpn: Vec<Vec<u8>> = hello
             .alpn()
             .into_iter()
@@ -1379,10 +1466,10 @@ where
                         .connect(ServerName::IpAddress(self.addr.ip().into()), tcp_stream),
                 )
                 .await
-                .with_ctx(|_| (ErrorKind::Network, backend_addr))
-                .log_err()?
-                .with_ctx(|_| (ErrorKind::Network, backend_addr))
-                .log_err()?;
+                .inspect_err(|error| tracing::trace!(backend = %self.addr, ?error, "Backend TLS handshake timed out"))
+                .ok()?
+                .inspect_err(|error| tracing::trace!(backend = %self.addr, ?error, "Backend TLS handshake failed"))
+                .ok()?;
                 let negotiated = target_stream
                     .get_ref()
                     .1
@@ -1405,63 +1492,23 @@ where
         &self,
         stream: AcceptStream,
         metadata: TlsMetadata<<A as Accept>::Metadata>,
-        (mut prev, origin_registration): Self::PreprocessRes,
+        (prev, origin_registration): Self::PreprocessRes,
         ctx: ProxyContext,
     ) {
-        let add_x_forwarded_headers = self.add_x_forwarded_headers;
-        // Pre-compile the auth gate once per stream — base64-encode all
-        // accepted credentials, build the lookup map and the
-        // WWW-Authenticate challenge — so each request on this connection
-        // is just a HashMap probe. Compile errors (e.g. credentials that
-        // can't fit in a `HeaderValue`, or any other authoring bug) fail
-        // closed: we log and drop the connection rather than risk
-        // silently exposing an upstream that the operator intended to
-        // gate.
-        let auth_gate = match self
-            .auth
-            .as_ref()
-            .map(crate::net::http::AuthGate::from_auth)
-        {
-            Some(Ok(g)) => Some(g),
-            Some(Err(e)) => {
-                tracing::error!("Failed to compile proxy auth gate; refusing connection: {e}");
-                tracing::debug!("{e:?}");
-                drop(stream);
-                drop(prev);
-                return;
-            }
-            None => None,
-        };
-        let http_aware = add_x_forwarded_headers || auth_gate.is_some();
-        let (mut stream, registration, conn_cancel) = ctx.track_with(stream);
-        let target_cancel = ctx.cancel.clone();
+        let target = self.clone();
+        let (stream, registration, conn_cancel) = ctx.track_with(stream);
         tokio::spawn(async move {
-            // Force capture by the outer `async move`; without a reference
-            // here the registry entry would deregister immediately.
             let _registration = registration;
             let _origin_registration = origin_registration;
-            let work = async move {
-                if http_aware {
-                    crate::net::http::run_http_proxy(
-                        stream,
-                        prev,
-                        metadata.tls_info.alpn,
-                        extract::<TcpMetadata, _>(&metadata.inner).map(|m| m.peer_addr.ip()),
-                        add_x_forwarded_headers,
-                        auth_gate,
-                    )
-                    .await
-                    .ok();
-                } else {
-                    tokio::io::copy_bidirectional(&mut stream, &mut prev)
-                        .await
-                        .ok();
-                }
-            };
             tokio::select! {
-                _ = target_cancel.cancelled() => {}
                 _ = conn_cancel.cancelled() => {}
-                _ = work => {}
+                _ = target.relay(
+                    stream,
+                    prev,
+                    metadata.tls_info.alpn,
+                    extract::<TcpMetadata, _>(&metadata.inner).map(|m| m.peer_addr.ip()),
+                    true,
+                ) => {}
             }
         });
     }
@@ -1650,6 +1697,94 @@ impl ProxyContext {
         let wrapped: Pin<Box<dyn ReadWriter + Send + 'static>> =
             Box::pin(ActivityStream::new(stream, last_active));
         (wrapped, handle, conn_cancel)
+    }
+}
+
+pub struct PlainHttpProxy {
+    cancel: CancellationToken,
+    _thread: NonDetachingJoinHandle<()>,
+}
+
+impl fmt::Debug for PlainHttpProxy {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PlainHttpProxy")
+            .finish_non_exhaustive()
+    }
+}
+
+impl PlainHttpProxy {
+    pub fn new(
+        interfaces: &NetworkInterfaceController,
+        port: u16,
+        target: ProxyTarget,
+        max_connections: usize,
+    ) -> Self {
+        let (public_gateways, private_ips) =
+            VHostTarget::<VHostBindListener>::bind_requirements(&target);
+        let requirements = Watch::new(VHostBindRequirements {
+            public_gateways,
+            private_ips,
+        });
+        Self::serve(
+            VHostBindListener::new(interfaces, port, requirements),
+            target,
+            max_connections,
+        )
+    }
+
+    fn serve(mut listener: VHostBindListener, target: ProxyTarget, max_connections: usize) -> Self {
+        let ctx = ProxyContext::new(max_connections);
+        let cancel = ctx.cancel.clone();
+        let thread = tokio::spawn(async move {
+            loop {
+                let accepted = futures::future::poll_fn(|cx| listener.poll_accept(cx)).await;
+                let (metadata, stream) = match accepted {
+                    Ok(accepted) => accepted,
+                    Err(error) => {
+                        tracing::trace!(?error, "HTTP proxy failed to accept connection");
+                        continue;
+                    }
+                };
+                if !VHostTarget::<VHostBindListener>::filter(&target, &metadata) {
+                    continue;
+                }
+                let target = target.clone();
+                let (stream, registration, conn_cancel) = ctx.track_with(stream);
+                tokio::spawn(async move {
+                    let _registration = registration;
+                    let work = async {
+                        let Some((backend, _)) = target.connect_plain().await else {
+                            return;
+                        };
+                        let Some(_origin) = target
+                            .register_origin::<VHostBindListener>(&metadata, &backend)
+                            .ok()
+                        else {
+                            return;
+                        };
+                        let source = extract::<TcpMetadata, _>(&metadata).map(|m| m.peer_addr.ip());
+                        target
+                            .relay(stream, Box::pin(backend), None, source, false)
+                            .await;
+                    };
+                    tokio::select! {
+                        _ = conn_cancel.cancelled() => {}
+                        _ = work => {}
+                    }
+                });
+            }
+        });
+        Self {
+            cancel,
+            _thread: thread.into(),
+        }
+    }
+}
+
+impl Drop for PlainHttpProxy {
+    fn drop(&mut self) {
+        self.cancel.cancel();
     }
 }
 
@@ -2061,9 +2196,8 @@ impl<A: Accept> VHostServer<A> {
                     },
                 ));
                 loop {
-                    if let Err(e) = listener.handle_next().await {
-                        tracing::trace!("VHostServer: failed to accept connection: {e}");
-                        tracing::trace!("{e:?}");
+                    if let Err(error) = listener.handle_next().await {
+                        tracing::trace!(?error, "Vhost server failed to accept connection");
                     }
                 }
             })
@@ -2314,8 +2448,7 @@ mod port_map_tests {
             acme: acme.then(|| AcmeProvider::from_str("letsencrypt").unwrap()),
             addr: "10.0.3.2:443".parse().unwrap(),
             addr_v6: None,
-            add_x_forwarded_headers: false,
-            auth: None,
+            proxy: None,
             connect_ssl: None,
             alpn: None,
             passthrough: false,
@@ -2533,8 +2666,7 @@ mod accept_filter_tests {
             acme: None,
             addr: "10.0.0.1:443".parse().unwrap(),
             addr_v6: None,
-            add_x_forwarded_headers: false,
-            auth: None,
+            proxy: None,
             connect_ssl: None,
             alpn: None,
             passthrough: false,
@@ -2931,8 +3063,10 @@ mod upstream_alpn_tests {
             acme: None,
             addr: backend,
             addr_v6: None,
-            add_x_forwarded_headers: true,
-            auth: None,
+            proxy: Some(ProxyOptions::Http {
+                add_x_forwarded_headers: true,
+                auth: None,
+            }),
             connect_ssl,
             alpn,
             passthrough: false,
@@ -3015,6 +3149,34 @@ mod upstream_alpn_tests {
             .expect("the listener's accept task runs to completion")
             .expect("the listener accepts the connection");
         Ok(alpn.map(|a| String::from_utf8(a.0).unwrap()))
+    }
+
+    #[tokio::test]
+    async fn malformed_backend_tls_is_trace_only() {
+        for trace_enabled in [false, true] {
+            let (logs, dispatch) = if trace_enabled {
+                connection_error_tests::capture_trace_logs()
+            } else {
+                connection_error_tests::capture_logs()
+            };
+            let _guard = tracing::dispatcher::set_default(&dispatch);
+            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let backend = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                stream.write_all(b"not TLS").await.unwrap();
+            });
+            assert!(try_negotiate(rewrap(), None, &[], addr, &[]).await.is_err());
+            backend.await.unwrap();
+            let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
+            if trace_enabled {
+                assert!(logs.contains("Backend TLS handshake failed"), "{logs}");
+                assert!(!logs.contains("ERROR"), "{logs}");
+                assert!(!logs.contains("WARN"), "{logs}");
+            } else {
+                assert!(logs.is_empty(), "{logs}");
+            }
+        }
     }
 
     #[tokio::test]
@@ -3170,7 +3332,7 @@ mod upstream_alpn_tests {
             let mut before = target(backend_addr, None, None);
             before.private = BTreeSet::from([old_addr.ip(), new_addr.ip()]);
             before.passthrough = true;
-            before.add_x_forwarded_headers = false;
+            before.proxy = None;
             let owner = server
                 .add(None, DynVHostTarget::new(before.clone()), 4)
                 .unwrap();

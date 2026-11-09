@@ -151,7 +151,30 @@ fn secure_gateways<'a>(
 }
 
 impl Model<Host> {
+    /// Runs for service, network and operator changes alike. An operator action
+    /// that groups addresses applies its intent first through `derive_addresses`.
     pub fn update_addresses(
+        &mut self,
+        mdns: &ServerHostname,
+        gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+        available_ports: &AvailablePorts,
+    ) -> Result<(), Error> {
+        let previous = self.as_bindings().de()?;
+        self.derive_addresses(mdns, gateways, available_ports)?;
+        self.as_bindings_mut().mutate(|bindings| {
+            for (port, binding) in bindings.iter_mut() {
+                let addresses = previous
+                    .get(port)
+                    .map_or_else(Default::default, |info| info.addresses.clone());
+                binding.addresses.resolve_address_groups(&addresses);
+            }
+            Ok(())
+        })?;
+        self.derive_addresses(mdns, gateways, available_ports)
+    }
+
+    /// Rebuilds the address rows and port forwards from the stored selections.
+    fn derive_addresses(
         &mut self,
         mdns: &ServerHostname,
         gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>,
@@ -169,7 +192,6 @@ impl Model<Host> {
             let mut available = bind.as_addresses().as_available().de()?;
             let mdns_gateways = mdns_gateways(gateways, &available);
             available.retain(|h| matches!(h.metadata, HostnameMetadata::Plugin { .. }));
-            let gua_wan = bind.as_addresses().as_gua_wan().de()?;
             for (gid, g) in gateways {
                 if g.gateway_type == GatewayType::OutboundOnly {
                     continue;
@@ -194,31 +216,22 @@ impl Model<Host> {
                         opt.secure
                             .map_or(gateway_secure, |_| opt.wants_plain_port())
                     }) {
-                        let mut hi = HostnameInfo {
+                        available.insert(HostnameInfo {
                             ssl: opt.secure.map_or(false, |s| s.ssl),
                             public: false,
                             hostname: host.clone(),
                             port: Some(port),
                             metadata: metadata.clone(),
-                        };
-                        // A GUA's public flag is the operator's WAN opt-in.
-                        if let Some(gua) = hi.gua() {
-                            hi.public = gua_wan.contains(&gua);
-                        }
-                        available.insert(hi);
+                        });
                     }
                     if let Some(port) = net.assigned_ssl_port {
-                        let mut hi = HostnameInfo {
+                        available.insert(HostnameInfo {
                             ssl: true,
                             public: false,
                             hostname: host.clone(),
                             port: Some(port),
                             metadata,
-                        };
-                        if let Some(gua) = hi.gua() {
-                            hi.public = gua_wan.contains(&gua);
-                        }
-                        available.insert(hi);
+                        });
                     }
                 }
                 if let Some(wan_ip) = &ip_info.wan_ip {
@@ -363,7 +376,9 @@ impl Model<Host> {
                     });
                 }
             }
-            bind.as_addresses_mut().as_available_mut().ser(&available)?;
+            let mut addresses = bind.as_addresses().de()?;
+            addresses.set_available(available);
+            bind.as_addresses_mut().ser(&addresses)?;
         }
 
         // Port-range bindings get the same reachable-address set as single-port
@@ -942,7 +957,7 @@ mod tests {
     use imbl_value::InternedString;
     use ipnet::IpNet;
 
-    use super::{Host, Model, mdns_gateways, secure_gateways};
+    use super::{Host, Model, PublicDomainConfig, mdns_gateways, secure_gateways};
     use crate::GatewayId;
     use crate::db::model::public::{
         CapabilityVerdict, GatewayType, IpInfo, NetworkInterfaceInfo, NetworkInterfaceType,
@@ -1024,6 +1039,7 @@ mod tests {
             preferred_external_port,
             add_ssl: None,
             secure: Some(crate::net::host::binding::Security { ssl: false }),
+            proxy: None,
         }
     }
 
@@ -1109,6 +1125,51 @@ mod tests {
         gateways.remove(&gw("eth0"));
         host.update_addresses(&server, &gateways, &ports).unwrap();
         assert!(mdns_rows(&host, 9735).is_empty());
+    }
+
+    #[test]
+    fn a_binding_turning_plain_publishes_nothing_without_public_bare_ips() {
+        let server = ServerHostname::new(InternedString::intern("server")).unwrap();
+        let mut eth0 = iface(NetworkInterfaceType::Ethernet, None);
+        Arc::make_mut(eth0.ip_info.as_mut().unwrap()).subnets = [
+            "192.0.2.10/24".parse::<IpNet>().unwrap(),
+            "2001:db8::1/64".parse::<IpNet>().unwrap(),
+        ]
+        .into_iter()
+        .collect();
+        let gateways: OrdMap<GatewayId, NetworkInterfaceInfo> =
+            [(gw("eth0"), eth0)].into_iter().collect();
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        let own_tls = BindOptions {
+            secure: Some(crate::net::host::binding::Security { ssl: true }),
+            ..plain(5223)
+        };
+        host.add_binding(&mut ports, 5223, own_tls, false).unwrap();
+        host.as_public_domains_mut()
+            .insert(
+                &InternedString::intern("smp.example.com"),
+                &PublicDomainConfig {
+                    gateway: gw("eth0"),
+                    acme: None,
+                },
+            )
+            .unwrap();
+        host.update_addresses(&server, &gateways, &ports).unwrap();
+        host.as_bindings_mut()
+            .mutate(|bindings| {
+                bindings.get_mut(&5223).unwrap().addresses.disabled.clear();
+                Ok(())
+            })
+            .unwrap();
+
+        host.add_binding(&mut ports, 5223, plain(5223), false)
+            .unwrap();
+        host.update_addresses(&server, &gateways, &ports).unwrap();
+
+        let addresses = host.de().unwrap().bindings[&5223].addresses.clone();
+        assert!(addresses.gua_wan.is_empty());
+        assert!(addresses.enabled().iter().all(|a| !a.public));
     }
 
     #[test]

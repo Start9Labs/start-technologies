@@ -17,7 +17,7 @@ Published ports (port forwarding) allow devices on the Internet to reach specifi
 
 1. Configure the rule:
    - **Label** — A descriptive name (e.g. "Home Assistant", "Minecraft Server", "Bitcoin P2P").
-   - **Device** — Select the target device from the list. The device is identified by name and IP address. If the rule includes IPv4 and the device does not already have a reserved IPv4 address, one will be assigned automatically to ensure the rule always reaches the correct device.
+   - **Device** — Select the target device from the list. The device is identified by name and IP address. If the rule includes IPv4 and the device does not already have a reserved IPv4 address on the profile it is on, one is reserved there automatically to ensure the rule always reaches the correct device. The rule belongs to that profile: if the device moves to another profile, the rule is kept and works again when the device returns.
    - **Port** — The port or port range on the device to expose. Enter a single port (e.g. `443`) or a range (e.g. `27015-27030`).
    - **Protocol** — TCP, UDP, or TCP + UDP.
    - **Source** — Who can connect. Select **Any** to allow connections from anywhere on the Internet, or **Custom** to restrict access to a specific IPv4 address or range (e.g. `203.0.113.0/24`). A rule with a custom source accepts IPv4 connections only.
@@ -51,9 +51,10 @@ Each rule can be toggled on and off without deleting it. Use the "Enable" or "Di
 Each published port rule shows a status indicator in the table:
 
 - **Active** (green) — The rule is enabled and the target device is online with the addresses the rule needs.
-- **Partial** (yellow) — Only one of the rule's IP versions is currently usable. For example, the device is missing its IPv4 or IPv6 address, or its IPv6 address is out of date after your ISP rotated the delegated prefix.
+- **Partial** (yellow) — Only one of the rule's IP versions is currently usable. For example, the device is missing its IPv4 or IPv6 address, its IPv6 address is out of date after your ISP rotated the delegated prefix, or the router has no global IPv6 address from your ISP.
 - **Paused** (orange) — The target device is offline or not found.
-- **Error** (red) — No usable address is available for the rule — the device lacks an address for the selected IP version(s), or its IPv6 address is out of date.
+- **Inactive** (blue) — The target device is on a different [Security Profile](security-profiles.md) from the one the rule forwards into. The rule works again when the device returns to that profile.
+- **Error** (red) — No usable address is available for the rule — the device lacks an address for the selected IP version(s), its IPv6 address is out of date, or the router has no global IPv6 address for an IPv6-only rule.
 - **Disabled** (grey) — The rule has been toggled off.
 
 The status reflects the rule and the device's addresses on your LAN — it does not test whether traffic actually arrives from the Internet.
@@ -81,7 +82,7 @@ Port uses created this way appear in the **Automatic** section of the Published 
 
 - The device itself creates, renews, and removes its forwards.
 - A forward the device stops renewing expires and is removed automatically once the lifetime the device asked for runs out — about an hour for typical clients, and never longer than a week even for a device that asks to keep the port indefinitely.
-- A forward is also removed once the device no longer holds the address it points at — if the device leaves the network long enough for its DHCP lease to lapse, or comes back on a different address. This keeps a forward from quietly delivering Internet traffic to whichever device is given that address next. Devices with a reserved address are unaffected.
+- A forward is also removed once the device no longer holds the address it points at — if the device leaves the network long enough for its DHCP lease to lapse, or comes back on a different address. This keeps a forward from quietly delivering Internet traffic to whichever device is given that address next. A reserved address keeps its forward while the device has no address on file, such as after the router restarts, but not once the device takes an address on another profile.
 - To stop a device from creating forwards, turn its toggle back off on the device page — or forget the device entirely. Either way its existing forwards and hostname routes are closed immediately, and it can no longer open new ones.
 
 Automatic forwards survive router reboots, so a self-configured device stays reachable while the router restarts. They can never take over a port that one of your manual rules already uses — the device's request is refused instead. The reverse also holds: if you publish a port manually that an automatic forward is currently using, your manual rule wins and the automatic forward is removed.

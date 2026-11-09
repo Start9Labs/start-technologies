@@ -22,7 +22,7 @@ use crate::util::io::{ParallelBlake3Writer, TrackingIO};
 #[derive(Clone)]
 pub struct DirectoryContents<S> {
     contents: OrdMap<InternedString, Entry<S>>,
-    /// used to optimize files to have earliest needed information up front
+    source_end: u64,
     sort_by: Option<Arc<dyn Fn(&str, &str) -> std::cmp::Ordering + Send + Sync>>,
 }
 impl<S: Debug> Debug for DirectoryContents<S> {
@@ -33,10 +33,14 @@ impl<S: Debug> Debug for DirectoryContents<S> {
     }
 }
 impl<S> DirectoryContents<S> {
+    pub(crate) fn source_end(&self) -> u64 {
+        self.source_end
+    }
     pub fn new() -> Self {
         Self {
             contents: OrdMap::new(),
             sort_by: None,
+            source_end: 0,
         }
     }
 
@@ -181,6 +185,7 @@ impl<S: ArchiveSource + Clone> DirectoryContents<Section<S>> {
                 "size is greater than signed"
             );
 
+            let mut source_end = super::source::checked_end(source, position, size).await?;
             let mut toc_reader = source.fetch(position, size).await?;
 
             let len = varint::deserialize_varint(&mut toc_reader).await?;
@@ -188,12 +193,18 @@ impl<S: ArchiveSource + Clone> DirectoryContents<Section<S>> {
             for _ in 0..len {
                 let name = varint::deserialize_varstring(&mut toc_reader).await?;
                 let entry = Entry::deserialize(source.clone(), &mut toc_reader).await?;
+                source_end = source_end.max(match entry.as_contents() {
+                    EntryContents::Missing => 0,
+                    EntryContents::File(f) => f.end(),
+                    EntryContents::Directory(d) => d.source_end(),
+                });
                 entries.insert(name.into(), entry);
             }
 
             let res = Self {
                 contents: entries,
                 sort_by: None,
+                source_end,
             };
 
             if res.sighash().await? == sighash {
@@ -256,6 +267,7 @@ impl<S: FileSource + Clone> DirectoryContents<S> {
             Self {
                 contents: sig_contents,
                 sort_by: None,
+                source_end: 0,
             }
             .serialize_toc(&mut WriteQueue::new(0), &mut hasher)
             .await?;
@@ -312,6 +324,7 @@ impl<S: FileSource + Clone> DirectoryContents<S> {
                 .map(|(k, v)| (k, v.into_dyn()))
                 .collect(),
             sort_by: self.sort_by,
+            source_end: self.source_end,
         }
     }
 }

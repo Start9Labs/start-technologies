@@ -1,5 +1,0 @@
----
-user-facing: true
----
-
-- Fixed `merge()` changing file-model keys it was not given, and `.const()` reads not re-running, when keys fall back to a fixed `.catch()` object. Rebuild packages with this SDK version to receive the fix.

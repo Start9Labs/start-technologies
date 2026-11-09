@@ -266,6 +266,11 @@ proptest! {
     }
 
     #[test]
+    fn contradiction_unsatisfiable(a in range_gen()) {
+        assert!(!VersionRange::and(a.clone(), VersionRange::not(a)).satisfiable());
+    }
+
+    #[test]
     fn intersects_symmetric(a in range_gen(), b in range_gen()) {
         assert!(a.intersects(&b) == b.intersects(&a));
     }
@@ -308,6 +313,12 @@ fn satisfiable_flavor_disjoint() {
     assert!(
         !VersionRange::and(VersionRange::anchor(EQ, a), VersionRange::anchor(EQ, b),).satisfiable()
     );
+
+    // a disjunction across flavors never intersects its complement
+    let mixed: VersionRange = "(>=30.3:16 && <31) || >=#knotsprerdts:29.3:29"
+        .parse()
+        .unwrap();
+    assert!(!VersionRange::and(mixed.clone(), VersionRange::not(mixed)).satisfiable());
 
     // intersects: same flavor, overlapping ranges
     let r1: VersionRange = ">=#bitcoin:1:0".parse().unwrap();

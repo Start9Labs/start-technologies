@@ -1,6 +1,10 @@
 import { Component, inject, input } from '@angular/core'
 import { DialogService, i18nPipe, TaskService } from '@start9labs/shared'
-import { TuiButton, TuiNotificationService } from '@taiga-ui/core'
+import {
+  TUI_BREAKPOINT,
+  TuiButton,
+  TuiNotificationService,
+} from '@taiga-ui/core'
 import { filter, of, switchMap } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { BackupService } from './backup.service'
@@ -13,8 +17,12 @@ import { BackupService } from './backup.service'
       size="s"
       iconStart="@tui.brush-cleaning"
       (click)="$event.stopPropagation(); remove()"
+      (keydown.enter)="$event.stopPropagation()"
+      [attr.aria-label]="'Delete old backup' | i18n"
     >
-      {{ 'Delete old backup' | i18n }}
+      @if (breakpoint() !== 'mobile') {
+        {{ 'Delete old backup' | i18n }}
+      }
     </button>
   `,
   styles: `
@@ -31,6 +39,8 @@ export class BackupLegacyWarningComponent {
   private readonly api = inject(ApiService)
   private readonly service = inject(BackupService)
   private readonly i18n = inject(i18nPipe)
+
+  protected readonly breakpoint = inject(TUI_BREAKPOINT)
 
   readonly id = input.required<string>()
   readonly hasCurrentBackup = input.required<boolean>()
