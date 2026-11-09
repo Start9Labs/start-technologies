@@ -579,6 +579,7 @@ export default {
   615: 'Ports publiés supprimés avec ce profil : {list}.',
   616: 'En dehors du sous-réseau du profil de cet appareil',
   617: "Pas une adresse d'hôte utilisable",
-  618: 'Modifier ce mot de passe peut déconnecter brièvement tous les appareils Wi-Fi. Les appareils qui utilisent l’ancien mot de passe doivent se reconnecter avec le nouveau.',
-  619: 'Ce mot de passe Wi-Fi a été modifié ou supprimé. Vos modifications n’ont pas été enregistrées.',
+  618: 'Cet appareil tente de publier des enregistrements DNS. Autorisez la publication d’enregistrements DNS pour qu’ils soient résolus sur votre réseau.',
+  619: 'Modifier ce mot de passe peut déconnecter brièvement tous les appareils Wi-Fi. Les appareils qui utilisent l’ancien mot de passe doivent se reconnecter avec le nouveau.',
+  620: 'Ce mot de passe Wi-Fi a été modifié ou supprimé. Vos modifications n’ont pas été enregistrées.',
 } satisfies i18n

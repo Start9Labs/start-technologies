@@ -39,6 +39,19 @@ impl<'a> Config<'a> {
         Ok(())
     }
 
+    /// Panics past the end, like [`Vec::insert`].
+    pub fn insert<T: TypedSection<'a>>(
+        &mut self,
+        index: usize,
+        section: &T,
+        name: Option<&str>,
+    ) -> Result<(), Error> {
+        let name = name.map(|n| self.arena.alloc(n.to_string()).as_str());
+        let section = T::append(section, self.arena, name)?;
+        self.sections.insert(index, section);
+        Ok(())
+    }
+
     pub fn each<T: TypedSection<'a>, E>(
         &self,
         mut each: impl FnMut(Option<&str>, T),
@@ -239,6 +252,20 @@ impl<'a> Section<'a> {
         for line in &self.lines {
             if let Line::Section { name, .. } = line {
                 return name.as_ref().map(Token::as_str);
+            }
+        }
+        panic!("section missing header")
+    }
+
+    pub fn set_name(&mut self, name: &str) {
+        let arena = self.arena;
+        for line in &mut self.lines {
+            if let Line::Section { name: header, .. } = line {
+                *header = Some(Token::from_str(
+                    arena.alloc(name.to_string()).as_str(),
+                    arena,
+                ));
+                return;
             }
         }
         panic!("section missing header")

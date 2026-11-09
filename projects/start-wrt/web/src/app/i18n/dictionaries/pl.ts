@@ -579,6 +579,7 @@ export default {
   615: 'Opublikowane porty usuwane wraz z tym profilem: {list}.',
   616: 'Poza podsiecią profilu tego urządzenia',
   617: 'To nie jest użyteczny adres hosta',
-  618: 'Zmiana tego hasła może na krótko rozłączyć wszystkie urządzenia Wi-Fi. Urządzenia używające starego hasła muszą połączyć się ponownie przy użyciu nowego.',
-  619: 'To hasło Wi-Fi zostało zmienione lub usunięte. Twoje zmiany nie zostały zapisane.',
+  618: 'To urządzenie próbuje opublikować rekordy DNS. Zezwól na publikowanie rekordów DNS, aby były rozpoznawane w Twojej sieci.',
+  619: 'Zmiana tego hasła może na krótko rozłączyć wszystkie urządzenia Wi-Fi. Urządzenia używające starego hasła muszą połączyć się ponownie przy użyciu nowego.',
+  620: 'To hasło Wi-Fi zostało zmienione lub usunięte. Twoje zmiany nie zostały zapisane.',
 } satisfies i18n

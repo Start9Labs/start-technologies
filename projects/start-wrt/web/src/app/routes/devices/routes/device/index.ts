@@ -14,6 +14,7 @@ import {
   TuiHintDirective,
   TuiInput,
   TuiLink,
+  TuiNotification,
   TuiTitle,
 } from '@taiga-ui/core'
 import { provideTranslatedValidationErrors } from 'src/app/i18n/validation-errors'
@@ -167,6 +168,14 @@ import { i18nKey } from 'src/app/i18n/i18n.providers'
           />
           {{ 'Allow DNS record publishing' | i18n }}
         </label>
+        @if (data()?.dnsInjectionRequested) {
+          <div tuiNotification size="s" appearance="info">
+            {{
+              'This device is trying to publish DNS records. Allow DNS record publishing for them to resolve on your network.'
+                | i18n
+            }}
+          </div>
+        }
         <label tuiLabel>
           <input
             tuiSwitch
@@ -231,6 +240,7 @@ import { i18nKey } from 'src/app/i18n/i18n.providers'
     TuiError,
     TuiHintDirective,
     TuiCell,
+    TuiNotification,
     TuiSwitch,
     InjectedRecordsTable,
     i18nPipe,
