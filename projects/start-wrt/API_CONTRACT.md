@@ -877,6 +877,9 @@ struct Device {
     /// (`devices.set-dns-injection`; `vpn-server.peer-set-dns-injection` for a
     /// VPN peer).
     allow_dns_injection: bool,
+    /// Whether the router refused this device's DNS records for lack of that
+    /// permission in the last half hour.
+    dns_injection_requested: bool,
     /// Whether the router forwards this device's IPv6 router advertisements
     /// to the rest of the LAN (`devices.set-router-advertisements`). Always
     /// false for VPN peers.

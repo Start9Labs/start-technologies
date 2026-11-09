@@ -2708,6 +2708,7 @@ config rule 'pp_a_v6'
             profile_network: None,
             allow_auto_port_forward: false,
             allow_dns_injection: false,
+            dns_injection_requested: false,
             allow_router_advertisements: false,
             security_profile: None,
             speed: None,
