@@ -95,6 +95,13 @@ turns the compiled bins + UIs + runtime squashfs into a `.deb`, `.squashfs`, and
 finally the `.iso`/`.img` for the target platform (x86_64, aarch64/Raspberry Pi,
 rockchip, riscv64).
 
+Persistent administrator GRUB drop-ins live in `/media/startos/config/grub.d/*.cfg`.
+The packaged `build/lib/grub-user.cfg` loader is installed as
+`/etc/default/grub.d/zz-startos-user.cfg` and sources them after image/platform
+defaults through `/media/startos/root/config`, available in the installation and
+update chroots as well as the running OS. The NVMe isolation helper owns only
+`90-nvme-isolation.cfg`; see [Kernel Arguments](docs/src/kernel-arguments.md).
+
 ## Build pipeline (cross-layer)
 
 Changes flow in one direction; verify in this order:
