@@ -6,6 +6,10 @@
 
 use std::path::{Path, PathBuf};
 
+use openssl::pkey::PKey;
+use openssl::x509::X509;
+use startos::net::ssl::reissue_root_cert;
+use startos::util::io::{delete_file, maybe_read_file_to_string};
 use tokio::io::AsyncWriteExt;
 use uciedit::openwrt::{Dhcp, DhcpHost, InterfaceProto, NetworkInterface};
 use uciedit::{dump_all, parse_all, Arena, TypedSection};
@@ -34,6 +38,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::RemoveServerCert,
     Migration::EnableFlowOffloading,
     Migration::ScopeReservedNames,
+    Migration::ReissueRootCa,
     Migration::BindLuciToLoopback,
 ];
 
@@ -63,6 +68,9 @@ enum Migration {
     EnableFlowOffloading,
     /// Earlier releases served a reserved device's name to every profile.
     ScopeReservedNames,
+    /// Earlier releases issued Root CAs whose authority key identifier lacks a
+    /// key ID; iOS refuses to install them.
+    ReissueRootCa,
     /// Earlier images served LuCI's uhttpd on every address.
     BindLuciToLoopback,
 }
@@ -81,6 +89,7 @@ impl Migration {
             Migration::RemoveServerCert => remove_server_cert(root).await,
             Migration::EnableFlowOffloading => enable_flow_offloading(root).await,
             Migration::ScopeReservedNames => scope_reserved_names(root).await,
+            Migration::ReissueRootCa => reissue_root_ca(root).await,
             Migration::BindLuciToLoopback => bind_luci_to_loopback(root).await,
         }
     }
@@ -137,10 +146,13 @@ pub async fn forget_unless_restored(root: &Path, archive_listing: &str) -> Resul
 /// Holds while only the daemon creates the CA, after this runner at boot.
 /// A CA created earlier makes every fresh router replay every migration.
 async fn has_run_startwrt(root: &Path) -> bool {
-    let ca = crate::ssl::ca_cert_path();
-    tokio::fs::try_exists(root.join(ca.strip_prefix("/").unwrap_or(&ca)))
+    tokio::fs::try_exists(under(root, &crate::ssl::ca_cert_path()))
         .await
         .unwrap_or(false)
+}
+
+fn under(root: &Path, path: &Path) -> PathBuf {
+    root.join(path.strip_prefix("/").unwrap_or(path))
 }
 
 async fn read_record(record: &Path) -> Result<Option<usize>, Error> {
@@ -238,6 +250,31 @@ async fn remove_server_cert(root: &Path) -> Result<(), Error> {
         }
     }
     Ok(())
+}
+
+/// An unreadable root stays as it is.
+async fn reissue_root_ca(root: &Path) -> Result<(), Error> {
+    let cert_path = under(root, &crate::ssl::ca_cert_path());
+    let (Some(cert), Some(key)) = (
+        maybe_read_file_to_string(&cert_path).await?,
+        maybe_read_file_to_string(under(root, &crate::ssl::ca_key_path())).await?,
+    ) else {
+        return Ok(());
+    };
+    let (Ok(cert), Ok(key)) = (
+        X509::from_pem(cert.as_bytes()),
+        PKey::private_key_from_pem(key.as_bytes()),
+    ) else {
+        return Ok(());
+    };
+    let Some(reissued) = reissue_root_cert(&key, &cert)? else {
+        return Ok(());
+    };
+    // Precedes the root's rewrite: a replay leaves a reissued root alone.
+    for path in [crate::ssl::int_cert_path(), crate::ssl::int_key_path()] {
+        delete_file(under(root, &path)).await?;
+    }
+    crate::ssl::write_pem(&cert_path, reissued.to_pem()?, 0o644).await
 }
 
 #[derive(Debug, TypedSection, Default)]
@@ -868,7 +905,7 @@ config forwarding
 
     #[tokio::test]
     async fn luci_listens_on_loopback_unless_changed() {
-        let dir = router(Some("11\n"), true);
+        let dir = router(Some("12\n"), true);
         write(&dir, "etc/config/uhttpd", LEGACY_UHTTPD);
         run(dir.path()).await.unwrap();
         assert_eq!(record(&dir), current());
@@ -883,7 +920,7 @@ config forwarding
         assert!(uhttpd.contains("option days '397'"), "{uhttpd}");
 
         let custom = LEGACY_UHTTPD.replace("[::]:8080", "[::]:8443");
-        let dir = router(Some("11\n"), true);
+        let dir = router(Some("12\n"), true);
         write(&dir, "etc/config/uhttpd", &custom);
         run(dir.path()).await.unwrap();
         assert_eq!(read(&dir, "etc/config/uhttpd"), custom);
@@ -905,5 +942,166 @@ config forwarding
             .await
             .unwrap();
         assert_eq!(record(&dir), "1\n");
+    }
+
+    /// A root as earlier releases issued it, its authority key identifier
+    /// naming only the issuer and serial.
+    fn issuer_only_root(key: &PKey<openssl::pkey::Private>) -> X509 {
+        use openssl::asn1::Asn1Time;
+        use openssl::bn::BigNum;
+        use openssl::conf::{Conf, ConfMethod};
+        use openssl::hash::MessageDigest;
+        use openssl::x509::extension::{
+            AuthorityKeyIdentifier, BasicConstraints, SubjectKeyIdentifier,
+        };
+        use openssl::x509::{X509Builder, X509NameBuilder};
+
+        let mut name = X509NameBuilder::new().unwrap();
+        name.append_entry_by_text("CN", "StartWRT Local Root CA 0123abcd")
+            .unwrap();
+        let name = name.build();
+        let mut builder = X509Builder::new().unwrap();
+        builder.set_version(2).unwrap();
+        builder
+            .set_not_before(&Asn1Time::days_from_now(0).unwrap())
+            .unwrap();
+        builder
+            .set_not_after(&Asn1Time::days_from_now(3640).unwrap())
+            .unwrap();
+        builder
+            .set_serial_number(&BigNum::from_u32(1).unwrap().to_asn1_integer().unwrap())
+            .unwrap();
+        builder.set_subject_name(&name).unwrap();
+        builder.set_issuer_name(&name).unwrap();
+        builder.set_pubkey(key).unwrap();
+        let cfg = Conf::new(ConfMethod::default()).unwrap();
+        let ctx = builder.x509v3_context(None, Some(&cfg));
+        let ski = SubjectKeyIdentifier::new().build(&ctx).unwrap();
+        let aki = AuthorityKeyIdentifier::new()
+            .keyid(false)
+            .issuer(true)
+            .build(&ctx)
+            .unwrap();
+        builder.append_extension(ski).unwrap();
+        builder.append_extension(aki).unwrap();
+        builder
+            .append_extension(BasicConstraints::new().critical().ca().build().unwrap())
+            .unwrap();
+        builder.sign(key, MessageDigest::sha256()).unwrap();
+        builder.build()
+    }
+
+    fn ca_file(dir: &tempfile::TempDir, path: PathBuf) -> PathBuf {
+        under(dir.path(), &path)
+    }
+
+    fn write_ca(dir: &tempfile::TempDir, root: &X509, key: &PKey<openssl::pkey::Private>) {
+        let write = |path: PathBuf, content: &[u8]| {
+            let path = ca_file(dir, path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, content).unwrap();
+        };
+        write(crate::ssl::ca_cert_path(), &root.to_pem().unwrap());
+        write(
+            crate::ssl::ca_key_path(),
+            &key.private_key_to_pem_pkcs8().unwrap(),
+        );
+        write(crate::ssl::int_cert_path(), b"intermediate");
+        write(crate::ssl::int_key_path(), b"intermediate key");
+    }
+
+    fn read_root(dir: &tempfile::TempDir) -> X509 {
+        X509::from_pem(&std::fs::read(ca_file(dir, crate::ssl::ca_cert_path())).unwrap()).unwrap()
+    }
+
+    fn has_intermediate(dir: &tempfile::TempDir) -> [bool; 2] {
+        [crate::ssl::int_cert_path(), crate::ssl::int_key_path()].map(|p| ca_file(dir, p).exists())
+    }
+
+    #[tokio::test]
+    async fn issuer_only_root_is_reissued_under_its_key() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let key = startos::net::ssl::gen_nistp256().unwrap();
+        let old = issuer_only_root(&key);
+        assert!(old.authority_key_id().is_none());
+        let pending = MIGRATIONS
+            .iter()
+            .position(|m| matches!(m, Migration::ReissueRootCa))
+            .unwrap();
+        let dir = router(Some(&format!("{pending}\n")), false);
+        write_ca(&dir, &old, &key);
+        let key_pem = std::fs::read(ca_file(&dir, crate::ssl::ca_key_path())).unwrap();
+
+        run(dir.path()).await.unwrap();
+        assert_eq!(record(&dir), current());
+
+        let root = read_root(&dir);
+        assert!(root.public_key().unwrap().public_eq(&key));
+        assert!(root.verify(&key).unwrap());
+        assert_eq!(
+            root.subject_name().to_der().unwrap(),
+            old.subject_name().to_der().unwrap()
+        );
+        assert_eq!(root.not_before(), old.not_before());
+        assert_eq!(root.not_after(), old.not_after());
+        assert_ne!(
+            root.serial_number().to_bn().unwrap(),
+            old.serial_number().to_bn().unwrap()
+        );
+        assert_eq!(
+            root.authority_key_id().unwrap().as_slice(),
+            root.subject_key_id().unwrap().as_slice()
+        );
+        assert!(root.authority_issuer().is_none());
+        assert_eq!(has_intermediate(&dir), [false, false]);
+        assert_eq!(
+            std::fs::read(ca_file(&dir, crate::ssl::ca_key_path())).unwrap(),
+            key_pem
+        );
+        let mode = std::fs::metadata(ca_file(&dir, crate::ssl::ca_cert_path()))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o644);
+
+        let reissued = root.to_der().unwrap();
+        Migration::ReissueRootCa.apply(dir.path()).await.unwrap();
+        assert_eq!(read_root(&dir).to_der().unwrap(), reissued);
+    }
+
+    #[tokio::test]
+    async fn replay_reissues_a_root_whose_intermediate_is_gone() {
+        let key = startos::net::ssl::gen_nistp256().unwrap();
+        let dir = router(Some(&current()), false);
+        write_ca(&dir, &issuer_only_root(&key), &key);
+        for path in [crate::ssl::int_cert_path(), crate::ssl::int_key_path()] {
+            std::fs::remove_file(ca_file(&dir, path)).unwrap();
+        }
+        Migration::ReissueRootCa.apply(dir.path()).await.unwrap();
+        assert!(read_root(&dir).authority_key_id().is_some());
+    }
+
+    #[tokio::test]
+    async fn conforming_and_unreadable_roots_keep_their_intermediate() {
+        let key = startos::net::ssl::gen_nistp256().unwrap();
+        let root = startos::net::ssl::make_root_cert(
+            &key,
+            &crate::ssl::startwrt_branding("0123abcd"),
+            std::time::SystemTime::now(),
+        )
+        .unwrap();
+        let dir = router(Some(&current()), false);
+        write_ca(&dir, &root, &key);
+        Migration::ReissueRootCa.apply(dir.path()).await.unwrap();
+        assert_eq!(read_root(&dir).to_der().unwrap(), root.to_der().unwrap());
+        assert_eq!(has_intermediate(&dir), [true, true]);
+
+        let dir = router(Some(&current()), false);
+        write_ca(&dir, &issuer_only_root(&key), &key);
+        std::fs::write(ca_file(&dir, crate::ssl::ca_key_path()), "unreadable").unwrap();
+        Migration::ReissueRootCa.apply(dir.path()).await.unwrap();
+        assert!(read_root(&dir).authority_key_id().is_none());
+        assert_eq!(has_intermediate(&dir), [true, true]);
     }
 }

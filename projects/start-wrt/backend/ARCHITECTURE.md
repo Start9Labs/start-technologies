@@ -245,7 +245,7 @@ traverses `main_api()` for the RPC tree.
 
 ### Parsing
 
-Arena-based zero-copy parser. `Config::parse()` reads a UCI file into a tree of `Section`s, each containing `Line`s (option, list, comment, empty). Preserves all formatting and comments.
+Arena-based zero-copy parser. `Config::parse()` reads a UCI file into a tree of `Section`s, each containing `Line`s (package, option, list, comment, empty). Preserves all formatting and comments. It accepts libuci's syntax and decodes each value the way libuci's `parse_str` does; new values are written in libuci's quoting (`'…'`, with `'` as `'\''`).
 
 ```rust
 let arena = Arena::new();

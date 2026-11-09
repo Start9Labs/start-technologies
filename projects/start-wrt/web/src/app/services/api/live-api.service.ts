@@ -29,6 +29,8 @@ import {
   WifiBlackoutSetResult,
   ScheduleWindow,
   ProfileId,
+  ProfileDeleteParams,
+  ProfileDeleteResult,
   ProfileIdOpt,
   SecurityProfile,
   ProfileCreateInput,
@@ -228,7 +230,9 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'profiles.set', params })
   }
 
-  async profileDelete(params: ProfileIdOpt): Promise<null> {
+  async profileDelete(
+    params: ProfileDeleteParams,
+  ): Promise<ProfileDeleteResult> {
     return this.rpc.request({ method: 'profiles.delete', params })
   }
 
@@ -462,12 +466,16 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'activity.clear', params: {} })
   }
 
-  async backupCreate(): Promise<BackupCreateRes> {
-    return this.rpc.request({ method: 'backup.create', params: {} })
+  async backupCreate(
+    params: RpcParamType<Api, 'backup.create'>,
+  ): Promise<BackupCreateRes> {
+    return this.rpc.request({ method: 'backup.create', params })
   }
 
-  async backupRestore(): Promise<BackupRestoreRes> {
-    return this.rpc.request({ method: 'backup.restore', params: {} })
+  async backupRestore(
+    params: RpcParamType<Api, 'backup.restore'>,
+  ): Promise<BackupRestoreRes> {
+    return this.rpc.request({ method: 'backup.restore', params })
   }
 
   async diagnosticsCreate(): Promise<DiagnosticsCreateRes> {

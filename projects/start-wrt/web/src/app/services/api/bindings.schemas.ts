@@ -43,32 +43,6 @@ export const ActivityListParams: z.ZodObject<{
 }).meta({
   id: 'ActivityListParams',
 })
-
-/**
- * A published port that will be removed because the device it forwards to can
- * no longer be reached at its current address — its security profile is changing
- * (ethernet-port or WiFi-password reassignment) or its WiFi password is being
- * deleted (disconnecting it) — so its DNAT rule, bound to the device's old
- * subnet, would otherwise break. Surfaced to the UI to confirm the deletion.
- */
-export const AffectedPublishedPort: z.ZodObject<{
-  id: z.ZodString
-  label: z.ZodString
-  device_mac: z.ZodString
-  device_name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  id: z.string(),
-  label: z.string(),
-  device_mac: z.string(),
-  device_name: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'AffectedPublishedPort',
-  description:
-    "A published port that will be removed because the device it forwards to can\nno longer be reached at its current address — its security profile is changing\n(ethernet-port or WiFi-password reassignment) or its WiFi password is being\ndeleted (disconnecting it) — so its DNAT rule, bound to the device's old\nsubnet, would otherwise break. Surfaced to the UI to confirm the deletion.",
-})
 export const AnyVerifyingKey: typeof literal_0 = /* @__PURE__ */ literal_0.meta(
   {
     id: 'AnyVerifyingKey',
@@ -193,6 +167,20 @@ export const AutomaticPortUse: z.ZodObject<{
   id: 'AutomaticPortUse',
   description: 'One automatic port use for the published-ports UI.',
 })
+export const BackupCreateParams: z.ZodObject<{ password: z.ZodString }> =
+  /* @__PURE__ */ object({ password: z.string() }).meta({
+    id: 'BackupCreateParams',
+  })
+export const BackupRestoreParams: z.ZodObject<{
+  password: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  password: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'BackupRestoreParams',
+})
 export const BlackoutSetResult: z.ZodObject<{
   /**
    * True (and nothing applied) when a window covers the current time and the
@@ -289,6 +277,62 @@ export const DeleteArgs: z.ZodObject<{
 }).meta({
   id: 'DeleteArgs',
 })
+
+/**
+ * A published port deleted with the profile it forwards into.
+ */
+export const DeletedPublishedPort: z.ZodObject<{
+  id: z.ZodString
+  label: z.ZodString
+  mac: z.ZodString
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  id: z.string(),
+  label: z.string(),
+  mac: z.string(),
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'DeletedPublishedPort',
+  description: 'A published port deleted with the profile it forwards into.',
+})
+export const DeletedReservation: z.ZodObject<{
+  mac: z.ZodString
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  ipv4: z.ZodString
+}> = /* @__PURE__ */ object({
+  mac: z.string(),
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  ipv4: z.string(),
+}).meta({
+  id: 'DeletedReservation',
+})
+
+/**
+ * A device that keeps a reservation or published port for the profile it is
+ * leaving. They apply again when it returns.
+ */
+export const DeviceLeavingProfile: z.ZodObject<{
+  mac: z.ZodString
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  profile: z.ZodString
+}> = /* @__PURE__ */ object({
+  mac: z.string(),
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  profile: z.string(),
+}).meta({
+  id: 'DeviceLeavingProfile',
+  description:
+    'A device that keeps a reservation or published port for the profile it is\nleaving. They apply again when it returns.',
+})
 export const DeviceMacReq: z.ZodObject<{ mac: z.ZodString }> =
   /* @__PURE__ */ object({ mac: z.string() }).meta({
     id: 'DeviceMacReq',
@@ -307,8 +351,20 @@ export const DeviceUpdateReq: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * On: `ipv4` becomes the reservation in the profile whose subnet holds it.
+   * Off: the reservation `ipv4` names is deleted; with `ipv4` empty, the one
+   * in the profile the device is on.
+   */
   ipv4_static: z.ZodBoolean
   ipv4: z.ZodString
+  /**
+   * Reservations to delete, by address.
+   */
+  remove_ipv4_reservations: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
 }> = /* @__PURE__ */ object({
   mac: z.string(),
   /**
@@ -319,8 +375,25 @@ export const DeviceUpdateReq: z.ZodObject<{
     description:
       'Absent leaves the assigned name untouched; empty clears it. Otherwise\nit must pass [`validate_device_name`].',
   }),
-  ipv4_static: z.boolean(),
+  /**
+   * On: `ipv4` becomes the reservation in the profile whose subnet holds it.
+   * Off: the reservation `ipv4` names is deleted; with `ipv4` empty, the one
+   * in the profile the device is on.
+   */
+  ipv4_static: z.boolean().meta({
+    description:
+      'On: `ipv4` becomes the reservation in the profile whose subnet holds it.\nOff: the reservation `ipv4` names is deleted; with `ipv4` empty, the one\nin the profile the device is on.',
+  }),
   ipv4: z.string(),
+  /**
+   * Reservations to delete, by address.
+   */
+  remove_ipv4_reservations: wire(
+    z.array(z.string()).optional(),
+    z.array(z.string()),
+  ).meta({
+    description: 'Reservations to delete, by address.',
+  }),
 }).meta({
   id: 'DeviceUpdateReq',
 })
@@ -560,6 +633,37 @@ export const IoFormat: z.ZodEnum<{
   .meta({
     id: 'IoFormat',
   })
+export const Ipv4Reservation: z.ZodObject<{
+  ipv4: z.ZodString
+  /**
+   * The profile whose subnet holds it; `None` when no profile's does.
+   */
+  profile: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * DHCP gives it to the device on the profile it is on.
+   */
+  active: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  ipv4: z.string(),
+  /**
+   * The profile whose subnet holds it; `None` when no profile's does.
+   */
+  profile: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      "The profile whose subnet holds it; `None` when no profile's does.",
+  }),
+  /**
+   * DHCP gives it to the device on the profile it is on.
+   */
+  active: z.boolean().meta({
+    description: 'DHCP gives it to the device on the profile it is on.',
+  }),
+}).meta({
+  id: 'Ipv4Reservation',
+})
 export const LanIpv4Response: z.ZodObject<{
   address: z.ZodString
   netmask: z.ZodString
@@ -958,10 +1062,11 @@ export const PublishedPortStatus: z.ZodEnum<{
   active: 'active'
   partial: 'partial'
   paused: 'paused'
+  inactive: 'inactive'
   error: 'error'
   disabled: 'disabled'
 }> = /* @__PURE__ */ z
-  .enum(['active', 'partial', 'paused', 'error', 'disabled'])
+  .enum(['active', 'partial', 'paused', 'inactive', 'error', 'disabled'])
   .meta({
     id: 'PublishedPortStatus',
   })
@@ -1508,6 +1613,9 @@ export const Device: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * The reservation DHCP applies, otherwise the live address.
+   */
   ipv4: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
@@ -1516,7 +1624,21 @@ export const Device: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * `ipv4` is a reservation DHCP applies.
+   */
   ipv4_static: z.ZodBoolean
+  /**
+   * Every IPv4 reservation, at most one per profile.
+   */
+  ipv4_reservations: z.ZodArray<typeof Ipv4Reservation>
+  /**
+   * The router's address on the device's profile, with its prefix length.
+   */
+  profile_network: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
   /**
    * Whether this device may auto-create port forwards via PCP/UPnP
    * (default off; set via `devices set-auto-forward`).
@@ -1577,9 +1699,35 @@ export const Device: z.ZodObject<{
   }),
   status: DeviceStatus,
   connection: wire(z.string().nullable().optional(), z.string().nullable()),
-  ipv4: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * The reservation DHCP applies, otherwise the live address.
+   */
+  ipv4: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description: 'The reservation DHCP applies, otherwise the live address.',
+  }),
   ipv6: wire(z.string().nullable().optional(), z.string().nullable()),
-  ipv4_static: z.boolean(),
+  /**
+   * `ipv4` is a reservation DHCP applies.
+   */
+  ipv4_static: z.boolean().meta({
+    description: '`ipv4` is a reservation DHCP applies.',
+  }),
+  /**
+   * Every IPv4 reservation, at most one per profile.
+   */
+  ipv4_reservations: z.array(Ipv4Reservation).meta({
+    description: 'Every IPv4 reservation, at most one per profile.',
+  }),
+  /**
+   * The router's address on the device's profile, with its prefix length.
+   */
+  profile_network: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
+    description:
+      "The router's address on the device's profile, with its prefix length.",
+  }),
   /**
    * Whether this device may auto-create port forwards via PCP/UPnP
    * (default off; set via `devices set-auto-forward`).
@@ -1665,19 +1813,13 @@ export const EditArgs: z.ZodObject<{
 })
 
 /**
- * `ethernet.set` request: the desired port layout plus a confirmation flag.
- * Reassigning a port to a different profile moves its devices to a new subnet,
- * which breaks any published ports forwarding to them. When the flag is false
- * and such ports exist, `set` applies nothing and returns them in
- * `EthernetSetResult` for a confirmation dialog; with the flag true it deletes
- * those published ports as part of the reassignment.
+ * `ethernet.set` request: the desired port layout. With `preview`, nothing is
+ * applied and the result lists the devices that keep settings for the profile
+ * a reassigned port leaves.
  */
 export const EthernetSetRequest: z.ZodIntersection<
   z.ZodObject<{
-    confirm_published_port_deletion: z.ZodCodec<
-      z.ZodOptional<z.ZodBoolean>,
-      z.ZodBoolean
-    >
+    preview: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   }>,
   z.ZodObject<{
     wan_ipv6: z.ZodBoolean
@@ -1697,12 +1839,7 @@ export const EthernetSetRequest: z.ZodIntersection<
   }>
 > = /* @__PURE__ */ z
   .intersection(
-    object({
-      confirm_published_port_deletion: wire(
-        z.boolean().optional(),
-        z.boolean(),
-      ),
-    }),
+    object({ preview: wire(z.boolean().optional(), z.boolean()) }),
     object({
       wan_ipv6: z.boolean(),
       wan_port: wire(z.string().nullable().optional(), z.string().nullable()),
@@ -1720,22 +1857,19 @@ export const EthernetSetRequest: z.ZodIntersection<
   .meta({
     id: 'EthernetSetRequest',
     description:
-      '`ethernet.set` request: the desired port layout plus a confirmation flag.\nReassigning a port to a different profile moves its devices to a new subnet,\nwhich breaks any published ports forwarding to them. When the flag is false\nand such ports exist, `set` applies nothing and returns them in\n`EthernetSetResult` for a confirmation dialog; with the flag true it deletes\nthose published ports as part of the reassignment.',
+      '`ethernet.set` request: the desired port layout. With `preview`, nothing is\napplied and the result lists the devices that keep settings for the profile\na reassigned port leaves.',
   })
 export const EthernetSetResult: z.ZodObject<{
   /**
-   * Non-empty (and nothing applied) when published ports would be deleted and
-   * the caller hasn't confirmed yet. Empty once the change is applied.
+   * Filled by a preview only.
    */
-  pending_published_port_deletions: z.ZodArray<typeof AffectedPublishedPort>
+  leaving_profile: z.ZodArray<typeof DeviceLeavingProfile>
 }> = /* @__PURE__ */ object({
   /**
-   * Non-empty (and nothing applied) when published ports would be deleted and
-   * the caller hasn't confirmed yet. Empty once the change is applied.
+   * Filled by a preview only.
    */
-  pending_published_port_deletions: z.array(AffectedPublishedPort).meta({
-    description:
-      "Non-empty (and nothing applied) when published ports would be deleted and\nthe caller hasn't confirmed yet. Empty once the change is applied.",
+  leaving_profile: z.array(DeviceLeavingProfile).meta({
+    description: 'Filled by a preview only.',
   }),
 }).meta({
   id: 'EthernetSetResult',
@@ -1925,6 +2059,39 @@ export const PeerAddArgs: z.ZodObject<{
   }),
 }).meta({
   id: 'PeerAddArgs',
+})
+
+/**
+ * `profiles.delete` request. With `preview`, nothing is deleted.
+ */
+export const ProfileDeleteRequest: z.ZodIntersection<
+  z.ZodObject<{
+    preview: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  }>,
+  typeof ProfileIdOpt
+> = /* @__PURE__ */ z
+  .intersection(
+    object({ preview: wire(z.boolean().optional(), z.boolean()) }),
+    ProfileIdOpt,
+  )
+  .meta({
+    id: 'ProfileDeleteRequest',
+    description:
+      '`profiles.delete` request. With `preview`, nothing is deleted.',
+  })
+
+/**
+ * The reservations and published ports deleted with the profile.
+ */
+export const ProfileDeleteResult: z.ZodObject<{
+  reservations: z.ZodArray<typeof DeletedReservation>
+  published_ports: z.ZodArray<typeof DeletedPublishedPort>
+}> = /* @__PURE__ */ object({
+  reservations: z.array(DeletedReservation),
+  published_ports: z.array(DeletedPublishedPort),
+}).meta({
+  id: 'ProfileDeleteResult',
+  description: 'The reservations and published ports deleted with the profile.',
 })
 export const ProfileSetRequest: z.ZodIntersection<
   z.ZodObject<{ force: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean> }>,
@@ -2600,20 +2767,13 @@ export const WanPortCollision: z.ZodObject<{
 })
 
 /**
- * `wifi.set` request: the desired WiFi config plus a confirmation flag.
- * When a profile loses its last WiFi password its devices can no longer reach
- * that subnet — disconnected if the password was removed, or moved to another
- * profile if it was reassigned — which breaks any published ports forwarding to
- * them. When the flag is false and such ports exist, `set` applies nothing and
- * returns them in `WifiSetResult` for a confirmation dialog; with the flag true
- * it deletes those published ports as part of the change.
+ * `wifi.set` request: the desired WiFi config. With `preview`, nothing is
+ * applied and the result lists the Wi-Fi devices that keep settings for a
+ * profile losing its last password.
  */
 export const WifiSetRequest: z.ZodIntersection<
   z.ZodObject<{
-    confirmPublishedPortDeletion: z.ZodCodec<
-      z.ZodOptional<z.ZodBoolean>,
-      z.ZodBoolean
-    >
+    preview: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   }>,
   z.ZodObject<{
     ssid: z.ZodString
@@ -2639,9 +2799,7 @@ export const WifiSetRequest: z.ZodIntersection<
   }>
 > = /* @__PURE__ */ z
   .intersection(
-    object({
-      confirmPublishedPortDeletion: wire(z.boolean().optional(), z.boolean()),
-    }),
+    object({ preview: wire(z.boolean().optional(), z.boolean()) }),
     object({
       ssid: z.string(),
       broadcastSeparately: z.boolean(),
@@ -2670,22 +2828,19 @@ export const WifiSetRequest: z.ZodIntersection<
   .meta({
     id: 'WifiSetRequest',
     description:
-      '`wifi.set` request: the desired WiFi config plus a confirmation flag.\nWhen a profile loses its last WiFi password its devices can no longer reach\nthat subnet — disconnected if the password was removed, or moved to another\nprofile if it was reassigned — which breaks any published ports forwarding to\nthem. When the flag is false and such ports exist, `set` applies nothing and\nreturns them in `WifiSetResult` for a confirmation dialog; with the flag true\nit deletes those published ports as part of the change.',
+      '`wifi.set` request: the desired WiFi config. With `preview`, nothing is\napplied and the result lists the Wi-Fi devices that keep settings for a\nprofile losing its last password.',
   })
 export const WifiSetResult: z.ZodObject<{
   /**
-   * Non-empty (and nothing applied) when published ports would be deleted and
-   * the caller hasn't confirmed yet. Empty once the change is applied.
+   * Filled by a preview only.
    */
-  pendingPublishedPortDeletions: z.ZodArray<typeof AffectedPublishedPort>
+  leavingProfile: z.ZodArray<typeof DeviceLeavingProfile>
 }> = /* @__PURE__ */ object({
   /**
-   * Non-empty (and nothing applied) when published ports would be deleted and
-   * the caller hasn't confirmed yet. Empty once the change is applied.
+   * Filled by a preview only.
    */
-  pendingPublishedPortDeletions: z.array(AffectedPublishedPort).meta({
-    description:
-      "Non-empty (and nothing applied) when published ports would be deleted and\nthe caller hasn't confirmed yet. Empty once the change is applied.",
+  leavingProfile: z.array(DeviceLeavingProfile).meta({
+    description: 'Filled by a preview only.',
   }),
 }).meta({
   id: 'WifiSetResult',
@@ -2887,11 +3042,11 @@ export const Api = {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
         create: {
-          _PARAMS: /* @__PURE__ */ empty,
+          _PARAMS: /* @__PURE__ */ BackupCreateParams,
           _RETURN: /* @__PURE__ */ BackupCreateRes,
         },
         restore: {
-          _PARAMS: /* @__PURE__ */ empty,
+          _PARAMS: /* @__PURE__ */ BackupRestoreParams,
           _RETURN: /* @__PURE__ */ BackupRestoreRes,
         },
       },
@@ -3247,8 +3402,19 @@ export const Api = {
           _RETURN: /* @__PURE__ */ ProfileId,
         },
         delete: {
-          _PARAMS: /* @__PURE__ */ ProfileIdOpt,
-          _RETURN: /* @__PURE__ */ z.null(),
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            ProfileDeleteRequest,
+          ),
+          _RETURN: /* @__PURE__ */ ProfileDeleteResult,
         },
         edit: {
           _PARAMS: /* @__PURE__ */ z.intersection(

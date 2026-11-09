@@ -2,6 +2,7 @@ import { Component, Input } from '@angular/core'
 import { TuiAccordion, TuiFade } from '@taiga-ui/kit'
 import { ActionSuccessMemberComponent } from './action-success-member.component'
 import { ActionSuccessMultilineComponent } from './action-success-multiline.component'
+import { ActionSuccessFile } from './file'
 import { GroupResult } from './types'
 
 @Component({
@@ -14,6 +15,13 @@ import { GroupResult } from './types'
       @if (member.type === 'multiline') {
         <app-action-success-multiline
           [multiline]="member"
+          [name]="member.name"
+          [description]="member.description || ''"
+        />
+      }
+      @if (member.type === 'file') {
+        <app-action-success-file
+          [file]="member"
           [name]="member.name"
           [description]="member.description || ''"
         />
@@ -40,6 +48,7 @@ import { GroupResult } from './types'
   imports: [
     ActionSuccessMemberComponent,
     ActionSuccessMultilineComponent,
+    ActionSuccessFile,
     TuiAccordion,
     TuiFade,
   ],

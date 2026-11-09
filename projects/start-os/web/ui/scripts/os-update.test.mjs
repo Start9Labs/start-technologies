@@ -147,7 +147,7 @@ boundaries.set(
         `export * from ${JSON.stringify(new URL(`../../../../../shared-libs/ts-modules/marketplace/src/${file}`, import.meta.url).href)};`,
     )
     .join('\n') +
-    '\nexport class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {} export class MarketplaceSignersComponent {} export class MarketplaceAboutComponent {} export class MarketplaceDependenciesComponent {} export class MarketplaceLinksComponent {} export class MarketplaceReleaseNotesComponent {}',
+    '\nexport class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {} export class MarketplaceSignersComponent {} export class MarketplaceSignerChipsComponent {} export class MarketplaceAboutComponent {} export class MarketplaceDependenciesComponent {} export class MarketplaceLinksComponent {} export class MarketplaceReleaseNotesComponent {}',
 )
 loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
@@ -1454,6 +1454,7 @@ test('PEM form parsing canonicalizes multiple keys and rejects empty, private, n
     first + 'trailing junk',
     first.slice(0, -15),
     rsa,
+    publicKeyPem(Uint8Array.from([2, ...new Array(31).fill(0)])),
     privateKey.export({ type: 'pkcs8', format: 'pem' }),
   ]) {
     assert.throws(() => parsePublicKeys(invalid))
@@ -1618,9 +1619,10 @@ test('a trusted package installs without a prompt or override', async () => {
 test('the upload RPC receives the confirmed override and failed setup does not navigate', async () => {
   const calls = []
   const file = new File(['data'], 'test.s9pk')
+  const signatures = { [untrustedSigner]: 'AA==' }
   const instance = {
     file: () => file,
-    pkg: () => ({ s9pks: [], signers: [untrustedSigner] }),
+    pkg: () => ({ s9pks: [], signers: [untrustedSigner], signatures }),
     trust: { keys: () => ({}) },
     tasks: {
       run: async work => {
@@ -1645,7 +1647,11 @@ test('the upload RPC receives the confirmed override and failed setup does not n
   }
   assert.equal(await Controls.prototype.upload.call(instance, true), true)
   assert.deepEqual(calls, [
-    { trust: true, acceptSigners: { any: [{ signer: untrustedSigner }] } },
+    {
+      trust: true,
+      signatures,
+      acceptSigners: { any: [{ signer: untrustedSigner }] },
+    },
   ])
   let navigated = false
   await Controls.prototype.installOrUpload.call(
@@ -1664,13 +1670,18 @@ test('the upload RPC receives the confirmed override and failed setup does not n
   assert.equal(navigated, false)
 })
 
-test('sideload pins only matching package-trusted keys without an override', async () => {
+test('sideload pins only package-trusted keys and forwards the signature map', async () => {
   const calls = []
+  const signatures = {
+    [OS_UPDATE_SIGNERS[0]]: 'Ag==',
+    [untrustedSigner]: 'AA==',
+  }
   const instance = {
     file: () => new File(['data'], 'test.s9pk'),
     pkg: () => ({
       s9pks: [],
       signers: [OS_UPDATE_SIGNERS[0], untrustedSigner],
+      signatures,
     }),
     trust: { keys: () => trustedSigners },
     tasks: {
@@ -1695,6 +1706,7 @@ test('sideload pins only matching package-trusted keys without an override', asy
   assert.deepEqual(calls, [
     {
       trust: false,
+      signatures,
       acceptSigners: { any: [{ signer: OS_UPDATE_SIGNERS[0] }] },
     },
   ])
@@ -2052,7 +2064,7 @@ test('registry signing-key identities keep GPG metadata under the key label', ()
   })
 })
 
-test('key identities are GPG user IDs, or the emails registries publish for a plain key', () => {
+test('key identities include GPG user IDs and registry contact emails', () => {
   const id = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
   const contact = [{ email: 'dev@example.com' }, { matrix: '@dev:example.com' }]
   assert.deepEqual(
@@ -2064,11 +2076,23 @@ test('key identities are GPG user IDs, or the emails registries publish for a pl
         { identities: { [id]: ['A <a@example.com>'], other: ['C'] } },
       ],
     }),
-    ['A <a@example.com>', 'B <b@example.com>'],
+    ['A <a@example.com>', 'B <b@example.com>', 'dev@example.com'],
   )
   assert.deepEqual(keyIdentities({ publicKey: id, contact, gpgExports: [] }), [
     'dev@example.com',
   ])
+  assert.deepEqual(
+    keyIdentities({
+      publicKey: id,
+      contact: [...contact, ...contact],
+      gpgExports: [{ identities: { [id]: ['dev@example.com'] } }],
+    }),
+    ['dev@example.com'],
+  )
+  assert.deepEqual(
+    keyIdentities({ publicKey: id, contact: [], gpgExports: [] }),
+    [],
+  )
 })
 
 function registriesFixture({

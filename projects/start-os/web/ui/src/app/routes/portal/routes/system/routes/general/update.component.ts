@@ -1,10 +1,10 @@
-import { CommonModule, TitleCasePipe } from '@angular/common'
+import { CommonModule } from '@angular/common'
 import { Component, computed, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { Router } from '@angular/router'
 import {
   acceptSignerPolicy,
-  MarketplaceSignersComponent,
+  MarketplaceSignerChipsComponent,
 } from '@start9labs/marketplace'
 import {
   DialogService,
@@ -15,7 +15,6 @@ import {
   TaskService,
 } from '@start9labs/shared'
 import { TuiButton, TuiDialogContext, TuiScrollbar } from '@taiga-ui/core'
-import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { PatchDB } from 'patch-db-client'
@@ -28,16 +27,17 @@ import { TRUSTED_KEYS_LINK } from '../../system.const'
 
 @Component({
   template: `
-    <h2 style="margin-top: 0">{{ 'Release notes' | i18n | titlecase }}</h2>
-    @if (signers().length) {
-      <section tuiCardLarge appearance="secondary-grayscale">
-        <header tuiHeader="h6">{{ 'Signed by' | i18n }}</header>
-        <marketplace-signers [keys]="signers()" context="os" />
-      </section>
-    }
+    <h2>StartOS {{ os.updateCandidates()[0]?.version }}</h2>
     <tui-scrollbar style="margin-bottom: 24px; max-height: 50vh;">
+      @if (signers().length) {
+        <h3>{{ 'Signed by' | i18n }}</h3>
+        <marketplace-signer-chips [keys]="signers()" context="os" />
+      }
+      <h3>{{ 'Release notes' | i18n }}</h3>
       @for (v of os.updateCandidates(); track v.version) {
-        <h4 class="version-header">{{ v.version }}</h4>
+        @if (os.updateCandidates().length > 1) {
+          <h4>{{ v.version }}</h4>
+        }
         <div
           safeLinks
           [innerHTML]="v.notes | localize | markdown | dompurify"
@@ -54,10 +54,23 @@ import { TRUSTED_KEYS_LINK } from '../../system.const'
     </button>
   `,
   styles: `
-    .version-header {
+    h2 {
+      margin-top: 0;
+    }
+
+    h3 {
+      margin: 1.5rem 0 0.75rem;
+      font: var(--tui-typography-heading-h6);
+
+      &:first-child {
+        margin-top: 0;
+      }
+    }
+
+    h4 {
+      margin: 1.25rem 0 0;
+      font: var(--tui-typography-body-l);
       font-weight: bold;
-      font-size: 1.4rem;
-      margin: 2rem 0 0 0;
       color: var(--tui-text-secondary);
     }
   `,
@@ -65,15 +78,12 @@ import { TRUSTED_KEYS_LINK } from '../../system.const'
     CommonModule,
     LocalizePipe,
     MarkdownPipe,
-    MarketplaceSignersComponent,
+    MarketplaceSignerChipsComponent,
     NgDompurifyPipe,
     SafeLinksDirective,
     TuiButton,
-    TuiCardLarge,
-    TuiHeader,
     TuiScrollbar,
     i18nPipe,
-    TitleCasePipe,
   ],
 })
 export class SystemUpdateModal {

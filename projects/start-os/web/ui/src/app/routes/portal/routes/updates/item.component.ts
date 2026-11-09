@@ -1,38 +1,37 @@
 import { DatePipe } from '@angular/common'
-import {
-  Component,
-  computed,
-  effect,
-  inject,
-  input,
-  signal,
-} from '@angular/core'
-import { toSignal } from '@angular/core/rxjs-interop'
-import { ActivatedRoute, Router } from '@angular/router'
+import { Component, computed, inject, input, signal } from '@angular/core'
+import { RouterLink } from '@angular/router'
 import {
   MarketplaceIconDirective,
   MarketplacePkg,
-  MarketplacePreviewComponent,
   matchingTrustedKeys,
+  MarketplaceSignerChipsComponent,
   packageSigners,
 } from '@start9labs/marketplace'
-import { DialogService, i18nPipe } from '@start9labs/shared'
+import {
+  DialogService,
+  i18nPipe,
+  LocalizePipe,
+  MarkdownPipe,
+  SafeLinksDirective,
+} from '@start9labs/shared'
 import {
   TuiButton,
-  TuiButtonX,
+  TuiExpand,
   TuiIcon,
-  TuiPopup,
+  TuiLink,
   TuiTitle,
 } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import {
   TuiAvatar,
   TuiButtonLoading,
-  TuiDrawer,
+  TuiChevron,
   TuiFade,
   TuiProgressCircle,
   TuiSkeleton,
 } from '@taiga-ui/kit'
-import { debounceTime, filter } from 'rxjs'
+import { filter } from 'rxjs'
 import { InstallingProgressPipe } from 'src/app/routes/portal/routes/services/pipes/install-progress.pipe'
 import { HiddenUpdatesService } from 'src/app/services/hidden-updates.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
@@ -42,14 +41,16 @@ import {
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
 import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
-import { MarketplaceControlsComponent } from '../marketplace/components/controls.component'
 import { MarketplaceAlertsService } from '../marketplace/services/alerts.service'
 import UpdatesComponent from './updates.component'
 
 @Component({
   selector: 'updates-item',
   template: `
-    <tr [class._note]="error() || !trusted().length" (click)="toggle(true)">
+    <tr
+      [class._note]="error() || !trusted().length"
+      (click)="expanded.set(!expanded())"
+    >
       <td>
         <div [style.gap.rem]="0.75" [style.padding-inline-end.rem]="1">
           <span
@@ -85,28 +86,6 @@ import UpdatesComponent from './updates.component'
             }}
           </p>
         }
-        <tui-drawer
-          *tuiPopup="open()"
-          [overlay]="true"
-          (click.self)="toggle(false)"
-        >
-          <marketplace-preview
-            [pkgId]="item().id"
-            [pkg]="item()"
-            [controls]="controls"
-          >
-            <button
-              tuiButtonX
-              [tuiAppearanceFocus]="false"
-              (click)="toggle(false)"
-            >
-              {{ 'Close' | i18n }}
-            </button>
-          </marketplace-preview>
-        </tui-drawer>
-        <ng-template #controls let-pkg>
-          <marketplace-controls [pkg]="pkg" />
-        </ng-template>
       </td>
       <td class="desktop">
         <div>
@@ -122,6 +101,14 @@ import UpdatesComponent from './updates.component'
         {{ item().s9pks[0]?.[1]?.publishedAt | date }}
       </td>
       <td>
+        <button
+          tuiIconButton
+          size="m"
+          appearance="icon"
+          [tuiChevron]="expanded()"
+        >
+          {{ 'Details' | i18n }}
+        </button>
         @if (local().stateInfo.state === 'updating') {
           <tui-progress-circle
             size="xs"
@@ -158,6 +145,48 @@ import UpdatesComponent from './updates.component'
         }
       </td>
     </tr>
+    <tr>
+      <td colspan="5">
+        <tui-expand [expanded]="expanded()">
+          <p tuiTitle class="mobile">
+            <b>{{ 'Package Hash' | i18n }}</b>
+            <span tuiSubtitle>{{ item().gitHash }}</span>
+          </p>
+          <p tuiTitle class="mobile">
+            <b>{{ 'Published' | i18n }}</b>
+            <span tuiSubtitle>
+              {{ item().s9pks[0]?.[1]?.publishedAt | date }}
+            </span>
+          </p>
+          <p tuiTitle>
+            <b>{{ 'Signed by' | i18n }}</b>
+            <marketplace-signer-chips [keys]="signers()" />
+          </p>
+          <p tuiTitle>
+            <span>
+              <b>{{ 'Release notes' | i18n }}</b>
+              (
+              <a
+                tuiLink
+                iconEnd="@tui.external-link"
+                routerLink="/marketplace"
+                [queryParams]="{
+                  registry: parent.current()?.url,
+                  id: item().id,
+                  flavor: item().flavor,
+                }"
+                [textContent]="'View in Marketplace' | i18n"
+              ></a>
+              )
+            </span>
+          </p>
+          <p
+            safeLinks
+            [innerHTML]="item().releaseNotes | localize | markdown | dompurify"
+          ></p>
+        </tui-expand>
+      </td>
+    </tr>
   `,
   styles: `
     :host {
@@ -173,14 +202,14 @@ import UpdatesComponent from './updates.component'
       vertical-align: middle;
     }
 
-    div {
+    td > div {
       display: flex;
       align-items: center;
       gap: 0.25rem;
       white-space: nowrap;
     }
 
-    tr {
+    tr:first-child {
       position: relative;
       min-height: var(--tui-height-l);
       word-break: break-word;
@@ -221,6 +250,17 @@ import UpdatesComponent from './updates.component'
           margin-inline-start: 0.375rem;
         }
       }
+
+      &[colspan]:only-child {
+        padding: 0 3rem;
+        text-align: left;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+    }
+
+    [tuiTitle] {
+      margin: 1rem 0;
     }
 
     .pending {
@@ -232,14 +272,8 @@ import UpdatesComponent from './updates.component'
       display: none;
     }
 
-    tui-drawer {
-      top: 0;
-      width: 28rem;
-      border-radius: 0;
-    }
-
     :host-context(tui-root._mobile) {
-      tr {
+      tr:first-child {
         display: grid;
         grid-template-columns: 1fr min-content;
         align-items: center;
@@ -252,6 +286,10 @@ import UpdatesComponent from './updates.component'
             padding-block-end: 0;
           }
         }
+      }
+
+      td[colspan]:only-child {
+        padding: 0 0.5rem;
       }
 
       .note {
@@ -278,17 +316,21 @@ import UpdatesComponent from './updates.component'
   imports: [
     DatePipe,
     InstallingProgressPipe,
-    MarketplaceControlsComponent,
+    LocalizePipe,
+    MarkdownPipe,
     MarketplaceIconDirective,
-    MarketplacePreviewComponent,
+    MarketplaceSignerChipsComponent,
+    NgDompurifyPipe,
+    RouterLink,
+    SafeLinksDirective,
     TuiAvatar,
     TuiButton,
     TuiButtonLoading,
-    TuiButtonX,
-    TuiDrawer,
+    TuiChevron,
+    TuiExpand,
     TuiFade,
     TuiIcon,
-    TuiPopup,
+    TuiLink,
     TuiProgressCircle,
     TuiSkeleton,
     TuiTitle,
@@ -297,16 +339,13 @@ import UpdatesComponent from './updates.component'
 })
 export class UpdatesItemComponent {
   private readonly service = inject(MarketplaceService)
-  private readonly trust = inject(TrustedKeysService)
   private readonly dialog = inject(DialogService)
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
   private readonly alerts = inject(MarketplaceAlertsService)
-  private readonly router = inject(Router)
-  private readonly params = toSignal(
-    inject(ActivatedRoute).queryParamMap.pipe(debounceTime(100)),
-  )
 
+  private readonly trust = inject(TrustedKeysService)
   readonly parent = inject(UpdatesComponent)
+  readonly expanded = signal(false)
   readonly error = signal('')
   readonly ready = signal(true)
 
@@ -315,35 +354,10 @@ export class UpdatesItemComponent {
     input.required<PackageDataEntry<InstalledState | UpdatingState>>()
   readonly pending = input.required<boolean>()
 
+  protected readonly signers = computed(() => packageSigners(this.item()))
   protected readonly trusted = computed(() =>
-    matchingTrustedKeys(
-      packageSigners(this.item()),
-      this.trust.keys() ?? {},
-      'marketplace',
-    ),
+    matchingTrustedKeys(this.signers(), this.trust.keys() ?? {}, 'marketplace'),
   )
-  protected readonly open = computed(
-    () =>
-      this.params()?.get('id') === this.item().id &&
-      this.params()?.get('flavor') === this.item().flavor,
-  )
-
-  constructor() {
-    effect(() => {
-      const url = this.parent.current()?.url
-      if (this.open() && url) this.service.currentRegistryUrl$.next(url)
-    })
-  }
-
-  toggle(open: boolean) {
-    this.router.navigate([], {
-      queryParams: {
-        id: open ? this.item().id : null,
-        flavor: open ? this.item().flavor : null,
-      },
-      queryParamsHandling: 'merge',
-    })
-  }
 
   async update() {
     const trust = !this.trusted().length

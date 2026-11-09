@@ -270,6 +270,7 @@ jobs:
               )
             )[(github.event.inputs.platform || 'ALL') == 'ALL']
           }}
+    # RISC-V image assembly stays native; full emulation is too slow.
     runs-on: >-
       ${{
         fromJson(
@@ -341,21 +342,31 @@ jobs:
       - name: Ensure hostedtoolcache exists
         run: sudo mkdir -p /opt/hostedtoolcache && sudo chown $USER:$USER /opt/hostedtoolcache
 
-      - name: Set up docker QEMU
-        uses: docker/setup-qemu-action@v4
-
-      # The RISE riscv64 runner ships no Node, and nodejs.org publishes no riscv64 builds.
-      # setup-node's mirror input requires a nodejs.org `/dist` layout, which unofficial-builds lacks.
-      - name: Install Node from unofficial-builds
+      # Actions use the runner's bundled Node, not the Node on GITHUB_PATH.
+      - name: Update RISC-V action runtime
         if: ${{ env.ARCH == 'riscv64' && github.event.inputs.runner != 'fast' }}
         run: |
+          set -euo pipefail
+          worker="$(readlink -f "/proc/$PPID/exe")"
+          test "$(basename "$worker")" = Runner.Worker
+          runner_node="$(dirname "$worker")/../externals/node24/bin/node"
+          echo "Bundled action runtime: $("$runner_node" --version)"
           base="https://unofficial-builds.nodejs.org/download/release/v${NODEJS_VERSION}"
           tarball="node-v${NODEJS_VERSION}-linux-riscv64.tar.xz"
           cd "$RUNNER_TEMP"
           curl -fsSLO "$base/$tarball"
           curl -fsSL "$base/SHASUMS256.txt" | grep " $tarball\$" | sha256sum -c -
           tar -xJf "$tarball"
-          echo "$RUNNER_TEMP/${tarball%.tar.xz}/bin" >> "$GITHUB_PATH"
+          node_dir="$RUNNER_TEMP/${tarball%.tar.xz}"
+          test "$("$node_dir/bin/node" --version)" = "v${NODEJS_VERSION}"
+          "$node_dir/bin/node" -e 'require("node:crypto").createHash("sha256").update("action-runtime").digest(); console.log(process.versions)'
+          install -m 755 "$node_dir/bin/node" "$runner_node.next"
+          mv -f "$runner_node.next" "$runner_node"
+          echo "Updated action runtime: $("$runner_node" --version)"
+          echo "$node_dir/bin" >> "$GITHUB_PATH"
+
+      - name: Set up docker QEMU
+        uses: docker/setup-qemu-action@v4
 
       - uses: actions/checkout@v6
         with:
