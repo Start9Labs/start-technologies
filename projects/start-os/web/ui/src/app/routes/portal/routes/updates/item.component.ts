@@ -5,8 +5,8 @@ import {
   MarketplaceIconDirective,
   MarketplacePkg,
   matchingTrustedKeys,
+  MarketplaceSignerChipsComponent,
   packageSigners,
-  SignerStatusesPipe,
 } from '@start9labs/marketplace'
 import {
   DialogService,
@@ -27,7 +27,6 @@ import {
   TuiAvatar,
   TuiButtonLoading,
   TuiChevron,
-  TuiChip,
   TuiFade,
   TuiProgressCircle,
   TuiSkeleton,
@@ -161,26 +160,7 @@ import UpdatesComponent from './updates.component'
           </p>
           <p tuiTitle>
             <b>{{ 'Signed by' | i18n }}</b>
-            <span tuiSubtitle class="signers">
-              @for (
-                signer of signers() | signerStatuses: trust.keys() ?? {};
-                track signer.id
-              ) {
-                <button
-                  tuiChip
-                  type="button"
-                  [appearance]="
-                    signer.status === 'trusted' ? 'positive' : 'neutral'
-                  "
-                  [iconStart]="
-                    signer.status === 'trusted' ? '@tui.check' : '@tui.minus'
-                  "
-                  (click)="trust.viewSigner(signer)"
-                >
-                  {{ signer.name || ('Unknown key' | i18n) }}
-                </button>
-              }
-            </span>
+            <marketplace-signer-chips [keys]="signers()" />
           </p>
           <p tuiTitle>
             <span>
@@ -283,13 +263,6 @@ import UpdatesComponent from './updates.component'
       margin: 1rem 0;
     }
 
-    .signers {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-      margin-block-start: 0.25rem;
-    }
-
     .pending {
       margin-right: 0.5rem;
       font-style: italic;
@@ -346,15 +319,14 @@ import UpdatesComponent from './updates.component'
     LocalizePipe,
     MarkdownPipe,
     MarketplaceIconDirective,
+    MarketplaceSignerChipsComponent,
     NgDompurifyPipe,
     RouterLink,
     SafeLinksDirective,
-    SignerStatusesPipe,
     TuiAvatar,
     TuiButton,
     TuiButtonLoading,
     TuiChevron,
-    TuiChip,
     TuiExpand,
     TuiFade,
     TuiIcon,
@@ -371,7 +343,7 @@ export class UpdatesItemComponent {
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
   private readonly alerts = inject(MarketplaceAlertsService)
 
-  protected readonly trust = inject(TrustedKeysService)
+  private readonly trust = inject(TrustedKeysService)
   readonly parent = inject(UpdatesComponent)
   readonly expanded = signal(false)
   readonly error = signal('')
