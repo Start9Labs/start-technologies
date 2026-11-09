@@ -6,6 +6,10 @@
 
 use std::path::{Path, PathBuf};
 
+use openssl::pkey::PKey;
+use openssl::x509::X509;
+use startos::net::ssl::reissue_root_cert;
+use startos::util::io::{delete_file, maybe_read_file_to_string};
 use tokio::io::AsyncWriteExt;
 use uciedit::openwrt::{Dhcp, DhcpHost, InterfaceProto, NetworkInterface};
 use uciedit::{dump_all, parse_all, Arena, TypedSection};
@@ -34,6 +38,8 @@ const MIGRATIONS: &[Migration] = &[
     Migration::RemoveServerCert,
     Migration::EnableFlowOffloading,
     Migration::ScopeReservedNames,
+    Migration::ReissueRootCa,
+    Migration::NameProfileFirewallSections,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -62,6 +68,11 @@ enum Migration {
     EnableFlowOffloading,
     /// Earlier releases served a reserved device's name to every profile.
     ScopeReservedNames,
+    /// Earlier releases issued Root CAs whose authority key identifier lacks a
+    /// key ID; iOS refuses to install them.
+    ReissueRootCa,
+    /// Earlier releases generated a profile's firewall sections without names.
+    NameProfileFirewallSections,
 }
 
 impl Migration {
@@ -78,6 +89,36 @@ impl Migration {
             Migration::RemoveServerCert => remove_server_cert(root).await,
             Migration::EnableFlowOffloading => enable_flow_offloading(root).await,
             Migration::ScopeReservedNames => scope_reserved_names(root).await,
+            Migration::ReissueRootCa => reissue_root_ca(root).await,
+            Migration::NameProfileFirewallSections => name_profile_firewall_sections(root).await,
+        }
+    }
+
+    /// Completes "Updated settings to …".
+    fn purpose(self) -> &'static str {
+        match self {
+            Migration::RemoveEtcNftablesRules => {
+                "remove firewall rule files left by earlier versions"
+            }
+            Migration::StripUnreferencedWanZoneVpns => {
+                "take unused VPN connections out of the WAN firewall zone"
+            }
+            Migration::PppoeWanIpv6 => "stop PPPoE connections from running a second IPv6 client",
+            Migration::StoreLanAccessMode => "store each profile's LAN Access setting",
+            Migration::ExpandLogRetention => "keep more system log history",
+            Migration::StoreLogsUnderVar => "move the system and activity logs into /var",
+            Migration::RemoveSessionsJson => "remove sign-in sessions saved by earlier versions",
+            Migration::ForceDhcpPools => {
+                "hand out addresses without first checking for another DHCP server"
+            }
+            Migration::RemoveServerCert => {
+                "remove the single HTTPS certificate earlier versions used"
+            }
+            Migration::EnableFlowOffloading => "speed up forwarding of established connections",
+            Migration::ScopeReservedNames => {
+                "serve each reserved device's name only within its own profile"
+            }
+            Migration::ReissueRootCa => "reissue the Root CA in a form iOS can install",
         }
     }
 }
@@ -87,26 +128,87 @@ impl Migration {
 ///
 /// Without a record, a configuration that StartWRT has already run on starts
 /// from the first migration and a fresh one is recorded as current. A failed
-/// migration stops the run and stays pending for the next boot.
+/// migration stops the run and stays pending for the next boot. A run that
+/// applies or fails a migration records it in the activity log.
 pub async fn run(root: &Path) -> Result<(), Error> {
+    let mut progress = Progress::default();
+    let result = apply_pending(root, &mut progress).await;
+    if let Some(summary) = progress.summary(result.is_ok()) {
+        let error = result.as_ref().err().map(|e| e.to_string());
+        crate::activity::log(
+            "system",
+            "migrate",
+            result.is_ok(),
+            &summary,
+            error.as_deref(),
+        );
+    }
+    result.map_err(|e| match progress.failed {
+        Some(migration) => Error::new(
+            eyre!("migration {migration:?} failed: {e}"),
+            ErrorKind::Filesystem,
+        ),
+        None => e,
+    })
+}
+
+#[derive(Default)]
+struct Progress {
+    applied: Vec<Migration>,
+    failed: Option<Migration>,
+}
+
+impl Progress {
+    fn summary(&self, succeeded: bool) -> Option<String> {
+        let version = env!("CARGO_PKG_VERSION");
+        let updated = purposes(&self.applied);
+        match (succeeded, self.applied.is_empty(), self.failed) {
+            (true, true, _) => None,
+            (true, false, _) => Some(format!("Updated settings for v{version} to {updated}")),
+            (false, true, Some(failed)) => Some(format!(
+                "Couldn't update settings for v{version} to {}",
+                failed.purpose()
+            )),
+            (false, true, None) => Some(format!("Couldn't update settings for v{version}")),
+            (false, false, Some(failed)) => Some(format!(
+                "Updated settings for v{version} to {updated}, but couldn't {}",
+                failed.purpose()
+            )),
+            (false, false, None) => Some(format!(
+                "Updated settings for v{version} to {updated}, but couldn't finish"
+            )),
+        }
+    }
+}
+
+fn purposes(migrations: &[Migration]) -> String {
+    let purposes: Vec<_> = migrations.iter().map(|m| m.purpose()).collect();
+    match purposes.as_slice() {
+        [] => String::new(),
+        [one] => one.to_string(),
+        [first, second] => format!("{first} and {second}"),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
+    }
+}
+
+async fn apply_pending(root: &Path, progress: &mut Progress) -> Result<(), Error> {
     let record = root.join(RECORD);
-    let mut applied = match read_record(&record).await? {
-        Some(applied) => applied,
+    let mut done = match read_record(&record).await? {
+        Some(done) => done,
         None if has_run_startwrt(root).await => 0,
         None => {
             write_record(&record, MIGRATIONS.len()).await?;
             return Ok(());
         }
     };
-    while let Some(migration) = MIGRATIONS.get(applied) {
-        migration.apply(root).await.map_err(|e| {
-            Error::new(
-                eyre!("migration {migration:?} failed: {e}"),
-                ErrorKind::Filesystem,
-            )
-        })?;
-        applied += 1;
-        write_record(&record, applied).await?;
+    while let Some(&migration) = MIGRATIONS.get(done) {
+        if let Err(e) = migration.apply(root).await {
+            progress.failed = Some(migration);
+            return Err(e);
+        }
+        done += 1;
+        write_record(&record, done).await?;
+        progress.applied.push(migration);
     }
     Ok(())
 }
@@ -133,10 +235,13 @@ pub async fn forget_unless_restored(root: &Path, archive_listing: &str) -> Resul
 /// Holds while only the daemon creates the CA, after this runner at boot.
 /// A CA created earlier makes every fresh router replay every migration.
 async fn has_run_startwrt(root: &Path) -> bool {
-    let ca = crate::ssl::ca_cert_path();
-    tokio::fs::try_exists(root.join(ca.strip_prefix("/").unwrap_or(&ca)))
+    tokio::fs::try_exists(under(root, &crate::ssl::ca_cert_path()))
         .await
         .unwrap_or(false)
+}
+
+fn under(root: &Path, path: &Path) -> PathBuf {
+    root.join(path.strip_prefix("/").unwrap_or(path))
 }
 
 async fn read_record(record: &Path) -> Result<Option<usize>, Error> {
@@ -236,6 +341,31 @@ async fn remove_server_cert(root: &Path) -> Result<(), Error> {
     Ok(())
 }
 
+/// An unreadable root stays as it is.
+async fn reissue_root_ca(root: &Path) -> Result<(), Error> {
+    let cert_path = under(root, &crate::ssl::ca_cert_path());
+    let (Some(cert), Some(key)) = (
+        maybe_read_file_to_string(&cert_path).await?,
+        maybe_read_file_to_string(under(root, &crate::ssl::ca_key_path())).await?,
+    ) else {
+        return Ok(());
+    };
+    let (Ok(cert), Ok(key)) = (
+        X509::from_pem(cert.as_bytes()),
+        PKey::private_key_from_pem(key.as_bytes()),
+    ) else {
+        return Ok(());
+    };
+    let Some(reissued) = reissue_root_cert(&key, &cert)? else {
+        return Ok(());
+    };
+    // Precedes the root's rewrite: a replay leaves a reissued root alone.
+    for path in [crate::ssl::int_cert_path(), crate::ssl::int_key_path()] {
+        delete_file(under(root, &path)).await?;
+    }
+    crate::ssl::write_pem(&cert_path, reissued.to_pem()?, 0o644).await
+}
+
 #[derive(Debug, TypedSection, Default)]
 #[uci(ty = "defaults")]
 struct FirewallDefaults {
@@ -291,6 +421,15 @@ async fn pppoe_wan_ipv6(root: &Path) -> Result<(), Error> {
         break;
     }
     if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+async fn name_profile_firewall_sections(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["firewall", "network", "startwrt"]).await?;
+    if crate::profiles::name_profile_firewall_sections(&mut cfgs)? {
         dump_all(uci_root(root), cfgs).await?;
     }
     Ok(())
@@ -416,6 +555,53 @@ async fn move_file(from: &Path, to: &Path, collision: Collision) -> Result<(), E
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migration_outcomes_say_what_changed() {
+        let v = env!("CARGO_PKG_VERSION");
+        let progress = |applied: &[Migration], failed| Progress {
+            applied: applied.to_vec(),
+            failed,
+        };
+        let dhcp = Migration::ForceDhcpPools;
+        let cert = Migration::RemoveServerCert;
+        let offload = Migration::EnableFlowOffloading;
+        assert_eq!(progress(&[], None).summary(true), None);
+        assert_eq!(
+            progress(&[cert], None).summary(true),
+            Some(format!(
+                "Updated settings for v{v} to remove the single HTTPS certificate earlier versions used"
+            ))
+        );
+        assert_eq!(
+            progress(&[dhcp, cert, offload], None).summary(true),
+            Some(format!(
+                "Updated settings for v{v} to hand out addresses without first checking for another DHCP server, remove the single HTTPS certificate earlier versions used, and speed up forwarding of established connections"
+            ))
+        );
+        assert_eq!(
+            progress(&[], Some(cert)).summary(false),
+            Some(format!(
+                "Couldn't update settings for v{v} to remove the single HTTPS certificate earlier versions used"
+            ))
+        );
+        assert_eq!(
+            progress(&[], None).summary(false),
+            Some(format!("Couldn't update settings for v{v}"))
+        );
+        assert_eq!(
+            progress(&[cert, offload], Some(Migration::ScopeReservedNames)).summary(false),
+            Some(format!(
+                "Updated settings for v{v} to remove the single HTTPS certificate earlier versions used and speed up forwarding of established connections, but couldn't serve each reserved device's name only within its own profile"
+            ))
+        );
+        assert_eq!(
+            progress(&[cert], None).summary(false),
+            Some(format!(
+                "Updated settings for v{v} to remove the single HTTPS certificate earlier versions used, but couldn't finish"
+            ))
+        );
+    }
 
     const SHIPPED_SYSTEM: &str = "\
 config system
@@ -836,5 +1022,166 @@ config forwarding
             .await
             .unwrap();
         assert_eq!(record(&dir), "1\n");
+    }
+
+    /// A root as earlier releases issued it, its authority key identifier
+    /// naming only the issuer and serial.
+    fn issuer_only_root(key: &PKey<openssl::pkey::Private>) -> X509 {
+        use openssl::asn1::Asn1Time;
+        use openssl::bn::BigNum;
+        use openssl::conf::{Conf, ConfMethod};
+        use openssl::hash::MessageDigest;
+        use openssl::x509::extension::{
+            AuthorityKeyIdentifier, BasicConstraints, SubjectKeyIdentifier,
+        };
+        use openssl::x509::{X509Builder, X509NameBuilder};
+
+        let mut name = X509NameBuilder::new().unwrap();
+        name.append_entry_by_text("CN", "StartWRT Local Root CA 0123abcd")
+            .unwrap();
+        let name = name.build();
+        let mut builder = X509Builder::new().unwrap();
+        builder.set_version(2).unwrap();
+        builder
+            .set_not_before(&Asn1Time::days_from_now(0).unwrap())
+            .unwrap();
+        builder
+            .set_not_after(&Asn1Time::days_from_now(3640).unwrap())
+            .unwrap();
+        builder
+            .set_serial_number(&BigNum::from_u32(1).unwrap().to_asn1_integer().unwrap())
+            .unwrap();
+        builder.set_subject_name(&name).unwrap();
+        builder.set_issuer_name(&name).unwrap();
+        builder.set_pubkey(key).unwrap();
+        let cfg = Conf::new(ConfMethod::default()).unwrap();
+        let ctx = builder.x509v3_context(None, Some(&cfg));
+        let ski = SubjectKeyIdentifier::new().build(&ctx).unwrap();
+        let aki = AuthorityKeyIdentifier::new()
+            .keyid(false)
+            .issuer(true)
+            .build(&ctx)
+            .unwrap();
+        builder.append_extension(ski).unwrap();
+        builder.append_extension(aki).unwrap();
+        builder
+            .append_extension(BasicConstraints::new().critical().ca().build().unwrap())
+            .unwrap();
+        builder.sign(key, MessageDigest::sha256()).unwrap();
+        builder.build()
+    }
+
+    fn ca_file(dir: &tempfile::TempDir, path: PathBuf) -> PathBuf {
+        under(dir.path(), &path)
+    }
+
+    fn write_ca(dir: &tempfile::TempDir, root: &X509, key: &PKey<openssl::pkey::Private>) {
+        let write = |path: PathBuf, content: &[u8]| {
+            let path = ca_file(dir, path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, content).unwrap();
+        };
+        write(crate::ssl::ca_cert_path(), &root.to_pem().unwrap());
+        write(
+            crate::ssl::ca_key_path(),
+            &key.private_key_to_pem_pkcs8().unwrap(),
+        );
+        write(crate::ssl::int_cert_path(), b"intermediate");
+        write(crate::ssl::int_key_path(), b"intermediate key");
+    }
+
+    fn read_root(dir: &tempfile::TempDir) -> X509 {
+        X509::from_pem(&std::fs::read(ca_file(dir, crate::ssl::ca_cert_path())).unwrap()).unwrap()
+    }
+
+    fn has_intermediate(dir: &tempfile::TempDir) -> [bool; 2] {
+        [crate::ssl::int_cert_path(), crate::ssl::int_key_path()].map(|p| ca_file(dir, p).exists())
+    }
+
+    #[tokio::test]
+    async fn issuer_only_root_is_reissued_under_its_key() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let key = startos::net::ssl::gen_nistp256().unwrap();
+        let old = issuer_only_root(&key);
+        assert!(old.authority_key_id().is_none());
+        let pending = MIGRATIONS
+            .iter()
+            .position(|m| matches!(m, Migration::ReissueRootCa))
+            .unwrap();
+        let dir = router(Some(&format!("{pending}\n")), false);
+        write_ca(&dir, &old, &key);
+        let key_pem = std::fs::read(ca_file(&dir, crate::ssl::ca_key_path())).unwrap();
+
+        run(dir.path()).await.unwrap();
+        assert_eq!(record(&dir), current());
+
+        let root = read_root(&dir);
+        assert!(root.public_key().unwrap().public_eq(&key));
+        assert!(root.verify(&key).unwrap());
+        assert_eq!(
+            root.subject_name().to_der().unwrap(),
+            old.subject_name().to_der().unwrap()
+        );
+        assert_eq!(root.not_before(), old.not_before());
+        assert_eq!(root.not_after(), old.not_after());
+        assert_ne!(
+            root.serial_number().to_bn().unwrap(),
+            old.serial_number().to_bn().unwrap()
+        );
+        assert_eq!(
+            root.authority_key_id().unwrap().as_slice(),
+            root.subject_key_id().unwrap().as_slice()
+        );
+        assert!(root.authority_issuer().is_none());
+        assert_eq!(has_intermediate(&dir), [false, false]);
+        assert_eq!(
+            std::fs::read(ca_file(&dir, crate::ssl::ca_key_path())).unwrap(),
+            key_pem
+        );
+        let mode = std::fs::metadata(ca_file(&dir, crate::ssl::ca_cert_path()))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o644);
+
+        let reissued = root.to_der().unwrap();
+        Migration::ReissueRootCa.apply(dir.path()).await.unwrap();
+        assert_eq!(read_root(&dir).to_der().unwrap(), reissued);
+    }
+
+    #[tokio::test]
+    async fn replay_reissues_a_root_whose_intermediate_is_gone() {
+        let key = startos::net::ssl::gen_nistp256().unwrap();
+        let dir = router(Some(&current()), false);
+        write_ca(&dir, &issuer_only_root(&key), &key);
+        for path in [crate::ssl::int_cert_path(), crate::ssl::int_key_path()] {
+            std::fs::remove_file(ca_file(&dir, path)).unwrap();
+        }
+        Migration::ReissueRootCa.apply(dir.path()).await.unwrap();
+        assert!(read_root(&dir).authority_key_id().is_some());
+    }
+
+    #[tokio::test]
+    async fn conforming_and_unreadable_roots_keep_their_intermediate() {
+        let key = startos::net::ssl::gen_nistp256().unwrap();
+        let root = startos::net::ssl::make_root_cert(
+            &key,
+            &crate::ssl::startwrt_branding("0123abcd"),
+            std::time::SystemTime::now(),
+        )
+        .unwrap();
+        let dir = router(Some(&current()), false);
+        write_ca(&dir, &root, &key);
+        Migration::ReissueRootCa.apply(dir.path()).await.unwrap();
+        assert_eq!(read_root(&dir).to_der().unwrap(), root.to_der().unwrap());
+        assert_eq!(has_intermediate(&dir), [true, true]);
+
+        let dir = router(Some(&current()), false);
+        write_ca(&dir, &issuer_only_root(&key), &key);
+        std::fs::write(ca_file(&dir, crate::ssl::ca_key_path()), "unreadable").unwrap();
+        Migration::ReissueRootCa.apply(dir.path()).await.unwrap();
+        assert!(read_root(&dir).authority_key_id().is_none());
+        assert_eq!(has_intermediate(&dir), [true, true]);
     }
 }

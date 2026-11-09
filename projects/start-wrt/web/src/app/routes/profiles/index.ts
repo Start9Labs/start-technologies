@@ -24,6 +24,7 @@ import {
 } from 'src/app/services/api/api.service'
 import { ConnectionService } from 'src/app/services/connection.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { fill } from 'src/app/i18n/validation-errors'
 import { confirmVpnExposedPort } from 'src/app/services/vpn-exposed-port'
 import { isVpnPeersWouldBreak } from 'src/app/services/vpn-peers'
 import { ADD_PROFILE, ProfileDialogResult } from './dialog'
@@ -274,10 +275,10 @@ class Profiles {
           .split('.')
           .slice(0, 3)
           .join('.')
-        hasStaticIpsInSubnet = devices.some(
-          d =>
-            d.ipv4_static &&
-            d.ipv4?.split('.').slice(0, 3).join('.') === profileSubnet,
+        hasStaticIpsInSubnet = devices.some(d =>
+          d.ipv4_reservations.some(
+            r => r.ipv4.split('.').slice(0, 3).join('.') === profileSubnet,
+          ),
         )
         const defaultName =
           this.service.data()?.find(p => p.owns_lan)?.fullname ?? ''
@@ -418,17 +419,51 @@ class Profiles {
       })
   }
 
-  deleteProfile(profile: SecurityProfile) {
+  async deleteProfile(profile: SecurityProfile) {
+    const id = {
+      fullname: profile.fullname,
+      interface: profile.interface,
+      vlan_tag: profile.vlan_tag,
+    }
+    const deleted = await this.service.previewDelete(id)
+    if (!deleted) return
+
+    const content = [
+      deleted.reservations.length
+        ? fill(
+            this.i18n.transform(
+              'IPv4 reservations deleted with this profile: {list}.',
+            ),
+            {
+              list: deleted.reservations
+                .map(r => `${r.name || r.mac} (${r.ipv4})`)
+                .join(', '),
+            },
+          )
+        : '',
+      deleted.published_ports.length
+        ? fill(
+            this.i18n.transform(
+              'Published ports deleted with this profile: {list}.',
+            ),
+            {
+              list: deleted.published_ports
+                .map(p => `${p.label || p.id} (${p.name || p.mac})`)
+                .join(', '),
+            },
+          )
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+
     this.dialogs
-      .open(TUI_CONFIRM, { label: this.i18n.transform('Are you sure?') })
-      .pipe(filter(Boolean))
-      .subscribe(() => {
-        this.service.deleteProfile({
-          fullname: profile.fullname,
-          interface: profile.interface,
-          vlan_tag: profile.vlan_tag,
-        })
+      .open(TUI_CONFIRM, {
+        label: this.i18n.transform('Are you sure?'),
+        data: { content },
       })
+      .pipe(filter(Boolean))
+      .subscribe(() => this.service.deleteProfile(id))
   }
 }
 

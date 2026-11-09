@@ -9,6 +9,7 @@ import { BTC_ICON, LND_ICON, PROXY_ICON, REGISTRY_ICON } from './api-icons'
 import { ActionRes, Result } from './api.types'
 
 import markdown from './md-sample.md'
+const version = require('../../../../../../../../package.json').version
 
 const mockMerkleArchiveCommitment: T.MerkleArchiveCommitment = {
   type: 'merkle-archive',
@@ -37,11 +38,12 @@ export namespace Mock {
   }
 
   export const RegistryOSUpdate: T.OsVersionInfoMap = {
-    '0.4.2': {
+    [`${version}.2`]: {
       gitHash: null,
       security: false,
-      headline: 'v0.4.2',
-      releaseNotes: 'Testing some release notes',
+      headline: `v${version}.2`,
+      releaseNotes:
+        '## Highlights\n\n- Backups resume where they left off after an interruption.\n- The Updates tab shows release notes in place.\n\n## Fixes\n\n- Services no longer restart twice after a reboot.',
       sourceVersion: '>=0.3.5:0 <=0.4.0-alpha.17:0',
       authorized: ['G24CSA5HNYEPIXJNMK7ZM4KD5SX5N6X4'],
       iso: {},
@@ -104,6 +106,10 @@ export namespace Mock {
           signatures: {
             '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=\n-----END PUBLIC KEY-----\n':
               '-----BEGIN SIGNATURE-----\nMEkwBQYDK2VwBEDuGbncT5wcXd26p8ieqZyDQKmAcWKx/gP90i2GMNXgCf9L4jA4\nTz+B5PqC6kljRstyT1600wL3R02+fRpqkAUH\n-----END SIGNATURE-----\n',
+            '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=\n-----END PUBLIC KEY-----\n':
+              'mock-signature',
+            [`-----BEGIN PUBLIC KEY-----\n${unknownSigner}\n-----END PUBLIC KEY-----\n`]:
+              'mock-signature',
           },
         },
         'x86_64-nonfree': {
@@ -122,6 +128,18 @@ export namespace Mock {
           },
         },
       },
+      img: {},
+    },
+    [`${version}.1`]: {
+      gitHash: null,
+      security: false,
+      headline: `v${version}.1`,
+      releaseNotes:
+        '## Fixes\n\n- Restored network profiles after upgrading from 0.3.5.1.\n- Long service names no longer overflow the sidebar.',
+      sourceVersion: '*',
+      authorized: [],
+      iso: {},
+      squashfs: {},
       img: {},
     },
     '0.4.1-alpha.5': {
@@ -513,7 +531,13 @@ export namespace Mock {
                     'https://github.com/Start9Labs/bitcoind-startos/releases/download/v26.1.0/bitcoind.s9pk',
                   ],
                   commitment: mockMerkleArchiveCommitment,
-                  signatures: { [unknownSigner]: 'mock-signature' },
+                  signatures: {
+                    'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=':
+                      'mock-signature',
+                    'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=':
+                      'mock-signature',
+                    [unknownSigner]: 'mock-signature',
+                  },
                   publishedAt: Date.now().toString(),
                 },
               ],
@@ -1981,6 +2005,29 @@ PersistentKeepalive = 25`
       }),
     )
 
+  export const getFileInputSpec = async (): Promise<IST.InputSpec> => ({
+    certificate: {
+      type: 'file',
+      name: 'Certificate',
+      description: null,
+      warning: null,
+      uploadId: 'mock-certificate',
+      extensions: ['.pem', '.crt'],
+      required: true,
+      maxSize: 1024 * 1024,
+    },
+    attachment: {
+      type: 'file',
+      name: 'Attachment',
+      description: null,
+      warning: null,
+      uploadId: 'mock-attachment',
+      extensions: ['.tar.gz', '.txt'],
+      required: false,
+      maxSize: null,
+    },
+  })
+
   export const getActionInputSpec = async (): Promise<IST.InputSpec> =>
     configBuilderToSpec(
       ISB.InputSpec.of({
@@ -2050,11 +2097,6 @@ PersistentKeepalive = 25`
           min: 1,
           max: 65535,
         }),
-        // file: ISB.Value.file({
-        //   name: 'File',
-        //   required: false,
-        //   extensions: ['png', 'pdf'],
-        // }),
         users: ISB.Value.multiselect({
           name: 'Users',
           default: [],

@@ -116,6 +116,8 @@ Devices receive a profile based on how they join the network:
 | **Inbound VPN** | Each WireGuard server interface bound to a profile.                                                                                                                                             |
 
 Profile orchestration spans five UCI configs: `startwrt`, `network`, `firewall`, `dhcp`, `wireless`.
+A profile save rewrites only the firewall sections named `profile_<interface>_*`; sections added in LuCI
+or by hand stay as they are.
 
 ## Build Pipeline
 

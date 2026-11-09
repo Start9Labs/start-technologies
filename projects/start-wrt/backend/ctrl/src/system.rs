@@ -113,7 +113,7 @@ async fn newer_versions(_ctx: ServerContext) -> Result<Vec<VersionInfo>, Error> 
     // Read registry URL from UCI config (fallback to default)
     let registry_url = read_registry_url().unwrap_or_else(|| DEFAULT_REGISTRY_URL.to_string());
 
-    let versions = match crate::update::fetch_newer_versions(&registry_url).await {
+    let versions = match crate::update::fetch_versions(&registry_url).await {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!("Failed to check for updates: {e}");
@@ -130,13 +130,12 @@ async fn newer_versions(_ctx: ServerContext) -> Result<Vec<VersionInfo>, Error> 
     let mut result: Vec<VersionInfo> = versions
         .into_iter()
         .filter(|(ver, info)| {
-            // Only include versions that have an asset for our platform
-            // and are newer than the current version (semver comparison)
-            info.asset_for_platform(&platform).is_some() && is_newer_version(ver, current)
+            crate::registry::os::asset_for_platform(info, &platform).is_some()
+                && is_newer_version(ver, current)
         })
         .map(|(ver, info)| VersionInfo {
             version: ver,
-            release_notes: info.release_notes,
+            release_notes: info.release_notes.localized_for("en_US"),
         })
         .collect();
     // Sort ascending by semver precedence. The map above iterates in
@@ -783,12 +782,14 @@ async fn factory_reset(_ctx: ServerContext) -> Result<(), Error> {
 async fn restart(_ctx: ServerContext) -> Result<(), Error> {
     crate::activity::log("system", "restart", true, "System restart initiated", None);
 
+    crate::boot::record_reboot(crate::boot::RunState::Restarting);
     tokio::spawn(async {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         if let Err(e) = tokio::process::Command::new("reboot")
             .invoke(ErrorKind::Filesystem.into())
             .await
         {
+            crate::boot::record_running();
             tracing::error!("failed to reboot: {e}");
         }
     });

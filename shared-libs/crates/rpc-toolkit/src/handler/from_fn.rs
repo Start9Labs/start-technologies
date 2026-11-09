@@ -87,6 +87,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
@@ -98,6 +99,7 @@ where
                 params,
                 inherited_params,
                 raw_params,
+                rpc_stream,
             },
             result,
         )
@@ -197,6 +199,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
@@ -208,6 +211,7 @@ where
                 params,
                 inherited_params,
                 raw_params,
+                rpc_stream,
             },
             result,
         )
@@ -294,6 +298,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
@@ -305,6 +310,7 @@ where
                 params,
                 inherited_params,
                 raw_params,
+                rpc_stream,
             },
             result,
         )
