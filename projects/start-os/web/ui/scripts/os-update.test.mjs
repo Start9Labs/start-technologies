@@ -2162,7 +2162,6 @@ function registriesFixture({
         calls.push(['check', url])
         return publishes
       },
-      loadOS: async url => calls.push(['load', url]),
     },
     marketplace: {
       setOsRegistry: async url => {
@@ -2228,7 +2227,6 @@ test('another registry provides StartOS updates only after a warning, and report
       ...(confirm
         ? [
             ['set', 'https://other.test'],
-            ['load', 'https://other.test'],
             ['notice', 'StartOS updates', ['key']],
           ]
         : []),
@@ -2242,35 +2240,9 @@ test('another registry provides StartOS updates only after a warning, and report
   assert.deepEqual(calls, [
     ['check', 'https://registry.test'],
     ['set', 'https://registry.test'],
-    ['load', 'https://registry.test'],
     ['notice', 'StartOS updates', ['key']],
   ])
 })
-
-for (const succeeds of [true, false]) {
-  test(`registry selection handles catalog refresh completion: ${succeeds}`, async () => {
-    const { instance } = registriesFixture()
-    const refresh = deferred()
-    const outcomes = []
-    instance.os.loadOS = () => refresh.promise
-    instance.tasks.run = async work => {
-      const succeeded = await runTask(work)
-      outcomes.push(succeeded)
-      return succeeded
-    }
-    const selecting = RegistriesPage.prototype.useForUpdates.call(
-      instance,
-      'https://registry.test',
-    )
-    await tick()
-    assert.equal(instance.saving(), true)
-    if (succeeds) refresh.resolve()
-    else refresh.reject(new Error('registry unavailable'))
-    await selecting
-    assert.equal(instance.saving(), false)
-    assert.deepEqual(outcomes, [true, true, succeeds])
-  })
-}
 
 test('the update registry cannot be removed', async () => {
   const { instance, calls } = registriesFixture()
