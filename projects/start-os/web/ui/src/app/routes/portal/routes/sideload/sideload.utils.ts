@@ -22,6 +22,7 @@ export async function validateS9pk(
       fullLicense: await s9pk.license(),
       s9pks: [],
       signers: [...s9pk.signers],
+      signatures: { ...s9pk.signatures },
       signatureDiagnostics: s9pk.diagnostics,
     }
   } catch (error) {

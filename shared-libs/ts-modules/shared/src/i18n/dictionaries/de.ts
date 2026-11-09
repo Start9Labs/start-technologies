@@ -71,7 +71,6 @@ export default {
   72: 'Abmelden',
   73: 'Benutzerhandbuch',
   74: 'Support kontaktieren',
-  75: 'An Start9 spenden',
   76: 'Möchten Sie den Server wirklich neu starten? Es kann einige Minuten dauern, bis er wieder online ist.',
   77: 'Möchten Sie den Server wirklich herunterfahren? Dies kann einige Minuten dauern, und der Server wird nicht automatisch wieder eingeschaltet. Um ihn erneut einzuschalten, müssen Sie das Gerät physisch vom Stromnetz trennen und wieder anschließen.',
   78: 'Dienste',
@@ -956,4 +955,9 @@ export default {
   1104: 'Paketsignaturen werden geprüft',
   1105: 'Für Dienstpakete aktiviert',
   1106: 'Für StartOS-Updates aktiviert',
+  1107: 'Jede Datei muss ein eigenes Upload-Ziel haben.',
+  1108: 'Ungültiges Dateiformat',
+  1109: 'Ungültige Antwort vom Server',
+  1110: 'Maximale Dateigröße',
+  1111: 'Im Marktplatz anzeigen',
 } satisfies i18n

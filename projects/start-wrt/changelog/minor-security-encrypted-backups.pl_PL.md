@@ -1,0 +1,1 @@
+- **Kopie zapasowe są szyfrowane hasłem administratora.** Pobranie kopii zapasowej wymaga hasła administratora, a jej przywrócenie hasła administratora obowiązującego w chwili jej utworzenia. Kopie zapasowe z wcześniejszych wersji nadal można przywrócić bez hasła.

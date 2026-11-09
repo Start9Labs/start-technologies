@@ -3,10 +3,13 @@ import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import { TuiButton, TuiTitle } from '@taiga-ui/core'
 import { TUI_CONFIRM, TuiBlock } from '@taiga-ui/kit'
 import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
-import { filter } from 'rxjs'
+import { filter, map, Observable } from 'rxjs'
 import { ActionService } from 'src/app/services/action.service'
 import { ApiService } from 'src/app/services/api/api.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { BACKUP_PASSWORD } from './dialog'
+
+const ENCRYPTED_MAGIC = 'STARTWRT-BACKUP'
 
 @Component({
   template: `
@@ -50,7 +53,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             tuiBlock
             appearance=""
             type="file"
-            accept=".tar.gz,.gz"
+            accept=".swbk,.tar.gz,.gz"
             (change)="onFileSelected($event)"
           />
         </label>
@@ -88,10 +91,24 @@ export default class Backup {
     this.selectedFile.set(input.files?.[0] ?? null)
   }
 
-  protected async download() {
+  protected download() {
+    this.dialogs
+      .open<string>(BACKUP_PASSWORD, {
+        label: this.i18n.transform('Create Backup'),
+        data: {
+          message: this.i18n.transform(
+            'Enter your admin password to encrypt this backup.',
+          ),
+          action: this.i18n.transform('Download Backup'),
+        },
+      })
+      .subscribe(password => this.doDownload(password))
+  }
+
+  private async doDownload(password: string) {
     await this.actions.run(
       async () => {
-        const { guid, filename } = await this.api.backupCreate()
+        const { guid, filename } = await this.api.backupCreate({ password })
         const res = await fetch(`/rest/rpc/${guid}`)
         if (!res.ok)
           throw new Error(
@@ -112,30 +129,47 @@ export default class Backup {
     )
   }
 
-  protected restore() {
-    this.dialogs
-      .open(TUI_CONFIRM, {
-        label: this.i18n.transform('Restore Backup'),
-        data: {
-          content: this.i18n.transform(
-            'All current settings will be overwritten and the device will reboot. Are you sure you want to continue?',
-          ),
-          yes: this.i18n.transform('Restore & Reboot'),
-          no: this.i18n.transform('Cancel'),
-        },
-      })
-      .pipe(filter(Boolean))
-      .subscribe(() => this.doRestore())
-  }
-
-  private async doRestore() {
+  protected async restore() {
     const file = this.selectedFile()
     if (!file) return
 
+    const label = this.i18n.transform('Restore Backup')
+    const action = this.i18n.transform('Restore & Reboot')
+    const confirmed: Observable<string | null> =
+      (await file.slice(0, ENCRYPTED_MAGIC.length).text()) === ENCRYPTED_MAGIC
+        ? this.dialogs.open<string>(BACKUP_PASSWORD, {
+            label,
+            data: {
+              message: this.i18n.transform(
+                'All current settings will be overwritten and the device will reboot. Enter the admin password in effect when this backup was created.',
+              ),
+              action,
+            },
+          })
+        : this.dialogs
+            .open<boolean>(TUI_CONFIRM, {
+              label,
+              data: {
+                content: this.i18n.transform(
+                  'All current settings will be overwritten and the device will reboot. Are you sure you want to continue?',
+                ),
+                yes: action,
+                no: this.i18n.transform('Cancel'),
+              },
+            })
+            .pipe(
+              filter(Boolean),
+              map(() => null),
+            )
+
+    confirmed.subscribe(password => this.doRestore(file, password))
+  }
+
+  private async doRestore(file: File, password: string | null) {
     this.uploading.set(true)
     const success = await this.actions.run(
       async () => {
-        const { upload } = await this.api.backupRestore()
+        const { upload } = await this.api.backupRestore({ password })
         const arrayBuffer = await file.arrayBuffer()
         const res = await fetch(`/rest/rpc/${upload}`, {
           method: 'POST',

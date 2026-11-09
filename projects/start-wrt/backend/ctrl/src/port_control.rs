@@ -657,12 +657,11 @@ impl PortControl {
                 .collect();
             // Statically reserved addresses can't be handed to anyone else, so
             // they pin a forward even with no lease on file.
-            let mut reserved: HashMap<String, String> = HashMap::new();
-            cfgs["dhcp"].each::<DhcpHost, Error>(|_, host| {
-                if let Some(ip) = host.ip.filter(|ip| !ip.is_empty()) {
-                    reserved.insert(host.mac.to_uppercase(), ip);
-                }
-            })?;
+            let reserved: HashMap<String, Vec<String>> =
+                crate::reservations::reservations_by_mac(&cfgs["dhcp"])
+                    .into_iter()
+                    .map(|(mac, ips)| (mac, ips.iter().map(|ip| ip.to_string()).collect()))
+                    .collect();
             Ok((sections, reserved))
         })
         .await?;
@@ -1165,11 +1164,12 @@ struct AutoSection {
     dest_ip: Option<String>,
 }
 
-/// Sections whose tagged owner no longer holds the destination address.
-/// Untagged sections are ignored.
+/// Sections whose tagged owner no longer holds the destination address: its
+/// newest lease, or without one, any of its reservations. Untagged sections
+/// are ignored.
 fn unbound_sections(
     sections: &[AutoSection],
-    reserved: &HashMap<String, String>,
+    reserved: &HashMap<String, Vec<String>>,
     leases: &HashMap<String, String>,
 ) -> Vec<String> {
     sections
@@ -1178,8 +1178,10 @@ fn unbound_sections(
             let (Some(mac), Some(dest_ip)) = (&section.mac, &section.dest_ip) else {
                 return false;
             };
-            !reserved.get(mac).is_some_and(|ip| ip == dest_ip)
-                && !leases.get(mac).is_some_and(|ip| ip == dest_ip)
+            match leases.get(mac) {
+                Some(ip) => ip != dest_ip,
+                None => !reserved.get(mac).is_some_and(|ips| ips.contains(dest_ip)),
+            }
         })
         .map(|section| section.name.clone())
         .collect()
@@ -2799,6 +2801,7 @@ config rule 'wan_to_lan'
             section("renumbered", "BB:BB:BB:BB:BB:BB", "192.168.1.60"),
             section("no_lease", "CC:CC:CC:CC:CC:CC", "192.168.1.70"),
             section("reserved", "DD:DD:DD:DD:DD:DD", "192.168.1.80"),
+            section("moved", "EE:EE:EE:EE:EE:EE", "192.168.1.90"),
             AutoSection {
                 name: "untagged".into(),
                 mac: None,
@@ -2810,14 +2813,24 @@ config rule 'wan_to_lan'
             // The device is still on the network, but at a different address —
             // the forward now points at whoever holds .60.
             ("BB:BB:BB:BB:BB:BB".to_string(), "192.168.1.61".to_string()),
+            // On another profile now, away from its reservation.
+            ("EE:EE:EE:EE:EE:EE".to_string(), "192.168.20.90".to_string()),
         ]);
         // A static reservation survives having no lease on file.
-        let reserved =
-            HashMap::from([("DD:DD:DD:DD:DD:DD".to_string(), "192.168.1.80".to_string())]);
+        let reserved = HashMap::from([
+            (
+                "DD:DD:DD:DD:DD:DD".to_string(),
+                vec!["192.168.1.80".to_string()],
+            ),
+            (
+                "EE:EE:EE:EE:EE:EE".to_string(),
+                vec!["192.168.1.90".to_string(), "192.168.20.90".to_string()],
+            ),
+        ]);
 
         let mut unbound = unbound_sections(&sections, &reserved, &leases);
         unbound.sort();
-        assert_eq!(unbound, vec!["no_lease", "renumbered"]);
+        assert_eq!(unbound, vec!["moved", "no_lease", "renumbered"]);
     }
 
     #[tokio::test]

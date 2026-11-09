@@ -889,6 +889,7 @@ pub async fn init_web(ctx: CliContext) -> Result<(), Error> {
                             params: Empty {},
                             inherited_params: Empty {},
                             raw_params: json!({}),
+                            rpc_stream: None,
                         })
                         .await?;
                     }

@@ -110,7 +110,10 @@ pub fn profiles<C: CtrlContext>() -> ParentHandler<C> {
             "set",
             from_fn_async_local(set::<C>).with_display_serializable(),
         )
-        .subcommand("delete", from_fn_async_local(delete::<C>).no_display())
+        .subcommand(
+            "delete",
+            from_fn_async_local(delete::<C>).with_display_serializable(),
+        )
         .subcommand(
             "list",
             from_fn_async_local(list::<C>).with_display_serializable(),
@@ -174,6 +177,45 @@ pub struct ProfileIdOpt {
     pub vlan_tag: Option<u16>,
 }
 rpc_toolkit::reflect_ts!(ProfileIdOpt);
+
+/// `profiles.delete` request. With `preview`, nothing is deleted.
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
+pub struct ProfileDeleteRequest {
+    #[serde(flatten)]
+    #[clap(flatten)]
+    pub id: ProfileIdOpt,
+    #[serde(default)]
+    #[clap(long)]
+    pub preview: bool,
+}
+rpc_toolkit::reflect_ts!(ProfileDeleteRequest);
+
+/// The reservations and published ports deleted with the profile.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, visit_rs::VisitFields)]
+pub struct ProfileDeleteResult {
+    pub reservations: Vec<DeletedReservation>,
+    pub published_ports: Vec<crate::published_ports::DeletedPublishedPort>,
+}
+rpc_toolkit::reflect_ts!(ProfileDeleteResult);
+
+#[derive(Debug, Clone, Deserialize, Serialize, visit_rs::VisitFields)]
+pub struct DeletedReservation {
+    pub mac: String,
+    pub name: Option<String>,
+    pub ipv4: String,
+}
+rpc_toolkit::reflect_ts!(DeletedReservation);
+
+impl ProfileDeleteResult {
+    fn name_devices(&mut self, names: &HashMap<String, String>) {
+        for reservation in &mut self.reservations {
+            reservation.name = names.get(&reservation.mac).cloned();
+        }
+        for port in &mut self.published_ports {
+            port.name = names.get(&port.mac).cloned();
+        }
+    }
+}
 
 impl From<ProfileId> for ProfileIdOpt {
     fn from(id: ProfileId) -> Self {
@@ -824,8 +866,20 @@ pub(crate) fn get_config(
 }
 
 #[instrument(skip_all)]
-pub async fn delete<C: CtrlContext>(ctx: C, id: ProfileIdOpt) -> Result<(), Error> {
+pub async fn delete<C: CtrlContext>(
+    ctx: C,
+    ProfileDeleteRequest { id, preview }: ProfileDeleteRequest,
+) -> Result<ProfileDeleteResult, Error> {
     let name = id.fullname.clone().unwrap_or_default();
+    const CONFIGS: &[&str] = &["startwrt", "network", "firewall", "dhcp", "wireless"];
+
+    if preview {
+        let arena = Arena::new();
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, CONFIGS).await?;
+        let mut deleted = delete_config(ctx.clone(), &mut cfgs, &id)?;
+        deleted.name_devices(&crate::port_control::device_display_names(&cfgs["dhcp"])?);
+        return Ok(deleted);
+    }
 
     // Resolve the profile interface name before the retry loop so we can
     // use it for ifdown after dump_all succeeds (delete_config consumes the query).
@@ -840,22 +894,21 @@ pub async fn delete<C: CtrlContext>(ctx: C, id: ProfileIdOpt) -> Result<(), Erro
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all(
-            ctx.uci_root(),
-            &arena,
-            &["startwrt", "network", "firewall", "dhcp", "wireless"],
-        )
-        .await?;
-        if let Err(e) = delete_config(ctx.clone(), &mut cfgs, &id) {
-            crate::activity::log(
-                "profile",
-                "deleted",
-                false,
-                &format!("Failed to delete profile '{name}'"),
-                Some(&e.to_string()),
-            );
-            return Err(e);
-        }
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, CONFIGS).await?;
+        let mut deleted = match delete_config(ctx.clone(), &mut cfgs, &id) {
+            Ok(deleted) => deleted,
+            Err(e) => {
+                crate::activity::log(
+                    "profile",
+                    "deleted",
+                    false,
+                    &format!("Failed to delete profile '{name}'"),
+                    Some(&e.to_string()),
+                );
+                return Err(e);
+            }
+        };
+        deleted.name_devices(&crate::port_control::device_display_names(&cfgs["dhcp"])?);
         let dump_result = dump_all(ctx.uci_root(), cfgs).await;
         drop(arena);
         match dump_result {
@@ -886,6 +939,7 @@ pub async fn delete<C: CtrlContext>(ctx: C, id: ProfileIdOpt) -> Result<(), Erro
                         tokio::process::Command::new("ifdown").arg(&wg_interface_name),
                     )
                     .await;
+                    crate::published_ports::sync_v6_mac_bind_logged(ctx.uci_root()).await;
                     reload_system_and_wifi().await?;
                 }
                 // Regenerate schedule crontab to remove deleted profile's entries
@@ -907,17 +961,19 @@ pub async fn delete<C: CtrlContext>(ctx: C, id: ProfileIdOpt) -> Result<(), Erro
                     &format!("Deleted profile '{name}'"),
                     None,
                 );
-                return Ok(());
+                return Ok(deleted);
             }
         }
     }
 }
 
+/// Returns the reservations and published ports deleted with the profile,
+/// unnamed.
 fn delete_config(
     ctx: impl CtrlContext,
     cfgs: &mut Configs,
     query: &ProfileIdOpt,
-) -> Result<(), Error> {
+) -> Result<ProfileDeleteResult, Error> {
     let wan_v4 = ctx.wan_ipv4_addrs();
     let lookup = Lookup::parse(ctx, cfgs)?;
     let id = lookup.resolve(query)?.clone();
@@ -929,6 +985,23 @@ fn delete_config(
             ErrorKind::CannotDeleteLanOwner,
         ));
     }
+
+    let subnet = crate::reservations::profile_networks(cfgs, &lookup)
+        .into_iter()
+        .find(|p| p.vlan == id.vlan_tag)
+        .and_then(|p| p.address);
+    let published_ports = crate::published_ports::remove_profile_ports(cfgs, &lookup, &id.fullname);
+    let reservations = match subnet {
+        Some(subnet) => crate::reservations::remove_in_subnet(&mut cfgs["dhcp"], subnet)?,
+        None => Vec::new(),
+    }
+    .into_iter()
+    .map(|(mac, ip)| DeletedReservation {
+        mac,
+        name: None,
+        ipv4: ip.to_string(),
+    })
+    .collect();
 
     // Remove profile and its VPN server metadata from startwrt config
     let wg_interface_name = format!("wg_{}", id.interface);
@@ -1100,7 +1173,10 @@ fn delete_config(
     // redirects outright over the now-unknown name.
     crate::published_ports::sync_hairpin(&mut cfgs["firewall"], &wan_v4)?;
 
-    Ok(())
+    Ok(ProfileDeleteResult {
+        reservations,
+        published_ports,
+    })
 }
 
 #[instrument(skip_all)]
@@ -4669,6 +4745,202 @@ config wifi-vlan
             reflection_list(&cfgs, "apf_aabbccddeeff_9000"),
             vec!["lan".to_string()]
         );
+    }
+
+    /// `setup_configs` plus two devices with Guest reservations, one also
+    /// reserved on Admin, and published ports into each profile.
+    fn seed_profile_owned_settings(dir: &std::path::Path) {
+        seed_reflection_firewall(dir, false);
+        let mut fw = std::fs::read_to_string(dir.join("firewall")).unwrap();
+        fw.push_str(
+            "
+config redirect 'pp_y'
+\toption name 'Phone Admin'
+\toption src 'wan'
+\toption dest 'lan'
+\toption target 'DNAT'
+\tlist proto 'tcp'
+\toption src_dport '8080'
+\toption dest_ip '192.168.1.20'
+\toption dest_port '8080'
+\toption _pp_id 'y'
+\toption _pp_mac 'AA:BB:CC:DD:EE:01'
+
+config redirect 'pp_g'
+\toption name 'Phone Guest'
+\toption src 'wan'
+\toption dest 'vlan_guest'
+\toption target 'DNAT'
+\tlist proto 'tcp'
+\toption src_dport '443'
+\toption dest_ip '192.168.101.20'
+\toption dest_port '443'
+\toption _pp_id 'g'
+\toption _pp_mac 'AA:BB:CC:DD:EE:01'
+
+config rule 'pp_g_v6'
+\toption name 'Phone Guest'
+\toption family 'ipv6'
+\toption src 'wan'
+\toption dest 'vlan_guest'
+\toption dest_ip '2001:db8:101::20'
+\toption dest_port '443'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+\toption _pp_id 'g'
+\toption _pp_mac 'AA:BB:CC:DD:EE:01'
+
+config rule 'pp_h_v6'
+\toption name 'Tablet Guest'
+\toption family 'ipv6'
+\toption src 'wan'
+\toption dest 'vlan_guest'
+\toption dest_ip '2001:db8:101::30'
+\toption dest_port '22'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+\toption _pp_id 'h'
+\toption _pp_mac 'AA:BB:CC:DD:EE:02'
+",
+        );
+        std::fs::write(dir.join("firewall"), fw).unwrap();
+        let mut dhcp = std::fs::read_to_string(dir.join("dhcp")).unwrap();
+        dhcp.push_str(
+            "
+config host 'host_aabbccddee01'
+\toption mac 'AA:BB:CC:DD:EE:01'
+\toption ip '192.168.101.20'
+\toption name 'phone'
+\toption _allow_pcp '1'
+
+config host 'host_aabbccddee01_2'
+\toption mac 'AA:BB:CC:DD:EE:01'
+\toption ip '192.168.1.20'
+\toption name 'phone'
+
+config host 'host_aabbccddee02'
+\toption mac 'AA:BB:CC:DD:EE:02'
+\toption ip '192.168.101.30'
+\toption name 'tablet'
+\toption _allow_dns_inject '1'
+",
+        );
+        std::fs::write(dir.join("dhcp"), dhcp).unwrap();
+    }
+
+    fn guest_query() -> ProfileIdOpt {
+        ProfileIdOpt {
+            fullname: None,
+            interface: Some("guest".into()),
+            vlan_tag: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn deleting_profile_deletes_its_reservations_and_published_ports() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        seed_profile_owned_settings(dir.path());
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+
+        let deleted = delete_config(ctx.clone(), &mut cfgs, &guest_query()).unwrap();
+
+        let reservations: Vec<(&str, &str)> = deleted
+            .reservations
+            .iter()
+            .map(|r| (r.mac.as_str(), r.ipv4.as_str()))
+            .collect();
+        assert_eq!(
+            reservations,
+            vec![
+                ("AA:BB:CC:DD:EE:01", "192.168.101.20"),
+                ("AA:BB:CC:DD:EE:02", "192.168.101.30"),
+            ]
+        );
+        let ports: Vec<(&str, &str, &str)> = deleted
+            .published_ports
+            .iter()
+            .map(|p| (p.id.as_str(), p.label.as_str(), p.mac.as_str()))
+            .collect();
+        assert_eq!(
+            ports,
+            vec![
+                ("g", "Phone Guest", "AA:BB:CC:DD:EE:01"),
+                ("h", "Tablet Guest", "AA:BB:CC:DD:EE:02"),
+            ]
+        );
+
+        let hosts: Vec<uciedit::openwrt::DhcpHost> = cfgs["dhcp"]
+            .sections
+            .iter()
+            .filter_map(|s| s.get_typed::<uciedit::openwrt::DhcpHost>().ok().flatten())
+            .collect();
+        let phone: Vec<&uciedit::openwrt::DhcpHost> = hosts
+            .iter()
+            .filter(|h| h.mac == "AA:BB:CC:DD:EE:01")
+            .collect();
+        assert_eq!(phone.len(), 1);
+        assert_eq!(phone[0].ip.as_deref(), Some("192.168.1.20"));
+        assert_eq!(phone[0].name.as_deref(), Some("phone"));
+        assert_eq!(phone[0]._allow_pcp.as_deref(), Some("1"));
+        let tablet: Vec<&uciedit::openwrt::DhcpHost> = hosts
+            .iter()
+            .filter(|h| h.mac == "AA:BB:CC:DD:EE:02")
+            .collect();
+        assert_eq!(tablet.len(), 1);
+        assert_eq!(tablet[0].ip, None);
+        assert_eq!(tablet[0].name.as_deref(), Some("tablet"));
+        assert_eq!(tablet[0]._allow_dns_inject.as_deref(), Some("1"));
+
+        let names: Vec<String> = cfgs["firewall"]
+            .sections
+            .iter()
+            .filter_map(|s| s.name().map(|n| n.into_owned()))
+            .filter(|n| n.starts_with("pp_"))
+            .collect();
+        assert_eq!(names, vec!["pp_x".to_string(), "pp_y".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn previewing_profile_delete_lists_settings_and_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        seed_profile_owned_settings(dir.path());
+        let read = |name: &str| std::fs::read_to_string(dir.path().join(name)).unwrap();
+        let before: Vec<String> = ["startwrt", "network", "firewall", "dhcp", "wireless"]
+            .iter()
+            .map(|c| read(c))
+            .collect();
+
+        let deleted = delete(
+            ctx,
+            ProfileDeleteRequest {
+                id: guest_query(),
+                preview: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(deleted.reservations.len(), 2);
+        assert_eq!(deleted.reservations[0].name.as_deref(), Some("phone"));
+        assert_eq!(deleted.published_ports.len(), 2);
+        assert_eq!(deleted.published_ports[1].name.as_deref(), Some("tablet"));
+        let after: Vec<String> = ["startwrt", "network", "firewall", "dhcp", "wireless"]
+            .iter()
+            .map(|c| read(c))
+            .collect();
+        assert_eq!(before, after);
     }
 
     /// The reverse transition: granting a profile Access to the LAN must add

@@ -1,0 +1,11 @@
+name: Setup release tooling tests
+description: Install the Debian archive and signing tools used by make release-notes-test and make test
+
+runs:
+  using: composite
+  steps:
+    - name: Install release tooling test dependencies
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq apt-utils dpkg-dev gnupg
