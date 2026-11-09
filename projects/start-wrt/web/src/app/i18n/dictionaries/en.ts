@@ -584,4 +584,5 @@ export const ENGLISH: Record<string, number> = {
   'Published ports deleted with this profile: {list}.': 615,
   "Outside the subnet of this device's profile": 616,
   'Not a usable host address': 617,
+  'This device is trying to publish DNS records. Allow DNS record publishing for them to resolve on your network.': 618,
 }

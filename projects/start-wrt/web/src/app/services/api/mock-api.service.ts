@@ -1271,6 +1271,9 @@ export class MockApiService extends ApiService {
         profile_network: profile ? `${profile.gateway_ip}/24` : null,
         allow_auto_port_forward: this.autoForwardAllowed.has(mac),
         allow_dns_injection: this.dnsInjectionAllowed.has(mac),
+        dns_injection_requested:
+          !this.dnsInjectionAllowed.has(mac) &&
+          this.dnsInjectionRequested.has(mac),
         allow_router_advertisements: this.raAllowed.has(mac),
         security_profile: profile?.fullname ?? null,
         speed: def.status === 'online' ? def.speed : null,
@@ -1352,6 +1355,10 @@ export class MockApiService extends ApiService {
 
   /** MACs allowed to publish DNS records into the router's resolver. */
   private dnsInjectionAllowed = new Set<string>(['00:1A:2B:3C:4D:5E'])
+  /** MACs the router recently refused DNS records from. */
+  private readonly dnsInjectionRequested = new Set<string>([
+    'AA:BB:CC:DD:EE:02',
+  ])
 
   async devicesSetDnsInjection(
     params: RpcParamType<Api, 'devices.set-dns-injection'>,
@@ -2260,7 +2267,7 @@ export class MockApiService extends ApiService {
         "Updated WiFi settings (SSID: 'MyNetwork')",
         "Deleted outbound VPN 'Mullvad US'",
         "Failed to enable outbound VPN 'NordVPN'",
-        'Logged in',
+        'Logged in from 192.168.1.23 (Admin profile) using a browser',
       ][i % 5],
       error: i === 3 ? 'VpnChainCycle: would create a loop' : null,
     }),

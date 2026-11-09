@@ -14,7 +14,7 @@ use patch_db::{HasModel, ModelExt, PatchDb};
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{from_fn_async, CallRemote, Empty, HandlerArgs, HandlerExt, ParentHandler};
 use serde::{Deserialize, Serialize};
-use startos::auth::{AuthKeys, LoginContext, Session};
+use startos::auth::{AuthKeys, LoginAttempt, LoginContext, Session};
 use startos::context::setup::CURRENT_SECRET;
 use startos::middleware::auth::local::LocalAuthContext;
 use startos::middleware::auth::signature::{
@@ -261,17 +261,47 @@ impl LoginContext for ServerContext {
         db.as_session_pubkeys_mut()
     }
     fn check_password(_: &Model<Self::Database>, password: &str) -> Result<(), startos::Error> {
-        check_password_sync(Path::new(SHADOW_PATH), password).map_err(|e| {
-            crate::activity::log("auth", "login", false, "Login failed", Some(&e.to_string()));
-            e.into()
-        })
+        Ok(check_password_sync(Path::new(SHADOW_PATH), password)?)
     }
     fn sign_in_expired(session: &Session, now: DateTime<Utc>) -> bool {
         sign_in_ended(session.logged_in, now, true)
     }
-    async fn post_login_hook(&self, _: &str) -> Result<(), startos::Error> {
-        crate::activity::log("auth", "login", true, "Logged in", None);
-        Ok(())
+    async fn login_attempt_hook(
+        &self,
+        attempt: &LoginAttempt,
+        result: Result<(), &startos::Error>,
+    ) {
+        let mut source = String::new();
+        if let Some(peer) = attempt.peer {
+            source = format!(" from {}", crate::peer::describe(peer).await);
+        }
+        let client = describe_client(attempt.user_agent.as_deref());
+        match result {
+            Ok(()) => crate::activity::log(
+                "auth",
+                "login",
+                true,
+                &format!("Logged in{source} {client}"),
+                None,
+            ),
+            Err(e) => crate::activity::log(
+                "auth",
+                "login",
+                false,
+                &format!("Login failed{source} {client}"),
+                Some(&e.to_string()),
+            ),
+        }
+    }
+}
+
+/// Every mainstream browser's user agent starts `Mozilla/`; other clients are
+/// named by their first product token.
+fn describe_client(user_agent: Option<&str>) -> String {
+    match user_agent.and_then(|ua| ua.split_whitespace().next()) {
+        Some(product) if product.starts_with("Mozilla/") => "using a browser".into(),
+        Some(product) => format!("using {}", product.chars().take(64).collect::<String>()),
+        None => "with no user agent".into(),
     }
 }
 
@@ -724,6 +754,22 @@ mod tests {
 
     const LAST_ACTIVE_RESOLUTION: TimeDelta =
         <ServerContext as SignatureAuthContext>::LAST_ACTIVE_RESOLUTION;
+
+    #[test]
+    fn login_clients_are_named_by_user_agent() {
+        for (user_agent, expected) in [
+            (
+                Some("Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0"),
+                "using a browser",
+            ),
+            (Some("curl/8.5.0"), "using curl/8.5.0"),
+            (Some("node"), "using node"),
+            (Some("   "), "with no user agent"),
+            (None, "with no user agent"),
+        ] {
+            assert_eq!(describe_client(user_agent), expected, "{user_agent:?}");
+        }
+    }
 
     #[test]
     fn validate_password_length_rejects_short() {

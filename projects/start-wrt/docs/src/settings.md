@@ -67,7 +67,7 @@ Manage the public keys authorized to access your router's command line over SSH.
 
 ## Activity
 
-View a log of administrative actions taken through the web interface. Each entry shows:
+View a log of administrative actions taken through the web interface, along with sign-ins, SSH sessions, and each time the router starts. Each entry shows:
 
 - **Status icon** — Green check for successful actions, red X for failures.
 - **Timestamp** — When the action occurred.

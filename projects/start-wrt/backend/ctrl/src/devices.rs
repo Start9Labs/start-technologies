@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -86,6 +86,9 @@ pub struct Device {
     /// (`devices set-dns-injection`; `vpn-server peer-set-dns-injection` for a
     /// VPN peer).
     pub allow_dns_injection: bool,
+    /// Whether the router refused this device's DNS records for lack of that
+    /// permission in the last half hour.
+    pub dns_injection_requested: bool,
     /// Whether the router forwards this device's IPv6 router advertisements
     /// to the rest of the LAN (`devices set-router-advertisements`). Always
     /// false for a VPN peer.
@@ -1830,6 +1833,10 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
         }
     }
     let mdns_by_mac = resolve_mdns_names(mdns_targets).await;
+    let asking_to_publish = crate::dns_inject::DNS_INJECT
+        .get()
+        .map(|di| di.asking_sources())
+        .unwrap_or_default();
 
     let mut devices = Vec::new();
     for mac in &all_macs {
@@ -1984,6 +1991,16 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             .get(mac)
             .map(|(rx, tx)| ((rx + tx) as f64 / 1_073_741_824.0 * 10.0).round() / 10.0);
 
+        let allow_dns_injection = host.is_some_and(|h| h._allow_dns_inject.as_deref() == Some("1"));
+        let dns_injection_requested = !allow_dns_injection
+            && arp_list
+                .iter()
+                .map(|e| e.ip.as_str())
+                .chain(lease.map(|l| l.ip.as_str()))
+                .chain(ipv4.as_deref())
+                .filter_map(|ip| ip.parse::<IpAddr>().ok())
+                .any(|ip| asking_to_publish.contains(&ip));
+
         devices.push(Device {
             mac: Some(mac.clone()),
             name,
@@ -1999,7 +2016,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             ipv4_reservations,
             profile_network: profile_address.map(|net| net.to_string()),
             allow_auto_port_forward: host.is_some_and(|h| h._allow_pcp.as_deref() == Some("1")),
-            allow_dns_injection: host.is_some_and(|h| h._allow_dns_inject.as_deref() == Some("1")),
+            allow_dns_injection,
+            dns_injection_requested,
             allow_router_advertisements: host.is_some_and(|h| h._allow_ra.as_deref() == Some("1")),
             security_profile,
             speed,
@@ -2110,6 +2128,12 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 // No MAC to authorize, so a VPN peer can never be auto-forward capable.
                 allow_auto_port_forward: false,
                 allow_dns_injection: peer_cfg.allow_dns_injection,
+                dns_injection_requested: !peer_cfg.allow_dns_injection
+                    && peer_cfg
+                        .ip
+                        .as_deref()
+                        .and_then(|ip| ip.parse::<IpAddr>().ok())
+                        .is_some_and(|ip| asking_to_publish.contains(&ip)),
                 allow_router_advertisements: false,
                 security_profile: Some(server.profile_fullname.clone()),
                 speed,
@@ -2262,6 +2286,17 @@ fn follow_replaced_reservations(
     Ok(changed)
 }
 
+/// What a save did to the assigned name. An absent request leaves it alone.
+fn name_change(prior: Option<&str>, requested: Option<&str>) -> Option<String> {
+    match (prior, requested?) {
+        (Some(old), "") => Some(format!("cleared name '{old}'")),
+        (None, "") => None,
+        (Some(old), new) if old == new => None,
+        (Some(old), _) => Some(format!("renamed from '{old}'")),
+        (None, _) => Some("name assigned".into()),
+    }
+}
+
 /// Every field dnsmasq parses, checked before it reaches the config it reads:
 /// a malformed reservation is one it refuses to start on, taking the LAN's DHCP
 /// with it. An unchanged reservation is not checked again, so a rename never
@@ -2342,7 +2377,8 @@ pub async fn update<C: CtrlContext>(
             .iter()
             .filter_map(|s| s.get_typed::<DhcpHost>().ok().flatten())
             .find(|h| h.mac.eq_ignore_ascii_case(&mac_upper))
-            .and_then(|h| h.name);
+            .and_then(|h| h.name)
+            .filter(|name| !name.is_empty());
         reservations::write_reservations(&mut cfgs["dhcp"], &mac_upper, &want)?;
         if let Some(name) = req.name.as_deref() {
             reservations::write_name(&mut cfgs["dhcp"], &mac_upper, Some(name))?;
@@ -2350,7 +2386,7 @@ pub async fn update<C: CtrlContext>(
 
         let label = match req.name.as_deref() {
             Some(name) => Some(name.to_string()),
-            None => prior_name,
+            None => prior_name.clone(),
         }
         .filter(|name| !name.is_empty());
         let subject = match label {
@@ -2382,7 +2418,10 @@ pub async fn update<C: CtrlContext>(
                 return Err(err.into());
             }
             Ok(()) => {
-                let summary = format!("Updated device {subject}{suffix}");
+                let renamed = name_change(prior_name.as_deref(), req.name.as_deref())
+                    .map(|change| format!(" — {change}"))
+                    .unwrap_or_default();
+                let summary = format!("Updated device {subject}{renamed}{suffix}");
                 crate::activity::log("device", "updated", true, &summary, None);
                 if ctx.effectful() {
                     reload_dnsmasq();
@@ -3793,6 +3832,24 @@ config host 'host_aabbccddeeff_2'
         FdbEntry {
             port: "eth0".into(),
             vlan,
+        }
+    }
+
+    #[test]
+    fn name_changes_describe_the_old_name() {
+        for (prior, requested, expected) in [
+            (Some("old"), Some("new"), Some("renamed from 'old'")),
+            (Some("old"), Some(""), Some("cleared name 'old'")),
+            (None, Some("new"), Some("name assigned")),
+            (Some("same"), Some("same"), None),
+            (Some("old"), None, None),
+            (None, Some(""), None),
+        ] {
+            assert_eq!(
+                name_change(prior, requested).as_deref(),
+                expected,
+                "{prior:?} → {requested:?}"
+            );
         }
     }
 

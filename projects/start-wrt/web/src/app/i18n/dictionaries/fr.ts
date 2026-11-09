@@ -579,4 +579,5 @@ export default {
   615: 'Ports publiés supprimés avec ce profil : {list}.',
   616: 'En dehors du sous-réseau du profil de cet appareil',
   617: "Pas une adresse d'hôte utilisable",
+  618: 'Cet appareil tente de publier des enregistrements DNS. Autorisez la publication d’enregistrements DNS pour qu’ils soient résolus sur votre réseau.',
 } satisfies i18n
