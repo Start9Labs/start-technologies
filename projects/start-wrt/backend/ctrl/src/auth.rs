@@ -411,6 +411,10 @@ pub async fn check_password(shadow: &Path, password: &str) -> Result<(), Error> 
     tokio::task::spawn_blocking(move || check_password_sync(&shadow, &password)).await?
 }
 
+pub async fn check_admin_password(password: &str) -> Result<(), Error> {
+    check_password(Path::new(SHADOW_PATH), password).await
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifyPasswordParams {
@@ -423,7 +427,7 @@ pub async fn verify_password_impl(
     _ctx: ServerContext,
     VerifyPasswordParams { password }: VerifyPasswordParams,
 ) -> Result<(), Error> {
-    check_password(Path::new(SHADOW_PATH), &password).await
+    check_admin_password(&password).await
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::VisitFields)]

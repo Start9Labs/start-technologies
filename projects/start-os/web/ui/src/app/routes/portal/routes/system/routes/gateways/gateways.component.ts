@@ -10,6 +10,7 @@ import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { GatewayService } from 'src/app/services/gateway.service'
 import { TitleDirective } from 'src/app/services/title.service'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
+import { readWireguardConfig, wireguardConfigInput } from './config-input'
 
 import { GatewaysTableComponent } from './table.component'
 
@@ -90,34 +91,7 @@ export default class GatewaysComponent {
         default: null,
         placeholder: 'StartTunnel 1',
       }),
-      config: ISB.Value.union({
-        name: this.i18n.transform('WireGuard Config File'),
-        default: 'paste',
-        variants: ISB.Variants.of({
-          paste: {
-            name: this.i18n.transform('Copy/Paste'),
-            spec: ISB.InputSpec.of({
-              file: ISB.Value.textarea({
-                name: this.i18n.transform('File Contents'),
-                default: null,
-                required: true,
-                minRows: 8,
-                maxRows: 8,
-              }),
-            }),
-          },
-          select: {
-            name: this.i18n.transform('Upload'),
-            spec: ISB.InputSpec.of({
-              file: ISB.Value.file({
-                name: this.i18n.transform('File'),
-                required: true,
-                extensions: ['.conf'],
-              }),
-            }),
-          },
-        }),
-      }),
+      config: wireguardConfigInput(this.i18n),
     })
 
     this.formDialog.open(FormComponent, {
@@ -132,10 +106,7 @@ export default class GatewaysComponent {
                 async () =>
                   await this.api.rpc.net.tunnel.add({
                     name: input.name,
-                    config:
-                      input.config.selection === 'paste'
-                        ? input.config.value.file
-                        : await (input.config.value.file as any as File).text(),
+                    config: await readWireguardConfig(input.config),
                     type: null, // let StartOS auto-detect from the config
                     setAsDefaultOutbound: false,
                   }),

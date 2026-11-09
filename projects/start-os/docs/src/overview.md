@@ -12,7 +12,7 @@ Each service runs in its own isolated container. StartOS doesn't use Docker or P
 
 On a service's page, its package gives you:
 
-- [Actions](actions.md): buttons, some of which open a form, that do what an administrator would otherwise do on the command line, such as showing credentials, changing a setting, resetting a password or connecting an integration. Some are available only while the service is running, or only while it's stopped.
+- [Actions](actions.md): buttons, some of which open a form, that do what an administrator would otherwise do on the command line, such as showing credentials, changing a setting, uploading or downloading a file, resetting a password or connecting an integration. Some are available only while the service is running, or only while it's stopped.
 - [Tasks](tasks.md): notifications that guide you through setup and upkeep, most of them by pointing to an action on this service or on a service it depends on. Each task is Required, Important or Recommended; while a Required task is open, the service stays stopped.
 - [Interfaces](interfaces.md): the service's web UIs, APIs and peer-to-peer endpoints.
 - [Instructions](instructions.md): the package developer's guide to setting up and using the service on StartOS.

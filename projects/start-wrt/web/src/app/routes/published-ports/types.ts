@@ -11,6 +11,7 @@ export type PublishedPortStatus =
   | 'active'
   | 'partial'
   | 'paused'
+  | 'inactive'
   | 'error'
   | 'disabled'
 
@@ -35,7 +36,6 @@ export interface PublishedPort {
 
 export interface PublishedPortDialogResult {
   port: PublishedPort
-  reserveIpv4: boolean
 }
 
 export interface PublishedPortDisplay extends PublishedPort {
