@@ -1,7 +1,12 @@
 import { Component, inject, input } from '@angular/core'
 import { i18nPipe } from '@start9labs/shared'
 import { TuiChip } from '@taiga-ui/kit'
-import { MarketplaceTrust, SignerStatusesPipe, TrustContext } from '../trust'
+import {
+  MarketplaceTrust,
+  SIGNER_STATUS_LABELS,
+  SignerStatusesPipe,
+  TrustContext,
+} from '../trust'
 
 @Component({
   selector: 'marketplace-signer-chips',
@@ -10,14 +15,17 @@ import { MarketplaceTrust, SignerStatusesPipe, TrustContext } from '../trust'
       signer of keys() | signerStatuses: trust.keys() ?? {} : context();
       track signer.id
     ) {
+      @let name = signer.name || ('Unknown key' | i18n);
+      @let status = statusLabels[signer.status] | i18n;
       <button
         tuiChip
         type="button"
         [appearance]="signer.status === 'trusted' ? 'positive' : 'neutral'"
         [iconStart]="signer.status === 'trusted' ? '@tui.check' : '@tui.minus'"
+        [attr.aria-label]="name === status ? name : name + ': ' + status"
         (click.stop)="trust.viewSigner(signer)"
       >
-        {{ signer.name || ('Unknown key' | i18n) }}
+        {{ name }}
       </button>
     }
   `,
@@ -32,6 +40,7 @@ import { MarketplaceTrust, SignerStatusesPipe, TrustContext } from '../trust'
 })
 export class MarketplaceSignerChipsComponent {
   protected readonly trust = inject(MarketplaceTrust)
+  protected readonly statusLabels = SIGNER_STATUS_LABELS
 
   readonly keys = input.required<readonly string[]>()
   readonly context = input<TrustContext>('marketplace')
