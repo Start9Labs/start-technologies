@@ -29,7 +29,7 @@ const TOR_PROXY: (&str, u16) = ("tor.startos", 9050);
 const CONNECT_ATTEMPT_DELAY: Duration = Duration::from_millis(250);
 const RESOLUTION_DELAY: Duration = Duration::from_millis(50);
 
-/// Uses host NSS, including split DNS and `/etc/hosts`.
+/// Uses libc resolution; musl reads `/etc/hosts` and `/etc/resolv.conf`.
 async fn lookup_family(
     domain: String,
     port: u16,
@@ -133,7 +133,7 @@ where
         .unwrap_or_else(|| Error::new(eyre!("no address to connect to"), ErrorKind::Network)))
 }
 
-/// Routes `.onion` through Tor and `.local` through Avahi; other names use host NSS.
+/// Routes `.onion` through Tor and `.local` through Avahi; other names use libc resolution.
 async fn connect_target(addr: TargetAddr) -> Result<TcpStream, Error> {
     match addr {
         TargetAddr::Domain(domain, port) if domain.ends_with(".onion") => Ok(
