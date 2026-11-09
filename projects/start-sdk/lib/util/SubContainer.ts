@@ -724,6 +724,8 @@ export class SubContainerEager<
   /**
    * Run a command inside this subcontainer.
    * Does NOT throw on non-zero exit (see {@link execFail}).
+   * Timeout and cancellation close output pipes; captured output may be incomplete.
+   * A command that already exited retains its exit status.
    *
    * @param command Argv array representing the command and its arguments
    * @param options Optional environment, user, cwd, stdin input, `timeout` (default 30 s, `null` for no timeout), and `abort`
@@ -767,7 +769,11 @@ export class SubContainerEager<
     return new Promise((resolve, reject) => {
       let killTimeout: NodeJS.Timeout | undefined
       let timedOut = false
-      const kill = () => child.kill('SIGKILL')
+      const kill = () => {
+        child.kill('SIGKILL')
+        child.stdout?.destroy()
+        child.stderr?.destroy()
+      }
       const cleanup = () => {
         clearTimeout(killTimeout)
         abort?.signal.removeEventListener('abort', kill)
