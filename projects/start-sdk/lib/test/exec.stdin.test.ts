@@ -21,8 +21,8 @@ function fakeChild() {
   const child = new EventEmitter() as any
   child.pid = 4242
   child.kill = jest.fn()
-  child.stdout = new EventEmitter()
-  child.stderr = new EventEmitter()
+  child.stdout = Object.assign(new EventEmitter(), { destroy: jest.fn() })
+  child.stderr = Object.assign(new EventEmitter(), { destroy: jest.fn() })
   child.input = ''
   child.stdin = Object.assign(new EventEmitter(), {
     write: jest.fn((data: string, cb: (e?: Error) => void) => {

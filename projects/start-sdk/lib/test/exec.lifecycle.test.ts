@@ -1,4 +1,5 @@
-import { EventEmitter, getEventListeners } from 'node:events'
+import { EventEmitter, getEventListeners, once } from 'node:events'
+import { PassThrough } from 'node:stream'
 import * as cp from 'child_process'
 import { HealthDaemon } from '../mainFn/HealthDaemon'
 import { SubContainerEager } from '../util/SubContainer'
@@ -11,19 +12,27 @@ jest.mock('child_process', () => ({
 function fakeChild(mode = 'fast') {
   const child = new EventEmitter() as any
   child.pid = 4242
-  child.stdout = new EventEmitter()
-  child.stderr = new EventEmitter()
+  child.stdout = new PassThrough()
+  child.stderr = new PassThrough()
   child.stdin = new EventEmitter()
+  const outputClosed = Promise.all([
+    once(child.stdout, 'close'),
+    once(child.stderr, 'close'),
+  ])
   let exited = false
   function exit(code: number | null, signal: NodeJS.Signals | null = null) {
     if (exited) return false
     exited = true
     child.emit('exit', code, signal)
-    setImmediate(() => {
-      child.stdout.emit('data', 'tail')
-      child.stderr.emit('data', 'diagnostic')
-      child.emit('close', code, signal)
-    })
+    if (mode === 'open-output') {
+      void outputClosed.then(() => child.emit('close', code, signal))
+    } else {
+      setImmediate(() => {
+        child.stdout.emit('data', 'tail')
+        child.stderr.emit('data', 'diagnostic')
+        child.emit('close', code, signal)
+      })
+    }
     return true
   }
   child.kill = jest.fn((signal: NodeJS.Signals) => exit(null, signal))
@@ -130,6 +139,29 @@ test('the deadline covers a stdin callback that never arrives', async () => {
     timedOutAfter: 10,
   })
 })
+
+test.each(['deadline', 'abort'] as const)(
+  '%s settles when a descendant holds output pipes after command exit',
+  async reason => {
+    const { sub, child } = subject('open-output')
+    const exited = once(child, 'exit')
+    const abort = new AbortController()
+    const result = sub.exec(['sh', '-c', 'sleep 60 &'], {
+      timeout: reason === 'deadline' ? 10 : null,
+      abort,
+    })
+    await exited
+    if (reason === 'abort') abort.abort()
+    await expect(bounded(result)).resolves.toMatchObject({
+      exitCode: 0,
+      exitSignal: null,
+      timedOutAfter: null,
+    })
+    expect(child.stdout.destroyed).toBe(true)
+    expect(child.stderr.destroyed).toBe(true)
+    expect(getEventListeners(abort.signal, 'abort')).toHaveLength(0)
+  },
+)
 
 test('spawn failure rejects even before stdin has finished', async () => {
   const { sub } = subject('spawn-error')
