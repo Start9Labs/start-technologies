@@ -119,6 +119,9 @@ impl Migration {
                 "serve each reserved device's name only within its own profile"
             }
             Migration::ReissueRootCa => "reissue the Root CA in a form iOS can install",
+            Migration::NameProfileFirewallSections => {
+                "name the firewall rules earlier versions created for each profile"
+            }
         }
     }
 }
