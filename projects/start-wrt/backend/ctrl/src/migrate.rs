@@ -126,6 +126,7 @@ impl Migration {
             Migration::NameProfileFirewallSections => {
                 "keep firewall rules added in LuCI when a profile is saved"
             }
+            Migration::BindLuciToLoopback => "serve LuCI only over HTTPS",
         }
     }
 }
