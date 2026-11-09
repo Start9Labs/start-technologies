@@ -44,7 +44,10 @@ The receiving server verifies the client proof and exact body before applying th
 existing `accept_nonce` clock/replay policy. RPC admission and secure-origin GUID
 redemption use the same policy owner. A GUID also requires the original client
 identity. Replay checking must not retain the RPC context, cache clock/enrollment
-state or introduce a second nonce cache. No RPC callback receives unverified data.
+state or introduce a second nonce cache. `SignatureAuthContext` owns that policy;
+`RequestReplayCheck` acquires it weakly through `SecureRpcContext::replay_check`.
+Creating an unpolled check must not keep its authentication owner alive.
+No RPC callback receives unverified data.
 
 Each connection gets a fresh client ephemeral key, commitment and nonce. Client
 signing finishes before the network/exchange deadline; identity-provider handles
