@@ -8,6 +8,46 @@ This file tracks notable changes since the move to the monorepo, and is what eac
 [GitHub release](https://github.com/Start9Labs/start-technologies/releases) links to
 for the detail behind its highlights.
 
+## [0.4.2]
+
+### Added
+
+- Service actions can now let you upload and download files, with progress shown during uploads.
+
+### Fixed
+
+- Display apostrophes and other special characters correctly in action-form list headings.
+- Correct the maximum text-length error message.
+
+- Submitting an action's input no longer reloads the page.
+- Pressing Enter in SMTP settings saves changes instead of cancelling them; in the test-email field, it sends the email instead of reloading the page.
+
+- Long dropdown lists keep their background all the way down, so the page behind no longer shows through the options.
+
+- Show server-provided plaintext HTTP error details and preserve meaningful timeout and cancellation errors.
+
+- The installer no longer offers the USB drive it was booted from as the OS drive or the data drive.
+
+- Automatic firewall configuration (PCP) now opens IPv6 ports on home routers, so a public address published over IPv6 is reachable without a manual firewall rule.
+
+- Numeric forms preserve zero defaults and honor bounds set to zero.
+
+- Improved access to services through public domains over IPv6.
+- Service updates keep your public domains off if you switched them off.
+- For services that StartOS forwards directly, public domains and the public IP addresses they use now turn on and off together.
+
+- Preserve saved Ethernet and Wi-Fi settings across server restarts.
+
+- Improved wired network reliability on Server Pure.
+
+- Sideloaded packages appear in Installed services with upload progress before the upload finishes.
+
+- Show registry contact email addresses alongside GPG identities in Trusted Keys.
+
+- Record virtual-host client/service connection failures at trace level instead of flooding normal logs. Use `start-cli server set-log-level trace` for temporary `start-core`/`start-os` trace output, or choose `error`, `warn`, `info`, or `debug`. The startup log filter is restored when the daemon restarts.
+
+- Reject source-preserving proxy connections when the client's address cannot be preserved, instead of substituting the host's address. Services on unproxied TLS bindings need an IPv6 listener to accept IPv6 clients; TLS rejection does not trigger automatic IPv4 fallback.
+
 ## [0.4.1.2]
 
 ### Changed
