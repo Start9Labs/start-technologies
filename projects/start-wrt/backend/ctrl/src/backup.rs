@@ -396,12 +396,14 @@ async fn restore(
                         None,
                     );
 
+                    crate::boot::record_reboot(crate::boot::RunState::Restoring);
                     tokio::spawn(async {
                         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                         if let Err(e) = Command::new("reboot")
                             .invoke(ErrorKind::Filesystem.into())
                             .await
                         {
+                            crate::boot::record_running();
                             tracing::error!("failed to reboot after restore: {e}");
                         }
                     });

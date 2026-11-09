@@ -102,7 +102,8 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::auth::{
-        AuthKeys, CreateTokenParams, Sessions, TokenSessions, create_token, revoke_tokens,
+        AuthKeys, CreateTokenParams, LoginAttempt, Sessions, TokenSessions, create_token,
+        revoke_tokens,
     };
     use crate::middleware::auth::signature::{
         AUTH_SIG_HEADER, LoginMetadata, NonceCache, SignatureAuthContext, SignatureHeader,
@@ -126,6 +127,7 @@ pub(crate) mod tests {
         db: TypedPatchDb<TestDb>,
         nonces: SyncMutex<NonceCache>,
         continuations: OpenAuthedContinuations<Option<InternedString>>,
+        login_attempts: SyncMutex<Vec<(LoginAttempt, bool)>>,
     }
     impl Context for TestCtx {}
     impl DbContext for TestCtx {
@@ -167,9 +169,9 @@ pub(crate) mod tests {
             &self,
             db: &Model<TestDb>,
             pubkey: Option<&AnyVerifyingKey>,
-            _: LoginMetadata,
+            metadata: LoginMetadata,
         ) -> Result<(), Error> {
-            check_enrolled(pubkey, false, |id| {
+            check_enrolled(pubkey, metadata.login, |id| {
                 Ok(db.as_sessions().as_pubkeys().as_idx(id).is_some())
             })
             .map(|_| ())
@@ -185,10 +187,20 @@ pub(crate) mod tests {
         fn access_tokens(db: &mut Model<TestDb>) -> Option<&mut Model<TokenSessions>> {
             Some(db.as_sessions_mut().as_tokens_mut())
         }
-        fn check_password(_: &Model<TestDb>, _: &str) -> Result<(), Error> {
+        fn check_password(_: &Model<TestDb>, password: &str) -> Result<(), Error> {
+            if password == WRONG_PASSWORD {
+                return Err(Error::new(eyre!("wrong"), ErrorKind::IncorrectPassword));
+            }
             Ok(())
         }
+        async fn login_attempt_hook(&self, attempt: &LoginAttempt, result: Result<(), &Error>) {
+            self.0
+                .login_attempts
+                .mutate(|attempts| attempts.push((attempt.clone(), result.is_ok())));
+        }
     }
+
+    const WRONG_PASSWORD: &str = "wrong-password";
 
     #[derive(Deserialize, Serialize)]
     struct WhoAmI {
@@ -205,6 +217,7 @@ pub(crate) mod tests {
             .unwrap(),
             nonces: SyncMutex::new(NonceCache::default()),
             continuations: OpenAuthedContinuations::new(),
+            login_attempts: SyncMutex::new(Vec::new()),
         }))
     }
 
@@ -215,13 +228,24 @@ pub(crate) mod tests {
                 let ctx = ctx.clone();
                 async move { Ok(ctx) }
             },
-            ParentHandler::new().subcommand(
-                "whoami",
-                from_fn_async(|_: TestCtx, p: WhoAmI| async move { Ok::<_, Error>(p.signer) })
-                    .with_metadata("get_signer", Value::Bool(true))
-                    .no_cli()
-                    .no_ts(),
-            ),
+            ParentHandler::new()
+                .subcommand(
+                    "whoami",
+                    from_fn_async(|_: TestCtx, p: WhoAmI| async move { Ok::<_, Error>(p.signer) })
+                        .with_metadata("get_signer", Value::Bool(true))
+                        .no_cli()
+                        .no_ts(),
+                )
+                .subcommand(
+                    "login",
+                    from_fn_async(crate::auth::login_impl::<TestCtx>)
+                        .with_metadata("login", Value::Bool(true))
+                        .with_metadata("get_signer", Value::Bool(true))
+                        .with_metadata("get_user_agent", Value::Bool(true))
+                        .with_metadata("get_peer", Value::Bool(true))
+                        .no_cli()
+                        .no_ts(),
+                ),
         )
         .middleware(Auth::new().with_bearer_auth().with_signature_auth())
     }
@@ -239,8 +263,72 @@ pub(crate) mod tests {
         serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
     }
 
+    async fn login(
+        server: &HttpServer<TestCtx>,
+        key: &AnySigningKey,
+        password: &str,
+    ) -> serde_json::Value {
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "login",
+            "params": { "password": password, "pubkey": key.verifying_key() },
+        })
+        .to_string();
+        let signature = SignatureHeader::sign(&key.clone().into(), body.as_bytes(), "localhost")
+            .await
+            .unwrap()
+            .to_header();
+        let mut request = http::Request::builder()
+            .method("POST")
+            .uri("/rpc/v1")
+            .header(AUTH_SIG_HEADER, signature)
+            .header(http::header::USER_AGENT, "test-client/1")
+            .body(Body::from(body))
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(crate::net::web_server::TcpMetadata {
+                peer_addr: "192.168.0.23:51234".parse().unwrap(),
+                local_addr: "192.168.0.1:443".parse().unwrap(),
+            });
+        let response = server.handle(request).await;
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+    }
+
     fn bearer_headers(token: &str) -> http::HeaderMap {
         http::HeaderMap::from_iter([(AUTHORIZATION, format!("Bearer {token}").parse().unwrap())])
+    }
+
+    #[tokio::test]
+    async fn login_attempts_carry_their_peer_and_outcome() {
+        let ctx = context().await;
+        let server = server(&ctx);
+        let key = AnySigningKey::Ed25519(ed25519_dalek::SigningKey::generate(
+            &mut crate::util::crypto::os_rng(),
+        ));
+
+        let accepted = login(&server, &key, "right-password").await;
+        assert!(accepted["error"].is_null(), "{accepted}");
+        let refused = login(&server, &key, WRONG_PASSWORD).await;
+        assert_eq!(
+            refused["error"]["code"],
+            ErrorKind::IncorrectPassword as i32,
+            "{refused}"
+        );
+
+        let peer: Option<std::net::IpAddr> = Some("192.168.0.23".parse().unwrap());
+        let agent = Some("test-client/1".to_string());
+        let attempts = ctx.0.login_attempts.peek(|attempts| {
+            attempts
+                .iter()
+                .map(|(attempt, ok)| (attempt.peer, attempt.user_agent.clone(), *ok))
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(
+            attempts,
+            [(peer, agent.clone(), true), (peer, agent, false)]
+        );
     }
 
     #[tokio::test]

@@ -579,4 +579,5 @@ export default {
   615: 'Puertos publicados que se eliminan con este perfil: {list}.',
   616: 'Fuera de la subred del perfil de este dispositivo',
   617: 'No es una dirección de host utilizable',
+  618: 'Este dispositivo intenta publicar registros DNS. Permita la publicación de registros DNS para que se resuelvan en su red.',
 } satisfies i18n
