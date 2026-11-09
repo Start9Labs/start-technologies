@@ -44,6 +44,8 @@ Removing an external drive or CIFS share target leaves its backups on the drive 
 >
 > If you are using a Raspberry Pi, backup drive _must_ be self-powered, or be connected via a powered USB hub, to prevent possible data corruption.
 
+Add drives that already contain this server's backups in the same way. Re-add a removed target to access its preserved backups.
+
 1. Plug the drive into your server.
 
 1. In **System → Backups**, select **Add**, then **External drive**.

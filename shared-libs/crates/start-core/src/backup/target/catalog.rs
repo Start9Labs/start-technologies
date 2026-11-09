@@ -447,6 +447,8 @@ pub(crate) fn write_inspection(
         })
 }
 
+/// Drive targets require explicit registration.
+/// Consumes legacy CIFS registrations; same-version pre-feature development rollback is unsupported.
 pub(crate) fn initialize(db: &mut DatabaseModel) -> Result<(), Error> {
     let mut targets = db.as_public().as_backup_targets().de()?;
     let mut credentials = db.as_private().as_backup_target_credentials().de()?;

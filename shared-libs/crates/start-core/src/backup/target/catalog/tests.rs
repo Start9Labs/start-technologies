@@ -220,6 +220,46 @@ async fn registered_filesystem_preserves_inline_backup_cifs_policy_identity() {
 }
 
 #[test]
+fn attached_backup_drives_remain_unregistered_across_initialization() {
+    use crate::disk::util::{DiskInfo, PartitionInfo, PartitionTable};
+
+    let mut db = database();
+    let disks = vec![DiskInfo {
+        logicalname: "/dev/sdb".into(),
+        stable_path: "/dev/disk/by-path/backup-drive".into(),
+        partition_table: Some(PartitionTable::Gpt),
+        vendor: None,
+        model: None,
+        capacity: 1 << 30,
+        guid: None,
+        filesystem: None,
+        partitions: vec![PartitionInfo {
+            logicalname: "/dev/sdb1".into(),
+            stable_path: "/dev/disk/by-path/backup-drive-part1".into(),
+            label: Some("Backups".into()),
+            capacity: 1 << 30,
+            used: None,
+            available: None,
+            start_os: BTreeMap::from([("server".to_owned(), StartOsRecoveryInfo::default())]),
+            legacy_backup: true,
+            guid: Some("11111111-1111-1111-1111-111111111111".into()),
+            filesystem: Some("btrfs".into()),
+        }],
+    }];
+    db.as_public_mut().as_disks_mut().ser(&disks).unwrap();
+    for _ in 0..2 {
+        initialize(&mut db).unwrap();
+        let targets = db.as_public().as_backup_targets().de().unwrap();
+        assert_eq!(targets.len(), 1);
+        assert!(targets.contains_key(&"cifs-7".parse().unwrap()));
+        assert_eq!(
+            serde_json::to_value(db.as_public().as_disks().de().unwrap()).unwrap(),
+            serde_json::to_value(&disks).unwrap()
+        );
+    }
+}
+
+#[test]
 fn migration_preserves_identity_intent_and_secrets_without_a_second_catalog() {
     let mut db = database();
     initialize(&mut db).unwrap();
