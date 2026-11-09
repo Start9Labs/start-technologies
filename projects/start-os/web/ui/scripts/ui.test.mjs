@@ -2008,6 +2008,76 @@ test('remove/reinsert while erase confirmation is open requires a fresh choice b
   assert.equal(f.form.get('path').value, 'library/photos')
 })
 
+test('erase confirmation rejects a different inventory description at the same device name', async t => {
+  for (const replace of [
+    disk => ({ ...disk, stablePath: `${disk.stablePath}-replacement` }),
+    disk => ({ ...disk, vendor: `${disk.vendor}-replacement` }),
+    disk => ({ ...disk, model: `${disk.model}-replacement` }),
+    disk => ({ ...disk, capacity: disk.capacity + 1 }),
+    disk => ({ ...disk, guid: `${disk.guid}-replacement` }),
+    disk => ({
+      ...disk,
+      partitions: disk.partitions.map(partition => ({
+        ...partition,
+        guid: `${partition.guid}-replacement`,
+      })),
+    }),
+    disk => ({ ...disk, partitions: [] }),
+  ]) {
+    const f = editingDriveForm(t, 'format')
+    await tick()
+    const confirmation = new Subject()
+    f.model.dialogs.openConfirm = () => confirmation
+    const saving = f.model.buttons[0].handler(f.form.getRawValue())
+    f.attach(
+      VolumeMock.Disks.map(disk =>
+        disk.logicalname === '/dev/sdc' ? replace(disk) : disk,
+      ),
+    )
+    await tick()
+    confirmation.next(true)
+    confirmation.complete()
+    assert.equal(await saving, false)
+    assert.deepEqual(f.requests, [])
+  }
+})
+
+test('erase confirmation snapshots an inventory entry before an in-place cache update', async t => {
+  const f = editingDriveForm(t, 'format')
+  const drives = structuredClone(VolumeMock.Disks)
+  f.attach(drives)
+  await tick()
+  const confirmation = new Subject()
+  f.model.dialogs.openConfirm = () => confirmation
+  const saving = f.model.buttons[0].handler(f.form.getRawValue())
+  const disk = drives.find(disk => disk.logicalname === '/dev/sdc')
+  assert.ok(disk)
+  disk.model = `${disk.model}-replacement`
+  f.attach(drives)
+  await tick()
+  confirmation.next(true)
+  confirmation.complete()
+  assert.equal(await saving, false)
+  assert.deepEqual(f.requests, [])
+})
+
+test('erase confirmation accepts an unchanged inventory description', async t => {
+  const f = editingDriveForm(t, 'format')
+  await tick()
+  const confirmation = new Subject()
+  f.model.dialogs.openConfirm = () => confirmation
+  const saving = f.model.buttons[0].handler(f.form.getRawValue())
+  f.attach(structuredClone(VolumeMock.Disks))
+  await tick()
+  confirmation.next(true)
+  confirmation.complete()
+  assert.equal(await saving, true)
+  assert.equal(
+    f.requests.filter(request => request.kind === 'format').length,
+    1,
+  )
+})
+
 test('volume sources map blank optional fields to their wire defaults', () => {
   assert.deepEqual(diskSource('/dev/sdc1', null), {
     kind: 'disk',

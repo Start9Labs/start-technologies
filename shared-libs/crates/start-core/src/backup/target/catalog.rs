@@ -273,34 +273,42 @@ pub(super) fn ensure_cifs(db: &DatabaseModel, id: &BackupTargetId) -> Result<(),
 }
 
 pub async fn remove(ctx: RpcContext, TargetParams { id }: TargetParams) -> Result<(), Error> {
-    let db = ctx.db.peek().await;
+    remove_target(&ctx.db, &id, Path::new(crate::DATA_DIR)).await
+}
+
+async fn remove_target(
+    database: &TypedPatchDb<crate::db::model::Database>,
+    id: &BackupTargetId,
+    data_dir: &Path,
+) -> Result<(), Error> {
+    let db = database.peek().await;
     let source = db
         .as_public()
         .as_backup_targets()
-        .as_idx(&id)
+        .as_idx(id)
         .map(|target| target.as_source().de())
         .transpose()?;
     let local = matches!(source, None | Some(SharedVolumeSource::Local));
-    let path = local_path(crate::DATA_DIR, &id);
+    let path = local_path(data_dir, id);
     let _unused = if local {
         Some(TmpMountGuard::reserve_unmounted(&Bind::new(&path), ReadOnly).await?)
     } else {
         None
     };
-    ctx.db
-        .mutate(|db| {
-            db.as_public_mut().as_backup_targets_mut().remove(&id)?;
-            db.as_private_mut()
-                .as_backup_target_credentials_mut()
-                .remove(&id)?;
-            Ok(())
-        })
-        .await
-        .result?;
+    // Registration survives failed or interrupted managed-data deletion.
     if local {
         crate::util::io::delete_dir(&path).await?;
     }
-    Ok(())
+    database
+        .mutate(|db| {
+            db.as_public_mut().as_backup_targets_mut().remove(id)?;
+            db.as_private_mut()
+                .as_backup_target_credentials_mut()
+                .remove(id)?;
+            Ok(())
+        })
+        .await
+        .result
 }
 
 pub async fn inspect(

@@ -24,14 +24,12 @@ enum Event {
 #[derive(Debug, PartialEq, Eq)]
 enum InspectionEvent {
     None,
-    Check,
     Restart,
 }
 
 fn inspection_event(event: Option<&Event>, source: &SharedVolumeSource) -> InspectionEvent {
     match (event, source) {
         (Some(Event::Disks), SharedVolumeSource::Disk { .. }) => InspectionEvent::Restart,
-        (Some(Event::Network), SharedVolumeSource::Cifs { .. }) => InspectionEvent::Check,
         _ => InspectionEvent::None,
     }
 }
@@ -115,10 +113,7 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
                     .get(id)
                     .is_some_and(|source| source.definition == *definition)
         });
-        retries.retain(|id, _| sources.get(id).is_some_and(|source| source.retryable));
-        if matches!(event, Some(Event::Network)) {
-            retries.clear();
-        }
+        retries.retain(|id, _| sources.get(id).is_some_and(|source| source.retryable()));
         if matches!(event, Some(Event::Disks))
             || retire_at.is_some_and(|deadline| deadline <= Instant::now())
         {
@@ -180,11 +175,9 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
         }
         for (id, source) in sources {
             let trigger = inspection_event(event.as_ref(), source.definition.source());
-            let full = startup
-                || trigger != InspectionEvent::None
-                || source.inspection.availability == SharedVolumeAvailability::Unknown;
+            let full = source.needs_inspection(startup, trigger == InspectionEvent::Restart);
             if matches!(source.definition.source(), SharedVolumeSource::Cifs { .. })
-                && (full || source.retryable)
+                && (full || source.retryable())
                 && source
                     .existing()
                     .await
@@ -219,7 +212,7 @@ async fn watch(context: impl Fn() -> Option<RpcContext>) -> Result<(), Error> {
             if running.contains_key(&id) {
                 continue;
             }
-            let tcp = source.retryable
+            let tcp = source.retryable()
                 && retries
                     .entry(id.clone())
                     .or_insert_with(|| Retry::new(Instant::now()))
@@ -265,7 +258,7 @@ mod tests {
         };
         assert_eq!(
             inspection_event(Some(&Event::Network), &cifs),
-            InspectionEvent::Check
+            InspectionEvent::None
         );
         assert_eq!(
             inspection_event(Some(&Event::Disks), &disk),

@@ -40,6 +40,30 @@ function selectedDisk(drives: Disk[], value?: T.DeepPartial<DriveValue>) {
     : undefined
 }
 
+// Matching inventory descriptions do not attest physical hardware identity.
+function sameDriveDescription(a: Disk, b: Disk) {
+  return (
+    a.stablePath === b.stablePath &&
+    a.vendor === b.vendor &&
+    a.model === b.model &&
+    a.capacity === b.capacity &&
+    a.guid === b.guid &&
+    a.filesystem === b.filesystem &&
+    a.partitionTable === b.partitionTable &&
+    a.partitions.length === b.partitions.length &&
+    a.partitions.every((partition, index) => {
+      const other = b.partitions[index]
+      return (
+        partition.logicalname === other?.logicalname &&
+        partition.stablePath === other.stablePath &&
+        partition.guid === other.guid &&
+        partition.filesystem === other.filesystem &&
+        partition.capacity === other.capacity
+      )
+    })
+  )
+}
+
 @Component({
   template: `
     @if (spec(); as spec) {
@@ -114,17 +138,21 @@ export class DriveVolumeForm {
         'Saving',
       )
     this.value = value
-    if (!(await this.confirmErase(disk))) return false
+    // PatchDB cache entries can mutate during confirmation.
+    const confirmedDisk = structuredClone(disk)
+    if (!(await this.confirmErase(confirmedDisk))) return false
     this.rememberValue()
+    const current = selectedDisk(this.drives() ?? [], this.value)
     if (
       this.value?.drive?.selection !== drive.selection ||
       this.value?.drive?.value?.partition !== FORMAT ||
-      !selectedDisk(this.drives() ?? [], this.value)
+      !current ||
+      !sameDriveDescription(current, confirmedDisk)
     )
       return false
     return this.tasks.run(async () => {
       const formatted = await this.api.rpc.disk.format({
-        disk: disk.logicalname,
+        disk: confirmedDisk.logicalname,
         label: name,
       })
       try {

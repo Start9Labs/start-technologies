@@ -45,7 +45,7 @@ Uninstalling or rolling back a consuming service leaves volume contents untouche
 
 Select volumes independently alongside services when [creating a backup](backups.md#creating-a-backup). Each selected volume copies its complete backing folder, including network sources. An unavailable source fails that item rather than producing an empty successful copy.
 
-Use a backup destination outside every selected volume, including any server-side aliases of those folders. An external-drive volume cannot be backed up onto the same partition.
+Use a backup destination outside every selected volume, including any server-side aliases of those folders. Disjoint folders on the same partition can be used. Configured paths are compared without case distinctions, and opened directory identities are checked for overlapping contents.
 
 A service backup excludes its attached volume contents. Back up the volume itself to protect those files.
 

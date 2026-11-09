@@ -61,8 +61,8 @@ fn snapshot_keeps_collection_ids_distinct_and_retries_only_required_unavailable_
     let (mut db, volume_id, target_id) = database();
     let sources = snapshot(&db).unwrap();
     assert_eq!(sources.len(), 2);
-    assert!(!sources[&SourceId::Volume(volume_id.clone())].retryable);
-    assert!(sources[&SourceId::Target(target_id.clone())].retryable);
+    assert!(!sources[&SourceId::Volume(volume_id.clone())].retryable());
+    assert!(sources[&SourceId::Target(target_id.clone())].retryable());
     db.as_public_mut()
         .as_shared_volumes_mut()
         .as_idx_mut(&volume_id)
@@ -73,7 +73,7 @@ fn snapshot_keeps_collection_ids_distinct_and_retries_only_required_unavailable_
             &SharedVolumeGrant { readonly: true },
         )
         .unwrap();
-    assert!(snapshot(&db).unwrap()[&SourceId::Volume(volume_id.clone())].retryable);
+    assert!(snapshot(&db).unwrap()[&SourceId::Volume(volume_id.clone())].retryable());
     db.as_public_mut()
         .as_backup_targets_mut()
         .as_idx_mut(&target_id)
@@ -83,7 +83,40 @@ fn snapshot_keeps_collection_ids_distinct_and_retries_only_required_unavailable_
             Ok(())
         })
         .unwrap();
-    assert!(!snapshot(&db).unwrap()[&SourceId::Target(target_id)].retryable);
+    assert!(!snapshot(&db).unwrap()[&SourceId::Target(target_id)].retryable());
+}
+
+#[test]
+fn cold_cifs_checks_require_intent_and_available_sources_stay_passive() {
+    let (mut db, volume_id, target_id) = database();
+    let sources = snapshot(&db).unwrap();
+    let mut ungranted = sources[&SourceId::Volume(volume_id.clone())].clone();
+    ungranted.inspection = Default::default();
+    assert!(!ungranted.needs_inspection(true, false));
+    assert!(!ungranted.needs_inspection(false, false));
+    db.as_public_mut()
+        .as_shared_volumes_mut()
+        .as_idx_mut(&volume_id)
+        .unwrap()
+        .as_grants_mut()
+        .insert(
+            &"consumer".parse().unwrap(),
+            &SharedVolumeGrant { readonly: true },
+        )
+        .unwrap();
+    let sources = snapshot(&db).unwrap();
+    for id in [SourceId::Volume(volume_id), SourceId::Target(target_id)] {
+        let mut source = sources[&id].clone();
+        source.inspection = Default::default();
+        assert!(source.needs_inspection(true, false));
+        assert!(source.needs_inspection(false, false));
+        source.inspection = SharedVolumeInspection::unavailable("offline".into());
+        assert!(!source.needs_inspection(false, false));
+        assert!(source.retryable());
+        source.inspection = SharedVolumeInspection::available(Some(123));
+        assert!(!source.needs_inspection(false, false));
+        assert!(!source.retryable());
+    }
 }
 
 #[test]

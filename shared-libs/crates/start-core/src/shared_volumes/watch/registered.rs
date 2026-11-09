@@ -38,7 +38,7 @@ pub(super) struct RegisteredSource {
     pub id: SourceId,
     pub definition: SourceDefinition,
     pub inspection: SharedVolumeInspection,
-    pub retryable: bool,
+    pub check_unmounted: bool,
 }
 
 pub(super) fn snapshot(db: &DatabaseModel) -> Result<BTreeMap<SourceId, RegisteredSource>, Error> {
@@ -46,16 +46,13 @@ pub(super) fn snapshot(db: &DatabaseModel) -> Result<BTreeMap<SourceId, Register
     let mut insert =
         |id: SourceId, inspection: SharedVolumeInspection, required: bool| -> Result<(), Error> {
             let definition = id.definition(db)?;
-            let retryable = required
-                && matches!(definition.source(), SharedVolumeSource::Cifs { .. })
-                && inspection.availability == SharedVolumeAvailability::Unavailable;
             sources.insert(
                 id.clone(),
                 RegisteredSource {
                     id,
                     definition,
                     inspection,
-                    retryable,
+                    check_unmounted: required,
                 },
             );
             Ok(())
@@ -80,6 +77,21 @@ pub(super) fn directory_inspector<'a>(
 }
 
 impl RegisteredSource {
+    // Cold CIFS checks require a granted volume or a registered target.
+    pub fn needs_inspection(&self, startup: bool, restart: bool) -> bool {
+        let cifs = matches!(self.definition.source(), SharedVolumeSource::Cifs { .. });
+        (!cifs || self.check_unmounted)
+            && (startup
+                || restart
+                || self.inspection.availability == SharedVolumeAvailability::Unknown)
+    }
+
+    pub fn retryable(&self) -> bool {
+        self.check_unmounted
+            && matches!(self.definition.source(), SharedVolumeSource::Cifs { .. })
+            && self.inspection.availability == SharedVolumeAvailability::Unavailable
+    }
+
     pub fn needs_contents(&self) -> bool {
         matches!(self.id, SourceId::Target(_))
             && catalog::needs_content_validation(&self.inspection)

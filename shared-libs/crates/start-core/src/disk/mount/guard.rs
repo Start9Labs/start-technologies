@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::ErrorKind as IoErrorKind;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -144,6 +144,9 @@ impl MountGuard {
         if self.is_mounted() {
             unmount(&self.mountpoint, true).await?;
             self.mounted.store(false, Ordering::Release);
+            if let Some(device) = &self.device {
+                RETIRED_DEVICES.mutate(|retired| retired.insert(device.path.clone()));
+            }
         }
         Ok(())
     }
@@ -241,6 +244,8 @@ async fn tmp_mountpoint(source: &impl FileSystem, mount_type: MountType) -> Resu
 lazy_static! {
     static ref TMP_MOUNTS: SyncMutex<BTreeMap<PathBuf, MountSlot>> =
         SyncMutex::new(BTreeMap::new());
+    // Consumer invalidation survives callers replacing a stale mount before observation.
+    static ref RETIRED_DEVICES: SyncMutex<BTreeSet<PathBuf>> = SyncMutex::new(BTreeSet::new());
 }
 
 fn mount_slot(mountpoint: PathBuf, mount_type: MountType) -> MountSlot {
@@ -354,7 +359,6 @@ impl TmpMountGuard {
 
     pub(crate) async fn retire_changed_devices() -> (Vec<PathBuf>, bool) {
         let slots = TMP_MOUNTS.mutate(|mounts| mounts.values().cloned().collect::<Vec<_>>());
-        let mut retired = Vec::new();
         let mut pending = false;
         for slot in slots {
             let Ok(mut slot) = slot.try_lock() else {
@@ -370,25 +374,25 @@ impl TmpMountGuard {
             let result = async {
                 if !guard.device_is_current().await? {
                     guard.retire().await?;
-                    Ok(Some(guard.device.as_ref().unwrap().path.clone()))
+                    Ok(true)
                 } else {
-                    Ok(None)
+                    Ok(false)
                 }
             }
             .await;
             match result {
-                Ok(Some(path)) => {
-                    retired.push(path);
-                    slot.1 = Weak::new();
-                }
-                Ok(None) => {}
+                Ok(true) => slot.1 = Weak::new(),
+                Ok(false) => {}
                 Err(error) => {
                     pending = true;
                     Result::<(), Error>::Err(error).log_err();
                 }
             }
         }
-        (retired, pending)
+        (
+            RETIRED_DEVICES.mutate(std::mem::take).into_iter().collect(),
+            pending,
+        )
     }
 
     pub(crate) fn downgrade(&self) -> WeakMountGuard {
@@ -658,6 +662,54 @@ mod tests {
         tokio::fs::remove_file(&alias).await.unwrap();
         tokio::fs::symlink(&second, &alias).await.unwrap();
         assert!(!identity.is_current().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn caller_replacement_remains_visible_to_device_observation() {
+        struct Filesystem {
+            id: String,
+            node: PathBuf,
+        }
+        impl FileSystem for Filesystem {
+            async fn mount<P: AsRef<Path> + Send>(&self, _: P, _: MountType) -> Result<(), Error> {
+                Ok(())
+            }
+            async fn source_hash(&self) -> Result<digest::Output<sha2::Sha256>, Error> {
+                use digest::Digest;
+                Ok(sha2::Sha256::digest(self.id.as_bytes()))
+            }
+            async fn device(&self) -> Result<Option<PathBuf>, Error> {
+                Ok(Some(self.node.clone()))
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let node = directory.path().join("node");
+        tokio::fs::write(&node, b"original").await.unwrap();
+        let filesystem = Filesystem {
+            id: crate::shared_volumes::SharedVolumeId::new().to_string(),
+            node: node.clone(),
+        };
+        let mountpoint = tmp_mountpoint(&filesystem, ReadOnly).await.unwrap();
+        let slot = mount_slot(mountpoint.clone(), ReadOnly);
+        let old = Arc::new(MountGuard {
+            mountpoint,
+            mounted: AtomicBool::new(true),
+            device: Some(DeviceIdentity::capture(node.clone()).await.unwrap()),
+            slot: Some(slot.clone()),
+        });
+        slot.lock().await.1 = Arc::downgrade(&old);
+        tokio::fs::rename(&node, directory.path().join("old-node"))
+            .await
+            .unwrap();
+        tokio::fs::write(&node, b"replacement").await.unwrap();
+        let current = TmpMountGuard::mount(&filesystem, ReadOnly).await.unwrap();
+        assert!(!old.is_mounted());
+        assert!(current.guard.device_is_current().await.unwrap());
+        let (retired, _) = TmpMountGuard::retire_changed_devices().await;
+        assert!(retired.contains(&node));
+        let (retired, _) = TmpMountGuard::retire_changed_devices().await;
+        assert!(!retired.contains(&node));
+        current.guard.mounted.store(false, Ordering::Release);
     }
 
     #[tokio::test]

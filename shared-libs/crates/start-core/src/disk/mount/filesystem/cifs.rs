@@ -76,16 +76,8 @@ pub(crate) async fn locations_overlap(
     source: (&str, &Path),
     destination: (&str, &Path),
 ) -> Result<bool, Error> {
-    let components = |path: &Path| {
-        path.components()
-            .filter_map(|part| match part {
-                std::path::Component::Normal(name) => Some(name.to_string_lossy().to_lowercase()),
-                _ => None,
-            })
-            .collect::<PathBuf>()
-    };
-    let source_path = components(source.1);
-    let destination_path = components(destination.1);
+    let source_path = crate::util::io::case_folded(source.1);
+    let destination_path = crate::util::io::case_folded(destination.1);
     if !crate::util::io::paths_overlap(&source_path, &destination_path) {
         return Ok(false);
     }

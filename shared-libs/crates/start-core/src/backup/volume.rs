@@ -127,19 +127,32 @@ pub(super) async fn backup_volume(
     )
     .await?
     {
-        return Err(Error::new(
-            eyre!(t!("backup.volume.overlapping-target")),
-            ErrorKind::Backup,
-        ));
+        return Err(overlapping_target_error());
     }
     let source = source::open_source(ctx, id, ReadOnly).await?;
-    let result = stage_copy(&backup.shared_volume_data(id), source.path()).await;
+    let result = async {
+        let target_data = backup
+            .backup_disk_path()
+            .join(backup.encrypted_relative_path());
+        if crate::util::io::directories_overlap(source.path(), &target_data).await? {
+            return Err(overlapping_target_error());
+        }
+        stage_copy(&backup.shared_volume_data(id), source.path()).await
+    }
+    .await;
     source.unmount().await?;
     Ok(SharedVolumeBackupInfo {
         name: volume.name,
         timestamp: Utc::now(),
         generation: result?,
     })
+}
+
+fn overlapping_target_error() -> Error {
+    Error::new(
+        eyre!(t!("backup.volume.overlapping-target")),
+        ErrorKind::Backup,
+    )
 }
 
 async fn source_overlaps_target(
@@ -176,9 +189,11 @@ async fn source_overlaps_target(
             },
         ) => {
             let target_path = target_path.join(encrypted_relative_path);
-            crate::util::io::paths_overlap(path, &target_path)
-                && BlockDev::new(logicalname).source_hash().await?
-                    == BlockDev::new(target).source_hash().await?
+            crate::util::io::paths_overlap(
+                &crate::util::io::case_folded(path),
+                &crate::util::io::case_folded(&target_path),
+            ) && BlockDev::new(logicalname).source_hash().await?
+                == BlockDev::new(target).source_hash().await?
         }
         _ => false,
     })
@@ -397,6 +412,9 @@ mod tests {
             ("media", "media", true),
             ("media/backup/photos", "media", true),
             ("media/backups", "media", false),
+            ("Photos", "photos", true),
+            ("MEDIA/BACKUP/photos", "media", true),
+            ("Photos-old", "photos", false),
         ] {
             assert_eq!(
                 source_overlaps_target(

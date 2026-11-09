@@ -1,4 +1,83 @@
+use patch_db::json_ptr::ROOT;
+
 use super::*;
+
+#[tokio::test]
+async fn failed_local_deletion_stays_registered_and_can_be_retried() {
+    let directory = tempfile::tempdir().unwrap();
+    let id = BackupTargetId::new();
+    let mut model = database();
+    model
+        .as_public_mut()
+        .as_backup_targets_mut()
+        .insert(
+            &id,
+            &BackupTarget {
+                name: "Local".into(),
+                source: SharedVolumeSource::Local,
+                inspection: Default::default(),
+                start_os: BTreeMap::new(),
+                legacy_backup: false,
+            },
+        )
+        .unwrap();
+    let database = TypedPatchDb::<crate::db::model::Database>::load_unchecked(
+        patch_db::PatchDb::open(directory.path().join("state.db"))
+            .await
+            .unwrap(),
+    );
+    database.put(&ROOT, &model).await.unwrap();
+    let path = local_path(directory.path(), &id);
+    tokio::fs::create_dir_all(path.parent().unwrap())
+        .await
+        .unwrap();
+    tokio::fs::write(&path, b"not a directory").await.unwrap();
+    assert!(
+        remove_target(&database, &id, directory.path())
+            .await
+            .is_err()
+    );
+    assert!(
+        database
+            .peek()
+            .await
+            .as_public()
+            .as_backup_targets()
+            .as_idx(&id)
+            .is_some()
+    );
+    tokio::fs::remove_file(&path).await.unwrap();
+    remove_target(&database, &id, directory.path())
+        .await
+        .unwrap();
+    assert!(
+        database
+            .peek()
+            .await
+            .as_public()
+            .as_backup_targets()
+            .as_idx(&id)
+            .is_none()
+    );
+    database.put(&ROOT, &model).await.unwrap();
+    tokio::fs::create_dir(&path).await.unwrap();
+    tokio::fs::write(path.join("backup"), b"data")
+        .await
+        .unwrap();
+    remove_target(&database, &id, directory.path())
+        .await
+        .unwrap();
+    assert!(!path.exists());
+    assert!(
+        database
+            .peek()
+            .await
+            .as_public()
+            .as_backup_targets()
+            .as_idx(&id)
+            .is_none()
+    );
+}
 
 #[tokio::test]
 async fn content_inspection_validates_backup_metadata_before_legacy_edits_publish() {
