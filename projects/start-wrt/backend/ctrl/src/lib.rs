@@ -47,6 +47,7 @@ pub mod system;
 pub mod tls;
 pub mod uci;
 pub mod update;
+pub mod usb_ports;
 pub mod utils;
 pub mod verify;
 pub mod vpn_client;

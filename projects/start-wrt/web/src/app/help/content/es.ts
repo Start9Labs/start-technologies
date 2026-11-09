@@ -59,7 +59,7 @@ Elimina un dispositivo sin conexión de tu lista de dispositivos. Se perderá cu
 
 ### Puerto
 
-El identificador del puerto físico Ethernet (p. ej., eth0, eth1).
+El puerto físico: un puerto Ethernet (p. ej., eth0, eth1) o un puerto USB con un adaptador Ethernet USB (p. ej., usb_eth0). Un puerto USB aparece la primera vez que se conecta a él un dispositivo de red y conserva su perfil aunque no haya nada conectado. Cada puerto de un hub USB es un puerto USB propio. Un puerto USB sin adaptador conectado se puede quitar.
 
 ### Perfil de seguridad
 
@@ -67,7 +67,7 @@ El perfil de seguridad por defecto asignado a los dispositivos conectados a trav
 
 ### WAN
 
-El puerto WAN (Wide Area Network) se conecta al módem de tu ISP o a la red ascendente. Solo un puerto Ethernet puede designarse como WAN a la vez.
+El puerto WAN (Wide Area Network) se conecta al módem de tu ISP o a la red ascendente. Solo un puerto Ethernet puede designarse como WAN a la vez. El puerto WAN debe ser un puerto Ethernet.
 
 ### Cambiar puerto WAN
 

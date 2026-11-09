@@ -594,4 +594,10 @@ export default {
   630: 'línea {line}',
   631: 'Comprobar de nuevo',
   632: 'Esta sección también tiene {option} {value}, establecido fuera de StartWRT. StartWRT muestra el primer valor y deja este tal como está.',
+  633: '¿Quitar el puerto USB?',
+  634: 'Quitar {port} reinicia la red brevemente. El puerto vuelve a aparecer, en el perfil Admin, la próxima vez que se conecte a él un adaptador Ethernet USB.',
+  635: 'Puerto USB quitado',
+  636: 'No se pudo quitar el puerto USB',
+  637: 'Desconecte el adaptador de {port} y luego quite el puerto.',
+  638: 'Adaptador conectado',
 } satisfies i18n

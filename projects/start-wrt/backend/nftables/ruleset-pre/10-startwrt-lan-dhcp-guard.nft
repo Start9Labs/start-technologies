@@ -3,6 +3,9 @@
 # leave through the output hook. startwrt fills @ra_allow from
 # 11-startwrt-lan-ra-allow.nft.
 #
+# A USB port's usb_eth* veth links its own bridge to the LAN bridge: its
+# frames are the router's own or were checked on the bridge they left.
+#
 # Needs kmod-nft-bridge: without it this include fails and fw4 loads no ruleset.
 table bridge startwrt_lan_guard
 delete table bridge startwrt_lan_guard
@@ -12,6 +15,7 @@ table bridge startwrt_lan_guard {
 	}
 	chain forward {
 		type filter hook forward priority filter; policy accept;
+		iifname "usb_eth*" accept
 		ether type ip meta l4proto udp udp sport 67 udp dport 68 counter drop
 		ether type ip6 meta l4proto udp udp sport 547 udp dport 546 counter drop
 		ether type ip6 meta l4proto ipv6-icmp icmpv6 type nd-router-advert ether saddr != @ra_allow counter drop

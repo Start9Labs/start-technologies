@@ -594,4 +594,10 @@ export default {
   630: 'Zeile {line}',
   631: 'Erneut prüfen',
   632: 'Dieser Abschnitt hat außerdem {option} {value}, gesetzt außerhalb von StartWRT. StartWRT zeigt den ersten Wert an und lässt diesen unverändert.',
+  633: 'USB-Port entfernen?',
+  634: 'Das Entfernen von {port} startet das Netzwerk kurz neu. Der Port erscheint wieder im Admin-Profil, sobald das nächste Mal ein USB-Ethernet-Adapter daran angeschlossen wird.',
+  635: 'USB-Port entfernt',
+  636: 'USB-Port konnte nicht entfernt werden',
+  637: 'Ziehen Sie den Adapter von {port} ab und entfernen Sie dann den Port.',
+  638: 'Adapter angeschlossen',
 } satisfies i18n

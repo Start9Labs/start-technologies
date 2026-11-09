@@ -59,7 +59,7 @@ Entfernt ein Offline-Gerät aus Ihrer Geräteliste. Alle benutzerdefinierten Nam
 
 ### Port
 
-Die Kennung des physischen Ethernet-Ports (z. B. eth0, eth1).
+Der physische Port: ein Ethernet-Port (z. B. eth0, eth1) oder ein USB-Port mit einem USB-Ethernet-Adapter (z. B. usb_eth0). Ein USB-Port erscheint, sobald zum ersten Mal ein Netzwerkgerät daran angeschlossen wird, und behält sein Profil, auch wenn nichts angeschlossen ist. Jeder Anschluss eines USB-Hubs ist ein eigener USB-Port. Ein USB-Port ohne angeschlossenen Adapter kann entfernt werden.
 
 ### Sicherheitsprofil
 
@@ -67,7 +67,7 @@ Das standardmäßige Sicherheitsprofil, das Geräten zugewiesen wird, die über 
 
 ### WAN
 
-Der WAN-Port (Wide Area Network) verbindet sich mit dem Modem Ihres ISP oder dem vorgelagerten Netzwerk. Es kann immer nur ein Ethernet-Port als WAN festgelegt werden.
+Der WAN-Port (Wide Area Network) verbindet sich mit dem Modem Ihres ISP oder dem vorgelagerten Netzwerk. Es kann immer nur ein Ethernet-Port als WAN festgelegt werden. Der WAN-Port muss ein Ethernet-Port sein.
 
 ### WAN-Port ändern
 

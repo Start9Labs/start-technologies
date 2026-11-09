@@ -599,4 +599,10 @@ export const ENGLISH: Record<string, number> = {
   'line {line}': 630,
   'Check again': 631,
   'This section also has {option} {value}, set outside StartWRT. StartWRT shows the first value and leaves this one as it is.': 632,
+  'Remove USB port?': 633,
+  'Removing {port} briefly restarts the network. The port appears again, in the Admin profile, the next time a USB Ethernet adapter is plugged into it.': 634,
+  'USB port removed': 635,
+  'Failed to remove USB port': 636,
+  'Unplug the adapter from {port}, then remove the port.': 637,
+  'Adapter plugged in': 638,
 }

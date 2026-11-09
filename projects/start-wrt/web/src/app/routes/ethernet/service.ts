@@ -7,10 +7,12 @@ import {
   EthernetConfig,
   EthernetSetConfig,
   ProfileId,
+  UsbPortStatus,
 } from 'src/app/services/api/api.service'
 
 export interface EthernetPortView {
   name: string
+  usb: UsbPortStatus | null
   profile: ProfileId | null
   profileName: string
   wan: boolean
@@ -51,6 +53,25 @@ export class EthernetService extends FormService<EthernetPortView[]> {
     await this.api.ethernetSet(this.buildConfig(items, false))
   }
 
+  /** Read fresh: the polled state trails a plug or unplug. */
+  async usbPortInUse(port: string): Promise<boolean> {
+    const { usb_ports } = await this.api.ethernetGet()
+    return usb_ports[port]?.present ?? false
+  }
+
+  async removeUsbPort(port: string): Promise<void> {
+    const removed = await this.actions.run(
+      () => this.api.ethernetRemoveUsbPort({ port }),
+      {
+        loading: this.i18n.transform('Restarting network...'),
+        success: this.i18n.transform('USB port removed'),
+        fail: this.i18n.transform('Failed to remove USB port'),
+        restart: true,
+      },
+    )
+    if (removed) this.refresh()
+  }
+
   /** The devices that keep settings for the profile a port leaves. */
   async previewPorts(
     items: EthernetPortView[],
@@ -76,12 +97,18 @@ export class EthernetService extends FormService<EthernetPortView[]> {
 
   private toPortViews(ethernet: EthernetConfig): EthernetPortView[] {
     return Object.entries(ethernet.ports)
-      .map(([name, port]) => ({
-        name,
-        profile: port.profile,
-        profileName: port.profile?.fullname ?? 'Admin',
-        wan: name === ethernet.wan_port,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(([name, port]) => {
+        const usb = ethernet.usb_ports[name] ?? null
+        return {
+          name,
+          usb,
+          profile: port.profile,
+          profileName: port.profile?.fullname ?? 'Admin',
+          wan: name === ethernet.wan_port,
+        }
+      })
+      .sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { numeric: true }),
+      )
   }
 }
