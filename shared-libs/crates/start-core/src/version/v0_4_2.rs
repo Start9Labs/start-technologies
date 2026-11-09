@@ -49,7 +49,7 @@ mod tests {
                 .unwrap();
         let settings = json!({
             "mode": "client", "upsName": "ups", "host": "192.0.2.1", "port": 3493,
-            "monitorUsername": "monitor", "monitorPassword": "test-password", "shutdownDelay": 5,
+            "monitorUsername": "monitor", "monitorPassword": "test-password",
         });
         let mut trust = initial_trusted_keys();
         for key in trust.values_mut() {

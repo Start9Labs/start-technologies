@@ -2333,18 +2333,32 @@ nut.field-monitor-username:
   pl_PL: "nazwa użytkownika monitora"
 
 nut.field-network-client-password:
-  en_US: "network client password"
-  de_DE: "Passwort des Netzwerk-Clients"
-  es_ES: "contraseña del cliente de red"
-  fr_FR: "mot de passe du client réseau"
-  pl_PL: "hasło klienta sieciowego"
+  en_US: "client password"
+  de_DE: "Client-Passwort"
+  es_ES: "contraseña del cliente"
+  fr_FR: "mot de passe du client"
+  pl_PL: "hasło klienta"
 
 nut.field-network-client-username:
-  en_US: "network client username"
-  de_DE: "Benutzername des Netzwerk-Clients"
-  es_ES: "nombre de usuario del cliente de red"
-  fr_FR: "nom d’utilisateur du client réseau"
-  pl_PL: "nazwa użytkownika klienta sieciowego"
+  en_US: "client username"
+  de_DE: "Client-Benutzername"
+  es_ES: "nombre de usuario del cliente"
+  fr_FR: "nom d’utilisateur du client"
+  pl_PL: "nazwa użytkownika klienta"
+
+nut.field-product-id:
+  en_US: "product ID"
+  de_DE: "Produkt-ID"
+  es_ES: "ID de producto"
+  fr_FR: "identifiant de produit"
+  pl_PL: "identyfikator produktu"
+
+nut.field-serial:
+  en_US: "serial number"
+  de_DE: "Seriennummer"
+  es_ES: "número de serie"
+  fr_FR: "numéro de série"
+  pl_PL: "numer seryjny"
 
 nut.field-server-host:
   en_US: "server host"
@@ -2360,6 +2374,13 @@ nut.field-ups-name:
   fr_FR: "nom de l’onduleur"
   pl_PL: "nazwa UPS"
 
+nut.field-vendor-id:
+  en_US: "vendor ID"
+  de_DE: "Hersteller-ID"
+  es_ES: "ID de fabricante"
+  fr_FR: "identifiant de fabricant"
+  pl_PL: "identyfikator producenta"
+
 nut.invalid-identifier:
   en_US: "Invalid NUT %{field}: use letters, numbers, dots, underscores, or hyphens"
   de_DE: "Ungültiges NUT-Feld %{field}: Verwenden Sie Buchstaben, Zahlen, Punkte, Unterstriche oder Bindestriche"
@@ -2374,12 +2395,12 @@ nut.invalid-port:
   fr_FR: "Le port NUT doit être supérieur à 0"
   pl_PL: "Port NUT musi być większy niż 0"
 
-nut.invalid-shutdown-delay:
-  en_US: "NUT shutdown delay must be 300 seconds or less"
-  de_DE: "Die NUT-Abschaltverzögerung darf höchstens 300 Sekunden betragen"
-  es_ES: "La demora de apagado de NUT debe ser de 300 segundos o menos"
-  fr_FR: "Le délai d'arrêt NUT doit être inférieur ou égal à 300 secondes"
-  pl_PL: "Opóźnienie wyłączenia NUT musi wynosić maksymalnie 300 sekund"
+nut.invalid-quoted:
+  en_US: "Invalid NUT %{field}: use printable ASCII except backslash or double quote"
+  de_DE: "Ungültiges NUT-Feld %{field}: Verwenden Sie druckbare ASCII-Zeichen außer Rückstrich oder doppeltem Anführungszeichen"
+  es_ES: "Campo NUT %{field} no válido: use caracteres ASCII imprimibles excepto barra inversa o comillas dobles"
+  fr_FR: "Champ NUT %{field} invalide : utilisez des caractères ASCII imprimables sauf barre oblique inverse ou guillemet double"
+  pl_PL: "Nieprawidłowe pole NUT %{field}: użyj drukowalnych znaków ASCII z wyjątkiem ukośnika odwrotnego i cudzysłowu"
 
 nut.invalid-token:
   en_US: "Invalid NUT %{field}: use visible ASCII except #, backslash, or double quote"
@@ -2402,6 +2423,20 @@ nut.enabled-without-settings:
   fr_FR: "Network UPS Tools ne peut pas être activé sans configuration"
   pl_PL: "Nie można włączyć Network UPS Tools bez konfiguracji"
 
+nut.list-ups-failed:
+  en_US: "Could not list the UPS devices on the NUT server at %{target}: %{error}"
+  de_DE: "Die USV-Geräte auf dem NUT-Server unter %{target} konnten nicht aufgelistet werden: %{error}"
+  es_ES: "No se pudieron listar los dispositivos SAI del servidor NUT en %{target}: %{error}"
+  fr_FR: "Impossible de lister les onduleurs du serveur NUT à %{target} : %{error}"
+  pl_PL: "Nie udało się pobrać listy urządzeń UPS z serwera NUT pod adresem %{target}: %{error}"
+
+nut.list-ups-timeout:
+  en_US: "the NUT server did not respond"
+  de_DE: "der NUT-Server hat nicht geantwortet"
+  es_ES: "el servidor NUT no respondió"
+  fr_FR: "le serveur NUT n'a pas répondu"
+  pl_PL: "serwer NUT nie odpowiedział"
+
 nut.monitor-auth-failed:
   en_US: "NUT rejected the monitoring login. Check the monitor username, password, and permissions on the UPS server."
   de_DE: "NUT hat die Monitor-Anmeldung abgelehnt. Prüfen Sie Benutzername, Passwort und Berechtigungen auf dem USV-Server."
@@ -2422,6 +2457,20 @@ nut.monitor-not-running:
   es_ES: "El monitor de apagado de NUT no está en ejecución. Compruebe la configuración de NUT y reinicie la monitorización."
   fr_FR: "Le moniteur d’arrêt NUT ne fonctionne pas. Vérifiez la configuration NUT et redémarrez la surveillance."
   pl_PL: "Monitor wyłączania NUT nie działa. Sprawdź konfigurację NUT i uruchom ponownie monitorowanie."
+
+nut.scan-failed:
+  en_US: "Could not scan for UPS devices: %{error}"
+  de_DE: "USV-Geräte konnten nicht gesucht werden: %{error}"
+  es_ES: "No se pudieron buscar dispositivos SAI: %{error}"
+  fr_FR: "Impossible de rechercher des onduleurs : %{error}"
+  pl_PL: "Nie udało się wyszukać urządzeń UPS: %{error}"
+
+nut.scan-timeout:
+  en_US: "Scanning for UPS devices timed out"
+  de_DE: "Die Suche nach USV-Geräten hat das Zeitlimit überschritten"
+  es_ES: "La búsqueda de dispositivos SAI agotó el tiempo de espera"
+  fr_FR: "La recherche d'onduleurs a expiré"
+  pl_PL: "Przekroczono limit czasu wyszukiwania urządzeń UPS"
 
 nut.status-command-failed:
   en_US: "NUT status command failed for %{target}: %{error}"

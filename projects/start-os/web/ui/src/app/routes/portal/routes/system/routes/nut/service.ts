@@ -8,11 +8,9 @@ import {
   exhaustMap,
   from,
   map,
-  merge,
   of,
   scan,
   startWith,
-  Subject,
   switchMap,
   timer,
 } from 'rxjs'
@@ -35,14 +33,13 @@ const EMPTY_STATE: StatusState = {
 export class NutStatusService {
   private readonly api = inject(ApiService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
-  private readonly refresh$ = new Subject<void>()
 
   readonly state = toSignal(
     this.patch.watch$('serverInfo', 'nut').pipe(
       switchMap(config =>
         !config?.enabled || !config.settings
           ? of(EMPTY_STATE)
-          : merge(timer(0, 15000), this.refresh$).pipe(
+          : timer(0, 5000).pipe(
               exhaustMap(() =>
                 from(this.api.rpc.server.nutStatus({})).pipe(
                   map(status => ({ status, error: null, refreshing: false })),
@@ -69,8 +66,4 @@ export class NutStatusService {
     ),
     { initialValue: EMPTY_STATE },
   )
-
-  refresh(): void {
-    this.refresh$.next()
-  }
 }

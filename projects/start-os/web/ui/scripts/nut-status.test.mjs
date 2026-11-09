@@ -71,7 +71,7 @@ test('periodic checks retain readings while loading and show authentication fail
     error: null,
     refreshing: false,
   })
-  t.mock.timers.tick(15000)
+  t.mock.timers.tick(5000)
   assert.equal(requests.length, 2)
   assert.equal(service.state().status, healthy)
   assert.equal(service.state().refreshing, true)
@@ -79,7 +79,7 @@ test('periodic checks retain readings while loading and show authentication fail
   requests[1].resolve(denied)
   await flush()
   assert.equal(service.state().status.monitoringError, denied.monitoringError)
-  t.mock.timers.tick(15000)
+  t.mock.timers.tick(5000)
   requests[2].resolve(healthy)
   await flush()
   assert.equal(service.state().status.monitoringError, null)
@@ -87,8 +87,7 @@ test('periodic checks retain readings while loading and show authentication fail
 
 test('network errors remain visible until a successful recheck, without overlapping requests', async t => {
   const { requests, service } = fixture(t)
-  service.refresh()
-  t.mock.timers.tick(15000)
+  t.mock.timers.tick(5000)
   assert.equal(requests.length, 1)
   requests[0].reject({ message: 'UPS unreachable' })
   await flush()
@@ -97,7 +96,7 @@ test('network errors remain visible until a successful recheck, without overlapp
     error: 'UPS unreachable',
     refreshing: false,
   })
-  service.refresh()
+  t.mock.timers.tick(5000)
   assert.equal(requests.length, 2)
   assert.equal(service.state().error, 'UPS unreachable')
   requests[1].resolve(healthy)
@@ -125,7 +124,6 @@ test('configuration changes ignore stale responses and disabling stops checks', 
     refreshing: false,
   })
   t.mock.timers.tick(30000)
-  service.refresh()
   assert.equal(requests.length, 2)
 })
 

@@ -55,7 +55,7 @@ export default [
         loadComponent: () => import('./routes/wifi/wifi.component'),
       },
       {
-        path: 'nut',
+        path: 'ups',
         title: titleResolver,
         loadComponent: () => import('./routes/nut'),
       },

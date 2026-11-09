@@ -44,6 +44,6 @@ There are three common topologies. For a home server, **line-interactive** is th
 
 ## Automatic shutdown on low battery
 
-StartOS supports automatic shutdown on low battery through [Network UPS Tools (NUT)](network-ups-tools.md). Configure NUT to monitor either a directly connected UPS, usually by USB, or a UPS served by another NUT server on the network.
+StartOS supports automatic shutdown on low battery through [UPS Monitor](ups-monitor.md), built on Network UPS Tools (NUT). Configure it to monitor either a directly connected UPS, usually by USB, or a UPS served by another NUT server on the network.
 
 If your area has frequent or long outages, size your UPS to keep your server and any required networking equipment powered long enough for StartOS to receive the low-battery signal and shut down cleanly.

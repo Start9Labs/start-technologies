@@ -1,212 +1,185 @@
 import { i18nPipe } from '@start9labs/shared'
 import { ISB, T } from '@start9labs/start-core'
 
-type ServerValue = {
-  upsName: string
-  driver: string
-  port: string
-  monitorUsername: string
-  monitorPassword: string | null
-  listenAll: boolean
-  remoteUsername: string | null
-  remotePassword: string | null
-  shutdownDelay: number
-}
+export type NutMode = T.NutSettings['mode']
 
-type ClientValue = {
-  upsName: string
-  host: string
-  port: number
-  monitorUsername: string
-  monitorPassword: string | null
-  shutdownDelay: number
-}
-
-export type NutForm = {
-  enabled: boolean
-  settings:
-    | { selection: 'server'; value: ServerValue }
-    | { selection: 'client'; value: ClientValue }
-}
-
-const DEFAULT_SERVER: ServerValue = {
-  upsName: 'ups',
-  driver: 'usbhid-ups',
-  port: 'auto',
-  monitorUsername: 'monuser',
-  monitorPassword: null,
-  listenAll: false,
-  remoteUsername: null,
-  remotePassword: null,
-  shutdownDelay: 5,
-}
+const PASSWORD = { charset: 'a-z,A-Z,0-9', len: 22 }
 
 export const DEFAULT_NUT_CONFIG: T.NutConfig = {
   enabled: false,
   settings: null,
 }
 
-export function nutSpec(i18n: i18nPipe) {
-  return ISB.InputSpec.of({
-    enabled: ISB.Value.toggle({
-      name: i18n.transform('Enabled'),
-      default: false,
-    }),
-    settings: ISB.Value.union({
-      name: i18n.transform('Mode'),
-      default: 'server',
+export function deviceName({ vendor, product, driver, serial }: T.NutDevice) {
+  const name = [vendor, product].filter(Boolean).join(' ') || driver
+  return serial ? `${name} (${serial})` : name
+}
+
+function sharingField(i18n: i18nPipe) {
+  return {
+    sharing: ISB.Value.union({
+      name: i18n.transform('Other clients can monitor'),
+      description: i18n.transform(
+        'Other devices plugged into this UPS can’t see its battery level on their own. Turn this on so they can monitor it through StartOS and shut down safely when its battery runs low. Set them up as NUT clients that connect to this server on port 3493 with the UPS name “startos”.',
+      ),
+      default: 'off',
       variants: ISB.Variants.of({
-        server: {
-          name: i18n.transform('Direct UPS'),
+        off: { name: i18n.transform('Off'), spec: ISB.InputSpec.of({}) },
+        on: {
+          name: i18n.transform('On'),
           spec: ISB.InputSpec.of({
-            upsName: ISB.Value.text({
-              name: i18n.transform('UPS Name'),
-              required: true,
-              default: 'ups',
-              placeholder: 'ups',
-            }),
-            driver: ISB.Value.text({
-              name: i18n.transform('Driver'),
-              required: true,
-              default: 'usbhid-ups',
-              placeholder: 'usbhid-ups',
-            }),
-            port: ISB.Value.text({
-              name: i18n.transform('Device or address'),
-              required: true,
-              default: 'auto',
-              placeholder: 'auto',
-            }),
-            monitorUsername: ISB.Value.text({
-              name: i18n.transform('Monitor username'),
-              required: true,
-              default: 'monuser',
-              placeholder: 'monuser',
-            }),
-            monitorPassword: ISB.Value.text({
-              name: i18n.transform('Monitor password'),
-              required: true,
-              default: null,
-              masked: true,
-            }),
-            listenAll: ISB.Value.toggle({
-              name: i18n.transform('Allow network clients'),
-              default: false,
-            }),
             remoteUsername: ISB.Value.text({
-              name: i18n.transform('Network client username'),
-              required: false,
-              default: null,
-              placeholder: 'upsclient',
+              name: i18n.transform('Username'),
+              description: i18n.transform(
+                'The username other devices use when they connect to this server as NUT clients.',
+              ),
+              required: true,
+              default: 'upsclient',
             }),
             remotePassword: ISB.Value.text({
-              name: i18n.transform('Network client password'),
-              required: false,
-              default: null,
+              name: i18n.transform('Password'),
+              description: i18n.transform(
+                'The password other devices use when they connect to this server as NUT clients.',
+              ),
+              required: true,
+              default: PASSWORD,
               masked: true,
-            }),
-            shutdownDelay: ISB.Value.number({
-              name: i18n.transform('Shutdown delay'),
-              required: true,
-              default: 5,
-              integer: true,
-              min: 0,
-              max: 300,
-              units: i18n.transform('Seconds'),
-            }),
-          }),
-        },
-        client: {
-          name: i18n.transform('Network UPS client'),
-          spec: ISB.InputSpec.of({
-            upsName: ISB.Value.text({
-              name: i18n.transform('UPS Name'),
-              required: true,
-              default: 'ups',
-              placeholder: 'ups',
-            }),
-            host: ISB.Value.text({
-              name: i18n.transform('NUT server host'),
-              required: true,
-              default: null,
-              placeholder: '192.168.1.10',
-            }),
-            port: ISB.Value.number({
-              name: i18n.transform('NUT server port'),
-              required: true,
-              default: 3493,
-              integer: true,
-              min: 1,
-              max: 65535,
-            }),
-            monitorUsername: ISB.Value.text({
-              name: i18n.transform('Monitor username'),
-              required: true,
-              default: 'monuser',
-              placeholder: 'monuser',
-            }),
-            monitorPassword: ISB.Value.text({
-              name: i18n.transform('Monitor password'),
-              required: true,
-              default: null,
-              masked: true,
-            }),
-            shutdownDelay: ISB.Value.number({
-              name: i18n.transform('Shutdown delay'),
-              required: true,
-              default: 5,
-              integer: true,
-              min: 0,
-              max: 300,
-              units: i18n.transform('Seconds'),
+              generate: PASSWORD,
             }),
           }),
         },
       }),
     }),
+  }
+}
+
+export function serverSpec(i18n: i18nPipe) {
+  return ISB.InputSpec.of(sharingField(i18n))
+}
+
+export function deviceServerSpec(
+  i18n: i18nPipe,
+  devices: readonly T.NutDevice[],
+) {
+  return ISB.InputSpec.of({
+    device: ISB.Value.select({
+      name: i18n.transform('UPS'),
+      description: i18n.transform(
+        'The UPS connected to this server that StartOS monitors.',
+      ),
+      default: '0',
+      values: Object.fromEntries(
+        devices.map((device, index) => [String(index), deviceName(device)]),
+      ),
+    }),
+    ...sharingField(i18n),
   })
 }
 
-export function toNutForm(config: T.NutConfig): NutForm {
+function clientFields(i18n: i18nPipe) {
   return {
-    enabled: config.enabled,
-    settings: toSettingsForm(config.settings),
+    host: ISB.Value.text({
+      name: i18n.transform('NUT server host'),
+      description: i18n.transform(
+        'The IP address or hostname of the device running the NUT server.',
+      ),
+      required: true,
+      default: null,
+      placeholder: '192.168.1.10',
+    }),
+    port: ISB.Value.number({
+      name: i18n.transform('NUT server port'),
+      description: i18n.transform(
+        'The port the NUT server listens on, usually 3493.',
+      ),
+      required: true,
+      default: 3493,
+      integer: true,
+      min: 1,
+      max: 65535,
+    }),
+    monitorUsername: ISB.Value.text({
+      name: i18n.transform('Username'),
+      description: i18n.transform(
+        'A user on the NUT server with permission to monitor this UPS.',
+      ),
+      required: true,
+      default: null,
+      placeholder: 'monuser',
+    }),
+    monitorPassword: ISB.Value.text({
+      name: i18n.transform('Password'),
+      description: i18n.transform(
+        'The password for that user on the NUT server.',
+      ),
+      required: true,
+      default: null,
+      masked: true,
+    }),
   }
 }
 
-export function toNutConfig(value: NutForm): T.NutConfig {
+export function clientSpec(i18n: i18nPipe) {
+  return ISB.InputSpec.of(clientFields(i18n))
+}
+
+export function clientUpsSpec(
+  i18n: i18nPipe,
+  upses: readonly T.NutRemoteUps[],
+  current?: string,
+) {
+  return ISB.InputSpec.of({
+    upsName: ISB.Value.select({
+      name: i18n.transform('UPS'),
+      description: i18n.transform(
+        'This NUT server monitors more than one UPS. Choose the one that powers this server.',
+      ),
+      default: upses.some(({ name }) => name === current)
+        ? current!
+        : upses[0]!.name,
+      values: Object.fromEntries(
+        upses.map(({ name, description }) => [
+          name,
+          description ? `${description} (${name})` : name,
+        ]),
+      ),
+    }),
+    ...clientFields(i18n),
+  })
+}
+
+type ServerSettings = Extract<T.NutSettings, { mode: 'server' }>
+
+export function toServerForm({
+  listenAll,
+  remoteUsername,
+  remotePassword,
+}: ServerSettings) {
   return {
-    enabled: value.enabled,
-    settings: toNutSettings(value.settings),
+    sharing: listenAll
+      ? { selection: 'on', value: { remoteUsername, remotePassword } }
+      : { selection: 'off', value: {} },
   }
 }
 
-function toSettingsForm(settings: T.NutSettings | null): NutForm['settings'] {
-  switch (settings?.mode) {
-    case 'client':
-      return { selection: 'client', value: settings }
-    case 'server':
-      return { selection: 'server', value: settings }
-    default:
-      return { selection: 'server', value: DEFAULT_SERVER }
-  }
-}
-
-function toNutSettings(settings: NutForm['settings']): T.NutSettings {
-  switch (settings.selection) {
-    case 'client':
-      return {
-        mode: 'client',
-        ...settings.value,
-        monitorPassword: settings.value.monitorPassword || '',
-      }
-    case 'server':
-      return {
+export function toServerSettings(
+  device: T.NutDevice,
+  { sharing }: ReturnType<typeof serverSpec>['_TYPE'],
+): T.NutSettings {
+  return sharing.selection === 'on'
+    ? { mode: 'server', device, listenAll: true, ...sharing.value }
+    : {
         mode: 'server',
-        ...settings.value,
-        monitorPassword: settings.value.monitorPassword || '',
-        remoteUsername: settings.value.remoteUsername || null,
-        remotePassword: settings.value.remotePassword || null,
+        device,
+        listenAll: false,
+        remoteUsername: null,
+        remotePassword: null,
       }
-  }
+}
+
+export function toClientSettings(
+  upsName: string,
+  value: ReturnType<typeof clientSpec>['_TYPE'],
+): T.NutSettings {
+  return { mode: 'client', upsName, ...value }
 }

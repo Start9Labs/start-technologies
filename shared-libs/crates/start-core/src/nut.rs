@@ -21,6 +21,9 @@ use crate::util::io::{delete_file, write_file_atomic};
 const NUT_ETC_DIR: &str = "/etc/nut";
 const NUT_OVERLAY_DIR: &str = "/media/startos/config/overlay/etc/nut";
 const NUT_PORT: u16 = 3493;
+const LOCAL_UPS: &str = "startos";
+const LOCAL_MONITOR_USERNAME: &str = "startos";
+const SHUTDOWN_DELAY: u16 = 5;
 
 /// Stored NUT configuration and its independent enabled state.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize, VisitFields)]
@@ -47,19 +50,13 @@ rpc_toolkit::ts_export!(NutConfig, namespaces = [""]);
 pub enum NutSettings {
     /// Serve and monitor a UPS connected directly to this StartOS host.
     Server {
-        ups_name: String,
-        driver: String,
-        port: String,
-        monitor_username: String,
-        monitor_password: String,
+        device: NutDevice,
         #[serde(default)]
         listen_all: bool,
         #[serde(default)]
         remote_username: Option<String>,
         #[serde(default)]
         remote_password: Option<String>,
-        #[serde(default = "default_shutdown_delay")]
-        shutdown_delay: u16,
     },
     /// Monitor a UPS exposed by another NUT server.
     Client {
@@ -69,13 +66,55 @@ pub enum NutSettings {
         port: u16,
         monitor_username: String,
         monitor_password: String,
-        #[serde(default = "default_shutdown_delay")]
-        shutdown_delay: u16,
     },
 }
 
 rpc_toolkit::reflect_ts!(NutSettings);
 rpc_toolkit::ts_export!(NutSettings, namespaces = [""]);
+
+/// A UPS detected on USB, with the driver settings that address it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct NutDevice {
+    pub driver: String,
+    pub port: String,
+    #[serde(default)]
+    pub vendor_id: Option<String>,
+    #[serde(default)]
+    pub product_id: Option<String>,
+    #[serde(default)]
+    pub serial: Option<String>,
+    #[serde(default)]
+    pub vendor: Option<String>,
+    #[serde(default)]
+    pub product: Option<String>,
+}
+
+rpc_toolkit::reflect_ts!(NutDevice);
+rpc_toolkit::ts_export!(NutDevice, namespaces = [""]);
+
+/// A UPS served by a NUT server, as `LIST UPS` reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct NutRemoteUps {
+    pub name: String,
+    pub description: String,
+}
+
+rpc_toolkit::reflect_ts!(NutRemoteUps);
+rpc_toolkit::ts_export!(NutRemoteUps, namespaces = [""]);
+
+/// Address of the NUT server to list UPS devices from.
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct ListNutUpsParams {
+    pub host: String,
+    #[serde(default = "default_nut_port")]
+    pub port: u16,
+}
+
+rpc_toolkit::reflect_ts!(ListNutUpsParams);
+rpc_toolkit::ts_export!(ListNutUpsParams, namespaces = [""]);
 
 /// Parameters for replacing the stored NUT configuration.
 #[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
@@ -101,10 +140,6 @@ rpc_toolkit::ts_export!(NutStatus, namespaces = [""]);
 
 const fn default_nut_port() -> u16 {
     NUT_PORT
-}
-
-const fn default_shutdown_delay() -> u16 {
-    5
 }
 
 /// Apply and persist a complete NUT configuration.
@@ -136,6 +171,78 @@ pub async fn clear_nut(ctx: RpcContext, _: Empty) -> Result<(), Error> {
         },
     )
     .await
+}
+
+/// List the UPS devices `nut-scanner` finds on USB.
+pub async fn scan_nut(_: RpcContext, _: Empty) -> Result<Vec<NutDevice>, Error> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(30),
+        Command::new("nut-scanner")
+            .args(["--usb_scan", "--quiet"])
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .map_err(|_| Error::new(eyre!("{}", t!("nut.scan-timeout")), ErrorKind::Timeout))?
+    .with_ctx(|_| (ErrorKind::Network, "nut-scanner"))?;
+
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(Error::new(
+            eyre!(
+                "{}",
+                t!(
+                    "nut.scan-failed",
+                    error = if error.is_empty() {
+                        output.status.to_string()
+                    } else {
+                        error
+                    }
+                )
+            ),
+            ErrorKind::Network,
+        ));
+    }
+
+    Ok(parse_nut_scanner(
+        &String::from_utf8(output.stdout).with_kind(ErrorKind::Utf8)?,
+    ))
+}
+
+/// List the UPS devices a NUT server serves.
+pub async fn list_nut_ups(
+    _: RpcContext,
+    ListNutUpsParams { host, port }: ListNutUpsParams,
+) -> Result<Vec<NutRemoteUps>, Error> {
+    validate_token(&t!("nut.field-server-host"), &host)?;
+    validate_nut_port(port)?;
+    let failed = |error: &dyn std::fmt::Display| {
+        Error::new(
+            eyre!(
+                "{}",
+                t!(
+                    "nut.list-ups-failed",
+                    target = nut_address(&host, port),
+                    error = error.to_string()
+                )
+            ),
+            ErrorKind::Network,
+        )
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let address = host
+            .strip_prefix('[')
+            .and_then(|host| host.strip_suffix(']'))
+            .unwrap_or(&host);
+        let stream = TcpStream::connect((address, port))
+            .await
+            .map_err(|error| failed(&error))?;
+        read_ups_list(BufStream::new(stream))
+            .await
+            .map_err(|error| failed(&error))
+    })
+    .await
+    .map_err(|_| failed(&t!("nut.list-ups-timeout")))?
 }
 
 /// Query the UPS configured in the database through `upsc`.
@@ -184,22 +291,24 @@ async fn disable_nut() -> Result<(), Error> {
 async fn apply_nut(settings: NutSettings) -> Result<(), Error> {
     match settings {
         NutSettings::Server {
-            ups_name,
-            driver,
-            port,
-            monitor_username,
-            monitor_password,
+            device,
             listen_all,
             remote_username,
             remote_password,
-            shutdown_delay,
         } => {
-            validate_identifier(&t!("nut.field-ups-name"), &ups_name)?;
-            validate_identifier(&t!("nut.field-driver"), &driver)?;
-            validate_token(&t!("nut.field-device-or-address"), &port)?;
-            validate_identifier(&t!("nut.field-monitor-username"), &monitor_username)?;
-            validate_token(&t!("nut.field-monitor-password"), &monitor_password)?;
-            validate_shutdown_delay(shutdown_delay)?;
+            validate_identifier(&t!("nut.field-driver"), &device.driver)?;
+            validate_token(&t!("nut.field-device-or-address"), &device.port)?;
+            for (field, value) in [
+                (t!("nut.field-vendor-id"), &device.vendor_id),
+                (t!("nut.field-product-id"), &device.product_id),
+            ] {
+                if let Some(value) = value {
+                    validate_identifier(&field, value)?;
+                }
+            }
+            if let Some(serial) = &device.serial {
+                validate_quoted(&t!("nut.field-serial"), serial)?;
+            }
             if listen_all {
                 validate_required_identifier(
                     &t!("nut.field-network-client-username"),
@@ -212,14 +321,7 @@ async fn apply_nut(settings: NutSettings) -> Result<(), Error> {
             }
 
             write_nut_file("nut.conf", "MODE=netserver\n", 0o644).await?;
-            write_nut_file(
-                "ups.conf",
-                &format!(
-                    "[{ups_name}]\n    driver = {driver}\n    port = {port}\n    desc = \"StartOS UPS\"\n",
-                ),
-                0o640,
-            )
-            .await?;
+            write_nut_file("ups.conf", &ups_conf(&device), 0o640).await?;
             write_nut_file(
                 "upsd.conf",
                 if listen_all {
@@ -231,8 +333,9 @@ async fn apply_nut(settings: NutSettings) -> Result<(), Error> {
             )
             .await?;
 
+            let monitor_password = hex::encode(rand::random::<[u8; 16]>());
             let mut users = format!(
-                "[{monitor_username}]\n    password = {monitor_password}\n    upsmon primary\n",
+                "[{LOCAL_MONITOR_USERNAME}]\n    password = {monitor_password}\n    upsmon primary\n",
             );
             if listen_all {
                 let username = remote_username.expect("remote username validated");
@@ -245,13 +348,12 @@ async fn apply_nut(settings: NutSettings) -> Result<(), Error> {
             write_nut_file(
                 "upsmon.conf",
                 &upsmon_conf(
-                    &ups_name,
+                    LOCAL_UPS,
                     "localhost",
                     NUT_PORT,
-                    &monitor_username,
+                    LOCAL_MONITOR_USERNAME,
                     &monitor_password,
                     "primary",
-                    shutdown_delay,
                 ),
                 0o640,
             )
@@ -280,14 +382,12 @@ async fn apply_nut(settings: NutSettings) -> Result<(), Error> {
             port,
             monitor_username,
             monitor_password,
-            shutdown_delay,
         } => {
             validate_identifier(&t!("nut.field-ups-name"), &ups_name)?;
             validate_token(&t!("nut.field-server-host"), &host)?;
             validate_identifier(&t!("nut.field-monitor-username"), &monitor_username)?;
             validate_token(&t!("nut.field-monitor-password"), &monitor_password)?;
             validate_nut_port(port)?;
-            validate_shutdown_delay(shutdown_delay)?;
 
             write_nut_file("nut.conf", "MODE=netclient\n", 0o644).await?;
             delete_nut_file("ups.conf").await?;
@@ -302,7 +402,6 @@ async fn apply_nut(settings: NutSettings) -> Result<(), Error> {
                     &monitor_username,
                     &monitor_password,
                     "secondary",
-                    shutdown_delay,
                 ),
                 0o640,
             )
@@ -386,18 +485,13 @@ async fn monitor_status(settings: &NutSettings) -> Result<(), Error> {
             })?;
 
         match settings {
-            NutSettings::Server {
-                ups_name,
-                monitor_username,
-                monitor_password,
-                ..
-            } => {
+            NutSettings::Server { .. } => {
                 authenticate_monitor(
                     "localhost",
                     NUT_PORT,
-                    ups_name,
-                    monitor_username,
-                    monitor_password,
+                    LOCAL_UPS,
+                    LOCAL_MONITOR_USERNAME,
+                    &local_monitor_password().await?,
                     true,
                 )
                 .await
@@ -538,7 +632,7 @@ fn upsc_target(config: &NutConfig) -> Option<String> {
         return None;
     }
     match config.settings.as_ref()? {
-        NutSettings::Server { ups_name, .. } => Some(nut_target(ups_name, "localhost", NUT_PORT)),
+        NutSettings::Server { .. } => Some(nut_target(LOCAL_UPS, "localhost", NUT_PORT)),
         NutSettings::Client {
             ups_name,
             host,
@@ -549,11 +643,49 @@ fn upsc_target(config: &NutConfig) -> Option<String> {
 }
 
 fn nut_target(ups_name: &str, host: &str, port: u16) -> String {
+    format!("{ups_name}@{}", nut_address(host, port))
+}
+
+fn nut_address(host: &str, port: u16) -> String {
     if host.contains(':') && !host.starts_with('[') {
-        format!("{ups_name}@[{host}]:{port}")
+        format!("[{host}]:{port}")
     } else {
-        format!("{ups_name}@{host}:{port}")
+        format!("{host}:{port}")
     }
+}
+
+async fn read_ups_list<S: AsyncBufRead + AsyncWrite + Unpin>(
+    mut stream: S,
+) -> Result<Vec<NutRemoteUps>, Error> {
+    let first = nut_command(&mut stream, "LIST UPS").await?;
+    if first != "BEGIN LIST UPS" {
+        return Err(Error::new(eyre!("{first}"), ErrorKind::Network));
+    }
+    let mut upses = Vec::new();
+    for _ in 0..256 {
+        let mut line = Vec::new();
+        (&mut stream)
+            .take(1024)
+            .read_until(b'\n', &mut line)
+            .await
+            .with_kind(ErrorKind::Network)?;
+        let line = String::from_utf8(line).with_kind(ErrorKind::Utf8)?;
+        let line = line.trim_end_matches(['\r', '\n']);
+        if line == "END LIST UPS" {
+            return Ok(upses);
+        }
+        let Some((name, description)) = line
+            .strip_prefix("UPS ")
+            .and_then(|rest| rest.split_once(' '))
+        else {
+            return Err(Error::new(eyre!("{line}"), ErrorKind::Network));
+        };
+        upses.push(NutRemoteUps {
+            name: name.to_owned(),
+            description: description.trim_matches('"').to_owned(),
+        });
+    }
+    Err(Error::new(eyre!("LIST UPS"), ErrorKind::Network))
 }
 
 fn parse_upsc(stdout: &str) -> BTreeMap<String, String> {
@@ -569,6 +701,71 @@ fn parse_upsc(stdout: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
+/// Reads the generated local monitor password back from `upsmon.conf`.
+async fn local_monitor_password() -> Result<String, Error> {
+    let path = Path::new(NUT_ETC_DIR).join("upsmon.conf");
+    tokio::fs::read_to_string(&path)
+        .await
+        .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("read {path:?}")))?
+        .lines()
+        .find_map(|line| {
+            let mut fields = line.strip_prefix("MONITOR ")?.split_whitespace();
+            fields.nth(3).map(str::to_owned)
+        })
+        .ok_or_else(|| {
+            Error::new(
+                eyre!("{}", t!("nut.monitor-not-running")),
+                ErrorKind::Systemd,
+            )
+        })
+}
+
+fn parse_nut_scanner(stdout: &str) -> Vec<NutDevice> {
+    let mut sections: Vec<BTreeMap<&str, &str>> = Vec::new();
+    for line in stdout.lines().map(str::trim) {
+        if line.starts_with('[') && line.ends_with(']') {
+            sections.push(BTreeMap::new());
+        } else if let (Some(section), Some((key, value))) =
+            (sections.last_mut(), line.split_once('='))
+        {
+            section.insert(key.trim(), value.trim().trim_matches('"'));
+        }
+    }
+    sections
+        .into_iter()
+        .filter_map(|section| {
+            let field = |key: &str| section.get(key).map(|value| (*value).to_owned());
+            Some(NutDevice {
+                driver: field("driver")?,
+                port: field("port")?,
+                vendor_id: field("vendorid"),
+                product_id: field("productid"),
+                serial: field("serial").filter(|serial| !serial.is_empty()),
+                vendor: field("vendor"),
+                product: field("product"),
+            })
+        })
+        .collect()
+}
+
+fn ups_conf(device: &NutDevice) -> String {
+    let mut conf = format!(
+        "[{LOCAL_UPS}]\n    driver = {}\n    port = {}\n",
+        device.driver, device.port
+    );
+    for (key, value) in [
+        ("vendorid", &device.vendor_id),
+        ("productid", &device.product_id),
+        ("serial", &device.serial),
+    ] {
+        if let Some(value) = value {
+            conf.push_str(&format!("    {key} = \"{value}\"\n"));
+        }
+    }
+    conf.push_str("    desc = \"StartOS UPS\"\n");
+    conf
+}
+
 fn upsmon_conf(
     ups_name: &str,
     host: &str,
@@ -576,7 +773,6 @@ fn upsmon_conf(
     username: &str,
     password: &str,
     role: &str,
-    shutdown_delay: u16,
 ) -> String {
     let target = nut_target(ups_name, host, port);
     format!(
@@ -588,7 +784,7 @@ POLLFREQ 5
 POLLFREQALERT 5
 HOSTSYNC 15
 DEADTIME 15
-FINALDELAY {shutdown_delay}
+FINALDELAY {SHUTDOWN_DELAY}
 POWERDOWNFLAG /etc/killpower
 NOTIFYFLAG ONLINE SYSLOG
 NOTIFYFLAG ONBATT SYSLOG
@@ -703,10 +899,14 @@ fn validate_nut_port(port: u16) -> Result<(), Error> {
     Ok(())
 }
 
-fn validate_shutdown_delay(delay: u16) -> Result<(), Error> {
-    if delay > 300 {
+fn validate_quoted(field: &str, value: &str) -> Result<(), Error> {
+    if value.is_empty()
+        || !value
+            .bytes()
+            .all(|b| (b.is_ascii_graphic() || b == b' ') && !matches!(b, b'\\' | b'"'))
+    {
         return Err(Error::new(
-            eyre!("{}", t!("nut.invalid-shutdown-delay")),
+            eyre!("{}", t!("nut.invalid-quoted", field = field)),
             ErrorKind::InvalidRequest,
         ));
     }
@@ -935,18 +1135,88 @@ mod tests {
                     port: NUT_PORT,
                     monitor_username: "monitor".to_owned(),
                     monitor_password: "secret".to_owned(),
-                    shutdown_delay: 5,
                 }),
             };
 
             assert_eq!(upsc_target(&config).as_deref(), Some(target));
             assert_eq!(
-                upsmon_conf("ups", host, NUT_PORT, "monitor", "secret", "secondary", 5)
+                upsmon_conf("ups", host, NUT_PORT, "monitor", "secret", "secondary")
                     .lines()
                     .next(),
                 Some(format!("MONITOR {target} 1 monitor secret secondary").as_str())
             );
         }
+    }
+
+    #[test]
+    fn parses_nut_scanner_devices_into_pinned_ups_conf() {
+        let devices = parse_nut_scanner(
+            "\
+[nutdev1]
+\tdriver = \"usbhid-ups\"
+\tport = \"auto\"
+\tvendorid = \"051D\"
+\tproductid = \"0002\"
+\tproduct = \"Back-UPS ES 600M1\"
+\tserial = \"4B1234P56789\"
+\tvendor = \"American Power Conversion\"
+\tbus = \"001\"
+
+[nutdev2]
+\tdriver = \"nutdrv_qx\"
+\tport = \"auto\"
+\tserial = \"\"
+[nutdev3]
+\tport = \"auto\"
+",
+        );
+
+        assert_eq!(devices.len(), 2);
+        assert_eq!(devices[1].serial, None);
+        assert_eq!(
+            ups_conf(&devices[0]),
+            "\
+[startos]
+    driver = usbhid-ups
+    port = auto
+    vendorid = \"051D\"
+    productid = \"0002\"
+    serial = \"4B1234P56789\"
+    desc = \"StartOS UPS\"
+"
+        );
+    }
+
+    #[tokio::test]
+    async fn lists_remote_ups_devices() {
+        let (client, server) = tokio::io::duplex(4096);
+        let server = tokio::spawn(async move {
+            let mut server = BufStream::new(server);
+            let mut line = String::new();
+            server.read_line(&mut line).await.unwrap();
+            assert_eq!(line, "LIST UPS\n");
+            server
+                .write_all(
+                    b"BEGIN LIST UPS\nUPS ups \"Synology UPS\"\nUPS rack \"Eaton 5E\"\nEND LIST UPS\n",
+                )
+                .await
+                .unwrap();
+            server.flush().await.unwrap();
+        });
+        assert_eq!(
+            read_ups_list(BufStream::new(client)).await.unwrap(),
+            [
+                NutRemoteUps {
+                    name: "ups".to_owned(),
+                    description: "Synology UPS".to_owned(),
+                },
+                NutRemoteUps {
+                    name: "rack".to_owned(),
+                    description: "Eaton 5E".to_owned(),
+                },
+            ]
+        );
+        server.await.unwrap();
     }
 
     #[test]

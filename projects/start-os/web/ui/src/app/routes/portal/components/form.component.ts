@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common'
 import { Component, inject, Input, OnInit } from '@angular/core'
 import { FormGroup, ReactiveFormsModule } from '@angular/forms'
 import { RouterModule } from '@angular/router'
@@ -19,11 +20,14 @@ export interface ActionButton<T> {
   /** May destroy the form before native button activation. */
   handler?: (value: T) => Promise<boolean | void> | void
   link?: string
+  appearance?: string
 }
 
 export interface FormNote {
   text: string
   items?: string[]
+  appearance?: string
+  top?: boolean
 }
 
 export interface FormContext<T> {
@@ -43,18 +47,12 @@ export interface FormContext<T> {
       (reset.capture.prevent.stop)="onReset()"
       (tuiValueChanges)="markAsDirty()"
     >
+      @if (note?.top) {
+        <ng-container [ngTemplateOutlet]="noteTemplate" />
+      }
       <form-group [spec]="spec" />
-      @if (note) {
-        <div tuiNotification appearance="warning" class="note">
-          {{ note.text }}
-          @if (note.items?.length) {
-            <ul>
-              @for (item of note.items; track $index) {
-                <li>{{ item }}</li>
-              }
-            </ul>
-          }
-        </div>
+      @if (note && !note.top) {
+        <ng-container [ngTemplateOutlet]="noteTemplate" />
       }
       <footer>
         <ng-content />
@@ -62,7 +60,9 @@ export interface FormContext<T> {
           @if (button.handler) {
             <button
               tuiButton
-              [appearance]="$last ? 'primary' : 'flat-grayscale'"
+              [appearance]="
+                button.appearance || ($last ? 'primary' : 'flat-grayscale')
+              "
               [type]="$last ? 'submit' : 'button'"
               (click.prevent)="onClick(button.handler)"
             >
@@ -81,11 +81,34 @@ export interface FormContext<T> {
         }
       </footer>
     </form>
+    <ng-template #noteTemplate>
+      @if (note; as note) {
+        <div
+          tuiNotification
+          class="note"
+          [class._top]="note.top"
+          [appearance]="note.appearance || 'warning'"
+        >
+          {{ note.text }}
+          @if (note.items?.length) {
+            <ul>
+              @for (item of note.items; track $index) {
+                <li>{{ item }}</li>
+              }
+            </ul>
+          }
+        </div>
+      }
+    </ng-template>
   `,
   host: { '[class._dialog]': '!!context' },
   styles: `
     .note {
       margin-top: 1rem;
+
+      &._top {
+        margin: 0 0 1rem;
+      }
     }
 
     .note ul {
@@ -112,6 +135,7 @@ export interface FormContext<T> {
     }
   `,
   imports: [
+    NgTemplateOutlet,
     ReactiveFormsModule,
     RouterModule,
     TuiValueChanges,
