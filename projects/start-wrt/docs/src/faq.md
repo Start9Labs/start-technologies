@@ -14,11 +14,9 @@ Stock OpenWrt exposes raw networking primitives through the LuCI interface, requ
 
 StartWRT uses WPA2's identity PSK feature. A single SSID (`StartWRT`) accepts multiple passwords, each mapped to a different Security Profile. When a device connects, the router identifies which password was used and places the device on the corresponding VLAN and subnet automatically. See [Wi-Fi](wifi.md) for details.
 
-## Can I extend Wi-Fi coverage with my own access points?
+## Can I extend Wi-Fi coverage with my own access points, mesh system, or range extender?
 
-Using external access points to extend coverage isn't a supported configuration. StartWRT gives each device a [Security Profile](security-profiles.md) based on how it connects: the password it used on the router's own Wi-Fi, or the [Ethernet port](ethernet.md) it is plugged into. An access point handles its devices' passwords itself, so the router sees only the port the access point is plugged into. Every device connected to the access point gets that port's profile, whichever password it used. This is true even for an access point with several passwords or networks.
-
-StartWRT's Wi-Fi uses WPA2 because with WPA3, the router could not tell which of several passwords a device used. An access point that uses the router's network name must also allow WPA2, or devices treat the two as different networks.
+Extending coverage with your own access points, mesh system, or range extender isn't a supported configuration. StartWRT gives each device a [Security Profile](security-profiles.md) based on how it connects: the password it used on the router's own Wi-Fi, or the [Ethernet port](ethernet.md) it is plugged into. Your own equipment handles its devices' passwords itself, so the router sees only how that equipment connects: the port an access point or mesh system is plugged into, or the password a range extender joined with. Every device connected through that equipment gets that one profile, whichever password it used, even when the equipment uses the router's network name and passwords.
 
 ## Is VPN chaining really more private?
 
