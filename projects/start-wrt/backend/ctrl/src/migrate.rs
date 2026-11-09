@@ -120,7 +120,7 @@ impl Migration {
             }
             Migration::ReissueRootCa => "reissue the Root CA in a form iOS can install",
             Migration::NameProfileFirewallSections => {
-                "name the firewall rules earlier versions created for each profile"
+                "name each profile's firewall sections so saving a profile keeps changes made in LuCI"
             }
         }
     }

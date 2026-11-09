@@ -29,7 +29,6 @@ fi
 update-initramfs -u -k all
 
 if [ -f /etc/default/grub ]; then
-	# GRUB values are always double-quoted; delegate the replace-or-append.
 	grub_set() {
 		set_config /etc/default/grub "$1" "\"$2\""
 	}
@@ -42,6 +41,8 @@ if [ -f /etc/default/grub ]; then
 	fi
 	grub_set GRUB_CMDLINE_LINUX "$CMDLINE"
 	grub_set GRUB_CMDLINE_LINUX_DEFAULT ''
+	mkdir -p /etc/default/grub.d
+	cp /usr/lib/startos/grub-user.cfg /etc/default/grub.d/zz-startos-user.cfg
 	grub_set GRUB_DISTRIBUTOR "StartOS v$(cat /usr/lib/startos/VERSION.txt)"
 	grub_set GRUB_TOP_LEVEL "$(ls -1 /boot/vmlinuz-* | sort -V | tail -n1)"
 	# Graphical terminal (serial added conditionally via /etc/grub.d/01_serial)
