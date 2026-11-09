@@ -1,5 +1,292 @@
 use super::*;
 
+#[tokio::test]
+async fn failed_publications_remove_new_directories_and_successful_ones_preserve_contents() {
+    let root = tempfile::tempdir().unwrap();
+    let failed = root.path().join("failed");
+    tokio::fs::create_dir(&failed).await.unwrap();
+    let error = finish_directory_publication(
+        &failed,
+        Err(Error::new(
+            eyre!("database unavailable"),
+            ErrorKind::Database,
+        )),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Database);
+    assert!(!failed.exists());
+    let published = root.path().join("published");
+    tokio::fs::create_dir(&published).await.unwrap();
+    tokio::fs::write(published.join("data"), b"preserved")
+        .await
+        .unwrap();
+    finish_directory_publication(&published, Ok(()))
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::fs::read(published.join("data")).await.unwrap(),
+        b"preserved"
+    );
+}
+
+#[test]
+fn public_observations_hide_private_cache_identity_without_losing_failure_details() {
+    let private = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let error = format!("mount: /media/startos/tmp/{private}: permission denied (13)");
+    let public = public_error_message(error);
+    assert!(public.contains("[source]"));
+    assert!(public.contains("permission denied (13)"));
+    assert!(!public.contains(private));
+    assert_eq!(
+        public_error_message("DNS could not resolve nas.local"),
+        "DNS could not resolve nas.local"
+    );
+}
+
+#[test]
+fn cifs_preparation_separates_private_password_and_preserves_connection_details() {
+    for path in ["share/photos", "/share/photos"] {
+        let (source, credentials) = prepare_cifs_source(Cifs {
+            hostname: "nas.local".into(),
+            path: path.into(),
+            username: "family".into(),
+            password: Some("private-password".into()),
+        })
+        .unwrap();
+        let public = serde_json::to_value(&source).unwrap();
+        assert_eq!(public["path"], "/share/photos");
+        assert_eq!(public["username"], "family");
+        assert!(!public.to_string().contains("private-password"));
+        let definition = SourceDefinition::new(source, Some(credentials));
+        let cifs = definition.cifs().unwrap();
+        assert_eq!(cifs.hostname, "nas.local");
+        assert_eq!(cifs.username, "family");
+        assert_eq!(cifs.password.as_deref(), Some("private-password"));
+    }
+    assert!(
+        prepare_cifs_source(Cifs {
+            hostname: "nas.local".into(),
+            path: "share/../escape".into(),
+            username: "family".into(),
+            password: None,
+        })
+        .is_err()
+    );
+}
+
+#[tokio::test]
+async fn shared_cifs_mounts_delegate_their_cache_policy() {
+    let (source, credentials) = prepare_cifs_source(Cifs {
+        hostname: "nas.local".into(),
+        path: "/shared".into(),
+        username: "owner".into(),
+        password: None,
+    })
+    .unwrap();
+    let source =
+        SourceDefinition::new(source, Some(credentials)).filesystem(&SharedVolumeId::new());
+    assert_eq!(
+        source.mount_hash(ReadOnly).await.unwrap(),
+        source.mount_hash(ReadWrite).await.unwrap()
+    );
+    assert_ne!(
+        source.mount_hash(ReadWrite).await.unwrap(),
+        source
+            .mount_hash(crate::disk::mount::filesystem::BackupWrite)
+            .await
+            .unwrap()
+    );
+}
+
+#[test]
+fn mounted_sources_stay_available_when_capacity_fails_or_times_out() {
+    for kind in [ErrorKind::Filesystem, ErrorKind::Timeout] {
+        let error = Error::new(eyre!("capacity unavailable"), kind);
+        let inspection =
+            SharedVolumeInspection::available_capacity(Err(public_error_message(error)));
+        assert_eq!(
+            inspection.availability,
+            super::super::SharedVolumeAvailability::Available
+        );
+        assert_eq!(inspection.available, None);
+        assert!(inspection.error.unwrap().contains("capacity unavailable"));
+        assert!(inspection.checked_at.is_some());
+    }
+    let measured = SharedVolumeInspection::available_capacity(Ok(0));
+    assert_eq!(measured.available, Some(0));
+    assert_eq!(measured.error, None);
+}
+
+#[test]
+fn password_edits_preserve_omissions_and_clear_explicit_empty_values() {
+    let mut credentials = SharedVolumeCredentials {
+        password: Some("original".into()),
+    };
+    credentials.update_password(None);
+    assert_eq!(credentials.password.as_deref(), Some("original"));
+    credentials.update_password(Some("replacement".into()));
+    assert_eq!(credentials.password.as_deref(), Some("replacement"));
+    credentials.update_password(Some(String::new()));
+    assert_eq!(credentials.password, None);
+    credentials.update_password(None);
+    assert_eq!(credentials.password, None);
+}
+
+#[test]
+fn observations_are_flattened_and_preserve_the_volume_definition() {
+    let id = SharedVolumeId::new();
+    let mut db = crate::db::model::DatabaseModel::from(
+        to_value(&serde_json::json!({
+            "public": { "sharedVolumes": {
+                id.to_string(): {
+                    "name": "Photos",
+                    "source": {"kind": "local"},
+                    "grants": {"consumer": {"readonly": true}},
+                    "availability": "unknown"
+                }
+            }}
+        }))
+        .unwrap(),
+    );
+    let before = db
+        .as_public()
+        .as_shared_volumes()
+        .as_idx(&id)
+        .unwrap()
+        .de()
+        .unwrap();
+    assert_eq!(before.inspection, SharedVolumeInspection::default());
+    let inspection = SharedVolumeInspection::available(Some(1234));
+    write_inspection(&mut db, &id, inspection.clone()).unwrap();
+    let after = db
+        .as_public()
+        .as_shared_volumes()
+        .as_idx(&id)
+        .unwrap()
+        .de()
+        .unwrap();
+    assert_eq!(after.name, before.name);
+    assert_eq!(after.source, before.source);
+    assert_eq!(after.grants, before.grants);
+    assert_eq!(after.inspection, inspection);
+    let encoded = serde_json::to_value(after).unwrap();
+    assert_eq!(encoded["available"], 1234);
+    assert!(encoded["error"].is_null());
+    assert!(encoded["checkedAt"].is_string());
+    assert!(encoded.get("inspection").is_none());
+    let unavailable = SharedVolumeInspection::unavailable("source disconnected".into());
+    write_inspection(&mut db, &id, unavailable.clone()).unwrap();
+    assert_eq!(
+        db.as_public()
+            .as_shared_volumes()
+            .as_idx(&id)
+            .unwrap()
+            .as_inspection()
+            .de()
+            .unwrap(),
+        unavailable
+    );
+}
+
+#[test]
+fn a_finished_check_does_not_resurrect_a_removed_volume() {
+    let mut db = crate::db::model::DatabaseModel::from(
+        to_value(&serde_json::json!({
+            "public": {"sharedVolumes": {}}
+        }))
+        .unwrap(),
+    );
+    write_inspection(
+        &mut db,
+        &SharedVolumeId::new(),
+        SharedVolumeInspection::available(None),
+    )
+    .unwrap();
+    assert!(db.as_public().as_shared_volumes().de().unwrap().is_empty());
+}
+
+#[test]
+fn credential_changes_reject_checks_of_the_previous_source() {
+    let id = SharedVolumeId::new();
+    let mut db = crate::db::model::DatabaseModel::from(to_value(&serde_json::json!({
+        "public": {"sharedVolumes": { id.to_string(): {
+            "name": "Remote", "source": {"kind": "cifs", "hostname": "nas.local", "path": "/share", "username": "user"},
+            "grants": {}, "availability": "unknown"
+        }}},
+        "private": {"sharedVolumeCredentials": { id.to_string(): {
+            "password": "old-password"
+        }}}
+    })).unwrap());
+    let old = SourceDefinition::read(&db, &id).unwrap();
+    db.as_private_mut()
+        .as_shared_volume_credentials_mut()
+        .as_idx_mut(&id)
+        .unwrap()
+        .mutate(|credentials| {
+            credentials.password = Some("new-password".into());
+            Ok(())
+        })
+        .unwrap();
+    assert!(
+        !write_checked(
+            &mut db,
+            &id,
+            &old,
+            None,
+            SharedVolumeInspection::available(Some(42))
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        db.as_public()
+            .as_shared_volumes()
+            .as_idx(&id)
+            .unwrap()
+            .as_inspection()
+            .de()
+            .unwrap(),
+        SharedVolumeInspection::default()
+    );
+    let current = SourceDefinition::read(&db, &id).unwrap();
+    assert!(
+        write_checked(
+            &mut db,
+            &id,
+            &current,
+            None,
+            SharedVolumeInspection::available(Some(42))
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        db.as_public()
+            .as_shared_volumes()
+            .as_idx(&id)
+            .unwrap()
+            .as_inspection()
+            .de()
+            .unwrap()
+            .available,
+        Some(42)
+    );
+}
+
+#[tokio::test]
+async fn checking_a_missing_local_directory_does_not_recreate_it() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("removed");
+    let target = root.path().join("mountpoint");
+    assert!(
+        SourceFilesystem::Local(path.clone())
+            .mount(&target, ReadWrite)
+            .await
+            .is_err()
+    );
+    assert!(!path.exists());
+    assert!(!target.exists());
+}
+
 #[test]
 fn source_failures_keep_their_reason_kind_and_metadata() {
     for (kind, reason) in [
@@ -8,8 +295,10 @@ fn source_failures_keep_their_reason_kind_and_metadata() {
         (ErrorKind::Timeout, "mount deadline elapsed"),
     ] {
         let info = imbl_value::json!({ "operation": "source" });
-        let error = source_result(Err(Error::new(eyre!(reason), kind).with_info(info.clone())))
-            .unwrap_err();
+        let error = source_result::<PreparedSource>(Err(
+            Error::new(eyre!(reason), kind).with_info(info.clone())
+        ))
+        .unwrap_err();
         assert_eq!(error.kind, kind);
         assert_eq!(error.info, info);
         assert!(error.to_string().contains(reason));
@@ -39,7 +328,7 @@ fn stored_folder_failures_are_source_errors_without_recreating_paths() {
         let cause = error.source.downcast_ref::<std::io::Error>().unwrap();
         let reason = cause.to_string();
         let errno = cause.raw_os_error();
-        let error = source_result(Err(error)).unwrap_err();
+        let error = source_result::<PreparedSource>(Err(error)).unwrap_err();
         assert_eq!(error.kind, ErrorKind::Filesystem);
         assert!(error.to_string().contains(&reason));
         assert_eq!(

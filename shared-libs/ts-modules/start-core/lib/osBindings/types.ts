@@ -34,7 +34,15 @@ export type AnyVerifyingKey = z.output<typeof schemas.AnyVerifyingKey>
 export type AnyVerifyingKeyInput = z.input<typeof schemas.AnyVerifyingKey>
 export type ApiState = z.output<typeof schemas.ApiState>
 export type ApiStateInput = z.input<typeof schemas.ApiState>
+
+/**
+ * A registered-target identity; migrated CIFS targets retain their existing IDs.
+ */
 export type BackupTargetId = z.output<typeof schemas.BackupTargetId>
+
+/**
+ * A registered-target identity; migrated CIFS targets retain their existing IDs.
+ */
 export type BackupTargetIdInput = z.input<typeof schemas.BackupTargetId>
 export type Base64 = z.output<typeof schemas.Base64>
 export type Base64Input = z.input<typeof schemas.Base64>
@@ -288,6 +296,8 @@ export type PackageVersionCount = z.output<typeof schemas.PackageVersionCount>
 export type PackageVersionCountInput = z.input<
   typeof schemas.PackageVersionCount
 >
+export type PartitionTable = z.output<typeof schemas.PartitionTable>
+export type PartitionTableInput = z.input<typeof schemas.PartitionTable>
 export type PathOrUrl = z.output<typeof schemas.PathOrUrl>
 export type PathOrUrlInput = z.input<typeof schemas.PathOrUrl>
 export type Pem = z.output<typeof schemas.Pem>
@@ -1088,8 +1098,12 @@ export type SetupExecuteParams = z.output<typeof schemas.SetupExecuteParams>
 export type SetupExecuteParamsInput = z.input<typeof schemas.SetupExecuteParams>
 export type SetupResult = z.output<typeof schemas.SetupResult>
 export type SetupResultInput = z.input<typeof schemas.SetupResult>
-export type SharedVolume = z.output<typeof schemas.SharedVolume>
-export type SharedVolumeInput = z.input<typeof schemas.SharedVolume>
+export type SharedVolumeInspection = z.output<
+  typeof schemas.SharedVolumeInspection
+>
+export type SharedVolumeInspectionInput = z.input<
+  typeof schemas.SharedVolumeInspection
+>
 export type SharedVolumeMountResult = z.output<
   typeof schemas.SharedVolumeMountResult
 >
@@ -1180,8 +1194,16 @@ export type BackupParams = z.output<typeof schemas.BackupParams>
 export type BackupParamsInput = z.input<typeof schemas.BackupParams>
 export type BackupReport = z.output<typeof schemas.BackupReport>
 export type BackupReportInput = z.input<typeof schemas.BackupReport>
-export type CifsBackupTarget = z.output<typeof schemas.CifsBackupTarget>
-export type CifsBackupTargetInput = z.input<typeof schemas.CifsBackupTarget>
+
+/**
+ * A registered backup destination and its last source observation.
+ */
+export type BackupTarget = z.output<typeof schemas.BackupTarget>
+
+/**
+ * A registered backup destination and its last source observation.
+ */
+export type BackupTargetInput = z.input<typeof schemas.BackupTarget>
 export type ClearBindingsParams = z.output<typeof schemas.ClearBindingsParams>
 export type ClearBindingsParamsInput = z.input<
   typeof schemas.ClearBindingsParams
@@ -1278,6 +1300,8 @@ export type SetDependenciesParamsInput = z.input<
 >
 export type SetupProgress = z.output<typeof schemas.SetupProgress>
 export type SetupProgressInput = z.input<typeof schemas.SetupProgress>
+export type SharedVolume = z.output<typeof schemas.SharedVolume>
+export type SharedVolumeInput = z.input<typeof schemas.SharedVolume>
 export type SideloadParams = z.output<typeof schemas.SideloadParams>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 export type Task = z.output<typeof schemas.Task>
@@ -1312,8 +1336,16 @@ export type ActionResult = z.output<typeof schemas.ActionResult>
 export type ActionResultInput = z.input<typeof schemas.ActionResult>
 export type AddSslOptions = z.output<typeof schemas.AddSslOptions>
 export type AddSslOptionsInput = z.input<typeof schemas.AddSslOptions>
-export type BackupTarget = z.output<typeof schemas.BackupTarget>
-export type BackupTargetInput = z.input<typeof schemas.BackupTarget>
+
+/**
+ * A completed background backup with its original target name and final report.
+ */
+export type BackupRun = z.output<typeof schemas.BackupRun>
+
+/**
+ * A completed background backup with its original target name and final report.
+ */
+export type BackupRunInput = z.input<typeof schemas.BackupRun>
 export type BindingSetAddressEnabledParams = z.output<
   typeof schemas.BindingSetAddressEnabledParams
 >
@@ -1336,6 +1368,8 @@ export type DepInfo = z.output<typeof schemas.DepInfo>
 export type DepInfoInput = z.input<typeof schemas.DepInfo>
 export type DerivedAddressInfo = z.output<typeof schemas.DerivedAddressInfo>
 export type DerivedAddressInfoInput = z.input<typeof schemas.DerivedAddressInfo>
+export type DiskInfo = z.output<typeof schemas.DiskInfo>
+export type DiskInfoInput = z.input<typeof schemas.DiskInfo>
 export type ImageConfig = z.output<typeof schemas.ImageConfig>
 export type ImageConfigInput = z.input<typeof schemas.ImageConfig>
 export type MetricsFollowResponse = z.output<

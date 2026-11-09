@@ -138,7 +138,6 @@ export class FormComponent<T extends Record<string, any>> implements OnInit {
   form = new FormGroup({})
 
   ngOnInit() {
-    this.confirm?.markAsPristine()
     this.form = this.formService.createForm(this.spec, this.value)
     this.process(this.operations)
   }

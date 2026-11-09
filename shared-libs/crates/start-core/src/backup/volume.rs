@@ -9,13 +9,13 @@ use imbl::OrdSet;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
-use super::target::{BackupTargetId, SharedVolumeBackupInfo};
+use super::target::{BackupTargetId, BackupTargetSource, SharedVolumeBackupInfo, TargetMount};
 use super::{PackageBackupReport, VolumeBackupReport};
 use crate::context::{CliContext, RpcContext};
 use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::{FileSystem, ReadOnly, ReadWrite};
-use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
+use crate::disk::mount::guard::GenericMountGuard;
 use crate::disk::mount::util::sync_directory;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
@@ -107,9 +107,9 @@ pub(super) async fn measure_backup(
 
 pub(super) async fn backup_volume(
     ctx: &RpcContext,
-    backup: &BackupMountGuard<TmpMountGuard>,
+    backup: &BackupMountGuard<TargetMount>,
     id: &SharedVolumeId,
-    destination: &super::target::BackupTargetFS,
+    destination: &BackupTargetSource,
 ) -> Result<SharedVolumeBackupInfo, Error> {
     let volume = ctx
         .db
@@ -122,7 +122,7 @@ pub(super) async fn backup_volume(
         .de()?;
     if source_overlaps_target(
         &volume.source,
-        destination,
+        &destination.source,
         &backup.encrypted_relative_path(),
     )
     .await?
@@ -144,27 +144,42 @@ pub(super) async fn backup_volume(
 
 async fn source_overlaps_target(
     source: &SharedVolumeSource,
-    destination: &super::target::BackupTargetFS,
+    destination: &SharedVolumeSource,
     encrypted_relative_path: &Path,
 ) -> Result<bool, Error> {
     Ok(match (source, destination) {
         (
             SharedVolumeSource::Cifs { hostname, path, .. },
-            super::target::BackupTargetFS::Cifs(target),
+            SharedVolumeSource::Cifs {
+                hostname: target_hostname,
+                path: target_path,
+                ..
+            },
         ) => {
             let target_path = Path::new("/")
-                .join(&target.path)
+                .join(target_path)
                 .join(encrypted_relative_path);
             crate::disk::mount::filesystem::cifs::locations_overlap(
                 (hostname, path),
-                (&target.hostname, &target_path),
+                (target_hostname, &target_path),
             )
             .await?
         }
         (
-            SharedVolumeSource::Disk { logicalname, .. },
-            super::target::BackupTargetFS::Disk(target),
-        ) => BlockDev::new(logicalname).source_hash().await? == target.source_hash().await?,
+            SharedVolumeSource::Disk {
+                logicalname, path, ..
+            },
+            SharedVolumeSource::Disk {
+                logicalname: target,
+                path: target_path,
+                ..
+            },
+        ) => {
+            let target_path = target_path.join(encrypted_relative_path);
+            crate::util::io::paths_overlap(path, &target_path)
+                && BlockDev::new(logicalname).source_hash().await?
+                    == BlockDev::new(target).source_hash().await?
+        }
         _ => false,
     })
 }
@@ -233,12 +248,7 @@ pub async fn restore_volumes_rpc(
         Some(id) => id,
         None => db.as_public().as_server_info().as_id().de()?,
     };
-    let backup = BackupMountGuard::mount(
-        TmpMountGuard::mount(&fs, ReadWrite).await?,
-        &server_id,
-        &password,
-    )
-    .await?;
+    let backup = BackupMountGuard::mount(fs.mount(ReadWrite).await?, &server_id, &password).await?;
     tokio::spawn(async move {
         let mut result = RestoreVolumeResult::default();
         for id in selected_ids(Some(ids), []) {
@@ -287,7 +297,10 @@ fn new_local_restore(name: String) -> (SharedVolumeId, SharedVolume) {
             name,
             source: SharedVolumeSource::Local,
             grants: BTreeMap::new(),
-            availability: SharedVolumeAvailability::Available,
+            inspection: crate::shared_volumes::SharedVolumeInspection {
+                availability: SharedVolumeAvailability::Available,
+                ..Default::default()
+            },
         },
     )
 }
@@ -308,11 +321,9 @@ async fn restore_local_copy<F: Future<Output = Result<(), Error>>>(
         copy_folder(source, &path).await?;
         source::create_local_directory(&path).await?;
         sync_directory(&path).await?;
+        // Publication can commit after its caller cancels.
         incomplete.0.take();
-        if let Err(error) = publish(id.clone(), volume).await {
-            delete_dir(&path).await.log_err();
-            return Err(error);
-        }
+        source::finish_directory_publication(&path, publish(id.clone(), volume).await).await?;
         Ok(id)
     }
     .await;
@@ -324,9 +335,9 @@ async fn restore_local_copy<F: Future<Output = Result<(), Error>>>(
     result
 }
 
-pub(super) async fn restore_volume(
+pub(super) async fn restore_volume<G: GenericMountGuard>(
     ctx: &RpcContext,
-    backup: &BackupMountGuard<TmpMountGuard>,
+    backup: &BackupMountGuard<G>,
     id: &SharedVolumeId,
 ) -> Result<SharedVolumeId, Error> {
     let info = backup
@@ -362,7 +373,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn external_volume_backups_reject_the_same_partition_through_any_alias() {
+    async fn external_volume_backups_reject_overlapping_folders_through_any_device_alias() {
         let fixture = tempfile::tempdir().unwrap();
         let disk = fixture.path().join("disk");
         let alias = fixture.path().join("filesystem-uuid");
@@ -370,22 +381,43 @@ mod tests {
         std::fs::write(&disk, "source").unwrap();
         std::fs::write(&other, "destination").unwrap();
         symlink(&disk, &alias).unwrap();
-        let source = SharedVolumeSource::Disk {
-            logicalname: alias,
-            path: PathBuf::new(),
+        let source = |path: &str| SharedVolumeSource::Disk {
+            logicalname: alias.clone(),
+            path: path.into(),
             label: None,
         };
-        let target = |path| super::super::target::BackupTargetFS::Disk(BlockDev::new(path));
-        assert!(
-            source_overlaps_target(&source, &target(disk), Path::new("backup"))
+        let target = |logicalname, path: &str| SharedVolumeSource::Disk {
+            logicalname,
+            path: path.into(),
+            label: None,
+        };
+        for (source_path, target_path, overlaps) in [
+            ("", "", true),
+            ("media", "backups", false),
+            ("media", "media", true),
+            ("media/backup/photos", "media", true),
+            ("media/backups", "media", false),
+        ] {
+            assert_eq!(
+                source_overlaps_target(
+                    &source(source_path),
+                    &target(disk.clone(), target_path),
+                    Path::new("backup")
+                )
+                .await
+                .unwrap(),
+                overlaps
+            );
+            assert!(
+                !source_overlaps_target(
+                    &source(source_path),
+                    &target(other.clone(), target_path),
+                    Path::new("backup")
+                )
                 .await
                 .unwrap()
-        );
-        assert!(
-            !source_overlaps_target(&source, &target(other), Path::new("backup"))
-                .await
-                .unwrap()
-        );
+            );
+        }
     }
 
     fn info(generation: String) -> SharedVolumeBackupInfo {
@@ -406,9 +438,10 @@ mod tests {
     #[test]
     fn restore_cli_omits_password_but_keeps_it_in_rpc_params() {
         let id = SharedVolumeId::new();
+        let target = BackupTargetId::new();
         let mut params = RestoreVolumeParams::try_parse_from([
             "restore",
-            "disk-/dev/test",
+            target.as_ref(),
             id.as_ref(),
             "--server-id",
             "old-server",
@@ -420,7 +453,7 @@ mod tests {
         assert!(
             RestoreVolumeParams::try_parse_from([
                 "restore",
-                "disk-/dev/test",
+                target.as_ref(),
                 "plaintext-password",
                 id.as_ref(),
             ])
@@ -549,6 +582,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires root and UID/GID 100000 mapped"]
     async fn restore_creates_a_new_local_volume_without_touching_existing_data() {
         let fixture = tempfile::tempdir().unwrap();
         let old_id = SharedVolumeId::new();
@@ -587,6 +621,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires root and UID/GID 100000 mapped"]
     async fn failed_restore_copy_or_publication_leaves_no_new_data() {
         let fixture = tempfile::tempdir().unwrap();
         let source = fixture.path().join("backup");
@@ -601,7 +636,7 @@ mod tests {
             },
         )
         .await;
-        assert!(failed_copy.is_err());
+        assert_eq!(failed_copy.unwrap_err().kind, ErrorKind::Backup);
         let failed_publication =
             restore_local_copy(fixture.path(), &source, "Photos".into(), |_, _| async {
                 Err(Error::new(
@@ -610,7 +645,7 @@ mod tests {
                 ))
             })
             .await;
-        assert!(failed_publication.is_err());
+        assert_eq!(failed_publication.unwrap_err().kind, ErrorKind::Database);
         assert_eq!(
             std::fs::read_dir(fixture.path().join("shared-volumes"))
                 .unwrap()

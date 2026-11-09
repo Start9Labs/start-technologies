@@ -51,6 +51,9 @@ impl<LogicalName: AsRef<Path> + Send + Sync> FileSystem for BlockDev<LogicalName
     async fn source(&self) -> Result<Option<impl AsRef<Path>>, Error> {
         Ok(Some(&self.logicalname))
     }
+    async fn device(&self) -> Result<Option<PathBuf>, Error> {
+        Ok(Some(self.logicalname.as_ref().to_owned()))
+    }
     async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         let mut sha = Sha256::new();
         sha.update("BlockDev");

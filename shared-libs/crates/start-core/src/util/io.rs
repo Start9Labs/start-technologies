@@ -1835,6 +1835,18 @@ pub fn to_tmp_path(path: impl AsRef<Path>) -> Result<PathBuf, Error> {
     }
 }
 
+pub(crate) fn paths_overlap(source: &Path, destination: &Path) -> bool {
+    source.starts_with(destination) || destination.starts_with(source)
+}
+
+pub(crate) async fn file_identity(path: impl AsRef<Path>) -> Result<(u64, u64), Error> {
+    let path = path.as_ref();
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .with_ctx(|_| (ErrorKind::Filesystem, path.display().to_string()))?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
 pub async fn canonicalize(
     path: impl AsRef<Path> + Send + Sync,
     create_parent: bool,

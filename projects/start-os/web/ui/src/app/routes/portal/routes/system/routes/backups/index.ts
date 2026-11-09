@@ -50,7 +50,7 @@ import { TitleDirective } from 'src/app/services/title.service'
 import { formatDuration } from 'src/app/utils/format-duration'
 import { BACKUP } from './backup.component'
 import { BackupService } from './backup.service'
-import { BackupRun, EMPTY_HISTORY, historyRpc, targetRpc } from './backup.types'
+import { BackupRun, EMPTY_HISTORY } from './backup.types'
 import { CONVERSIONS, ConversionLabel } from './conversion'
 import { BackupLegacyWarningComponent } from './legacy-warning.component'
 import { LEGACY_BACKUP } from './legacy.component'
@@ -387,7 +387,7 @@ export default class Backups {
       this.os.backingUp$.pipe(filter(backingUp => !backingUp)),
     ]).pipe(
       switchMap(([{ index, size }]) =>
-        historyRpc(this.api)
+        this.api.rpc.backup.history
           .list({ offset: index * size, limit: size })
           .catch(error => {
             this.errors.handleError(error as HttpError)
@@ -431,7 +431,7 @@ export default class Backups {
       Object.entries(targets)
         .filter(([, { checkedAt }]) => isStale(checkedAt))
         .map(([id]) =>
-          targetRpc(this.api)
+          this.api.rpc.backup.target
             .inspect({ id })
             .catch(error => this.errors.handleError(error as HttpError)),
         ),
@@ -440,7 +440,7 @@ export default class Backups {
 
   protected add() {
     this.addSource.open('Add backup target', TARGET_SOURCES, params =>
-      targetRpc(this.api).create(params),
+      this.api.rpc.backup.target.create(params),
     )
   }
 
@@ -576,7 +576,7 @@ export default class Backups {
     )
     if (!confirmed) return
     await this.tasks.run(
-      () => targetRpc(this.api).remove({ id }),
+      () => this.api.rpc.backup.target.remove({ id }),
       local ? 'Deleting' : 'Removing',
     )
   }

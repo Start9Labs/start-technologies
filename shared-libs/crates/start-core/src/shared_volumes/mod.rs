@@ -9,6 +9,8 @@ use crate::PackageId;
 
 pub mod mounts;
 pub mod source;
+#[cfg(target_os = "linux")]
+pub(crate) mod watch;
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::prelude::*;
@@ -120,17 +122,25 @@ pub struct SharedVolume {
     pub name: String,
     pub source: SharedVolumeSource,
     pub grants: BTreeMap<PackageId, SharedVolumeGrant>,
-    #[serde(default)]
-    pub availability: SharedVolumeAvailability,
+    #[serde(flatten)]
+    pub inspection: SharedVolumeInspection,
 }
 
 rpc_toolkit::reflect_ts!(SharedVolume);
 rpc_toolkit::ts_export!(SharedVolume, namespaces = [""]);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SharedVolumeCredentials {
     pub password: Option<String>,
+}
+
+impl SharedVolumeCredentials {
+    pub(crate) fn update_password(&mut self, password: Option<String>) {
+        if let Some(password) = password {
+            self.password = (!password.is_empty()).then_some(password);
+        }
+    }
 }
 
 impl std::fmt::Debug for SharedVolumeCredentials {
@@ -201,7 +211,7 @@ pub struct CreateSharedVolumeParams {
 
 rpc_toolkit::reflect_ts!(CreateSharedVolumeParams);
 
-fn validate_name(name: &str) -> Result<(), Error> {
+pub(crate) fn validate_name(name: &str) -> Result<(), Error> {
     if name.trim().is_empty() {
         return Err(Error::new(
             eyre!(t!("shared-volumes.name-required")),
@@ -222,39 +232,19 @@ pub async fn create(
             source::create_local_directory(&local_path(crate::DATA_DIR, &id)).await?;
             (SharedVolumeSource::Local, None)
         }
-        CreateSharedVolumeSource::Disk { logicalname, path } => {
-            let disks = crate::disk::util::list(&ctx.os_partitions, None).await?;
-            let logicalname = tokio::fs::canonicalize(logicalname).await?;
-            let (partition, label) = source::external_partition(&disks, &logicalname)?;
-            crate::disk::format::refuse_system_drive(
-                &ctx.os_partitions,
-                &crate::disk::format::parent_drive(&partition).await?,
-            )
-            .await?;
-            (
-                source::prepare_external_source(partition, path, label).await?,
-                None,
-            )
-        }
+        CreateSharedVolumeSource::Disk { logicalname, path } => (
+            source::prepare_disk_source(&ctx, logicalname, path).await?,
+            None,
+        ),
         CreateSharedVolumeSource::Cifs(cifs) => {
-            cifs.validate()?;
-            let Cifs {
-                hostname,
-                path,
-                username,
-                password,
-            } = cifs;
-            (
-                SharedVolumeSource::Cifs {
-                    hostname,
-                    path: Path::new("/").join(path),
-                    username,
-                },
-                Some(SharedVolumeCredentials { password }),
-            )
+            let (source, credentials) = source::prepare_cifs_source(cifs)?;
+            (source, Some(credentials))
         }
     };
-    ctx.db
+    let directory =
+        matches!(source, SharedVolumeSource::Local).then(|| local_path(crate::DATA_DIR, &id));
+    let publication = ctx
+        .db
         .mutate(|db| {
             if let Some(credentials) = &credentials {
                 db.as_private_mut()
@@ -267,13 +257,18 @@ pub async fn create(
                     name,
                     source,
                     grants: BTreeMap::new(),
-                    availability: SharedVolumeAvailability::default(),
+                    inspection: SharedVolumeInspection::default(),
                 },
             )?;
             Ok(())
         })
         .await
-        .result?;
+        .result;
+    if let Some(directory) = directory {
+        source::finish_directory_publication(&directory, publication).await?;
+    } else {
+        publication?;
+    }
     Ok(id)
 }
 
@@ -342,45 +337,33 @@ pub async fn update_cifs(
                     ErrorKind::InvalidRequest,
                 ));
             }
-            let stored = db
+            let mut credentials = db
                 .as_private()
                 .as_shared_volume_credentials()
                 .as_idx(&id)
                 .map(|credentials| credentials.de())
-                .transpose()?;
-            let password = match password {
-                Some(password) => (!password.is_empty()).then_some(password),
-                None => stored.and_then(|stored| stored.password),
-            };
-            let cifs = Cifs {
+                .transpose()?
+                .unwrap_or_default();
+            credentials.update_password(password);
+            let (source, credentials) = source::prepare_cifs_source(Cifs {
                 hostname,
                 path,
                 username,
-                password,
-            };
-            cifs.validate()?;
-            let Cifs {
-                hostname,
-                path,
-                username,
-                password,
-            } = cifs;
+                password: credentials.password,
+            })?;
             db.as_private_mut()
                 .as_shared_volume_credentials_mut()
-                .insert(&id, &SharedVolumeCredentials { password })?;
+                .insert(&id, &credentials)?;
             let volume = db
                 .as_public_mut()
                 .as_shared_volumes_mut()
                 .as_idx_mut(&id)
                 .or_not_found(&id)?;
-            volume.as_source_mut().ser(&SharedVolumeSource::Cifs {
-                hostname,
-                path: Path::new("/").join(path),
-                username,
-            })?;
-            volume
-                .as_availability_mut()
-                .ser(&SharedVolumeAvailability::Unknown)
+            volume.as_source_mut().ser(&source)?;
+            volume.mutate(|volume| {
+                volume.inspection = SharedVolumeInspection::default();
+                Ok(())
+            })
         })
         .await
         .result
@@ -550,12 +533,44 @@ async fn delete_retained_data(ctx: &RpcContext, id: &SharedVolumeId) -> Result<(
         .result
 }
 
-#[derive(Serialize, Deserialize, VisitFields)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, HasModel, VisitFields)]
+#[serde(default, rename_all = "camelCase")]
+#[model = "Model<Self>"]
 pub struct SharedVolumeInspection {
     pub availability: SharedVolumeAvailability,
     pub available: Option<u64>,
     pub error: Option<String>,
+    pub checked_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl SharedVolumeInspection {
+    pub(crate) fn observed(
+        availability: SharedVolumeAvailability,
+        available: Option<u64>,
+        error: Option<String>,
+    ) -> Self {
+        Self {
+            availability,
+            available,
+            error,
+            checked_at: Some(chrono::Utc::now()),
+        }
+    }
+
+    pub(crate) fn available(bytes: Option<u64>) -> Self {
+        Self::observed(SharedVolumeAvailability::Available, bytes, None)
+    }
+
+    pub(crate) fn available_capacity(result: Result<u64, String>) -> Self {
+        match result {
+            Ok(bytes) => Self::available(Some(bytes)),
+            Err(error) => Self::observed(SharedVolumeAvailability::Available, None, Some(error)),
+        }
+    }
+
+    pub(crate) fn unavailable(error: String) -> Self {
+        Self::observed(SharedVolumeAvailability::Unavailable, None, Some(error))
+    }
 }
 
 rpc_toolkit::reflect_ts!(SharedVolumeInspection);
@@ -566,39 +581,18 @@ pub async fn inspect(
 ) -> Result<SharedVolumeInspection, Error> {
     use crate::disk::mount::filesystem::ReadOnly;
     use crate::disk::mount::guard::GenericMountGuard;
-    match source::open_source(&ctx, &id, ReadOnly).await {
-        Ok(guard) => {
-            let available = tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                crate::disk::util::get_available(guard.path()),
-            )
-            .await
-            .with_kind(ErrorKind::Timeout)
-            .and_then(|result| result);
-            guard.unmount().await?;
-            match available {
-                Ok(available) => Ok(SharedVolumeInspection {
-                    availability: SharedVolumeAvailability::Available,
-                    available: Some(available),
-                    error: None,
-                }),
-                Err(_) => {
-                    source::record_availability(&ctx, &id, SharedVolumeAvailability::Unavailable)
-                        .await?;
-                    Ok(SharedVolumeInspection {
-                        availability: SharedVolumeAvailability::Unavailable,
-                        available: None,
-                        error: Some(t!("shared-volumes.source-unavailable").to_string()),
-                    })
-                }
-            }
-        }
-        Err(error) => Ok(SharedVolumeInspection {
-            availability: SharedVolumeAvailability::Unavailable,
-            available: None,
-            error: Some(error.to_string()),
-        }),
+    if let Ok(guard) = source::open_source(&ctx, &id, ReadOnly).await {
+        guard.unmount().await?;
     }
+    ctx.db
+        .peek()
+        .await
+        .as_public()
+        .as_shared_volumes()
+        .as_idx(&id)
+        .or_not_found(&id)?
+        .as_inspection()
+        .de()
 }
 
 #[cfg(test)]
@@ -705,7 +699,7 @@ mod tests {
             name: "Photos".into(),
             source: SharedVolumeSource::Local,
             grants: BTreeMap::new(),
-            availability: SharedVolumeAvailability::Unknown,
+            inspection: SharedVolumeInspection::default(),
         };
         assert!(volume.authorize(true, &package, true).is_err());
         volume

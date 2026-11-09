@@ -1,6 +1,5 @@
 import { FullKeyboard, Languages } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import { Result } from 'src/app/services/api/api.types'
 
 export type DataModel = {
   ui: UIData
@@ -9,28 +8,12 @@ export type DataModel = {
     keyboard: FullKeyboard | null
   }
   packageData: AllPackageData
-  sharedVolumes: Record<
-    string,
-    T.SharedVolume & {
-      available: number | null
-      error: string | null
-      checkedAt: string | null
-    }
-  >
-  disks: Result<'disk.list'>
-  backupTargets: Record<string, BackupTargetEntry>
+  sharedVolumes: T.Public['sharedVolumes']
+  disks: T.Public['disks']
+  backupTargets: T.Public['backupTargets']
 }
 
-export type BackupTargetEntry = {
-  name: string
-  source: T.SharedVolumeSource
-  availability: T.SharedVolumeAvailability
-  available: number | null
-  error: string | null
-  checkedAt: string | null
-  startOs: Record<string, T.StartOsRecoveryInfo>
-  legacyBackup: boolean
-}
+export type BackupTargetEntry = T.BackupTarget
 
 export type UIData = {
   registries: Record<string, string | null>

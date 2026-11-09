@@ -86,9 +86,9 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
                                 if !relevant(&value) {
                                     continue;
                                 }
-                                if let Some(cbs) = this.inner.mutate(|map| {
-                                    map.remove(&k).and_then(CallbackHandlers::detach_watcher)
-                                }) {
+                                if let Some(cbs) =
+                                    this.remove(&k).and_then(CallbackHandlers::detach_watcher)
+                                {
                                     if let Err(e) = cbs.call((this.arguments)(value)).await {
                                         tracing::error!("Error in {label} callback: {e}");
                                         tracing::debug!("{e:?}");
@@ -104,6 +104,10 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
                 .1
                 .push(handler);
         })
+    }
+
+    fn remove(&self, key: &K) -> Option<(NonDetachingJoinHandle<()>, Vec<CallbackHandler>)> {
+        self.inner.mutate(|map| map.remove(key))
     }
 
     pub fn gc(&self) {
@@ -381,6 +385,14 @@ impl ServiceCallbacks {
     ) {
         self.get_shared_volumes
             .add_filtered(package_id, watch, relevant, handler);
+    }
+
+    pub(crate) async fn invalidate_shared_volumes(&self, package: &PackageId) -> Result<(), Error> {
+        if let Some((watcher, handlers)) = self.get_shared_volumes.remove(package) {
+            drop(watcher);
+            CallbackHandlers(handlers).call(vector![]).await?;
+        }
+        Ok(())
     }
 
     pub(super) fn add_get_service_manifest(

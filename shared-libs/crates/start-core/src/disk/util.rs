@@ -48,6 +48,7 @@ pub struct DiskInfo {
 }
 
 rpc_toolkit::reflect_ts!(DiskInfo);
+rpc_toolkit::ts_export!(DiskInfo, namespaces = [""]);
 
 #[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]

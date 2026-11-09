@@ -9,6 +9,7 @@ import { finalize, firstValueFrom, Observer, share } from 'rxjs'
 export class FormDialogService {
   private readonly dialog = inject(DialogService)
   private readonly i18n = inject(i18nPipe)
+  // Dialog lifetime owns discard state across inner-form rebuilds.
   private readonly formService = new TuiConfirmService()
   private readonly injector = Injector.create({
     parent: inject(Injector),

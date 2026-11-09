@@ -105,12 +105,8 @@ pub async fn restore_packages_rpc(
         Some(id) => id,
         None => peek.as_public().as_server_info().as_id().de()?,
     };
-    let backup_guard = BackupMountGuard::mount(
-        TmpMountGuard::mount(&fs, ReadWrite).await?,
-        &server_id,
-        &password,
-    )
-    .await?;
+    let backup_guard =
+        BackupMountGuard::mount(fs.mount(ReadWrite).await?, &server_id, &password).await?;
 
     let tasks = restore_packages(&ctx, backup_guard, ids).await?;
 
@@ -273,9 +269,9 @@ pub async fn recover_full_server(
 }
 
 #[instrument(skip(ctx, backup_guard))]
-async fn restore_packages(
+async fn restore_packages<G: GenericMountGuard>(
     ctx: &RpcContext,
-    backup_guard: BackupMountGuard<TmpMountGuard>,
+    backup_guard: BackupMountGuard<G>,
     ids: Vec<PackageId>,
 ) -> Result<BTreeMap<PackageId, DownloadInstallFuture>, Error> {
     let backup_guard = Arc::new(backup_guard);

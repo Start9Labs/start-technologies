@@ -328,16 +328,21 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
   }
 
   /**
-   * Build a reactive `main` entrypoint that reconciles the daemon set
-   * returned by `fn` against the running set on every `effects.constRetry`
-   * trigger.
+   * Reconcile a reactive daemon set within `setupMain` on each `effects.constRetry`.
    *
    * The supplied builder returns a {@link Daemons} (in record-mode, not yet
    * built); the SDK diffs its entries against the running daemons by
    * `(id, configHash)`. Per id: absent → present **start**, present →
-   * absent **stop**, same hash **leave alone**, different hash **restart**.
-   * Dependents of any restarted or stopped daemon are also restarted so
-   * `requires` wiring stays consistent. Re-runs are coalesced.
+   * absent **stop**, unchanged configuration **leave alone**, changed configuration **restart**.
+   * Shared-container membership is part of the configuration. A stopped or
+   * restarted container refreshes all its processes and their dependents.
+   * Re-runs are coalesced.
+   *
+   * Invalidations from `getSharedVolumes(...).const()` refresh containers with
+   * declared or attempted shared-volume mounts even when metadata and hashes
+   * remain equal. The callback covers the granted catalog, so its shared-volume
+   * consumers refresh together; unrelated containers stay running. Nested effects
+   * retain this reconciliation scope rather than restarting the whole service.
    *
    * The diff key (`configHash`) covers the subcontainer descriptor
    * (`imageId`, `sharedRun`, `name`, structural `mounts.build()`), the
@@ -350,9 +355,9 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
    * reconciler to react to it changing.
    *
    * **Use lazy SubContainers** ({@link SubContainer.of}) for daemons under
-   * `Daemons.dynamic`. Eager handles created inside `fn` are wasted on
-   * re-runs that diff to "leave alone"; the reconciler throws at hash time
-   * if it sees one.
+   * `Daemons.dynamic`, creating fresh handles inside `fn` on each evaluation.
+   * Stopped handles are destroyed and cannot be reused. Eager handles created
+   * inside `fn` materialize before diffing; the reconciler rejects them.
    *
    * Return the result from `setupMain` — it is a {@link T.DaemonBuildable},
    * exactly like a static `Daemons.of(...)` chain:
@@ -806,9 +811,6 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
 }
 
 // ----------------------------------------------------------------------------
-// Daemons.dynamic — reconciler + configHash
-// ----------------------------------------------------------------------------
-
 /** The user-supplied builder consumed by {@link Daemons.dynamic}. */
 export type DaemonsBuilder<M extends T.SDKManifest> = (opts: {
   effects: T.Effects
@@ -839,8 +841,9 @@ function validateEntries<M extends T.SDKManifest>(
  * Stable JSON hash over the structural args of a recorded entry.
  *
  * Two entries with the same id and the same `configHash` are considered
- * "the same daemon" by `Daemons.dynamic`'s reconciler — it leaves them
- * running across re-runs. Any difference triggers a restart.
+ * structurally equal. The reconciler leaves them running while shared-container
+ * membership and shared-volume dependencies remain unchanged. Any hash
+ * difference triggers a restart.
  *
  * Hashed fields: kind, id, sorted requires, subcontainer descriptor
  * (`imageId`, `sharedRun`, `name`, `mounts.build()`), the whole `exec`
@@ -933,6 +936,7 @@ type RunningEntry<M extends T.SDKManifest> = {
   healthDaemon: HealthDaemon<M>
   subcontainer: SubContainer<M> | null
   configHash: string
+  sharedVolumesRevision: number
   requires: ReadonlyArray<string>
 }
 
@@ -951,6 +955,7 @@ export class DaemonsReconciler<M extends T.SDKManifest>
   private running = new Map<string, RunningEntry<M>>()
   private inFlight: Promise<void> | null = null
   private pendingRerun = false
+  private sharedVolumesRevision = 0
   private isTerminating = false
   private termPromise: Promise<void> | null = null
   private detached = false
@@ -995,6 +1000,31 @@ export class DaemonsReconciler<M extends T.SDKManifest>
     this.runReconcile().catch(e => logErrorOnce(asError(e)))
   }
 
+  private builderEffects(): T.Effects {
+    const constRetry = once(() => this.scheduleRerun())
+    const decorate = (effects: T.Effects): T.Effects => {
+      const child = effects.child.bind(effects)
+      const getSharedVolumes = effects.getSharedVolumes.bind(effects)
+      effects.constRetry = constRetry
+      effects.child = name => decorate(child(name))
+      effects.getSharedVolumes = options => {
+        const callback = options.callback
+        return getSharedVolumes({
+          ...options,
+          callback: callback
+            ? () => {
+                this.sharedVolumesRevision++
+                callback()
+                constRetry()
+              }
+            : undefined,
+        })
+      }
+      return effects
+    }
+    return decorate(this.rootEffects.child('dyn-daemons-fn'))
+  }
+
   private runReconcile(): Promise<void> {
     if (this.isTerminating) return Promise.resolve()
     // Tracking the in-flight promise (rather than a boolean) lets term()
@@ -1002,11 +1032,9 @@ export class DaemonsReconciler<M extends T.SDKManifest>
     // race between teardown and a concurrent reconcile.
     const p = (async () => {
       try {
-        const fnEffects = this.rootEffects.child(`dyn-daemons-fn`)
-        fnEffects.constRetry = once(() => this.scheduleRerun())
-        const recorded = await this.fn({ effects: fnEffects })
+        const recorded = await this.fn({ effects: this.builderEffects() })
         validateEntries(recorded.entries)
-        await this.reconcile(recorded.entries)
+        await this.reconcile(recorded.entries, this.sharedVolumesRevision)
       } catch (e) {
         logErrorOnce(asError(e))
       }
@@ -1024,6 +1052,7 @@ export class DaemonsReconciler<M extends T.SDKManifest>
 
   private async reconcile(
     entries: ReadonlyArray<DaemonEntry<M>>,
+    sharedVolumesRevision: number,
   ): Promise<void> {
     // Eager subcontainers can't be diffed across reconciles (no stable hash).
     // If we find any, the user's `fn` has already paid for `createFs` on
@@ -1063,7 +1092,19 @@ export class DaemonsReconciler<M extends T.SDKManifest>
       entries.map(e => [e.id, e]),
     )
     const desiredHashes = new Map<string, string>(
-      entries.map(e => [e.id, configHash(e)]),
+      entries.map(entry => {
+        const subcontainer = 'subcontainer' in entry ? entry.subcontainer : null
+        const peers = subcontainer
+          ? entries
+              .filter(
+                peer =>
+                  'subcontainer' in peer && peer.subcontainer === subcontainer,
+              )
+              .map(peer => peer.id)
+              .sort()
+          : []
+        return [entry.id, stableStringify([configHash(entry), peers])]
+      }),
     )
 
     const toStop = new Set<string>()
@@ -1071,15 +1112,29 @@ export class DaemonsReconciler<M extends T.SDKManifest>
       const desired = desiredById.get(id)
       if (!desired) toStop.add(id)
       else if (desiredHashes.get(id) !== current.configHash) toStop.add(id)
+      else if (
+        current.subcontainer instanceof SubContainerLazy &&
+        current.subcontainer.dependsOnSharedVolumes &&
+        current.sharedVolumesRevision !== sharedVolumesRevision
+      )
+        toStop.add(id)
     }
 
-    // Transitively mark dependents of stopping entries
+    // Shared containers restart as a unit.
     let changed = true
     while (changed) {
       changed = false
       for (const [id, current] of this.running) {
         if (toStop.has(id)) continue
-        if (current.requires.some(r => toStop.has(r))) {
+        if (
+          current.requires.some(r => toStop.has(r)) ||
+          (current.subcontainer &&
+            [...toStop].some(
+              stopped =>
+                this.running.get(stopped)?.subcontainer ===
+                current.subcontainer,
+            ))
+        ) {
           toStop.add(id)
           changed = true
         }
@@ -1088,11 +1143,14 @@ export class DaemonsReconciler<M extends T.SDKManifest>
 
     await this.stopEntries(toStop)
 
-    // Start desired-but-not-running. Entries are in topo order by construction.
     for (const entry of entries) {
       if (this.running.has(entry.id)) continue
       try {
-        await this.startEntry(entry, desiredHashes.get(entry.id)!)
+        await this.startEntry(
+          entry,
+          desiredHashes.get(entry.id)!,
+          sharedVolumesRevision,
+        )
       } catch (e) {
         logErrorOnce(asError(e))
       }
@@ -1133,7 +1191,11 @@ export class DaemonsReconciler<M extends T.SDKManifest>
     }
   }
 
-  private async startEntry(entry: DaemonEntry<M>, hash: string): Promise<void> {
+  private async startEntry(
+    entry: DaemonEntry<M>,
+    hash: string,
+    sharedVolumesRevision: number,
+  ): Promise<void> {
     const id = entry.id
     let daemon: Daemon<M> | null = null
     let readyArg: Ready | typeof EXIT_SUCCESS
@@ -1174,6 +1236,7 @@ export class DaemonsReconciler<M extends T.SDKManifest>
       healthDaemon,
       subcontainer,
       configHash: hash,
+      sharedVolumesRevision,
       requires: entry.requires,
     })
 

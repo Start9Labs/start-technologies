@@ -18,8 +18,11 @@ for (const [sharedVolumes, version, succeeds, linked = false] of [
   [true, '2.5.2', false],
   [true, '2.6.0', false],
   [true, '2.7.0', false],
-  [true, '2.8.0', true],
+  [true, '2.8.0', false],
+  [true, '2.99.0', false],
   [true, '3.0.0', true],
+  [true, '3.0.1', true],
+  [true, '3.0.0', true, true],
   [true, '2.7.0', false, true],
 ]) {
   test(`volume capability ${sharedVolumes} with CLI ${version}, linked ${linked}`, t => {
@@ -48,6 +51,6 @@ for (const [sharedVolumes, version, succeeds, linked = false] of [
     })
     assert.equal(result.status === 0, succeeds, result.stderr)
     if (!succeeds)
-      assert.match(result.stderr, /Volume packages require start-cli 2\.8\.0/)
+      assert.match(result.stderr, /Volume packages require start-cli 3\.0\.0/)
   })
 }

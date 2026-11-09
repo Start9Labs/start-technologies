@@ -456,7 +456,8 @@ pub async fn init(
     validate_db.start();
     db.mutate(|d| {
         let model = d.de()?;
-        d.ser(&model)
+        d.ser(&model)?;
+        crate::backup::target::catalog::initialize(d)
     })
     .await
     .result?;

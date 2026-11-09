@@ -16,14 +16,10 @@ import { TuiPassword, TuiTextarea, TuiTooltip } from '@taiga-ui/kit'
 import { ApiClient } from 'src/app/services/api/api.types'
 import { VOLUME_STATUSES, VOLUME_TYPES } from './types'
 
-export interface SourceEntry {
-  name: string
-  source: T.SharedVolumeSource
-  availability: T.SharedVolumeAvailability
-  available: number | null
-  error: string | null
-}
-
+export type SourceEntry = Pick<
+  T.SharedVolume,
+  'name' | 'source' | 'availability' | 'available' | 'error'
+>
 export type SourceClient = Pick<ApiClient['volumes'], 'rename' | 'updateCifs'>
 
 export function sourceEdit(entry: Signal<SourceEntry | undefined>) {

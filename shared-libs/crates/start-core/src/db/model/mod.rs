@@ -47,6 +47,8 @@ impl Database {
                 os_security_notifications: BTreeMap::new(),
                 push: Default::default(),
                 cifs: CifsTargets::new(),
+                backup_history: BTreeMap::new(),
+                backup_target_credentials: BTreeMap::new(),
                 shared_volume_credentials: BTreeMap::new(),
                 retained_shared_volumes: BTreeMap::new(),
                 package_stores: BTreeMap::new(),

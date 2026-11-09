@@ -5,6 +5,7 @@ import * as T from '@start9labs/start-core/types'
 import { getSharedVolumes } from '@start9labs/start-core/util'
 import { StartSdk } from '../StartSdk'
 import { Mounts } from '../mainFn/Mounts'
+import { onceTrigger } from '../trigger'
 import { configHash, Daemons } from '../mainFn/Daemons'
 import { setupManifest } from '../manifest/setupManifest'
 import { SubContainer } from '../util/SubContainer'
@@ -222,6 +223,7 @@ test.each(['eager', 'lazy'] as const)(
           )
         : SubContainer.of<Manifest>(effects, { imageId: 'main' }, null, 'test')
     try {
+      expect(sub.dependsOnSharedVolumes).toBe(false)
       await expect(sub.tryMountSharedVolume(options)).resolves.toEqual({
         kind: 'mounted',
       })
@@ -233,6 +235,7 @@ test.each(['eager', 'lazy'] as const)(
         subcontainer: 'guid',
       })
       expect(effects.mount).not.toHaveBeenCalled()
+      expect(sub.dependsOnSharedVolumes).toBe(true)
     } finally {
       await sub.destroy()
     }
@@ -257,6 +260,7 @@ test.each(['sourceUnavailable', 'timeout'] as const)(
       const result = await sub.tryMountSharedVolume(options)
       if (result.kind === 'mounted') await sub.launch(['music-server'])
       expect(result).toEqual({ kind: 'unavailable', reason })
+      expect(sub.dependsOnSharedVolumes).toBe(true)
       expect(launch).not.toHaveBeenCalled()
       expect(effects.subcontainer.destroyFs).not.toHaveBeenCalled()
     } finally {
@@ -321,6 +325,82 @@ test('invalid traversal cannot prepare a directory outside the subcontainer', as
     expect(effects.mountSharedVolume).not.toHaveBeenCalled()
   } finally {
     await sub.destroy()
+  }
+})
+
+test('dynamic recovery recreates an optional consumer and remounts after an equal-metadata invalidation', async () => {
+  const effects = context()
+  effects.child = () => ({ ...effects })
+  effects.setHealth = jest.fn(async () => null)
+  let callback: (() => void) | undefined
+  jest.mocked(effects.getSharedVolumes).mockImplementation(async opts => {
+    callback = opts.callback
+    return [{ id, name: 'Media', readonly: true, availability: 'available' }]
+  })
+  let created = 0
+  jest
+    .mocked(effects.subcontainer.createFs)
+    .mockImplementation(async () => [`/rootfs/${++created}`, `guid-${created}`])
+  jest
+    .mocked(effects.mountSharedVolume)
+    .mockResolvedValueOnce({ kind: 'unavailable', reason: 'sourceUnavailable' })
+    .mockResolvedValue({ kind: 'mounted' })
+  const reconciler = Daemons.dynamic<Manifest>(effects, async ({ effects }) => {
+    await getSharedVolumes(effects).const()
+    const sub = SubContainer.of<Manifest>(
+      effects,
+      { imageId: 'main' },
+      null,
+      'optional',
+    )
+    return Daemons.of<Manifest>({ effects }).addDaemon('optional', {
+      subcontainer: sub,
+      exec: {
+        fn: async (container, abort) => {
+          await container!.tryMountSharedVolume(options)
+          await new Promise<void>(resolve => {
+            if (abort.aborted) resolve()
+            else
+              abort.addEventListener('abort', () => resolve(), { once: true })
+          })
+          return null
+        },
+      },
+      ready: {
+        display: 'Optional',
+        fn: () => ({ result: 'success', message: null }),
+        trigger: onceTrigger,
+      },
+      requires: [],
+    })
+  })
+  const built = await reconciler.build()
+  const waitForMounts = async (count: number) => {
+    for (let i = 0; i < 100; i++) {
+      if (jest.mocked(effects.mountSharedVolume).mock.calls.length >= count)
+        return
+      await new Promise(resolve => setImmediate(resolve))
+    }
+    throw new Error(`expected ${count} shared-volume mount attempts`)
+  }
+  try {
+    await waitForMounts(1)
+    callback!()
+    await waitForMounts(2)
+    expect(effects.subcontainer.createFs).toHaveBeenCalledTimes(2)
+    expect(effects.mountSharedVolume).toHaveBeenNthCalledWith(1, {
+      ...options,
+      subcontainer: 'guid-1',
+    })
+    expect(effects.mountSharedVolume).toHaveBeenNthCalledWith(2, {
+      ...options,
+      subcontainer: 'guid-2',
+    })
+    expect(effects.subcontainer.destroyFs).toHaveBeenCalledWith({
+      guid: 'guid-1',
+    })
+  } finally {
+    await built.term()
   }
 })
 

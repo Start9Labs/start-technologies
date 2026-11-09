@@ -13,7 +13,6 @@ use sha2::Sha256;
 use tokio::sync::Mutex;
 use tracing::instrument;
 
-use self::cifs::CifsBackupTarget;
 use crate::PackageId;
 use crate::backup::trash;
 use crate::context::{CliContext, RpcContext};
@@ -22,8 +21,7 @@ use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::disk::mount::filesystem::{FileSystem, MountType, ReadWrite};
-use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
-use crate::disk::util::PartitionInfo;
+use crate::disk::mount::guard::GenericMountGuard;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::util::serde::{
@@ -31,8 +29,11 @@ use crate::util::serde::{
 };
 use crate::util::{FromStrParser, VersionString};
 
+pub(crate) mod catalog;
 pub mod cifs;
 pub mod conversion;
+pub use catalog::BackupTarget;
+pub(crate) use catalog::{BackupTargetSource, TargetMount};
 
 #[cfg(test)]
 mod password_cli_tests {
@@ -56,63 +57,60 @@ mod password_cli_tests {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, VisitVariants)]
-#[serde(tag = "type")]
-#[serde(rename_all = "camelCase")]
-pub enum BackupTarget {
-    #[serde(rename_all = "camelCase")]
-    Disk {
-        vendor: Option<String>,
-        model: Option<String>,
-        #[serde(flatten)]
-        partition_info: PartitionInfo,
-    },
-    Cifs(CifsBackupTarget),
-}
-
-rpc_toolkit::reflect_ts!(BackupTarget);
-rpc_toolkit::ts_export!(BackupTarget, namespaces = [""]);
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, VisitVariants)]
+/// A registered-target identity; migrated CIFS targets retain their existing IDs.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, VisitFields)]
 #[visit(ts(type = "z.string()"))]
-pub enum BackupTargetId {
-    Disk { logicalname: PathBuf },
-    Cifs { id: u32 },
-}
+pub struct BackupTargetId(String);
 
 rpc_toolkit::reflect_ts!(BackupTargetId);
 rpc_toolkit::ts_export!(BackupTargetId, namespaces = [""]);
 impl BackupTargetId {
-    pub fn load(self, db: &DatabaseModel) -> Result<BackupTargetFS, Error> {
-        Ok(match self {
-            BackupTargetId::Disk { logicalname } => {
-                BackupTargetFS::Disk(BlockDev::new(logicalname))
-            }
-            BackupTargetId::Cifs { id } => BackupTargetFS::Cifs(cifs::load(db, id)?),
+    pub(crate) fn refresh_disks_on_drop(
+        &self,
+        updates: tokio::sync::watch::Sender<()>,
+    ) -> crate::util::GeneralBoxedGuard {
+        crate::util::GeneralBoxedGuard::new(move || {
+            updates.send_replace(());
         })
+    }
+
+    pub fn new() -> Self {
+        Self(crate::rpc_continuations::Guid::new().to_string())
+    }
+
+    pub(crate) fn load(&self, db: &DatabaseModel) -> Result<BackupTargetSource, Error> {
+        BackupTargetSource::read(db, self)
     }
 }
 impl std::fmt::Display for BackupTargetId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BackupTargetId::Disk { logicalname } => write!(f, "disk-{}", logicalname.display()),
-            BackupTargetId::Cifs { id } => write!(f, "cifs-{}", id),
-        }
+        self.0.fmt(f)
     }
 }
 impl std::str::FromStr for BackupTargetId {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.split_once('-') {
-            Some(("disk", logicalname)) => Ok(BackupTargetId::Disk {
-                logicalname: Path::new(logicalname).to_owned(),
-            }),
-            Some(("cifs", id)) => Ok(BackupTargetId::Cifs { id: id.parse()? }),
-            _ => Err(Error::new(
+        if s.parse::<crate::rpc_continuations::Guid>().is_ok()
+            || s.strip_prefix("cifs-")
+                .is_some_and(|id| id.parse::<u32>().is_ok_and(|id| format!("cifs-{id}") == s))
+        {
+            Ok(Self(s.to_owned()))
+        } else {
+            Err(Error::new(
                 eyre!("Invalid Backup Target ID"),
                 ErrorKind::InvalidBackupTargetId,
-            )),
+            ))
         }
+    }
+}
+impl AsRef<str> for BackupTargetId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+impl Default for BackupTargetId {
+    fn default() -> Self {
+        Self::new()
     }
 }
 impl ValueParserFactory for BackupTargetId {
@@ -159,16 +157,39 @@ impl FileSystem for BackupTargetFS {
             BackupTargetFS::Cifs(a) => a.mount(mountpoint, mount_type).await,
         }
     }
+    async fn check_mount(&self, mountpoint: &Path) -> Result<(), Error> {
+        match self {
+            Self::Cifs(cifs) => cifs.check_mount(mountpoint).await,
+            _ => Ok(()),
+        }
+    }
+    async fn device(&self) -> Result<Option<PathBuf>, Error> {
+        match self {
+            Self::Disk(disk) => disk.device().await,
+            Self::Cifs(_) => Ok(None),
+        }
+    }
     async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         match self {
             BackupTargetFS::Disk(a) => a.source_hash().await,
             BackupTargetFS::Cifs(a) => a.source_hash().await,
         }
     }
+    async fn mount_hash(&self, mount_type: MountType) -> Result<digest::Output<Sha256>, Error> {
+        match self {
+            Self::Disk(disk) => disk.mount_hash(mount_type).await,
+            Self::Cifs(cifs) => cifs.mount_hash(mount_type).await,
+        }
+    }
 }
 
 pub fn target<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
+        .subcommand("create", from_fn_async(catalog::create).no_cli())
+        .subcommand("rename", from_fn_async(catalog::rename).no_cli())
+        .subcommand("update-cifs", from_fn_async(catalog::update_cifs).no_cli())
+        .subcommand("remove", from_fn_async(catalog::remove).no_cli())
+        .subcommand("inspect", from_fn_async(catalog::inspect).no_cli())
         .subcommand(
             "cifs",
             cifs::cifs::<C>().with_about("about.add-remove-update-backup-target"),
@@ -218,38 +239,8 @@ pub fn target<C: Context>() -> ParentHandler<C> {
         )
 }
 
-// #[command(display(display_serializable))]
 pub async fn list(ctx: RpcContext) -> Result<BTreeMap<BackupTargetId, BackupTarget>, Error> {
-    let peek = ctx.db.peek().await;
-    let server_id = peek.as_public().as_server_info().as_id().de()?;
-    let (disks_res, cifs) = tokio::try_join!(
-        crate::disk::util::list(&ctx.os_partitions, Some(server_id.as_str())),
-        cifs::list(&peek, &server_id),
-    )?;
-    Ok(disks_res
-        .into_iter()
-        .flat_map(|mut disk| {
-            std::mem::take(&mut disk.partitions)
-                .into_iter()
-                .map(|part| {
-                    (
-                        BackupTargetId::Disk {
-                            logicalname: part.logicalname.clone(),
-                        },
-                        BackupTarget::Disk {
-                            vendor: disk.vendor.clone(),
-                            model: disk.model.clone(),
-                            partition_info: part,
-                        },
-                    )
-                })
-                .collect::<Vec<_>>()
-        })
-        .chain(
-            cifs.into_iter()
-                .map(|(id, cifs)| (BackupTargetId::Cifs { id }, BackupTarget::Cifs(cifs))),
-        )
-        .collect())
+    ctx.db.peek().await.as_public().as_backup_targets().de()
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, VisitFields)]
@@ -368,7 +359,10 @@ pub async fn info(
     }: InfoParams,
 ) -> Result<BackupInfo, Error> {
     let guard = BackupMountGuard::mount(
-        TmpMountGuard::mount(&target_id.load(&ctx.db.peek().await)?, ReadWrite).await?,
+        target_id
+            .load(&ctx.db.peek().await)?
+            .mount(ReadWrite)
+            .await?,
         &server_id,
         &password,
     )
@@ -382,7 +376,7 @@ pub async fn info(
 }
 
 lazy_static::lazy_static! {
-    static ref USER_MOUNTS: Mutex<BTreeMap<BackupTargetId, Result<BackupMountGuard<TmpMountGuard>, TmpMountGuard>>> =
+    static ref USER_MOUNTS: Mutex<BTreeMap<BackupTargetId, Result<BackupMountGuard<TargetMount>, TargetMount>>> =
         Mutex::new(BTreeMap::new());
 }
 
@@ -441,7 +435,10 @@ pub async fn mount(
         Some(Ok(a)) => return Ok(a.path().display().to_string()),
         Some(Err(e)) => e.clone(),
         None => {
-            TmpMountGuard::mount(&target_id.clone().load(&ctx.db.peek().await)?, ReadWrite).await?
+            target_id
+                .load(&ctx.db.peek().await)?
+                .mount(ReadWrite)
+                .await?
         }
     };
 
@@ -551,7 +548,8 @@ pub async fn delete_legacy(
     let peek = ctx.db.peek().await;
     let server_id = peek.as_public().as_server_info().as_id().de()?;
     let target = target_id.to_string();
-    let guard = TmpMountGuard::mount(&target_id.load(&peek)?, ReadWrite).await?;
+    let guard = target_id.load(&peek)?.mount(ReadWrite).await?;
+    let _disk_refresh = target_id.refresh_disks_on_drop(ctx.disk_updates.clone());
     let legacy_dir = guard
         .path()
         .join(crate::disk::LEGACY_BACKUP_DIR_NAME)
@@ -559,13 +557,17 @@ pub async fn delete_legacy(
     if tokio::fs::metadata(&legacy_dir).await.is_ok() {
         trash::move_to_trash(guard.path(), &legacy_dir).await?;
     }
+    catalog::refresh(&ctx.db, &target_id).await.log_err();
     if !trash::has_trash(guard.path()).await {
         return guard.unmount().await;
     }
     let db = ctx.db.clone();
+    let disk_refresh = target_id.refresh_disks_on_drop(ctx.disk_updates.clone());
     tokio::task::spawn(async move {
+        let _disk_refresh = disk_refresh;
         let result = trash::sweep_until_clear(&guard).await;
         guard.unmount().await.log_err();
+        catalog::refresh(&db, &target_id).await.log_err();
         // `mutate` needs an unwind-safe closure, which eyre errors are not —
         // render the notification before it, not inside
         let (level, title, message) = match &result {
@@ -596,6 +598,48 @@ pub async fn delete_legacy(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn target_mutations_request_discovery_after_the_guard_releases() {
+        let (updates, mut observed) = tokio::sync::watch::channel(());
+        let target = BackupTargetId::new();
+        let guard = target.refresh_disks_on_drop(updates.clone());
+        assert!(!observed.has_changed().unwrap());
+        drop(guard);
+        assert!(observed.has_changed().unwrap());
+        observed.borrow_and_update();
+        drop(
+            "cifs-1"
+                .parse::<BackupTargetId>()
+                .unwrap()
+                .refresh_disks_on_drop(updates.clone()),
+        );
+        assert!(observed.has_changed().unwrap());
+    }
+
+    #[tokio::test]
+    async fn backup_cifs_mounts_keep_the_requested_cache_policy() {
+        let target = BackupTargetFS::Cifs(Cifs {
+            hostname: "nas.local".into(),
+            path: "/backup".into(),
+            username: "owner".into(),
+            password: None,
+        });
+        assert_eq!(
+            target
+                .mount_hash(crate::disk::mount::filesystem::ReadOnly)
+                .await
+                .unwrap(),
+            target.mount_hash(ReadWrite).await.unwrap()
+        );
+        assert_ne!(
+            target.mount_hash(ReadWrite).await.unwrap(),
+            target
+                .mount_hash(crate::disk::mount::filesystem::BackupWrite)
+                .await
+                .unwrap()
+        );
+    }
 
     #[test]
     fn legacy_metadata_defaults_to_no_volume_backups() {

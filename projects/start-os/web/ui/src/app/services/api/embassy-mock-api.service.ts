@@ -65,7 +65,6 @@ import { BTC_ICON, LND_ICON, PROXY_ICON } from './api-icons'
 import {
   ActionRes,
   CheckDnsRes,
-  CifsBackupTarget,
   DiagnosticErrorRes,
   FollowPackageLogsReq,
   FollowServerLogsReq,
@@ -90,6 +89,15 @@ import { mockPatchData } from './mock-patch'
 import markdown from './md-sample.md'
 
 const UI_KEY = '_startos/mock-ui'
+
+type SourceCollection = 'sharedVolumes' | 'backupTargets'
+
+const UNKNOWN_SOURCE: Result<'volumes.inspect'> = {
+  availability: 'unknown',
+  available: null,
+  error: null,
+  checkedAt: null,
+}
 
 const PROGRESS: T.FullProgress = {
   overall: {
@@ -910,52 +918,39 @@ export class MockApiService extends ApiService {
         name,
         source: this.mockSource(source),
         grants: {},
-        availability: 'unknown',
+        ...UNKNOWN_SOURCE,
       }
       await this.mockRevision<unknown>([
         {
           op: PatchOp.ADD,
           path: `/sharedVolumes/${id}`,
-          value: { ...volume, available: null, error: null, checkedAt: null },
+          value: volume,
         },
       ])
-      void pauseFor(1000).then(() => this.checkSource('sharedVolumes', id))
+      this.queueSourceCheck('sharedVolumes', id)
       return id
     },
-    ...({
-      'volumes.update-cifs': async ({
-        id,
-        hostname,
-        path,
-        username,
-      }: {
-        id: string
-        hostname: string
-        path: string
-        username: string
-      }) => {
-        await pauseFor(1000)
-        await this.mockRevision<unknown>([
-          {
-            op: PatchOp.REPLACE,
-            path: `/sharedVolumes/${id}/source`,
-            value: {
-              kind: 'cifs',
-              hostname,
-              path: `/${path.replace(/^\/+/, '')}`,
-              username,
-            },
+    'volumes.update-cifs': async ({ id, hostname, path, username }) => {
+      await pauseFor(1000)
+      const volume: T.SharedVolume | undefined = this.mockData(
+        `/sharedVolumes/${id}`,
+      )
+      if (!volume || volume.source.kind !== 'cifs')
+        throw new Error('CIFS volume not found')
+      await this.mockRevision<unknown>([
+        {
+          op: PatchOp.REPLACE,
+          path: `/sharedVolumes/${id}`,
+          value: {
+            ...volume,
+            source: this.mockSource({ kind: 'cifs', hostname, path, username }),
+            ...UNKNOWN_SOURCE,
           },
-          {
-            op: PatchOp.REPLACE,
-            path: `/sharedVolumes/${id}/availability`,
-            value: 'unknown',
-          },
-        ])
-        void pauseFor(1000).then(() => this.checkSource('sharedVolumes', id))
-        return null
-      },
-    } as unknown as RpcHandlers<Api>),
+        },
+      ])
+      this.queueSourceCheck('sharedVolumes', id)
+      return null
+    },
     'volumes.rename': async ({ id, name }) => {
       const volume: T.SharedVolume | undefined = this.mockData(
         `/sharedVolumes/${id}`,
@@ -1012,25 +1007,17 @@ export class MockApiService extends ApiService {
     },
     'backup.target.list': async params => {
       await pauseFor(2000)
-      return structuredClone(Mock.BackupTargets)
+      return structuredClone(
+        this.mockData('/backupTargets'),
+      ) as DataModel['backupTargets']
     },
-    ...({
-      'backup.history.list': async ({
-        offset,
-        limit,
-      }: {
-        offset: number
-        limit: number
-      }) => {
-        await pauseFor(500)
-        return {
-          runs: structuredClone(
-            this.backupHistory.slice(offset, offset + limit),
-          ),
-          total: this.backupHistory.length,
-        }
-      },
-    } as unknown as RpcHandlers<Api>),
+    'backup.history.list': async ({ offset, limit }) => {
+      await pauseFor(500)
+      return {
+        runs: structuredClone(this.backupHistory.slice(offset, offset + limit)),
+        total: this.backupHistory.length,
+      }
+    },
     'backup.target.convert': async params => {
       const backup: T.StartOsRecoveryInfo | undefined = structuredClone(
         this.backupTarget(params.targetId)?.startOs[params.serverId],
@@ -1049,124 +1036,76 @@ export class MockApiService extends ApiService {
       void this.simulateConversion(params, backup)
       return null
     },
-    ...({
-      'backup.target.create': async ({
-        name,
-        source,
-      }: Params<'volumes.create'>) => {
-        await pauseFor(1000)
-        const id = this.guid()
-        await this.mockRevision<unknown>([
-          {
-            op: PatchOp.ADD,
-            path: `/backupTargets/${id}`,
-            value: {
-              name,
-              source: this.mockSource(source),
-              availability: 'unknown',
-              available: null,
-              error: null,
-              checkedAt: null,
-              startOs: {},
-              legacyBackup: false,
-            },
+    'backup.target.create': async ({ name, source }) => {
+      await pauseFor(1000)
+      const id = this.guid()
+      await this.mockRevision<unknown>([
+        {
+          op: PatchOp.ADD,
+          path: `/backupTargets/${id}`,
+          value: {
+            name,
+            source: this.mockSource(source),
+            ...UNKNOWN_SOURCE,
+            startOs: {},
+            legacyBackup: false,
           },
-        ])
-        void pauseFor(1000).then(() => this.checkSource('backupTargets', id))
-        return id
-      },
-      'backup.target.rename': async ({
-        id,
-        name,
-      }: {
-        id: string
-        name: string
-      }) => {
-        await this.mockRevision<unknown>([
-          {
-            op: PatchOp.REPLACE,
-            path: `/backupTargets/${id}/name`,
-            value: name,
-          },
-        ])
-        return null
-      },
-      'backup.target.update-cifs': async ({
-        id,
-        hostname,
-        path,
-        username,
-      }: {
-        id: string
-        hostname: string
-        path: string
-        username: string
-      }) => {
-        await pauseFor(1000)
-        await this.mockRevision<unknown>([
-          {
-            op: PatchOp.REPLACE,
-            path: `/backupTargets/${id}/source`,
-            value: this.mockSource({
-              kind: 'cifs',
-              hostname,
-              path,
-              username,
-            }),
-          },
-          {
-            op: PatchOp.REPLACE,
-            path: `/backupTargets/${id}/availability`,
-            value: 'unknown',
-          },
-        ])
-        void pauseFor(1000).then(() => this.checkSource('backupTargets', id))
-        return null
-      },
-      'backup.target.remove': async ({ id }: { id: string }) => {
-        await pauseFor(1000)
-        if (this.backupTarget(id))
-          await this.mockRevision([
-            { op: PatchOp.REMOVE, path: `/backupTargets/${id}` },
-          ])
-        return null
-      },
-      'backup.target.inspect': async ({ id }: { id: string }) => {
-        await pauseFor(1000)
-        return this.checkSource('backupTargets', id)
-      },
-    } as unknown as RpcHandlers<Api>),
-    'backup.target.cifs.add': async params => {
-      await pauseFor(2000)
-      const { hostname, path, username } = params
-      return {
-        latfgvwdbhjsndmk: {
-          type: 'cifs',
-          hostname,
-          path,
-          username,
-          mountable: true,
-          available: 50000000000,
-          startOs: {},
-          legacyBackup: false,
         },
-      }
+      ])
+      this.queueSourceCheck('backupTargets', id)
+      return id
+    },
+    'backup.target.rename': async ({ id, name }) => {
+      await this.mockRevision<unknown>([
+        { op: PatchOp.REPLACE, path: `/backupTargets/${id}/name`, value: name },
+      ])
+      return null
+    },
+    'backup.target.update-cifs': async ({ id, hostname, path, username }) => {
+      await pauseFor(1000)
+      const target = this.cifsTarget(id)
+      await this.mockRevision<unknown>([
+        {
+          op: PatchOp.REPLACE,
+          path: `/backupTargets/${id}`,
+          value: {
+            ...target,
+            source: this.mockSource({ kind: 'cifs', hostname, path, username }),
+            ...UNKNOWN_SOURCE,
+            startOs: {},
+            legacyBackup: false,
+          },
+        },
+      ])
+      this.queueSourceCheck('backupTargets', id)
+      return null
+    },
+    'backup.target.remove': async ({ id }) => {
+      await pauseFor(1000)
+      if (this.backupTarget(id))
+        await this.mockRevision([
+          { op: PatchOp.REMOVE, path: `/backupTargets/${id}` },
+        ])
+      return null
+    },
+    'backup.target.inspect': async ({ id }) => {
+      await pauseFor(1000)
+      return this.checkSource('backupTargets', id)
+    },
+    'backup.target.cifs.add': async params => {
+      const id = await this.rpc.backup.target.create({
+        name: `${params.hostname}:${params.path}`,
+        source: { kind: 'cifs', ...params },
+      })
+      return { [id]: this.backupTarget(id)! }
     },
     'backup.target.cifs.update': async params => {
-      await pauseFor(2000)
-      const { id, hostname, path, username } = params
-      return {
-        [id]: {
-          ...(Mock.BackupTargets[id] as CifsBackupTarget),
-          hostname,
-          path,
-          username,
-        },
-      }
+      await this.rpc.backup.target.updateCifs(params)
+      return { [params.id]: this.backupTarget(params.id)! }
     },
     'backup.target.cifs.remove': async params => {
-      await pauseFor(2000)
-      return null
+      this.cifsTarget(params.id)
+      return this.rpc.backup.target.remove(params)
     },
     'backup.target.delete-legacy': async params => {
       await pauseFor(2000)
@@ -1186,6 +1125,10 @@ export class MockApiService extends ApiService {
     'backup.create': async params => {
       const startedAt = new Date().toISOString()
       await pauseFor(2000)
+      const target = this.backupTarget(params.targetId)
+      if (!target) throw new Error('Backup target not found')
+      const targetName = target.name
+      const source = structuredClone(target.source)
       const serverPath = '/serverInfo/statusInfo/backupProgress'
       const ids =
         params.packageIds ?? Object.keys(this.mockData('/packageData'))
@@ -1310,8 +1253,7 @@ export class MockApiService extends ApiService {
         this.backupHistory.unshift({
           id: this.guid(),
           targetId: params.targetId,
-          targetName:
-            this.backupTarget(params.targetId)?.name ?? params.targetId,
+          targetName,
           startedAt,
           completedAt: new Date().toISOString(),
           report,
@@ -1326,18 +1268,19 @@ export class MockApiService extends ApiService {
             },
           ]
         this.mockRevision(lastPatch)
-        await this.mockRevision<unknown>([
-          {
-            op: PatchOp.ADD,
-            path: `/backupTargets/${params.targetId}/startOs/${Mock.ServerId}`,
-            value: {
-              hostname: this.mockData('/serverInfo/hostname'),
-              timestamp: new Date().toISOString(),
-              version: this.mockData('/serverInfo/version'),
-              formatStatus: 'current',
+        if (utils.deepEqual(this.backupTarget(params.targetId)?.source, source))
+          await this.mockRevision<unknown>([
+            {
+              op: PatchOp.ADD,
+              path: `/backupTargets/${params.targetId}/startOs/${Mock.ServerId}`,
+              value: {
+                hostname: this.mockData('/serverInfo/hostname'),
+                timestamp: new Date().toISOString(),
+                version: this.mockData('/serverInfo/version'),
+                formatStatus: 'current',
+              },
             },
-          },
-        ])
+          ])
 
         await this.notify({
           packageId: null,
@@ -2998,6 +2941,12 @@ export class MockApiService extends ApiService {
     return this.mockData('/backupTargets')[id]
   }
 
+  private cifsTarget(id: string) {
+    const target = this.backupTarget(id)
+    if (target?.source.kind !== 'cifs') throw new Error('CIFS target not found')
+    return target
+  }
+
   private mockSource(
     source: Params<'volumes.create'>['source'],
   ): T.SharedVolumeSource {
@@ -3034,8 +2983,15 @@ export class MockApiService extends ApiService {
     ])
   }
 
+  private queueSourceCheck(collection: SourceCollection, id: string) {
+    void pauseFor(1000).then(() => {
+      if (this.mockData(`/${collection}`)[id])
+        return this.checkSource(collection, id)
+    })
+  }
+
   private async checkSource(
-    collection: 'sharedVolumes' | 'backupTargets',
+    collection: SourceCollection,
     id: string,
   ): Promise<Result<'volumes.inspect'>> {
     const volume: { source: T.SharedVolumeSource } | undefined = this.mockData(
@@ -3045,42 +3001,41 @@ export class MockApiService extends ApiService {
     const prefix =
       'The volume source is unavailable. Check the source, network and credentials.: '
     const { source } = volume
-    const result: Result<'volumes.inspect'> =
-      source.kind === 'local'
-        ? { availability: 'available', available: 812400000000, error: null }
-        : source.kind === 'disk'
-          ? this.attachedDrives.has(source.logicalname)
-            ? {
-                availability: 'available',
-                available: this.attachedDrives.get(source.logicalname)!,
-                error: null,
-              }
-            : {
-                availability: 'unavailable',
-                available: null,
-                error: `${prefix}mount: special device ${source.logicalname} does not exist`,
-              }
-          : source.hostname.endsWith('.invalid')
-            ? {
-                availability: 'unavailable',
-                available: null,
-                error: `${prefix}mount error(113): could not connect to ${source.hostname}`,
-              }
-            : {
-                availability: 'available',
-                available: 3215000000000,
-                error: null,
-              }
+    const result: Omit<Result<'volumes.inspect'>, 'checkedAt'> = source.kind ===
+    'local'
+      ? { availability: 'available', available: 812400000000, error: null }
+      : source.kind === 'disk'
+        ? this.attachedDrives.has(source.logicalname)
+          ? {
+              availability: 'available',
+              available: this.attachedDrives.get(source.logicalname)!,
+              error: null,
+            }
+          : {
+              availability: 'unavailable',
+              available: null,
+              error: `${prefix}mount: special device ${source.logicalname} does not exist`,
+            }
+        : source.hostname.endsWith('.invalid')
+          ? {
+              availability: 'unavailable',
+              available: null,
+              error: `${prefix}mount error(113): could not connect to ${source.hostname}`,
+            }
+          : {
+              availability: 'available',
+              available: 3215000000000,
+              error: null,
+            }
+    const inspection = { ...result, checkedAt: new Date().toISOString() }
     await this.mockRevision<unknown>(
-      Object.entries({ ...result, checkedAt: new Date().toISOString() }).map(
-        ([key, value]) => ({
-          op: PatchOp.REPLACE,
-          path: `/${collection}/${id}/${key}`,
-          value,
-        }),
-      ),
+      Object.entries(inspection).map(([key, value]) => ({
+        op: PatchOp.REPLACE,
+        path: `/${collection}/${id}/${key}`,
+        value,
+      })),
     )
-    return result
+    return inspection
   }
 
   private async publishDisks(): Promise<void> {

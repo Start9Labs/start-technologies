@@ -9,7 +9,7 @@ import {
   runInInjectionContext,
   signal,
 } from '@angular/core'
-import { FormBuilder, NonNullableFormBuilder } from '@angular/forms'
+import { FormBuilder, NonNullableFormBuilder, Validators } from '@angular/forms'
 import { BehaviorSubject, EMPTY, firstValueFrom, map, of, Subject } from 'rxjs'
 
 const boundaries = new Map()
@@ -1546,6 +1546,7 @@ function volumeFixture(t, packageData = {}, disks = VolumeMock.Disks) {
   const patch = new PatchDB(source, cache)
   patch.start()
   const query = new BehaviorSubject({})
+  let revision = 1
   const requests = [],
     results = [],
     errors = [],
@@ -1765,7 +1766,10 @@ function volumeFixture(t, packageData = {}, disks = VolumeMock.Disks) {
     query,
     attach(disks) {
       source.next([
-        { id: 2, patch: [{ op: 'replace', path: '/disks', value: disks }] },
+        {
+          id: ++revision,
+          patch: [{ op: 'replace', path: '/disks', value: disks }],
+        },
       ])
     },
     make: Class => runInInjectionContext(injector, () => new Class()),
@@ -1918,6 +1922,90 @@ test('the external drive form follows the attached drives', async t => {
   await tick()
   assert.equal(model.drives().length, VolumeMock.Disks.length)
   assert.ok(model.spec())
+})
+
+function editingDriveForm(t, partition = '/dev/sdc1') {
+  const f = volumeFixture(t)
+  const model = f.make(DriveVolumeForm)
+  const builder = new FormBuilder()
+  const form = builder.group({
+    name: ['Edited name'],
+    path: ['library/photos'],
+    drive: builder.group({
+      selection: ['/dev/sdc', Validators.required],
+      value: builder.group({ partition: [partition, Validators.required] }),
+    }),
+  })
+  model.form = () => ({ form })
+  return { ...f, model, form }
+}
+
+test('a removed drive clears only the source choice even when reinsertion supersedes asynchronous specs', async t => {
+  const f = editingDriveForm(t)
+  await tick()
+  f.attach([])
+  f.attach(VolumeMock.Disks)
+  await tick()
+  assert.equal(f.form.get('drive.selection').value, null)
+  assert.equal(f.form.valid, false)
+  assert.equal(f.model.value.name, 'Edited name')
+  assert.equal(f.model.value.path, 'library/photos')
+  assert.equal(f.model.value.drive.selection, null)
+  assert.ok(f.model.spec())
+})
+
+test('metadata updates retain valid drive choices and edits made while specs are rebuilding', async t => {
+  const f = editingDriveForm(t)
+  await tick()
+  f.attach(structuredClone(VolumeMock.Disks))
+  f.form.get('name').setValue('Edited during rebuild')
+  f.form.get('path').setValue('new/path')
+  await tick()
+  assert.equal(f.model.value.name, 'Edited during rebuild')
+  assert.equal(f.model.value.path, 'new/path')
+  assert.equal(f.model.value.drive.selection, '/dev/sdc')
+  assert.equal(f.model.value.drive.value.partition, '/dev/sdc1')
+})
+
+test('a missing selected partition invalidates the source without selecting erase-and-format', async t => {
+  const f = editingDriveForm(t)
+  await tick()
+  f.attach(
+    VolumeMock.Disks.map(disk =>
+      disk.logicalname === '/dev/sdc' ? { ...disk, partitions: [] } : disk,
+    ),
+  )
+  await tick()
+  assert.equal(f.form.get('drive.selection').value, null)
+  assert.equal(f.form.get('drive.value.partition').value, null)
+  assert.equal(f.model.value.name, 'Edited name')
+  assert.equal(f.model.value.path, 'library/photos')
+})
+
+test('a stale selected partition cannot be submitted after the drive disappears', async t => {
+  const f = editingDriveForm(t)
+  await tick()
+  const selected = f.form.getRawValue()
+  f.attach([])
+  await tick()
+  assert.equal(await f.model.buttons[0].handler(selected), false)
+  assert.deepEqual(f.requests, [])
+})
+
+test('remove/reinsert while erase confirmation is open requires a fresh choice before formatting', async t => {
+  const f = editingDriveForm(t, 'format')
+  await tick()
+  const confirmation = new Subject()
+  f.model.dialogs.openConfirm = () => confirmation
+  const saving = f.model.buttons[0].handler(f.form.getRawValue())
+  f.attach([])
+  f.attach(VolumeMock.Disks)
+  confirmation.next(true)
+  confirmation.complete()
+  assert.equal(await saving, false)
+  assert.deepEqual(f.requests, [])
+  assert.equal(f.form.get('name').value, 'Edited name')
+  assert.equal(f.form.get('path').value, 'library/photos')
 })
 
 test('volume sources map blank optional fields to their wire defaults', () => {
@@ -2375,6 +2463,45 @@ test('production mocks support inspection, independent failed backups and new-lo
     injector.destroy()
   })
   t.mock.timers.enable({ apis: ['setTimeout'] })
+  const targetId = await api.rpc.backup.target.create({
+    name: 'Archive',
+    source: { kind: 'local' },
+  })
+  assert.match(targetId, /^[A-Z2-7]{32}$/)
+  assert.deepEqual(
+    await api.rpc.backup.target.list({}),
+    cache.value.value.backupTargets,
+  )
+  await assert.rejects(
+    api.rpc.backup.target.cifs.remove({ id: targetId }),
+    /CIFS target/,
+  )
+  const cifs = await api.rpc.backup.target.cifs.add({
+    hostname: 'nas.local',
+    path: '/archive',
+    username: 'family',
+    password: 'private-password',
+  })
+  const [cifsId] = Object.keys(cifs)
+  assert.match(cifsId, /^[A-Z2-7]{32}$/)
+  await api.rpc.backup.target.updateCifs({
+    id: cifsId,
+    hostname: 'new-nas.local',
+    path: '/new-archive',
+    username: 'family',
+  })
+  assert.deepEqual(cache.value.value.backupTargets[cifsId].source, {
+    kind: 'cifs',
+    hostname: 'new-nas.local',
+    path: '/new-archive',
+    username: 'family',
+  })
+  assert.doesNotMatch(
+    JSON.stringify(cache.value.value.backupTargets),
+    /private-password/,
+  )
+  await api.rpc.backup.target.cifs.remove({ id: cifsId })
+  assert.equal(cache.value.value.backupTargets[cifsId], undefined)
   assert.deepEqual(
     api.mockSource({ kind: 'cifs', hostname: 'nas', path: 'share' }),
     {
@@ -2442,12 +2569,13 @@ test('production mocks support inspection, independent failed backups and new-lo
     generation: 'previous',
   }
   await api.rpc.backup.create({
-    targetId: 'csgashbdjkasnd',
+    targetId,
     packageIds: [],
     sharedVolumeIds: [local, remote],
     password: 'password',
     oldPassword: null,
   })
+  await api.rpc.backup.target.rename({ id: targetId, name: 'Later name' })
   t.mock.timers.tick(500)
   await tick()
   assert.equal(
@@ -2466,8 +2594,13 @@ test('production mocks support inspection, independent failed backups and new-lo
   assert.equal(report.sharedVolumes[local].error, null)
   assert.ok(report.sharedVolumes[remote].error)
   assert.deepEqual(report.packages, {})
+  const history = await api.rpc.backup.history.list({ offset: 0, limit: 1 })
+  assert.equal(history.runs[0].targetId, targetId)
+  assert.equal(history.runs[0].targetName, 'Archive')
+  assert.deepEqual(history.runs[0].report, report)
+  assert.equal(cache.value.value.backupTargets[targetId].name, 'Later name')
   const restored = await api.rpc.backup.volume.restore({
-    targetId: 'csgashbdjkasnd',
+    targetId,
     serverId: '1234-5678-9876-5432',
     password: 'password',
     ids: [local],

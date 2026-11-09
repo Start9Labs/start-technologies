@@ -36,7 +36,7 @@ fn backup_acceptance_rejects_a_running_conversion_before_publishing_progress() {
         let result = assure_backing_up(
             &mut db,
             &FullProgress::new(),
-            &BackupTargetId::Cifs { id: 1 },
+            &"cifs-1".parse().unwrap(),
             "server-a",
         );
         assert_eq!(result.is_err(), state == ConversionState::Running);
@@ -55,8 +55,8 @@ fn backup_acceptance_rejects_a_running_conversion_before_publishing_progress() {
 #[test]
 fn conversion_on_another_target_or_server_does_not_block_backup_acceptance() {
     for (target, server) in [
-        (BackupTargetId::Cifs { id: 2 }, "server-a"),
-        (BackupTargetId::Cifs { id: 1 }, "server-b"),
+        ("cifs-2".parse::<BackupTargetId>().unwrap(), "server-a"),
+        ("cifs-1".parse::<BackupTargetId>().unwrap(), "server-b"),
     ] {
         let mut db = database(ConversionState::Running);
         assure_backing_up(&mut db, &FullProgress::new(), &target, server).unwrap();
