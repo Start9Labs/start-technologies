@@ -784,39 +784,37 @@ struct Ethernet {
 ### `ethernet.set`
 
 ```rust
-// Request: Ethernet fields are flattened in alongside the confirm flag.
+// Request: Ethernet fields are flattened in alongside the preview flag.
 #[derive(Deserialize)]
 struct EthernetSetRequest {
     #[serde(flatten)]
     ethernet: Ethernet,            // { wan_ipv6, wan_port, ports: BTreeMap<String, Port<ProfileIdOpt>> }
-    /// Authorize deleting the published ports returned by a prior unconfirmed call.
+    /// Apply nothing; report the devices leaving a profile they keep settings for.
     #[serde(default)]
-    confirm_published_port_deletion: bool,
+    preview: bool,
 }
 
-// A published port that will be deleted because its device is moving to a
-// different profile. Shared (snake_case) with wifi.set's result.
+// A device with a reservation or published port for the profile it leaves.
+// Shared (snake_case) with wifi.set's result.
 #[derive(Serialize)]
-struct AffectedPublishedPort {
-    id: String,
-    label: String,
-    device_mac: String,
-    device_name: Option<String>,
+struct DeviceLeavingProfile {
+    mac: String,
+    name: Option<String>,
+    /// The profile it leaves.
+    profile: String,
 }
 
 // Response:
 #[derive(Serialize)]
 struct EthernetSetResult {
-    /// Non-empty (and nothing applied) when a port being reassigned to a
-    /// different profile has devices with published ports and the caller hasn't
-    /// confirmed. Empty once the change is applied.
-    pending_published_port_deletions: Vec<AffectedPublishedPort>,
+    /// Filled by a preview only.
+    leaving_profile: Vec<DeviceLeavingProfile>,
 }
-// Backend: detects ports changing profile, finds their devices via bridge FDB,
-// and the published ports they'd break. Without confirmation it applies nothing
-// and returns them; with confirmation it deletes those published ports (firewall
-// rules + stale DHCP reservations) atomically with the bridge-VLAN/WAN update,
-// then reloads network + firewall.
+// Backend: detects ports changing profile and finds their devices via the
+// bridge FDB. A preview applies nothing and returns the devices that have a
+// reservation or published port for a port's old profile. A change keeps both:
+// they apply again when the device returns to that profile. Otherwise it
+// applies the bridge-VLAN/WAN update, then reloads network + firewall.
 ```
 
 Note: `ProfileId` and `ProfileIdOpt` are shared types defined at the top of the contract.
@@ -824,7 +822,7 @@ Note: `ProfileId` and `ProfileIdOpt` are shared types defined at the top of the 
 ### `ethernet.edit`
 
 CLI editor flow — opens the current Ethernet config in `$EDITOR`, then calls
-`ethernet.set` with published-port deletion implicitly confirmed. Not called by
+`ethernet.set`. Not called by
 the web UI.
 
 ```rust
@@ -865,9 +863,16 @@ struct Device {
     status: DeviceStatus,
     /// "Ethernet", "Wi-Fi 2.4GHz", "Wi-Fi 5GHz", etc.
     connection: Option<String>,
+    /// The reservation DHCP applies, otherwise the live address.
     ipv4: Option<String>,
     ipv6: Option<String>,
+    /// `ipv4` is a reservation DHCP applies.
     ipv4_static: bool,
+    /// Every IPv4 reservation, at most one per profile. Empty for a VPN peer.
+    ipv4_reservations: Vec<Ipv4Reservation>,
+    /// The router's address on the device's profile, with its prefix length
+    /// (`192.168.2.1/24`). `None` for a VPN peer or an unplaced device.
+    profile_network: Option<String>,
     /// Whether this device may auto-create port forwards via PCP/UPnP
     /// (default off; toggled via `devices.set-auto-forward`). Always false for
     /// VPN peers (no MAC to authorize).
@@ -888,6 +893,16 @@ struct Device {
     /// Total data used in the current nlbwmon period (GB, 1 decimal, rx+tx); for
     /// a VPN peer, its cumulative `wg show` rx+tx since the interface came up
     data_usage: Option<f64>,
+}
+
+#[derive(Serialize)]
+struct Ipv4Reservation {
+    ipv4: String,
+    /// The profile whose subnet holds it; `None` when no profile's does.
+    profile: Option<String>,
+    /// DHCP gives it to the device on the profile it is on: the reservation in
+    /// that profile's subnet, or for a device on no known profile, its only one.
+    active: bool,
 }
 
 #[derive(Serialize)]
@@ -919,15 +934,33 @@ struct DeviceUpdateReq {
     /// trailing hyphen, at most 63 characters — since dnsmasq serves it.
     #[serde(default)]
     name: Option<String>,
+    /// On: `ipv4` becomes the reservation in the profile whose subnet holds
+    /// it, replacing the one there. Off: the reservation `ipv4` names is
+    /// deleted; with `ipv4` empty, the one in the profile the device is on.
     ipv4_static: bool,
-    /// Dotted-quad, or empty for no reservation.
+    /// Dotted-quad, or empty.
     ipv4: String,
+    /// Reservations to delete, by address.
+    #[serde(default)]
+    remove_ipv4_reservations: Vec<String>,
 }
 // Every field lands in the config dnsmasq reads, which it refuses to start on
 // if malformed, so each is validated: a bad one is rejected with
 // `InvalidValue` and nothing is written.
+// A changed reservation must be a host address, other than the router's, in
+// the subnet of the profile the device is on (from the neighbor table, the
+// bridge, and its lease); for a device on no known profile, in some profile's
+// subnet. It must not be another device's reservation, since dnsmasq does not
+// start with one address on two hosts. An unchanged reservation is accepted as
+// stored.
+// Deleting a reservation an enabled published port forwards to is refused with
+// `InvalidValue`; replacing it within its profile moves the port to the new
+// address.
 // Response: null
-// Backend: creates/updates DHCP host section, reloads dnsmasq.
+// Backend: the device's settings and first reservation live on its first DHCP
+// host section, each further reservation on its own section carrying the
+// device's name, so every section has an address while any reservation
+// remains. Reloads dnsmasq, and the firewall when a port moved.
 // No IPv6 fields: devices choose their own IPv6 addresses (SLAAC), so there is
 // no user-facing IPv6 reservation. A legacy `hostid` (written by older releases,
 // read by `published-ports.reconcile` as a fallback) is left untouched.
@@ -1057,6 +1090,10 @@ enum PublishedPortStatus {
     Partial,
     /// Device offline, or not in the device list ("Device not found")
     Paused,
+    /// The port forwards into a profile the device is not on ("Applies when
+    /// the device is on the <profile> profile"). Its profile is that of its
+    /// IPv4 target's subnet, else of its rule's zone.
+    Inactive,
     /// No usable address ("No addresses available"), or (IPv6-only) the forward
     /// is stranded on an old delegated prefix ("IPv6 address out of date" — the
     /// device's current GUA is in a different /64; normally repaired by the
@@ -1087,6 +1124,7 @@ struct PublishedPort {
     status: PublishedPortStatus,
     status_reason: Option<String>,
     device_name: Option<String>,
+    /// The address the IPv4 forward targets, else the device's.
     device_ipv4: Option<String>,
     device_ipv6: Option<String>,
 }
@@ -1147,10 +1185,11 @@ struct PublishedPortsSetResult {
     pending_wan_port_collisions: Vec<WanPortCollision>,
 }
 // Backend: rebuilds firewall redirect+rule sections (dropping automatic forwards
-// that overlap an enabled manual port), resolves device IPs, adds a static DHCP
-// reservation for an enabled IPv4 port's device that has none, then reloads the
-// firewall (restarting it only if the reload fails) and, if a reservation was
-// added, dnsmasq
+// that overlap an enabled manual port), resolves device IPs, reserves an enabled
+// IPv4 port's target in its profile when the device has no reservation there
+// (a target another device has reserved is refused with `InvalidValue`, unless
+// the port already forwarded there), then reloads the firewall (restarting it
+// only if the reload fails) and, if a reservation was added, dnsmasq
 ```
 
 The request is applied **unless** an enabled IPv4 forward without
@@ -1170,7 +1209,7 @@ The split is informational only: the override works identically and removes
 the displaced hostname routes when the manual rule is saved.
 Detection is transport-aware (Remote Access is TCP, WireGuard is UDP — a
 UDP-only forward on 443 collides with nothing) and skipped in configs-only
-mode (the CLI editor confirms implicitly, like `ethernet.set` / `wifi.set`).
+mode (the CLI editor confirms implicitly).
 The automatic (PCP/UPnP) path refuses the same collision outright — a
 protocol client can't be asked.
 
@@ -1182,6 +1221,13 @@ Validation (errors with `MissingDeviceAddress`, rejecting the whole request):
   ULA or link-local address — unless the port already has an IPv6 rule for the
   same `id` and `device_mac`. A new IPv6 port, one newly switched to IPv6, or
   one moved to another device needs the device online with a GUA.
+
+An `ipv4` port keeps the profile of the address it forwards to: a stored port
+for the same `id` and `device_mac` targets the device's reservation in that
+profile, or its stored address when there is none, whichever profile the device
+is on. A new port, one newly switched to IPv4, or one moved to another device
+targets the device's reservation on the profile it is on, else its live
+address. The forward's zone follows its target.
 
 An `ipv6` port's rule pins the tracker-elected stable GUA the device holds
 within a currently-assigned prefix; with none (e.g. saved mid-prefix-rotation),
@@ -1675,32 +1721,30 @@ struct Wifi {
 ### `wifi.set`
 
 ```rust
-// Request: Wifi fields (camelCase) flattened in, plus a confirm flag.
+// Request: Wifi fields (camelCase) flattened in, plus a preview flag.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WifiSetRequest {
     #[serde(flatten)]
     wifi: Wifi<ProfileIdOpt>,               // wifi.get's response shape
-    /// Authorize deleting the published ports returned by a prior unconfirmed call.
+    /// Apply nothing; report the devices leaving a profile they keep settings for.
     #[serde(default)]
-    confirm_published_port_deletion: bool,  // serialized as `confirmPublishedPortDeletion`
+    preview: bool,
 }
 
 // Response:
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WifiSetResult {
-    /// Non-empty (and nothing applied) when reassigning a password to a different
-    /// profile would break published ports for devices on the vacated profile and
-    /// the caller hasn't confirmed. Empty once applied. Entries are the shared
-    /// snake_case `AffectedPublishedPort` (see ethernet.set).
-    pending_published_port_deletions: Vec<AffectedPublishedPort>,  // `pendingPublishedPortDeletions`
+    /// Filled by a preview only. Entries are the shared snake_case
+    /// `DeviceLeavingProfile` (see ethernet.set).
+    leaving_profile: Vec<DeviceLeavingProfile>,  // `leavingProfile`
 }
 // Backend: a profile losing its last WiFi password is "vacated"; its WiFi devices
 // (matched by current profile, since per-SSID mapping isn't available) move off
-// that subnet. Without confirmation it applies nothing and returns the published
-// ports that would break; with confirmation it deletes them (firewall rules +
-// stale DHCP reservations) atomically with the WiFi update, then reloads firewall.
+// that subnet. A preview applies nothing and returns those with a reservation or
+// published port for the vacated profile. A change keeps both: they apply again
+// when the device returns to that profile.
 // A `country` the regulatory database does not define is rejected with
 // `InvalidValue` before anything is written; codes are upper-case, as in the
 // database, so `us` is rejected. `null` clears it and returns the radios to the
@@ -1780,7 +1824,7 @@ blackout crontab runs it at every window boundary.
 ### `wifi.edit`
 
 CLI editor flow — opens the current WiFi config in `$EDITOR`, then calls
-`wifi.set` with published-port deletion implicitly confirmed. Not called by the
+`wifi.set`. Not called by the
 web UI.
 
 ```rust
@@ -1965,8 +2009,26 @@ struct ProfileSetRequest {
 ### `profiles.delete`
 
 ```rust
-// Request: ProfileIdOpt
-// Response: null
+// Request: ProfileIdOpt fields are flattened in alongside the preview flag.
+#[derive(Deserialize)]
+struct ProfileDeleteRequest {
+    #[serde(flatten)]
+    id: ProfileIdOpt,
+    /// Delete nothing; report what deleting the profile deletes.
+    #[serde(default)]
+    preview: bool,
+}
+
+// Response: the reservations and published ports deleted with the profile.
+#[derive(Serialize)]
+struct ProfileDeleteResult {
+    reservations: Vec<DeletedReservation>,       // { mac, name: Option<String>, ipv4 }
+    published_ports: Vec<DeletedPublishedPort>,  // { id, label, mac, name: Option<String> }
+}
+// Backend: deletes the reservations in the profile's subnet and the published
+// ports forwarding into it, IPv4 redirect and IPv6 rule, along with the
+// profile's zone, interface, DHCP server and points of entry. A device's
+// reservations in other profiles and its settings stay.
 ```
 
 ### `profiles.edit`

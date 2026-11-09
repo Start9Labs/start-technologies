@@ -52,7 +52,9 @@ export abstract class ApiService {
   abstract profileGet(params: ProfileIdOpt): Promise<SecurityProfile>
   abstract profileCreate(params: ProfileCreateInput): Promise<ProfileId>
   abstract profileUpdate(params: ProfileUpdateInput): Promise<ProfileId>
-  abstract profileDelete(params: ProfileIdOpt): Promise<null>
+  abstract profileDelete(
+    params: ProfileDeleteParams,
+  ): Promise<ProfileDeleteResult>
   abstract profileScheduleGet(params: {
     interface: string
   }): Promise<ScheduleWindow[]>
@@ -148,7 +150,7 @@ export type EthernetSetPort = RpcParamType<Api, 'ethernet.set'>['ports'][string]
 
 export type EthernetSetConfig = RpcParamType<Api, 'ethernet.set'>
 
-export type AffectedPublishedPort = Bindings.AffectedPublishedPort
+export type DeviceLeavingProfile = Bindings.DeviceLeavingProfile
 
 export type EthernetSetResult = RpcReturnType<Api, 'ethernet.set'>
 
@@ -254,7 +256,7 @@ export type WifiPassword = RpcReturnType<Api, 'wifi.get'>['passwords'][number]
 export type WifiProfileId = Bindings.ProfileId
 
 export type WifiConfig = RpcReturnType<Api, 'wifi.get'> &
-  Pick<RpcParamType<Api, 'wifi.set'>, 'confirmPublishedPortDeletion'>
+  Pick<RpcParamType<Api, 'wifi.set'>, 'preview'>
 
 export type WifiSetResult = RpcReturnType<Api, 'wifi.set'>
 
@@ -272,6 +274,10 @@ export type WifiBlackoutSetResult = RpcReturnType<Api, 'wifi.blackout-set'>
 export type ProfileId = RpcReturnType<Api, 'profiles.set'>
 
 export type ProfileIdOpt = Bindings.ProfileIdOptInput
+
+export type ProfileDeleteParams = RpcParamType<Api, 'profiles.delete'>
+
+export type ProfileDeleteResult = RpcReturnType<Api, 'profiles.delete'>
 
 export type SecurityProfile = RpcReturnType<Api, 'profiles.get'>
 
@@ -353,6 +359,7 @@ export type PublishedPortStatusValue =
   | 'active'
   | 'partial'
   | 'paused'
+  | 'inactive'
   | 'error'
   | 'disabled'
 

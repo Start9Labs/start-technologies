@@ -115,6 +115,7 @@ export type Ready = {
 
 /**
  * Options for running a daemon as a shell command inside a subcontainer.
+ * Non-init commands inherit each output stream without a callback from the runtime.
  */
 export type ExecCommandOptions = {
   /** The command and arguments to execute (e.g. `['bitcoind', '-conf=/etc/bitcoin.conf']`) */

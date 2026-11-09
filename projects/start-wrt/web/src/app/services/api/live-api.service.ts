@@ -29,6 +29,8 @@ import {
   WifiBlackoutSetResult,
   ScheduleWindow,
   ProfileId,
+  ProfileDeleteParams,
+  ProfileDeleteResult,
   ProfileIdOpt,
   SecurityProfile,
   ProfileCreateInput,
@@ -234,7 +236,9 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'profiles.set', params })
   }
 
-  async profileDelete(params: ProfileIdOpt): Promise<null> {
+  async profileDelete(
+    params: ProfileDeleteParams,
+  ): Promise<ProfileDeleteResult> {
     return this.rpc.request({ method: 'profiles.delete', params })
   }
 

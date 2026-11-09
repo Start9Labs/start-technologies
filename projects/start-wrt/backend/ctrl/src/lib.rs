@@ -34,6 +34,7 @@ pub mod profiles;
 pub mod progress;
 pub mod published_ports;
 pub mod registry;
+pub mod reservations;
 pub mod rpc;
 pub mod setup;
 pub use startos::sign;
