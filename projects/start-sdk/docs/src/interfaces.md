@@ -639,11 +639,11 @@ On a raw-TCP binding (`protocol: null`), `secure` says whether the protocol is s
 
 ## Listening on IPv4 and IPv6
 
-**A daemon behind a binding StartOS does not proxy must listen on IPv6 as well as IPv4.** That is every port without `proxy` — raw TCP and TLS passthrough. StartOS forwards IPv4 connections to the container's IPv4 address and the server's IPv6 addresses, LAN and public, to the container's own IPv6 address, both on the internal port. A daemon bound to `0.0.0.0` refuses every IPv6 connection, so each IPv6 address the user sees for the interface is dead.
+**A daemon behind a binding without `proxy` must listen on IPv6 as well as IPv4.** That is raw TCP — with or without `addSsl` — and TLS passthrough. On every port of such a binding, StartOS connects to your container in the client's own address family: an IPv6 client, LAN or public, reaches the container's IPv6 address on the internal port. A daemon bound to `0.0.0.0` refuses every IPv6 connection, so each IPv6 address the user sees for the interface is dead.
 
 Bind the wildcard both families answer on: `::` (or `[::]:<port>`), which accepts IPv4 too unless the daemon sets `IPV6_V6ONLY`, or the daemon's own all-families form — lightningd's empty host, `bind-addr=:9735`. Spellings differ per daemon, and some accept only an IPv4 literal; check its documentation, and where it has a separate IPv6 option, set that as well.
 
-An HTTP-proxied binding and the `addSsl` port of any binding are served by StartOS's own listener, which reaches your container over IPv4, so a `0.0.0.0` listener behind them loses nothing.
+An HTTP-proxied binding, with or without `addSsl`, reaches your container over IPv4, so a `0.0.0.0` listener behind it loses nothing.
 
 ## Authenticating at the Proxy
 
