@@ -585,4 +585,6 @@ export const ENGLISH: Record<string, number> = {
   "Outside the subnet of this device's profile": 616,
   'Not a usable host address': 617,
   'This device is trying to publish DNS records. Allow DNS record publishing for them to resolve on your network.': 618,
+  'Changing this password may briefly disconnect all Wi-Fi devices. Devices using the old password must reconnect with the new one.': 619,
+  'This Wi-Fi password was changed or deleted. Your changes were not saved.': 620,
 }
