@@ -402,7 +402,7 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
             let count = parse_port_set_options(req.get(MAP_REQUEST_LEN..).unwrap_or(&[]))
                 .ok()
                 .flatten()
-                .map_or(1, |ps| ps.size.clamp(1, MAX_PORT_SET));
+                .map_or(1, |ps| ps.size.max(1));
             backend.refused_mapping(peer, external_port, count).await;
         }
         return Some(map_response(
@@ -1020,6 +1020,21 @@ mod tests {
             },
         );
         assert_eq!(refused(range).await, Some((peer, 5000, 10)));
+
+        let mut large_range = map_request([5; 12], 3600, 5000, 5000);
+        encode_port_set_option(
+            &mut large_range,
+            &PortSet {
+                size: 2000,
+                first_internal_port: 5000,
+                parity: false,
+            },
+        );
+        assert_eq!(
+            refused(large_range).await,
+            Some((peer, 5000, 2000)),
+            "report the requested range rather than the maximum grant"
+        );
     }
 
     struct RecordingStub {

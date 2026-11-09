@@ -10,19 +10,19 @@ pub(crate) const REQUEST_MEMORY: Duration = Duration::from_secs(30 * 60);
 pub(crate) const MAX_SOURCES: usize = 256;
 
 /// Each source's latest refusal, stamped when it last arrived.
-pub(crate) struct Recent<K, V>(HashMap<K, (V, Instant)>);
+pub(crate) struct Recent<K, V, const CAPACITY: usize = MAX_SOURCES>(HashMap<K, (V, Instant)>);
 
-impl<K, V> Default for Recent<K, V> {
+impl<K, V, const CAPACITY: usize> Default for Recent<K, V, CAPACITY> {
     fn default() -> Self {
         Self(HashMap::new())
     }
 }
 
-impl<K: Eq + Hash + Clone, V: Default> Recent<K, V> {
+impl<K: Eq + Hash + Clone, V: Default, const CAPACITY: usize> Recent<K, V, CAPACITY> {
     /// The source's entry, stamped `now`. Past the cap, the stalest source is
     /// forgotten.
     pub(crate) fn touch(&mut self, key: K, now: Instant) -> &mut V {
-        if !self.0.contains_key(&key) && self.0.len() >= MAX_SOURCES {
+        if !self.0.contains_key(&key) && self.0.len() >= CAPACITY {
             let stalest = self
                 .0
                 .iter()
@@ -38,7 +38,7 @@ impl<K: Eq + Hash + Clone, V: Default> Recent<K, V> {
     }
 }
 
-impl<K: Eq + Hash, V> Recent<K, V> {
+impl<K: Eq + Hash, V, const CAPACITY: usize> Recent<K, V, CAPACITY> {
     pub(crate) fn forget(&mut self, key: &K) {
         self.0.remove(key);
     }

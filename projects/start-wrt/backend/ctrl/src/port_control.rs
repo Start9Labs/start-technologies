@@ -162,9 +162,8 @@ pub struct PortControl {
     /// Requesting IP → its neighbor entry and whether that device holds the
     /// permission (None = no neighbor entry).
     client_cache: Mutex<HashMap<Ipv4Addr, (Instant, Option<(Client, bool)>)>>,
-    /// Uppercase MAC → port ranges it asked to open while lacking the
-    /// permission, oldest first.
-    requests: Mutex<Recent<String, Vec<(u16, u16)>>>,
+    /// Each port range expires independently after half an hour without a request.
+    requests: Mutex<Recent<String, Recent<(u16, u16), (), MAX_REQUESTED_RANGES>>>,
     sni: Arc<SniDemux>,
 }
 
@@ -297,24 +296,18 @@ impl PortControl {
     }
 
     /// Remembers ports a device lacking the permission asked to open.
-    fn note_request(&self, mac: String, range: (u16, u16)) {
-        let mut requests = self.requests.lock().unwrap();
-        let ranges = requests.touch(mac, Instant::now());
-        ranges.retain(|r| *r != range);
-        if ranges.len() >= MAX_REQUESTED_RANGES {
-            ranges.remove(0);
-        }
-        ranges.push(range);
+    fn note_request(&self, mac: String, range: (u16, u16), now: Instant) {
+        self.requests.lock().unwrap().touch(mac, now).touch(range, now);
     }
 
     /// Ports each device recently asked to open while lacking the permission,
     /// by uppercase MAC, as sorted port strings.
-    pub fn requested_ports(&self) -> HashMap<String, Vec<String>> {
+    pub fn requested_ports(&self, now: Instant) -> HashMap<String, Vec<String>> {
         let requests = self.requests.lock().unwrap();
         requests
-            .recent(Instant::now())
+            .recent(now)
             .map(|(mac, ranges)| {
-                let mut ranges = ranges.clone();
+                let mut ranges: Vec<_> = ranges.recent(now).map(|(range, _)| *range).collect();
                 ranges.sort();
                 let ports = ranges
                     .into_iter()
@@ -1155,7 +1148,8 @@ impl GatewayBackend for Via {
             return;
         }
         let last = external_port.saturating_add(count.max(1) - 1);
-        self.pc.note_request(client.mac, (external_port, last));
+        self.pc
+            .note_request(client.mac, (external_port, last), Instant::now());
     }
 
     async fn list_forwards(&self, peer: Ipv4Addr) -> Vec<MappingEntry> {
@@ -3158,12 +3152,18 @@ config redirect 'dns_override_lan'
         via(Arrival::On(lo.wrapping_add(9999)))
             .refused_mapping(refused, 443, 1)
             .await;
-        assert!(pc.requested_ports().is_empty(), "forged from elsewhere");
+        assert!(
+            pc.requested_ports(Instant::now()).is_empty(),
+            "forged from elsewhere"
+        );
 
         via(Arrival::On(lo))
             .refused_mapping(permitted, 443, 1)
             .await;
-        assert!(pc.requested_ports().is_empty(), "already permitted");
+        assert!(
+            pc.requested_ports(Instant::now()).is_empty(),
+            "already permitted"
+        );
 
         via(Arrival::On(lo)).refused_mapping(refused, 443, 1).await;
         via(Arrival::Unchecked)
@@ -3173,7 +3173,7 @@ config redirect 'dns_override_lan'
             .refused_mapping(Ipv4Addr::new(192, 168, 1, 52), 22, 1)
             .await;
         assert_eq!(
-            pc.requested_ports(),
+            pc.requested_ports(Instant::now()),
             HashMap::from([(
                 "AA:00:00:00:00:50".to_string(),
                 vec!["443".to_string(), "5000-5009".to_string()]
@@ -3181,7 +3181,7 @@ config redirect 'dns_override_lan'
         );
 
         pc.forget_requests("aa:00:00:00:00:50");
-        assert!(pc.requested_ports().is_empty());
+        assert!(pc.requested_ports(Instant::now()).is_empty());
     }
 
     #[tokio::test]
@@ -3189,15 +3189,45 @@ config redirect 'dns_override_lan'
         let dir = temp_root("");
         let pc = PortControl::new(dir.path().to_path_buf());
         let mac = "AA:00:00:00:00:50";
+        let now = Instant::now();
         for port in 1..=MAX_REQUESTED_RANGES as u16 {
-            pc.note_request(mac.into(), (port, port));
+            pc.note_request(
+                mac.into(),
+                (port, port),
+                now + Duration::from_secs(port as u64),
+            );
         }
-        pc.note_request(mac.into(), (1, 1));
-        pc.note_request(mac.into(), (100, 100));
-        let ports = pc.requested_ports().remove(mac).unwrap();
+        let later = now + Duration::from_secs(100);
+        pc.note_request(mac.into(), (1, 1), later);
+        pc.note_request(mac.into(), (100, 100), later);
+        let ports = pc.requested_ports(later).remove(mac).unwrap();
         assert_eq!(ports.len(), MAX_REQUESTED_RANGES);
         assert!(ports.contains(&"1".to_string()), "a repeat is refreshed");
         assert!(!ports.contains(&"2".to_string()), "the oldest is dropped");
+    }
+
+    #[tokio::test]
+    async fn requested_ranges_expire_independently_and_do_not_revive() {
+        let dir = temp_root("");
+        let pc = PortControl::new(dir.path().to_path_buf());
+        let mac = "AA:00:00:00:00:50";
+        let now = Instant::now();
+        let later = now + crate::recent::REQUEST_MEMORY;
+        pc.note_request(mac.into(), (443, 443), now);
+        pc.note_request(mac.into(), (5000, 5009), now + Duration::from_secs(1));
+        pc.note_request(mac.into(), (8443, 8443), later);
+        assert_eq!(
+            pc.requested_ports(later).remove(mac).unwrap(),
+            vec!["5000-5009".to_string(), "8443".to_string()]
+        );
+
+        let expired = later + crate::recent::REQUEST_MEMORY;
+        assert!(pc.requested_ports(expired).is_empty());
+        pc.note_request(mac.into(), (18080, 18080), expired);
+        assert_eq!(
+            pc.requested_ports(expired).remove(mac).unwrap(),
+            vec!["18080".to_string()]
+        );
     }
 
     #[tokio::test]

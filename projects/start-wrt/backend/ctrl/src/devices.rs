@@ -1842,7 +1842,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
         .unwrap_or_default();
     let mut asking_to_forward = crate::port_control::PORT_CONTROL
         .get()
-        .map(|pc| pc.requested_ports())
+        .map(|pc| pc.requested_ports(Instant::now()))
         .unwrap_or_default();
 
     let mut devices = Vec::new();
