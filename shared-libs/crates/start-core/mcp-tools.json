@@ -9334,6 +9334,15 @@
     }
   },
   {
+    "name": "server.clear-nut",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "server.clear-smtp",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -11165,6 +11174,48 @@
     }
   },
   {
+    "name": "server.nut-status",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "NutStatus": {
+          "type": "object",
+          "properties": {
+            "target": { "type": "string" },
+            "variables": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "type": "string" }
+            },
+            "monitoringError": { "type": ["string", "null"] }
+          },
+          "required": ["target", "variables", "monitoringError"],
+          "additionalProperties": true,
+          "description": "Current variables reported by the configured UPS."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "target": { "type": "string" },
+        "variables": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "type": "string" }
+        },
+        "monitoringError": { "type": ["string", "null"] }
+      },
+      "required": ["target", "variables", "monitoringError"],
+      "additionalProperties": true,
+      "description": "Current variables reported by the configured UPS."
+    }
+  },
+  {
     "name": "server.rebuild",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -11330,6 +11381,108 @@
       "required": ["level"],
       "additionalProperties": true,
       "description": "Sets verbosity for StartOS backend code in the running daemon."
+    }
+  },
+  {
+    "name": "server.set-nut",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SetNutParams": {
+          "type": "object",
+          "properties": { "config": { "$ref": "#/$defs/NutConfig" } },
+          "required": ["config"],
+          "additionalProperties": true,
+          "description": "Parameters for replacing the stored NUT configuration."
+        },
+        "NutConfig": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "Whether StartOS should run NUT monitoring.",
+              "type": "boolean"
+            },
+            "settings": {
+              "description": "Retained server or client settings, including while monitoring is disabled.",
+              "anyOf": [{ "$ref": "#/$defs/NutSettings" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true,
+          "description": "Stored NUT configuration and its independent enabled state."
+        },
+        "NutSettings": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "server",
+                  "description": "Serve and monitor a UPS connected directly to this StartOS host."
+                },
+                "upsName": { "type": "string" },
+                "driver": { "type": "string" },
+                "port": { "type": "string" },
+                "monitorUsername": { "type": "string" },
+                "monitorPassword": { "type": "string" },
+                "listenAll": { "type": "boolean" },
+                "remoteUsername": { "type": ["string", "null"] },
+                "remotePassword": { "type": ["string", "null"] },
+                "shutdownDelay": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "mode",
+                "upsName",
+                "driver",
+                "port",
+                "monitorUsername",
+                "monitorPassword"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "client",
+                  "description": "Monitor a UPS exposed by another NUT server."
+                },
+                "upsName": { "type": "string" },
+                "host": { "type": "string" },
+                "port": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "monitorUsername": { "type": "string" },
+                "monitorPassword": { "type": "string" },
+                "shutdownDelay": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "mode",
+                "upsName",
+                "host",
+                "monitorUsername",
+                "monitorPassword"
+              ]
+            }
+          ],
+          "description": "Directly connected UPS server settings or remote NUT client settings."
+        }
+      },
+      "type": "object",
+      "properties": { "config": { "$ref": "#/$defs/NutConfig" } },
+      "required": ["config"],
+      "additionalProperties": true,
+      "description": "Parameters for replacing the stored NUT configuration."
     }
   },
   {
