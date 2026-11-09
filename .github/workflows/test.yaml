@@ -139,8 +139,8 @@ jobs:
           test -z "$(git status --porcelain --untracked-files=all -- .github/actions/upload-each/dist)"
 
       - uses: ./.github/actions/setup-release-tests
-      - name: Install Bash completion test dependency
-        run: sudo apt-get install -y bash-completion
+      - name: Install shell test dependencies
+        run: sudo apt-get install -y bash-completion grub-common
 
       - name: Build And Run Tests
         run: make test

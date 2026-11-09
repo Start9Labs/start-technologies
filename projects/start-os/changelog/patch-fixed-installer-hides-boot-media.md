@@ -1,5 +1,0 @@
----
-release-notes: false
----
-
-- The installer no longer offers the USB drive it was booted from as the OS drive or the data drive.

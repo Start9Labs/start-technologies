@@ -68,6 +68,7 @@
 - [Logs](logs.md)
 - [Server Name](server-name.md)
 - [SSH](ssh.md)
+- [Kernel Arguments](kernel-arguments.md)
 - [SMTP](smtp.md)
 - [Shared Volumes](shared-volumes.md)
 - [Backups](backups.md)
