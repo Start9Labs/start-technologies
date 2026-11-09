@@ -580,4 +580,5 @@ export default {
   616: 'Poza podsiecią profilu tego urządzenia',
   617: 'To nie jest użyteczny adres hosta',
   618: 'To urządzenie próbuje opublikować rekordy DNS. Zezwól na publikowanie rekordów DNS, aby były rozpoznawane w Twojej sieci.',
+  619: 'To urządzenie poprosiło o otwarcie portów {ports} do internetu. Router odmówił, ponieważ automatyczne przekierowanie portów jest wyłączone.',
 } satisfies i18n

@@ -585,4 +585,5 @@ export const ENGLISH: Record<string, number> = {
   "Outside the subnet of this device's profile": 616,
   'Not a usable host address': 617,
   'This device is trying to publish DNS records. Allow DNS record publishing for them to resolve on your network.': 618,
+  'This device asked to open port(s) {ports} to the internet. The router refused because automatic port forwarding is off.': 619,
 }

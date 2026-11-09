@@ -580,4 +580,5 @@ export default {
   616: 'Fuera de la subred del perfil de este dispositivo',
   617: 'No es una dirección de host utilizable',
   618: 'Este dispositivo intenta publicar registros DNS. Permita la publicación de registros DNS para que se resuelvan en su red.',
+  619: 'Este dispositivo pidió abrir los puertos {ports} a Internet. El router lo rechazó porque el reenvío automático de puertos está desactivado.',
 } satisfies i18n

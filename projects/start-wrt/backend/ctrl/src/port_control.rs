@@ -113,6 +113,7 @@ use uciedit::{dump_all, parse_all, Arena};
 
 use crate::invoke::Invoke;
 use crate::prelude::*;
+use crate::recent::Recent;
 use crate::utils::DeserializeStdin;
 use crate::{CtrlContext, ServerContext};
 
@@ -128,6 +129,8 @@ const GRACE_LEASE: Duration = Duration::from_secs(3600);
 const MAX_LEASE: Duration = Duration::from_secs(604_800);
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 const CLIENT_CACHE_TTL: Duration = Duration::from_secs(10);
+/// Port ranges remembered per device that asked without the permission.
+const MAX_REQUESTED_RANGES: usize = 8;
 const WAN_CACHE_TTL: Duration = Duration::from_secs(30);
 const LAN_CACHE_TTL: Duration = Duration::from_secs(30);
 pub(crate) const UCI_RETRIES: usize = 4;
@@ -156,8 +159,12 @@ pub struct PortControl {
     leases: Mutex<HashMap<String, Instant>>,
     wan_cache: Mutex<Option<(Instant, Option<Ipv4Addr>)>>,
     lan_cache: Mutex<Option<(Instant, Arc<Vec<LanAddr>>)>>,
-    /// Requesting IP → resolved+authorized device (None = unauthorized).
-    client_cache: Mutex<HashMap<Ipv4Addr, (Instant, Option<Client>)>>,
+    /// Requesting IP → its neighbor entry and whether that device holds the
+    /// permission (None = no neighbor entry).
+    client_cache: Mutex<HashMap<Ipv4Addr, (Instant, Option<(Client, bool)>)>>,
+    /// Uppercase MAC → port ranges it asked to open while lacking the
+    /// permission, oldest first.
+    requests: Mutex<Recent<String, Vec<(u16, u16)>>>,
     sni: Arc<SniDemux>,
 }
 
@@ -189,6 +196,7 @@ impl PortControl {
                 wan_cache: Mutex::new(None),
                 lan_cache: Mutex::new(None),
                 client_cache: Mutex::new(HashMap::new()),
+                requests: Mutex::new(Recent::default()),
                 // Reconcile all live ports because callbacks may arrive out of order.
                 sni: SniDemux::with_on_change(
                     move |port, active| {
@@ -261,9 +269,16 @@ impl PortControl {
 
     /// Resolve the requesting IP to an authorized device: a neighbor-table
     /// entry on a LAN bridge, whose MAC has an `_allow_pcp`-flagged DHCP host
-    /// entry. `None` = unknown or not authorized. Both outcomes are cached
-    /// briefly (PCP clients probe several times per handshake).
+    /// entry. `None` = unknown or not authorized.
     async fn authorized_client(&self, peer: Ipv4Addr) -> Option<Client> {
+        let (client, allowed) = self.client(peer).await?;
+        allowed.then_some(client)
+    }
+
+    /// The requesting IP's neighbor entry, and whether its MAC holds the
+    /// permission. Both outcomes are cached briefly (PCP clients probe several
+    /// times per handshake).
+    async fn client(&self, peer: Ipv4Addr) -> Option<(Client, bool)> {
         {
             let cache = self.client_cache.lock().unwrap();
             if let Some((at, client)) = cache.get(&peer) {
@@ -281,7 +296,46 @@ impl PortControl {
         client
     }
 
-    async fn resolve_client(&self, peer: Ipv4Addr) -> Option<Client> {
+    /// Remembers ports a device lacking the permission asked to open.
+    fn note_request(&self, mac: String, range: (u16, u16)) {
+        let mut requests = self.requests.lock().unwrap();
+        let ranges = requests.touch(mac, Instant::now());
+        ranges.retain(|r| *r != range);
+        if ranges.len() >= MAX_REQUESTED_RANGES {
+            ranges.remove(0);
+        }
+        ranges.push(range);
+    }
+
+    /// Ports each device recently asked to open while lacking the permission,
+    /// by uppercase MAC, as sorted port strings.
+    pub fn requested_ports(&self) -> HashMap<String, Vec<String>> {
+        let requests = self.requests.lock().unwrap();
+        requests
+            .recent(Instant::now())
+            .map(|(mac, ranges)| {
+                let mut ranges = ranges.clone();
+                ranges.sort();
+                let ports = ranges
+                    .into_iter()
+                    .map(|(first, last)| {
+                        if first == last {
+                            first.to_string()
+                        } else {
+                            format!("{first}-{last}")
+                        }
+                    })
+                    .collect();
+                (mac.clone(), ports)
+            })
+            .collect()
+    }
+
+    pub fn forget_requests(&self, mac: &str) {
+        self.requests.lock().unwrap().forget(&mac.to_uppercase());
+    }
+
+    async fn resolve_client(&self, peer: Ipv4Addr) -> Option<(Client, bool)> {
         let neigh = tokio::process::Command::new("ip")
             .args(["neigh", "show"])
             .invoke(ErrorKind::Network.into())
@@ -298,7 +352,7 @@ impl PortControl {
         .await
         .map(|allowed| allowed.contains(&mac))
         .unwrap_or(false);
-        allowed.then_some(Client { mac, iface })
+        Some((Client { mac, iface }, allowed))
     }
 
     /// Drops hostname routes attributed to unauthorized devices.
@@ -1090,6 +1144,18 @@ impl GatewayBackend for Via {
         // core's `handle` as NOT_AUTHORIZED, covering both MAP and lifetime-0
         // delete — nothing reaches `add_forward`/`remove_forward` without it.
         arrival_matches(self.arrival, &client.iface)
+    }
+
+    async fn refused_mapping(&self, peer: Ipv4Addr, external_port: u16, count: u16) {
+        let Some((client, allowed)) = self.pc.client(peer).await else {
+            return;
+        };
+        // A PCP request from off the device's segment is forged.
+        if allowed || !arrival_matches(self.arrival, &client.iface) {
+            return;
+        }
+        let last = external_port.saturating_add(count.max(1) - 1);
+        self.pc.note_request(client.mac, (external_port, last));
     }
 
     async fn list_forwards(&self, peer: Ipv4Addr) -> Vec<MappingEntry> {
@@ -2197,6 +2263,7 @@ pub async fn set_auto_forward<C: CtrlContext>(
             close_device_forwards(&req.mac, &[]).await;
         } else if let Some(pc) = PORT_CONTROL.get() {
             pc.invalidate_clients();
+            pc.forget_requests(&mac_upper);
         }
     }
     Ok(())
@@ -3060,6 +3127,77 @@ config redirect 'dns_override_lan'
         ));
         // ...and when the arrival interface itself was indeterminate.
         assert!(!arrival_matches(Arrival::Indeterminate, "lo"));
+    }
+
+    fn known_neighbor(pc: &PortControl, peer: Ipv4Addr, mac: &str, allowed: bool) {
+        let client = Client {
+            mac: mac.into(),
+            iface: "lo".into(),
+        };
+        pc.client_cache
+            .lock()
+            .unwrap()
+            .insert(peer, (Instant::now(), Some((client, allowed))));
+    }
+
+    #[tokio::test]
+    async fn a_refused_device_is_noted_only_from_its_own_segment() {
+        let dir = temp_root("");
+        let pc = PortControl::new(dir.path().to_path_buf());
+        let lo = if_nametoindex("lo").expect("loopback resolvable");
+        let via = |arrival| Via {
+            pc: pc.clone(),
+            kind: KIND_PCP,
+            arrival,
+        };
+        let refused = Ipv4Addr::new(192, 168, 1, 50);
+        let permitted = Ipv4Addr::new(192, 168, 1, 51);
+        known_neighbor(&pc, refused, "AA:00:00:00:00:50", false);
+        known_neighbor(&pc, permitted, "AA:00:00:00:00:51", true);
+
+        via(Arrival::On(lo.wrapping_add(9999)))
+            .refused_mapping(refused, 443, 1)
+            .await;
+        assert!(pc.requested_ports().is_empty(), "forged from elsewhere");
+
+        via(Arrival::On(lo))
+            .refused_mapping(permitted, 443, 1)
+            .await;
+        assert!(pc.requested_ports().is_empty(), "already permitted");
+
+        via(Arrival::On(lo)).refused_mapping(refused, 443, 1).await;
+        via(Arrival::Unchecked)
+            .refused_mapping(refused, 5000, 10)
+            .await;
+        via(Arrival::On(lo))
+            .refused_mapping(Ipv4Addr::new(192, 168, 1, 52), 22, 1)
+            .await;
+        assert_eq!(
+            pc.requested_ports(),
+            HashMap::from([(
+                "AA:00:00:00:00:50".to_string(),
+                vec!["443".to_string(), "5000-5009".to_string()]
+            )])
+        );
+
+        pc.forget_requests("aa:00:00:00:00:50");
+        assert!(pc.requested_ports().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_device_keeps_its_latest_requests() {
+        let dir = temp_root("");
+        let pc = PortControl::new(dir.path().to_path_buf());
+        let mac = "AA:00:00:00:00:50";
+        for port in 1..=MAX_REQUESTED_RANGES as u16 {
+            pc.note_request(mac.into(), (port, port));
+        }
+        pc.note_request(mac.into(), (1, 1));
+        pc.note_request(mac.into(), (100, 100));
+        let ports = pc.requested_ports().remove(mac).unwrap();
+        assert_eq!(ports.len(), MAX_REQUESTED_RANGES);
+        assert!(ports.contains(&"1".to_string()), "a repeat is refreshed");
+        assert!(!ports.contains(&"2".to_string()), "the oldest is dropped");
     }
 
     #[tokio::test]

@@ -580,4 +580,5 @@ export default {
   616: 'Außerhalb des Subnetzes des Profils dieses Geräts',
   617: 'Keine nutzbare Host-Adresse',
   618: 'Dieses Gerät versucht, DNS-Einträge zu veröffentlichen. Erlauben Sie das Veröffentlichen von DNS-Einträgen, damit sie in Ihrem Netzwerk aufgelöst werden.',
+  619: 'Dieses Gerät hat angefragt, die Ports {ports} zum Internet zu öffnen. Der Router hat abgelehnt, weil die automatische Portweiterleitung ausgeschaltet ist.',
 } satisfies i18n

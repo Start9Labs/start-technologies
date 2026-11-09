@@ -1662,6 +1662,11 @@ export const Device: z.ZodObject<{
    */
   allow_auto_port_forward: z.ZodBoolean
   /**
+   * External ports or ranges (`443`, `5000-5009`) the router refused to
+   * open for this device for lack of that permission in the last half hour.
+   */
+  auto_port_forward_requests: z.ZodArray<z.ZodString>
+  /**
    * Whether this device may publish DNS records into the router's resolver
    * (`devices set-dns-injection`; `vpn-server peer-set-dns-injection` for a
    * VPN peer).
@@ -1757,6 +1762,14 @@ export const Device: z.ZodObject<{
   allow_auto_port_forward: z.boolean().meta({
     description:
       'Whether this device may auto-create port forwards via PCP/UPnP\n(default off; set via `devices set-auto-forward`).',
+  }),
+  /**
+   * External ports or ranges (`443`, `5000-5009`) the router refused to
+   * open for this device for lack of that permission in the last half hour.
+   */
+  auto_port_forward_requests: z.array(z.string()).meta({
+    description:
+      'External ports or ranges (`443`, `5000-5009`) the router refused to\nopen for this device for lack of that permission in the last half hour.',
   }),
   /**
    * Whether this device may publish DNS records into the router's resolver

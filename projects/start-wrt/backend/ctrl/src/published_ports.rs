@@ -2707,6 +2707,7 @@ config rule 'pp_a_v6'
             ipv4_reservations: Vec::new(),
             profile_network: None,
             allow_auto_port_forward: false,
+            auto_port_forward_requests: Vec::new(),
             allow_dns_injection: false,
             dns_injection_requested: false,
             allow_router_advertisements: false,
