@@ -864,6 +864,27 @@ for (const liveBeforeResponse of [true, false]) {
   })
 }
 
+test('a slower catalog response cannot replace a later registry selection', async t => {
+  const f = fixture(t, '0.4.0.2')
+  const first = f.os.loadOS('https://first.test')
+  await tick()
+  const second = f.os.loadOS('https://second.test')
+  await tick()
+  assert.deepEqual(
+    f.requests.map(({ params }) => params.registry),
+    ['https://first.test', 'https://second.test'],
+  )
+  f.requests[1].resolve({
+    '0.4.0.3': { releaseNotes: 'second registry', squashfs },
+  })
+  await second
+  f.requests[0].resolve(catalog)
+  await first
+  assert.deepEqual(f.os.updateCandidates(), [
+    { version: '0.4.0.3', notes: 'second registry', squashfs },
+  ])
+})
+
 test('without a cache, load waits for the first live state', async t => {
   const f = fixture(t)
   const loading = f.os.loadOS()
@@ -2225,6 +2246,31 @@ test('another registry provides StartOS updates only after a warning, and report
     ['notice', 'StartOS updates', ['key']],
   ])
 })
+
+for (const succeeds of [true, false]) {
+  test(`registry selection handles catalog refresh completion: ${succeeds}`, async () => {
+    const { instance } = registriesFixture()
+    const refresh = deferred()
+    const outcomes = []
+    instance.os.loadOS = () => refresh.promise
+    instance.tasks.run = async work => {
+      const succeeded = await runTask(work)
+      outcomes.push(succeeded)
+      return succeeded
+    }
+    const selecting = RegistriesPage.prototype.useForUpdates.call(
+      instance,
+      'https://registry.test',
+    )
+    await tick()
+    assert.equal(instance.saving(), true)
+    if (succeeds) refresh.resolve()
+    else refresh.reject(new Error('registry unavailable'))
+    await selecting
+    assert.equal(instance.saving(), false)
+    assert.deepEqual(outcomes, [true, true, succeeds])
+  })
+}
 
 test('the update registry cannot be removed', async () => {
   const { instance, calls } = registriesFixture()

@@ -284,7 +284,7 @@ export default class Registries {
     }, 'Saving')
 
     if (saved) {
-      void this.os.loadOS(url)
+      await this.save(() => this.os.loadOS(url), 'Checking registry')
       await this.notify(
         'StartOS updates',
         enabled.length
