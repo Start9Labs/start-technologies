@@ -41,6 +41,16 @@ pub(super) fn subscription_request(
     })
 }
 
+/// Recognizes absent HTTP upgrade routes, never rejected Noise admission.
+pub(crate) fn websocket_unsupported(error: &Error) -> bool {
+    use tokio_tungstenite::tungstenite::Error as WebSocketError;
+    matches!(
+        error.source.downcast_ref::<WebSocketError>(),
+        Some(WebSocketError::Http(response))
+            if matches!(response.status().as_u16(), 404 | 405 | 501)
+    )
+}
+
 pub(crate) async fn connect(
     client: &ReloadableHttpClient,
     registry: &Url,

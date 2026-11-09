@@ -357,10 +357,50 @@ pub(crate) async fn call(
     params: Value,
 ) -> Result<Value, RpcError> {
     use crate::middleware::auth::session::client as session_client;
-    let body = session_client::request_body(method, params)?;
     let identity = crate::sign::noise::NoiseIdentity::new(signer).await?;
-    let mut socket = super::sync::connection::connect(client, registry, identity, headers).await?;
-    session_client::request(&mut socket, body).await
+    match super::sync::connection::connect(client, registry, identity, headers.clone()).await {
+        Ok(mut socket) => {
+            session_client::request(&mut socket, session_client::request_body(method, params)?)
+                .await
+        }
+        Err(error) if super::sync::connection::websocket_unsupported(&error) => {
+            call_legacy(client, signer, registry, headers, method, params).await
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub(super) async fn call_legacy(
+    client: &crate::context::rpc::ReloadableHttpClient,
+    signer: &crate::sign::Signer,
+    registry: &Url,
+    mut headers: HeaderMap,
+    method: &str,
+    params: Value,
+) -> Result<Value, RpcError> {
+    use crate::middleware::auth::signature::{
+        AUTH_SIG_HEADER, SignatureHeader, rpc_request_body, send_http,
+    };
+    let body = rpc_request_body(method, params)?;
+    let address = registry.host_str().or_not_found("registry hostname")?;
+    headers.insert(
+        AUTH_SIG_HEADER,
+        SignatureHeader::sign(signer, body.as_bytes(), address)
+            .await?
+            .to_header(),
+    );
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        send_http(
+            client.get_without_redirects(),
+            registry_rpc_url(registry)?,
+            headers,
+            body,
+            crate::util::net::secure::DEFAULT_RPC_RESPONSE_LIMIT,
+        ),
+    )
+    .await
+    .with_kind(ErrorKind::Network)?
 }
 
 impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {

@@ -751,17 +751,27 @@ pub async fn call_http(
     method: &str,
     params: Value,
 ) -> Result<Value, RpcError> {
+    let body = rpc_request_body(method, params)?;
+    send_http(client, url, headers, body, usize::MAX).await
+}
+
+pub(crate) async fn send_http(
+    client: Client,
+    url: Url,
+    headers: HeaderMap,
+    body: String,
+    max_response_bytes: usize,
+) -> Result<Value, RpcError> {
     use reqwest::Method;
     use reqwest::header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE};
     use rpc_toolkit::RpcResponse;
-    let body = rpc_request_body(method, params)?;
     let req = client
         .request(Method::POST, url)
         .header(CONTENT_TYPE, "application/json")
         .header(ACCEPT, "application/json")
         .header(CONTENT_LENGTH, body.len())
         .headers(headers);
-    let res = req.body(body).send().await?;
+    let mut res = req.body(body).send().await?;
 
     if !res.status().is_success() {
         let status = res.status();
@@ -782,7 +792,18 @@ pub async fn call_http(
         .and_then(|v| v.to_str().ok())
     {
         Some("application/json") => {
-            serde_json::from_slice::<RpcResponse>(&*res.bytes().await?)
+            let mut bytes = Vec::new();
+            while let Some(chunk) = res.chunk().await? {
+                if chunk.len() > max_response_bytes - bytes.len() {
+                    return Err(Error::new(
+                        eyre!("{}", t!("util.net.secure.invalid-message")),
+                        ErrorKind::Network,
+                    )
+                    .into());
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            serde_json::from_slice::<RpcResponse>(&bytes)
                 .with_kind(ErrorKind::Deserialization)?
                 .result
         }

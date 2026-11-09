@@ -14,6 +14,7 @@ use crate::rpc_continuations::Guid;
 use crate::util::future::NonDetachingJoinHandle;
 
 mod live;
+mod polling;
 
 fn url() -> Url {
     registry_url("https://registry.test/catalog/").unwrap()

@@ -2,7 +2,7 @@
 release-notes: false
 ---
 
-- Keep connected registries synchronized over one automatically authenticated, encrypted WebSocket per registry for package listings, signing-key changes, and StartOS updates. Cached listings remain available when a registry is offline.
+- Keep connected registries synchronized over one automatically authenticated, encrypted WebSocket per registry for package listings, signing-key changes, and StartOS updates. Poll registries without WebSocket RPC support every 15 minutes using their existing HTTP API. Cached listings remain available when a registry is offline.
 - Skip malformed saved registry URLs independently, preserving synchronization and listings from valid sources.
 - Preserve deployment URL prefixes when diagnostic updates query a registry.
 - Retrieve private package and dependency icons using the server's registry identity, limited to saved registries' content-addressed icon endpoints.

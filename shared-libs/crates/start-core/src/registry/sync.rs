@@ -1,3 +1,5 @@
+//! `connected` reports synchronization availability, including successful polling without a persistent socket.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,6 +10,7 @@ use url::Url;
 
 use crate::context::RpcContext;
 use crate::db::model::{Database, DatabaseModel};
+use crate::middleware::auth::signature::SigningContext;
 use crate::prelude::*;
 use crate::registry::FullIndex;
 use crate::registry::device_info::DeviceInfo;
@@ -20,6 +23,7 @@ use crate::trusted_keys::connection::{
 use crate::util::future::NonDetachingJoinHandle;
 
 pub(crate) mod connection;
+mod polling;
 
 /// Last synchronized package listings and registry trust proposals.
 #[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
@@ -246,25 +250,53 @@ async fn watch_registry(
 ) {
     let mut backoff = 30;
     loop {
+        let next_poll = tokio::time::Instant::now() + polling::INTERVAL;
         let result = connection::subscribe(&db, &subscriptions, &context, &mut backoff).await;
-        if let Err(error) = result {
-            tracing::debug!(?error, ?subscriptions, "Registry connection disconnected");
-        }
-        let _ = db
-            .mutate(|db| {
-                for subscription in &subscriptions {
-                    set_disconnected(db, subscription)?;
-                }
-                Ok::<_, Error>(())
-            })
+        let polling = result
+            .as_ref()
+            .is_err_and(connection::websocket_unsupported);
+        let result = if polling {
+            async {
+                let Some(ctx) = context() else { return Ok(()) };
+                let device = DeviceInfo::load(&ctx).await?;
+                polling::poll(
+                    &db,
+                    &subscriptions,
+                    &device,
+                    &ctx.client,
+                    &ctx.signing_key()?,
+                )
+                .await
+            }
             .await
-            .result;
+        } else {
+            result
+        };
+        if let Err(error) = &result {
+            tracing::debug!(?error, ?subscriptions, "Registry synchronization failed");
+        }
+        if !polling || result.is_err() {
+            let _ = db
+                .mutate(|db| {
+                    for subscription in &subscriptions {
+                        set_disconnected(db, subscription)?;
+                    }
+                    Ok::<_, Error>(())
+                })
+                .await
+                .result;
+        }
         if context().is_none() {
             return;
         }
-        let delay = Duration::from_secs(rand::random_range(backoff / 2..=backoff));
-        backoff = (backoff * 2).min(300);
-        tokio::time::sleep(delay).await;
+        let next_attempt = if polling {
+            next_poll
+        } else {
+            let delay = Duration::from_secs(rand::random_range(backoff / 2..=backoff));
+            backoff = (backoff * 2).min(300);
+            tokio::time::Instant::now() + delay
+        };
+        tokio::time::sleep_until(next_attempt).await;
     }
 }
 

@@ -62,6 +62,17 @@ request bytes and single-response exchange for both Reqwest and SOCKS transports
 Initial package-trust grants, refresh discovery and cache projections retain their
 distinct owners; no transport identity is persisted in the registry cache.
 
+A registry upgrade route returning HTTP 404, 405 or 501 selects legacy signed HTTP
+for discovery and uncached backend calls. The existing registry task immediately
+polls `package.get` with full version details, `info` and the selected `os.index`,
+then repeats every 15 minutes. It rechecks WebSocket support each cycle. Polling
+reuses the snapshot projection and trust-discovery owners; it grants no trust.
+Refresh/removal retain their existing cancellation and join behavior. Successful
+polling reports availability without a persistent socket. Redirects, authorization
+errors, transport failures and rejected encrypted admission do not select this
+fallback. Native registry administration and other products retain their existing
+transport policy.
+
 ## Native CLI transport
 
 Normal keyed StartOS, registry, Tunnel and WRT CLI calls, including registry promotion, use
