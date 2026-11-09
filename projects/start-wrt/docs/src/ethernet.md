@@ -21,7 +21,7 @@ One Ethernet port is designated as the WAN port, which connects to your ISP mode
 1. If reassigning the port would break any [Published Ports](published-ports.md) rules (the devices on that port move to a new subnet), a confirmation dialog lists the affected rules first. Nothing is applied until you confirm; canceling leaves the port unchanged.
 
 > [!NOTE]
-> Changes take effect immediately. A device currently plugged into a port will be reassigned to the new profile without needing to unplug and replug.
+> Changes take effect immediately. The router briefly disconnects the port, and most devices plugged into it rejoin on the new profile's subnet within seconds. A device behind a switch, or one that ignores the brief disconnect, keeps its old address and usually loses Internet access and its connections to other devices until it reconnects. Unplug and replug its cable, or restart the device or the switch. Otherwise it reconnects on its own within 12 hours.
 
 > [!NOTE]
 > If you connect a network switch to an Ethernet port, all devices on that switch share the same Security Profile. StartWRT cannot differentiate between devices beyond its onboard Ethernet ports. Those devices still appear individually in the [Devices](devices.md) list — including hosts with static IPs or only IPv6 addresses — because the router learns them from the bridge forwarding table even without a DHCP lease.
