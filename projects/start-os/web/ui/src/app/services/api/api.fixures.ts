@@ -513,7 +513,13 @@ export namespace Mock {
                     'https://github.com/Start9Labs/bitcoind-startos/releases/download/v26.1.0/bitcoind.s9pk',
                   ],
                   commitment: mockMerkleArchiveCommitment,
-                  signatures: { [unknownSigner]: 'mock-signature' },
+                  signatures: {
+                    'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=':
+                      'mock-signature',
+                    'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=':
+                      'mock-signature',
+                    [unknownSigner]: 'mock-signature',
+                  },
                   publishedAt: Date.now().toString(),
                 },
               ],
@@ -1981,6 +1987,29 @@ PersistentKeepalive = 25`
       }),
     )
 
+  export const getFileInputSpec = async (): Promise<IST.InputSpec> => ({
+    certificate: {
+      type: 'file',
+      name: 'Certificate',
+      description: null,
+      warning: null,
+      uploadId: 'mock-certificate',
+      extensions: ['.pem', '.crt'],
+      required: true,
+      maxSize: 1024 * 1024,
+    },
+    attachment: {
+      type: 'file',
+      name: 'Attachment',
+      description: null,
+      warning: null,
+      uploadId: 'mock-attachment',
+      extensions: ['.tar.gz', '.txt'],
+      required: false,
+      maxSize: null,
+    },
+  })
+
   export const getActionInputSpec = async (): Promise<IST.InputSpec> =>
     configBuilderToSpec(
       ISB.InputSpec.of({
@@ -2050,11 +2079,6 @@ PersistentKeepalive = 25`
           min: 1,
           max: 65535,
         }),
-        // file: ISB.Value.file({
-        //   name: 'File',
-        //   required: false,
-        //   extensions: ['png', 'pdf'],
-        // }),
         users: ISB.Value.multiselect({
           name: 'Users',
           default: [],

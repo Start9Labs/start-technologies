@@ -1,3 +1,4 @@
+import { ed25519 } from '@noble/curves/ed25519'
 import { blake3 } from '@noble/hashes/blake3'
 import { concatBytes, hexToBytes } from '@noble/hashes/utils'
 
@@ -159,9 +160,13 @@ export function ed25519PublicKeyDer64(raw32: Uint8Array): string {
   return bytesToBase64(concatBytes(ED25519_SPKI_PREFIX, raw32))
 }
 
-/** Decodes an Ed25519 SPKI, accepting DER64 and PEM serialization. */
+/** Decodes an on-curve Ed25519 SPKI, accepting DER64 and PEM serialization. */
 export function parseEd25519PublicKey(serialized: string): Uint8Array {
-  return parseDerPayload(serialized, ED25519_SPKI_PREFIX, 32)
+  const key = parseDerPayload(serialized, ED25519_SPKI_PREFIX, 32)
+  // ZIP-215 decoding matches the backend's accepted curve points.
+  if (!ed25519.utils.isValidPublicKey(key, true))
+    throw new Error('Public key is not a curve point')
+  return key
 }
 
 /** Decodes a fixed-layout DER value using native key/signature encodings. */

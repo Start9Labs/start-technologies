@@ -71,7 +71,6 @@ export default {
   72: 'Déconnexion',
   73: 'Manuel utilisateur',
   74: 'Contacter le support',
-  75: 'Faire un don à Start9',
   76: 'Voulez-vous vraiment redémarrer votre serveur ? Cela peut prendre plusieurs minutes avant qu’il soit de nouveau en ligne.',
   77: 'Voulez-vous vraiment éteindre votre serveur ? Cela peut prendre plusieurs minutes et il ne redémarrera pas automatiquement. Pour le rallumer, il faudra le débrancher puis le rebrancher.',
   78: 'Services',
@@ -956,4 +955,9 @@ export default {
   1104: 'Vérification des signatures du paquet',
   1105: 'Activée pour les paquets de services',
   1106: 'Activée pour les mises à jour de StartOS',
+  1107: 'Chaque fichier doit avoir sa propre destination de téléversement.',
+  1108: 'Format de fichier non valide',
+  1109: 'Réponse du serveur non valide',
+  1110: 'Taille maximale du fichier',
+  1111: 'Voir dans la bibliothèque de services',
 } satisfies i18n

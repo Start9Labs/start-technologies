@@ -82,17 +82,6 @@ export type ActivityDeleteParamsInput = z.input<
 >
 export type ActivityEntry = z.output<typeof schemas.ActivityEntry>
 export type ActivityListParamsInput = z.input<typeof schemas.ActivityListParams>
-
-/**
- * A published port that will be removed because the device it forwards to can
- * no longer be reached at its current address — its security profile is changing
- * (ethernet-port or WiFi-password reassignment) or its WiFi password is being
- * deleted (disconnecting it) — so its DNAT rule, bound to the device's old
- * subnet, would otherwise break. Surfaced to the UI to confirm the deletion.
- */
-export type AffectedPublishedPort = z.output<
-  typeof schemas.AffectedPublishedPort
->
 export type AnyVerifyingKeyInput = z.input<typeof schemas.AnyVerifyingKey>
 export type ApChannel = z.output<typeof schemas.ApChannel>
 
@@ -100,6 +89,10 @@ export type ApChannel = z.output<typeof schemas.ApChannel>
  * One automatic port use for the published-ports UI.
  */
 export type AutomaticPortUse = z.output<typeof schemas.AutomaticPortUse>
+export type BackupCreateParamsInput = z.input<typeof schemas.BackupCreateParams>
+export type BackupRestoreParamsInput = z.input<
+  typeof schemas.BackupRestoreParams
+>
 export type BlackoutSetResult = z.output<typeof schemas.BlackoutSetResult>
 export type BlackoutWindow = z.output<typeof schemas.BlackoutWindow>
 export type BlackoutWindowInput = z.input<typeof schemas.BlackoutWindow>
@@ -109,6 +102,18 @@ export type DataUsagePoint = z.output<typeof schemas.DataUsagePoint>
 export type DdnsProvider = z.output<typeof schemas.DdnsProvider>
 export type DdnsProviderInput = z.input<typeof schemas.DdnsProvider>
 export type DeleteArgsInput = z.input<typeof schemas.DeleteArgs>
+
+/**
+ * A published port deleted with the profile it forwards into.
+ */
+export type DeletedPublishedPort = z.output<typeof schemas.DeletedPublishedPort>
+export type DeletedReservation = z.output<typeof schemas.DeletedReservation>
+
+/**
+ * A device that keeps a reservation or published port for the profile it is
+ * leaving. They apply again when it returns.
+ */
+export type DeviceLeavingProfile = z.output<typeof schemas.DeviceLeavingProfile>
 export type DeviceMacReqInput = z.input<typeof schemas.DeviceMacReq>
 export type DeviceStatus = z.output<typeof schemas.DeviceStatus>
 export type DeviceUpdateReqInput = z.input<typeof schemas.DeviceUpdateReq>
@@ -148,6 +153,7 @@ export type Guid = z.output<typeof schemas.Guid>
 export type HasUnenrolledKeys = z.output<typeof schemas.HasUnenrolledKeys>
 export type InjectedDnsRecord = z.output<typeof schemas.InjectedDnsRecord>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
+export type Ipv4Reservation = z.output<typeof schemas.Ipv4Reservation>
 export type LanIpv4Response = z.output<typeof schemas.LanIpv4Response>
 export type LanIpv4SetRequestInput = z.input<typeof schemas.LanIpv4SetRequest>
 export type LanIpv6Response = z.output<typeof schemas.LanIpv6Response>
@@ -262,12 +268,9 @@ export type DirEntry = z.output<typeof schemas.DirEntry>
 export type EditArgsInput = z.input<typeof schemas.EditArgs>
 
 /**
- * `ethernet.set` request: the desired port layout plus a confirmation flag.
- * Reassigning a port to a different profile moves its devices to a new subnet,
- * which breaks any published ports forwarding to them. When the flag is false
- * and such ports exist, `set` applies nothing and returns them in
- * `EthernetSetResult` for a confirmation dialog; with the flag true it deletes
- * those published ports as part of the reassignment.
+ * `ethernet.set` request: the desired port layout. With `preview`, nothing is
+ * applied and the result lists the devices that keep settings for the profile
+ * a reassigned port leaves.
  */
 export type EthernetSetRequestInput = z.input<typeof schemas.EthernetSetRequest>
 export type EthernetSetResult = z.output<typeof schemas.EthernetSetResult>
@@ -277,6 +280,18 @@ export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 export type LogsResponse = z.output<typeof schemas.LogsResponse>
 export type OutboundVpn = z.output<typeof schemas.OutboundVpn>
 export type PeerAddArgsInput = z.input<typeof schemas.PeerAddArgs>
+
+/**
+ * `profiles.delete` request. With `preview`, nothing is deleted.
+ */
+export type ProfileDeleteRequestInput = z.input<
+  typeof schemas.ProfileDeleteRequest
+>
+
+/**
+ * The reservations and published ports deleted with the profile.
+ */
+export type ProfileDeleteResult = z.output<typeof schemas.ProfileDeleteResult>
 export type ProfileSetRequestInput = z.input<typeof schemas.ProfileSetRequest>
 export type PublishedPort = z.output<typeof schemas.PublishedPort>
 export type PublishedPortInputInput = z.input<typeof schemas.PublishedPortInput>
@@ -307,13 +322,9 @@ export type WanMacSetRequestInput = z.input<typeof schemas.WanMacSetRequest>
 export type WanPortCollision = z.output<typeof schemas.WanPortCollision>
 
 /**
- * `wifi.set` request: the desired WiFi config plus a confirmation flag.
- * When a profile loses its last WiFi password its devices can no longer reach
- * that subnet — disconnected if the password was removed, or moved to another
- * profile if it was reassigned — which breaks any published ports forwarding to
- * them. When the flag is false and such ports exist, `set` applies nothing and
- * returns them in `WifiSetResult` for a confirmation dialog; with the flag true
- * it deletes those published ports as part of the change.
+ * `wifi.set` request: the desired WiFi config. With `preview`, nothing is
+ * applied and the result lists the Wi-Fi devices that keep settings for a
+ * profile losing its last password.
  */
 export type WifiSetRequestInput = z.input<typeof schemas.WifiSetRequest>
 export type WifiSetResult = z.output<typeof schemas.WifiSetResult>
