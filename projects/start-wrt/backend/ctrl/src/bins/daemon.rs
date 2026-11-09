@@ -239,6 +239,7 @@ async fn inner_main() -> Result<(), Error> {
     } else {
         // Normal mode: restore WiFi + manage captive portal state
 
+        crate::boot::record_start(crate::update::update_pending());
         // Record the outcome of a pending OTA update (if any) in the Activity
         // log now that the new firmware is up.
         crate::update::check_pending_update_marker();
@@ -387,6 +388,7 @@ async fn inner_main() -> Result<(), Error> {
 
     if !setup_mode {
         tokio::spawn(crate::auth::reap_idle_keys(ctx.clone()));
+        tokio::spawn(crate::ssh_sessions::run());
     }
     let rpc_ctx = ctx.clone();
     let handler = Server::new(move || ready(Ok(rpc_ctx.clone())), main_api())
@@ -510,9 +512,15 @@ async fn inner_main() -> Result<(), Error> {
         tokio::signal::unix::signal(SignalKind::terminate()).with_kind(ErrorKind::Filesystem)?;
     let mut sigint =
         tokio::signal::unix::signal(SignalKind::interrupt()).with_kind(ErrorKind::Filesystem)?;
+    if !setup_mode {
+        crate::boot::record_running();
+    }
     tokio::select! {
         _ = sigterm.recv() => tracing::info!("received SIGTERM, shutting down"),
         _ = sigint.recv() => tracing::info!("received SIGINT, shutting down"),
+    }
+    if !setup_mode {
+        crate::boot::record_stop();
     }
     server.shutdown().await;
 

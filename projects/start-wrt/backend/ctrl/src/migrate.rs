@@ -97,6 +97,38 @@ impl Migration {
             Migration::BindLuciToLoopback => bind_luci_to_loopback(root).await,
         }
     }
+
+    /// Completes "Updated settings to …".
+    fn purpose(self) -> &'static str {
+        match self {
+            Migration::RemoveEtcNftablesRules => {
+                "remove firewall rule files left by earlier versions"
+            }
+            Migration::StripUnreferencedWanZoneVpns => {
+                "take unused VPN connections out of the WAN firewall zone"
+            }
+            Migration::PppoeWanIpv6 => "stop PPPoE connections from running a second IPv6 client",
+            Migration::StoreLanAccessMode => "store each profile's LAN Access setting",
+            Migration::ExpandLogRetention => "keep more system log history",
+            Migration::StoreLogsUnderVar => "move the system and activity logs into /var",
+            Migration::RemoveSessionsJson => "remove sign-in sessions saved by earlier versions",
+            Migration::ForceDhcpPools => {
+                "hand out addresses without first checking for another DHCP server"
+            }
+            Migration::RemoveServerCert => {
+                "remove the single HTTPS certificate earlier versions used"
+            }
+            Migration::EnableFlowOffloading => "speed up forwarding of established connections",
+            Migration::ScopeReservedNames => {
+                "serve each reserved device's name only within its own profile"
+            }
+            Migration::ReissueRootCa => "reissue the Root CA in a form iOS can install",
+            Migration::NameProfileFirewallSections => {
+                "name each profile's generated firewall sections"
+            }
+            Migration::BindLuciToLoopback => "keep LuCI's HTTP listener on loopback",
+        }
+    }
 }
 
 /// Applies every migration the configuration under the filesystem root has
@@ -104,26 +136,87 @@ impl Migration {
 ///
 /// Without a record, a configuration that StartWRT has already run on starts
 /// from the first migration and a fresh one is recorded as current. A failed
-/// migration stops the run and stays pending for the next boot.
+/// migration stops the run and stays pending for the next boot. A run that
+/// applies or fails a migration records it in the activity log.
 pub async fn run(root: &Path) -> Result<(), Error> {
+    let mut progress = Progress::default();
+    let result = apply_pending(root, &mut progress).await;
+    if let Some(summary) = progress.summary(result.is_ok()) {
+        let error = result.as_ref().err().map(|e| e.to_string());
+        crate::activity::log(
+            "system",
+            "migrate",
+            result.is_ok(),
+            &summary,
+            error.as_deref(),
+        );
+    }
+    result.map_err(|e| match progress.failed {
+        Some(migration) => Error::new(
+            eyre!("migration {migration:?} failed: {e}"),
+            ErrorKind::Filesystem,
+        ),
+        None => e,
+    })
+}
+
+#[derive(Default)]
+struct Progress {
+    applied: Vec<Migration>,
+    failed: Option<Migration>,
+}
+
+impl Progress {
+    fn summary(&self, succeeded: bool) -> Option<String> {
+        let version = env!("CARGO_PKG_VERSION");
+        let updated = purposes(&self.applied);
+        match (succeeded, self.applied.is_empty(), self.failed) {
+            (true, true, _) => None,
+            (true, false, _) => Some(format!("Updated settings for v{version} to {updated}")),
+            (false, true, Some(failed)) => Some(format!(
+                "Couldn't update settings for v{version} to {}",
+                failed.purpose()
+            )),
+            (false, true, None) => Some(format!("Couldn't update settings for v{version}")),
+            (false, false, Some(failed)) => Some(format!(
+                "Updated settings for v{version} to {updated}, but couldn't {}",
+                failed.purpose()
+            )),
+            (false, false, None) => Some(format!(
+                "Updated settings for v{version} to {updated}, but couldn't finish"
+            )),
+        }
+    }
+}
+
+fn purposes(migrations: &[Migration]) -> String {
+    let purposes: Vec<_> = migrations.iter().map(|m| m.purpose()).collect();
+    match purposes.as_slice() {
+        [] => String::new(),
+        [one] => one.to_string(),
+        [first, second] => format!("{first} and {second}"),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
+    }
+}
+
+async fn apply_pending(root: &Path, progress: &mut Progress) -> Result<(), Error> {
     let record = root.join(RECORD);
-    let mut applied = match read_record(&record).await? {
-        Some(applied) => applied,
+    let mut done = match read_record(&record).await? {
+        Some(done) => done,
         None if has_run_startwrt(root).await => 0,
         None => {
             write_record(&record, MIGRATIONS.len()).await?;
             return Ok(());
         }
     };
-    while let Some(migration) = MIGRATIONS.get(applied) {
-        migration.apply(root).await.map_err(|e| {
-            Error::new(
-                eyre!("migration {migration:?} failed: {e}"),
-                ErrorKind::Filesystem,
-            )
-        })?;
-        applied += 1;
-        write_record(&record, applied).await?;
+    while let Some(&migration) = MIGRATIONS.get(done) {
+        if let Err(e) = migration.apply(root).await {
+            progress.failed = Some(migration);
+            return Err(e);
+        }
+        done += 1;
+        write_record(&record, done).await?;
+        progress.applied.push(migration);
     }
     Ok(())
 }
@@ -497,6 +590,66 @@ async fn move_file(from: &Path, to: &Path, collision: Collision) -> Result<(), E
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migration_outcomes_say_what_changed() {
+        let v = env!("CARGO_PKG_VERSION");
+        let progress = |applied: &[Migration], failed| Progress {
+            applied: applied.to_vec(),
+            failed,
+        };
+        let dhcp = Migration::ForceDhcpPools;
+        let cert = Migration::RemoveServerCert;
+        let offload = Migration::EnableFlowOffloading;
+        assert_eq!(progress(&[], None).summary(true), None);
+        assert_eq!(
+            progress(&[cert], None).summary(true),
+            Some(format!(
+                "Updated settings for v{v} to remove the single HTTPS certificate earlier versions used"
+            ))
+        );
+        assert_eq!(
+            progress(&[dhcp, cert, offload], None).summary(true),
+            Some(format!(
+                "Updated settings for v{v} to hand out addresses without first checking for another DHCP server, remove the single HTTPS certificate earlier versions used, and speed up forwarding of established connections"
+            ))
+        );
+        assert_eq!(
+            progress(
+                &[
+                    Migration::NameProfileFirewallSections,
+                    Migration::BindLuciToLoopback,
+                ],
+                None,
+            )
+            .summary(true),
+            Some(format!(
+                "Updated settings for v{v} to name each profile's generated firewall sections and keep LuCI's HTTP listener on loopback"
+            ))
+        );
+        assert_eq!(
+            progress(&[], Some(cert)).summary(false),
+            Some(format!(
+                "Couldn't update settings for v{v} to remove the single HTTPS certificate earlier versions used"
+            ))
+        );
+        assert_eq!(
+            progress(&[], None).summary(false),
+            Some(format!("Couldn't update settings for v{v}"))
+        );
+        assert_eq!(
+            progress(&[cert, offload], Some(Migration::ScopeReservedNames)).summary(false),
+            Some(format!(
+                "Updated settings for v{v} to remove the single HTTPS certificate earlier versions used and speed up forwarding of established connections, but couldn't serve each reserved device's name only within its own profile"
+            ))
+        );
+        assert_eq!(
+            progress(&[cert], None).summary(false),
+            Some(format!(
+                "Updated settings for v{v} to remove the single HTTPS certificate earlier versions used, but couldn't finish"
+            ))
+        );
+    }
 
     const SHIPPED_SYSTEM: &str = "\
 config system
