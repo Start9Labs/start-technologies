@@ -27,6 +27,7 @@ import {
 import {
   combineLatest,
   filter,
+  firstValueFrom,
   map,
   of,
   shareReplay,
@@ -55,6 +56,9 @@ import { MarketplaceReleaseNotesComponent } from './release-notes.component'
           <div tuiSubtitle>{{ 'Requires' | i18n }}: {{ targetRange() }}</div>
         </div>
       </div>
+      @if (flavors$ | async; as flavors) {
+        <marketplace-flavors [pkgs]="flavors" />
+      }
     } @else if (pkg$ | async; as pkg) {
       <header tuiHeader>
         <span tuiAvatar [round]="false" [tuiSkeleton]="icon.loading()">
@@ -63,6 +67,14 @@ import { MarketplaceReleaseNotesComponent } from './release-notes.component'
         <span tuiTitle tuiFade>{{ pkg.title }}</span>
         <span tuiAccessories><ng-content /></span>
       </header>
+      @if (flavorFallback) {
+        <div tuiNotification appearance="info">
+          <div tuiTitle>
+            {{ 'This alternative implementation meets the requirement' | i18n }}
+            <div tuiSubtitle>{{ 'Requires' | i18n }}: {{ targetRange() }}</div>
+          </div>
+        </div>
+      }
       <ng-container
         *ngTemplateOutlet="controls(); context: { $implicit: pkg }"
       />
@@ -153,6 +165,9 @@ export class MarketplacePreviewComponent {
 
   readonly noMatch = signal(false)
 
+  readonly flavorFallback =
+    !!this.router.lastSuccessfulNavigation()?.extras.state?.['flavorFallback']
+
   readonly pkg$ = combineLatest([
     toObservable(this.selectedVersion),
     this.flavor$,
@@ -174,7 +189,7 @@ export class MarketplacePreviewComponent {
           if (candidate) {
             this.selectedVersion.set(candidate)
           } else {
-            this.noMatch.set(true)
+            this.selectSatisfyingFlavor(flv, range)
           }
         }),
         filter(pkg => {
@@ -197,6 +212,29 @@ export class MarketplacePreviewComponent {
     return pkg?.version === version
       ? of(pkg)
       : this.marketplaceService.getPackage$(this.pkgId(), version, flavor)
+  }
+
+  private async selectSatisfyingFlavor(current: string | null, range: string) {
+    const { packages } = await firstValueFrom(
+      this.marketplaceService.currentRegistry$,
+    )
+    const match = packages.find(
+      p =>
+        p.id === this.pkgId() &&
+        p.flavor !== current &&
+        this.satisfiesWithAliases(p, range),
+    )
+
+    if (match) {
+      this.router.navigate([], {
+        queryParams: { flavor: match.flavor },
+        queryParamsHandling: 'merge',
+        replaceUrl: true,
+        state: { flavorFallback: true },
+      })
+    } else {
+      this.noMatch.set(true)
+    }
   }
 
   private satisfiesWithAliases(pkg: MarketplacePkg, range: string): boolean {
