@@ -162,7 +162,8 @@ pub struct PortControl {
     /// Requesting IP → its neighbor entry and whether that device holds the
     /// permission (None = no neighbor entry).
     client_cache: Mutex<HashMap<Ipv4Addr, (Instant, Option<(Client, bool)>)>>,
-    /// Each port range expires independently after half an hour without a request.
+    /// Uppercase MAC → port ranges it asked to open without the permission,
+    /// each range stamped on its own.
     requests: Mutex<Recent<String, Recent<(u16, u16), (), MAX_REQUESTED_RANGES>>>,
     sni: Arc<SniDemux>,
 }
@@ -297,7 +298,11 @@ impl PortControl {
 
     /// Remembers ports a device lacking the permission asked to open.
     fn note_request(&self, mac: String, range: (u16, u16), now: Instant) {
-        self.requests.lock().unwrap().touch(mac, now).touch(range, now);
+        self.requests
+            .lock()
+            .unwrap()
+            .touch(mac, now)
+            .touch(range, now);
     }
 
     /// Ports each device recently asked to open while lacking the permission,

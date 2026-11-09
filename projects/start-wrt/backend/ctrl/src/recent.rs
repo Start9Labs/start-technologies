@@ -1,15 +1,15 @@
-//! Sources a permission gate recently refused, for the device page to report.
+//! What a permission gate recently refused, for the device page to report.
 
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::time::{Duration, Instant};
 
-/// How long a refused source counts as asking.
+/// How long an entry stays recent.
 pub(crate) const REQUEST_MEMORY: Duration = Duration::from_secs(30 * 60);
-/// Sources remembered at once.
+/// Entries remembered at once unless a capacity is given.
 pub(crate) const MAX_SOURCES: usize = 256;
 
-/// Each source's latest refusal, stamped when it last arrived.
+/// Entries stamped when they last arrived.
 pub(crate) struct Recent<K, V, const CAPACITY: usize = MAX_SOURCES>(HashMap<K, (V, Instant)>);
 
 impl<K, V, const CAPACITY: usize> Default for Recent<K, V, CAPACITY> {
@@ -19,7 +19,7 @@ impl<K, V, const CAPACITY: usize> Default for Recent<K, V, CAPACITY> {
 }
 
 impl<K: Eq + Hash + Clone, V: Default, const CAPACITY: usize> Recent<K, V, CAPACITY> {
-    /// The source's entry, stamped `now`. Past the cap, the stalest source is
+    /// The key's entry, stamped `now`. Past the capacity, the stalest entry is
     /// forgotten.
     pub(crate) fn touch(&mut self, key: K, now: Instant) -> &mut V {
         if !self.0.contains_key(&key) && self.0.len() >= CAPACITY {
