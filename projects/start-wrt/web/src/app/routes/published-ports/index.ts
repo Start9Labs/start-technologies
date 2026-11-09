@@ -162,7 +162,7 @@ export default class PublishedPorts {
         },
       )
       .subscribe(async result => {
-        const { port: value, reserveIpv4 } = result
+        const { port: value } = result
 
         // An enabled port whose device routes through a VPN stays exposed on the
         // public WAN IP — confirm before saving (on both create and edit).
@@ -180,12 +180,6 @@ export default class PublishedPorts {
           ) {
             return
           }
-        }
-
-        // Reserve the device's IPv4 if needed (IPv6 cannot be reserved — the
-        // device chooses its own address via SLAAC)
-        if (reserveIpv4) {
-          this.service.reserveDeviceIpv4(value.deviceMac)
         }
 
         // Update/enrich the port
