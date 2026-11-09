@@ -161,6 +161,47 @@ test('equal-metadata source invalidation remounts consumers, shared peers and de
   }
 })
 
+test('a first fresh optional dependency does not replay an older catalog invalidation', async () => {
+  const r = runtime()
+  let original: ReturnType<typeof container> | undefined
+  let attempted = false
+  const reconciler = Daemons.dynamic<Manifest>(
+    r.effects,
+    async ({ effects }) => {
+      await getSharedVolumes(effects).const()
+      const current = container(effects, 'late')
+      if (!original) {
+        original = current
+        jest
+          .spyOn(current, 'dependsOnSharedVolumes', 'get')
+          .mockImplementation(() => attempted)
+      }
+      return Daemons.of<Manifest>({ effects }).addDaemon('late', {
+        subcontainer: current,
+        exec: { command: ['consume'] },
+        ready,
+        requires: [],
+      })
+    },
+  )
+  const built = await reconciler.build()
+  try {
+    mockLifecycle.length = 0
+    await r.sourceChanged()
+    expect(mockLifecycle).toEqual([])
+    attempted = true
+    reconciler.scheduleRerun()
+    await settle()
+    expect(mockLifecycle).toEqual([])
+    await r.sourceChanged()
+    expect(mockLifecycle).toContain('stop:late')
+    expect(mockLifecycle).toContain('start:late')
+  } finally {
+    await built.term()
+    r.close()
+  }
+})
+
 test('a composed reader cannot hide source invalidation behind equal mapped metadata', async () => {
   const r = runtime()
   const reconciler = Daemons.dynamic<Manifest>(

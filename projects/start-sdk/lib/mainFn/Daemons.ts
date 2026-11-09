@@ -1118,6 +1118,7 @@ export class DaemonsReconciler<M extends T.SDKManifest>
         current.sharedVolumesRevision !== sharedVolumesRevision
       )
         toStop.add(id)
+      else current.sharedVolumesRevision = sharedVolumesRevision
     }
 
     // Shared containers restart as a unit.
