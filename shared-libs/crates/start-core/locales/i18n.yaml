@@ -5196,6 +5196,13 @@ help.arg.dns-mode:
   fr_FR: "Mode DNS pour le sous-réseau : default, device ou custom"
   pl_PL: "Tryb DNS dla podsieci: default, device lub custom"
 
+help.arg.dns-preserve-source:
+  en_US: "Relay lookups from the asking device's address when the DNS server is a device on the subnet"
+  de_DE: "Anfragen mit der Adresse des anfragenden Geräts weiterleiten, wenn der DNS-Server ein Gerät im Subnetz ist"
+  es_ES: "Reenviar las consultas con la dirección del dispositivo que pregunta cuando el servidor DNS es un dispositivo de la subred"
+  fr_FR: "Relayer les requêtes avec l'adresse de l'appareil demandeur lorsque le serveur DNS est un appareil du sous-réseau"
+  pl_PL: "Przekazuj zapytania z adresem pytającego urządzenia, gdy serwer DNS jest urządzeniem w podsieci"
+
 help.arg.dns-server:
   en_US: "Upstream DNS server (IP or IP:port); repeatable, up to 3 (custom mode)"
   de_DE: "Upstream-DNS-Server (IP oder IP:Port); wiederholbar, bis zu 3 (Modus „custom“)"

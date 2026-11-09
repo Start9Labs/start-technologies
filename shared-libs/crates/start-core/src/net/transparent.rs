@@ -1,11 +1,11 @@
-//! Source-preserving transparent egress for the SNI demux.
+//! Source-preserving transparent egress for the SNI demux and the tunnel DNS relay.
 //!
 //! Upstream sockets bind the client address. Policy routing returns backend
 //! replies to the local transparent socket without terminating TLS.
 
-use std::net::SocketAddr;
+use std::net::{SocketAddr, SocketAddrV4};
 
-use tokio::net::{TcpSocket, TcpStream};
+use tokio::net::{TcpSocket, TcpStream, UdpSocket};
 use tokio::process::Command;
 
 #[cfg(target_os = "linux")]
@@ -135,6 +135,63 @@ pub async fn transparent_connect(
     sock.connect(target).await
 }
 
+/// Opens a UDP socket bound to the client source address and connected to the target.
+/// Replies reach it once [`ensure_udp_divert_infra`] has run.
+#[cfg(target_os = "linux")]
+pub fn transparent_udp(client: SocketAddrV4, target: SocketAddrV4) -> std::io::Result<UdpSocket> {
+    use socket2::{Domain, Protocol, Socket, Type};
+
+    let sock = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+    // IP_TRANSPARENT must precede bind.
+    sock.set_ip_transparent_v4(true)?;
+    sock.set_nonblocking(true)?;
+    sock.bind(&SocketAddr::V4(client).into())?;
+    sock.connect(&SocketAddr::V4(target).into())?;
+    UdpSocket::from_std(sock.into())
+}
+
+/// Unsupported non-Linux implementation for cross-platform builds.
+#[cfg(not(target_os = "linux"))]
+pub fn transparent_udp(_client: SocketAddrV4, _target: SocketAddrV4) -> std::io::Result<UdpSocket> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "IP_TRANSPARENT transparent egress is Linux-only",
+    ))
+}
+
+/// Nftables comment identifying the IPv4 UDP reply-marking rule.
+const UDP_DIVERT_COMMENT: &str = "udp-divert";
+
+fn udp_divert_mark_rule() -> String {
+    format!(
+        "add rule ip startos mangle_prerouting meta l4proto udp socket transparent 1 meta mark set {DIVERT_MARK:#010x} comment \"{UDP_DIVERT_COMMENT}\"\n"
+    )
+}
+
+/// Reconciles [`ensure_divert_infra`] plus the IPv4 UDP marking rule.
+/// Returns whether any missing rule was restored.
+pub async fn ensure_udp_divert_infra() -> Result<bool, Error> {
+    let mut repaired = ensure_divert_infra().await?;
+    if !divert_config().manage_nft {
+        return Ok(repaired);
+    }
+    let _guard = DIVERT_ASSERT.lock().await;
+    let chain = Command::new("nft")
+        .args(["list", "chain", "ip", "startos", "mangle_prerouting"])
+        .invoke(ErrorKind::Network)
+        .await
+        .unwrap_or_default();
+    if !String::from_utf8_lossy(&chain).contains(UDP_DIVERT_COMMENT) {
+        Command::new("nft")
+            .args(["-f", "-"])
+            .input(Some(&mut std::io::Cursor::new(udp_divert_mark_rule())))
+            .invoke(ErrorKind::Network)
+            .await?;
+        repaired = true;
+    }
+    Ok(repaired)
+}
+
 /// Whether installed diversion covers IPv6. `None` until installed.
 static DIVERT_INFRA_IPV6: tokio::sync::Mutex<Option<bool>> = tokio::sync::Mutex::const_new(None);
 
@@ -237,6 +294,14 @@ mod tests {
         assert_eq!(cfg.rule_priority, 49);
         assert_eq!(fwmark_arg(&cfg), format!("{DIVERT_MARK:#x}"));
         assert!(cfg.manage_nft);
+    }
+
+    #[test]
+    fn udp_divert_rule_marks_transparent_udp_replies() {
+        assert_eq!(
+            udp_divert_mark_rule(),
+            "add rule ip startos mangle_prerouting meta l4proto udp socket transparent 1 meta mark set 0x00540001 comment \"udp-divert\"\n"
+        );
     }
 
     #[test]

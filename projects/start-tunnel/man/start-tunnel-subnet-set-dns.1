@@ -4,7 +4,7 @@
 .SH NAME
 start\-tunnel\-subnet\-set\-dns \- Set subnet DNS
 .SH SYNOPSIS
-\fBstart\-tunnel subnet set\-dns\fR <\fB\-\-mode\fR> [\fB\-\-device\-ip\fR] [\fB\-\-server\fR] [\fB\-h\fR|\fB\-\-help\fR]
+\fBstart\-tunnel subnet set\-dns\fR <\fB\-\-mode\fR> [\fB\-\-device\-ip\fR] [\fB\-\-server\fR] [\fB\-\-preserve\-source\fR] [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Set subnet DNS
 .SH OPTIONS
@@ -29,6 +29,9 @@ WireGuard IP of the device to use as DNS server (device mode)
 .TP
 \fB\-\-server\fR \fI<SERVERS>\fR
 Upstream DNS server (IP or IP:port); repeatable, up to 3 (custom mode)
+.TP
+\fB\-\-preserve\-source\fR
+Relay lookups from the asking device\*(Aqs address when the DNS server is a device on the subnet
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

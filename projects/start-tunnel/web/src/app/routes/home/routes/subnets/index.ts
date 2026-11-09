@@ -175,6 +175,7 @@ export default class Subnets {
           name: info.name,
           hasClients: !!Object.keys(info.clients).length,
           dns: info.dns,
+          dnsPreserveSource: info.dnsPreserveSource,
           clients: info.clients,
           // Device name is data-derived (resolved here); the 'custom'/'default'
           // labels are translated in the template so they react to a live
@@ -200,6 +201,7 @@ export default class Subnets {
           mode: 'default',
           device: null,
           servers: [],
+          preserveSource: false,
           devices: [],
           wanIp: null,
           wanOptions: this.wans(),
@@ -214,6 +216,7 @@ export default class Subnets {
     range,
     name,
     dns,
+    dnsPreserveSource,
     clients,
     wanIp,
     ipv6,
@@ -235,6 +238,7 @@ export default class Subnets {
               ? (devices.find(d => d.ip === dns.ip) ?? null)
               : null,
           servers: dns.type === 'custom' ? dns.servers : [],
+          preserveSource: dnsPreserveSource,
           devices,
           wanIp,
           wanOptions: this.wans(),
@@ -287,6 +291,7 @@ type MappedSubnet = {
   name: string
   hasClients: boolean
   dns: T.Tunnel.DnsConfig
+  dnsPreserveSource: boolean
   clients: T.Tunnel.WgSubnetClients
   dnsDevice: string
   wanIp: string | null

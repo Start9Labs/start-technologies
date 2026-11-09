@@ -115,6 +115,10 @@ pub struct WgSubnetConfig {
     pub clients: WgSubnetClients,
     #[serde(default)]
     pub dns: DnsConfig,
+    /// Relay lookups from the asking device's own address when every DNS
+    /// upstream is a device on this subnet.
+    #[serde(default)]
+    pub dns_preserve_source: bool,
     /// SNAT this subnet's egress to this WAN IP instead of `masquerade`. `None`
     /// keeps the default masquerade; a per-device `wan_ip` overrides this.
     #[serde(default)]
