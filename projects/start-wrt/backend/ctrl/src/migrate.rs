@@ -123,6 +123,9 @@ impl Migration {
                 "serve each reserved device's name only within its own profile"
             }
             Migration::ReissueRootCa => "reissue the Root CA in a form iOS can install",
+            Migration::NameProfileFirewallSections => {
+                "keep firewall rules added in LuCI when a profile is saved"
+            }
         }
     }
 }
