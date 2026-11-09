@@ -637,6 +637,14 @@ On a raw-TCP binding (`protocol: null`), `secure` says whether the protocol is s
 | `{ ssl: false }` | Is secure without TLS from its first byte: it encrypts some other way (SSH, LND's peer protocol, or TLS negotiated after a plaintext opening, like Postgres), or it is safe to expose unencrypted (DNS) | As a plain port, on every address the user enables — LAN and public alike.                                                                                                                                                           |
 | `{ ssl: true }`  | Speaks TLS from its first byte                                                                                                                                                                          | On every address the user enables, as a TLS port. With `addSsl: null`, StartOS passes the TLS through to your container — see [Serving Your Own TLS](#serving-your-own-tls-passthrough).                                             |
 
+## Listening on IPv4 and IPv6
+
+**A daemon behind a binding StartOS does not proxy must listen on IPv6 as well as IPv4.** That is every port without `proxy` — raw TCP and TLS passthrough. StartOS forwards IPv4 connections to the container's IPv4 address and the server's IPv6 addresses, LAN and public, to the container's own IPv6 address, both on the internal port. A daemon bound to `0.0.0.0` refuses every IPv6 connection, so each IPv6 address the user sees for the interface is dead.
+
+Bind the wildcard both families answer on: `::` (or `[::]:<port>`), which accepts IPv4 too unless the daemon sets `IPV6_V6ONLY`, or the daemon's own all-families form — lightningd's empty host, `bind-addr=:9735`. Spellings differ per daemon, and some accept only an IPv4 literal; check its documentation, and where it has a separate IPv6 option, set that as well.
+
+An HTTP-proxied binding and the `addSsl` port of any binding are served by StartOS's own listener, which reaches your container over IPv4, so a `0.0.0.0` listener behind them loses nothing.
+
 ## Authenticating at the Proxy
 
 Gate an HTTP-proxied binding with HTTP authentication by setting `proxy.auth`. The OS reverse proxy validates the `Authorization` header on every incoming request _before_ forwarding it to your container. Requests that fail get `401 Unauthorized` with a `WWW-Authenticate` challenge and never reach your service. You do **not** need to build auth into the service or run a sidecar proxy — the platform enforces it at the edge.
