@@ -39,6 +39,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::EnableFlowOffloading,
     Migration::ScopeReservedNames,
     Migration::ReissueRootCa,
+    Migration::NameProfileFirewallSections,
     Migration::BindLuciToLoopback,
 ];
 
@@ -71,6 +72,8 @@ enum Migration {
     /// Earlier releases issued Root CAs whose authority key identifier lacks a
     /// key ID; iOS refuses to install them.
     ReissueRootCa,
+    /// Earlier releases generated a profile's firewall sections without names.
+    NameProfileFirewallSections,
     /// Earlier images served LuCI's uhttpd on every address.
     BindLuciToLoopback,
 }
@@ -90,6 +93,7 @@ impl Migration {
             Migration::EnableFlowOffloading => enable_flow_offloading(root).await,
             Migration::ScopeReservedNames => scope_reserved_names(root).await,
             Migration::ReissueRootCa => reissue_root_ca(root).await,
+            Migration::NameProfileFirewallSections => name_profile_firewall_sections(root).await,
             Migration::BindLuciToLoopback => bind_luci_to_loopback(root).await,
         }
     }
@@ -359,6 +363,15 @@ async fn pppoe_wan_ipv6(root: &Path) -> Result<(), Error> {
         break;
     }
     if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+async fn name_profile_firewall_sections(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["firewall", "network", "startwrt"]).await?;
+    if crate::profiles::name_profile_firewall_sections(&mut cfgs)? {
         dump_all(uci_root(root), cfgs).await?;
     }
     Ok(())
@@ -905,7 +918,7 @@ config forwarding
 
     #[tokio::test]
     async fn luci_listens_on_loopback_unless_changed() {
-        let dir = router(Some("12\n"), true);
+        let dir = router(Some("13\n"), true);
         write(&dir, "etc/config/uhttpd", LEGACY_UHTTPD);
         run(dir.path()).await.unwrap();
         assert_eq!(record(&dir), current());
@@ -920,7 +933,7 @@ config forwarding
         assert!(uhttpd.contains("option days '397'"), "{uhttpd}");
 
         let custom = LEGACY_UHTTPD.replace("[::]:8080", "[::]:8443");
-        let dir = router(Some("12\n"), true);
+        let dir = router(Some("13\n"), true);
         write(&dir, "etc/config/uhttpd", &custom);
         run(dir.path()).await.unwrap();
         assert_eq!(read(&dir, "etc/config/uhttpd"), custom);
