@@ -20,6 +20,7 @@ import { DataModel } from './patch-db/data-model'
 export class OSService {
   private readonly api = inject(ApiService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
+  private loadSequence = 0
 
   private readonly catalog$ = new BehaviorSubject<{
     versions: T.OsVersionInfoMap
@@ -94,7 +95,9 @@ export class OSService {
     return Object.keys(versions).length > 0
   }
 
+  /** Older in-flight loads cannot replace a later request's catalog. */
   async loadOS(registry?: string): Promise<void> {
+    const sequence = ++this.loadSequence
     const { id } = await getServerInfo(this.patch)
     registry ??= (await firstValueFrom(this.patch.watch$('ui'))).startosRegistry
 
@@ -105,6 +108,7 @@ export class OSService {
       }),
       this.api.rpc.gitInfo({}),
     ])
-    this.catalog$.next({ versions, gitHash: gitHash.trim() })
+    if (sequence === this.loadSequence)
+      this.catalog$.next({ versions, gitHash: gitHash.trim() })
   }
 }
