@@ -224,6 +224,27 @@ describe('FileHelper.merge', () => {
     )
   })
 
+  test.each(['original', 'withPath'])(
+    '%s preserves the file when onRead validation rejects',
+    async location => {
+      const before = '{"A": 123, "secret": "keep"}'
+      const path = seeded(`transform-error-${location}.json`, before)
+      const file = FileHelper.json(
+        location === 'original' ? path : join(dir, 'unused.json'),
+        z.looseObject({ A: z.string().catch('default') }),
+        {
+          onRead: raw => z.looseObject({ A: z.string() }).parse(raw),
+          onWrite: data => data,
+        },
+      )
+      const target = location === 'original' ? file : file.withPath(path)
+
+      await expect(target.merge(effects, {})).rejects.toThrow()
+
+      expect(readFileSync(path, 'utf-8')).toBe(before)
+    },
+  )
+
   test.each([
     ['json', '{"A": "keep",'],
     ['yaml', 'A: [keep'],
