@@ -40,6 +40,7 @@ const host = (
       enabled: true,
       options: {
         preferredExternalPort: 3478,
+        publicOnly: false,
         addSsl: null,
         secure: null,
         proxy: null,
