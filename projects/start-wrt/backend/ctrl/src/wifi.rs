@@ -839,8 +839,8 @@ fn auto_enable_radios_on_first_admin_password(
 /// Turning off a radio a client-mode interface uses would drop that uplink.
 fn check_uplink_radios(cfgs: &Configs, radios: &BTreeMap<String, WifiRadio>) -> Result<(), Error> {
     let uplinks = crate::wwan::uplink_radios(cfgs)?;
-    for (_, iface, _, radio) in find_relevant_with_radios(cfgs, radios)? {
-        if !radio.enabled && uplinks.contains(&iface.device) {
+    for (_, iface, device, radio) in find_relevant_with_radios(cfgs, radios)? {
+        if !radio.enabled && !device.disabled && uplinks.contains(&iface.device) {
             crate::activity::log(
                 "wifi",
                 "updated",
@@ -4190,6 +4190,22 @@ config wifi-iface 'wifinet2'
         check_uplink_radios(&cfgs, &radio(true)).unwrap();
         let err = check_uplink_radios(&cfgs, &radio(false)).unwrap_err();
         assert_eq!(err.kind, ErrorKind::WifiRadioCarriesUplink);
+
+        let wireless = std::fs::read_to_string(dir.path().join("wireless")).unwrap();
+        std::fs::write(
+            dir.path().join("wireless"),
+            wireless.replacen(
+                "\toption channel 'auto'\n",
+                "\toption channel 'auto'\n\toption disabled '1'\n",
+                1,
+            ),
+        )
+        .unwrap();
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path().to_path_buf(), &arena, &["wireless"])
+            .await
+            .unwrap();
+        check_uplink_radios(&cfgs, &radio(false)).unwrap();
     }
 
     #[tokio::test]
@@ -4198,7 +4214,13 @@ config wifi-iface 'wifinet2'
         let ctx = TestContext(dir.path().to_path_buf());
         setup_test_configs(dir.path());
         write_wireless_config_unkeyed(dir.path());
-        let mut wireless = std::fs::read_to_string(dir.path().join("wireless")).unwrap();
+        let mut wireless = std::fs::read_to_string(dir.path().join("wireless"))
+            .unwrap()
+            .replacen(
+                "\toption channel '1'\n\toption disabled '1'\n",
+                "\toption channel '1'\n",
+                1,
+            );
         wireless.push_str(
             "\nconfig wifi-iface 'wwan'\n\toption device 'radio0'\n\toption mode 'sta'\n\toption network 'wwan'\n\toption ssid 'Upstream'\n",
         );

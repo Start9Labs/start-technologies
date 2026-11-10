@@ -1754,9 +1754,9 @@ struct WifiSetResult {
 // (`autoWidths` for "auto"), or when the radio's PHY mode cannot express the
 // width (HT stops at 40 MHz).
 // A call that changes `country` instead rejects any width above 80 MHz.
-// Turning off a radio that an enabled client-mode `wifi-iface` uses, whoever
-// configured it, is rejected with `WifiRadioCarriesUplink` (1027), by a preview
-// too.
+// Turning off a radio that is on and that an enabled client-mode `wifi-iface`
+// uses, whoever configured it, is rejected with `WifiRadioCarriesUplink` (1027),
+// by a preview too.
 ```
 
 ### `wifi.blackout-get`
