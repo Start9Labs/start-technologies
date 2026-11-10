@@ -7918,13 +7918,6 @@ update.signers.not-found:
   fr_FR: "Signataire de confiance des mises à jour du système introuvable"
   pl_PL: "Nie znaleziono zaufanego sygnatariusza aktualizacji systemu"
 
-trusted-keys.builtin-registry:
-  en_US: "The Start9 and Community registries cannot be removed"
-  de_DE: "Die Start9- und Community-Registrys können nicht entfernt werden"
-  es_ES: "Los registros de Start9 y de la comunidad no se pueden eliminar"
-  fr_FR: "Les registres Start9 et Communauté ne peuvent pas être supprimés"
-  pl_PL: "Nie można usunąć rejestrów Start9 i Community"
-
 trusted-keys.invalid:
   en_US: "Enter a name and at least one Ed25519 public key"
   de_DE: "Geben Sie einen Namen und mindestens einen öffentlichen Ed25519-Schlüssel ein"
