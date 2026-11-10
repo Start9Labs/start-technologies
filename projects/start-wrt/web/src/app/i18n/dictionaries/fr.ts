@@ -615,7 +615,6 @@ export default {
   651: 'Supprimer la liaison ?',
   652: 'Le routeur quittera ce réseau. Son accès à Internet dépendra alors du seul port WAN.',
   653: 'Connexion au réseau',
-  654: 'Réseau rejoint',
   655: 'Suppression de la liaison',
   656: 'Liaison supprimée',
   657: 'Rejoindre le réseau',

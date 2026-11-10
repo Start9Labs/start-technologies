@@ -615,7 +615,6 @@ export default {
   651: '¿Quitar enlace?',
   652: 'El router dejará esta red. Su acceso a Internet dependerá entonces solo del puerto WAN.',
   653: 'Uniéndose a la red',
-  654: 'Unido a la red',
   655: 'Quitando enlace',
   656: 'Enlace quitado',
   657: 'Unirse a la red',

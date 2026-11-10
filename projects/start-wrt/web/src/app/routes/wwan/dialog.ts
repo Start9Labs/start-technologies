@@ -81,6 +81,7 @@ export interface WwanJoinData {
           <input
             tuiInput
             type="password"
+            autocomplete="new-password"
             formControlName="password"
             [tuiAutoFocus]="!!network?.ssid && !isMobile"
           />

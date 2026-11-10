@@ -26,11 +26,7 @@ export class WwanService extends FormService<WwanResponse> {
         await this.api.wwanConnect(params)
         await this.refreshAndWait()
       },
-      {
-        loading: this.i18n.transform('Joining network'),
-        success: this.i18n.transform('Joined network'),
-        restart: true,
-      },
+      { loading: this.i18n.transform('Joining network'), restart: true },
     )
   }
 

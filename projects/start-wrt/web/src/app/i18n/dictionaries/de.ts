@@ -615,7 +615,6 @@ export default {
   651: 'Uplink entfernen?',
   652: 'Der Router verlässt dieses Netzwerk. Sein Internetzugang hängt dann allein vom WAN-Anschluss ab.',
   653: 'Netzwerk wird beigetreten',
-  654: 'Netzwerk beigetreten',
   655: 'Uplink wird entfernt',
   656: 'Uplink entfernt',
   657: 'Netzwerk beitreten',

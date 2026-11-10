@@ -615,7 +615,6 @@ export default {
   651: 'Usunąć łącze?',
   652: 'Router opuści tę sieć. Jego dostęp do Internetu będzie wtedy zależał wyłącznie od portu WAN.',
   653: 'Dołączanie do sieci',
-  654: 'Dołączono do sieci',
   655: 'Usuwanie łącza',
   656: 'Łącze usunięte',
   657: 'Dołącz do sieci',

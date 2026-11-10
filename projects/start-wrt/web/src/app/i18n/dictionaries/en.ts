@@ -620,7 +620,6 @@ export const ENGLISH: Record<string, number> = {
   'Remove uplink?': 651,
   'The router will leave this network. Its Internet access then depends on the WAN port alone.': 652,
   'Joining network': 653,
-  'Joined network': 654,
   'Removing uplink': 655,
   'Uplink removed': 656,
   'Join network': 657,
