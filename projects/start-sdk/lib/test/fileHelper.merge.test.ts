@@ -223,4 +223,23 @@ describe('FileHelper.merge', () => {
       'automation: !include automations.yaml',
     )
   })
+
+  test.each([
+    ['json', '{"A": "keep",'],
+    ['yaml', 'A: [keep'],
+    ['toml', 'A = "keep'],
+  ])(
+    '%s rebuilds a file it cannot parse from the defaults',
+    async (kind, before) => {
+      const path = seeded(`unparseable.${kind}`, before)
+      const file = (FileHelper as any)[kind](
+        path,
+        z.looseObject({ A: z.string().catch('default') }),
+      )
+
+      await file.merge(effects, {})
+
+      expect(await file.read().once()).toEqual({ A: 'default' })
+    },
+  )
 })

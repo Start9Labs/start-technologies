@@ -444,7 +444,16 @@ class FileHelperImpl<A> implements FileHelper<A> {
     return this.modify(
       effects,
       async raw => {
-        let fileData: any = raw === null ? null : this.readData(raw)
+        let fileData: any = null
+        if (raw !== null) {
+          try {
+            fileData = this.readData(raw)
+          } catch (e) {
+            console.warn(
+              `${this.path} could not be parsed; rebuilding it from the schema defaults: ${asError(e).message}`,
+            )
+          }
+        }
         try {
           fileData = this.validate(fileData)
         } catch (_) {}
