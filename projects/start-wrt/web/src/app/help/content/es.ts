@@ -407,7 +407,7 @@ Habilita DNS over HTTPS (DoH) para consultas DNS cifradas. Esto mejora la privac
 DDNS asigna tu dirección IP cambiante a un nombre de dominio fijo, permitiéndote acceder a tu red de forma remota sin conocer tu IP actual.
 
 Requiere una cuenta con un proveedor compatible. Introduce las credenciales y el nombre de host de tu proveedor de DDNS.`,
-  '/wwan': `## WAN inalámbrica
+  '/wan/wireless-wan': `## WAN – WAN inalámbrica
 
 El router se une a otra red Wi-Fi y la usa para acceder a Internet. Los dispositivos de su red llegan a Internet a través de ella igual que por el puerto WAN: los perfiles, los puertos publicados y el acceso remoto la tratan como la WAN.
 
@@ -424,7 +424,7 @@ El cambio sigue al enlace: una red superior que sigue conectada pero deja de lle
 
 ### La Wi-Fi propia del router
 
-La banda que lleva el enlace sigue el canal de la red superior, y su Wi-Fi está apagada mientras el router no esté conectado a esa red, también tras una contraseña incorrecta. Únase desde un dispositivo con cable o desde la otra banda. Una franja de apagado de Wi-Fi que apaga esa banda también desconecta el enlace.`,
+La banda que lleva el enlace sigue el canal de la red superior, y su Wi-Fi está apagada mientras el router no esté conectado a esa red. Únase desde un dispositivo con cable o desde la otra banda. Si el router no puede unirse a una red que acaba de recibir, o una red al alcance lo rechaza durante dos minutos, deja de intentarlo y la Wi-Fi de esa banda vuelve a encenderse; pulse **Reintentar** o **Cambiar contraseña** para reanudar. Una franja de apagado de Wi-Fi que apaga esa banda también desconecta el enlace.`,
   '/settings/activity': `## Ajustes – Actividad
 
 Consulta los intentos de inicio de sesión recientes y los eventos de seguridad. Vigila la actividad sospechosa y elimina las entradas antiguas según sea necesario.`,

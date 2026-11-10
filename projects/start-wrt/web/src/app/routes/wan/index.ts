@@ -45,6 +45,7 @@ class Wan {
     'DNS',
     'MAC Address',
     'Dynamic DNS',
+    'Wireless WAN',
   ]
 }
 
@@ -72,6 +73,10 @@ export default [
       {
         path: 'dynamic-dns',
         loadComponent: () => import('./routes/ddns'),
+      },
+      {
+        path: 'wireless-wan',
+        loadComponent: () => import('./routes/wireless-wan'),
       },
       {
         path: '**',

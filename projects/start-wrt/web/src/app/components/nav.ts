@@ -14,11 +14,6 @@ const MENU = {
       link: 'wan',
     },
     {
-      name: 'Wireless WAN',
-      icon: '@tui.radio-tower',
-      link: 'wwan',
-    },
-    {
       name: 'Published Ports',
       icon: '@tui.door-open',
       link: 'published-ports',

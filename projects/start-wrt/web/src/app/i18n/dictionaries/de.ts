@@ -629,4 +629,11 @@ export default {
   666: 'Keine Netzwerke gefunden',
   667: 'Das Frequenzband {band} trägt den WLAN-Uplink zu {ssid}. Sein WLAN folgt dem Kanal dieses Netzwerks und ist aus, solange der Uplink getrennt ist. Um dieses Frequenzband auszuschalten, entfernen Sie zuerst den Uplink.',
   668: 'Dieser WLAN-Uplink wurde außerhalb von StartWRT eingerichtet. Das WLAN auf seinem Frequenzband folgt dem Kanal des vorgelagerten Netzwerks und ist aus, solange der Uplink getrennt ist. Um dieses Frequenzband auszuschalten, entfernen Sie zuerst den Uplink in LuCI.',
+  669: 'Gestoppt',
+  670: 'Passwort ändern',
+  671: 'Netzwerk beigetreten',
+  672: '{ssid} hat den Router nicht angenommen, daher versucht der Router nicht mehr, dem Netzwerk beizutreten. Prüfen Sie das Passwort.',
+  673: 'Der Router hat {ssid} nicht gefunden und versucht nicht mehr, dem Netzwerk beizutreten. Prüfen Sie, ob das Netzwerk eingeschaltet und in Reichweite ist.',
+  674: 'Der Uplink zu {ssid} ist ausgeschaltet.',
+  675: 'Der Router versucht weiter, sich zu verbinden. Bis dahin ist sein eigenes WLAN in diesem Frequenzband aus.',
 } satisfies i18n

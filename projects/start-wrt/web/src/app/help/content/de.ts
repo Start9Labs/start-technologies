@@ -407,7 +407,7 @@ Aktivieren Sie DNS over HTTPS (DoH) für verschlüsselte DNS-Abfragen. Dies verb
 DDNS ordnet Ihre wechselnde IP-Adresse einem festen Domänennamen zu, sodass Sie aus der Ferne auf Ihr Netzwerk zugreifen können, ohne Ihre aktuelle IP zu kennen.
 
 Erfordert ein Konto bei einem unterstützten Anbieter. Geben Sie die Zugangsdaten und den Hostnamen Ihres DDNS-Anbieters ein.`,
-  '/wwan': `## Drahtloses WAN
+  '/wan/wireless-wan': `## WAN – Drahtloses WAN
 
 Der Router tritt einem anderen WLAN bei und nutzt es für den Internetzugang. Geräte in Ihrem Netzwerk erreichen das Internet darüber genau wie über den WAN-Anschluss: Profile, veröffentlichte Ports und der Fernzugriff behandeln es als WAN.
 
@@ -424,7 +424,7 @@ Die Umschaltung folgt der Verbindung: Ein Upstream, der verbunden bleibt, aber d
 
 ### Das eigene WLAN des Routers
 
-Das Frequenzband des Uplinks folgt dem Kanal des Upstream-Netzwerks, und sein WLAN ist aus, solange der Router nicht mit diesem Netzwerk verbunden ist, auch nach einem falschen Passwort. Treten Sie von einem kabelgebundenen Gerät oder über das andere Frequenzband bei. Ein WLAN-Sperrzeitraum, der dieses Frequenzband ausschaltet, trennt auch den Uplink.`,
+Das Frequenzband des Uplinks folgt dem Kanal des Upstream-Netzwerks, und sein WLAN ist aus, solange der Router nicht mit diesem Netzwerk verbunden ist. Treten Sie von einem kabelgebundenen Gerät oder über das andere Frequenzband bei. Kann der Router einem gerade eingetragenen Netzwerk nicht beitreten oder weist ihn ein Netzwerk in Reichweite zwei Minuten lang ab, versucht er es nicht mehr, und das WLAN dieses Frequenzbands schaltet sich wieder ein; mit **Wiederholen** oder **Passwort ändern** geht es weiter. Ein WLAN-Sperrzeitraum, der dieses Frequenzband ausschaltet, trennt auch den Uplink.`,
   '/settings/activity': `## Einstellungen – Aktivität
 
 Zeigt aktuelle Anmeldeversuche und Sicherheitsereignisse an. Überwachen Sie verdächtige Aktivitäten und entfernen Sie bei Bedarf alte Einträge.`,

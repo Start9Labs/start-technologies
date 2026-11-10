@@ -407,7 +407,7 @@ Activez le DNS over HTTPS (DoH) pour des requêtes DNS chiffrées. Cela amélior
 Le DDNS associe votre adresse IP changeante à un nom de domaine fixe, vous permettant d’accéder à votre réseau à distance sans connaître votre adresse IP actuelle.
 
 Nécessite un compte chez un fournisseur pris en charge. Saisissez les identifiants et le nom d’hôte de votre fournisseur DDNS.`,
-  '/wwan': `## WAN sans fil
+  '/wan/wireless-wan': `## WAN – WAN sans fil
 
 Le routeur rejoint un autre réseau Wi-Fi et l’utilise pour accéder à Internet. Les appareils de votre réseau atteignent Internet par lui exactement comme par le port WAN : les profils, les ports publiés et l’accès à distance le traitent comme le WAN.
 
@@ -424,7 +424,7 @@ La bascule suit le lien : un réseau amont qui reste connecté mais n’atteint 
 
 ### Le Wi-Fi du routeur
 
-La bande qui porte la liaison suit le canal du réseau amont, et son Wi-Fi est éteint tant que le routeur n’est pas connecté à ce réseau, y compris après un mauvais mot de passe. Rejoignez-le depuis un appareil filaire ou depuis l’autre bande. Une plage de coupure Wi-Fi qui éteint cette bande déconnecte aussi la liaison.`,
+La bande qui porte la liaison suit le canal du réseau amont, et son Wi-Fi est éteint tant que le routeur n’est pas connecté à ce réseau. Rejoignez-le depuis un appareil filaire ou depuis l’autre bande. Si le routeur ne parvient pas à rejoindre un réseau qui vient de lui être indiqué, ou si un réseau à portée le refuse pendant deux minutes, il cesse d’essayer et le Wi-Fi de cette bande se rallume ; choisissez **Réessayer** ou **Changer le mot de passe** pour reprendre. Une plage de coupure Wi-Fi qui éteint cette bande déconnecte aussi la liaison.`,
   '/settings/activity': `## Paramètres – Activité
 
 Consultez les tentatives de connexion récentes et les évènements de sécurité. Surveillez les activités suspectes et supprimez les anciennes entrées selon vos besoins.`,

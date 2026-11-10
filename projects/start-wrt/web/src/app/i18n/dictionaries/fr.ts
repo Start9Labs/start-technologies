@@ -629,4 +629,11 @@ export default {
   666: 'Aucun réseau trouvé',
   667: 'La bande {band} porte la liaison montante Wi-Fi vers {ssid}. Son Wi-Fi suit le canal de ce réseau et est éteint tant que la liaison est déconnectée. Pour éteindre cette bande, supprimez d’abord la liaison.',
   668: 'Cette liaison montante Wi-Fi a été configurée en dehors de StartWRT. Le Wi-Fi de sa bande suit le canal du réseau amont et est éteint tant que la liaison est déconnectée. Pour éteindre cette bande, supprimez d’abord la liaison dans LuCI.',
+  669: 'Arrêtée',
+  670: 'Changer le mot de passe',
+  671: 'Réseau rejoint',
+  672: '{ssid} n’a pas accepté le routeur, qui a donc cessé d’essayer de le rejoindre. Vérifiez le mot de passe.',
+  673: 'Le routeur n’a pas trouvé {ssid} et a cessé d’essayer de le rejoindre. Vérifiez que le réseau est allumé et à portée.',
+  674: 'La liaison vers {ssid} est désactivée.',
+  675: 'Le routeur continue d’essayer de se connecter. D’ici là, son propre Wi-Fi sur cette bande est éteint.',
 } satisfies i18n

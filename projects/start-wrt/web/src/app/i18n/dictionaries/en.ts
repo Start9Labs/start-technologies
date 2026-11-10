@@ -634,4 +634,11 @@ export const ENGLISH: Record<string, number> = {
   'No networks found': 666,
   'The {band} band carries the Wi-Fi uplink to {ssid}. Its Wi-Fi follows that network’s channel and is off while the uplink is disconnected. To turn this band off, remove the uplink first.': 667,
   'This Wi-Fi uplink was set up outside StartWRT. Wi-Fi on its band follows the upstream network’s channel and is off while the uplink is disconnected. To turn that band off, remove the uplink in LuCI first.': 668,
+  'Stopped': 669,
+  'Change password': 670,
+  'Joined network': 671,
+  '{ssid} didn’t accept the router, so the router stopped trying to join it. Check the password.': 672,
+  'The router couldn’t find {ssid}, so it stopped trying to join it. Check that the network is on and in range.': 673,
+  'The uplink to {ssid} is turned off.': 674,
+  'The router keeps trying to connect. Until it does, its own Wi-Fi on this band is off.': 675,
 }

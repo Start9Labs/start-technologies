@@ -41,6 +41,7 @@ export interface WwanJoinData {
   band: string
   /** Absent for a network that hides its name. */
   network?: WwanNetwork
+  priority?: WwanPriority
 }
 
 @Component({
@@ -173,7 +174,7 @@ class WwanJoinDialog {
       '',
       [Validators.required, Validators.minLength(8), Validators.maxLength(63)],
     ],
-    priority: ['backup' as WwanPriority],
+    priority: [this.context.data.priority ?? ('backup' as WwanPriority)],
   })
 
   protected readonly security = toSignal(

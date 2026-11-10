@@ -47,7 +47,6 @@ import network from '@taiga-ui/icons/src/network.svg'
 import pencil from '@taiga-ui/icons/src/pencil.svg'
 import plus from '@taiga-ui/icons/src/plus.svg'
 import qrCode from '@taiga-ui/icons/src/qr-code.svg'
-import radioTower from '@taiga-ui/icons/src/radio-tower.svg'
 import radio from '@taiga-ui/icons/src/radio.svg'
 import refreshCw from '@taiga-ui/icons/src/refresh-cw.svg'
 import repeat from '@taiga-ui/icons/src/repeat.svg'
@@ -117,7 +116,6 @@ export const ICONS = {
   '@tui.plus': plus,
   '@tui.qr-code': qrCode,
   '@tui.radio': radio,
-  '@tui.radio-tower': radioTower,
   '@tui.refresh-cw': refreshCw,
   '@tui.repeat': repeat,
   '@tui.rocket': rocket,

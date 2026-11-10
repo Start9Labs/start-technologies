@@ -629,4 +629,11 @@ export default {
   666: 'No se encontraron redes',
   667: 'La banda {band} lleva el enlace Wi-Fi a {ssid}. Su Wi-Fi sigue el canal de esa red y está apagada mientras el enlace está desconectado. Para apagar esta banda, quite primero el enlace.',
   668: 'Este enlace Wi-Fi se configuró fuera de StartWRT. La Wi-Fi de su banda sigue el canal de la red de origen y está apagada mientras el enlace está desconectado. Para apagar esa banda, quita primero el enlace en LuCI.',
+  669: 'Detenido',
+  670: 'Cambiar contraseña',
+  671: 'Unido a la red',
+  672: '{ssid} no aceptó el router, así que el router dejó de intentar unirse. Revisa la contraseña.',
+  673: 'El router no encontró {ssid}, así que dejó de intentar unirse. Comprueba que la red esté encendida y al alcance.',
+  674: 'El enlace a {ssid} está apagado.',
+  675: 'El router sigue intentando conectarse. Hasta que lo logre, su propia Wi-Fi en esta banda está apagada.',
 } satisfies i18n

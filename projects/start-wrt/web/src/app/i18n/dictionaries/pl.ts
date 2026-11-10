@@ -629,4 +629,11 @@ export default {
   666: 'Nie znaleziono sieci',
   667: 'Pasmo {band} obsługuje łącze Wi-Fi do {ssid}. Jego Wi-Fi korzysta z kanału tamtej sieci i jest wyłączone, gdy łącze jest rozłączone. Aby wyłączyć to pasmo, najpierw usuń łącze.',
   668: 'To łącze Wi-Fi skonfigurowano poza StartWRT. Wi-Fi w jego paśmie korzysta z kanału sieci nadrzędnej i jest wyłączone, gdy łącze jest rozłączone. Aby wyłączyć to pasmo, najpierw usuń łącze w LuCI.',
+  669: 'Zatrzymane',
+  670: 'Zmień hasło',
+  671: 'Dołączono do sieci',
+  672: 'Sieć {ssid} nie przyjęła routera, więc router przestał próbować do niej dołączyć. Sprawdź hasło.',
+  673: 'Router nie znalazł sieci {ssid}, więc przestał próbować do niej dołączyć. Sprawdź, czy sieć jest włączona i w zasięgu.',
+  674: 'Łącze do {ssid} jest wyłączone.',
+  675: 'Router nadal próbuje się połączyć. Do tego czasu jego własne Wi-Fi w tym paśmie jest wyłączone.',
 } satisfies i18n

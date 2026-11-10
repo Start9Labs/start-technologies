@@ -25,8 +25,12 @@ const VIEWS = [
   'ethernet',
   'wifi',
   'inbound',
-  'wwan',
 ] as const satisfies readonly ConfigView[]
+
+/** Tabs with a view of their own, by page and tab. */
+const TAB_VIEWS: Record<string, ConfigView> = {
+  'wan/wireless-wan': 'wwan',
+}
 
 /** RPC errors raised by configuration StartWRT cannot read or model. */
 const UNREPRESENTABLE = new Set([
@@ -69,7 +73,10 @@ export class ConfigCheckService {
 
   readonly view = computed(() => {
     const [path = ''] = this.url().split(/[?#]/)
-    return VIEWS.find(view => view === path.split('/')[1]) ?? null
+    const [, page = '', tab = ''] = path.split('/')
+    return (
+      TAB_VIEWS[`${page}/${tab}`] ?? VIEWS.find(view => view === page) ?? null
+    )
   })
   private readonly current = computed(() => {
     const view = this.view()

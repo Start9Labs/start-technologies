@@ -32,7 +32,7 @@ import { PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { filter, map, startWith } from 'rxjs'
 import { Footer } from 'src/app/components/footer'
 import { Form } from 'src/app/components/form'
-import { BAND_LABELS } from 'src/app/routes/wwan/utils'
+import { BAND_LABELS } from 'src/app/routes/wan/routes/wireless-wan/utils'
 import {
   ApiService,
   WifiConfig,
@@ -84,7 +84,9 @@ const COUNTRY_CHANGE_MAX_WIDTH = 80
       @if (uplinkNotice(); as notice) {
         <div tuiNotification appearance="info">
           {{ notice }}
-          <a tuiLink routerLink="/wwan">{{ 'Wireless WAN' | i18n }}</a>
+          <a tuiLink routerLink="/wan/wireless-wan">
+            {{ 'Wireless WAN' | i18n }}
+          </a>
         </div>
       }
       <label tuiLabel>
@@ -231,6 +233,7 @@ export default class WifiSettings {
     const uplink = this.uplink()
     return (
       uplink &&
+      !uplink.stopped &&
       fill(
         this.i18n.transform(
           'The {band} band carries the Wi-Fi uplink to {ssid}. Its Wi-Fi follows that network’s channel and is off while the uplink is disconnected. To turn this band off, remove the uplink first.',

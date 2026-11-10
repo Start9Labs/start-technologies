@@ -67,3 +67,7 @@ Some ISPs bind your Internet connection to a specific MAC address. If you are re
 ## Dynamic DNS
 
 See [Dynamic DNS](ddns.md) for full details on configuring DDNS from this tab.
+
+## Wireless WAN
+
+See [Wireless WAN](wireless-wan.md) for connecting the router to another Wi-Fi network from this tab.

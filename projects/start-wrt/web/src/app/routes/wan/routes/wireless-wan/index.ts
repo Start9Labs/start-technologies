@@ -22,6 +22,7 @@ import {
   WwanNetwork,
   WwanPriority,
   WwanResponse,
+  WwanUplink,
 } from 'src/app/services/api/api.service'
 import { ActionService } from 'src/app/services/action.service'
 import { provideFormService } from 'src/app/services/form.service'
@@ -37,7 +38,10 @@ interface UplinkStatus {
   appearance: string
 }
 
-function uplinkStatus({ state }: WwanResponse): UplinkStatus {
+function uplinkStatus({ uplink, state }: WwanResponse): UplinkStatus {
+  if (uplink?.stopped) {
+    return { label: 'Stopped', appearance: 'negative' }
+  }
   if (!state?.associated) {
     return { label: 'Not connected', appearance: 'negative' }
   }
@@ -51,17 +55,6 @@ function uplinkStatus({ state }: WwanResponse): UplinkStatus {
 
 @Component({
   template: `
-    <header tuiHeader>
-      <hgroup tuiTitle>
-        <h2>{{ 'Wireless WAN' | i18n }}</h2>
-        <p tuiSubtitle>
-          {{
-            'Connect the router to another Wi-Fi network for Internet access, as a backup to the WAN port or in its place.'
-              | i18n
-          }}
-        </p>
-      </hgroup>
-    </header>
     @if (service.data(); as data) {
       @if (data.unmanaged.length) {
         <div tuiNotification appearance="warning">
@@ -75,7 +68,7 @@ function uplinkStatus({ state }: WwanResponse): UplinkStatus {
         </div>
       } @else if (data.uplink; as uplink) {
         <header tuiHeader="h6">
-          <h3 tuiTitle>{{ 'Summary' | i18n }}</h3>
+          <h2 tuiTitle>{{ 'Summary' | i18n }}</h2>
           <aside tuiAccessories>
             <button
               tuiButton
@@ -87,6 +80,32 @@ function uplinkStatus({ state }: WwanResponse): UplinkStatus {
             </button>
           </aside>
         </header>
+        @if (stopMessage(); as message) {
+          <form
+            tuiNotification
+            appearance="negative"
+            (submit.prevent)="reconnect()"
+            (reset)="changePassword(uplink)"
+          >
+            <div tuiTitle>
+              {{ 'Stopped' | i18n }}
+              <span tuiSubtitle>{{ message }}</span>
+              <div>
+                <button tuiButton size="xs">{{ 'Retry' | i18n }}</button>
+                <button tuiLink type="reset">
+                  {{ 'Change password' | i18n }}
+                </button>
+              </div>
+            </div>
+          </form>
+        } @else if (!data.state?.associated) {
+          <div tuiNotification appearance="warning">
+            {{
+              'The router keeps trying to connect. Until it does, its own Wi-Fi on this band is off.'
+                | i18n
+            }}
+          </div>
+        }
         <article [formLoading]="false">
           <section>
             <div [appSummary]="uplink.ssid">{{ 'Network name' | i18n }}</div>
@@ -116,7 +135,7 @@ function uplinkStatus({ state }: WwanResponse): UplinkStatus {
           </section>
         </article>
         <header tuiHeader="h6">
-          <h3 tuiTitle>{{ 'Settings' | i18n }}</h3>
+          <h2 tuiTitle>{{ 'Settings' | i18n }}</h2>
         </header>
         <form
           [formGroup]="form"
@@ -142,7 +161,15 @@ function uplinkStatus({ state }: WwanResponse): UplinkStatus {
         </form>
       } @else if (radios().length) {
         <header tuiHeader="h6">
-          <h3 tuiTitle>{{ 'Available networks' | i18n }}</h3>
+          <hgroup tuiTitle>
+            <h2>{{ 'Available networks' | i18n }}</h2>
+            <p tuiSubtitle>
+              {{
+                'Connect the router to another Wi-Fi network for Internet access, as a backup to the WAN port or in its place.'
+                  | i18n
+              }}
+            </p>
+          </hgroup>
           <aside tuiAccessories>
             @if (radios().length > 1) {
               <tui-segmented
@@ -231,6 +258,10 @@ export default class Wwan {
   )
   protected readonly radioIndex = signal(0)
   protected readonly networks = signal<WwanNetwork[] | null>(null)
+  protected readonly stopMessage = computed(() => {
+    const data = this.service.data()
+    return data ? this.service.stopMessage(data) : null
+  })
   protected readonly status = computed(() => {
     const data = this.service.data()
     return data ? uplinkStatus(data) : null
@@ -273,6 +304,29 @@ export default class Wwan {
       .subscribe(async request => {
         if (await this.service.connect(request)) this.networks.set(null)
       })
+  }
+
+  protected reconnect(): void {
+    this.service.reconnect()
+  }
+
+  protected changePassword(uplink: WwanUplink): void {
+    this.dialogs
+      .open<WwanConnectRequest>(WWAN_JOIN, {
+        data: {
+          radio: uplink.radio,
+          band: uplink.band,
+          network: {
+            ssid: uplink.ssid,
+            bssid: '',
+            channel: null,
+            signal: null,
+            security: uplink.security,
+          },
+          priority: uplink.priority,
+        },
+      })
+      .subscribe(request => this.service.connect(request))
   }
 
   protected async savePriority(): Promise<void> {
