@@ -100,30 +100,28 @@ test('shared-volume capability defaults to false and preserves explicit opt-in',
   const optedIn = setupManifest({ ...manifest(), sharedVolumes: true })
   const built = buildManifest(versions, optedIn, Dependencies.of())
   expect(built.sharedVolumes).toBe(true)
-  expect(built.osVersion).toBe('0.4.2')
+  expect(built.osVersion).toBe('0.4.3')
 })
 
 test('an explicit compatibility override cannot understate shared-volume support', () => {
-  expect(() =>
-    buildManifest(
-      versions,
-      setupManifest({
-        ...manifest(),
-        sharedVolumes: true,
-        osVersion: '0.4.1.1',
-      }),
-      Dependencies.of(),
-    ),
-  ).toThrow('Shared volumes require StartOS 0.4.2 or later')
+  for (const osVersion of ['0.4.2', '0.4.1.1']) {
+    expect(() =>
+      buildManifest(
+        versions,
+        setupManifest({ ...manifest(), sharedVolumes: true, osVersion }),
+        Dependencies.of(),
+      ),
+    ).toThrow('Shared volumes require StartOS 0.4.3 or later')
+  }
   expect(
     buildManifest(
       versions,
       setupManifest({
         ...manifest(),
         sharedVolumes: true,
-        osVersion: '0.4.2',
+        osVersion: '0.4.3',
       }),
       Dependencies.of(),
     ).osVersion,
-  ).toBe('0.4.2')
+  ).toBe('0.4.3')
 })
