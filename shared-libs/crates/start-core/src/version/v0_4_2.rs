@@ -4,6 +4,10 @@ use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_4_1_3};
 use crate::prelude::*;
 
+lazy_static::lazy_static! {
+    static ref V0_4_2: exver::Version = exver::Version::new([0, 4, 2], []);
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Version;
 
@@ -15,7 +19,7 @@ impl VersionT for Version {
         Ok(())
     }
     fn semver(self) -> exver::Version {
-        exver::Version::new([0, 4, 2], [])
+        V0_4_2.clone()
     }
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT

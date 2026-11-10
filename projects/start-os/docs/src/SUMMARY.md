@@ -76,6 +76,7 @@
 - [Logs](logs.md)
 - [Server Name](server-name.md)
 - [SSH](ssh.md)
+- [Kernel Arguments](kernel-arguments.md)
 - [SMTP](smtp.md)
 - [WiFi](wifi.md)
 - [Internationalization](internationalization.md)

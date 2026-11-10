@@ -417,11 +417,11 @@ Options avancées pour les utilisateurs expérimentés. LuCI fournit un accès d
 
 ### Créer une sauvegarde
 
-Téléchargez une sauvegarde de tous les paramètres du routeur, y compris les profils de sécurité, la configuration Wi-Fi, les certificats SSL et les préférences système. Conservez le fichier de sauvegarde dans un endroit sûr.
+Téléchargez une sauvegarde de tous les paramètres du routeur, y compris les profils de sécurité, la configuration Wi-Fi, les certificats SSL et les préférences système. La sauvegarde est chiffrée avec votre mot de passe administrateur. Conservez le fichier de sauvegarde dans un endroit sûr.
 
 ### Restaurer une sauvegarde
 
-Téléversez un fichier de sauvegarde précédemment créé pour restaurer tous les paramètres. Le routeur redémarrera après la restauration et tous les paramètres actuels seront écrasés.`,
+Téléversez un fichier de sauvegarde précédemment créé pour restaurer tous les paramètres. Saisissez le mot de passe administrateur en vigueur lors de la création de la sauvegarde. Le routeur redémarrera après la restauration et tous les paramètres actuels seront écrasés.`,
   '/settings/general': `## Paramètres – Général
 
 <details><summary>Préférences</summary> Préférences générales pour l’interface utilisateur et le comportement du routeur.<h3>Thème</h3>Choisissez un thème sombre ou clair, ou conservez les paramètres de votre système appliqués à l’interface.<h3>Langue</h3>Configurez la langue préférée pour l’interface utilisateur du routeur. Ce paramètre affecte la langue affichée pour tous les menus, options et autres éléments de texte de l’interface web du routeur.<h3>Fuseau horaire</h3>Définissez le fuseau horaire local du routeur. Cela affecte les évènements planifiés tels que les plages d’extinction WAN et les plannings d’extinction Wi-Fi. </details> <details><summary>Accès à distance</summary> Active l’accès à distance pour gérer les paramètres et configurations du routeur depuis l’extérieur du réseau local.<ul><li><b>Derrière un NAT</b> (Network Address Translation) : Autorise l’accès à distance uniquement lorsque le routeur fait partie d’un réseau privé utilisant le NAT. Le NAT est couramment utilisé dans les réseaux domestiques et des petites entreprises où plusieurs appareils partagent une seule adresse IP publique.</li><li><b>Jamais :</b> Désactive complètement l’accès à distance. Convient aux environnements où la sécurité est primordiale, comme les réseaux hautement sensibles ou isolés.</li><li><b>Toujours :</b> Active l’accès à distance en permanence. Idéal pour les environnements où une gestion à distance continue est nécessaire, comme un réseau d’entreprise où les administrateurs informatiques ont besoin d’un accès constant au routeur pour la surveillance et les mises à jour.</li></ul></details><details><summary>Sécurité</summary> Téléchargez votre certificat Root CA pour faire confiance aux connexions HTTPS depuis d’autres appareils. L’installation de ce certificat permet aux navigateurs et aux applications de vérifier l’identité du routeur sans avertissements de sécurité. </details> <details><summary>Mises à jour</summary> Lorsqu’une mise à jour est disponible, une bannière apparaît en haut de cette page. Vous pouvez consulter les notes de version avant de mettre à jour. Le routeur connaîtra une brève indisponibilité pendant le processus de mise à jour.</details>`,
@@ -461,22 +461,22 @@ Les heures de début et de fin de la période d’extinction. Le Wi-Fi sera dés
 Sélectionnez les jours de la semaine où la plage d’extinction doit être active.`,
   '/wifi/passwords': `## Wi-Fi – Mots de passe
 
-Gérez les mots de passe des réseaux sans fil. Chaque entrée représente un réseau Wi-Fi avec son propre mot de passe et son profil de sécurité contrôlant les autorisations d’accès.
+Gérez les mots de passe du réseau sans fil. Tous les mots de passe rejoignent le même réseau Wi-Fi, dont le nom se définit dans Wi-Fi › Paramètres. Le mot de passe avec lequel un appareil se connecte détermine son profil de sécurité.
 
 ### Profil de sécurité
 
 Contrôle ce à quoi l’appareil connecté peut accéder sur le réseau. Attribuez un profil de sécurité pour limiter ou accorder l’accès à des ressources spécifiques.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Mots de passe
 
-Chaque entrée représente un réseau Wi-Fi avec son propre mot de passe et son profil de sécurité contrôlant les autorisations d’accès.
+Tous les mots de passe rejoignent le même réseau Wi-Fi, dont le nom se définit dans Wi-Fi › Paramètres. Le mot de passe avec lequel un appareil se connecte détermine son profil de sécurité.
 
 ### Étiquette
 
-Un nom descriptif pour ce réseau Wi-Fi, tel que « Maison » ou « Réseau invité ». C’est le nom du réseau (SSID) que les appareils verront.
+Un nom descriptif pour ce mot de passe, tel que « Maison » ou « Réseau invité ». Il n’apparaît que dans cette interface ; les appareils ne le voient jamais.
 
 ### Mot de passe
 
-Le mot de passe que les appareils utiliseront pour se connecter. Doit comporter au moins 8 caractères. Utilisez le bouton de génération pour créer un mot de passe aléatoire fort.
+Le mot de passe que les appareils utiliseront pour se connecter. Doit comporter au moins 8 caractères. Utilisez le bouton de génération pour créer un mot de passe aléatoire fort. Modifier un mot de passe peut déconnecter brièvement tous les appareils Wi-Fi. Les appareils qui utilisent l’ancien mot de passe doivent se reconnecter avec le nouveau.
 
 ### Profil de sécurité
 

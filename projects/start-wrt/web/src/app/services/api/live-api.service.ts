@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core'
 import {
   ApiService,
+  ConfigCheck,
   ExecReq,
   ExecRes,
   GetFileReq,
@@ -29,6 +30,8 @@ import {
   WifiBlackoutSetResult,
   ScheduleWindow,
   ProfileId,
+  ProfileDeleteParams,
+  ProfileDeleteResult,
   ProfileIdOpt,
   SecurityProfile,
   ProfileCreateInput,
@@ -127,6 +130,10 @@ export class LiveApiService extends ApiService {
 
   async systemInfo(timeout?: number): Promise<SystemInfoRes> {
     return this.rpc.request({ method: 'system.info', params: {}, timeout })
+  }
+
+  async configCheck(): Promise<ConfigCheck> {
+    return this.rpc.request({ method: 'config.check', params: {} })
   }
 
   async systemNewerVersions(): Promise<VersionInfo[]> {
@@ -228,7 +235,9 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'profiles.set', params })
   }
 
-  async profileDelete(params: ProfileIdOpt): Promise<null> {
+  async profileDelete(
+    params: ProfileDeleteParams,
+  ): Promise<ProfileDeleteResult> {
     return this.rpc.request({ method: 'profiles.delete', params })
   }
 
@@ -266,6 +275,10 @@ export class LiveApiService extends ApiService {
       method: 'setup.status',
       params: {},
     })
+  }
+
+  async getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>> {
+    return this.rpc.request({ method: 'setup.get-pubkey', params: {} })
   }
 
   async systemFactoryReset(): Promise<null> {
@@ -458,12 +471,16 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'activity.clear', params: {} })
   }
 
-  async backupCreate(): Promise<BackupCreateRes> {
-    return this.rpc.request({ method: 'backup.create', params: {} })
+  async backupCreate(
+    params: RpcParamType<Api, 'backup.create'>,
+  ): Promise<BackupCreateRes> {
+    return this.rpc.request({ method: 'backup.create', params })
   }
 
-  async backupRestore(): Promise<BackupRestoreRes> {
-    return this.rpc.request({ method: 'backup.restore', params: {} })
+  async backupRestore(
+    params: RpcParamType<Api, 'backup.restore'>,
+  ): Promise<BackupRestoreRes> {
+    return this.rpc.request({ method: 'backup.restore', params })
   }
 
   async diagnosticsCreate(): Promise<DiagnosticsCreateRes> {

@@ -417,11 +417,11 @@ Zaawansowane opcje dla zaawansowanych użytkowników. LuCI zapewnia bezpośredni
 
 ### Utwórz kopię zapasową
 
-Pobierz kopię zapasową wszystkich ustawień routera, w tym profili bezpieczeństwa, konfiguracji WiFi, certyfikatów SSL i preferencji systemowych. Przechowuj plik kopii zapasowej w bezpiecznym miejscu.
+Pobierz kopię zapasową wszystkich ustawień routera, w tym profili bezpieczeństwa, konfiguracji WiFi, certyfikatów SSL i preferencji systemowych. Kopia zapasowa jest szyfrowana hasłem administratora. Przechowuj plik kopii zapasowej w bezpiecznym miejscu.
 
 ### Przywróć kopię zapasową
 
-Prześlij wcześniej utworzony plik kopii zapasowej, aby przywrócić wszystkie ustawienia. Router uruchomi się ponownie po przywróceniu, a wszystkie bieżące ustawienia zostaną nadpisane.`,
+Prześlij wcześniej utworzony plik kopii zapasowej, aby przywrócić wszystkie ustawienia. Wprowadź hasło administratora obowiązujące w chwili utworzenia kopii zapasowej. Router uruchomi się ponownie po przywróceniu, a wszystkie bieżące ustawienia zostaną nadpisane.`,
   '/settings/general': `## Ustawienia – Ogólne
 
 <details><summary>Preferencje</summary> Ogólne preferencje dotyczące interfejsu użytkownika i zachowania routera.<h3>Motyw</h3>Wybierz motyw ciemny lub jasny albo zachowaj ustawienia systemowe zastosowane do interfejsu.<h3>Język</h3>Skonfiguruj preferowany język interfejsu użytkownika routera. To ustawienie wpływa na język wyświetlany dla wszystkich menu, opcji i innych elementów tekstowych w interfejsie internetowym routera.<h3>Strefa czasowa</h3>Ustaw lokalną strefę czasową dla routera. Wpływa to na zaplanowane zdarzenia, takie jak okna wyłączenia WAN i harmonogramy wyłączeń WiFi. </details> <details><summary>Dostęp zdalny</summary> Umożliwia zdalny dostęp do zarządzania ustawieniami i konfiguracjami routera spoza sieci lokalnej.<ul><li><b>Gdy za NAT</b> (translacja adresów sieciowych): Zezwala na zdalny dostęp tylko wtedy, gdy router jest częścią sieci prywatnej korzystającej z NAT. NAT jest powszechnie używany w sieciach domowych i małych firm, gdzie wiele urządzeń współdzieli jeden publiczny adres IP.</li><li><b>Nigdy:</b> Całkowicie wyłącza zdalny dostęp. Odpowiednie dla środowisk, w których bezpieczeństwo jest najważniejsze, takich jak wysoce wrażliwe lub izolowane sieci.</li><li><b>Zawsze:</b> Włącza zdalny dostęp przez cały czas. Idealne dla środowisk, w których konieczne jest ciągłe zdalne zarządzanie, takich jak sieć firmowa, gdzie administratorzy IT muszą utrzymywać stały dostęp do routera w celu monitorowania i aktualizacji.</li></ul></details><details><summary>Bezpieczeństwo</summary> Pobierz certyfikat Root CA, aby zaufać połączeniom HTTPS z dodatkowych urządzeń. Zainstalowanie tego certyfikatu pozwala przeglądarkom i aplikacjom zweryfikować tożsamość routera bez ostrzeżeń bezpieczeństwa. </details> <details><summary>Aktualizacje</summary> Gdy dostępna jest aktualizacja, na górze tej strony pojawi się baner. Możesz wyświetlić informacje o wydaniu przed aktualizacją. Router będzie miał krótki przestój podczas procesu aktualizacji.</details>`,
@@ -461,22 +461,22 @@ Czas rozpoczęcia i zakończenia okresu wyłączenia. WiFi będzie wyłączone m
 Wybierz, w które dni tygodnia okno wyłączenia ma być aktywne.`,
   '/wifi/passwords': `## Wi-Fi – Hasła
 
-Zarządzaj hasłami sieci bezprzewodowych. Każdy wpis reprezentuje sieć Wi-Fi z własnym hasłem i profilem bezpieczeństwa kontrolującym uprawnienia dostępu.
+Zarządzaj hasłami sieci bezprzewodowej. Każde hasło łączy z tą samą siecią Wi-Fi, której nazwę ustawia się w Wi-Fi › Ustawienia. Hasło, którym łączy się urządzenie, decyduje o jego profilu bezpieczeństwa.
 
 ### Profil bezpieczeństwa
 
 Kontroluje, do czego podłączone urządzenie może mieć dostęp w sieci. Przypisz profil bezpieczeństwa, aby ograniczyć lub przyznać dostęp do określonych zasobów.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Hasła
 
-Każdy wpis reprezentuje sieć Wi-Fi z własnym hasłem i profilem bezpieczeństwa kontrolującym uprawnienia dostępu.
+Każde hasło łączy z tą samą siecią Wi-Fi, której nazwę ustawia się w Wi-Fi › Ustawienia. Hasło, którym łączy się urządzenie, decyduje o jego profilu bezpieczeństwa.
 
 ### Etykieta
 
-Opisowa nazwa tej sieci Wi-Fi, taka jak „Dom” lub „Sieć dla gości”. Jest to nazwa sieci (SSID), którą zobaczą urządzenia.
+Opisowa nazwa tego hasła, taka jak „Dom” lub „Sieć dla gości”. Pojawia się tylko w tym interfejsie; urządzenia nigdy jej nie widzą.
 
 ### Hasło
 
-Hasło, którego urządzenia będą używać do łączenia się. Musi mieć co najmniej 8 znaków. Użyj przycisku generowania, aby utworzyć silne losowe hasło.
+Hasło, którego urządzenia będą używać do łączenia się. Musi mieć co najmniej 8 znaków. Użyj przycisku generowania, aby utworzyć silne losowe hasło. Zmiana hasła może na krótko rozłączyć wszystkie urządzenia Wi-Fi. Urządzenia używające starego hasła muszą połączyć się ponownie przy użyciu nowego.
 
 ### Profil bezpieczeństwa
 

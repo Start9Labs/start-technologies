@@ -61,7 +61,7 @@ function detectProviderKey(host: string | undefined): string {
       </div>
     </ng-container>
     @if (form$ | async; as data) {
-      <form [formGroup]="data.form">
+      <form [formGroup]="data.form" (submit.prevent)="save(data.form)">
         <header tuiHeader="body-l">
           <h3 tuiTitle>
             <b>
@@ -86,23 +86,19 @@ function detectProviderKey(host: string | undefined): string {
               tuiButton
               size="l"
               appearance="secondary"
+              type="button"
               (click)="cancel(data)"
             >
               {{ 'Cancel' | i18n }}
             </button>
           }
-          <button
-            tuiButton
-            size="l"
-            [disabled]="data.form.pristine"
-            (click)="save(data.form)"
-          >
+          <button tuiButton size="l" [disabled]="data.form.pristine">
             {{ 'Save' | i18n }}
           </button>
         </footer>
       </form>
       @if (data.form.value.smtp?.selection === 'enabled') {
-        <form>
+        <form (submit.prevent)="sendTestEmail(data.form.value)">
           <header tuiHeader="body-l">
             <h3 tuiTitle>
               <b>{{ 'Send test email' | i18n }}</b>
@@ -126,10 +122,8 @@ function detectProviderKey(host: string | undefined): string {
           <footer>
             <button
               tuiButton
-              type="button"
               size="l"
               [disabled]="!testEmail || isEmailInvalid || data.form.invalid"
-              (click)="sendTestEmail(data.form.value)"
             >
               {{ 'Send' | i18n }}
             </button>

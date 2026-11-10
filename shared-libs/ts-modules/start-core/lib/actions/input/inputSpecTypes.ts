@@ -1,3 +1,5 @@
+import type { UploadLimits } from '../../osBindings'
+
 /**
  * A record mapping field keys to their {@link ValueSpec} definitions.
  * This is the root shape of a dynamic form specification — it defines the complete set
@@ -255,8 +257,23 @@ export type ValueSpecUnion = {
   default: string | null
   immutable: boolean
 }
+/** Matches filename suffixes case-insensitively; an empty list permits any filename. */
+export function matchesFileExtensions(
+  name: string,
+  extensions: readonly string[],
+): boolean {
+  return (
+    !extensions.length ||
+    extensions.some(extension =>
+      name.toLowerCase().endsWith(extension.toLowerCase()),
+    )
+  )
+}
+
 /** Spec for a file upload input field. */
-export type ValueSpecFile = {
+export type ValueSpecFile = UploadLimits & {
+  /** The prepared upload capability, or null for a browser-only file picker. */
+  uploadId: string | null
   name: string
   description: string | null
   warning: string | null

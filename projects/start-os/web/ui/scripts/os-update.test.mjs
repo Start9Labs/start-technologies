@@ -149,7 +149,7 @@ boundaries.set(
         `export * from ${JSON.stringify(new URL(`../../../../../shared-libs/ts-modules/marketplace/src/${file}`, import.meta.url).href)};`,
     )
     .join('\n') +
-    '\nexport class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {} export class MarketplaceSignersComponent {} export class MarketplaceAboutComponent {} export class MarketplaceDependenciesComponent {} export class MarketplaceLinksComponent {} export class MarketplaceReleaseNotesComponent {}',
+    '\nexport class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {} export class MarketplaceSignersComponent {} export class MarketplaceSignerChipsComponent {} export class MarketplaceAboutComponent {} export class MarketplaceDependenciesComponent {} export class MarketplaceLinksComponent {} export class MarketplaceReleaseNotesComponent {}',
 )
 loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
@@ -2103,7 +2103,7 @@ test('registry signing-key identities keep GPG metadata under the key label', ()
   })
 })
 
-test('key identities are GPG user IDs, or the emails registries publish for a plain key', () => {
+test('key identities include GPG user IDs and registry contact emails', () => {
   const id = 'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg='
   const contact = [{ email: 'dev@example.com' }, { matrix: '@dev:example.com' }]
   assert.deepEqual(
@@ -2115,11 +2115,23 @@ test('key identities are GPG user IDs, or the emails registries publish for a pl
         { identities: { [id]: ['A <a@example.com>'], other: ['C'] } },
       ],
     }),
-    ['A <a@example.com>', 'B <b@example.com>'],
+    ['A <a@example.com>', 'B <b@example.com>', 'dev@example.com'],
   )
   assert.deepEqual(keyIdentities({ publicKey: id, contact, gpgExports: [] }), [
     'dev@example.com',
   ])
+  assert.deepEqual(
+    keyIdentities({
+      publicKey: id,
+      contact: [...contact, ...contact],
+      gpgExports: [{ identities: { [id]: ['dev@example.com'] } }],
+    }),
+    ['dev@example.com'],
+  )
+  assert.deepEqual(
+    keyIdentities({ publicKey: id, contact: [], gpgExports: [] }),
+    [],
+  )
 })
 
 function registriesFixture({

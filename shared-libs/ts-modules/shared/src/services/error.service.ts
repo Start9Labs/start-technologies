@@ -1,8 +1,6 @@
 import { ErrorHandler, inject, Service } from '@angular/core'
 import { TuiNotificationService } from '@taiga-ui/core'
 
-import { HttpError } from '../classes/http-error'
-
 @Service()
 export class ErrorService extends ErrorHandler {
   private readonly alerts = inject(TuiNotificationService)
@@ -20,17 +18,23 @@ export class ErrorService extends ErrorHandler {
 }
 
 export function getErrorMessage(e: unknown, link?: string): string {
+  const error = e !== null && typeof e === 'object' ? e : null
   let message = ''
 
   if (typeof e === 'string') {
     message = e
-  } else if (e instanceof HttpError && e.code === 0) {
+  } else if (error && 'code' in error && error.code === 0) {
     message =
       "Request Error. Your browser couldn't reach your server (network or browser blocked the connection). Common causes: a VPN or firewall blocking loopback/LAN; the server is still starting; or the page is loaded from a different origin than the API. Try refreshing this page; if you're using a VPN, allow LAN connections or disconnect briefly."
-  } else if (!(e instanceof Error || e instanceof HttpError) || !e.message) {
-    message = 'Unknown Error'
+  } else if (
+    error &&
+    'message' in error &&
+    typeof error.message === 'string' &&
+    error.message
+  ) {
+    message = error.message
   } else {
-    message = e.message
+    message = 'Unknown Error'
   }
 
   return link

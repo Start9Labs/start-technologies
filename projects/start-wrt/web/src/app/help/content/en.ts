@@ -417,11 +417,11 @@ Advanced options for power users. LuCI provides direct access to OpenWRT configu
 
 ### Create Backup
 
-Download a backup of all router settings, including security profiles, WiFi configuration, SSL certificates, and system preferences. Store the backup file in a safe location.
+Download a backup of all router settings, including security profiles, WiFi configuration, SSL certificates, and system preferences. The backup is encrypted with your admin password. Store the backup file in a safe location.
 
 ### Restore Backup
 
-Upload a previously created backup file to restore all settings. The router will reboot after restoring and all current settings will be overwritten.`,
+Upload a previously created backup file to restore all settings. Enter the admin password in effect when the backup was created. The router will reboot after restoring and all current settings will be overwritten.`,
   '/settings/general': `## Settings – General
 
 <details><summary>Preferences</summary> General preferences for the router's user interface and behavior.<h3>Theme</h3>Choose from dark or light theme, or keep your system settings applied to the UI.<h3>Language</h3>Configure the preferred language for the user interface of the router. This setting affects the language displayed for all menus, options, and other text elements within the router's web interface.<h3>Timezone</h3>Set the local timezone for the router. This affects scheduled events such as WAN blackout windows and WiFi blackout schedules. </details> <details><summary>Remote Access</summary> Enables remote access to manage the router's settings and configurations from outside the local network.<ul><li><b>When behind NAT</b> (Network Address Translation): Allows remote access only when the router is part of a private network using NAT. NAT is commonly used in home and small business networks where multiple devices share a single public IP address.</li><li><b>Never:</b> Completely disables remote access. Suitable for environments where security is paramount, such as in highly sensitive or isolated networks.</li><li><b>Always:</b> Enables remote access at all times. Ideal for environments where continuous remote management is necessary, such as in a business network where IT administrators need to maintain constant access to the router for monitoring and updates.</li></ul></details><details><summary>Security</summary> Download your Root CA certificate to trust HTTPS connections from additional devices. Installing this certificate allows browsers and apps to verify the router's identity without security warnings. </details> <details><summary>Updates</summary> When an update is available, a banner will appear at the top of this page. You can view release notes before updating. The router will experience brief downtime during the update process.</details>`,
@@ -459,22 +459,22 @@ The start and end times for the blackout period. WiFi will be disabled between t
 Select which days of the week the blackout window should be active.`,
   '/wifi/passwords': `## Wi-Fi – Passwords
 
-Manage wireless network passwords. Each entry represents a Wi-Fi network with its own password and security profile controlling access permissions.
+Manage wireless network passwords. Every password joins the same Wi-Fi network, named under Wi-Fi › Settings. The password a device connects with decides its security profile.
 
 ### Security Profile
 
 Controls what the connected device can access on the network. Assign a security profile to limit or grant access to specific resources.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Passwords
 
-Each entry represents a Wi-Fi network with its own password and security profile controlling access permissions.
+Every password joins the same Wi-Fi network, named under Wi-Fi › Settings. The password a device connects with decides its security profile.
 
 ### Label
 
-A descriptive name for this Wi-Fi network, such as "Home" or "Guest Network". This is the network name (SSID) that devices will see.
+A descriptive name for this password, such as "Home" or "Guest Network". It appears only in this interface; devices never see it.
 
 ### Password
 
-The password devices will use to connect. Must be at least 8 characters. Use the generate button to create a strong random password.
+The password devices will use to connect. Must be at least 8 characters. Use the generate button to create a strong random password. Changing a password may briefly disconnect all Wi-Fi devices. Devices using the old password must reconnect with the new one.
 
 ### Security Profile
 

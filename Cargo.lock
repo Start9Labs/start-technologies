@@ -8353,7 +8353,7 @@ dependencies = [
 
 [[package]]
 name = "start-cli"
-version = "2.8.0"
+version = "2.9.0"
 dependencies = [
  "start-core",
  "tracing",
@@ -8361,7 +8361,7 @@ dependencies = [
 
 [[package]]
 name = "start-core"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "aes 0.9.3",
  "astral-tokio-tar",
@@ -8517,7 +8517,7 @@ dependencies = [
 
 [[package]]
 name = "start-os"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "include_dir",
  "start-core",
@@ -8582,6 +8582,7 @@ version = "1.4.0"
 dependencies = [
  "async_cell",
  "axum",
+ "base32",
  "base64 0.22.1",
  "blake3",
  "chrono",
@@ -8600,6 +8601,7 @@ dependencies = [
  "include_dir",
  "ipnet",
  "itertools 0.14.0",
+ "josekit",
  "libc",
  "macaddr",
  "mime_guess",
@@ -8614,6 +8616,7 @@ dependencies = [
  "rpassword",
  "rpc-toolkit",
  "rusqlite",
+ "rust-argon2",
  "rustls",
  "semver",
  "serde",
@@ -8637,6 +8640,7 @@ dependencies = [
  "url",
  "visit-rs",
  "x25519-dalek 2.0.1",
+ "zeroize",
 ]
 
 [[package]]

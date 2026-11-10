@@ -75,6 +75,44 @@ fn no_shadowed_args_start_cli() {
 }
 
 #[test]
+fn log_level_requires_one_of_the_named_levels() {
+    use crate::util::logger::LogLevel;
+
+    for (value, expected) in [
+        ("error", LogLevel::Error),
+        ("warn", LogLevel::Warn),
+        ("info", LogLevel::Info),
+        ("debug", LogLevel::Debug),
+        ("trace", LogLevel::Trace),
+    ] {
+        let matches = app()
+            .into_command()
+            .try_get_matches_from(["start-cli", "server", "set-log-level", value])
+            .unwrap();
+        let params = matches
+            .subcommand_matches("server")
+            .unwrap()
+            .subcommand_matches("set-log-level")
+            .unwrap();
+        assert_eq!(params.get_one::<LogLevel>("level"), Some(&expected));
+    }
+    assert!(
+        app()
+            .into_command()
+            .try_get_matches_from(["start-cli", "server", "set-log-level"])
+            .is_err()
+    );
+    for value in ["invalid", "off", "5", "true", "TRACE"] {
+        assert!(
+            app()
+                .into_command()
+                .try_get_matches_from(["start-cli", "server", "set-log-level", value])
+                .is_err()
+        );
+    }
+}
+
+#[test]
 fn diagnostic_update_accepts_trust_without_an_ignored_registry_argument() {
     let matches = app()
         .into_command()

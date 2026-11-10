@@ -17,6 +17,7 @@ use crate::progress::{FullProgressTracker, ProgressUnits};
 use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
 use crate::registry::os::SIG_CONTEXT;
+use crate::registry::os::asset::may_manage_assets;
 use crate::registry::os::index::OsVersionInfo;
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
@@ -86,6 +87,8 @@ pub struct AddAssetParams {
     #[visit(ts(skip))]
     pub signer: AnyVerifyingKey,
     pub signature: AnySignature,
+    #[serde(default)]
+    pub signatures: SignatureMap,
     pub commitment: Blake3Commitment,
 }
 
@@ -100,6 +103,7 @@ async fn add_asset(
         url,
         signer,
         signature,
+        signatures,
         commitment,
     }: AddAssetParams,
     accessor: impl FnOnce(
@@ -108,22 +112,17 @@ async fn add_asset(
     + UnwindSafe
     + Send,
 ) -> Result<(), Error> {
-    let signature =
-        crate::sign::compat::verify_commitment(&signer, &commitment, SIG_CONTEXT, &signature)?;
+    let signatures = crate::sign::compat::verify_signatures(
+        &commitment,
+        SIG_CONTEXT,
+        &signatures,
+        &signer,
+        &signature,
+    )?;
     ctx.db
         .mutate(|db| {
             let signer_guid = db.as_index().as_signers().get_signer(&signer)?;
-            if db
-                .as_index()
-                .as_os()
-                .as_versions()
-                .as_idx(&version)
-                .or_not_found(&version)?
-                .as_authorized()
-                .de()?
-                .contains(&signer_guid)
-                || db.as_admins().de()?.contains(&signer_guid)
-            {
+            if may_manage_assets(db, &version, &signer_guid)? {
                 accessor(
                     db.as_index_mut()
                         .as_os_mut()
@@ -146,7 +145,7 @@ async fn add_asset(
                             ErrorKind::InvalidSignature,
                         ))
                     } else {
-                        s.signatures.insert(signer, signature);
+                        s.merge_signatures(&commitment, signatures);
                         if !s.urls.contains(&url) {
                             s.urls.push(url);
                         }
@@ -343,17 +342,7 @@ async fn remove_asset(
     ctx.db
         .mutate(|db| {
             let signer_guid = db.as_index().as_signers().get_signer(&signer)?;
-            if db
-                .as_index()
-                .as_os()
-                .as_versions()
-                .as_idx(&version)
-                .or_not_found(&version)?
-                .as_authorized()
-                .de()?
-                .contains(&signer_guid)
-                || db.as_admins().de()?.contains(&signer_guid)
-            {
+            if may_manage_assets(db, &version, &signer_guid)? {
                 Ok(accessor(
                     db.as_index_mut()
                         .as_os_mut()

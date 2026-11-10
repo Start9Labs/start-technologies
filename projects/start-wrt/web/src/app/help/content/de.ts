@@ -417,11 +417,11 @@ Erweiterte Optionen für fortgeschrittene Benutzer. LuCI bietet direkten Zugriff
 
 ### Sicherung erstellen
 
-Laden Sie eine Sicherung aller Router-Einstellungen herunter, einschließlich Sicherheitsprofilen, WiFi-Konfiguration, SSL-Zertifikaten und Systemeinstellungen. Bewahren Sie die Sicherungsdatei an einem sicheren Ort auf.
+Laden Sie eine Sicherung aller Router-Einstellungen herunter, einschließlich Sicherheitsprofilen, WiFi-Konfiguration, SSL-Zertifikaten und Systemeinstellungen. Die Sicherung wird mit Ihrem Administrator-Passwort verschlüsselt. Bewahren Sie die Sicherungsdatei an einem sicheren Ort auf.
 
 ### Sicherung wiederherstellen
 
-Laden Sie eine zuvor erstellte Sicherungsdatei hoch, um alle Einstellungen wiederherzustellen. Der Router wird nach der Wiederherstellung neu gestartet, und alle aktuellen Einstellungen werden überschrieben.`,
+Laden Sie eine zuvor erstellte Sicherungsdatei hoch, um alle Einstellungen wiederherzustellen. Geben Sie das Administrator-Passwort ein, das beim Erstellen der Sicherung galt. Der Router wird nach der Wiederherstellung neu gestartet, und alle aktuellen Einstellungen werden überschrieben.`,
   '/settings/general': `## Einstellungen – Allgemein
 
 <details><summary>Einstellungen</summary> Allgemeine Einstellungen für die Benutzeroberfläche und das Verhalten des Routers.<h3>Design</h3>Wählen Sie zwischen dunklem oder hellem Design, oder behalten Sie die für die Benutzeroberfläche übernommenen Systemeinstellungen bei.<h3>Sprache</h3>Konfigurieren Sie die bevorzugte Sprache für die Benutzeroberfläche des Routers. Diese Einstellung beeinflusst die für alle Menüs, Optionen und sonstigen Textelemente angezeigte Sprache innerhalb der Weboberfläche des Routers.<h3>Zeitzone</h3>Legen Sie die lokale Zeitzone für den Router fest. Dies beeinflusst geplante Ereignisse wie WAN-Sperrzeiten und WiFi-Sperrzeitpläne. </details> <details><summary>Fernzugriff</summary> Ermöglicht den Fernzugriff zur Verwaltung der Einstellungen und Konfigurationen des Routers von außerhalb des lokalen Netzwerks.<ul><li><b>Wenn hinter NAT</b> (Network Address Translation): Erlaubt den Fernzugriff nur, wenn der Router Teil eines privaten Netzwerks ist, das NAT verwendet. NAT wird häufig in Heim- und Kleinunternehmensnetzwerken eingesetzt, in denen sich mehrere Geräte eine einzige öffentliche IP-Adresse teilen.</li><li><b>Nie:</b> Deaktiviert den Fernzugriff vollständig. Geeignet für Umgebungen, in denen Sicherheit oberste Priorität hat, etwa in hochsensiblen oder isolierten Netzwerken.</li><li><b>Immer:</b> Aktiviert den Fernzugriff jederzeit. Ideal für Umgebungen, in denen kontinuierliche Fernverwaltung erforderlich ist, etwa in einem Unternehmensnetzwerk, in dem IT-Administratoren ständigen Zugriff auf den Router für Überwachung und Aktualisierungen benötigen.</li></ul></details><details><summary>Sicherheit</summary> Laden Sie Ihr Root-CA-Zertifikat herunter, um HTTPS-Verbindungen von weiteren Geräten zu vertrauen. Durch die Installation dieses Zertifikats können Browser und Apps die Identität des Routers ohne Sicherheitswarnungen überprüfen. </details> <details><summary>Aktualisierungen</summary> Wenn eine Aktualisierung verfügbar ist, erscheint oben auf dieser Seite ein Banner. Sie können vor dem Aktualisieren die Versionshinweise einsehen. Der Router ist während des Aktualisierungsvorgangs kurzzeitig nicht erreichbar.</details>`,
@@ -461,22 +461,22 @@ Die Start- und Endzeiten für die Sperrzeit. WiFi wird zwischen diesen Zeiten an
 Wählen Sie aus, an welchen Wochentagen die Sperrzeit aktiv sein soll.`,
   '/wifi/passwords': `## Wi-Fi – Passwörter
 
-Verwalten Sie die Passwörter für drahtlose Netzwerke. Jeder Eintrag steht für ein Wi-Fi-Netzwerk mit eigenem Passwort und eigenem Sicherheitsprofil, das die Zugriffsberechtigungen steuert.
+Verwalten Sie die Passwörter für drahtlose Netzwerke. Jedes Passwort verbindet mit demselben Wi-Fi-Netzwerk, dessen Name unter Wi-Fi › Einstellungen festgelegt wird. Das Passwort, mit dem sich ein Gerät verbindet, bestimmt sein Sicherheitsprofil.
 
 ### Sicherheitsprofil
 
 Steuert, worauf das verbundene Gerät im Netzwerk zugreifen kann. Weisen Sie ein Sicherheitsprofil zu, um den Zugriff auf bestimmte Ressourcen einzuschränken oder zu gewähren.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Passwörter
 
-Jeder Eintrag steht für ein Wi-Fi-Netzwerk mit eigenem Passwort und eigenem Sicherheitsprofil, das die Zugriffsberechtigungen steuert.
+Jedes Passwort verbindet mit demselben Wi-Fi-Netzwerk, dessen Name unter Wi-Fi › Einstellungen festgelegt wird. Das Passwort, mit dem sich ein Gerät verbindet, bestimmt sein Sicherheitsprofil.
 
 ### Bezeichnung
 
-Ein aussagekräftiger Name für dieses Wi-Fi-Netzwerk, etwa „Zuhause“ oder „Gastnetzwerk“. Dies ist der Netzwerkname (SSID), den Geräte sehen.
+Ein aussagekräftiger Name für dieses Passwort, etwa „Zuhause“ oder „Gastnetzwerk“. Er erscheint nur in dieser Oberfläche; Geräte sehen ihn nie.
 
 ### Passwort
 
-Das Passwort, das Geräte zum Verbinden verwenden. Muss mindestens 8 Zeichen lang sein. Verwenden Sie die Schaltfläche zum Generieren, um ein starkes, zufälliges Passwort zu erstellen.
+Das Passwort, das Geräte zum Verbinden verwenden. Muss mindestens 8 Zeichen lang sein. Verwenden Sie die Schaltfläche zum Generieren, um ein starkes, zufälliges Passwort zu erstellen. Eine Passwortänderung kann kurzzeitig alle Wi-Fi-Geräte trennen. Geräte, die das alte Passwort verwenden, müssen sich mit dem neuen erneut verbinden.
 
 ### Sicherheitsprofil
 

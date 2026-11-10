@@ -417,11 +417,11 @@ Opciones avanzadas para usuarios expertos. LuCI proporciona acceso directo a la 
 
 ### Crear copia de seguridad
 
-Descarga una copia de seguridad de todos los ajustes del router, incluidos los perfiles de seguridad, la configuración de WiFi, los certificados SSL y las preferencias del sistema. Guarda el archivo de copia de seguridad en un lugar seguro.
+Descarga una copia de seguridad de todos los ajustes del router, incluidos los perfiles de seguridad, la configuración de WiFi, los certificados SSL y las preferencias del sistema. La copia de seguridad se cifra con tu contraseña de administrador. Guarda el archivo de copia de seguridad en un lugar seguro.
 
 ### Restaurar copia de seguridad
 
-Sube un archivo de copia de seguridad creado previamente para restaurar todos los ajustes. El router se reiniciará tras la restauración y se sobrescribirán todos los ajustes actuales.`,
+Sube un archivo de copia de seguridad creado previamente para restaurar todos los ajustes. Introduce la contraseña de administrador vigente cuando se creó la copia de seguridad. El router se reiniciará tras la restauración y se sobrescribirán todos los ajustes actuales.`,
   '/settings/general': `## Ajustes – General
 
 <details><summary>Preferencias</summary> Preferencias generales para la interfaz de usuario y el comportamiento del router.<h3>Tema</h3>Elige entre tema oscuro o claro, o mantén la configuración de tu sistema aplicada a la interfaz.<h3>Idioma</h3>Configura el idioma preferido para la interfaz de usuario del router. Este ajuste afecta al idioma mostrado en todos los menús, opciones y demás elementos de texto dentro de la interfaz web del router.<h3>Zona horaria</h3>Establece la zona horaria local del router. Afecta a los eventos programados como los apagados de WAN y las programaciones de apagado de WiFi. </details> <details><summary>Acceso remoto</summary> Habilita el acceso remoto para gestionar los ajustes y configuraciones del router desde fuera de la red local.<ul><li><b>Cuando esté detrás de NAT</b> (Network Address Translation): Permite el acceso remoto solo cuando el router forma parte de una red privada que usa NAT. NAT se usa habitualmente en redes domésticas y de pequeñas empresas donde varios dispositivos comparten una única dirección IP pública.</li><li><b>Nunca:</b> Deshabilita por completo el acceso remoto. Adecuado para entornos donde la seguridad es primordial, como en redes muy sensibles o aisladas.</li><li><b>Siempre:</b> Habilita el acceso remoto en todo momento. Ideal para entornos donde es necesaria una gestión remota continua, como en una red empresarial donde los administradores de TI necesitan mantener acceso constante al router para supervisión y actualizaciones.</li></ul></details><details><summary>Seguridad</summary> Descarga tu certificado Root CA para confiar en las conexiones HTTPS desde dispositivos adicionales. Instalar este certificado permite a los navegadores y aplicaciones verificar la identidad del router sin advertencias de seguridad. </details> <details><summary>Actualizaciones</summary> Cuando haya una actualización disponible, aparecerá un aviso en la parte superior de esta página. Puedes consultar las notas de la versión antes de actualizar. El router experimentará una breve interrupción durante el proceso de actualización.</details>`,
@@ -461,22 +461,22 @@ Las horas de inicio y fin del periodo de apagado. El WiFi se deshabilitará entr
 Selecciona qué días de la semana debe estar activo el apagado.`,
   '/wifi/passwords': `## Wi-Fi – Contraseñas
 
-Gestiona las contraseñas de las redes inalámbricas. Cada entrada representa una red Wi-Fi con su propia contraseña y perfil de seguridad que controla los permisos de acceso.
+Gestiona las contraseñas de la red inalámbrica. Todas las contraseñas conectan a la misma red Wi-Fi, cuyo nombre se define en Wi-Fi › Ajustes. La contraseña con la que se conecta un dispositivo decide su perfil de seguridad.
 
 ### Perfil de seguridad
 
 Controla a qué puede acceder el dispositivo conectado en la red. Asigna un perfil de seguridad para limitar o conceder acceso a recursos específicos.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Contraseñas
 
-Cada entrada representa una red Wi-Fi con su propia contraseña y perfil de seguridad que controla los permisos de acceso.
+Todas las contraseñas conectan a la misma red Wi-Fi, cuyo nombre se define en Wi-Fi › Ajustes. La contraseña con la que se conecta un dispositivo decide su perfil de seguridad.
 
 ### Etiqueta
 
-Un nombre descriptivo para esta red Wi-Fi, como «Casa» o «Red de invitados». Es el nombre de red (SSID) que verán los dispositivos.
+Un nombre descriptivo para esta contraseña, como «Casa» o «Red de invitados». Solo aparece en esta interfaz; los dispositivos nunca lo ven.
 
 ### Contraseña
 
-La contraseña que usarán los dispositivos para conectarse. Debe tener al menos 8 caracteres. Usa el botón de generar para crear una contraseña aleatoria fuerte.
+La contraseña que usarán los dispositivos para conectarse. Debe tener al menos 8 caracteres. Usa el botón de generar para crear una contraseña aleatoria fuerte. Cambiar una contraseña puede desconectar brevemente todos los dispositivos Wi-Fi. Los dispositivos que usan la contraseña anterior deben volver a conectarse con la nueva.
 
 ### Perfil de seguridad
 

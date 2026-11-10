@@ -85,10 +85,12 @@ mod v0_4_1_1;
 mod v0_4_1_2;
 mod v0_4_1_3;
 mod v0_4_2;
+mod v0_4_2_1;
+mod v0_4_3;
 #[cfg(test)]
 pub(crate) use v0_4_1_2::retired_alpha_keys;
 
-pub type Current = v0_4_2::Version; // VERSION_BUMP
+pub type Current = v0_4_3::Version; // VERSION_BUMP
 
 impl Current {
     #[instrument(skip(self, db))]
@@ -238,7 +240,9 @@ enum Version {
     V0_4_1_1(Wrapper<v0_4_1_1::Version>),
     V0_4_1_2(Wrapper<v0_4_1_2::Version>),
     V0_4_1_3(Wrapper<v0_4_1_3::Version>),
-    V0_4_2(Wrapper<v0_4_2::Version>), // VERSION_BUMP
+    V0_4_2(Wrapper<v0_4_2::Version>),
+    V0_4_2_1(Wrapper<v0_4_2_1::Version>),
+    V0_4_3(Wrapper<v0_4_3::Version>), // VERSION_BUMP
     Other(exver::Version),
 }
 
@@ -326,7 +330,9 @@ impl Version {
             Self::V0_4_1_1(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_1_2(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_1_3(v) => DynVersion(Box::new(v.0)),
-            Self::V0_4_2(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
+            Self::V0_4_2(v) => DynVersion(Box::new(v.0)),
+            Self::V0_4_2_1(v) => DynVersion(Box::new(v.0)),
+            Self::V0_4_3(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
             Self::Other(v) => {
                 return Err(Error::new(
                     eyre!("unknown version {v}"),
@@ -406,7 +412,9 @@ impl Version {
             Version::V0_4_1_1(Wrapper(x)) => x.semver(),
             Version::V0_4_1_2(Wrapper(x)) => x.semver(),
             Version::V0_4_1_3(Wrapper(x)) => x.semver(),
-            Version::V0_4_2(Wrapper(x)) => x.semver(), // VERSION_BUMP
+            Version::V0_4_2(Wrapper(x)) => x.semver(),
+            Version::V0_4_2_1(Wrapper(x)) => x.semver(),
+            Version::V0_4_3(Wrapper(x)) => x.semver(), // VERSION_BUMP
             Version::Other(x) => x.clone(),
         }
     }
@@ -881,8 +889,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn maintenance_revisions_migrate_and_roll_back_without_changing_service_data() {
-        for (from, to, revision) in [("0.4.0.3", "0.4.0.4", 0), ("0.4.0.4", "0.4.0.5", 3)] {
+    async fn releases_migrate_and_roll_back_without_changing_service_data() {
+        for (from, to, revision) in [
+            ("0.4.0.3", "0.4.0.4", 0),
+            ("0.4.0.4", "0.4.0.5", 3),
+            ("0.4.1.2", "0.4.1.3", 0),
+            ("0.4.1.3", "0.4.2", 0),
+            ("0.4.2", "0.4.2.1", 0),
+            ("0.4.2.1", "0.4.3", 0),
+        ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
                 .as_version_t()
@@ -1012,11 +1027,11 @@ mod tests {
 
     #[tokio::test]
     async fn automatic_backup_release_migrates_from_maintenance_revisions() {
-        let current = Version::from_exver_version(v0_4_2::Version.semver())
+        let current = Version::from_exver_version(v0_4_3::Version.semver())
             .as_version_t()
             .unwrap();
-        assert_eq!(current.previous().semver(), v0_4_1_3::Version.semver());
-        for from in ["0.4.1.2", "0.4.1.3"] {
+        assert_eq!(current.previous().semver(), v0_4_2_1::Version.semver());
+        for from in ["0.4.2", "0.4.2.1"] {
             let previous = Version::from_exver_version(from.parse().unwrap())
                 .as_version_t()
                 .unwrap();
@@ -1029,11 +1044,11 @@ mod tests {
             let packages = db["public"]["packageData"].clone();
             let pre_ups = PreUps::load(&previous, &current).await.unwrap();
             migrate_from_unchecked(&previous, &current, pre_ups, &mut db).unwrap();
-            assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.2"));
-            let expected = if from == "0.4.1.2" {
-                json!({ "0.4.1.3": null, "0.4.2": null })
+            assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.3"));
+            let expected = if from == "0.4.2" {
+                json!({ "0.4.2.1": null, "0.4.3": null })
             } else {
-                json!({ "0.4.2": null })
+                json!({ "0.4.3": null })
             };
             assert_eq!(
                 db["public"]["serverInfo"]["postInitMigrationTodos"],
