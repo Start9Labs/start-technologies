@@ -77,14 +77,12 @@ import { UpdateService } from 'src/app/services/update.service'
 
       tui-scrollbar {
         border-start-start-radius: 1rem;
+        block-size: 100%;
         padding: 0;
 
-        // Base insets the custom scrollbar by 1.5rem to sit in the
-        // padding-inline-end gutter; mobile drops that gutter (padding: 0), so
-        // the inset would push the scrollbar past the edge and add a phantom
-        // horizontal scroll. Keep it flush on mobile.
+        // Mobile drops the 1.5rem end padding: the thumb's painted 0.25rem, inside a 0.25rem transparent border, moves into main's 0.375rem border.
         > ::ng-deep tui-scroll-controls {
-          transform: none;
+          transform: translateX(0.625rem);
         }
       }
     }
@@ -122,7 +120,9 @@ import { UpdateService } from 'src/app/services/update.service'
         background: var(--tui-background-base-alt);
       }
 
+      // Less its top padding, so it ends at main's 1.5rem bottom border and that border is the gap below the content.
       tui-scrollbar {
+        block-size: calc(100% - 1.5rem);
         min-inline-size: 100%;
         padding-block-start: 1.5rem;
         padding-inline-end: 1.5rem;

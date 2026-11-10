@@ -109,6 +109,12 @@ renders the selected value, `[filler]` ghost-texts. Dropdown content attaches wi
 loading state), `[itemContent]`, `[emptyContent]`; filter with `| tuiFilterByInput`;
 `[stringify]`/`[identityMatcher]` come from `TuiItemsHandlers`. `tuiChevron` adds the arrow.
 
+A date input opens a calendar only when its textfield holds one:
+`<tui-calendar *tuiDropdown />` beside `input[tuiInputDate]` (`TuiCalendar` arrives with the
+`TuiInputDate` bundle). Without it the calendar icon does nothing. A size-`s` textfield draws
+its `tuiLabel` outside the box, so in a navigation header the label goes beside the field as
+plain text, `<label>As of <tui-textfield>…</tui-textfield></label>`.
+
 ### Polymorpheus (`@taiga-ui/polymorpheus`)
 
 The mechanism behind every `content`/`label`/`itemContent` API. `PolymorpheusContent<C>` is the
