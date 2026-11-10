@@ -380,7 +380,7 @@ async fn registry_cli_websocket_keeps_the_configured_http_proxy() {
     let headers = request.await.unwrap();
     assert!(headers.starts_with("GET http://"), "{headers}");
     assert!(
-        headers.contains("/nested/ws/rpc?noise=1&context=127.0.0.1"),
+        headers.contains("/nested/ws/rpc?secure=1&context=127.0.0.1"),
         "{headers}"
     );
     assert!(!headers.to_lowercase().contains("x-start-auth-sig"));
@@ -893,10 +893,12 @@ async fn actual_cli_tofu_preserves_stdout_and_exit_status_across_rotation_and_st
         .put(&patch_db::json_ptr::ROOT, first.db.peek().await.as_value())
         .await
         .unwrap();
-    let old =
-        crate::sign::noise::fingerprint(&first.server_identity.verifying_key().await.unwrap());
-    let new =
-        crate::sign::noise::fingerprint(&second.server_identity.verifying_key().await.unwrap());
+    let old = crate::sign::fingerprint::fingerprint(
+        &first.server_identity.verifying_key().await.unwrap(),
+    );
+    let new = crate::sign::fingerprint::fingerprint(
+        &second.server_identity.verifying_key().await.unwrap(),
+    );
     let selected = Arc::new(tokio::sync::RwLock::new(first));
     let serving = selected.clone();
     let app = Router::new().fallback(move |request: axum::extract::Request| {

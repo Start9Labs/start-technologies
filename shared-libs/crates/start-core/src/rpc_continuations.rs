@@ -139,7 +139,8 @@ pub struct WebSocketHandler {
     kill: Option<BoxFuture<'static, ()>>,
 }
 impl WebSocketHandler {
-    pub fn on_upgrade(self, ws: WebSocketUpgrade) -> Response {
+    /// The redeemed GUID must identify this handler.
+    pub fn on_upgrade(self, ws: WebSocketUpgrade, guid: Guid) -> Response {
         let incoming = std::num::NonZeroUsize::new(match self.policy {
             WebSocketPolicy::Public => 1024,
             WebSocketPolicy::Authenticated => 64 * 1024 * 1024,
@@ -163,7 +164,7 @@ impl WebSocketHandler {
             kill: self.kill,
             fut: async move {
                 let socket: rpc_toolkit::BoxWebSocket = match self.secure {
-                    Some(secure) => match secure.accept(Box::new(socket), incoming).await {
+                    Some(secure) => match secure.accept(Box::new(socket), incoming, &guid).await {
                         Ok(socket) => Box::new(socket),
                         Err(_) => return,
                     },
@@ -424,15 +425,15 @@ pub(crate) mod websocket_tests {
         let guid = Guid::new();
         continuations.add(guid.clone(), cont).await;
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("ws://{}/ws", listener.local_addr().unwrap());
+        let url = format!("ws://{}/ws/{guid}", listener.local_addr().unwrap());
         let router = Router::new().route(
-            "/ws",
+            &format!("/ws/{guid}"),
             get(move |ws: WebSocketUpgrade| {
                 let continuations = continuations.clone();
                 let guid = guid.clone();
                 async move {
                     match continuations.get_ws_handler(&guid).await {
-                        Some(handler) => handler.on_upgrade(ws),
+                        Some(handler) => handler.on_upgrade(ws, guid),
                         None => StatusCode::NOT_FOUND.into_response(),
                     }
                 }

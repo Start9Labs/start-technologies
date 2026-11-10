@@ -11,10 +11,10 @@ use rpc_toolkit::{BoxWebSocket, RpcResponse};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use url::Url;
 
-use super::{RpcSessionUpgrader, prologue, session_url};
+use super::{RpcSessionUpgrader, session_url};
 use crate::middleware::auth::signature::rpc_request_body;
 use crate::prelude::*;
-use crate::sign::noise::NoiseIdentity;
+use crate::sign::session::{PreparedClient, Target};
 use crate::sign::{AnyVerifyingKey, Signer};
 use crate::util::net::secure::{DEFAULT_RPC_RESPONSE_LIMIT, EncryptedSocket, wire_message_size};
 use crate::util::net::tungstenite::reqwest_transport;
@@ -76,15 +76,17 @@ pub async fn legacy(client: &Client, url: Url) -> Result<BoxWebSocket, Error> {
 /// Returns the verified peer and socket after completed encrypted admission.
 pub async fn connect(
     client: &Client,
-    identity: NoiseIdentity,
+    signer: &Signer,
     url: Url,
     address: &str,
+    target: Target,
     headers: HeaderMap,
 ) -> Result<(AnyVerifyingKey, EncryptedSocket), Error> {
     let url = session_url(url, address)?;
     admit(
-        identity,
+        signer,
         address,
+        target,
         upgrade(
             client,
             url,
@@ -96,14 +98,16 @@ pub async fn connect(
 }
 
 pub(crate) async fn admit(
-    identity: NoiseIdentity,
+    signer: &Signer,
     address: &str,
+    target: Target,
     upgrade: impl Future<Output = Result<BoxWebSocket, Error>>,
 ) -> Result<(AnyVerifyingKey, EncryptedSocket), Error> {
+    let prepared = PreparedClient::new(signer, address, target).await?;
     let limit = NonZeroUsize::new(DEFAULT_RPC_RESPONSE_LIMIT).unwrap();
     tokio::time::timeout(CONNECT_TIMEOUT, async {
         let socket = upgrade.await?;
-        EncryptedSocket::initiate(socket, identity, &prologue(address), limit).await
+        EncryptedSocket::initiate(socket, prepared, limit).await
     })
     .await
     .with_kind(ErrorKind::Network)?
@@ -126,8 +130,8 @@ pub async fn call(
     params: Value,
 ) -> Result<Value, RpcError> {
     let body = request_body(method, params)?;
-    let identity = NoiseIdentity::new(signer).await?;
-    let (_, mut socket) = connect(client, identity, websocket_url, address, headers).await?;
+    let (_, mut socket) =
+        connect(client, signer, websocket_url, address, Target::Rpc, headers).await?;
     request(&mut socket, body).await
 }
 

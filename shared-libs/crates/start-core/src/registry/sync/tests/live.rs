@@ -1,7 +1,7 @@
 use super::*;
-use crate::middleware::auth::session::{prologue, session_url};
+use crate::middleware::auth::session::session_url;
 use crate::middleware::auth::signature::AUTH_SIG_HEADER;
-use crate::sign::noise::NoiseIdentity;
+use crate::sign::session::Target;
 use crate::sign::{AnySigningKey, Signer};
 use crate::util::net::secure::EncryptedSocket;
 use crate::util::net::tungstenite::transport;
@@ -15,17 +15,17 @@ fn signer() -> Signer {
 pub(super) async fn encrypted_server(
     socket: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
 ) -> EncryptedSocket {
-    let identity = NoiseIdentity::new(&Signer::Key(AnySigningKey::Ed25519(
+    let identity = Signer::Key(AnySigningKey::Ed25519(
         ed25519_dalek::SigningKey::from_bytes(&[72; 32]),
-    )))
-    .await
-    .unwrap();
+    ));
     let (_, socket) = EncryptedSocket::accept(
         transport(socket),
-        identity,
-        &prologue("registry.test"),
+        &identity,
+        "registry.test",
         std::num::NonZeroUsize::new(1024 * 1024).unwrap(),
-        Some(signer().verifying_key().await.unwrap()),
+        &Target::Rpc,
+        Some(&signer().verifying_key().await.unwrap()),
+        |_| async { Ok(()) },
     )
     .await
     .unwrap();
@@ -37,10 +37,8 @@ pub(super) async fn native_connection(
     signer: &Signer,
 ) -> (Result<EncryptedSocket, Error>, NonDetachingJoinHandle<()>) {
     let (client, task) = crate::registry::context::test_utils::socks_client(registry).await;
-    let identity = NoiseIdentity::new(signer).await.unwrap();
     (
-        super::super::connection::connect(&client, registry, identity, http::HeaderMap::new())
-            .await,
+        super::super::connection::connect(&client, registry, signer, http::HeaderMap::new()).await,
         task,
     )
 }
@@ -105,7 +103,7 @@ async fn one_socket_demultiplexes_large_dumps_and_interleaved_revisions() {
                 assert_eq!(request.uri().path(), "/catalog/ws/rpc");
                 let query: BTreeMap<String, String> =
                     serde_urlencoded::from_str(request.uri().query().unwrap()).unwrap();
-                assert_eq!(query["noise"], "1");
+                assert_eq!(query["secure"], "1");
                 assert_eq!(query["context"], "registry.test");
                 Ok(response)
             },
@@ -234,11 +232,7 @@ fn session_negotiation_preserves_endpoints_and_binds_the_shared_profile() {
     .unwrap();
     assert_eq!(
         target.as_str(),
-        "wss://registry.test:8443/catalog/ws/rpc?keep=value&noise=1&context=registry.test"
-    );
-    assert_eq!(
-        prologue("registry.test"),
-        b"Start-RPC-Noise v1\0registry.test"
+        "wss://registry.test:8443/catalog/ws/rpc?keep=value&secure=1&context=registry.test"
     );
     let target = session_url("ws://[::1]:5959/ws/rpc".parse().unwrap(), "[::1]").unwrap();
     let query: BTreeMap<String, String> = target

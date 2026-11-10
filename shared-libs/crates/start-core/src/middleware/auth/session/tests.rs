@@ -10,21 +10,49 @@ use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuation, WebSock
 use crate::sign::AnySigningKey;
 use crate::util::net::secure::tests::raw_socket;
 
-async fn scope() -> (SecureSession, Signer) {
+struct ScopeOwner {
+    _context: crate::registry::context::RegistryContext,
+    _directory: tempfile::TempDir,
+}
+
+async fn scope() -> (SecureSession, Signer, ScopeOwner) {
     let signer: Signer = AnySigningKey::generate().into();
+    let directory = tempfile::tempdir().unwrap();
+    let peer = signer.verifying_key().await.unwrap();
+    let context =
+        crate::registry::context::test_context(directory.path().into(), peer.clone()).await;
     let scope = SecureSession {
-        peer: signer.verifying_key().await.unwrap(),
+        peer,
         address: "localhost".into(),
-        server_identity: AnySigningKey::generate().into(),
+        server_identity: context.server_identity().unwrap(),
+        replay_check: context.replay_check(),
     };
-    (scope, signer)
+    (
+        scope,
+        signer,
+        ScopeOwner {
+            _directory: directory,
+            _context: context,
+        },
+    )
 }
 
 async fn connect(url: &str, signer: &Signer) -> EncryptedSocket {
+    let guid = Url::parse(url)
+        .unwrap()
+        .path()
+        .rsplit('/')
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let prepared =
+        crate::sign::session::PreparedClient::new(signer, "localhost", Target::Continuation(guid))
+            .await
+            .unwrap();
     EncryptedSocket::initiate(
         raw_socket(url).await,
-        NoiseIdentity::new(signer).await.unwrap(),
-        &prologue("localhost"),
+        prepared,
         NonZeroUsize::new(64 * 1024 * 1024).unwrap(),
     )
     .await
@@ -34,7 +62,7 @@ async fn connect(url: &str, signer: &Signer) -> EncryptedSocket {
 
 #[tokio::test]
 async fn secured_public_continuations_preserve_exact_plaintext_budget() {
-    let (scope, signer) = scope().await;
+    let (scope, signer, _owner) = scope().await;
     let (url, _server) = serve(RpcContinuation::ws(
         WebSocketPolicy::Public,
         Some(scope),
@@ -63,7 +91,7 @@ async fn secured_public_continuations_preserve_exact_plaintext_budget() {
 
 #[tokio::test]
 async fn secured_authenticated_continuations_preserve_text_and_binary_bulk() {
-    let (scope, signer) = scope().await;
+    let (scope, signer, _owner) = scope().await;
     let (url, _server) = serve(RpcContinuation::ws(
         WebSocketPolicy::Authenticated,
         Some(scope),
@@ -90,7 +118,7 @@ async fn secured_authenticated_continuations_preserve_text_and_binary_bulk() {
 
 #[tokio::test]
 async fn revocation_cancels_the_pending_encrypted_handshake_before_callback() {
-    let (scope, signer) = scope().await;
+    let (scope, _signer, _owner) = scope().await;
     let open = Arc::new(OpenAuthedContinuations::new());
     let called = Arc::new(AtomicBool::new(false));
     let observer = called.clone();
@@ -106,14 +134,7 @@ async fn revocation_cancels_the_pending_encrypted_handshake_before_callback() {
     ))
     .await;
     let mut raw = raw_socket(&url).await;
-    let identity = NoiseIdentity::new(&signer).await.unwrap();
-    let mut state = identity.initiator(&prologue("localhost")).unwrap();
-    let mut message = vec![0; 1024];
-    let length = state.write_message(&[], &mut message).unwrap();
-    let mut framed = (length as u16).to_be_bytes().to_vec();
-    framed.extend_from_slice(&message[..length]);
-    raw.send(Message::Binary(framed.into())).await.unwrap();
-    assert!(matches!(raw.next().await, Some(Ok(Message::Binary(_)))));
+    raw.send(Message::Binary(vec![0].into())).await.unwrap();
     open.kill(&"client");
     assert!(!matches!(
         tokio::time::timeout(Duration::from_secs(3), raw.next())

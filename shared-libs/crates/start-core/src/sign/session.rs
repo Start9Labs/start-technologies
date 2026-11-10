@@ -12,6 +12,7 @@ use zeroize::Zeroizing;
 use super::commitment::request::{RequestCommitment, RequestProof};
 use super::{AnyVerifyingKey, Signer};
 use crate::prelude::*;
+use crate::rpc_continuations::Guid;
 use crate::util::serde::Base64;
 
 const PROTOCOL: &str = "Start-RPC-Session";
@@ -21,6 +22,16 @@ const NONCE_BYTES: usize = 12;
 pub(crate) const MAX_HANDSHAKE_BYTES: usize = 1024;
 pub(crate) const TAG_BYTES: usize = 16;
 const MAX_RECORDS_PER_KEY: u64 = 1 << 32;
+
+/// Logical admission intent, independent of deployment prefixes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Target {
+    /// The shared JSON-RPC channel.
+    Rpc,
+    /// Redemption of this continuation, not another known capability.
+    Continuation(Guid),
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,6 +53,7 @@ struct Message {
 enum Hello {
     Client {
         ephemeral: Base64<[u8; 32]>,
+        target: Target,
     },
     Server {
         ephemeral: Base64<[u8; 32]>,
@@ -118,13 +130,14 @@ pub struct PreparedClient {
 
 impl PreparedClient {
     /// Uses a fresh DH key and request commitment for every connection.
-    pub async fn new(signer: &Signer, context: &str) -> Result<Self, Error> {
+    pub async fn new(signer: &Signer, context: &str, target: Target) -> Result<Self, Error> {
         let secret = ephemeral();
         let message = encode(
             signer,
             context,
             Hello::Client {
                 ephemeral: Base64(PublicKey::from(&secret).to_bytes()),
+                target,
             },
         )
         .await?;
@@ -169,10 +182,12 @@ impl PreparedClient {
 }
 
 /// Authenticates a client and applies the caller's replay policy before responding.
+/// The expected target comes from the accepting route, not the client's claim.
 pub async fn accept<F, Fut>(
     signer: &Signer,
     context: &str,
     request: &[u8],
+    expected_target: &Target,
     expected_peer: Option<&AnyVerifyingKey>,
     accept_nonce: F,
 ) -> Result<(AnyVerifyingKey, Vec<u8>, SessionCipher), Error>
@@ -180,10 +195,18 @@ where
     F: FnOnce(RequestCommitment) -> Fut,
     Fut: Future<Output = Result<(), Error>>,
 {
-    let (Hello::Client { ephemeral: remote }, proof) = decode(request, context).await? else {
+    let (
+        Hello::Client {
+            ephemeral: remote,
+            target,
+        },
+        proof,
+    ) = decode(request, context).await?
+    else {
         return Err(invalid());
     };
-    if expected_peer.is_some_and(|expected| expected != &proof.signer) {
+    if &target != expected_target || expected_peer.is_some_and(|expected| expected != &proof.signer)
+    {
         return Err(invalid());
     }
     let secret = ephemeral();
@@ -331,6 +354,8 @@ pub(crate) fn wire_profile() -> serde_json::Value {
         "clientKeyInfo": Side::Client.key_info(), "serverKeyInfo": Side::Server.key_info(),
         "aadPrefix": protocol_label(), "tagBytes": TAG_BYTES, "maxRecordsPerKey": MAX_RECORDS_PER_KEY,
         "keyBytes": CIPHER_KEY_BYTES, "nonceBytes": NONCE_BYTES,
+        "directions": { "client": Side::Client.code(), "server": Side::Server.code() },
+        "rpcTarget": Target::Rpc,
     })
 }
 

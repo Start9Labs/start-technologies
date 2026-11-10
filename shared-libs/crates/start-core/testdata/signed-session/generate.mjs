@@ -85,7 +85,7 @@ const serverDh = await dh(serverPrivate)
 const clientIdentity = await identity(31)
 const serverIdentity = await identity(32)
 const client = await signed(
-  { role: 'client', ephemeral: b64(clientDh.public) },
+  { role: 'client', ephemeral: b64(clientDh.public), target: 'rpc' },
   clientIdentity,
   0xffffffffffffffffn,
 )

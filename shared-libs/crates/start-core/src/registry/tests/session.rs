@@ -5,10 +5,13 @@ use axum::extract::ws::Message as LogicalMessage;
 use axum::routing::get;
 
 use super::*;
-use crate::middleware::auth::session::{RpcSessionUpgrader, prologue};
-use crate::sign::noise::NoiseIdentity;
+use crate::middleware::auth::session::RpcSessionUpgrader;
+use crate::sign::session::{PreparedClient, Target};
 use crate::util::net::secure::EncryptedSocket;
 use crate::util::net::secure::tests::raw_socket;
+
+#[path = "session_admission.rs"]
+mod admission;
 
 async fn session_server(ctx: RegistryContext) -> (Url, NonDetachingJoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -31,11 +34,20 @@ fn ws_url(url: &Url, path: &str) -> String {
 }
 
 pub(super) async fn encrypted(url: &str, signer: &Signer) -> EncryptedSocket {
-    let identity = NoiseIdentity::new(signer).await.unwrap();
+    let path = Url::parse(url).unwrap();
+    let target = path
+        .path()
+        .rsplit('/')
+        .next()
+        .and_then(crate::rpc_continuations::Guid::from)
+        .map(Target::Continuation)
+        .unwrap_or(Target::Rpc);
+    let prepared = PreparedClient::new(signer, "127.0.0.1", target)
+        .await
+        .unwrap();
     EncryptedSocket::initiate(
         raw_socket(url).await,
-        identity,
-        &prologue("127.0.0.1"),
+        prepared,
         NonZeroUsize::new(64 * 1024 * 1024).unwrap(),
     )
     .await
@@ -66,7 +78,7 @@ async fn call(socket: &mut EncryptedSocket, request: Value) -> Value {
 }
 
 fn secure_url(url: &Url) -> String {
-    ws_url(url, "secure?noise=1&context=127.0.0.1")
+    ws_url(url, "secure?secure=1&context=127.0.0.1")
 }
 
 async fn subscribe(socket: &mut EncryptedSocket) -> String {
@@ -208,7 +220,7 @@ async fn secure_origin_guid_rejects_plaintext_and_different_authenticated_peer()
         .await
         .unwrap();
     plain
-        .send(Message::Text("not a Noise handshake".into()))
+        .send(Message::Text("not an encrypted handshake".into()))
         .await
         .unwrap();
     assert!(!matches!(
@@ -218,14 +230,22 @@ async fn secure_origin_guid_rejects_plaintext_and_different_authenticated_peer()
         Some(Ok(Message::Text(_)))
     ));
     let guid = subscribe(&mut socket).await;
-    let mut other = encrypted(&ws_url(&url, &format!("ws/rpc/{guid}")), &signer(33)).await;
-    let _ = other.send(LogicalMessage::Text("probe".into())).await;
-    assert!(!matches!(
-        tokio::time::timeout(Duration::from_secs(3), other.next())
-            .await
-            .unwrap(),
-        Some(Ok(LogicalMessage::Text(_)))
-    ));
+    let prepared = PreparedClient::new(
+        &signer(33),
+        "127.0.0.1",
+        Target::Continuation(guid.parse().unwrap()),
+    )
+    .await
+    .unwrap();
+    assert!(
+        EncryptedSocket::initiate(
+            raw_socket(&ws_url(&url, &format!("ws/rpc/{guid}"))).await,
+            prepared,
+            NonZeroUsize::new(1024).unwrap(),
+        )
+        .await
+        .is_err()
+    );
     let guid = subscribe(&mut socket).await;
     let mut same = encrypted(&ws_url(&url, &format!("ws/rpc/{guid}")), &reader).await;
     revoke_private_reader(&ctx).await;
@@ -267,19 +287,20 @@ async fn legacy_created_guid_remains_plain_for_the_same_key_used_securely() {
 async fn handshake_rejects_unconfigured_name_and_mismatched_transcript_context() {
     let (_temp, ctx, admin, _reader, _) = fixture().await;
     let (url, _task) = session_server(ctx).await;
-    let mut raw = raw_socket(&ws_url(&url, "secure?noise=1&context=unconfigured.test")).await;
+    let mut raw = raw_socket(&ws_url(&url, "secure?secure=1&context=unconfigured.test")).await;
     assert!(!matches!(
         tokio::time::timeout(Duration::from_secs(3), raw.next())
             .await
             .unwrap(),
         Some(Ok(LogicalMessage::Text(_)))
     ));
-    let identity = NoiseIdentity::new(&admin).await.unwrap();
+    let prepared = PreparedClient::new(&admin, "wrong.test", Target::Rpc)
+        .await
+        .unwrap();
     assert!(
         EncryptedSocket::initiate(
             raw_socket(&secure_url(&url)).await,
-            identity,
-            &prologue("wrong.test"),
+            prepared,
             NonZeroUsize::new(1024).unwrap()
         )
         .await

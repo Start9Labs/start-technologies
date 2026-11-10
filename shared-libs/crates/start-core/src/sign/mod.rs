@@ -17,10 +17,10 @@ use crate::util::serde::{Der64, DerEncoding, deserialize_from_str};
 pub mod commitment;
 pub mod compat;
 pub mod ed25519;
+pub mod fingerprint;
 pub(crate) mod gpg;
 pub mod gpg_agent;
 pub mod instance;
-pub mod noise;
 pub mod session;
 
 /// Signatures serialized in signer order.

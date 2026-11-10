@@ -27,7 +27,8 @@ length and a JSON envelope with exactly `payload` and `proof` fields:
 Each body has `protocol: "Start-RPC-Session"`, `version: 1` and a `hello` object:
 
 1. Client → server: `hello` has `role: "client"` and `ephemeral`, the Base64-encoded
-   32-byte X25519 ephemeral public key.
+   32-byte X25519 ephemeral public key, and `target`. Ordinary RPC uses `"rpc"`;
+   a continuation uses `{"continuation":"<guid>"}` with its existing GUID.
 2. Server → client: `hello` has `role: "server"`, its own `ephemeral`, and
    `clientHello`, the Base64-encoded SHA-256 digest of the exact client envelope
    bytes, excluding the record length prefix.
@@ -43,7 +44,10 @@ message. This binds the server response to the client's identity, proof and DH k
 The receiving server verifies the client proof and exact body before applying the
 existing `accept_nonce` clock/replay policy. RPC admission and secure-origin GUID
 redemption use the same policy owner. A GUID also requires the original client
-identity. Replay checking must not retain the RPC context, cache clock/enrollment
+identity. Admission checks the signed logical target before consuming a nonce or
+invoking a callback. An RPC hello cannot authorize a continuation, or one GUID
+another. This remains required for server-first streams; no client RPC is needed
+to start those callbacks. Deployment prefixes do not change logical targets. Replay checking must not retain the RPC context, cache clock/enrollment
 state or introduce a second nonce cache. `SignatureAuthContext` owns that policy;
 `RequestReplayCheck` acquires it weakly through `SecureRpcContext::replay_check`.
 Creating an unpolled check must not keep its authentication owner alive.

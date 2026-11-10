@@ -37,7 +37,7 @@ Defined in `shared-libs/crates/start-core/src/registry/mod.rs`:
 
 - `GET /` — HTTP 307 to `https://marketplace.start9.com/?registry=<encoded-origin>`, using the request authority and `X-Forwarded-Proto` (plain HTTP by default).
 - `POST /rpc/{*path}` — JSON-RPC through outer CORS and shared `Auth` (local + signature auth) and `DeviceInfoMiddleware`.
-- `GET /ws/rpc` — multiplexed JSON-RPC and opt-in `rpcstream` responses with the same middleware. `noise=1&context=<configured-hostname>` selects authenticated encrypted admission; live method authorization uses the completed session's peer identity. Without that opt-in, legacy per-message proofs remain available; an upgrade-body signature does not authenticate subsequent messages.
+- `GET /ws/rpc` — multiplexed JSON-RPC and opt-in `rpcstream` responses with the same middleware. `secure=1&context=<configured-hostname>` selects signed ephemeral-DH admission; live method authorization uses the completed session's peer identity. Missing opt-in retains legacy/public behavior; an upgrade-body signature does not authenticate subsequent messages.
 - `GET /ws/rpc/{*path}` — WebSocket RPC continuations, keyed by a `Guid`.
 - `/rest/rpc/{*path}` — REST continuation channel (e.g. large asset streams), keyed by a `Guid`.
 - `GET /icons/{*path}` — a package or dependency icon from the content-addressed store. Access follows the visibility of packages referencing the bytes. Public references permit immutable public caching; private-only references require an authorized request signature and return `private, no-store`. Package versions refer to an icon by this path, `blake3/<hash>.<ext>`; `DeviceInfoMiddleware` inlines it as a data URL for StartOS before 0.4.0.3.
@@ -70,16 +70,19 @@ its subscription; ordinary calls and other subscriptions retain the connection.
 
 StartOS opens one `/ws/rpc` socket per registry, multiplexing `/index` and the selected OS source's
 `/index/os` subscriptions. StartOS's account developer key authenticates its client identity during
-Noise admission; initiating messages include the client's OS version inside that encrypted channel.
+signed-DH admission; initiating messages include the client's OS version inside that encrypted channel.
 Responses permit 64 MiB logical payloads independently of request limits; wire allowances include
 framing and ciphertext overhead.
 Package queries and registry information use the backend cache; browser sessions observe projected
 package and OS metadata through PatchDB. Subscriptions reconnect with jittered backoff and a fresh
 dump. Cached metadata remains available offline, with connection availability reported separately
 from registry configuration. Malformed saved source URLs are skipped independently without
-rewriting configured intent. Registries must support Noise admission and `rpcstream` subscriptions
-before deploying this client; the method name alone does not establish support. Configured registry
-hostnames must include the client's selected URL host. There is no native legacy transport fallback. Older clients can still call `db.subscribe` without opting in.
+rewriting configured intent. Streaming requires signed-DH admission, `rpcstream` and a configured
+hostname covering the client's selected URL host. An upgrade HTTP 404/405/501 selects signed HTTP
+polling every 15 minutes, using full/all-revision `package.get`, `info` and the selected `os.index`.
+Each cycle rechecks upgrade support. Successful polling marks observed availability; failed polls
+retain caches without granting trust. Redirects, authorization errors and failed encrypted admission
+never select fallback. Older clients can still call `db.subscribe` without opting in.
 
 Both transports read filtered in-memory replicas and use bounded, 32-revision JSON queues. Slow
 subscribers close rather than skip patches. Replicas are created lazily for each effective reader

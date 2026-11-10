@@ -8,14 +8,14 @@ use axum::extract::ws::{CloseFrame, Message, Utf8Bytes};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use rpc_toolkit::BoxWebSocket;
-use snow::{HandshakeState, TransportState};
 use tokio_util::codec::length_delimited::Builder;
 use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 
 use super::{MAX_CLOSE_PAYLOAD_BYTES, MAX_CLOSE_REASON_BYTES};
 use crate::prelude::*;
-use crate::sign::AnyVerifyingKey;
-use crate::sign::noise::{NoiseIdentity, authenticate_peer};
+use crate::sign::commitment::request::RequestCommitment;
+use crate::sign::session::{PreparedClient, SessionCipher, Target};
+use crate::sign::{AnyVerifyingKey, Signer};
 
 /// Logical RPC response limit before framing and encryption overhead.
 pub const DEFAULT_RPC_RESPONSE_LIMIT: usize = 64 * 1024 * 1024;
@@ -23,10 +23,10 @@ pub const DEFAULT_RPC_RESPONSE_LIMIT: usize = 64 * 1024 * 1024;
 const RECORD_HEADER: usize = 2;
 const MESSAGE_HEADER: usize = 4;
 const MESSAGE_KIND: usize = 1;
-const TAG_SIZE: usize = 16;
+const TAG_SIZE: usize = crate::sign::session::TAG_BYTES;
 const MAX_RECORD: usize = u16::MAX as usize;
 const MAX_PLAINTEXT: usize = MAX_RECORD - TAG_SIZE;
-const MAX_HANDSHAKE_RECORD: usize = 1024;
+const MAX_HANDSHAKE_RECORD: usize = crate::sign::session::MAX_HANDSHAKE_BYTES;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(num_enum::IntoPrimitive, num_enum::TryFromPrimitive)]
 #[repr(u8)]
@@ -141,8 +141,8 @@ pub fn wire_chunk_size(logical: NonZeroUsize) -> NonZeroUsize {
     wire_message_size(logical).min(NonZeroUsize::new(MAX_RECORD + RECORD_HEADER).unwrap())
 }
 
-struct NoiseCodec {
-    state: TransportState,
+struct SessionCodec {
+    state: SessionCipher,
     incoming: NonZeroUsize,
     record_reader: LengthDelimitedCodec,
     record_writer: LengthDelimitedCodec,
@@ -153,8 +153,8 @@ struct NoiseCodec {
     plaintext: Vec<u8>,
 }
 
-impl NoiseCodec {
-    fn new(state: TransportState, incoming: NonZeroUsize, records: BytesMut) -> Self {
+impl SessionCodec {
+    fn new(state: SessionCipher, incoming: NonZeroUsize, records: BytesMut) -> Self {
         Self {
             state,
             incoming,
@@ -278,11 +278,7 @@ impl HandshakeRecords {
         }
     }
 
-    async fn receive(
-        &mut self,
-        socket: &mut BoxWebSocket,
-        state: &mut HandshakeState,
-    ) -> Result<Vec<u8>, Error> {
+    async fn receive(&mut self, socket: &mut BoxWebSocket) -> Result<Vec<u8>, Error> {
         loop {
             if let Some(mut record) = self
                 .decoder
@@ -290,12 +286,7 @@ impl HandshakeRecords {
                 .map_err(|_| invalid_message())?
             {
                 record.advance(RECORD_HEADER);
-                let mut payload = vec![0; MAX_HANDSHAKE_RECORD];
-                let length = state
-                    .read_message(&record, &mut payload)
-                    .with_kind(ErrorKind::InvalidSignature)?;
-                payload.truncate(length);
-                return Ok(payload);
+                return Ok(record.to_vec());
             }
             match socket.next().await {
                 Some(Ok(Message::Binary(bytes))) => self.buffered.extend_from_slice(&bytes),
@@ -314,19 +305,11 @@ impl HandshakeRecords {
     }
 }
 
-async fn send_handshake(
-    socket: &mut BoxWebSocket,
-    state: &mut HandshakeState,
-    payload: &[u8],
-) -> Result<(), Error> {
-    let mut output = vec![0; MAX_HANDSHAKE_RECORD];
-    let length = state
-        .write_message(payload, &mut output)
-        .with_kind(ErrorKind::InvalidSignature)?;
+async fn send_handshake(socket: &mut BoxWebSocket, payload: &[u8]) -> Result<(), Error> {
     let mut record = BytesMut::new();
     framing(RECORD_HEADER, MAX_HANDSHAKE_RECORD)
         .new_codec()
-        .encode(Bytes::copy_from_slice(&output[..length]), &mut record)
+        .encode(Bytes::copy_from_slice(payload), &mut record)
         .map_err(|_| invalid_message())?;
     socket
         .send(Message::Binary(record.freeze()))
@@ -334,12 +317,12 @@ async fn send_handshake(
         .with_kind(ErrorKind::Network)
 }
 
-/// An authenticated Noise channel retaining WebSocket text, binary and control semantics.
+/// An authenticated channel retaining WebSocket text, binary and control semantics.
 /// Close results are encrypted; physical controls carry no application close reason.
 /// Peer authentication does not enroll keys or grant RPC roles.
 pub struct EncryptedSocket {
     inner: BoxWebSocket,
-    codec: NoiseCodec,
+    codec: SessionCodec,
     pending: VecDeque<Message>,
     closing: Option<Message>,
     fused: bool,
@@ -348,70 +331,65 @@ pub struct EncryptedSocket {
 impl EncryptedSocket {
     fn new(
         inner: BoxWebSocket,
-        state: HandshakeState,
+        state: SessionCipher,
         records: HandshakeRecords,
         incoming: NonZeroUsize,
-    ) -> Result<Self, Error> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             inner,
-            codec: NoiseCodec::new(
-                state
-                    .into_transport_mode()
-                    .with_kind(ErrorKind::Authorization)?,
-                incoming,
-                records.buffered,
-            ),
+            codec: SessionCodec::new(state, incoming, records.buffered),
             pending: VecDeque::new(),
             closing: None,
             fused: false,
-        })
+        }
     }
 
     /// Completes the initiator exchange before returning the verified remote identity.
     /// Preparing the identity separately keeps interactive signing outside the handshake deadline.
     pub async fn initiate(
         mut socket: BoxWebSocket,
-        identity: NoiseIdentity,
-        prologue: &[u8],
+        prepared: PreparedClient,
         incoming: NonZeroUsize,
     ) -> Result<(AnyVerifyingKey, Self), Error> {
         tokio::time::timeout(HANDSHAKE_TIMEOUT, async move {
-            let mut state = identity.initiator(prologue)?;
             let mut records = HandshakeRecords::new();
-            send_handshake(&mut socket, &mut state, &[]).await?;
-            let certificate = records.receive(&mut socket, &mut state).await?;
-            let peer = authenticate_peer(&state, &certificate)?;
-            send_handshake(&mut socket, &mut state, identity.certificate()).await?;
-            Ok((peer, Self::new(socket, state, records, incoming)?))
+            send_handshake(&mut socket, prepared.message()).await?;
+            let response = records.receive(&mut socket).await?;
+            let (peer, state) = prepared.finish(&response).await?;
+            Ok((peer, Self::new(socket, state, records, incoming)))
         })
         .await
         .with_kind(ErrorKind::Network)?
     }
 
     /// Completes the responder exchange, optionally restricting the admitted peer identity.
-    pub async fn accept(
+    pub async fn accept<F, Fut>(
         mut socket: BoxWebSocket,
-        identity: NoiseIdentity,
-        prologue: &[u8],
+        signer: &Signer,
+        context: &str,
         incoming: NonZeroUsize,
-        expected: Option<AnyVerifyingKey>,
-    ) -> Result<(AnyVerifyingKey, Self), Error> {
+        target: &Target,
+        expected: Option<&AnyVerifyingKey>,
+        accept_nonce: F,
+    ) -> Result<(AnyVerifyingKey, Self), Error>
+    where
+        F: FnOnce(RequestCommitment) -> Fut,
+        Fut: Future<Output = Result<(), Error>>,
+    {
         tokio::time::timeout(HANDSHAKE_TIMEOUT, async move {
-            let mut state = identity.responder(prologue)?;
             let mut records = HandshakeRecords::new();
-            if !records.receive(&mut socket, &mut state).await?.is_empty() {
-                return Err(invalid_message());
-            }
-            send_handshake(&mut socket, &mut state, identity.certificate()).await?;
-            let certificate = records.receive(&mut socket, &mut state).await?;
-            let peer = authenticate_peer(&state, &certificate)?;
-            if expected.as_ref().is_some_and(|expected| expected != &peer) {
-                return Err(Error::new(
-                    eyre!("{}", t!("util.net.secure.unexpected-peer")),
-                    ErrorKind::Authorization,
-                ));
-            }
-            Ok((peer, Self::new(socket, state, records, incoming)?))
+            let request = records.receive(&mut socket).await?;
+            let (peer, response, state) = crate::sign::session::accept(
+                signer,
+                context,
+                &request,
+                target,
+                expected,
+                accept_nonce,
+            )
+            .await?;
+            send_handshake(&mut socket, &response).await?;
+            Ok((peer, Self::new(socket, state, records, incoming)))
         })
         .await
         .with_kind(ErrorKind::Network)?

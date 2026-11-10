@@ -132,7 +132,7 @@ Metadata tags are processed by different middleware. Group them logically:
 | ------------ | ------- | ------------------------------------------------------- |
 | `get_signer` | `false` | Inject signer public key into params as `__Auth_signer` |
 
-`SignatureAuth` reads the peer from completed Noise admission and applies current enrollment,
+`SignatureAuth` reads the peer from completed signed-DH admission and applies current enrollment,
 permissions and hooks on each call. HTTP compatibility uses `X-Start-Auth-Sig` over the
 captured body, including the original MCP HTTP body, with the existing clock and nonce checks.
 `SignatureHeader::sign` and TypeScript `auth.signRequest` produce those headers. WebSocket

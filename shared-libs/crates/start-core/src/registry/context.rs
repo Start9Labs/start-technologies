@@ -258,12 +258,12 @@ pub(crate) async fn call_cli(
     super::compat::pem_wire(&mut params);
     if let Some(signer) = ctx.rpc_signer(&headers)? {
         let body = client::request_body(method, params)?;
-        let identity = crate::sign::noise::NoiseIdentity::new(&signer).await?;
         let (peer, mut socket) = client::connect(
             &ctx.websocket_client,
-            identity,
+            &signer,
             client::websocket_url(url.clone())?,
             address,
+            crate::sign::session::Target::Rpc,
             headers,
         )
         .await?;
@@ -362,8 +362,7 @@ pub(crate) async fn call(
     params: Value,
 ) -> Result<Value, RpcError> {
     use crate::middleware::auth::session::client as session_client;
-    let identity = crate::sign::noise::NoiseIdentity::new(signer).await?;
-    match super::sync::connection::connect(client, registry, identity, headers.clone()).await {
+    match super::sync::connection::connect(client, registry, signer, headers.clone()).await {
         Ok(mut socket) => {
             session_client::request(&mut socket, session_client::request_body(method, params)?)
                 .await

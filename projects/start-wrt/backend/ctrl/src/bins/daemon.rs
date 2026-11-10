@@ -66,12 +66,11 @@ async fn ws_continuation_handler(
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
 
-    let handler = match continuations::Guid::from(&guid) {
-        Some(guid) => continuations.get_ws_handler(&guid).await,
-        None => None,
+    let Some(guid) = continuations::Guid::from(&guid) else {
+        return StatusCode::NOT_FOUND.into_response();
     };
-    match handler {
-        Some(handler) => handler.on_upgrade(ws),
+    match continuations.get_ws_handler(&guid).await {
+        Some(handler) => handler.on_upgrade(ws, guid),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }

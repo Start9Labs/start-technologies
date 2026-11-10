@@ -193,7 +193,7 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
                             bad_request()
                         }
                         Some(guid) => match ctx.rpc_continuations.get_ws_handler(&guid).await {
-                            Some(cont) => cont.on_upgrade(ws),
+                            Some(cont) => cont.on_upgrade(ws, guid),
                             _ => not_found(),
                         },
                     }

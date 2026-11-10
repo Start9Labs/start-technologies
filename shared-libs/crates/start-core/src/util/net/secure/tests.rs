@@ -59,39 +59,35 @@ fn browser_profile_preserves_native_framing_and_close_validation() {
 }
 use crate::sign::{AnySigningKey, Signer};
 
-const PROLOGUE: &[u8] = b"Start-RPC-Noise test v1\0";
+const CONTEXT: &str = "server.test";
 
 fn signer(seed: u8) -> Signer {
     AnySigningKey::Ed25519(ed25519_dalek::SigningKey::from_bytes(&[seed; 32])).into()
 }
 
-async fn states() -> (TransportState, TransportState) {
-    let a = NoiseIdentity::new(&signer(41)).await.unwrap();
-    let b = NoiseIdentity::new(&signer(42)).await.unwrap();
-    let mut client = a.initiator(PROLOGUE).unwrap();
-    let mut server = b.responder(PROLOGUE).unwrap();
-    let mut wire = vec![0; MAX_RECORD];
-    let mut payload = vec![0; MAX_RECORD];
-    let length = client.write_message(&[], &mut wire).unwrap();
-    server.read_message(&wire[..length], &mut payload).unwrap();
-    let length = server.write_message(b.certificate(), &mut wire).unwrap();
-    let decoded = client.read_message(&wire[..length], &mut payload).unwrap();
-    authenticate_peer(&client, &payload[..decoded]).unwrap();
-    let length = client.write_message(a.certificate(), &mut wire).unwrap();
-    let decoded = server.read_message(&wire[..length], &mut payload).unwrap();
-    authenticate_peer(&server, &payload[..decoded]).unwrap();
-    (
-        client.into_transport_mode().unwrap(),
-        server.into_transport_mode().unwrap(),
+async fn states() -> (SessionCipher, SessionCipher) {
+    let prepared = PreparedClient::new(&signer(41), CONTEXT, Target::Rpc)
+        .await
+        .unwrap();
+    let (_, response, server) = crate::sign::session::accept(
+        &signer(42),
+        CONTEXT,
+        prepared.message(),
+        &Target::Rpc,
+        None,
+        |_| async { Ok(()) },
     )
+    .await
+    .unwrap();
+    (prepared.finish(&response).await.unwrap().1, server)
 }
 
-async fn codecs(incoming: usize) -> (NoiseCodec, NoiseCodec) {
+async fn codecs(incoming: usize) -> (SessionCodec, SessionCodec) {
     let (a, b) = states().await;
     let limit = NonZeroUsize::new(incoming).unwrap();
     (
-        NoiseCodec::new(a, limit, BytesMut::new()),
-        NoiseCodec::new(b, limit, BytesMut::new()),
+        SessionCodec::new(a, limit, BytesMut::new()),
+        SessionCodec::new(b, limit, BytesMut::new()),
     )
 }
 
@@ -107,7 +103,7 @@ fn wire_bytes(messages: VecDeque<Message>) -> Bytes {
     bytes.freeze()
 }
 
-fn encrypted_plaintext(sender: &mut NoiseCodec, plaintext: &[u8]) -> Bytes {
+fn encrypted_plaintext(sender: &mut SessionCodec, plaintext: &[u8]) -> Bytes {
     let mut wire = vec![0; MAX_RECORD];
     let length = sender.state.write_message(plaintext, &mut wire).unwrap();
     let mut output = BytesMut::new();
@@ -266,8 +262,8 @@ async fn keepalive_controls_remain_ordinary_websocket_messages() {
 #[tokio::test]
 async fn large_outgoing_messages_are_independent_of_incoming_budget() {
     let (a, b) = states().await;
-    let mut sender = NoiseCodec::new(a, NonZeroUsize::new(1024).unwrap(), BytesMut::new());
-    let mut receiver = NoiseCodec::new(
+    let mut sender = SessionCodec::new(a, NonZeroUsize::new(1024).unwrap(), BytesMut::new());
+    let mut receiver = SessionCodec::new(
         b,
         NonZeroUsize::new(64 * 1024 * 1024).unwrap(),
         BytesMut::new(),
@@ -413,7 +409,7 @@ async fn existing_send_deadline_covers_stalled_encrypted_transport() {
     let (state, _) = states().await;
     let encrypted = EncryptedSocket {
         inner: Box::new(StalledSocket),
-        codec: NoiseCodec::new(state, NonZeroUsize::new(1024).unwrap(), BytesMut::new()),
+        codec: SessionCodec::new(state, NonZeroUsize::new(1024).unwrap(), BytesMut::new()),
         pending: VecDeque::new(),
         closing: None,
         fused: false,
@@ -429,7 +425,7 @@ async fn close_result_reuses_the_existing_send_deadline() {
     let (state, _) = states().await;
     let encrypted = EncryptedSocket {
         inner: Box::new(StalledSocket),
-        codec: NoiseCodec::new(state, NonZeroUsize::new(1024).unwrap(), BytesMut::new()),
+        codec: SessionCodec::new(state, NonZeroUsize::new(1024).unwrap(), BytesMut::new()),
         pending: VecDeque::new(),
         closing: None,
         fused: false,
@@ -448,13 +444,14 @@ async fn close_result_reuses_the_existing_send_deadline() {
 
 #[tokio::test(start_paused = true)]
 async fn silent_handshake_is_bounded() {
-    let identity = NoiseIdentity::new(&signer(42)).await.unwrap();
     let result = EncryptedSocket::accept(
         Box::new(StalledSocket),
-        identity,
-        PROLOGUE,
+        &signer(42),
+        CONTEXT,
         NonZeroUsize::new(1024).unwrap(),
+        &Target::Rpc,
         None,
+        |_| async { Ok(()) },
     )
     .await;
     assert!(matches!(
@@ -489,19 +486,18 @@ impl WebSocketUpgrader<PeerContext> for SecureUpgrade {
         options: WebSocketOptions,
     ) -> BoxFuture<'static, Result<UpgradedWebSocket<PeerContext>, axum::Error>> {
         async move {
-            let identity = NoiseIdentity::new(&signer(42))
-                .await
-                .map_err(|error| axum::Error::new(error.source))?;
             let expected = signer(41)
                 .verifying_key()
                 .await
                 .map_err(|error| axum::Error::new(error.source))?;
             let (peer, socket) = EncryptedSocket::accept(
                 Box::new(socket),
-                identity,
-                PROLOGUE,
+                &signer(42),
+                CONTEXT,
                 options.max_message_size,
-                Some(expected),
+                &Target::Rpc,
+                Some(&expected),
+                |_| async { Ok(()) },
             )
             .await
             .map_err(|error| axum::Error::new(error.source))?;
@@ -582,13 +578,14 @@ async fn closing_server(
         let done = done.clone();
         async move {
             upgrade.on_upgrade(move |socket| async move {
-                let identity = NoiseIdentity::new(&signer(42)).await.unwrap();
                 let (_, socket) = EncryptedSocket::accept(
                     Box::new(socket),
-                    identity,
-                    PROLOGUE,
+                    &signer(42),
+                    CONTEXT,
                     NonZeroUsize::new(1024).unwrap(),
+                    &Target::Rpc,
                     None,
+                    |_| async { Ok(()) },
                 )
                 .await
                 .unwrap();
@@ -612,7 +609,7 @@ async fn closing_server(
 }
 
 #[tokio::test]
-async fn actual_close_result_keeps_application_outcomes_inside_noise() {
+async fn actual_close_result_keeps_application_outcomes_encrypted() {
     for result in [
         Ok("private close-result success"),
         Err("private close-result failure"),
@@ -627,8 +624,9 @@ async fn actual_close_result_keeps_application_outcomes_inside_noise() {
         });
         let (_, mut socket) = EncryptedSocket::initiate(
             Box::new(raw),
-            NoiseIdentity::new(&signer(41)).await.unwrap(),
-            PROLOGUE,
+            PreparedClient::new(&signer(41), CONTEXT, Target::Rpc)
+                .await
+                .unwrap(),
             NonZeroUsize::new(1).unwrap(),
         )
         .await
@@ -720,11 +718,12 @@ pub(crate) async fn raw_socket(url: &str) -> BoxWebSocket {
 }
 
 async fn connect(url: &str, seed: u8) -> EncryptedSocket {
-    let identity = NoiseIdentity::new(&signer(seed)).await.unwrap();
+    let prepared = PreparedClient::new(&signer(seed), CONTEXT, Target::Rpc)
+        .await
+        .unwrap();
     let (peer, socket) = EncryptedSocket::initiate(
         raw_socket(url).await,
-        identity,
-        PROLOGUE,
+        prepared,
         NonZeroUsize::new(64 * 1024 * 1024).unwrap(),
     )
     .await
@@ -800,17 +799,21 @@ async fn completed_channel_rejects_plaintext_before_rpc_dispatch() {
 #[tokio::test]
 async fn expected_peer_restriction_rejects_different_authenticated_identity() {
     let (url, context, _server) = server().await;
-    let mut socket = connect(&url, 43).await;
-    let _ = socket
-        .send(Message::Text(
-            json!({"jsonrpc":"2.0","id":1,"method":"peer"})
-                .to_string()
-                .into(),
-        ))
-        .await;
-    let received = tokio::time::timeout(Duration::from_secs(3), socket.next())
+    let prepared = PreparedClient::new(&signer(43), CONTEXT, Target::Rpc)
         .await
         .unwrap();
-    assert!(!matches!(received, Some(Ok(Message::Text(_)))));
+    assert!(
+        tokio::time::timeout(
+            Duration::from_secs(3),
+            EncryptedSocket::initiate(
+                raw_socket(&url).await,
+                prepared,
+                NonZeroUsize::new(1024).unwrap(),
+            )
+        )
+        .await
+        .unwrap()
+        .is_err()
+    );
     assert_eq!(context.calls.load(Ordering::SeqCst), 0);
 }

@@ -1,6 +1,6 @@
 # StartWRT API Contract
 
-Complete RPC API contract for the StartWRT backend. RPC uses **JSON-RPC 2.0** over signature-authenticated Noise WebSocket sessions at `/ws/rpc`; HTTP POST `/rpc/v1` remains for anonymous bootstrap and compatibility clients. Request and response types are defined in Rust.
+Complete RPC API contract for the StartWRT backend. RPC uses **JSON-RPC 2.0** over signed ephemeral-DH WebSocket sessions at `/ws/rpc`; HTTP POST `/rpc/v1` remains for anonymous bootstrap and compatibility clients. Request and response types are defined in Rust.
 
 **Goal:** The frontend should never touch UCI files, run shell commands, or read raw files. Every operation goes through a purpose-built RPC method. The backend handles all UCI manipulation, service restarts, and system queries internally.
 
@@ -50,20 +50,20 @@ enum Protocol {
 
 ## 1. Auth
 
-A request is authorized through a verified Noise peer or a compatibility credential:
+A request is authorized through a verified encrypted peer or a compatibility credential:
 
-- **Encrypted session** — `noise=1&context=<selected-server-name>` opts into the shared standard Noise exchange. The nonextractable browser key signs its prepared static-DH certificate before connection/response deadlines. The selected name follows the existing hostname/ingress policy. Following messages carry no per-request proof; enrollment/expiry/revocation and login hooks remain live per call. Rejected admission never falls back to plaintext. Secure-origin GUIDs require a fresh exchange proving the same peer; legacy-origin GUIDs retain their original contract. Application close results are encrypted; physical EOF is not an authenticated update result.
+- **Encrypted session** — `secure=1&context=<selected-server-name>` opts into the shared two-message signed ephemeral-DH exchange. Generic request-commitment proofs authenticate independent client/server signing schemes; X25519, HKDF-SHA256 and AES-256-GCM use maintained standard implementations. Client signing finishes before connection/response deadlines without exporting its private key. The selected name follows the existing hostname/ingress policy. Following messages carry no per-request proof; enrollment/expiry/revocation and login hooks remain live per call. Rejected admission never falls back to plaintext. Secure-origin GUIDs require a fresh exchange proving the same peer and signed intent for that GUID; RPC and GUID admission share the live nonce/clock owner; legacy-origin GUIDs retain their original contract. Application close results are encrypted; physical EOF is not an authenticated update result.
 
-- **HTTP signature** — `X-Start-Auth-Sig` from a key enrolled through `auth.login`. Compatibility clients use `@start9labs/start-core`'s `auth.signRequest` over captured raw body bytes. It binds the body, timestamp, nonce and addressed server identity (`router.lan`, `router.local`, any non-loopback address on the router's interfaces, or the enabled DDNS hostname; a loopback address only from a loopback peer). Timestamps must fall within 60 seconds of the router's clock once ntpd reports valid time; a replayed nonce is rejected.
+- **HTTP signature** — `X-Start-Auth-Sig` from a key enrolled through `auth.login`. Compatibility clients use `@start9labs/start-core`'s `auth.signRequest` over captured raw body bytes. It binds the body, timestamp, nonce and addressed server identity (`router.lan`, `router.local`, any non-loopback address on the router's interfaces, or the enabled DDNS hostname; a loopback address only from a loopback peer). Timestamps must fall within 30 seconds of the router's clock once ntpd reports valid time; a replayed nonce is rejected.
 - **Local auth token** — `Authorization: Bearer <token>`, where the token is the contents of `/run/startwrt/rpc.authcookie` (regenerated at daemon start, mode `0640`, `root:root`). `startwrt-cli` sends it only to loopback hosts.
 
-Keyed CLI calls use the shared Noise transport with `~/.startwrt/id.key.pem`; certificate preparation precedes transport deadlines. Local-token calls and calls without an initialized key retain HTTP. A malformed key or rejected encrypted admission does not fall back to plaintext. CLI log/update commands return GUID responses for separate continuation consumers.
+Keyed CLI calls use the shared encrypted transport with `~/.startwrt/id.key.pem`; fresh hello signing precedes transport deadlines. Local-token calls and calls without an initialized key retain HTTP. A malformed key or rejected encrypted admission does not fall back to plaintext. CLI log/update commands return GUID responses for separate continuation consumers.
 
 Endpoints registered with `authenticated: false` metadata answer without either. Enrolled keys persist in `/etc/startwrt/auth.db`, which sysupgrade keeps, and stay valid until revoked by `auth.logout`, `auth.session.kill`, or a password change, or until 24 hours after their `loggedIn` time, however recently they were used. The microSD wizard's Keep settings reflash does not carry them over. An expired key is rejected as unauthorized (code 34) on its next request. Before ntpd reports valid time the check judges age alone; afterwards a `loggedIn` more than 5 minutes in the future also counts as expired. The sweep that unenrolls expired keys runs hourly and waits for ntpd to report valid time.
 
 ### `auth.login`
 
-The call must prove the key it enrolls through Noise admission or a compatibility request signature. A valid local auth token rejects the call as unnecessary. Before first-time setup sets a password, every login fails with Uninitialized (code 40).
+The call must prove the key it enrolls through encrypted admission or a compatibility request signature. A valid local auth token rejects the call as unnecessary. Before first-time setup sets a password, every login fails with Uninitialized (code 40).
 
 ```rust
 #[derive(Deserialize)]
@@ -2338,17 +2338,17 @@ struct InjectedDnsRecord {
 Every RPC method above uses JSON-RPC 2.0 through **`/ws/rpc`** for keyed browser/CLI sessions, or **`POST /rpc/v1`** for anonymous and compatibility callers.
 The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 
-| Route                                              | Method                                  | Auth                                                                    | Purpose                                                                                       |
-| -------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `/ws/rpc`                                          | WebSocket GET / HTTP/2 extended CONNECT | Noise admission + live authorization (see § 1)                          | Encrypted JSON-RPC for keyed browser and CLI calls                                            |
-| `/rpc/v1`                                          | POST                                    | Request signature or local token (see § 1)                              | JSON-RPC 2.0 compatibility/anonymous endpoint                                                 |
-| `/rest/rpc/{guid}`                                 | GET/POST                                | GUID capability (one-shot)                                              | RPC continuation: binary download (backup, diagnostics) / upload (restore); 64 MiB body limit |
-| `/ws/rpc/{guid}`                                   | WebSocket                               | GUID capability; secure origin requires fresh same-peer Noise admission | Streaming: update progress (`system.update`), live logs (`system.logs-follow`)                |
-| `/api/setup/flash`                                 | POST                                    | None (setup wizard)                                                     | Streams NDJSON `SetupEvent` progress while flashing the eMMC; one flash at a time             |
-| `/static/local-root-ca.crt`                        | GET                                     | None                                                                    | Root CA certificate download                                                                  |
-| `/static/local-root-ca.mobileconfig`               | GET                                     | None                                                                    | Root CA as an Apple configuration profile                                                     |
-| `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any                                     | LuCI's own                                                              | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`        |
-| everything else                                    | any                                     | None                                                                    | Embedded web UI                                                                               |
+| Route                                              | Method                                  | Auth                                                                                   | Purpose                                                                                       |
+| -------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `/ws/rpc`                                          | WebSocket GET / HTTP/2 extended CONNECT | Signed-DH admission + live authorization (see § 1)                                     | Encrypted JSON-RPC for keyed browser and CLI calls                                            |
+| `/rpc/v1`                                          | POST                                    | Request signature or local token (see § 1)                                             | JSON-RPC 2.0 compatibility/anonymous endpoint                                                 |
+| `/rest/rpc/{guid}`                                 | GET/POST                                | GUID capability (one-shot)                                                             | RPC continuation: binary download (backup, diagnostics) / upload (restore); 64 MiB body limit |
+| `/ws/rpc/{guid}`                                   | WebSocket                               | GUID capability; secure origin requires fresh same-peer admission signed for that GUID | Streaming: update progress (`system.update`), live logs (`system.logs-follow`)                |
+| `/api/setup/flash`                                 | POST                                    | None (setup wizard)                                                                    | Streams NDJSON `SetupEvent` progress while flashing the eMMC; one flash at a time             |
+| `/static/local-root-ca.crt`                        | GET                                     | None                                                                                   | Root CA certificate download                                                                  |
+| `/static/local-root-ca.mobileconfig`               | GET                                     | None                                                                                   | Root CA as an Apple configuration profile                                                     |
+| `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any                                     | LuCI's own                                                                             | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`        |
+| everything else                                    | any                                     | None                                                                                   | Embedded web UI                                                                               |
 
 ---
 

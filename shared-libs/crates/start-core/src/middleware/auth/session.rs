@@ -9,13 +9,12 @@ use rpc_toolkit::{UpgradedWebSocket, WebSocketOptions, WebSocketUpgrader};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use super::signature::{SignatureAuthContext, request_identities};
+use super::signature::{RequestReplayCheck, SignatureAuthContext, request_identities};
 use crate::prelude::*;
-use crate::sign::noise::NoiseIdentity;
+use crate::rpc_continuations::Guid;
+use crate::sign::session::{Target, VERSION};
 use crate::sign::{AnyVerifyingKey, Signer};
 use crate::util::net::secure::{EncryptedSocket, wire_message_size};
-
-const VERSION: u8 = 1;
 
 /// Immutable provenance of a completed encrypted exchange, without cached enrollment or roles.
 #[derive(Clone)]
@@ -23,6 +22,7 @@ pub struct SecureSession {
     peer: AnyVerifyingKey,
     address: InternedString,
     server_identity: Signer,
+    replay_check: RequestReplayCheck,
 }
 
 impl SecureSession {
@@ -40,14 +40,16 @@ impl SecureSession {
         &self,
         socket: rpc_toolkit::BoxWebSocket,
         incoming: NonZeroUsize,
+        guid: &Guid,
     ) -> Result<EncryptedSocket, Error> {
-        let identity = NoiseIdentity::new(&self.server_identity).await?;
         let (_, socket) = EncryptedSocket::accept(
             socket,
-            identity,
-            &prologue(&self.address),
+            &self.server_identity,
+            &self.address,
             incoming,
-            Some(self.peer.clone()),
+            &Target::Continuation(guid.clone()),
+            Some(&self.peer),
+            |commitment| self.replay_check.check(commitment),
         )
         .await?;
         Ok(socket)
@@ -69,15 +71,10 @@ pub trait SecureRpcContext: SignatureAuthContext + Clone {
     fn with_secure_session(self, session: SecureSession) -> Self;
 }
 
-/// Binds the Noise transcript to the selected, ingress-validated server name.
-pub fn prologue(address: &str) -> Vec<u8> {
-    format!("Start-RPC-Noise v{VERSION}\0{address}").into_bytes()
-}
-
 /// Selects encrypted admission while preserving other endpoint parameters.
 pub fn session_url(mut url: Url, address: &str) -> Result<Url, Error> {
     let query = serde_urlencoded::to_string(Negotiation {
-        noise: Some(VERSION),
+        secure: Some(VERSION),
         context: Some(address.into()),
     })
     .with_kind(ErrorKind::Serialization)?;
@@ -91,25 +88,26 @@ pub fn session_url(mut url: Url, address: &str) -> Result<Url, Error> {
 
 /// Browser transport settings generated from the native protocol owners.
 pub fn browser_profile() -> serde_json::Value {
+    let mut identity = crate::sign::session::wire_profile();
+    identity["fingerprint"] = crate::sign::fingerprint::wire_profile();
     serde_json::json!({
-        "identity": crate::sign::noise::wire_profile(),
+        "identity": identity,
         "transport": crate::util::net::secure::browser_profile(),
         "negotiation": Negotiation {
-            noise: Some(VERSION),
+            secure: Some(VERSION),
             context: Some("".into()),
         },
-        "prologuePrefix": String::from_utf8(prologue("")).unwrap(),
         "rpcPath": RpcSessionUpgrader::PATH,
     })
 }
 
 #[derive(Deserialize, Serialize)]
 struct Negotiation {
-    noise: Option<u8>,
+    secure: Option<u8>,
     context: Option<InternedString>,
 }
 
-/// Opts into encrypted admission with `noise=1&context=<server-name>`; missing opt-in stays legacy.
+/// Opts into encrypted admission with `secure=1&context=<server-name>`; missing opt-in stays legacy.
 pub struct RpcSessionUpgrader;
 
 impl RpcSessionUpgrader {
@@ -172,7 +170,7 @@ impl<C: SecureRpcContext> WebSocketUpgrader<C> for RpcSessionUpgrader {
             let axum::extract::Query(negotiation) =
                 axum::extract::Query::<Negotiation>::try_from_uri(request.uri())
                     .map_err(axum::Error::new)?;
-            match negotiation.noise {
+            match negotiation.secure {
                 None => {
                     return Ok(UpgradedWebSocket {
                         context,
@@ -200,15 +198,15 @@ impl<C: SecureRpcContext> WebSocketUpgrader<C> for RpcSessionUpgrader {
             let server_identity = context
                 .server_identity()
                 .map_err(|error| axum::Error::new(error.source))?;
-            let identity = NoiseIdentity::new(&server_identity)
-                .await
-                .map_err(|error| axum::Error::new(error.source))?;
+            let replay_check = context.replay_check();
             let (peer, socket) = EncryptedSocket::accept(
                 Box::new(socket),
-                identity,
-                &prologue(&address),
+                &server_identity,
+                &address,
                 options.max_message_size,
+                &Target::Rpc,
                 None,
+                |commitment| replay_check.check(commitment),
             )
             .await
             .map_err(|error| axum::Error::new(error.source))?;
@@ -216,6 +214,7 @@ impl<C: SecureRpcContext> WebSocketUpgrader<C> for RpcSessionUpgrader {
                 peer,
                 address,
                 server_identity,
+                replay_check,
             });
             Ok(UpgradedWebSocket {
                 context: Arc::new(scoped),

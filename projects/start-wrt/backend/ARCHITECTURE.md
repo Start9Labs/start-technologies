@@ -4,7 +4,7 @@ Rust crates powering the StartWRT router daemon and CLI. Three crates: `ctrl` (R
 
 ## Transport
 
-HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 uses optional Noise admission at `/ws/rpc`, with `POST /rpc/v1` compatibility, via [rpc-toolkit](../../../shared-libs/crates/rpc-toolkit). `rpc.rs` composes one dispatch/middleware stack, adds typed firmware metadata to replies and retains the CORS-exposed HTTP firmware header. Live authorization uses the verified connection peer; request-signature/local-token compatibility stays in `start-core` (see [auth.rs](#authrs--authentication)).
+HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 uses optional signed-DH admission at `/ws/rpc`, with `POST /rpc/v1` compatibility, via [rpc-toolkit](../../../shared-libs/crates/rpc-toolkit). `rpc.rs` composes one dispatch/middleware stack, adds typed firmware metadata to replies and retains the CORS-exposed HTTP firmware header. Live authorization uses the verified connection peer; request-signature/local-token compatibility stays in `start-core` (see [auth.rs](#authrs--authentication)).
 
 Additional routes:
 
@@ -36,7 +36,7 @@ pub trait CtrlContext: Context + Clone {
 ```
 
 - **`ServerContext`**: always reads `/etc/config/`, always reloads services. Holds `start-core`'s `RpcContinuations` for long-running operations and the auth state (enrolled keys, nonce cache). `ServerContext::default()` carries an in-memory auth state that enrolls nothing; only the daemon opens `/etc/startwrt/auth.db`. The daemon loads its separate server identity from `/etc/startwrt/rpc-identity.pem` through `start-core`'s instance-key loader; sysupgrade keeps that private file. In-memory contexts generate an ephemeral server identity. Optional immutable `SecureSession` provenance belongs to each context clone rather than the shared auth state; WebSocket continuation creators capture it independently of revocation and resource policy.
-- **`CliContext`**: configurable root (`--config-root`), calls the daemon when needed. The identity at `~/.startwrt/id.key.pem` certifies Noise admission through the shared opaque signer before transport deadlines. Local tokens take precedence and remain HTTP, restricted to loopback hosts; missing keys retain anonymous HTTP and malformed keys fail closed. The ordinary HTTP client retains its network policy; an HTTP/1-only, nonredirecting upgrade client uses the shared encrypted transport. Login retry and command output stay in the CLI owner. Log/update commands return their existing GUID values rather than consuming the streams; browser continuation owners redeem secure-origin GUIDs through fresh same-peer exchanges.
+- **`CliContext`**: configurable root (`--config-root`), calls the daemon when needed. The identity at `~/.startwrt/id.key.pem` signs a fresh ephemeral-DH hello through the shared opaque signer before transport deadlines. Local tokens take precedence and remain HTTP, restricted to loopback hosts; missing keys retain anonymous HTTP and malformed keys fail closed. The ordinary HTTP client retains its network policy; an HTTP/1-only, nonredirecting upgrade client uses the shared encrypted transport. Login retry and command output stay in the CLI owner. Log/update commands return their existing GUID values rather than consuming the streams; browser continuation owners redeem secure-origin GUIDs through fresh same-peer exchanges.
 
 The single binary `startwrt` uses `MultiExecutable` to dispatch based on the symlink name (`startwrt-ctrld` or `startwrt-cli`) or the first argument.
 
@@ -181,7 +181,7 @@ Handler metadata:
 - `login: true` — enroll the signing key by password; reject enrollment when a valid local auth token is supplied
 - `get_signer: true` — inject the signing key as `__Auth_signer`
 
-Every other call needs an enrolled Noise peer, a valid compatibility signature or the local token; the peer address grants nothing. A secure-origin GUID requires fresh same-peer encrypted admission, independently of live revocation and resource budgets.
+Every other call needs an enrolled encrypted peer, a valid compatibility signature or the local token; the peer address grants nothing. A secure-origin GUID requires fresh same-peer encrypted admission signed for that GUID, independently of live revocation and resource budgets.
 
 Returns RPC error code 34 on auth failure (frontend auto-logs out).
 

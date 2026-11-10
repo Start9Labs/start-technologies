@@ -278,7 +278,7 @@ pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
                 move |x::Path(guid): x::Path<Guid>,
                       ws: axum::extract::ws::WebSocketUpgrade| async move {
                     match AsRef::<RpcContinuations>::as_ref(&ctx).get_ws_handler(&guid).await {
-                        Some(cont) => cont.on_upgrade(ws),
+                        Some(cont) => cont.on_upgrade(ws, guid),
                         _ => not_found(),
                     }
                 }

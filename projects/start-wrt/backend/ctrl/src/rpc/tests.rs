@@ -5,8 +5,8 @@ use std::time::Duration;
 use axum::extract::ws::Message;
 use futures::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use startos::middleware::auth::session::{prologue, session_url, RpcSessionUpgrader};
-use startos::sign::noise::NoiseIdentity;
+use startos::middleware::auth::session::{session_url, RpcSessionUpgrader};
+use startos::sign::session::{PreparedClient, Target};
 use startos::sign::{AnySigningKey, Signer};
 use startos::util::future::NonDetachingJoinHandle;
 use startos::util::net::secure::EncryptedSocket;
@@ -125,7 +125,9 @@ async fn http_retains_firmware_header_and_authentication_errors() {
 async fn encrypted_rpc_uses_live_auth_and_authenticated_firmware_metadata() {
     let (url, ctx, _task, _) = server().await;
     let signer: Signer = AnySigningKey::generate().into();
-    let identity = NoiseIdentity::new(&signer).await.unwrap();
+    let prepared = PreparedClient::new(&signer, "router.lan", Target::Rpc)
+        .await
+        .unwrap();
     let mut url = session_url(url.join(RpcSessionUpgrader::PATH).unwrap(), "router.lan").unwrap();
     url.set_scheme("ws").unwrap();
     let mut request = url.as_str().into_client_request().unwrap();
@@ -135,8 +137,7 @@ async fn encrypted_rpc_uses_live_auth_and_authenticated_firmware_metadata() {
     let (socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
     let (_, mut socket) = EncryptedSocket::initiate(
         startos::util::net::tungstenite::transport(socket),
-        identity,
-        &prologue("router.lan"),
+        prepared,
         NonZeroUsize::new(1024 * 1024).unwrap(),
     )
     .await

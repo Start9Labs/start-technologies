@@ -98,7 +98,7 @@ async fn rpc(url: &Url, method: &str, params: Value, signer: Option<&Signer>) ->
 
 async fn registry_socket(url: &Url, signer: &Signer) -> crate::util::net::secure::EncryptedSocket {
     let url = url
-        .join("ws/rpc?noise=1&context=127.0.0.1")
+        .join("ws/rpc?secure=1&context=127.0.0.1")
         .unwrap()
         .to_string()
         .replacen("http:", "ws:", 1);

@@ -35,7 +35,7 @@ use crate::util::sync::SyncMutex;
 pub const AUTH_SIG_HEADER: &str = "X-Start-Auth-Sig";
 
 /// RPC-metadata fields understood by [`SignatureAuth`] when layered over an
-/// [`RpcContext`]. `login` marks enrollment: Noise admission or a request
+/// [`RpcContext`]. `login` marks enrollment: encrypted admission or a request
 /// signature proves possession of the key, independently of prior registration.
 #[derive(Deserialize)]
 pub struct LoginMetadata {

@@ -5,7 +5,7 @@ use url::Url;
 
 use crate::prelude::*;
 use crate::sign::AnyVerifyingKey;
-use crate::sign::noise::fingerprint;
+use crate::sign::fingerprint::fingerprint;
 use crate::util::io::{AtomicFile, maybe_read_file_to_string};
 
 fn target(url: &Url, address: &str) -> Result<Url, Error> {

@@ -12,7 +12,7 @@ use crate::middleware::auth::session::{RpcSessionUpgrader, client};
 use crate::middleware::auth::signature::SigningContext;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
-use crate::sign::noise::NoiseIdentity;
+use crate::sign::session::Target;
 use crate::util::net::tungstenite::native_messages;
 
 #[cfg(test)]
@@ -34,12 +34,12 @@ impl CliWebSocketContext for RpcContext {
             headers.insert(AUTHORIZATION, auth);
         }
         if let Some(signer) = ctx.rpc_signer(&headers)? {
-            let identity = NoiseIdentity::new(&signer).await?;
             let (_, socket) = client::connect(
                 &ctx.websocket_client,
-                identity,
+                &signer,
                 url,
                 ctx.host_identity.as_deref().unwrap_or_default(),
+                Target::Continuation(guid),
                 HeaderMap::new(),
             )
             .await?;

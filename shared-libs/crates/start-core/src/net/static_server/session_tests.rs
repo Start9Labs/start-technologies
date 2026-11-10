@@ -7,11 +7,11 @@ use tokio_tungstenite::tungstenite::Message as WireMessage;
 use url::Url;
 
 use super::session_rpc_router;
-use crate::middleware::auth::session::{RpcSessionUpgrader, prologue, session_url};
+use crate::middleware::auth::session::{RpcSessionUpgrader, session_url};
 use crate::registry::context::RegistryContext;
 use crate::registry::registry_server;
 use crate::sign::Signer;
-use crate::sign::noise::NoiseIdentity;
+use crate::sign::session::{PreparedClient, Target};
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::net::secure::EncryptedSocket;
 use crate::util::net::secure::tests::raw_socket;
@@ -92,11 +92,17 @@ async fn encrypted(url: &Url, path: &str, signer: &Signer) -> EncryptedSocket {
     let mut url = url.join(path).unwrap();
     url.set_scheme("ws").unwrap();
     let url = session_url(url, "127.0.0.1").unwrap();
-    let identity = NoiseIdentity::new(signer).await.unwrap();
+    let target = if path == RpcSessionUpgrader::PATH {
+        Target::Rpc
+    } else {
+        Target::Continuation(path.rsplit('/').next().unwrap().parse().unwrap())
+    };
+    let prepared = PreparedClient::new(signer, "127.0.0.1", target)
+        .await
+        .unwrap();
     EncryptedSocket::initiate(
         raw_socket(url.as_str()).await,
-        identity,
-        &prologue("127.0.0.1"),
+        prepared,
         NonZeroUsize::new(64 * 1024 * 1024).unwrap(),
     )
     .await
