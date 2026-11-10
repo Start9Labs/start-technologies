@@ -260,7 +260,12 @@ pub fn wan<C: CtrlContext + Clone>() -> ParentHandler<C> {
         )
         .subcommand(
             "uplink-ipv4",
-            from_fn_async_local(uplink_ipv4::<C>).no_display(),
+            from_fn_async_local(uplink_ipv4::<C>).with_custom_display_fn::<C, _>(|_, ip| {
+                if let Some(ip) = ip {
+                    println!("{ip}");
+                }
+                Ok(())
+            }),
         )
         .subcommand(
             "mac-get",
@@ -1009,12 +1014,9 @@ pub(crate) fn sync_ddns_source(cfgs: &mut uciedit::Configs) -> Result<bool, Erro
     Ok(changed)
 }
 
-/// Prints the IPv4 address of the uplink carrying traffic, for ddns-scripts.
-pub async fn uplink_ipv4<C: CtrlContext>(_ctx: C) -> Result<(), Error> {
-    if let Some(ip) = crate::system::get_wan_ipv4().await? {
-        println!("{ip}");
-    }
-    Ok(())
+/// The active uplink address is available without an Ethernet WAN interface.
+pub async fn uplink_ipv4<C: CtrlContext>(ctx: C) -> Result<Option<String>, Error> {
+    Ok(ctx.wan_ipv4_addrs().first().map(ToString::to_string))
 }
 
 /// The DNS options of an interface, written without touching its other options.
@@ -1336,6 +1338,43 @@ mod tests {
         fn effectful(&self) -> bool {
             false
         }
+    }
+
+    #[tokio::test]
+    async fn active_uplink_endpoint_needs_no_wan_port_config() {
+        #[derive(Clone)]
+        struct UplinkOnlyContext(PathBuf);
+
+        impl Context for UplinkOnlyContext {
+            fn runtime(&self) -> Option<Arc<Runtime>> {
+                None
+            }
+        }
+
+        impl CtrlContext for UplinkOnlyContext {
+            fn uci_root(&self) -> PathBuf {
+                self.0.clone()
+            }
+            fn effectful(&self) -> bool {
+                false
+            }
+            fn wan_ipv4_addrs(&self) -> Vec<std::net::Ipv4Addr> {
+                vec!["192.168.43.27".parse().unwrap()]
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = UplinkOnlyContext(dir.path().to_path_buf());
+        assert_eq!(
+            uplink_ipv4(ctx).await.unwrap(),
+            Some("192.168.43.27".into())
+        );
+        assert_eq!(
+            uplink_ipv4(TestContext(dir.path().to_path_buf()))
+                .await
+                .unwrap(),
+            None
+        );
     }
 
     /// The wan6 proto and `auto` option as written to disk.

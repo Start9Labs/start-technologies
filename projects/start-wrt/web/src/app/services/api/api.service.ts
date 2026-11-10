@@ -88,6 +88,7 @@ export abstract class ApiService {
   abstract lanIpv4Set(params: LanIpv4SetRequest): Promise<null>
   abstract lanIpv6Get(): Promise<LanIpv6Response>
   abstract lanIpv6Set(params: LanIpv6SetRequest): Promise<null>
+  abstract wanUplinkIpv4(): Promise<RpcReturnType<Api, 'wan.uplink-ipv4'>>
   abstract wanIpv4Get(): Promise<WanIpv4Response>
   abstract wanIpv4Set(params: WanIpv4SetRequest): Promise<null>
   abstract wanIpv6Get(): Promise<WanIpv6Response>

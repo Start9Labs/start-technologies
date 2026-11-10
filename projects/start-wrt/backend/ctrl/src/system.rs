@@ -315,6 +315,15 @@ pub(crate) struct UplinkAddrs {
     pub(crate) all: Vec<Ipv4Addr>,
 }
 
+impl UplinkAddrs {
+    fn from_dump(dump: &serde_json::Value) -> Self {
+        Self {
+            active: uplink_ipv4_addrs(dump),
+            all: every_uplink_ipv4_addr(dump),
+        }
+    }
+}
+
 /// `None` when ubus is unavailable.
 pub(crate) fn read_uplink_ipv4_addrs() -> Option<UplinkAddrs> {
     let out = StdCommand::new("ubus")
@@ -325,10 +334,7 @@ pub(crate) fn read_uplink_ipv4_addrs() -> Option<UplinkAddrs> {
         return None;
     }
     let dump = serde_json::from_slice::<serde_json::Value>(&out.stdout).ok()?;
-    Some(UplinkAddrs {
-        active: uplink_ipv4_addrs(&dump),
-        all: every_uplink_ipv4_addr(&dump),
-    })
+    Some(UplinkAddrs::from_dump(&dump))
 }
 
 fn interface_ipv4_addrs(interface: &serde_json::Value) -> Vec<Ipv4Addr> {
@@ -536,12 +542,23 @@ fn remote_access_admits(
         })
 }
 
-/// Socket inodes of established SSH sessions to a WAN address from a source `admits` rejects.
+/// Remote Access tightening revokes SSH on standby uplinks too.
 fn rejected_wan_ssh_inodes(
     table: &str,
-    wan: &[IpAddr],
-    admits: impl Fn(IpAddr) -> bool,
+    mode: &str,
+    uplinks: &UplinkAddrs,
+    wan_ipv6s: &[Ipv6Addr],
 ) -> HashSet<u64> {
+    let wan: Vec<IpAddr> = uplinks
+        .all
+        .iter()
+        .copied()
+        .map(IpAddr::V4)
+        .chain(wan_ipv6s.iter().copied().map(IpAddr::V6))
+        .collect();
+    let admits = |source| {
+        remote_access_admits(mode, source, uplinks.active.first().copied(), wan_ipv6s)
+    };
     table
         .lines()
         .skip(1)
@@ -614,20 +631,11 @@ fn kill_dropbear_by_inodes(inodes: &HashSet<u64>) {
 }
 
 /// Ends WAN-side SSH sessions from sources the Remote Access mode no longer admits.
-fn kill_rejected_wan_ssh_sessions(mode: &str, wan_ipv4: Option<Ipv4Addr>, wan_ipv6s: &[Ipv6Addr]) {
-    let wan: Vec<IpAddr> = wan_ipv4
-        .map(IpAddr::V4)
-        .into_iter()
-        .chain(wan_ipv6s.iter().copied().map(IpAddr::V6))
-        .collect();
-    if wan.is_empty() {
-        return;
-    }
-    let admits = |source| remote_access_admits(mode, source, wan_ipv4, wan_ipv6s);
+fn kill_rejected_wan_ssh_sessions(mode: &str, uplinks: &UplinkAddrs, wan_ipv6s: &[Ipv6Addr]) {
     let mut inodes = HashSet::new();
     for table in ["/proc/net/tcp", "/proc/net/tcp6"] {
         if let Ok(content) = fs::read_to_string(table) {
-            inodes.extend(rejected_wan_ssh_inodes(&content, &wan, &admits));
+            inodes.extend(rejected_wan_ssh_inodes(&content, mode, uplinks, wan_ipv6s));
         }
     }
     if !inodes.is_empty() {
@@ -640,8 +648,15 @@ async fn reload_firewall(mode: &str, wan_ipv4: Option<Ipv4Addr>, wan_ipv6s: &[Ip
     let _ =
         crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("reload"))
             .await;
-    // Established sessions outlive the reload through conntrack.
-    kill_rejected_wan_ssh_sessions(mode, wan_ipv4, wan_ipv6s);
+    let uplinks = interface_dump()
+        .await
+        .as_ref()
+        .map(UplinkAddrs::from_dump)
+        .unwrap_or_else(|| UplinkAddrs {
+            active: wan_ipv4.into_iter().collect(),
+            all: wan_ipv4.into_iter().collect(),
+        });
+    kill_rejected_wan_ssh_sessions(mode, &uplinks, wan_ipv6s);
 }
 
 #[instrument(skip_all)]
@@ -1267,12 +1282,17 @@ mod tests {
         ]);
         let rejected = |mode: &str, wan: &str| {
             let wan_ip: Ipv4Addr = wan.parse().unwrap();
-            let mut inodes: Vec<u64> =
-                rejected_wan_ssh_inodes(&table, &[IpAddr::V4(wan_ip)], |src| {
-                    remote_access_admits(mode, src, Some(wan_ip), &[])
-                })
-                .into_iter()
-                .collect();
+            let mut inodes: Vec<u64> = rejected_wan_ssh_inodes(
+                &table,
+                mode,
+                &UplinkAddrs {
+                    active: vec![wan_ip],
+                    all: vec![wan_ip],
+                },
+                &[],
+            )
+            .into_iter()
+            .collect();
             inodes.sort();
             inodes
         };
@@ -1283,9 +1303,15 @@ mod tests {
         ]);
         let wan_ip: Ipv4Addr = "10.20.0.2".parse().unwrap();
         assert_eq!(
-            rejected_wan_ssh_inodes(&dual_stack, &[IpAddr::V4(wan_ip)], |src| {
-                remote_access_admits("default", src, Some(wan_ip), &[])
-            }),
+            rejected_wan_ssh_inodes(
+                &dual_stack,
+                "default",
+                &UplinkAddrs {
+                    active: vec![wan_ip],
+                    all: vec![wan_ip],
+                },
+                &[],
+            ),
             HashSet::from([8])
         );
         assert_eq!(rejected("default", "10.20.0.2"), vec![2]);
@@ -1293,11 +1319,38 @@ mod tests {
         let public_wan = proc_table(&[("203.0.113.5", 22, "10.20.0.50", "01", 6)]);
         let wan_ip: Ipv4Addr = "203.0.113.5".parse().unwrap();
         assert_eq!(
-            rejected_wan_ssh_inodes(&public_wan, &[IpAddr::V4(wan_ip)], |src| {
-                remote_access_admits("default", src, Some(wan_ip), &[])
-            }),
+            rejected_wan_ssh_inodes(
+                &public_wan,
+                "default",
+                &UplinkAddrs {
+                    active: vec![wan_ip],
+                    all: vec![wan_ip],
+                },
+                &[],
+            ),
             HashSet::from([6])
         );
+    }
+
+    #[test]
+    fn remote_access_tightening_revokes_both_ipv4_uplinks() {
+        let table = proc_table(&[
+            ("10.20.0.2", 22, "10.20.0.50", "01", 1),
+            ("192.168.43.27", 22, "192.168.43.50", "01", 2),
+            ("192.168.0.1", 22, "192.168.0.50", "01", 3),
+        ]);
+        for (wan_metric, wwan_metric) in [(10, 20), (20, 10)] {
+            let dump = serde_json::json!({ "interface": [
+                iface("wan", true, wan_metric, "10.20.0.2", true),
+                iface("wwan", true, wwan_metric, "192.168.43.27", true),
+            ] });
+            let uplinks = UplinkAddrs::from_dump(&dump);
+            assert_eq!(
+                rejected_wan_ssh_inodes(&table, "never", &uplinks, &[]),
+                HashSet::from([1, 2])
+            );
+            assert!(rejected_wan_ssh_inodes(&table, "always", &uplinks, &[]).is_empty());
+        }
     }
 
     #[test]
@@ -1307,12 +1360,14 @@ mod tests {
             ("fd00::1", 22, "2001:db8::5", "01", 2),
         ]);
         let rejected = |wan_ipv6s: &[Ipv6Addr]| {
-            let wan: Vec<IpAddr> = vec!["fd00::1".parse().unwrap()];
-            let mut inodes: Vec<u64> = rejected_wan_ssh_inodes(&table, &wan, |src| {
-                remote_access_admits("default", src, None, wan_ipv6s)
-            })
-            .into_iter()
-            .collect();
+            let uplinks = UplinkAddrs {
+                active: vec![],
+                all: vec![],
+            };
+            let mut inodes: Vec<u64> =
+                rejected_wan_ssh_inodes(&table, "default", &uplinks, wan_ipv6s)
+                    .into_iter()
+                    .collect();
             inodes.sort();
             inodes
         };

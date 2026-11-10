@@ -316,15 +316,15 @@ Internal endpoint, **not called from the frontend**. `startwrt-cli` runs it in
 its own process (it is not registered with `with_call_remote`), so the hook
 never reaches the daemon. Fired by the
 `/etc/hotplug.d/iface/99-startwrt-remote-access` hook (in `backend/hotplug/`)
-on `ifup`, `ifupdate`, and `ifdown` of `wan` or `wan6`.
+on `ifup`, `ifupdate`, and `ifdown` of `wan`, `wan6`, or `wwan`.
 
 ```rust
 // Request: {}
 // Response: null
 // Backend: re-applies the remote-access preference to the firewall against the
 // current WAN IPs, reloads the firewall, and kills WAN-side dropbear (SSH)
-// sessions from sources the mode no longer admits, so they don't survive a rule
-// change via conntrack ESTABLISHED state
+// sessions from sources the mode no longer admits, including sessions to a
+// standby uplink's address. Established sessions must not survive a tightening.
 ```
 
 ### `system.set-timezone`
@@ -668,12 +668,13 @@ of the uplink carrying traffic.
 
 ```rust
 // Request: {}
-// Response: null
+// Response: Option<String>
 ```
 
-Internal endpoint, **not called from the frontend**. Run from the CLI by
-ddns-scripts, it prints the IPv4 address of the uplink carrying traffic, or
-nothing while neither uplink has one.
+Returns the IPv4 address of the uplink carrying traffic, independent of whether
+an Ethernet WAN interface is configured. Published Ports and Inbound VPNs use
+it for their IPv4 endpoints. The CLI prints the bare address for ddns-scripts,
+or nothing while neither uplink has one.
 
 ---
 
@@ -2435,8 +2436,8 @@ point back on, and records why in `startwrt.wwan.reason`. A new or changed
 uplink stops after 30 s without connecting: `rejected` if wpa_supplicant saw
 the network at −75 dBm or better since, `unreachable` otherwise. An uplink that
 loses its connection stops as `rejected` once the network has refused it for
-120 s while seen at that signal within the last 90 s; an out-of-range or weak
-network is retried indefinitely. Sightings come from `ubus call
+120 s while seen at that signal within the last 90 s; losing those sightings
+resets the refusal timeout. An out-of-range or weak network is retried indefinitely. Sightings come from `ubus call
 wpa_supplicant.<ifname> control '{"command":"BSS RANGE=…"}'`.
 
 ### `wwan.get`
@@ -2627,7 +2628,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `wan.dns-set`                       | WAN             |                             |
 | `wan.ddns-get`                      | WAN             |                             |
 | `wan.ddns-set`                      | WAN             |                             |
-| `wan.uplink-ipv4`                   | WAN             | Internal, ddns-scripts      |
+| `wan.uplink-ipv4`                   | WAN             | Endpoints and ddns-scripts  |
 | `wwan.get`                          | Wireless WAN    |                             |
 | `wwan.scan`                         | Wireless WAN    |                             |
 | `wwan.connect`                      | Wireless WAN    |                             |

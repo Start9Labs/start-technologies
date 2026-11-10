@@ -1559,11 +1559,15 @@ export class MockApiService extends ApiService {
     device: 'eth1',
   }
 
+  async wanUplinkIpv4(): ReturnType<ApiService['wanUplinkIpv4']> {
+    const { state } = await this.wwanGet()
+    return state?.active ? state.address : this.mockWanIpv4.assigned_ip
+  }
+
   async wanIpv4Get(): Promise<WanIpv4Response> {
-    await pauseFor(250)
     return {
       ...structuredClone(this.mockWanIpv4),
-      uplink_ip: this.mockWanIpv4.assigned_ip,
+      uplink_ip: await this.wanUplinkIpv4(),
     }
   }
 

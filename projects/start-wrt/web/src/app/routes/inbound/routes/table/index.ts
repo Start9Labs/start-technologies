@@ -213,13 +213,13 @@ export default class InboundTable {
     const endpoints: VpnServerEndpoint[] = []
 
     const [ipv4, ipv6, ddns] = await Promise.all([
-      this.api.wanIpv4Get(),
+      this.api.wanUplinkIpv4(),
       this.api.wanIpv6Get(),
       this.api.wanDdnsGet(),
     ])
 
-    if (ipv4.uplink_ip) {
-      endpoints.push({ address: ipv4.uplink_ip, label: 'WAN IPv4' })
+    if (ipv4) {
+      endpoints.push({ address: ipv4, label: 'WAN IPv4' })
     }
     if (ipv6.mode !== 'disabled' && ipv6.assigned_ipv6) {
       endpoints.push({ address: ipv6.assigned_ipv6, label: 'WAN IPv6' })

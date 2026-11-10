@@ -362,6 +362,10 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'lan.ipv6-set', params })
   }
 
+  wanUplinkIpv4(): ReturnType<ApiService['wanUplinkIpv4']> {
+    return this.rpc.request({ method: 'wan.uplink-ipv4', params: {} })
+  }
+
   async wanIpv4Get(): Promise<WanIpv4Response> {
     return this.rpc.request({ method: 'wan.ipv4-get', params: {} })
   }

@@ -1224,9 +1224,10 @@ struct Attempt {
     since: Instant,
     /// When the network was last seen with usable signal after `since`.
     seen: Option<Instant>,
+    refused_since: Option<Instant>,
 }
 
-/// Decides when to give up on an uplink, from one observation every interval.
+/// An out-of-range interval does not count toward the refusal timeout.
 #[derive(Default)]
 struct Tracker {
     started: bool,
@@ -1256,6 +1257,7 @@ impl Tracker {
                 joining,
                 since: now,
                 seen: None,
+                refused_since: None,
             }),
         };
         if connected {
@@ -1263,6 +1265,7 @@ impl Tracker {
             attempt.joining = false;
             attempt.since = now;
             attempt.seen = None;
+            attempt.refused_since = None;
             return if joined {
                 Verdict::Joined
             } else {
@@ -1288,15 +1291,19 @@ impl Tracker {
                     joining: true,
                 };
             }
-        } else if elapsed >= REFUSED_TIMEOUT
-            && attempt
-                .seen
-                .is_some_and(|at| now.saturating_duration_since(at) <= SEEN_RECENTLY)
+        } else if attempt
+            .seen
+            .is_some_and(|at| now.saturating_duration_since(at) <= SEEN_RECENTLY)
         {
-            return Verdict::Stop {
-                reason: WwanStopReason::Rejected,
-                joining: false,
-            };
+            let refused_since = attempt.refused_since.get_or_insert(now);
+            if now.saturating_duration_since(*refused_since) >= REFUSED_TIMEOUT {
+                return Verdict::Stop {
+                    reason: WwanStopReason::Rejected,
+                    joining: false,
+                };
+            }
+        } else {
+            attempt.refused_since = None;
         }
         Verdict::Wait
     }
@@ -2321,7 +2328,12 @@ config zone 'wan_zone'
             Verdict::Wait
         );
         assert_eq!(
-            tracker.observe(uplink, t0 + REFUSED_TIMEOUT, false, &[sighting(60, -50)]),
+            tracker.observe(
+                uplink,
+                t0 + secs(5) + REFUSED_TIMEOUT,
+                false,
+                &[sighting(60, -50)]
+            ),
             Verdict::Stop {
                 reason: WwanStopReason::Rejected,
                 joining: false
@@ -2342,6 +2354,54 @@ config zone 'wan_zone'
                 Verdict::Wait
             );
         }
+    }
+
+    #[test]
+    fn network_returning_after_an_outage_has_time_to_authenticate() {
+        let mut tracker = Tracker::default();
+        let t0 = Instant::now();
+        let uplink = attempted("upstreampass");
+        tracker.observe(uplink.clone(), t0, true, &[]);
+        for t in [5, 60, 120, 300] {
+            assert_eq!(
+                tracker.observe(uplink.clone(), t0 + secs(t), false, &[]),
+                Verdict::Wait
+            );
+        }
+        assert_eq!(
+            tracker.observe(uplink.clone(), t0 + secs(305), false, &[sighting(1, -50)]),
+            Verdict::Wait
+        );
+        assert_eq!(
+            tracker.observe(uplink, t0 + secs(310), true, &[]),
+            Verdict::Wait
+        );
+    }
+
+    #[test]
+    fn losing_sight_of_the_network_resets_the_refusal_timeout() {
+        let mut tracker = Tracker::default();
+        let t0 = Instant::now();
+        let uplink = attempted("upstreampass");
+        tracker.observe(uplink.clone(), t0, true, &[]);
+        tracker.observe(uplink.clone(), t0 + secs(5), false, &[sighting(1, -50)]);
+        assert_eq!(
+            tracker.observe(uplink.clone(), t0 + secs(100), false, &[]),
+            Verdict::Wait
+        );
+        for t in [300, 360, 419] {
+            assert_eq!(
+                tracker.observe(uplink.clone(), t0 + secs(t), false, &[sighting(1, -50)]),
+                Verdict::Wait
+            );
+        }
+        assert_eq!(
+            tracker.observe(uplink, t0 + secs(420), false, &[sighting(1, -50)]),
+            Verdict::Stop {
+                reason: WwanStopReason::Rejected,
+                joining: false
+            }
+        );
     }
 
     #[test]
