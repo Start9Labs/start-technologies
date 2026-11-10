@@ -249,7 +249,7 @@ List network bindings for the server host.
 
 ### `start-cli server host binding reassign-port <INTERNAL_PORT> <EXTERNAL_PORT>`
 
-Change the server binding's assigned external port, preserving its address enable/disable settings. The chosen port must be available and not reserved for a host daemon.
+Change the server binding's assigned external port, preserving its address enable/disable settings. The chosen port must be available and not reserved for a host daemon. The server UI's SSL port is fixed at 443; `--ssl` accepts 443 to retain or restore that assignment.
 
 - `--ssl` — Change the assigned SSL port instead of the non-SSL port
 

@@ -2187,6 +2187,13 @@ net.host.binding.reassign.port-unavailable:
   fr_FR: "Le port %{port} est réservé ou déjà attribué"
   pl_PL: "Port %{port} jest zarezerwowany lub już przypisany"
 
+net.host.binding.reassign.server-ui-port:
+  en_US: "The server UI's SSL port must remain %{port}"
+  de_DE: "Der SSL-Port der Serveroberfläche muss %{port} bleiben"
+  es_ES: "El puerto SSL de la interfaz del servidor debe seguir siendo %{port}"
+  fr_FR: "Le port SSL de l'interface du serveur doit rester %{port}"
+  pl_PL: "Port SSL interfejsu serwera musi pozostać ustawiony na %{port}"
+
 # net/ssl.rs
 net.ssl.unreachable:
   en_US: "unreachable"

@@ -30,6 +30,8 @@ use crate::{GatewayId, HostId, PackageId};
 pub mod address;
 pub mod binding;
 
+pub const SERVER_UI_SSL_PORT: u16 = 443;
+
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
@@ -816,7 +818,7 @@ pub trait HostApiKind: 'static {
     type InheritedParams: Send + Sync + 'static;
     type Inheritance: RefUnwindSafe + OrEmpty<Self::Inheritance> + Send + Sync + 'static;
     fn inheritance(params: Self::Params, inherited: Self::InheritedParams) -> Self::Inheritance;
-    fn privileged(inheritance: &Self::Inheritance) -> bool;
+    fn is_server(inheritance: &Self::Inheritance) -> bool;
     fn host_for<'a>(
         inheritance: &Self::Inheritance,
         db: &'a mut DatabaseModel,
@@ -832,7 +834,7 @@ impl HostApiKind for ForPackage {
     type Params = RequiresHostId;
     type InheritedParams = PackageId;
     type Inheritance = (PackageId, HostId);
-    fn privileged((package, _): &Self::Inheritance) -> bool {
+    fn is_server((package, _): &Self::Inheritance) -> bool {
         package.is_start_os()
     }
     fn inheritance(
@@ -875,7 +877,7 @@ impl HostApiKind for ForServer {
     type Params = Empty;
     type InheritedParams = Empty;
     type Inheritance = Empty;
-    fn privileged(_: &Self::Inheritance) -> bool {
+    fn is_server(_: &Self::Inheritance) -> bool {
         true
     }
     fn inheritance(_: Self::Params, _: Self::InheritedParams) -> Self::Inheritance {

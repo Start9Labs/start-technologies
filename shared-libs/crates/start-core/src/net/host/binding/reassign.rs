@@ -6,7 +6,7 @@ use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
 use crate::hostname::ServerHostname;
 use crate::net::forward::AvailablePorts;
-use crate::net::host::{HostApiKind, all_hosts};
+use crate::net::host::{HostApiKind, SERVER_UI_SSL_PORT, all_hosts};
 use crate::prelude::*;
 
 #[cfg(test)]
@@ -43,6 +43,18 @@ fn reassign<Kind: HostApiKind>(
     params: &ReassignPortParams,
     inheritance: &Kind::Inheritance,
 ) -> Result<(), Error> {
+    if Kind::is_server(inheritance) && params.ssl && params.external_port != SERVER_UI_SSL_PORT {
+        return Err(Error::new(
+            eyre!(
+                "{}",
+                t!(
+                    "net.host.binding.reassign.server-ui-port",
+                    port = SERVER_UI_SSL_PORT
+                )
+            ),
+            ErrorKind::InvalidRequest,
+        ));
+    }
     let mut ports = db.as_private().as_available_ports().de()?;
     let changed = Kind::host_for(inheritance, db)?
         .as_bindings_mut()
@@ -55,7 +67,7 @@ fn reassign<Kind: HostApiKind>(
                 &mut ports,
                 params.external_port,
                 params.ssl,
-                Kind::privileged(inheritance),
+                Kind::is_server(inheritance),
             )
         })?;
     if !changed {

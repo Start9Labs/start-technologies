@@ -257,14 +257,19 @@ fn ssl_reassignment_keeps_shared_domain_ports_and_preferences() {
 #[test]
 fn moving_a_shared_listener_refreshes_sibling_domains_without_enabling_them() {
     let mut ports = AvailablePorts::new();
-    let server = host_with(binding(&mut ports, 80, Some(443)));
+    let listener = binding(&mut ports, 8081, Some(8444));
     let mut bind = binding(&mut ports, 8080, Some(8443));
     bind.options
         .add_ssl
         .as_mut()
         .unwrap()
-        .preferred_external_port = 443;
+        .preferred_external_port = 8444;
+    bind.addresses.disabled.extend([
+        ("private.example".into(), 8444),
+        ("public.example".into(), 8444),
+    ]);
     let mut host = host_with(bind);
+    host.bindings.insert(8001, listener);
     host.private_domains.insert(
         "private.example".into(),
         ["eth0".parse().unwrap()].into_iter().collect(),
@@ -276,22 +281,9 @@ fn moving_a_shared_listener_refreshes_sibling_domains_without_enabling_them() {
             acme: None,
         },
     );
-    host.bindings
-        .get_mut(&8000)
-        .unwrap()
-        .addresses
-        .disabled
-        .extend([
-            ("private.example".into(), 443),
-            ("public.example".into(), 443),
-        ]);
-    let mut db = database(host, server, ports);
-    let assigned = package_host(&mut db).de().unwrap().bindings[&8000]
-        .net
-        .assigned_ssl_port
-        .unwrap();
+    let mut db = database(host, Host::default(), ports);
 
-    reassign::<ForServer>(&mut db, &params(8000, 9443, true), &Empty {}).unwrap();
+    reassign::<ForPackage>(&mut db, &params(8001, 9443, true), &inheritance()).unwrap();
 
     let host = package_host(&mut db).de().unwrap();
     let addresses = &host.bindings[&8000].addresses;
@@ -301,49 +293,42 @@ fn moving_a_shared_listener_refreshes_sibling_domains_without_enabling_them() {
             .iter()
             .find(|row| row.hostname == domain && row.ssl)
             .unwrap();
-        assert_eq!(row.port, Some(assigned));
+        assert_eq!(row.port, Some(8443));
         assert!(!addresses.enabled().contains(row));
     }
     assert!(
         !host
             .port_forwards
             .iter()
-            .any(|forward| forward.src.port() == 443)
+            .any(|forward| forward.src.port() == 8444)
     );
 }
 
 #[test]
 fn assigning_a_shared_preferred_port_does_not_move_a_siblings_ip_overrides() {
     let mut ports = AvailablePorts::new();
-    let server = host_with(binding(&mut ports, 80, Some(443)));
-    let mut host = host_with(binding(&mut ports, 8080, Some(9443)));
-    host.bindings
-        .get_mut(&8000)
-        .unwrap()
-        .options
+    let listener = binding(&mut ports, 8081, Some(8444));
+    let mut bind = binding(&mut ports, 8080, Some(9443));
+    bind.options
         .add_ssl
         .as_mut()
         .unwrap()
-        .preferred_external_port = 443;
-    host.bindings
-        .get_mut(&8000)
-        .unwrap()
-        .addresses
+        .preferred_external_port = 8444;
+    bind.addresses
         .disabled
-        .insert(("private.example".into(), 443));
-    host.bindings
-        .get_mut(&8000)
-        .unwrap()
-        .addresses
+        .insert(("private.example".into(), 8444));
+    bind.addresses
         .enabled
         .insert("198.51.100.2:9443".parse().unwrap());
+    let mut host = host_with(bind);
+    host.bindings.insert(8001, listener);
     host.private_domains.insert(
         "private.example".into(),
         ["eth0".parse().unwrap()].into_iter().collect(),
     );
-    let mut db = database(host, server, ports);
-    reassign::<ForServer>(&mut db, &params(8000, 10443, true), &Empty {}).unwrap();
-    reassign::<ForServer>(&mut db, &params(8000, 443, true), &Empty {}).unwrap();
+    let mut db = database(host, Host::default(), ports);
+    reassign::<ForPackage>(&mut db, &params(8001, 10443, true), &inheritance()).unwrap();
+    reassign::<ForPackage>(&mut db, &params(8001, 8444, true), &inheritance()).unwrap();
 
     let host = package_host(&mut db).de().unwrap();
     let addresses = &host.bindings[&8000].addresses;
@@ -355,15 +340,63 @@ fn assigning_a_shared_preferred_port_does_not_move_a_siblings_ip_overrides() {
     assert!(
         !addresses
             .enabled
-            .contains(&"198.51.100.2:443".parse().unwrap())
+            .contains(&"198.51.100.2:8444".parse().unwrap())
     );
     let domain = addresses
         .available
         .iter()
         .find(|row| row.hostname == "private.example" && row.ssl)
         .unwrap();
-    assert_eq!(domain.port, Some(443));
+    assert_eq!(domain.port, Some(8444));
     assert!(!addresses.enabled().contains(domain));
+}
+
+#[test]
+fn server_ui_ssl_port_is_fixed_through_both_api_routes() {
+    let mut ports = AvailablePorts::new();
+    let mut server = Host::default();
+    server
+        .bindings
+        .insert(80, binding(&mut ports, 80, Some(443)));
+    let mut db = database(Host::default(), server, ports);
+    let before = to_value(&db).unwrap();
+
+    for port in [0, 80, 8443] {
+        assert!(reassign::<ForServer>(&mut db, &params(80, port, true), &Empty {}).is_err());
+        assert!(
+            reassign::<ForPackage>(
+                &mut db,
+                &params(80, port, true),
+                &(PackageId::start_os(), HostId::admin()),
+            )
+            .is_err()
+        );
+        assert_eq!(to_value(&db).unwrap(), before);
+    }
+    reassign::<ForServer>(&mut db, &params(80, 443, true), &Empty {}).unwrap();
+    reassign::<ForPackage>(
+        &mut db,
+        &params(80, 443, true),
+        &(PackageId::start_os(), HostId::admin()),
+    )
+    .unwrap();
+    assert_eq!(to_value(&db).unwrap(), before);
+}
+
+#[test]
+fn server_ui_ssl_port_can_be_restored_to_443() {
+    let mut ports = AvailablePorts::new();
+    let mut server = Host::default();
+    server
+        .bindings
+        .insert(80, binding(&mut ports, 80, Some(8443)));
+    let mut db = database(Host::default(), server, ports);
+    reassign::<ForServer>(&mut db, &params(80, 443, true), &Empty {}).unwrap();
+    let server = ForServer::host_for(&Empty {}, &mut db)
+        .unwrap()
+        .de()
+        .unwrap();
+    assert_eq!(server.bindings[&80].net.assigned_ssl_port, Some(443));
 }
 
 #[test]
