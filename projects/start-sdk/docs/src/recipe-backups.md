@@ -6,6 +6,8 @@ Every StartOS package must define a backup strategy. The SDK provides builders f
 
 Use `sdk.setupBackups()` with the appropriate builder. `sdk.Backups.ofVolumes('main')` for simple volume snapshots. `sdk.Backups.withPgDump()` for PostgreSQL (handles dump and restore). `sdk.Backups.withMysqlDump()` for MySQL and `sdk.Backups.withMariadbDump()` for MariaDB. Chain `.addVolume('name')` for additional volumes. Use `.addSync({ dataPath, backupPath })` instead of `.addVolume()` for large, mostly-unchanged datasets (user uploads, media) — rsync is incremental and much faster than full volume copies.
 
+A restore installs the s9pk stored in the backup, so it runs that version's own backup and restore code; the current version's migrations run on the update after it. Changing the backup set never affects backups taken before the change.
+
 > [!NOTE]
 > Because the service is stopped for the duration of the backup, your backup logic runs against a quiescent volume — nothing is writing to the data while it is copied or dumped. StartOS restarts the service automatically once the backup finishes, but only if it was running when the backup began; a service that was already stopped stays stopped.
 
