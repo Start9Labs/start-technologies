@@ -29,6 +29,7 @@ runs:
       if: inputs.free-space == 'true'
       shell: bash
       run: |
+        df -h /
         sudo apt-get remove --purge -y azure-cli || true
         sudo apt-get remove --purge -y firefox || true
         sudo apt-get remove --purge -y ghc-* || true
@@ -46,6 +47,7 @@ runs:
         sudo rm -rf /usr/share/dotnet
         sudo rm -rf /usr/share/swift
         sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+        df -h /
 
     # Some runners lack /opt/hostedtoolcache, which setup-python and setup-qemu expect
     - name: Ensure hostedtoolcache exists
