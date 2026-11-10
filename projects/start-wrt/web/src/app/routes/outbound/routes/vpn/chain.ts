@@ -13,8 +13,8 @@ const GLOBE = 26
 // Ellipse aspect of a tube's cross-section.
 const FACE = 0.32
 
-// Indexed by distance from the Internet-facing end, so a VPN keeps its color on every page.
-const COLORS = [16, 12, 10, 8, 6, 14].map(
+// Indexed by distance from the Internet-facing end. Every pair stays distinct under color blindness.
+const COLORS = [16, 12, 10, 9, 21, 6].map(
   i => `var(--tui-chart-categorical-${String(i).padStart(2, '0')})`,
 )
 
@@ -24,6 +24,8 @@ const COLORS = [16, 12, 10, 8, 6, 14].map(
     @let l = layout();
     <div>
       <svg
+        role="img"
+        [attr.aria-label]="l.path"
         [attr.viewBox]="'0 0 ' + l.width + ' ' + l.height"
         [style.max-inline-size.px]="l.width"
         [style.min-inline-size.px]="l.width * 0.7"
@@ -46,7 +48,14 @@ const COLORS = [16, 12, 10, 8, 6, 14].map(
             [attr.height]="l.cardHeight"
             [style.stroke]="s.color"
           />
-          <text [attr.x]="s.x" [attr.y]="l.cardY + 24">{{ s.label }}</text>
+          <foreignObject
+            [attr.x]="s.x - ${CARD / 2 - 8}"
+            [attr.y]="l.cardY + 9"
+            width="${CARD - 16}"
+            height="20"
+          >
+            <div class="name">{{ s.label }}</div>
+          </foreignObject>
         }
         @for (t of l.tubes; track $index) {
           <g [style.--c]="t.color">
@@ -161,6 +170,17 @@ const COLORS = [16, 12, 10, 8, 6, 14].map(
       text-anchor: middle;
     }
 
+    .name {
+      overflow: hidden;
+      color: var(--tui-text-primary);
+      font-size: 14px;
+      font-weight: bold;
+      line-height: 20px;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .card {
       fill: var(--tui-background-base);
       stroke-width: 2;
@@ -246,7 +266,7 @@ export class VPNChain {
   readonly chain = input.required<readonly string[]>()
 
   protected readonly layout = computed(() => {
-    // The first VPN's endpoint is reached through the second, so the last VPN is the outermost tunnel.
+    // Outermost tunnel first.
     const labels = [...this.chain()].reverse()
     const n = labels.length
     const outer = CORE + n * WALL
@@ -280,6 +300,11 @@ export class VPNChain {
       cy,
       gx,
       servers,
+      path: [
+        this.i18n.transform('Router'),
+        ...labels,
+        this.i18n.transform('Internet'),
+      ].join(' → '),
       router: Math.max(20, outer + 6),
       cardY: cy - outer - 36,
       cardHeight: outer * 2 + 50,
