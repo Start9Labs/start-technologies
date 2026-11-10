@@ -8,12 +8,14 @@ use clap::Parser;
 use imbl_value::imbl::OrdMap;
 use imbl_value::{json, InternedString, Value};
 use itertools::Itertools;
+use josekit::jwk::Jwk;
 use patch_db::value::index::Index;
 use patch_db::{HasModel, ModelExt, PatchDb};
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{from_fn_async, CallRemote, Empty, HandlerArgs, HandlerExt, ParentHandler};
 use serde::{Deserialize, Serialize};
 use startos::auth::{AuthKeys, LoginAttempt, LoginContext, Session};
+use startos::context::setup::CURRENT_SECRET;
 use startos::middleware::auth::local::LocalAuthContext;
 use startos::middleware::auth::signature::{
     check_enrolled, url_host_str, HasUnenrolledKeys, LoginMetadata, NonceCache,
@@ -23,6 +25,7 @@ use startos::middleware::auth::DbContext;
 use startos::prelude::{Model, TypedPatchDb};
 use startos::rpc_continuations::OpenAuthedContinuations;
 use startos::sign::AnyVerifyingKey;
+use startos::util::crypto::EncryptedWire;
 use startos::util::sync::SyncMutex;
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
@@ -153,6 +156,25 @@ impl ServerContext {
         });
         hostname
     }
+}
+
+impl AsRef<Jwk> for ServerContext {
+    fn as_ref(&self) -> &Jwk {
+        &CURRENT_SECRET
+    }
+}
+
+/// Decrypts a password encrypted to the key from `setup.get-pubkey`.
+pub(crate) fn decrypt_password(
+    ctx: &ServerContext,
+    password: EncryptedWire,
+) -> Result<String, Error> {
+    password.decrypt(ctx).ok_or_else(|| {
+        Error::new(
+            eyre!("could not decrypt the password; reload the page and try again"),
+            ErrorKind::InvalidRequest,
+        )
+    })
 }
 
 impl AsRef<OpenAuthedContinuations<Option<InternedString>>> for ServerContext {
@@ -635,10 +657,11 @@ pub async fn check_initialized_impl(_ctx: ServerContext) -> Result<CheckInitiali
     })
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
+#[derive(Debug, Clone, Deserialize, Serialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SetInitialPasswordParams {
-    pub password: String,
+    /// Encrypted to the key from `setup.get-pubkey`.
+    pub password: EncryptedWire,
     /// IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
     #[serde(default)]
     pub timezone: Option<String>,
@@ -650,6 +673,7 @@ pub async fn set_initial_password_impl(
     ctx: ServerContext,
     SetInitialPasswordParams { password, timezone }: SetInitialPasswordParams,
 ) -> Result<(), Error> {
+    let password = decrypt_password(&ctx, password)?;
     set_initial_password(&ctx, Path::new(SHADOW_PATH), &password).await?;
 
     if let Some(timezone) = timezone {
@@ -757,6 +781,21 @@ mod tests {
     fn validate_password_length_accepts_min_and_above() {
         assert!(validate_password_length("exactly12chr").is_ok());
         assert!(validate_password_length("a-longer-passphrase").is_ok());
+    }
+
+    #[test]
+    fn initial_password_must_be_encrypted() {
+        let plaintext = json!({ "password": "initial-admin-password" });
+        assert!(imbl_value::from_value::<SetInitialPasswordParams>(plaintext).is_err());
+    }
+
+    #[tokio::test]
+    async fn passwords_encrypted_to_another_key_are_rejected() {
+        let other = Jwk::generate_ec_key(josekit::jwk::alg::ec::EcCurve::P256).unwrap();
+        let wire =
+            EncryptedWire::encrypt("initial-admin-password", &other.to_public_key().unwrap())
+                .unwrap();
+        assert!(decrypt_password(&ServerContext::default(), wire).is_err());
     }
 
     #[test]

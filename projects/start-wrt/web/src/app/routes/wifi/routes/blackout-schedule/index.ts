@@ -22,7 +22,7 @@ import { BlackoutService } from './service'
       margin-bottom: -5rem;
     }
   `,
-  providers: [provideHelp('/wifi/blackout-schedule/dialog')],
+  providers: [BlackoutService, provideHelp('/wifi/blackout-schedule/dialog')],
   host: { class: 'g-page' },
   imports: [ScheduleComponent],
 })

@@ -2,7 +2,13 @@ import { Component, computed, inject } from '@angular/core'
 import { RouterLink } from '@angular/router'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import { TuiTable } from '@taiga-ui/addon-table'
-import { TuiButton, TuiDataList, TuiDropdown, TuiLink } from '@taiga-ui/core'
+import {
+  TuiButton,
+  TuiDataList,
+  TuiDropdown,
+  TuiLink,
+  TuiNotificationService,
+} from '@taiga-ui/core'
 import { TuiSkeleton } from '@taiga-ui/kit'
 import { Masked } from 'src/app/components/masked'
 import { Placeholder } from 'src/app/components/placeholder'
@@ -122,7 +128,7 @@ import {
 })
 export default class WifiPasswords {
   private readonly dialogs = inject(TuiResponsiveDialogService)
-  // @TODO matt review
+  private readonly alerts = inject(TuiNotificationService)
   private readonly api = inject(ApiService)
   private readonly i18n = inject(i18nPipe)
 
@@ -135,7 +141,6 @@ export default class WifiPasswords {
       })) || [],
   )
 
-  // @TODO matt review
   async add() {
     const profiles = (await this.api.profilesList()).filter(
       p => p.interface !== 'lan',
@@ -149,12 +154,11 @@ export default class WifiPasswords {
         this.service.addPassword({
           label: result.label,
           profile: result.profile,
-          password: result.password!,
+          password: result.password,
         })
       })
   }
 
-  // @TODO matt review
   async edit(entry: WifiPasswordEntry) {
     const profiles = (await this.api.profilesList()).filter(
       p => p.interface !== 'lan',
@@ -170,12 +174,23 @@ export default class WifiPasswords {
         const index = current.passwords.findIndex(
           p => p.password === entry.password,
         )
-        if (index < 0) return
+        if (index < 0) {
+          this.alerts
+            .open(
+              this.i18n.transform(
+                'This Wi-Fi password was changed or deleted. Your changes were not saved.',
+              ),
+              { appearance: 'negative' },
+            )
+            .subscribe()
+          return
+        }
         const passwords = [...current.passwords]
         passwords[index] = {
           ...passwords[index],
           label: result.label,
           profile: result.profile,
+          password: result.password,
         }
         const newConfig = { ...current, passwords }
 
@@ -188,8 +203,7 @@ export default class WifiPasswords {
         if (!(await confirmLeavingProfile(this.dialogs, this.i18n, leaving)))
           return
 
-        await this.service.store(newConfig)
-        this.service.refresh()
+        this.service.save(newConfig)
       })
   }
 
