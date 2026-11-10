@@ -12,6 +12,8 @@ use crate::util::net::secure::tests::raw_socket;
 
 #[path = "session_admission.rs"]
 mod admission;
+#[path = "session_browser.rs"]
+mod browser;
 
 async fn session_server(ctx: RegistryContext) -> (Url, NonDetachingJoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -1,4 +1,6 @@
 import { DOCUMENT, inject, Service } from '@angular/core'
+import { auth } from '@start9labs/start-core'
+import { SESSION_PROFILE } from '@start9labs/start-core/osBindings/session-profile'
 import { filter, firstValueFrom } from 'rxjs'
 import { webSocket } from 'rxjs/webSocket'
 import type { WebSocketSubject, WebSocketSubjectConfig } from 'rxjs/webSocket'
@@ -8,9 +10,10 @@ import type { RPCOptions, RPCResponse } from '../types/rpc.types'
 import { AUTH_SIGNING_HOST, AuthKeyService } from './auth-key.service'
 import type { AuthKeyLease } from './auth-key.service'
 import { withTimeout } from './http.service'
-import { prepareNoiseIdentity } from './noise-identity'
-import type { PreparedNoiseIdentity } from './noise-identity'
-import { NoiseOpenEvent, noiseWebSocketConstructor } from './noise-websocket'
+import {
+  SessionOpenEvent,
+  sessionWebSocketConstructor,
+} from './session-websocket'
 import { ServerIdentityService } from './server-identity.service'
 import { rpcWebSocketUrl } from './rpc-request'
 
@@ -22,12 +25,8 @@ export class RpcSocketService {
   private readonly authKeys = inject(AuthKeyService)
   private readonly serverIdentity = inject(ServerIdentityService)
   private readonly opened = (event: Event) => {
-    void this.serverIdentity.observe((event as NoiseOpenEvent).peer)
+    void this.serverIdentity.observe((event as SessionOpenEvent).peer)
   }
-  private readonly identities = new WeakMap<
-    AbortSignal,
-    Promise<PreparedNoiseIdentity>
-  >()
   private session?: {
     signal: AbortSignal
     abort: AbortController
@@ -40,7 +39,7 @@ export class RpcSocketService {
     options: Pick<RPCOptions, 'timeout'>,
     lease: AuthKeyLease,
   ): Promise<RPCResponse<T>> {
-    const prepared = await this.prepare(lease)
+    const prepared = this.prepare(lease)
     lease.signal.throwIfAborted()
     if (this.session?.signal !== lease.signal) {
       const abort = new AbortController()
@@ -48,9 +47,10 @@ export class RpcSocketService {
       const socket = webSocket<unknown>({
         url: this.url(),
         openObserver: { next: this.opened },
-        WebSocketCtor: noiseWebSocketConstructor(
+        WebSocketCtor: sessionWebSocketConstructor(
           async () => ({ ...prepared, signal }),
           this.context,
+          SESSION_PROFILE.identity.rpcTarget,
         ),
         serializer: value =>
           typeof value === 'string' ? value : JSON.stringify(value),
@@ -104,7 +104,7 @@ export class RpcSocketService {
 
   /** Opens an encrypted continuation with the DOM event/lifetime contract. */
   openSocket(guid: string): WebSocket {
-    const Constructor = this.constructorFor(() => this.authKeys.lease())
+    const Constructor = this.constructorFor(guid, () => this.authKeys.lease())
     const socket = new Constructor(this.url(guid))
     socket.addEventListener('open', this.opened, { once: true })
     return socket
@@ -124,7 +124,7 @@ export class RpcSocketService {
         },
       },
       url: this.url(guid),
-      WebSocketCtor: this.constructorFor(() => this.authKeys.lease()),
+      WebSocketCtor: this.constructorFor(guid, () => this.authKeys.lease()),
     })
   }
 
@@ -136,31 +136,23 @@ export class RpcSocketService {
     )
   }
 
-  private constructorFor(lease: () => Promise<AuthKeyLease | null>) {
-    return noiseWebSocketConstructor(async () => {
-      const current = await lease()
-      if (!current) throw new Error('No active device identity')
-      return this.prepare(current)
-    }, this.context)
+  private constructorFor(
+    guid: string,
+    lease: () => Promise<AuthKeyLease | null>,
+  ) {
+    return sessionWebSocketConstructor(
+      async () => {
+        const current = await lease()
+        if (!current) throw new Error('No active device identity')
+        return this.prepare(current)
+      },
+      this.context,
+      { continuation: guid },
+    )
   }
 
-  private async prepare(current: AuthKeyLease) {
+  private prepare(current: AuthKeyLease) {
     current.signal.throwIfAborted()
-    let identity = this.identities.get(current.signal)
-    if (!identity) {
-      identity = prepareNoiseIdentity(current.key).catch(error => {
-        this.identities.delete(current.signal)
-        throw error
-      })
-      this.identities.set(current.signal, identity)
-      current.signal.addEventListener(
-        'abort',
-        () => this.identities.delete(current.signal),
-        { once: true },
-      )
-    }
-    const prepared = await identity
-    current.signal.throwIfAborted()
-    return { identity: prepared, signal: current.signal }
+    return { signer: auth.requestSigner(current.key), signal: current.signal }
   }
 }

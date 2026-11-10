@@ -36,7 +36,7 @@ DTOs may contain required nullable fields absent from inputs. **Never hand-edit
 then rebuild core and SDK before checking consumers.
 
 StartWRT uses its own generated `Api` in `services/api/bindings.ts` and streaming
-schemas in `events.ts`; run `make start-wrt-rpc-bindings`. It composes shared Noise
+schemas in `events.ts`; run `make start-wrt-rpc-bindings`. It composes shared signed-DH
 RPC/DOM continuations while retaining anonymous HTTP cancellation and its own reconnect owners. Shared `HttpService` remains a JSON-RPC transport boundary; product
 wrappers infer results rather than accepting caller-selected return types.
 

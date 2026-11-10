@@ -25,6 +25,20 @@ test('continuation URLs encode their GUID and preserve endpoint parameters', () 
   )
 })
 
+test('deployment prefixes are shared by RPC and exact-GUID admission', () => {
+  assert.equal(
+    rpcWebSocketUrl(
+      'https://server.test/nested/rpc/v1/?existing=kept',
+      'http://unused',
+    ),
+    'wss://server.test/nested/ws/rpc?existing=kept',
+  )
+  assert.equal(
+    rpcWebSocketUrl('/nested/rpc/v0', 'https://server.test', 'guid'),
+    'wss://server.test/nested/ws/rpc/guid',
+  )
+})
+
 test('RPC WebSocket URLs preserve IPv6 authority and port', () => {
   assert.equal(
     rpcWebSocketUrl('/rpc/v1', 'http://[2001:db8::1]:5959', 'guid'),

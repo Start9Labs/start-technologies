@@ -8,7 +8,7 @@ lockstep with the other apps). Build/serve/check it from the repo root: `npm run
 `pauseFor`, the markdown pipe, and the `CaWizard` login screen. Its own strings come from the
 local dictionaries; `i18nService.setLangLocal` also loads the shared dictionary that shared
 components translate through, so change the language only through it. Its `RpcService` uses shared
-`RpcSocketService` for keyed Noise RPC; anonymous bootstrap retains its aborting `HttpService`.
+`RpcSocketService` for keyed signed-DH RPC; anonymous bootstrap retains its aborting `HttpService`.
 Response deadlines surface code-0 errors. `ConnectionService` and update recovery discard the
 stalled RPC session before probing again; retain those existing reconnect owners. Firmware
 identity arrives through generated RPC metadata and the genuine HTTP response header, both fed

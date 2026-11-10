@@ -113,8 +113,10 @@ separate from device keys and surviving logout. Replacements produce nonblocking
 foreign targets, startup and registry listings do not become own-server history. Trusted
 delivery of replacement JavaScript remains outside this protection.
 
-Browser adapters must use the native-generated profile and generic commitment signer and
-verifier owners, without exporting private keys. A key/provider lease may persist; each
+Browser adapters use native-generated profiles and hello types, with `auth.RequestSigner`
+and `auth.verifyRequestProof` owning proof creation/verification outside the transport.
+The handshake module loads lazily and requires WebCrypto Ed25519, X25519, HKDF and AES-GCM
+in a secure context. Identity private keys remain nonextractable. A key/provider lease may persist; each
 connection needs fresh DH/nonce/proof data. Existing RxJS refcounts, key-rotation/logout
 cancellation, metadata fences and product reconnect/recovery owners remain authoritative.
 A stale local-closing socket's error cannot reset its replacement; abnormal unverified

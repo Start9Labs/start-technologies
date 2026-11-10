@@ -18,7 +18,7 @@ legacy transport; unsupported versions and failed encrypted admission fail close
 There are two binary handshake records. Each record has a two-byte big-endian
 length and a JSON envelope with exactly `payload` and `proof` fields:
 
-- `payload` is standard Base64 of the complete UTF-8 message body.
+- `payload` is standard Base64 of the complete UTF-8 message body. Base64 fields accept padded and unpadded forms through `util::serde::Base64`; native encoding is unpadded.
 - `proof` uses the existing request-proof query encoding: request commitment,
   timestamp, nonce, size, BLAKE3 digest, algorithm-tagged DER verifying key and
   algorithm-tagged DER signature. Full-width integers stay decimal strings in this
@@ -59,7 +59,7 @@ may be reused, prepared connection hellos may not. The server signs its response
 after receiving and validating the client hello. Both handshake records retain a
 1,024-byte payload allowance and a 30-second admission deadline.
 
-Unlike Noise XX, the first message exposes the client's public identity on
+The first message exposes the client's public identity on
 `ws://`; `wss://` protects that handshake. Private signing keys are never exported.
 A valid identity proof does not enroll a client, grant roles or establish package
 signing trust. Method authorization, hooks and revocation remain live.

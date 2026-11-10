@@ -253,7 +253,7 @@ async fn authentication_and_redirect_errors_do_not_trigger_http_requests() {
 }
 
 #[tokio::test]
-async fn accepted_websocket_with_failed_noise_never_retries_http() {
+async fn accepted_websocket_with_failed_admission_never_retries_http() {
     let requests = Arc::new(AtomicUsize::new(0));
     let count = requests.clone();
     let router = Router::new()

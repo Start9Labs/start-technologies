@@ -5,6 +5,7 @@ import { Injector } from '@angular/core'
 import { WA_WINDOW } from '@ng-web-apis/common'
 import { TuiNotificationService } from '@taiga-ui/core'
 import { of } from 'rxjs'
+import { auth } from '@start9labs/start-core'
 import './typescript-loader.mjs'
 
 const { ServerIdentityService } =
@@ -92,13 +93,15 @@ function fixture(db, { namespace = 'device', url = '/rpc/v1' } = {}) {
   }
 }
 
-const first = Uint8Array.from(
-  Buffer.from(
-    'd54207da194977dcf46adbfec2bc2e75b52d5a8a42184fedfdc00024f0e3e8da',
-    'hex',
+const first = auth.ed25519PublicKeyDer64(
+  Uint8Array.from(
+    Buffer.from(
+      'd54207da194977dcf46adbfec2bc2e75b52d5a8a42184fedfdc00024f0e3e8da',
+      'hex',
+    ),
   ),
 )
-const second = new Uint8Array(32).fill(19)
+const second = auth.ed25519PublicKeyDer64(new Uint8Array(32).fill(19))
 const golden =
   'SHA256:d7e1e084be213b01e506852af8198b9980b43e03749c67d82dcd0903f4001c77'
 

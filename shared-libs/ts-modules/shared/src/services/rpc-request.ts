@@ -1,9 +1,9 @@
 import { HttpHeaders } from '@angular/common/http'
-import { NOISE_PROFILE } from '@start9labs/start-core/osBindings/noise-profile'
+import { SESSION_PROFILE } from '@start9labs/start-core/osBindings/session-profile'
 
 import type { RPCOptions } from '../types/rpc.types'
 
-/** Keeps the selected authority and query while choosing the WebSocket route. */
+/** Maps a versioned RPC URL to its sibling WebSocket route, preserving authority and query. */
 export function rpcWebSocketUrl(
   base: string,
   origin: string,
@@ -11,8 +11,13 @@ export function rpcWebSocketUrl(
 ): string {
   const url = new URL(base, origin)
   url.protocol = url.protocol === 'http:' ? 'ws:' : 'wss:'
+  const segments = url.pathname.split('/')
+  if (segments.at(-1) === '') segments.pop()
+  segments.pop()
+  segments.pop()
   url.pathname =
-    NOISE_PROFILE.rpcPath +
+    segments.join('/') +
+    SESSION_PROFILE.rpcPath +
     (guid === undefined ? '' : `/${encodeURIComponent(guid)}`)
   return url.href
 }

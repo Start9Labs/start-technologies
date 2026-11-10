@@ -73,12 +73,12 @@ function fixture(context) {
   }
   const sockets = {
     message: async (body, options, identity) => {
-      calls.push({ transport: 'noise', body, options, identity })
+      calls.push({ transport: 'encrypted', body, options, identity })
       return { result: 'encrypted' }
     },
     open: (guid, config) => {
       const socket = new Subject()
-      calls.push({ transport: 'noise-guid', guid, config, socket })
+      calls.push({ transport: 'encrypted-guid', guid, config, socket })
       return socket
     },
   }
@@ -151,7 +151,7 @@ test('an untrusted startup-mode reply cannot downgrade a private login', async c
     await f.api.rpc.auth.login({ password: 'fixture', pubkey: 'public' }),
     'encrypted',
   )
-  const message = f.calls.find(call => call.transport === 'noise')
+  const message = f.calls.find(call => call.transport === 'encrypted')
   assert.equal(message.identity, f.lease)
   assert.deepEqual(JSON.parse(message.body), {
     method: 'auth.login',
@@ -204,7 +204,7 @@ test('normal GUIDs always use fresh encrypted admission regardless of startup st
   }
   const socket = f.api.openWebsocket$('secure-guid', config)
   const call = f.calls.at(-1)
-  assert.equal(call.transport, 'noise-guid')
+  assert.equal(call.transport, 'encrypted-guid')
   assert.equal(call.config, config)
   assert.equal(socket, call.socket)
 })
@@ -268,7 +268,7 @@ test('RPC bytes are captured before waiting for the device identity', async cont
   params.message = 'changed'
   identity(f.lease)
   assert.equal(await pending, 'encrypted')
-  const sent = f.calls.find(call => call.transport === 'noise')
+  const sent = f.calls.find(call => call.transport === 'encrypted')
   assert.equal(JSON.parse(sent.body).params.message, 'original')
 })
 

@@ -126,7 +126,7 @@ test(
     const native = await Socket.created.promise
     assert.match(
       native.url,
-      /\/ws\/rpc\/continuation\?noise=1&context=server.test$/,
+      /\/ws\/rpc\/continuation\?secure=1&context=server.test$/,
     )
     socket.close()
     await closed.promise

@@ -151,7 +151,7 @@ skill. `routes/published-ports/` is the project-local example of a table/dialog 
 
 ## API Layer
 
-- **Transport:** keyed JSON-RPC uses the shared signature-authenticated Noise WebSocket at `/ws/rpc`; anonymous bootstrap retains HTTP POST `/rpc/v1`. Failed encrypted admission never retries as plaintext. GUID sockets use fresh encrypted same-peer admission and keep their existing event/lifetime owners.
+- **Transport:** keyed JSON-RPC uses the shared signed-DH WebSocket at `/ws/rpc`; anonymous bootstrap retains HTTP POST `/rpc/v1`. Failed encrypted admission never retries as plaintext. GUID sockets use fresh same-peer admission signed for the exact GUID and keep their existing event/lifetime owners.
 - **Contract:** the generated `bindings.ts` types every RPC method; `ApiService` (abstract) defines the methods the UI calls. `LiveApiService` calls `RpcService`; `MockApiService` owns dev fixtures and local DOM-style continuation events without opening network sockets.
 - **Auth:** login enrolls a non-extractable WebCrypto key (`AuthKeyService` from `@start9labs/shared`) and `RpcService` binds it through the shared encrypted session. Firmware build metadata and the retained HTTP header feed the same stale-UI detector; connection/update recovery aborts a stalled session before the next bounded probe. RPC error code 34 clears the key and logs out.
 - **Mocks:** Toggle via `config.json` → `useMocks`. Dev server runs without a real router.

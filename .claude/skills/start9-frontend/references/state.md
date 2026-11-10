@@ -48,7 +48,7 @@ DI level by workspace config (monorepo) or environment (brochure). Methods are *
 promise-based**; components call `await this.api.method(params)` and never touch HTTP.
 
 - **Monorepo = JSON-RPC**: StartOS/Tunnel's keyed local calls use `RpcSocketService`
-  (`@start9labs/shared`) for signature-authenticated Noise admission and encrypted messages.
+  (`@start9labs/shared`) for signed-DH admission and encrypted messages. Each connection signs fresh RPC/GUID intent before the network deadline.
   Capture serialization before asynchronous key lookup; retain the existing RxJS socket and
   source-service retry/cancellation owners. `AuthKeyService` leases cancel on replacement,
   rollback and logout. Public calls without a key and explicit foreign overrides retain HTTP;
@@ -62,7 +62,7 @@ promise-based**; components call `await this.api.method(params)` and never touch
   is absent. Resource requests retain HTTP/header signatures. Streams (logs, PatchDB, metrics)
   use `api.openWebsocket$<T>(guid)` (`rxjs/webSocket`), buffered (`bufferTime(250…1000)`), with
   retry/backoff in the source service.
-- **start-wrt retains its RPC/reconnect workflow owners**: keyed calls compose shared Noise
+- **start-wrt retains its RPC/reconnect workflow owners**: keyed calls compose shared encrypted
   transport; anonymous bootstrap keeps its aborting `HttpService` (`withFetch()`). Deadlines
   surface `{code: 0}`; `ConnectionService` and update recovery call the shared session-abort
   primitive before probing again. A timed-out multiplexed probe alone cannot release siblings

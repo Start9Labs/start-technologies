@@ -37,11 +37,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(directory.join("rpc"))?;
     let rpc = directory.join("rpc");
     std::fs::write(
-        directory.join("noise-profile.ts"),
+        directory.join("session-profile.ts"),
         format!(
-            "export const NOISE_PROFILE = {}\n",
+            "export const SESSION_PROFILE = {} as const\n",
             serde_json::to_string_pretty(&start_core::middleware::auth::session::browser_profile())?,
         ),
+    )?;
+    let mut signature_profile = start_core::sign::browser_profile();
+    signature_profile["http"] = start_core::middleware::auth::signature::wire_profile();
+    std::fs::write(
+        directory.join("signature-profile.ts"),
+        format!(
+            "export const SIGNATURE_PROFILE = {} as const\n",
+            serde_json::to_string_pretty(&signature_profile)?,
+        ),
+    )?;
+    write_pair(
+        directory,
+        "session",
+        export_namespace("start_core", "session", "./session.schemas")?,
     )?;
     write_api(&rpc, "start-os", start_core::main_api::<RpcContext>())?;
     write_api(&rpc, "setup", start_core::main_api::<SetupContext>())?;

@@ -6,7 +6,7 @@ use crate::util::future::NonDetachingJoinHandle;
 
 #[cfg(target_os = "linux")]
 #[tokio::test]
-async fn noise_keeps_the_selected_identity_when_the_dial_host_is_pinned() {
+async fn admission_keeps_the_selected_identity_when_the_dial_host_is_pinned() {
     let temp = tempfile::tempdir().unwrap();
     let admin: crate::sign::Signer = crate::sign::AnySigningKey::generate().into();
     let registry = crate::registry::context::test_context_for_hosts(

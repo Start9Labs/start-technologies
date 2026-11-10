@@ -675,7 +675,7 @@ async fn actual_gpg_cli_authenticates_without_exporting_the_identity() {
     std::fs::create_dir(&home).unwrap();
     std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();
     let _agent = Agent(home.clone());
-    let uid = "Noise CLI fixture <noise-cli@example.invalid>";
+    let uid = "Signed RPC CLI fixture <signed-rpc-cli@example.invalid>";
     let generated = Command::new("gpg")
         .arg("--homedir")
         .arg(&home)

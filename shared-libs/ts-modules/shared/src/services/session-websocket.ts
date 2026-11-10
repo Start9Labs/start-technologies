@@ -1,24 +1,23 @@
-import type { lpStream } from '@libp2p/utils'
-import { NOISE_PROFILE } from '@start9labs/start-core/osBindings/noise-profile'
+import { auth } from '@start9labs/start-core'
+import type { Target } from '@start9labs/start-core/osBindings/session'
+import { SESSION_PROFILE } from '@start9labs/start-core/osBindings/session-profile'
 import { pEvent } from 'p-event'
 
-import type { PreparedNoiseIdentity } from './noise-identity'
+import type { SessionCipher } from './session-identity'
+import { SessionWebSocketStream } from './session-stream'
 
-const profile = NOISE_PROFILE.transport
+const profile = SESSION_PROFILE.transport
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 
-export interface NoiseSocketIdentity {
-  identity: PreparedNoiseIdentity
+export interface SessionSocketIdentity {
+  signer: auth.RequestSigner
   signal: AbortSignal
 }
 
-export class NoiseOpenEvent extends Event {
-  readonly peer: Uint8Array
-
-  constructor(peer: Uint8Array) {
+export class SessionOpenEvent extends Event {
+  constructor(readonly peer: string) {
     super('open')
-    this.peer = peer.slice()
   }
 }
 
@@ -63,12 +62,13 @@ function closeEvent(payload: Uint8Array): CloseEvent {
   return new CloseEvent('close', { code, reason, wasClean: true })
 }
 
-export function noiseWebSocketConstructor(
-  prepare: () => Promise<NoiseSocketIdentity>,
+export function sessionWebSocketConstructor(
+  prepare: () => Promise<SessionSocketIdentity>,
   context: string,
+  target: Target,
   Socket: typeof WebSocket = WebSocket,
 ): typeof WebSocket {
-  return class NoiseWebSocket extends EventTarget implements WebSocket {
+  return class SessionWebSocket extends EventTarget implements WebSocket {
     static readonly CONNECTING = 0
     static readonly OPEN = 1
     static readonly CLOSING = 2
@@ -86,15 +86,17 @@ export function noiseWebSocketConstructor(
     onclose: WebSocket['onclose'] = null
     private readonly lifetime = new AbortController()
     private socket?: WebSocket
-    private messages?: ReturnType<typeof lpStream>
+    private raw?: SessionWebSocketStream
+    private cipher?: SessionCipher
+    private plaintext = new Uint8Array()
+    private offset = 0
     private writer = Promise.resolve()
     private queuedBytes = 0
 
     constructor(url: string | URL, protocols?: string | string[]) {
       super()
       const endpoint = new URL(url)
-      const negotiation = { ...NOISE_PROFILE.negotiation }
-      negotiation.context = context
+      const negotiation = { ...SESSION_PROFILE.negotiation, context }
       for (const [name, value] of Object.entries(negotiation))
         endpoint.searchParams.set(name, String(value))
       this.url = endpoint.href
@@ -119,69 +121,66 @@ export function noiseWebSocketConstructor(
     }
 
     private async connect(protocols?: string | string[]) {
-      const [prepared, { lpStream }, { NoiseWebSocketStream }] =
-        await Promise.all([
-          prepare(),
-          import('@libp2p/utils'),
-          import('./noise-stream'),
-        ])
+      const identity = await prepare()
       if (this.readyState !== this.CONNECTING) return
-      prepared.signal.throwIfAborted()
-      prepared.signal.addEventListener(
+      identity.signal.throwIfAborted()
+      identity.signal.addEventListener(
         'abort',
-        () => this.fail(prepared.signal.reason),
+        () => this.fail(identity.signal.reason),
         { once: true, signal: this.lifetime.signal },
       )
+      const { prepareSession } = await import('./session-identity')
+      const prepared = await prepareSession(identity.signer, context, target)
+      if (this.readyState !== this.CONNECTING) return
+      identity.signal.throwIfAborted()
       const signal = AbortSignal.any([
-        prepared.signal,
+        identity.signal,
         this.lifetime.signal,
         AbortSignal.timeout(profile.handshakeTimeoutMs),
       ])
       const socket = (this.socket = new Socket(this.url, protocols))
-      const raw = new NoiseWebSocketStream(socket)
+      const raw = (this.raw = new SessionWebSocketStream(socket))
       const abort = () => raw.abort(new Error('Encrypted WebSocket aborted'))
       signal.addEventListener('abort', abort, { once: true })
-      let peer: Uint8Array
+      let peer: string
       try {
         await pEvent(socket, 'open', {
           signal,
           rejectionEvents: ['error', 'close'],
         })
-        const secured = await prepared.identity(context, raw, signal)
+        await raw.writeRecord(prepared.message, signal)
+        const response = await raw.readRecord(
+          profile.maxHandshakeRecordBytes,
+          signal,
+        )
+        const secured = await prepared.finish(response)
         signal.throwIfAborted()
-        if (secured.remotePeer.publicKey?.type !== 'Ed25519')
-          throw new Error('Unsupported server identity')
-        peer = secured.remotePeer.publicKey.raw
-        this.messages = lpStream(secured.connection, {
-          maxDataLength: profile.maxIncomingBytes + profile.messageKindBytes,
-          maxBufferSize:
-            profile.maxIncomingBytes +
-            profile.messageKindBytes +
-            profile.messageHeaderBytes +
-            profile.maxPlaintextBytes,
-          maxLengthLength: profile.messageHeaderBytes,
-          lengthEncoder(length) {
-            const bytes = new Uint8Array(profile.messageHeaderBytes)
-            new DataView(bytes.buffer).setUint32(0, length)
-            return bytes
-          },
-          lengthDecoder: bytes => bytes.getUint32(0),
-        })
+        peer = secured.peer
+        this.cipher = secured.cipher
       } finally {
         signal.removeEventListener('abort', abort)
       }
       this.lifetime.signal.addEventListener('abort', abort, { once: true })
       this.readyState = this.OPEN
-      this.dispatchEvent(new NoiseOpenEvent(peer))
+      this.dispatchEvent(new SessionOpenEvent(peer))
       while (this.readyState < this.CLOSED) {
-        const bytes = (
-          await this.messages!.read({ signal: this.lifetime.signal })
-        ).subarray()
+        const header = await this.readPlain(profile.messageHeaderBytes)
+        const length = new DataView(header.buffer).getUint32(0)
+        if (
+          length < profile.messageKindBytes ||
+          length > profile.maxIncomingBytes + profile.messageKindBytes
+        )
+          throw new Error('Invalid encrypted WebSocket message length')
+        const bytes = await this.readPlain(length)
+        this.lifetime.signal.throwIfAborted()
         const kind = bytes[0]
         const payload = bytes.subarray(profile.messageKindBytes)
         if (kind === profile.kinds.close) {
           const event = closeEvent(payload)
-          if (this.messages!.unwrap().readBufferLength !== 0)
+          if (
+            this.offset !== this.plaintext.length ||
+            raw.readBufferLength !== 0
+          )
             throw new Error('Data follows encrypted close result')
           this.finish(event)
           return
@@ -256,17 +255,60 @@ export function noiseWebSocketConstructor(
             payload instanceof Blob
               ? new Uint8Array(await payload.arrayBuffer())
               : payload
-          const message = new Uint8Array(
-            profile.messageKindBytes + bytes.length,
+          const length = profile.messageKindBytes + bytes.length
+          const message = new Uint8Array(profile.messageHeaderBytes + length)
+          new DataView(message.buffer).setUint32(0, length)
+          message[profile.messageHeaderBytes] = kind
+          message.set(
+            bytes,
+            profile.messageHeaderBytes + profile.messageKindBytes,
           )
-          message[0] = kind
-          message.set(bytes, profile.messageKindBytes)
-          await this.messages!.write(message, { signal })
+          for (
+            let offset = 0;
+            offset < message.length;
+            offset += profile.maxPlaintextBytes
+          ) {
+            signal.throwIfAborted()
+            const encrypted = await this.cipher!.write(
+              message.subarray(offset, offset + profile.maxPlaintextBytes),
+            )
+            await this.raw!.writeRecord(encrypted, signal)
+          }
         })
         .catch(error => this.fail(error))
         .finally(() => {
           this.queuedBytes -= length
         })
+    }
+
+    private async readPlain(length: number): Promise<Uint8Array<ArrayBuffer>> {
+      const result = new Uint8Array(length)
+      let written = 0
+      while (written < length) {
+        if (this.offset === this.plaintext.length) {
+          const record = await this.raw!.readRecord(
+            profile.maxRecordBytes,
+            this.lifetime.signal,
+          )
+          const plaintext = await this.cipher!.read(record)
+          this.lifetime.signal.throwIfAborted()
+          this.plaintext = plaintext
+          if (this.plaintext.length === 0)
+            throw new Error('Empty encrypted record')
+          this.offset = 0
+        }
+        const count = Math.min(
+          length - written,
+          this.plaintext.length - this.offset,
+        )
+        result.set(
+          this.plaintext.subarray(this.offset, this.offset + count),
+          written,
+        )
+        this.offset += count
+        written += count
+      }
+      return result
     }
 
     private fail(error: unknown) {
@@ -282,8 +324,11 @@ export function noiseWebSocketConstructor(
       if (this.readyState === this.CLOSED) return
       this.readyState = this.CLOSED
       this.lifetime.abort()
+      this.plaintext = new Uint8Array()
+      this.offset = 0
       this.dispatchEvent(event)
-      this.socket?.close()
+      if (this.raw) this.raw.abort(this.lifetime.signal.reason)
+      else this.socket?.close()
     }
   }
 }

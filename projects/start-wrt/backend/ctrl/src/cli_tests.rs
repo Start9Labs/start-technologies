@@ -112,7 +112,7 @@ async fn configured_root_ca_applies_to_http_and_websocket_clients() {
 }
 
 #[tokio::test]
-async fn keyed_cli_uses_the_production_noise_route_and_live_authorization() {
+async fn keyed_cli_uses_production_encrypted_admission_and_live_authorization() {
     let temp = tempfile::tempdir().unwrap();
     let (url, server, _task, http_calls) = crate::rpc::tests::server().await;
     let ctx = client(
@@ -174,7 +174,7 @@ async fn absent_identity_keeps_http_but_malformed_identity_never_downgrades() {
 }
 
 #[tokio::test]
-async fn refused_noise_never_retries_plaintext_rpc() {
+async fn refused_admission_never_retries_plaintext_rpc() {
     let temp = tempfile::tempdir().unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let host = format!("http://{}/rpc/v1", listener.local_addr().unwrap())

@@ -24,7 +24,7 @@ pub(crate) const TAG_BYTES: usize = 16;
 const MAX_RECORDS_PER_KEY: u64 = 1 << 32;
 
 /// Logical admission intent, independent of deployment prefixes.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, VisitVariants)]
 #[serde(rename_all = "camelCase")]
 pub enum Target {
     /// The shared JSON-RPC channel.
@@ -33,14 +33,20 @@ pub enum Target {
     Continuation(Guid),
 }
 
-#[derive(Serialize, Deserialize)]
+rpc_toolkit::reflect_ts!(Target);
+rpc_toolkit::ts_export!(Target, namespaces = ["session"]);
+
+#[derive(Serialize, Deserialize, VisitFields)]
 #[serde(deny_unknown_fields)]
 struct Envelope {
     payload: Base64<Vec<u8>>,
     proof: String,
 }
 
-#[derive(Serialize, Deserialize)]
+rpc_toolkit::reflect_ts!(Envelope);
+rpc_toolkit::ts_export!(Envelope, namespaces = ["session"]);
+
+#[derive(Serialize, Deserialize, VisitFields)]
 #[serde(deny_unknown_fields)]
 struct Message {
     protocol: String,
@@ -48,7 +54,10 @@ struct Message {
     hello: Hello,
 }
 
-#[derive(Serialize, Deserialize)]
+rpc_toolkit::reflect_ts!(Message);
+rpc_toolkit::ts_export!(Message, namespaces = ["session"]);
+
+#[derive(Serialize, Deserialize, VisitVariants)]
 #[serde(tag = "role", rename_all = "camelCase", deny_unknown_fields)]
 enum Hello {
     Client {
@@ -61,6 +70,8 @@ enum Hello {
         client_hello: Base64<[u8; 32]>,
     },
 }
+
+rpc_toolkit::reflect_ts!(Hello);
 
 fn invalid() -> Error {
     Error::new(

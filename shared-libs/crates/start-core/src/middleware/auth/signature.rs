@@ -621,6 +621,11 @@ impl SignatureHeader {
 const REQUEST_AUTH_TAG: &[u8] = b"Start-Auth-Sig v2\0";
 const REQUEST_AUTH_TAG_V1: &[u8] = b"Start-Auth-Sig v1\0";
 
+/// HTTP authentication wire constants projected for generated clients.
+pub fn wire_profile() -> serde_json::Value {
+    serde_json::json!({ "tag": REQUEST_AUTH_TAG, "header": AUTH_SIG_HEADER })
+}
+
 fn request_signing_message(
     commitment: &RequestCommitment,
     context: &str,

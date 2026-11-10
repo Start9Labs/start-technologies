@@ -21,7 +21,9 @@ pub mod fingerprint;
 pub(crate) mod gpg;
 pub mod gpg_agent;
 pub mod instance;
+mod profile;
 pub mod session;
+pub use profile::browser_profile;
 
 /// Signatures serialized in signer order.
 pub type SignatureMap = std::collections::BTreeMap<AnyVerifyingKey, AnySignature>;
