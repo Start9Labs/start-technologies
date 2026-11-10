@@ -14,6 +14,7 @@ src/app/
 ├── components/               # Shared UI components
 │   ├── aside.ts              # Right help panel — renders HelpService content via `| markdown | dompurify`
 │   ├── copy.ts               # Copy-to-clipboard directive
+│   ├── custom-config.ts      # Page shown in place of one whose configuration StartWRT cannot represent
 │   ├── footer.ts             # Form footer (Cancel / Save buttons)
 │   ├── form.ts               # [formLoading] directive — TuiForm + TuiCardLarge + TuiSkeleton
 │   ├── header.ts             # Top bar: search, help toggle (HELP_OPEN), system info
@@ -43,6 +44,7 @@ src/app/
 ├── services/
 │   ├── action.service.ts     # Wraps async ops with loading/success/error toasts
 │   ├── auth.service.ts       # Signal-based auth state + localStorage
+│   ├── config-check.service.ts # Findings from `config.check` for the current page
 │   ├── connection.service.ts # Reconnect indicator + probing (expectDisruption / reportUnreachable)
 │   ├── form.service.ts       # Abstract FormService<T> — load/save/refresh cycle
 │   ├── http.service.ts       # Low-level HttpClient.post wrapper
@@ -135,6 +137,9 @@ and exposes `data` as a signal (`undefined` while loading). `provideFormService`
 binds the concrete service and the abstract token at the page component.
 The `[formLoading]` directive composes `TuiForm`, `TuiCardLarge`, and `TuiSkeleton`;
 `appFooter` supplies the reset/save footer.
+
+`ConfigCheckService` polls `config.check` and, with a load error from configuration
+StartWRT cannot read, has the shell show `CustomConfig` in place of the current page.
 
 `ActionService` owns loading/success/error notifications. Network-affecting actions
 use `restart: true` to suppress transient failures and probe until the device is

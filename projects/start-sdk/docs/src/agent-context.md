@@ -108,7 +108,7 @@ Understand these before writing any code (full detail on the pages above):
 - **Health checks** come in two forms: the `ready` property on every daemon, and standalone `.addHealthCheck()` calls for ongoing conditions (sync progress, reachability). (`main.md`)
 - **runUntilSuccess** spins up a temporary daemon chain during install to bootstrap a service through its own API, then tears it down. (`recipe-run-until-success.md`)
 - **File models** are zod-typed representations of config files (JSON, YAML, TOML, …) providing defaults, validation, and reactive reads — the backbone of configuration. Build every shape with `z.looseObject` at every nesting level — never `z.object`, which deletes every undeclared key on the next write. The sole exception is a file you have fully modeled and will always keep fully modeled. `merge(effects, {})` fills missing fields from their `.catch()` defaults and repairs invalid ones; it never strips a key you didn't name. It is not a way to clean or regenerate a config. (`file-models.md`)
-- **Interfaces** declare what your service exposes; the **user** decides where it's reachable. `type` (`'ui'`/`'api'`/`'p2p'`) is a label, not a control, and Tor is a service the user installs and enables per interface. Never claim a service is on Tor or the public internet. (`interfaces.md`)
+- **Interfaces** declare what your service exposes; the **user** decides where it's reachable. `type` (`'ui'`/`'api'`/`'p2p'`) is a label, not a control, and Tor is a service the user installs and enables per interface. Never claim a service is on Tor or the public internet. A daemon behind a binding without `proxy` listens on IPv6 as well as IPv4, never on `0.0.0.0` alone. (`interfaces.md`)
 
 ## Golden rules
 

@@ -80,7 +80,7 @@ import { FileHelper, z } from '@start9labs/start-sdk'
 import { sdk } from '../sdk'
 
 const shape = z.looseObject({
-  api_bind: z.literal('0.0.0.0').catch('0.0.0.0'),
+  api_bind: z.literal('::').catch('::'),
   api_port: z.literal(9814).catch(9814),
   debug: z.literal(false).catch(false),
   subscription_slots: z.literal(10_000).catch(10_000),
@@ -380,7 +380,7 @@ For values that should always be a specific literal and never change (e.g., inte
 ```typescript
 const shape = z.looseObject({
   // Enforced — always corrected back to these values
-  api_bind: z.literal('0.0.0.0').catch('0.0.0.0'),
+  api_bind: z.literal('::').catch('::'),
   api_port: z.literal(9814).catch(9814),
   btc_network: z.literal('mainnet').catch('mainnet'),
   debug: z.literal(false).catch(false),
@@ -398,7 +398,7 @@ When a `FileHelper.ini` uses an `InputSpec`'s `partialValidator` as its validato
 
 ```typescript
 export const shape = z.looseObject({
-  'bind-ip': z.literal('0.0.0.0').catch('0.0.0.0'),
+  'bind-ip': z.literal('::').catch('::'),
   'bind-port': z.literal(8080).catch(8080),
   // ...more enforced + configurable keys
 })
