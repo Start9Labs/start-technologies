@@ -81,13 +81,13 @@ async fn read_addrs() {
         .and_then(|out| String::from_utf8(out).ok())
         .map(|json| parse_connected(&json))
         .unwrap_or_default();
-    let wan = tokio::task::spawn_blocking(crate::system::read_wan_ipv4_addrs)
+    let uplinks = tokio::task::spawn_blocking(crate::system::read_uplink_ipv4_addrs)
         .await
         .ok()
         .flatten();
-    let local = off_wan(connected, wan.as_deref());
+    let local = off_wan(connected, uplinks.as_ref().map(|u| u.all.as_slice()));
     let mut gate = GATE.write().unwrap_or_else(|e| e.into_inner());
-    gate.wan = wan.unwrap_or_default();
+    gate.wan = uplinks.map(|u| u.active).unwrap_or_default();
     gate.local = local;
 }
 

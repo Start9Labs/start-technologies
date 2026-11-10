@@ -59,6 +59,9 @@ import shield from '@taiga-ui/icons/src/shield.svg'
 import terminal from '@taiga-ui/icons/src/terminal.svg'
 import trash from '@taiga-ui/icons/src/trash.svg'
 import userLock from '@taiga-ui/icons/src/user-lock.svg'
+import wifiHigh from '@taiga-ui/icons/src/wifi-high.svg'
+import wifiLow from '@taiga-ui/icons/src/wifi-low.svg'
+import wifiOff from '@taiga-ui/icons/src/wifi-off.svg'
 import wifi from '@taiga-ui/icons/src/wifi.svg'
 import x from '@taiga-ui/icons/src/x.svg'
 
@@ -125,5 +128,8 @@ export const ICONS = {
   '@tui.trash': trash,
   '@tui.user-lock': userLock,
   '@tui.wifi': wifi,
+  '@tui.wifi-high': wifiHigh,
+  '@tui.wifi-low': wifiLow,
+  '@tui.wifi-off': wifiOff,
   '@tui.x': x,
 }

@@ -407,6 +407,26 @@ Enable DNS over HTTPS (DoH) for encrypted DNS queries. This improves privacy by 
 DDNS maps your changing IP address to a fixed domain name, allowing you to access your network remotely without knowing your current IP.
 
 Requires an account with a supported provider. Enter the credentials and hostname from your DDNS provider.`,
+  '/wan/wireless-wan': `## WAN – Wireless WAN
+
+The router joins another Wi-Fi network and uses it for Internet access. Devices on your network reach the Internet through it exactly as through the WAN port: profiles, published ports and remote access treat it as the WAN.
+
+While Remote Access is on, devices on the network the router joins can reach its web interface and SSH. Joining offers to turn Remote Access off first.
+
+### Joining a network
+
+Choose a band, scan, and select **Join** beside a network, or **Hidden network** for one that hides its name. WPA2, WPA3 and open networks are supported; WPA Enterprise networks are not.
+
+### Priority
+
+- **Backup:** the WAN port is used whenever it has a connection, and the Wi-Fi uplink takes over when the WAN port loses its link.
+- **Preferred:** the Wi-Fi uplink is used whenever it is connected, and the WAN port takes over when it drops.
+
+Failover follows the link: an upstream that stays connected but stops reaching the Internet does not trigger it.
+
+### The router's own Wi-Fi
+
+The band that carries the uplink follows the upstream network's channel, and its Wi-Fi is off while the router is not connected to that network. Join from a wired device or, on a router with two bands, from the other band. If the router cannot join a network it was just given, or a network in range refuses it for two minutes, it stops trying and that band's Wi-Fi comes back on; select **Retry** or **Change password** to resume, which turns that band's Wi-Fi off again until the router connects. A Wi-Fi blackout window that turns that band off also disconnects the uplink.`,
   '/settings/activity': `## Settings – Activity
 
 View recent login attempts and security events. Monitor for suspicious activity and remove old entries as needed.`,

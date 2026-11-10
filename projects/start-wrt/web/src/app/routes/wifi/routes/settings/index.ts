@@ -1,6 +1,7 @@
 import { Component, computed, effect, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
+import { RouterLink } from '@angular/router'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import {
   tuiMarkControlAsTouchedAndValidate,
@@ -12,6 +13,7 @@ import {
   TuiFilterByInputPipe,
   TuiInput,
   TuiLabel,
+  TuiLink,
   TuiNotification,
   TuiRadio,
   TuiTextfield,
@@ -30,11 +32,14 @@ import { PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { filter, map, startWith } from 'rxjs'
 import { Footer } from 'src/app/components/footer'
 import { Form } from 'src/app/components/form'
+import { BAND_LABELS } from 'src/app/routes/wan/routes/wireless-wan/utils'
 import {
   ApiService,
   WifiConfig,
   WifiRegulatory,
+  WwanResponse,
 } from 'src/app/services/api/api.service'
+import { fill } from 'src/app/i18n/validation-errors'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { i18nService } from 'src/app/i18n/i18n.service'
 import { WifiService } from '../../service'
@@ -76,6 +81,14 @@ const COUNTRY_CHANGE_MAX_WIDTH = 80
           </div>
         }
       </tui-elastic-container>
+      @if (uplinkNotice(); as notice) {
+        <div tuiNotification appearance="info">
+          {{ notice }}
+          <a tuiLink routerLink="/wan/wireless-wan">
+            {{ 'Wireless WAN' | i18n }}
+          </a>
+        </div>
+      }
       <label tuiLabel>
         <input type="checkbox" tuiSwitch formControlName="enabled" />
         {{ 'Enable Wi-Fi' | i18n }}
@@ -195,6 +208,8 @@ const COUNTRY_CHANGE_MAX_WIDTH = 80
     TuiDataListWrapper,
     TuiFilterByInputPipe,
     TuiNotification,
+    TuiLink,
+    RouterLink,
     Footer,
     Form,
     TuiElasticContainer,
@@ -213,6 +228,23 @@ export default class WifiSettings {
     { type: 'region', fallback: 'code' },
   )
   protected readonly regulatory = signal<WifiRegulatory | null>(null)
+  private readonly uplink = signal<WwanResponse['uplink']>(null)
+  protected readonly uplinkNotice = computed(() => {
+    const uplink = this.uplink()
+    return (
+      uplink &&
+      !uplink.stopped &&
+      fill(
+        this.i18n.transform(
+          'The {band} band carries the Wi-Fi uplink to {ssid}. Its Wi-Fi follows that network’s channel and is off while the uplink is disconnected. To turn this band off, remove the uplink first.',
+        ),
+        {
+          band: this.i18n.transform(BAND_LABELS[uplink.band] ?? 'Wi-Fi'),
+          ssid: uplink.ssid,
+        },
+      )
+    )
+  })
   protected readonly form = inject(NonNullableFormBuilder).group({
     country: [WORLD],
     enabled: [true],
@@ -288,6 +320,10 @@ export default class WifiSettings {
 
   constructor() {
     this.loadRegulatory()
+    this.api
+      .wwanGet()
+      .then(res => this.uplink.set(res.uplink))
+      .catch(() => {})
     effect(() => {
       const config = this.service.data()
       if (config && this.form.pristine) {

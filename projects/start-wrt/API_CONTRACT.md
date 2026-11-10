@@ -316,15 +316,15 @@ Internal endpoint, **not called from the frontend**. `startwrt-cli` runs it in
 its own process (it is not registered with `with_call_remote`), so the hook
 never reaches the daemon. Fired by the
 `/etc/hotplug.d/iface/99-startwrt-remote-access` hook (in `backend/hotplug/`)
-on `ifup`, `ifupdate`, and `ifdown` of `wan` or `wan6`.
+on `ifup`, `ifupdate`, and `ifdown` of `wan`, `wan6`, or `wwan`.
 
 ```rust
 // Request: {}
 // Response: null
 // Backend: re-applies the remote-access preference to the firewall against the
 // current WAN IPs, reloads the firewall, and kills WAN-side dropbear (SSH)
-// sessions from sources the mode no longer admits, so they don't survive a rule
-// change via conntrack ESTABLISHED state
+// sessions from sources the mode no longer admits, including sessions to a
+// standby uplink's address. Established sessions must not survive a tightening.
 ```
 
 ### `system.set-timezone`
@@ -588,7 +588,7 @@ struct WanDnsSetRequest {
 }
 // Response: null
 // Backend: stores custom servers in the `startwrt` config (`system_dns`
-// section), sets `peerdns` on wan/wan6 (0 for Custom, 1 for Isp), rewrites
+// section), sets `peerdns` on wan/wan6/wwan (0 for Custom, 1 for Isp), rewrites
 // per-profile DNS forwarding (dnsmasq + firewall DNAT), regenerates the
 // SmartDNS config, then runs the full reload_system() (network + smartdns +
 // firewall + dnsmasq)
@@ -656,7 +656,22 @@ cloudflare script expects: `username 'Bearer'`, `domain 'host@zone'`
 (`'@zone'` for the apex), and `use_api_check '1'` so proxied (orange-cloud)
 records compare against the record's real content instead of the proxy IP.
 Every provider's section also gets `interface 'wan'`, binding it to hotplug
-so updates fire immediately on WAN reconnect.
+so updates fire immediately on WAN reconnect. The address comes from the
+`wan` interface (`ip_source 'network'`), or, while a Wi-Fi uplink exists, from
+`startwrt-cli wan uplink-ipv4` (`ip_source 'script'`), which prints the address
+of the uplink carrying traffic.
+
+### `wan.uplink-ipv4`
+
+```rust
+// Request: {}
+// Response: Option<String>
+```
+
+Returns the IPv4 address of the uplink carrying traffic, independent of whether
+an Ethernet WAN interface is configured. Published Ports and Inbound VPNs use
+it for their IPv4 endpoints. The CLI prints the bare address for ddns-scripts,
+or nothing while neither uplink has one.
 
 ---
 
@@ -1348,8 +1363,8 @@ the router currently has no global prefix (a flap to "none" never wipes rules).
 ```
 
 Internal endpoint, **not called from the frontend**. Re-derives every hairpin
-projection from the firewall config and the router's current WAN IPv4
-addresses (`ubus call network.interface.wan status`) — the `reflection_zone`
+projection from the firewall config and the IPv4 addresses of the uplink
+carrying traffic (`ubus call network.interface dump`) — the `reflection_zone`
 list on each published-port and automatic-forward redirect, and the LAN-side
 copies of each IPv6 published-port rule — and writes the config only if
 something changed. A profile's WAN Whitelist and Blacklist entries are read
@@ -1754,6 +1769,9 @@ struct WifiSetResult {
 // (`autoWidths` for "auto"), or when the radio's PHY mode cannot express the
 // width (HT stops at 40 MHz).
 // A call that changes `country` instead rejects any width above 80 MHz.
+// Turning off a radio that is on and that an enabled client-mode `wifi-iface`
+// uses, whoever configured it, is rejected with `WifiRadioCarriesUplink` (1027),
+// by a preview too.
 ```
 
 ### `wifi.blackout-get`
@@ -2361,7 +2379,7 @@ finding marked `notice` is shown above the form instead.
 #[serde(rename_all = "kebab-case")]
 enum ConfigView {
     // Settings, which holds the recovery tools, is never one.
-    Wan, PublishedPorts, Outbound, Lan, Devices, Profiles, Ethernet, Wifi, Inbound,
+    Wan, PublishedPorts, Outbound, Lan, Devices, Profiles, Ethernet, Wifi, Inbound, Wwan,
 }
 
 #[derive(Serialize)]
@@ -2375,6 +2393,7 @@ enum ConfigProblem {
     Absent,       // a section the page requires is absent
     Extra,        // a section beyond the one the page shows in its place
     Unmanaged,    // a value beyond the one the page manages, left as written
+    Uplink,       // a client-mode interface set up outside StartWRT
 }
 
 #[derive(Serialize)]
@@ -2397,6 +2416,158 @@ struct ConfigCheck {
 }
 // Response: ConfigCheck
 // Backend: ctrl/src/config_check.rs; reads ddns, dhcp, firewall, network, startwrt, wireless.
+```
+
+---
+
+## 19. Wireless WAN
+
+The router as a Wi-Fi client of another network. StartWRT owns the `wwan`
+sections of `wireless` and `network`; the `wwan` interface is a member of the
+`wan` firewall zone. A client-mode `wifi-iface` under another name (one set up
+in LuCI) is reported in `unmanaged` and never written.
+
+A watcher in the daemon (`wwan::watch`, every 5 s) stops the uplink it cannot
+join: it sets `wireless.wwan.disabled '1'`, which turns the band's own access
+point back on, and records why in `startwrt.wwan.reason`. A new or changed
+uplink stops after 30 s without connecting: `rejected` if wpa_supplicant saw
+the network at −75 dBm or better since, `unreachable` otherwise. An uplink that
+loses its connection stops as `rejected` once the network has refused it for
+120 s while seen at that signal within the last 90 s; losing those sightings
+resets the refusal timeout. An out-of-range or weak network is retried indefinitely. Sightings come from `ubus call
+wpa_supplicant.<ifname> control '{"command":"BSS RANGE=…"}'`.
+
+### `wwan.get`
+
+```rust
+// Request: {}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum WwanSecurity { Open, Wpa2, Wpa2Wpa3, Wpa3 }  // "open" | "wpa2" | "wpa2Wpa3" | "wpa3"
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum WwanPriority {
+    /// Used while the WAN port has no connection.
+    Backup,
+    /// Used while connected; the WAN port takes over when it drops.
+    Preferred,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum WwanStopReason {
+    /// The network was in range and did not accept the router.
+    Rejected,
+    /// The network was not found when the router tried to join it.
+    Unreachable,
+    /// Turned off outside StartWRT.
+    Disabled,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WwanResponse {
+    /// Every `wifi-device`, e.g. { radio: "radio0", band: "2g", enabled: true }.
+    radios: Vec<WwanRadio>,
+    /// { radio, band, ssid, security, priority, stopped: Option<WwanStopReason> }
+    uplink: Option<WwanUplink>,
+    /// Absent off the router, without an uplink, and while it is stopped.
+    state: Option<WwanState>,    // { associated, address, signal (dBm), channel, active, subnetConflict }
+    /// Client-mode Wi-Fi interfaces StartWRT did not create, by section name.
+    unmanaged: Vec<String>,
+}
+// Backend: `state.active` is true while `wwan` carries the default route
+// (`system::active_uplink`, from `network.interface dump`). `state.subnetConflict`
+// is true while the uplink's network overlaps one on a LAN or profile interface
+// in that dump. The priority reads
+// back from the two interfaces' route metrics. An `encryption` on
+// `wifi-iface 'wwan'` outside the four above is rejected with `CorruptedWifi`.
+```
+
+### `wwan.scan`
+
+```rust
+#[derive(Deserialize)]
+struct WwanScanRequest { radio: String }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WwanNetwork {
+    ssid: String,            // empty for a hidden network
+    bssid: String,
+    channel: Option<u32>,
+    signal: Option<i32>,     // dBm
+    /// None for a network StartWRT cannot join (WPA Enterprise, OWE, WEP, WPA1).
+    security: Option<WwanSecurity>,
+}
+// Response: Vec<WwanNetwork>, one entry per network name (strongest access
+// point), hidden networks one per access point, strongest first.
+// Backend: `ubus call iwinfo scan {"device": <radio>}`; iwinfo scans on one of
+// the radio's interfaces or a temporary one. A radio that is off or missing is
+// rejected with `WifiRadioUnavailable` (1029).
+```
+
+### `wwan.connect`
+
+```rust
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WwanConnectRequest {
+    radio: String,
+    ssid: String,               // 1–32 bytes, no control characters
+    security: WwanSecurity,
+    password: Option<String>,   // 8–63 characters, no control characters; ignored for Open
+    priority: WwanPriority,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum WwanJoinOutcome {
+    Connected,
+    /// The router stopped trying; `uplink.stopped` says why.
+    Stopped,
+    /// Undecided when the call returned.
+    Joining,
+}
+// Response: WwanJoinOutcome
+// Backend: replaces any `wwan` sections with a client-mode `wifi-iface 'wwan'`
+// (`network 'wwan'`) and a DHCP `interface 'wwan'`, adds `wwan` to the `wan`
+// zone, and writes route metrics: 10 on the preferred uplink, 20 on the other.
+// `peerdns '0'` follows a custom WAN DNS setting. Rejects an off or missing
+// radio (`WifiRadioUnavailable`), a bad name or password (`InvalidValue`), and
+// an unmanaged client interface (`WifiUplinkConfiguredElsewhere`, 1028), writing
+// nothing. Then reload_system(), and waits up to 45 s for the station to
+// authenticate or the watcher to stop it.
+```
+
+### `wwan.reconnect`
+
+```rust
+// Request: {}
+// Response: WwanJoinOutcome
+// Backend: clears `wireless.wwan.disabled` and `startwrt.wwan`, then
+// reload_system() and waits as `wwan.connect` does. `NotFound` without an
+// uplink; an off or missing radio is rejected with `WifiRadioUnavailable`.
+```
+
+### `wwan.priority-set`
+
+```rust
+#[derive(Deserialize)]
+struct WwanPrioritySetRequest { priority: WwanPriority }
+// Response: null
+// Backend: rewrites the two route metrics; `NotFound` without an uplink.
+```
+
+### `wwan.disconnect`
+
+```rust
+// Request: {}
+// Response: null
+// Backend: deletes the `wwan` sections and `startwrt.wwan`, takes `wwan` out of the `wan` zone and
+// clears `network.wan.metric`; `NotFound` without an uplink.
 ```
 
 ---
@@ -2454,6 +2625,13 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `wan.dns-set`                       | WAN             |                             |
 | `wan.ddns-get`                      | WAN             |                             |
 | `wan.ddns-set`                      | WAN             |                             |
+| `wan.uplink-ipv4`                   | WAN             | Endpoints and ddns-scripts  |
+| `wwan.get`                          | Wireless WAN    |                             |
+| `wwan.scan`                         | Wireless WAN    |                             |
+| `wwan.connect`                      | Wireless WAN    |                             |
+| `wwan.reconnect`                    | Wireless WAN    |                             |
+| `wwan.priority-set`                 | Wireless WAN    |                             |
+| `wwan.disconnect`                   | Wireless WAN    |                             |
 | `lan.ipv4-get`                      | LAN             |                             |
 | `lan.ipv4-set`                      | LAN             |                             |
 | `lan.ipv6-get`                      | LAN             |                             |
@@ -2514,7 +2692,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `dns.injected-list`                 | DNS Injection   |                             |
 | `config.check`                      | Config Check    |                             |
 
-**Totals:** 85 RPC methods across 18 categories, plus the HTTP/WebSocket routes
+**Totals:** 92 RPC methods across 19 categories, plus the HTTP/WebSocket routes
 table above and the deprecated generic endpoints below.
 
 ---

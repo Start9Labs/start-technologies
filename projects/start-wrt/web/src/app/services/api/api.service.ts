@@ -88,6 +88,7 @@ export abstract class ApiService {
   abstract lanIpv4Set(params: LanIpv4SetRequest): Promise<null>
   abstract lanIpv6Get(): Promise<LanIpv6Response>
   abstract lanIpv6Set(params: LanIpv6SetRequest): Promise<null>
+  abstract wanUplinkIpv4(): Promise<RpcReturnType<Api, 'wan.uplink-ipv4'>>
   abstract wanIpv4Get(): Promise<WanIpv4Response>
   abstract wanIpv4Set(params: WanIpv4SetRequest): Promise<null>
   abstract wanIpv6Get(): Promise<WanIpv6Response>
@@ -98,6 +99,12 @@ export abstract class ApiService {
   abstract wanDnsSet(params: WanDnsSetRequest): Promise<null>
   abstract wanDdnsGet(): Promise<WanDdnsResponse>
   abstract wanDdnsSet(params: WanDdnsSetRequest): Promise<null>
+  abstract wwanGet(): Promise<WwanResponse>
+  abstract wwanScan(params: WwanScanRequest): Promise<WwanNetwork[]>
+  abstract wwanConnect(params: WwanConnectRequest): Promise<WwanJoinOutcome>
+  abstract wwanReconnect(): Promise<WwanJoinOutcome>
+  abstract wwanPrioritySet(params: WwanPrioritySetRequest): Promise<null>
+  abstract wwanDisconnect(): Promise<null>
   abstract publishedPortsList(): Promise<PublishedPortFromApi[]>
   abstract publishedPortsSet(
     params: PublishedPortsSetRequest,
@@ -345,6 +352,26 @@ export type WanMacStrategy = 'router' | 'custom'
 export type WanMacResponse = RpcReturnType<Api, 'wan.mac-get'>
 
 export type WanMacSetRequest = RpcParamType<Api, 'wan.mac-set'>
+
+export type WwanResponse = RpcReturnType<Api, 'wwan.get'>
+
+export type WwanNetwork = Bindings.WwanNetwork
+
+export type WwanUplink = Bindings.WwanUplink
+
+export type WwanSecurity = Bindings.WwanSecurity
+
+export type WwanPriority = Bindings.WwanPriority
+
+export type WwanStopReason = Bindings.WwanStopReason
+
+export type WwanJoinOutcome = Bindings.WwanJoinOutcome
+
+export type WwanScanRequest = RpcParamType<Api, 'wwan.scan'>
+
+export type WwanConnectRequest = RpcParamType<Api, 'wwan.connect'>
+
+export type WwanPrioritySetRequest = RpcParamType<Api, 'wwan.priority-set'>
 
 export type WanDnsMode = 'isp' | 'custom'
 

@@ -256,6 +256,35 @@ export type WanIpv6Mode = z.output<typeof schemas.WanIpv6Mode>
 export type WanIpv6ModeInput = z.input<typeof schemas.WanIpv6Mode>
 export type WifiRadio = z.output<typeof schemas.WifiRadio>
 export type WifiRadioInput = z.input<typeof schemas.WifiRadio>
+
+/**
+ * How a join ended.
+ */
+export type WwanJoinOutcome = z.output<typeof schemas.WwanJoinOutcome>
+
+/**
+ * Which uplink carries traffic while both the WAN port and the Wi-Fi uplink are up.
+ */
+export type WwanPriority = z.output<typeof schemas.WwanPriority>
+
+/**
+ * Which uplink carries traffic while both the WAN port and the Wi-Fi uplink are up.
+ */
+export type WwanPriorityInput = z.input<typeof schemas.WwanPriority>
+export type WwanRadio = z.output<typeof schemas.WwanRadio>
+export type WwanScanRequestInput = z.input<typeof schemas.WwanScanRequest>
+export type WwanSecurity = z.output<typeof schemas.WwanSecurity>
+export type WwanSecurityInput = z.input<typeof schemas.WwanSecurity>
+
+/**
+ * What the router observes of the uplink. Absent off the router.
+ */
+export type WwanState = z.output<typeof schemas.WwanState>
+
+/**
+ * Why the router is not trying to join the uplink's network.
+ */
+export type WwanStopReason = z.output<typeof schemas.WwanStopReason>
 export type ActivityListResponse = z.output<typeof schemas.ActivityListResponse>
 
 /**
@@ -337,6 +366,12 @@ export type WanPortCollision = z.output<typeof schemas.WanPortCollision>
  */
 export type WifiSetRequestInput = z.input<typeof schemas.WifiSetRequest>
 export type WifiSetResult = z.output<typeof schemas.WifiSetResult>
+export type WwanConnectRequestInput = z.input<typeof schemas.WwanConnectRequest>
+export type WwanNetwork = z.output<typeof schemas.WwanNetwork>
+export type WwanPrioritySetRequestInput = z.input<
+  typeof schemas.WwanPrioritySetRequest
+>
+export type WwanUplink = z.output<typeof schemas.WwanUplink>
 
 /**
  * `wifi.blackout-set` request: the blackout windows plus a confirmation flag.
@@ -369,5 +404,6 @@ export type Sessions = z.output<typeof schemas.Sessions>
  */
 export type VpnServers = z.output<typeof schemas.VpnServers>
 export type WifiRegulatory = z.output<typeof schemas.WifiRegulatory>
+export type WwanResponse = z.output<typeof schemas.WwanResponse>
 export type SessionList = z.output<typeof schemas.SessionList>
 export type Api = RpcSchemaTree<typeof schemas.Api>

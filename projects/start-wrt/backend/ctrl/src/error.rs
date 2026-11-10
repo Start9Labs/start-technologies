@@ -62,6 +62,9 @@ pub enum ErrorKind {
     SubnetCollision = 1024,
     PublishedPortsUseIpv6 = 1025,
     VpnDisabled = 1026,
+    WifiRadioCarriesUplink = 1027,
+    WifiUplinkConfiguredElsewhere = 1028,
+    WifiRadioUnavailable = 1029,
 }
 
 impl From<Error> for startos::Error {
@@ -132,6 +135,9 @@ impl ErrorKind {
             SubnetCollision => "Subnet Collision",
             PublishedPortsUseIpv6 => "Published Ports Use IPv6",
             VpnDisabled => "Outbound VPN Disabled",
+            WifiRadioCarriesUplink => "Radio Carries Wi-Fi Uplink",
+            WifiUplinkConfiguredElsewhere => "Wi-Fi Uplink Configured Elsewhere",
+            WifiRadioUnavailable => "Wi-Fi Radio Unavailable",
         }
     }
 }

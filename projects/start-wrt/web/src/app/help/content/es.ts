@@ -407,6 +407,26 @@ Habilita DNS over HTTPS (DoH) para consultas DNS cifradas. Esto mejora la privac
 DDNS asigna tu dirección IP cambiante a un nombre de dominio fijo, permitiéndote acceder a tu red de forma remota sin conocer tu IP actual.
 
 Requiere una cuenta con un proveedor compatible. Introduce las credenciales y el nombre de host de tu proveedor de DDNS.`,
+  '/wan/wireless-wan': `## WAN – WAN inalámbrica
+
+El router se une a otra red Wi-Fi y la usa para acceder a Internet. Los dispositivos de su red llegan a Internet a través de ella igual que por el puerto WAN: los perfiles, los puertos publicados y el acceso remoto la tratan como la WAN.
+
+Mientras el acceso remoto esté activado, los dispositivos de la red a la que se une el router pueden acceder a su interfaz web y a SSH. Al unirse, se le ofrece desactivar antes el acceso remoto.
+
+### Unirse a una red
+
+Elija una banda, busque y seleccione **Unirse** junto a una red, o **Red oculta** para una que oculta su nombre. Se admiten redes WPA2, WPA3 y abiertas; las redes WPA Enterprise no.
+
+### Prioridad
+
+- **Respaldo:** se usa el puerto WAN siempre que tenga conexión, y el enlace Wi-Fi toma el relevo cuando el puerto WAN pierde el enlace.
+- **Preferida:** se usa el enlace Wi-Fi siempre que esté conectado, y el puerto WAN toma el relevo cuando se cae.
+
+El cambio sigue al enlace: una red superior que sigue conectada pero deja de llegar a Internet no lo activa.
+
+### La Wi-Fi propia del router
+
+La banda que lleva el enlace sigue el canal de la red superior, y su Wi-Fi está apagada mientras el router no esté conectado a esa red. Únase desde un dispositivo con cable o, en un router con dos bandas, desde la otra banda. Si el router no puede unirse a una red que acaba de recibir, o una red al alcance lo rechaza durante dos minutos, deja de intentarlo y la Wi-Fi de esa banda vuelve a encenderse; pulse **Reintentar** o **Cambiar contraseña** para reanudar, lo que vuelve a apagar la Wi-Fi de esa banda hasta que el router se conecte. Una franja de apagado de Wi-Fi que apaga esa banda también desconecta el enlace.`,
   '/settings/activity': `## Ajustes – Actividad
 
 Consulta los intentos de inicio de sesión recientes y los eventos de seguridad. Vigila la actividad sospechosa y elimina las entradas antiguas según sea necesario.`,

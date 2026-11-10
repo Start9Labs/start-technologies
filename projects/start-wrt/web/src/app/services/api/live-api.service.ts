@@ -59,6 +59,12 @@ import {
   WanDnsSetRequest,
   WanDdnsResponse,
   WanDdnsSetRequest,
+  WwanConnectRequest,
+  WwanJoinOutcome,
+  WwanNetwork,
+  WwanPrioritySetRequest,
+  WwanResponse,
+  WwanScanRequest,
   PublishedPortFromApi,
   PublishedPortsSetRequest,
   PublishedPortsSetResult,
@@ -356,6 +362,10 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'lan.ipv6-set', params })
   }
 
+  wanUplinkIpv4(): ReturnType<ApiService['wanUplinkIpv4']> {
+    return this.rpc.request({ method: 'wan.uplink-ipv4', params: {} })
+  }
+
   async wanIpv4Get(): Promise<WanIpv4Response> {
     return this.rpc.request({ method: 'wan.ipv4-get', params: {} })
   }
@@ -394,6 +404,30 @@ export class LiveApiService extends ApiService {
 
   async wanDdnsSet(params: WanDdnsSetRequest): Promise<null> {
     return this.rpc.request({ method: 'wan.ddns-set', params })
+  }
+
+  async wwanGet(): Promise<WwanResponse> {
+    return this.rpc.request({ method: 'wwan.get', params: {} })
+  }
+
+  async wwanScan(params: WwanScanRequest): Promise<WwanNetwork[]> {
+    return this.rpc.request({ method: 'wwan.scan', params })
+  }
+
+  async wwanConnect(params: WwanConnectRequest): Promise<WwanJoinOutcome> {
+    return this.rpc.request({ method: 'wwan.connect', params })
+  }
+
+  async wwanReconnect(): Promise<WwanJoinOutcome> {
+    return this.rpc.request({ method: 'wwan.reconnect', params: {} })
+  }
+
+  async wwanPrioritySet(params: WwanPrioritySetRequest): Promise<null> {
+    return this.rpc.request({ method: 'wwan.priority-set', params })
+  }
+
+  async wwanDisconnect(): Promise<null> {
+    return this.rpc.request({ method: 'wwan.disconnect', params: {} })
   }
 
   async publishedPortsList(): Promise<PublishedPortFromApi[]> {

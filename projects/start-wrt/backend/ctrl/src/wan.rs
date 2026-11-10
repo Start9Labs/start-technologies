@@ -1,4 +1,4 @@
-use rpc_toolkit::{from_fn_async_local, ParentHandler};
+use rpc_toolkit::{from_fn_async_local, HandlerExt, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
     DdnsService, InterfaceProto, NetworkDevice, NetworkInterface, UciSystemDns,
@@ -22,6 +22,10 @@ fn serde_name(v: &impl Serialize) -> String {
 
 pub const WAN_INTERFACE: &str = "wan";
 pub const WAN6_INTERFACE: &str = "wan6";
+/// The Wi-Fi uplink, a member of the `wan` firewall zone.
+pub const WWAN_INTERFACE: &str = "wwan";
+/// Interfaces whose upstream DNS servers follow the WAN DNS mode.
+const DNS_INTERFACES: [&str; 3] = [WAN_INTERFACE, WAN6_INTERFACE, WWAN_INTERFACE];
 /// netifd alias for the `wan` interface's layer-3 device.
 pub const WAN6_DEVICE: &str = "@wan";
 const DDNS_SECTION: &str = "wan";
@@ -251,6 +255,15 @@ pub fn wan<C: CtrlContext + Clone>() -> ParentHandler<C> {
         .subcommand(
             "ipv6-set",
             from_fn_async_local(ipv6_set::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "uplink-ipv4",
+            from_fn_async_local(uplink_ipv4::<C>).with_custom_display_fn::<C, _>(|_, ip| {
+                if let Some(ip) = ip {
+                    println!("{ip}");
+                }
+                Ok(())
+            }),
         )
         .subcommand(
             "mac-get",
@@ -918,6 +931,115 @@ pub async fn dns_get<C: CtrlContext>(ctx: C) -> Result<WanDnsResponse, Error> {
     }
 }
 
+/// Prints the address DDNS publishes.
+const UPLINK_IPV4_COMMAND: &str = "/usr/bin/startwrt-cli wan uplink-ipv4";
+
+/// Where ddns-scripts reads the address it publishes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DdnsSource {
+    /// The WAN port's address.
+    WanPort,
+    /// The address of the uplink carrying traffic.
+    ActiveUplink,
+}
+
+impl DdnsSource {
+    fn of(cfgs: &uciedit::Configs) -> Self {
+        let wifi_uplink = cfgs["network"]
+            .sections
+            .iter()
+            .any(|s| s.ty() == NetworkInterface::TY && s.name().as_deref() == Some(WWAN_INTERFACE));
+        if wifi_uplink {
+            DdnsSource::ActiveUplink
+        } else {
+            DdnsSource::WanPort
+        }
+    }
+
+    fn ip_source(self) -> &'static str {
+        match self {
+            DdnsSource::WanPort => "network",
+            DdnsSource::ActiveUplink => "script",
+        }
+    }
+
+    fn ip_network(self) -> Option<String> {
+        (self == DdnsSource::WanPort).then(|| WAN_INTERFACE.to_string())
+    }
+
+    fn ip_script(self) -> Option<String> {
+        (self == DdnsSource::ActiveUplink).then(|| UPLINK_IPV4_COMMAND.to_string())
+    }
+}
+
+/// The address source of a DDNS service, written without touching its other options.
+#[derive(Debug, TypedSection, Default)]
+#[uci(ty = "service")]
+struct DdnsAddressSource {
+    #[uci(default)]
+    enabled: Option<String>,
+    #[uci(default)]
+    ip_source: Option<String>,
+    #[uci(default)]
+    ip_network: Option<String>,
+    #[uci(default)]
+    ip_script: Option<String>,
+}
+
+/// Points DDNS at the uplink that carries traffic. True when an enabled service changed.
+pub(crate) fn sync_ddns_source(cfgs: &mut uciedit::Configs) -> Result<bool, Error> {
+    let source = DdnsSource::of(cfgs);
+    let mut changed = false;
+    for section in &mut cfgs["ddns"].sections {
+        if section.name().as_deref() != Some(DDNS_SECTION) {
+            continue;
+        }
+        if let Some(mut service) = section.get_typed::<DdnsAddressSource>()? {
+            if service.ip_source.as_deref() == Some(source.ip_source()) {
+                continue;
+            }
+            service.ip_source = Some(source.ip_source().to_string());
+            service.ip_network = source.ip_network();
+            service.ip_script = source.ip_script();
+            changed |= service.enabled.as_deref() == Some("1");
+            section.set(&service)?;
+        }
+    }
+    Ok(changed)
+}
+
+/// The active uplink address is available without an Ethernet WAN interface.
+pub async fn uplink_ipv4<C: CtrlContext>(ctx: C) -> Result<Option<String>, Error> {
+    Ok(ctx.wan_ipv4_addrs().first().map(ToString::to_string))
+}
+
+/// The DNS options of an interface, written without touching its other options.
+#[derive(Debug, TypedSection, Default)]
+#[uci(ty = "interface")]
+struct InterfaceDns {
+    #[uci(default)]
+    peerdns: Option<String>,
+    dns: Vec<String>,
+}
+
+/// Off keeps the upstream network's DNS servers out of dnsmasq's resolv file.
+fn set_peer_dns(cfgs: &mut uciedit::Configs, peer_dns: bool) -> Result<(), Error> {
+    for section in &mut cfgs["network"].sections {
+        if !section
+            .name()
+            .is_some_and(|n| DNS_INTERFACES.contains(&&*n))
+        {
+            continue;
+        }
+        if let Some(mut iface) = section.get_typed::<InterfaceDns>()? {
+            iface.peerdns = Some(if peer_dns { "1" } else { "0" }.to_string());
+            iface.dns = vec![];
+            section.set(&iface)?;
+        }
+    }
+    Ok(())
+}
+
 #[instrument(skip_all)]
 pub async fn dns_set<C: CtrlContext>(
     ctx: C,
@@ -948,33 +1070,9 @@ pub async fn dns_set<C: CtrlContext>(
                     Some("system_dns"),
                 )?;
 
-                // Set peerdns=0 on WAN/WAN6 to prevent ISP DNS from appearing in resolvfile
-                for section in &mut cfgs["network"].sections {
-                    let name = section.name();
-                    let n = name.as_deref();
-                    if n == Some(WAN_INTERFACE) || n == Some(WAN6_INTERFACE) {
-                        if let Some(mut iface) = section.get_typed::<NetworkInterface>()? {
-                            iface.peerdns = Some("0".to_string());
-                            iface.dns = vec![];
-                            section.set(&iface)?;
-                        }
-                    }
-                }
+                set_peer_dns(&mut cfgs, false)?;
             }
-            DnsMode::Isp => {
-                // Restore peerdns=1 on WAN/WAN6
-                for section in &mut cfgs["network"].sections {
-                    let name = section.name();
-                    let n = name.as_deref();
-                    if n == Some(WAN_INTERFACE) || n == Some(WAN6_INTERFACE) {
-                        if let Some(mut iface) = section.get_typed::<NetworkInterface>()? {
-                            iface.peerdns = Some("1".to_string());
-                            iface.dns = vec![];
-                            section.set(&iface)?;
-                        }
-                    }
-                }
-            }
+            DnsMode::Isp => set_peer_dns(&mut cfgs, true)?,
         }
 
         // Rewrite DNS forwarding (dnsmasq + firewall DNAT) for all profiles
@@ -1129,21 +1227,23 @@ pub async fn ddns_set<C: CtrlContext>(
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["ddns"]).await?;
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["ddns", "network"]).await?;
 
         let ddns_idx = cfgs["ddns"]
             .sections
             .iter()
             .position(|s| s.name().as_deref() == Some(DDNS_SECTION));
 
+        let source = DdnsSource::of(&cfgs);
         let new_svc = DdnsService {
             enabled: Some(if req.enabled { "1" } else { "0" }.to_string()),
             service_name: Some(provider_to_service(&req.provider).to_string()),
-            ip_source: Some("network".to_string()),
-            ip_network: Some("wan".to_string()),
+            ip_source: Some(source.ip_source().to_string()),
+            ip_network: source.ip_network(),
+            ip_script: source.ip_script(),
             // Hotplug binding: re-run the update as soon as the WAN bounces
             // instead of waiting for the daemon's next check interval
-            interface: Some("wan".to_string()),
+            interface: Some(WAN_INTERFACE.to_string()),
             use_api_check: if req.provider == DdnsProvider::Cloudflare {
                 Some("1".to_string())
             } else {
@@ -1232,6 +1332,43 @@ mod tests {
         fn effectful(&self) -> bool {
             false
         }
+    }
+
+    #[tokio::test]
+    async fn active_uplink_endpoint_needs_no_wan_port_config() {
+        #[derive(Clone)]
+        struct UplinkOnlyContext(PathBuf);
+
+        impl Context for UplinkOnlyContext {
+            fn runtime(&self) -> Option<Arc<Runtime>> {
+                None
+            }
+        }
+
+        impl CtrlContext for UplinkOnlyContext {
+            fn uci_root(&self) -> PathBuf {
+                self.0.clone()
+            }
+            fn effectful(&self) -> bool {
+                false
+            }
+            fn wan_ipv4_addrs(&self) -> Vec<std::net::Ipv4Addr> {
+                vec!["192.168.43.27".parse().unwrap()]
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = UplinkOnlyContext(dir.path().to_path_buf());
+        assert_eq!(
+            uplink_ipv4(ctx).await.unwrap(),
+            Some("192.168.43.27".into())
+        );
+        assert_eq!(
+            uplink_ipv4(TestContext(dir.path().to_path_buf()))
+                .await
+                .unwrap(),
+            None
+        );
     }
 
     /// The wan6 proto and `auto` option as written to disk.
@@ -1672,6 +1809,54 @@ config zone
                 },
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn dns_mode_follows_onto_the_wifi_uplink() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_network(dir.path());
+        setup_startwrt(dir.path());
+        let network = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        std::fs::write(
+            dir.path().join("network"),
+            format!(
+                "{network}\nconfig interface 'wwan'\n\toption proto 'dhcp'\n\toption metric '20'\n"
+            ),
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        let wwan = || {
+            let text = std::fs::read_to_string(dir.path().join("network")).unwrap();
+            text[text.find("'wwan'").unwrap()..].to_string()
+        };
+
+        dns_set(
+            ctx.clone(),
+            DeserializeStdin(WanDnsSetRequest {
+                mode: DnsMode::Custom,
+                servers: Some(vec![DnsServer {
+                    address: "9.9.9.9".into(),
+                    ssl: false,
+                }]),
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(wwan().contains("option peerdns '0'"));
+        assert!(wwan().contains("option metric '20'"));
+        assert!(!wwan().contains("device"));
+
+        dns_set(
+            ctx,
+            DeserializeStdin(WanDnsSetRequest {
+                mode: DnsMode::Isp,
+                servers: None,
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(wwan().contains("option peerdns '1'"));
+        assert!(!wwan().contains("device"));
     }
 
     // ── DDNS ──

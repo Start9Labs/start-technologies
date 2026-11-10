@@ -162,6 +162,8 @@ cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-published-ports "${FILES_DIR}/etc/
 chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-published-ports"
 cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-port-control "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-port-control"
 chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-port-control"
+cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-ddns "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-ddns"
+chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-ddns"
 cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-smartdns "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-smartdns"
 chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-smartdns"
 

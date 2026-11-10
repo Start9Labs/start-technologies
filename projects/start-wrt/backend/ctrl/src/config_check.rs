@@ -16,7 +16,8 @@ use crate::lan::{LAN_INTERFACE, LAN_NETMASK};
 use crate::prelude::*;
 use crate::profiles::UciProfile;
 use crate::utils::HandlerExtSerde;
-use crate::wan::{WAN6_INTERFACE, WAN_INTERFACE};
+use crate::wan::{WAN6_INTERFACE, WAN_INTERFACE, WWAN_INTERFACE};
+use crate::wwan::{InterfaceMetric, UplinkStation, WwanSecurity};
 use crate::CtrlContext;
 
 /// A page of the StartWRT UI, named by its route. Settings, which holds the recovery tools,
@@ -44,6 +45,7 @@ pub enum ConfigView {
     Ethernet,
     Wifi,
     Inbound,
+    Wwan,
 }
 rpc_toolkit::reflect_ts!(ConfigView);
 
@@ -66,6 +68,8 @@ pub enum ConfigProblem {
     Extra,
     /// A value beyond the one the page manages, left as written.
     Unmanaged,
+    /// A client-mode interface set up outside StartWRT.
+    Uplink,
 }
 rpc_toolkit::reflect_ts!(ConfigProblem);
 
@@ -130,6 +134,7 @@ const ALL: &[ConfigView] = &[
     Ethernet,
     Wifi,
     Inbound,
+    Wwan,
 ];
 
 /// The pages whose requests read the file.
@@ -145,6 +150,7 @@ fn file_views(config: &str) -> &'static [ConfigView] {
             Ethernet,
             Wifi,
             Inbound,
+            Wwan,
         ],
         "firewall" => &[
             Wan,
@@ -155,9 +161,10 @@ fn file_views(config: &str) -> &'static [ConfigView] {
             Ethernet,
             Wifi,
             Inbound,
+            Wwan,
         ],
         "dhcp" => &[Wan, PublishedPorts, Lan, Devices, Profiles],
-        "wireless" => &[Wifi, Profiles],
+        "wireless" => &[Wifi, Profiles, Wwan],
         "ddns" => &[Wan, PublishedPorts, Inbound],
         _ => ALL,
     }
@@ -393,6 +400,9 @@ fn check_network(cfg: &Config, profiles: &BTreeSet<String>, out: &mut Findings) 
                 _ => {}
             }
             out.read::<NetworkInterface>(C, section, &views);
+            if matches!(name.as_deref(), Some(WAN_INTERFACE | WWAN_INTERFACE)) {
+                out.read::<InterfaceMetric>(C, section, &[Wwan]);
+            }
         } else if ty == NetworkDevice::TY {
             out.read::<NetworkDevice>(C, section, &[Ethernet, Profiles]);
         } else if ty == NetworkBridgeVlan::TY {
@@ -499,20 +509,36 @@ fn check_wireless(cfg: &Config, out: &mut Findings) {
     for section in cfg.sections.iter().filter(|s| s.ty() == WifiDevice::TY) {
         if section.name().is_none() {
             out.section(C, section, VIEWS, ConfigProblem::Unnamed);
-        } else if out.read::<WifiDevice>(C, section, VIEWS).is_some() {
+        } else if out
+            .read::<WifiDevice>(C, section, &[Wifi, Profiles, Wwan])
+            .is_some()
+        {
             devices.extend(section.name().map(Cow::into_owned));
         }
     }
     let mut access_points = BTreeSet::new();
     for section in cfg.sections.iter().filter(|s| s.ty() == WifiInterface::TY) {
-        if section.name().is_none() {
+        let iface = if section.name().is_none() {
             out.section(C, section, VIEWS, ConfigProblem::Unnamed);
-            continue;
+            None
+        } else {
+            out.read::<WifiInterface>(C, section, VIEWS)
+        };
+        // Saving the Wi-Fi page reads every interface as an uplink too.
+        let station_views: &[ConfigView] = if iface.is_some() {
+            &[Wifi, Wwan]
+        } else {
+            &[Wwan]
+        };
+        if let Some(station) = out.read::<UplinkStation>(C, section, station_views) {
+            if station.mode == WifiMode::STA {
+                check_uplink(section, &station, out);
+            }
         }
-        let Some(iface) = out.read::<WifiInterface>(C, section, VIEWS) else {
+        let Some(iface) = iface else {
             continue;
         };
-        if !devices.contains(&iface.device) {
+        if !devices.contains(&iface.device) || iface.mode == WifiMode::STA {
             continue;
         }
         if let Some(disabled) = option(section, "disabled") {
@@ -570,6 +596,28 @@ fn check_wireless(cfg: &Config, out: &mut Findings) {
                 );
             }
         }
+    }
+}
+
+/// StartWRT's own uplink, and a notice on the Wi-Fi page for any other.
+fn check_uplink(section: &Section, station: &UplinkStation, out: &mut Findings) {
+    const C: &str = "wireless";
+    if section.name().as_deref() == Some(WWAN_INTERFACE) {
+        if WwanSecurity::from_encryption(&station.encryption).is_none() {
+            if let Some(encryption) = option(section, "encryption") {
+                out.value(
+                    C,
+                    section,
+                    &[Wwan],
+                    ConfigProblem::Unsupported,
+                    "encryption",
+                    encryption,
+                );
+            }
+        }
+    } else if !station.disabled {
+        out.section(C, section, &[Wifi], ConfigProblem::Uplink)
+            .notice = true;
     }
 }
 
@@ -637,7 +685,7 @@ fn check_firewall(cfg: &Config, out: &mut Findings) {
         }
     }
     if !wan {
-        out.absent(C, WAN_INTERFACE, &[Profiles]);
+        out.absent(C, WAN_INTERFACE, &[Profiles, Wwan]);
     }
 }
 
@@ -713,7 +761,7 @@ mod tests {
         )]);
         assert_eq!(found.len(), 1, "{found:#?}");
         assert_eq!(found[0].problem, ConfigProblem::Syntax);
-        assert_eq!(found[0].views, vec![Wifi, Profiles]);
+        assert_eq!(found[0].views, vec![Wifi, Profiles, Wwan]);
         let lines = stock()
             .into_iter()
             .find(|(n, _)| *n == "wireless")
@@ -921,11 +969,73 @@ mod tests {
             problems,
             vec![
                 (Some("guest"), ConfigProblem::Extra),
-                (Some("wwan"), ConfigProblem::Unsupported),
                 (None, ConfigProblem::Unnamed),
             ],
             "{found:#?}"
         );
+    }
+
+    const UPLINK: &str = "\nconfig wifi-iface 'wwan'\n\toption device 'radio0'\n\toption mode 'sta'\n\toption network 'wwan'\n\toption ssid 'Upstream'\n\toption encryption 'psk2'\n\toption key 'upstreampass'\n";
+
+    #[test]
+    fn startwrt_uplink_leaves_the_wifi_page_alone() {
+        let found = with(&[
+            ("wireless", UPLINK),
+            (
+                "network",
+                "\nconfig interface 'wwan'\n\toption proto 'dhcp'\n\toption metric '20'\n",
+            ),
+        ]);
+        assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn uplink_encryption_the_wwan_page_cannot_show() {
+        let found = with(&[("wireless", UPLINK.replace("'psk2'", "'wpa2'").as_str())]);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert_eq!(found[0].views, vec![Wwan]);
+        assert_eq!(found[0].problem, ConfigProblem::Unsupported);
+        assert_eq!(found[0].option.as_deref(), Some("encryption"));
+        assert_eq!(found[0].found.as_deref(), Some("wpa2"));
+        assert!(!found[0].notice);
+    }
+
+    #[test]
+    fn luci_uplink_is_a_notice_on_the_wifi_page() {
+        let luci = UPLINK.replace("'wwan'\n\toption device", "'wifinet2'\n\toption device");
+        let found = with(&[("wireless", luci.as_str())]);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert_eq!(found[0].section.as_deref(), Some("wifinet2"));
+        assert_eq!(found[0].views, vec![Wifi]);
+        assert_eq!(found[0].problem, ConfigProblem::Uplink);
+        assert!(found[0].notice);
+
+        let disabled = format!("{luci}\toption disabled '1'\n");
+        assert!(with(&[("wireless", disabled.as_str())]).is_empty());
+    }
+
+    #[test]
+    fn unreadable_station_or_metric_blocks_the_wwan_page() {
+        let found = with(&[(
+            "wireless",
+            format!("{UPLINK}\toption disabled 'maybe'\n").as_str(),
+        )]);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert_eq!(found[0].views, vec![Wifi, Wwan]);
+        assert_eq!(found[0].option.as_deref(), Some("disabled"));
+
+        let mut files = stock();
+        let network = &mut files.iter_mut().find(|(n, _)| *n == "network").unwrap().1;
+        *network = network.replacen(
+            "config interface 'wan'\n",
+            "config interface 'wan'\n\toption metric 'low'\n",
+            1,
+        );
+        let files: Vec<(&str, &str)> = files.iter().map(|(n, t)| (*n, t.as_str())).collect();
+        let found = findings(&files);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert_eq!(found[0].views, vec![Wwan]);
+        assert_eq!(found[0].option.as_deref(), Some("metric"));
     }
 
     #[test]

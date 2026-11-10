@@ -96,11 +96,11 @@ export default class PublishedPorts {
     // Each call degrades independently: one failing WAN/LAN endpoint must not
     // reject the whole batch and leave ipv4EndpointHost/ipv6Available unset
     // (which suppressed every IPv4 endpoint in the table).
-    const [wanIpv6, lanIpv6, ddns, wanIpv4] = await Promise.all([
+    const [wanIpv6, lanIpv6, ddns, uplinkIpv4] = await Promise.all([
       this.api.wanIpv6Get().catch(() => null),
       this.api.lanIpv6Get().catch(() => null),
       this.api.wanDdnsGet().catch(() => null),
-      this.api.wanIpv4Get().catch(() => null),
+      this.api.wanUplinkIpv4().catch(() => null),
     ])
 
     this.loadVpnProfiles()
@@ -114,7 +114,7 @@ export default class PublishedPorts {
 
     // Use DDNS hostname if available, otherwise WAN IP
     const ddnsHostname = ddns?.enabled ? ddns.hostname || null : null
-    this.ipv4EndpointHost.set(ddnsHostname || wanIpv4?.assigned_ip || null)
+    this.ipv4EndpointHost.set(ddnsHostname || uplinkIpv4 || null)
   }
 
   private async loadVpnProfiles() {

@@ -652,6 +652,9 @@ pub struct DdnsService {
     pub ip_source: Option<String>,
     #[uci(default)]
     pub ip_network: Option<String>,
+    /// Command whose output is the address to publish, for `ip_source 'script'`.
+    #[uci(default)]
+    pub ip_script: Option<String>,
     /// Binds the section to hotplug ifup/ifdown events for this interface
     #[uci(default)]
     pub interface: Option<String>,
