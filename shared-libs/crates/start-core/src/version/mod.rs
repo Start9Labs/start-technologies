@@ -86,10 +86,11 @@ mod v0_4_1_1;
 mod v0_4_1_2;
 mod v0_4_1_3;
 mod v0_4_2;
+mod v0_4_3;
 #[cfg(test)]
 pub(crate) use v0_4_1_2::retired_alpha_keys;
 
-pub type Current = v0_4_2::Version; // VERSION_BUMP
+pub type Current = v0_4_3::Version; // VERSION_BUMP
 
 impl Current {
     #[instrument(skip(self, db))]
@@ -239,7 +240,8 @@ enum Version {
     V0_4_1_1(Wrapper<v0_4_1_1::Version>),
     V0_4_1_2(Wrapper<v0_4_1_2::Version>),
     V0_4_1_3(Wrapper<v0_4_1_3::Version>),
-    V0_4_2(Wrapper<v0_4_2::Version>), // VERSION_BUMP
+    V0_4_2(Wrapper<v0_4_2::Version>),
+    V0_4_3(Wrapper<v0_4_3::Version>), // VERSION_BUMP
     Other(exver::Version),
 }
 
@@ -327,7 +329,8 @@ impl Version {
             Self::V0_4_1_1(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_1_2(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_1_3(v) => DynVersion(Box::new(v.0)),
-            Self::V0_4_2(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
+            Self::V0_4_2(v) => DynVersion(Box::new(v.0)),
+            Self::V0_4_3(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
             Self::Other(v) => {
                 return Err(Error::new(
                     eyre!("unknown version {v}"),
@@ -407,7 +410,8 @@ impl Version {
             Version::V0_4_1_1(Wrapper(x)) => x.semver(),
             Version::V0_4_1_2(Wrapper(x)) => x.semver(),
             Version::V0_4_1_3(Wrapper(x)) => x.semver(),
-            Version::V0_4_2(Wrapper(x)) => x.semver(), // VERSION_BUMP
+            Version::V0_4_2(Wrapper(x)) => x.semver(),
+            Version::V0_4_3(Wrapper(x)) => x.semver(), // VERSION_BUMP
             Version::Other(x) => x.clone(),
         }
     }
@@ -887,7 +891,8 @@ mod tests {
             ("0.4.0.3", "0.4.0.4", 0),
             ("0.4.0.4", "0.4.0.5", 3),
             ("0.4.1.2", "0.4.1.3", 0),
-            ("0.4.1.3", "0.4.2", 1),
+            ("0.4.1.3", "0.4.2", 0),
+            ("0.4.2", "0.4.3", 0),
         ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
@@ -929,6 +934,56 @@ mod tests {
             assert_eq!(db["public"]["serverInfo"]["version"], json!(from));
             assert_eq!(db["public"]["packageData"], packages);
         }
+    }
+
+    #[tokio::test]
+    async fn software_sharing_preserves_the_released_migration_chain() {
+        for (from, expected_todos) in [
+            ("0.4.1.2", vec!["0.4.1.3", "0.4.2", "0.4.3"]),
+            ("0.4.1.3", vec!["0.4.2", "0.4.3"]),
+            ("0.4.2", vec!["0.4.3"]),
+        ] {
+            let previous = from_value::<Version>(json!(from))
+                .unwrap()
+                .as_version_t()
+                .unwrap();
+            let current = Current::default();
+            let mut db = json!({ "public": { "serverInfo": {
+                "version": from,
+                "packageVersionCompat": ">=0.3.0 <0.5.0",
+                "postInitMigrationTodos": {},
+                "latestMigrationRevision": previous.migration_revision(),
+            }, "packageData": { "service": { "setting": "preserved" } } } });
+            let packages = db["public"]["packageData"].clone();
+            let upgrade = Upgrade::load(&previous, &current, previous.migration_revision())
+                .await
+                .unwrap();
+            upgrade.apply(&previous, &current, &mut db).unwrap();
+            let info = &db["public"]["serverInfo"];
+            assert_eq!(info["version"], json!("0.4.3"));
+            assert_eq!(info["latestMigrationRevision"], json!(0));
+            assert_eq!(
+                info["bittorrent"],
+                json!({"downloads": true, "seeding": false})
+            );
+            assert_eq!(
+                info["postInitMigrationTodos"]
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .collect::<Vec<_>>(),
+                expected_todos
+            );
+            assert_eq!(db["public"]["packageData"], packages);
+        }
+        let mut released_db = json!({"public": {"serverInfo": {}}});
+        v0_4_2::Version.up(&mut released_db, ()).unwrap();
+        assert!(
+            released_db["public"]["serverInfo"]
+                .get("bittorrent")
+                .is_none()
+        );
+        assert_eq!(v0_4_2::Version.migration_revision(), 0);
     }
 
     #[tokio::test]
