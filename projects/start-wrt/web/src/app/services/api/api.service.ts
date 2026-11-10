@@ -62,6 +62,7 @@ export abstract class ApiService {
     params: SetInitialPasswordReq,
   ): Promise<RpcReturnType<Api, 'auth.set-initial-password'>>
   abstract setupStatus(): Promise<SetupStatusRes>
+  abstract getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>>
   abstract systemFactoryReset(): Promise<null>
   abstract systemLogs(): Promise<LogsResponse>
   abstract followLogs(): Promise<RpcReturnType<Api, 'system.logs-follow'>>
@@ -127,6 +128,15 @@ export abstract class ApiService {
     params: RpcParamType<Api, 'backup.restore'>,
   ): Promise<BackupRestoreRes>
   abstract diagnosticsCreate(): Promise<DiagnosticsCreateRes>
+
+  async encrypt(password: string): Promise<EncryptedWire> {
+    // A dynamic import of node-jose itself has only a default export.
+    const [{ encrypt }, pubkey] = await Promise.all([
+      import('./encrypt'),
+      this.getPubkey(),
+    ])
+    return encrypt(pubkey, password)
+  }
 }
 
 export type BackupCreateRes = RpcReturnType<Api, 'backup.create'>
@@ -291,6 +301,8 @@ export type SetInitialPasswordReq = RpcParamType<
 >
 
 export type SetupStatusRes = RpcReturnType<Api, 'setup.status'>
+
+export type EncryptedWire = Bindings.EncryptedWireInput
 
 export type SetupFlashReq = Events.FlashParamsInput
 

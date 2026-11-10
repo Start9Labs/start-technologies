@@ -272,6 +272,10 @@ export class LiveApiService extends ApiService {
     })
   }
 
+  async getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>> {
+    return this.rpc.request({ method: 'setup.get-pubkey', params: {} })
+  }
+
   async systemFactoryReset(): Promise<null> {
     return this.rpc.request({
       method: 'system.factory-reset',

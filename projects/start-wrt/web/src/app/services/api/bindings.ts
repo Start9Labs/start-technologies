@@ -135,6 +135,7 @@ export type DnsServer = z.output<typeof schemas.DnsServer>
  * `ssl: true`  = DNS-over-HTTPS via SmartDNS (`server-https`).
  */
 export type DnsServerInput = z.input<typeof schemas.DnsServer>
+export type EncryptedWireInput = z.input<typeof schemas.EncryptedWire>
 export type ExecReqInput = z.input<typeof schemas.ExecReq>
 export type ExecRes = z.output<typeof schemas.ExecRes>
 export type FileContents = z.output<typeof schemas.FileContents>
@@ -208,9 +209,6 @@ export type SetAutoForwardRequestInput = z.input<
 >
 export type SetDnsInjectionReqInput = z.input<typeof schemas.SetDnsInjectionReq>
 export type SetFileArgsInput = z.input<typeof schemas.SetFileArgs>
-export type SetInitialPasswordParamsInput = z.input<
-  typeof schemas.SetInitialPasswordParams
->
 export type SetPreferencesReqInput = z.input<typeof schemas.SetPreferencesReq>
 export type SetRouterAdvertisementsReqInput = z.input<
   typeof schemas.SetRouterAdvertisementsReq
@@ -297,6 +295,9 @@ export type PublishedPort = z.output<typeof schemas.PublishedPort>
 export type PublishedPortInputInput = z.input<typeof schemas.PublishedPortInput>
 export type ScheduleWindowsInput = z.input<typeof schemas.ScheduleWindows>
 export type SetArgsInput = z.input<typeof schemas.SetArgs>
+export type SetInitialPasswordParamsInput = z.input<
+  typeof schemas.SetInitialPasswordParams
+>
 export type SetupStatusRes = z.output<typeof schemas.SetupStatusRes>
 export type UciFile = z.output<typeof schemas.UciFile>
 export type UciFileInput = z.input<typeof schemas.UciFile>

@@ -580,4 +580,6 @@ export default {
   616: 'Fuera de la subred del perfil de este dispositivo',
   617: 'No es una dirección de host utilizable',
   618: 'Este dispositivo intenta publicar registros DNS. Permita la publicación de registros DNS para que se resuelvan en su red.',
+  619: 'Cambiar esta contraseña puede desconectar brevemente todos los dispositivos Wi-Fi. Los dispositivos que usan la contraseña anterior deben volver a conectarse con la nueva.',
+  620: 'Esta contraseña Wi-Fi se ha cambiado o eliminado. No se han guardado tus cambios.',
 } satisfies i18n

@@ -212,7 +212,7 @@ All packages required by StartWRT are included in the firmware image. Both Keep 
 | **Backend**  | `startwrt-ctrld` in "setup mode"                     |
 | **Access**   | Captive portal (DNS hijack → any URL reaches wizard) |
 
-Setup mode is detected by `setup::is_setup_mode`: if the boot device is _not_ an eMMC, the daemon enters setup mode. The daemon mounts the same RPC surface and HTTP routes in both modes; what the wizard relies on is that `setup.status` requires no authentication and `/api/setup/flash` sits outside the RPC session middleware. Other RPC methods need a session, except `auth.check-initialized`, `system.info`, `system.newer-versions`, and `system.get-timezones` (no auth) and the login methods `auth.login` and `auth.set-initial-password`.
+Setup mode is detected by `setup::is_setup_mode`: if the boot device is _not_ an eMMC, the daemon enters setup mode. The daemon mounts the same RPC surface and HTTP routes in both modes; what the wizard relies on is that `setup.status` and `setup.get-pubkey` require no authentication and `/api/setup/flash` sits outside the RPC session middleware. The wizard encrypts the admin password to the `setup.get-pubkey` key before posting it to `/api/setup/flash`. Other RPC methods need a session, except `auth.check-initialized`, `system.info`, `system.newer-versions`, and `system.get-timezones` (no auth) and the login methods `auth.login` and `auth.set-initial-password`.
 
 ### Boot Detection
 
