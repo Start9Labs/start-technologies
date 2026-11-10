@@ -368,6 +368,8 @@ pub struct Metadata<Additional> {
     get_signer: bool,
     #[serde(default)]
     get_user_agent: bool,
+    #[serde(default)]
+    get_peer: bool,
 }
 
 #[derive(Clone)]
@@ -661,6 +663,11 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
             if metadata.get_user_agent {
                 if let Some(user_agent) = self.user_agent.as_ref().and_then(|h| h.to_str().ok()) {
                     request.params["__Auth_userAgent"] = to_value(&user_agent)?;
+                }
+            }
+            if metadata.get_peer {
+                if let Some(peer) = self.origin.peer_ip {
+                    request.params["__Auth_peer"] = to_value(&peer)?;
                 }
             }
             if login {

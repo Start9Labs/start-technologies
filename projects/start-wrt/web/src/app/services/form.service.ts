@@ -13,6 +13,7 @@ import {
   timer,
 } from 'rxjs'
 import { ActionService } from 'src/app/services/action.service'
+import { ConfigCheckService } from 'src/app/services/config-check.service'
 import {
   ConnectionService,
   isNetworkError,
@@ -23,6 +24,7 @@ export type FormRawValue<T> = T extends { getRawValue(): infer R } ? R : never
 export abstract class FormService<T> {
   private readonly load$ = new Subject<void>()
   private readonly alerts = inject(TuiNotificationService)
+  private readonly configCheck = inject(ConfigCheckService)
   protected readonly connection = inject(ConnectionService)
   private readonly value$ = merge(this.load$, timer(0, 5000)).pipe(
     switchMap(() =>
@@ -36,7 +38,7 @@ export abstract class FormService<T> {
             this.connection.reportUnreachable()
             return EMPTY
           }
-          return e?.code === 34
+          return e?.code === 34 || this.configCheck.report(e)
             ? EMPTY
             : this.alerts.open<never>(e?.message || e, {
                 appearance: 'negative',

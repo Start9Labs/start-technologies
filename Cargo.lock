@@ -9131,7 +9131,7 @@ dependencies = [
 
 [[package]]
 name = "start-cli"
-version = "2.8.0"
+version = "2.9.0"
 dependencies = [
  "start-core",
  "tracing",
@@ -9381,6 +9381,7 @@ dependencies = [
  "include_dir",
  "ipnet",
  "itertools 0.14.0",
+ "josekit",
  "libc",
  "macaddr",
  "mime_guess",

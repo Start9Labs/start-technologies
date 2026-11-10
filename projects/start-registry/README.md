@@ -99,7 +99,7 @@ start-cli --registry https://registry.example.com registry package add service.s
 
 `registry os asset add` accepts the same `--torrent` option for OS images. The RPC `package.add` and `os.asset.add.*` requests accept an optional `torrent` string. Both publish HTTP mirrors through `urls`; the OS RPC also accepts deprecated scalar `url` input from older publishers. When both appear, canonical mirrors come first, followed by distinct legacy mirrors. Package and OS promotion preserve torrent metadata and the complete HTTP mirror list.
 
-Upgrade registries to 1.5.0 before using start-cli 2.8.0 OS-asset publication or promotion, which sends the canonical `urls` field.
+Upgrade registries to 1.5.0 before using start-cli 2.9.0 OS-asset publication or promotion, which sends the canonical `urls` field.
 
 Create a single-file v1/v2 hybrid torrent with the exact bytes of the HTTP asset. Advertise both hashes in a hybrid magnet; StartOS and start-cli use its v1-compatible swarm. Existing v1 torrent sources remain compatible. Registry operators arrange seeding through an external BitTorrent client, with reachable seed peers and tracker or DHT discovery. The registry stores the source metadata; asset storage and seeding belong to those external hosts.
 
