@@ -2477,9 +2477,9 @@ struct WwanNetwork {
 #[serde(rename_all = "camelCase")]
 struct WwanConnectRequest {
     radio: String,
-    ssid: String,               // 1–32 bytes
+    ssid: String,               // 1–32 bytes, no control characters
     security: WwanSecurity,
-    password: Option<String>,   // 8–63 characters; ignored for Open
+    password: Option<String>,   // 8–63 characters, no control characters; ignored for Open
     priority: WwanPriority,
 }
 // Response: null

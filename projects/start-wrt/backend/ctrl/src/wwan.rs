@@ -488,15 +488,27 @@ fn validate(req: &WwanConnectRequest, radios: &BTreeMap<String, WifiDevice>) -> 
             ErrorKind::InvalidValue,
         ));
     }
+    if req.ssid.contains(char::is_control) {
+        return Err(Error::new(
+            eyre!("network name must not contain control characters"),
+            ErrorKind::InvalidValue,
+        ));
+    }
     if req.security != WwanSecurity::Open {
-        let len = req.password.as_deref().map_or(0, str::len);
-        if !(crate::wifi::MIN_PSK_LEN..=crate::wifi::MAX_PSK_LEN).contains(&len) {
+        let password = req.password.as_deref().unwrap_or_default();
+        if !(crate::wifi::MIN_PSK_LEN..=crate::wifi::MAX_PSK_LEN).contains(&password.len()) {
             return Err(Error::new(
                 eyre!(
                     "password must be {} to {} characters",
                     crate::wifi::MIN_PSK_LEN,
                     crate::wifi::MAX_PSK_LEN
                 ),
+                ErrorKind::InvalidValue,
+            ));
+        }
+        if password.contains(char::is_control) {
+            return Err(Error::new(
+                eyre!("password must not contain control characters"),
                 ErrorKind::InvalidValue,
             ));
         }
@@ -1014,6 +1026,21 @@ config zone 'wan_zone'
         let err = connect(ctx.clone(), DeserializeStdin(req))
             .await
             .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidValue);
+
+        let mut req = connect_req(WwanSecurity::Open, None);
+        req.ssid = "Up\nstream".into();
+        let err = connect(ctx.clone(), DeserializeStdin(req))
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidValue);
+
+        let err = connect(
+            ctx.clone(),
+            DeserializeStdin(connect_req(WwanSecurity::Wpa2, Some("upstream\npass"))),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.kind, ErrorKind::InvalidValue);
 
         let mut req = connect_req(WwanSecurity::Open, None);
