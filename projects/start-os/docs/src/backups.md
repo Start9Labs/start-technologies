@@ -58,6 +58,9 @@ Add drives that already contain this server's backups in the same way. Re-add a 
 
 A CIFS share sends your encrypted backup over the LAN to a shared folder on another device. First, create a shared folder on the target device, then add it in StartOS.
 
+> [!IMPORTANT]
+> The target device must share the folder over SMB 3.0 or later. StartOS cannot connect to a share that only offers SMB1 or SMB2, and has no setting to change this.
+
 #### Step 1. Create a Shared Folder
 
 {{#tabs global="backup-target"}}
@@ -438,7 +441,7 @@ The **Hostname** field accepts an IP address, a DNS name containing a dot (such 
 {{#endtabs}}
 
 > [!WARNING]
-> If you receive `Filesystem I/O Error mount error(13): Permission denied`, ensure you have entered the correct values in the Username and Password fields.
+> If you receive `Filesystem I/O Error mount error(13): Permission denied`, ensure you have entered the correct values in the Username and Password fields. Any other `mount error` can mean the target device does not offer SMB 3; check its SMB settings.
 
 ## Creating a Backup
 
