@@ -30,6 +30,7 @@ use crate::{GatewayId, HostId, PackageId};
 pub mod address;
 pub mod binding;
 
+/// The server UI's assigned SSL port. Operator port reassignment cannot move it.
 pub const SERVER_UI_SSL_PORT: u16 = 443;
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
