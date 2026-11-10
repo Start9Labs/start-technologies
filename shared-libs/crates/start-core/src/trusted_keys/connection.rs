@@ -51,6 +51,7 @@ pub(super) fn same_registry(first: &str, second: &str) -> bool {
     }
 }
 
+/// Registry operations and UI-data writes must preserve these connections.
 const BUILTIN_REGISTRIES: [(&str, &str); 2] = [
     ("https://registry.start9.com/", "Start9 Registry"),
     (

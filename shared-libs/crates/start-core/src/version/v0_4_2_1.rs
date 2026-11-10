@@ -29,7 +29,9 @@ impl VersionT for Version {
         1
     }
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
-        ensure_builtin_registries(&mut db["public"]["ui"]);
+        if let Some(ui) = db.get_mut("public").and_then(|public| public.get_mut("ui")) {
+            ensure_builtin_registries(ui);
+        }
         Ok(Value::Null)
     }
     fn down(self, _db: &mut Value) -> Result<(), Error> {
@@ -92,6 +94,14 @@ mod tests {
                 "https://community-registry.start9.com/": "Community Registry"
             })
         );
+    }
+
+    #[test]
+    fn a_db_without_ui_is_left_unchanged() {
+        let mut db = imbl_value::json!({ "public": { "serverInfo": {} } });
+        let before = db.clone();
+        Version.up(&mut db, ()).unwrap();
+        assert_eq!(db, before);
     }
 
     #[test]
