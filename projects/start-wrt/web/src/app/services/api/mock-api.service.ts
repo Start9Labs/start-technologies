@@ -4,6 +4,7 @@ import { pauseFor, RPCErrorDetails, RpcError } from '@start9labs/shared'
 import { GIT_HASH } from 'src/app/utils/workspace-config'
 import {
   ApiService,
+  ConfigCheck,
   ExecReq,
   ExecRes,
   GetFileReq,
@@ -289,6 +290,11 @@ export class MockApiService extends ApiService {
   async systemInfo(_timeout?: number): Promise<SystemInfoRes> {
     await pauseFor(250)
     return { ...this.mockSystemInfo, date: new Date().toISOString() }
+  }
+
+  async configCheck(): Promise<ConfigCheck> {
+    await pauseFor(100)
+    return { findings: [] }
   }
 
   async systemNewerVersions(): Promise<VersionInfo[]> {

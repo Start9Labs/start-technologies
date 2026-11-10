@@ -97,6 +97,13 @@ export type BlackoutSetResult = z.output<typeof schemas.BlackoutSetResult>
 export type BlackoutWindow = z.output<typeof schemas.BlackoutWindow>
 export type BlackoutWindowInput = z.input<typeof schemas.BlackoutWindow>
 export type CheckInitializedRes = z.output<typeof schemas.CheckInitializedRes>
+export type ConfigProblem = z.output<typeof schemas.ConfigProblem>
+
+/**
+ * A page of the StartWRT UI, named by its route. Settings, which holds the recovery tools,
+ * is never one.
+ */
+export type ConfigView = z.output<typeof schemas.ConfigView>
 export type DataUsagePeriodInput = z.input<typeof schemas.DataUsagePeriod>
 export type DataUsagePoint = z.output<typeof schemas.DataUsagePoint>
 export type DdnsProvider = z.output<typeof schemas.DdnsProvider>
@@ -259,6 +266,7 @@ export type BackupCreateRes = z.output<typeof schemas.BackupCreateRes>
 export type BackupRestoreRes = z.output<typeof schemas.BackupRestoreRes>
 export type BandChannels = z.output<typeof schemas.BandChannels>
 export type BlackoutWindowsInput = z.input<typeof schemas.BlackoutWindows>
+export type ConfigFinding = z.output<typeof schemas.ConfigFinding>
 export type DataUsageReqInput = z.input<typeof schemas.DataUsageReq>
 export type Device = z.output<typeof schemas.Device>
 export type DiagnosticsCreateRes = z.output<typeof schemas.DiagnosticsCreateRes>
@@ -338,6 +346,7 @@ export type WifiSetResult = z.output<typeof schemas.WifiSetResult>
  * with the flag true it saves the windows and applies them at once.
  */
 export type BlackoutSetRequestInput = z.input<typeof schemas.BlackoutSetRequest>
+export type ConfigCheck = z.output<typeof schemas.ConfigCheck>
 export type PublishedPortsSetRequestInput = z.input<
   typeof schemas.PublishedPortsSetRequest
 >

@@ -4,7 +4,7 @@ import { FormService } from 'src/app/services/form.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { parseDnsList } from './utils'
 
-@Injectable({ providedIn: 'root' })
+@Injectable()
 export class OutboundService extends FormService<OutboundVpn[]> {
   private readonly api = inject(ApiService)
   private readonly i18n = inject(i18nPipe)

@@ -164,11 +164,11 @@ pub async fn ipv4_get<C: CtrlContext>(ctx: C) -> Result<LanIpv4Response, Error> 
             if let Some(iface) = section.get_typed::<NetworkInterface>()? {
                 return Ok(LanIpv4Response {
                     address: iface
-                        .ipaddr
+                        .ipv4()
                         .map(|ip| ip.to_string())
                         .unwrap_or_else(|| "192.168.1.1".to_string()),
                     netmask: iface
-                        .netmask
+                        .ipv4_netmask()
                         .map(|m| m.to_string())
                         .unwrap_or_else(|| LAN_NETMASK.to_string()),
                 });
@@ -217,7 +217,7 @@ pub async fn ipv4_set<C: CtrlContext>(
             .iter()
             .find(|s| s.name().as_deref() == Some(LAN_INTERFACE))
             .and_then(|s| s.get_typed::<NetworkInterface>().ok().flatten())
-            .and_then(|i| i.ipaddr);
+            .and_then(|i| i.ipv4());
         profiles::guard_subnet_collision(
             &cfgs,
             subnet_guard_ip(current_lan_ip, address),
@@ -230,8 +230,8 @@ pub async fn ipv4_set<C: CtrlContext>(
         for section in &mut cfgs["network"].sections {
             if section.name().as_deref() == Some(LAN_INTERFACE) {
                 if let Some(mut iface) = section.get_typed::<NetworkInterface>()? {
-                    old_address = iface.ipaddr;
-                    iface.ipaddr = Some(address);
+                    old_address = iface.ipv4();
+                    iface.ipaddr = Some(address.into());
                     iface.netmask = Some(LAN_NETMASK);
                     section.set(&iface)?;
                     found = true;
@@ -675,9 +675,10 @@ pub fn update_profile_ips_for_block_change(
         if let Some(name) = section.name() {
             if profile_interfaces.contains(name.as_ref()) {
                 if let Some(mut iface) = section.get_typed::<NetworkInterface>()? {
-                    if let Some(ip) = iface.ipaddr {
+                    if let Some(mut ip) = iface.ipaddr {
                         let o = ip.octets();
-                        iface.ipaddr = Some(Ipv4Addr::new(new_oct[0], new_oct[1], o[2], o[3]));
+                        ip.addr = Ipv4Addr::new(new_oct[0], new_oct[1], o[2], o[3]);
+                        iface.ipaddr = Some(ip);
                         section.set(&iface)?;
                     }
                 }
@@ -1153,7 +1154,7 @@ config redirect 'dns_override_guest'
             if section.name().as_deref() == Some("guest") {
                 let iface = section.get_typed::<NetworkInterface>().unwrap().unwrap();
                 assert_eq!(
-                    iface.ipaddr.unwrap(),
+                    iface.ipv4().unwrap(),
                     Ipv4Addr::new(10, 0, 2, 1),
                     "Guest interface IP should be updated to new block"
                 );
@@ -1276,7 +1277,7 @@ config profile guest
             if section.name().as_deref() == Some("guest") {
                 let iface = section.get_typed::<NetworkInterface>().unwrap().unwrap();
                 assert_eq!(
-                    iface.ipaddr.unwrap(),
+                    iface.ipv4().unwrap(),
                     Ipv4Addr::new(192, 168, 2, 1),
                     "Guest interface IP should remain unchanged for same-block change"
                 );
