@@ -16,7 +16,7 @@ Additional routes:
 | `GET /luci`                               | Convenience redirect to `/cgi-bin/luci`                           |
 | `GET /static/local-root-ca.crt`           | Root CA certificate download (no auth)                            |
 | `GET /static/local-root-ca.mobileconfig`  | Root CA as an Apple configuration profile (no auth)               |
-| `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` | LuCI reverse proxy (localhost:8080)                               |
+| `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` | LuCI reverse proxy (localhost:8080), HTTPS only                   |
 | Fallback                                  | Serves embedded web UI via `include_dir`                          |
 
 Beside the wildcard listeners, port control binds the SNI demux to the WAN IPv4 on 443 while hostname routes hold it (SO_REUSEPORT; the kernel delivers a connection to the most specific bound socket).
@@ -45,7 +45,8 @@ The single binary `startwrt` uses `MultiExecutable` to dispatch based on the sym
 ```
 --config-root PATH   UCI config directory (default: /etc/config)
 --configs-only       Skip service reloads (write configs only)
---host URL           Server URL (default: http://127.0.0.1/rpc/v1 on the router, else http://router.lan/rpc/v1)
+--host URL           Server URL (default: http://127.0.0.1/rpc/v1 on the router, else https://router.lan/rpc/v1)
+--root-ca PEM_PATH   Certificate authority to trust, such as the router's from /static/local-root-ca.crt (repeatable)
 ```
 
 ### Local-Only Subcommands
@@ -95,7 +96,8 @@ vpn-client              # Outbound WireGuard VPN
   └─ set-enabled
 
 setup
-  └─ status             # Setup mode detection, disk state
+  ├─ status             # Setup mode detection, disk state
+  └─ get-pubkey         # Ephemeral key the setup password is encrypted to
 
 system                  # System settings, remote access, restart, factory reset,
                         # OTA update (newer-versions / update)
