@@ -1056,6 +1056,16 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
     for (let i = 0; i < this.backupSet.length; i++) {
       const item = this.backupSet[i]!
       const phase = syncs[i]!
+      // A backup taken before this source was added has nothing to restore for it.
+      if (
+        !(await fs.access(item.backupPath).then(
+          () => true,
+          () => false,
+        ))
+      ) {
+        phase.complete()
+        continue
+      }
       phase.start()
       phase.setTotal(100)
       phase.setDone(0)
