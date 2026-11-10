@@ -5,6 +5,20 @@ All notable changes to StartTunnel are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1]
+
+### Fixed
+
+- Fixed documentation links in the contextual help panel.
+
+- Show server-provided plaintext HTTP error details and preserve meaningful timeout and cancellation errors.
+
+### Security
+
+- Only root can now read the tunnel database and WireGuard configuration, which hold the server's keys. Existing installs are tightened when the service starts. Thanks to dritzps for reporting this.
+
+- Publishing to the Start9 apt repository now refuses to sign any package the repository's existing signed index does not list. Thanks to dritzps for reporting this.
+
 ## [1.5.0]
 
 ### Changed

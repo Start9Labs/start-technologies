@@ -14,6 +14,7 @@ use serde::Deserialize;
 use startos::middleware::auth::local::LocalAuthContext;
 use startos::net::tls::TlsListener;
 use startos::net::web_server::{Accept, Acceptor, DynAccept, MetadataVisitor, WebServer};
+use startos::util::crypto::EncryptedWire;
 use tokio::signal::unix::SignalKind;
 use tokio::sync::mpsc;
 use tracing::instrument;
@@ -37,10 +38,9 @@ struct AppState {
 #[serde(rename_all = "camelCase")]
 struct FlashParams {
     mode: FlashMode,
-    password: String,
-    /// Browser IANA timezone (e.g. "America/New_York") captured by the wizard.
-    /// Carried into the fresh eMMC config since the wizard's live set-timezone
-    /// only reaches the throwaway microSD overlay. Optional for older clients.
+    /// Encrypted to the key from `setup.get-pubkey`.
+    password: EncryptedWire,
+    /// IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
     #[serde(default)]
     timezone: Option<String>,
 }
@@ -78,8 +78,14 @@ async fn ws_continuation_handler(
 /// POST /api/setup/flash — streams NDJSON progress events.
 async fn setup_flash_handler(
     Extension(state): Extension<AppState>,
+    Extension(ctx): Extension<ServerContext>,
     Json(params): Json<FlashParams>,
 ) -> Response<Body> {
+    let password = match crate::auth::decrypt_password(&ctx, params.password) {
+        Ok(password) => password,
+        Err(e) => return ndjson_error(&e.to_string()),
+    };
+
     // Prevent concurrent flash operations
     if state
         .flash_in_progress
@@ -101,13 +107,7 @@ async fn setup_flash_handler(
             .build()
             .expect("failed to create setup-flash runtime");
         rt.block_on(async move {
-            setup::run_setup_flash(
-                params.mode,
-                &params.password,
-                params.timezone.as_deref(),
-                &tx,
-            )
-            .await;
+            setup::run_setup_flash(params.mode, &password, params.timezone.as_deref(), &tx).await;
             flash_flag.store(false, Ordering::SeqCst);
         });
     });
@@ -403,7 +403,7 @@ async fn inner_main() -> Result<(), Error> {
 
     let cors = startos::middleware::cors::layer().expose_headers([crate::rpc::GIT_HASH_HEADER]);
 
-    let app = crate::rpc::router(ctx)
+    let app = crate::rpc::router(ctx.clone())
         // RPC continuation endpoint (binary I/O for backup/restore/diagnostics)
         .route(
             "/rest/rpc/{guid}",
@@ -454,7 +454,8 @@ async fn inner_main() -> Result<(), Error> {
         .layer(cors)
         .layer(Extension(continuations))
         .layer(Extension(proxy_client))
-        .layer(Extension(app_state));
+        .layer(Extension(app_state))
+        .layer(Extension(ctx));
 
     let app = crate::captive::redirect_to_router(app);
     // Must stay outermost.

@@ -7,6 +7,7 @@ import { filter } from 'rxjs'
 import { ActionService } from 'src/app/services/action.service'
 import { ApiService } from 'src/app/services/api/api.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { LUCI_URL } from 'src/app/utils/luci'
 
 @Component({
   template: `
@@ -30,7 +31,7 @@ export default class Advanced {
   private readonly actions = inject(ActionService)
   private readonly dialogs = inject(TuiResponsiveDialogService)
   private readonly i18n = inject(i18nPipe)
-  protected readonly luciUrl = '/cgi-bin/luci'
+  protected readonly luciUrl = LUCI_URL
 
   protected downloadDiagnostics() {
     this.actions.run(

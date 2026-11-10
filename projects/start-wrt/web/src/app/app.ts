@@ -13,11 +13,13 @@ import { TUI_BREAKPOINT, TUI_DARK_MODE, TuiScrollbar } from '@taiga-ui/core'
 import { filter } from 'rxjs'
 import { TuiNavigation } from '@taiga-ui/layout'
 import { Aside } from 'src/app/components/aside'
+import { ConfigNotices, CustomConfig } from 'src/app/components/custom-config'
 import { Header } from 'src/app/components/header'
 import { Nav } from 'src/app/components/nav'
 import { StaleUiAlert } from 'src/app/components/stale-ui-alert'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { i18nService } from 'src/app/i18n/i18n.service'
+import { ConfigCheckService } from 'src/app/services/config-check.service'
 import { SystemService } from 'src/app/services/system.service'
 import { Language } from 'src/app/utils/languages'
 
@@ -46,7 +48,14 @@ import { Language } from 'src/app/utils/languages'
       </footer>
     </aside>
     <main>
-      <tui-scrollbar><router-outlet /></tui-scrollbar>
+      <tui-scrollbar>
+        @if (configCheck.blocked()) {
+          <app-custom-config />
+        } @else {
+          <app-config-notices />
+          <router-outlet />
+        }
+      </tui-scrollbar>
     </main>
     <aside appAside inert></aside>
     <stale-ui-alert />
@@ -134,6 +143,8 @@ import { Language } from 'src/app/utils/languages'
     Header,
     Nav,
     Aside,
+    ConfigNotices,
+    CustomConfig,
     RouterOutlet,
     StaleUiAlert,
     TuiScrollbar,
@@ -143,6 +154,7 @@ import { Language } from 'src/app/utils/languages'
 })
 export class App {
   protected readonly dark = inject(TUI_DARK_MODE)
+  protected readonly configCheck = inject(ConfigCheckService)
   private readonly router = inject(Router)
   private readonly breakpoint = inject(TUI_BREAKPOINT)
   private readonly navigation = toSignal(

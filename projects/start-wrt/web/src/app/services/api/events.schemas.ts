@@ -3,6 +3,10 @@ const wire = <A extends z.ZodType, B extends z.ZodType>(input: A, output: B) =>
   z.codec(input, output, { decode: v => v as never, encode: v => v as never })
 const object = <Shape extends z.core.$ZodLooseShape>(shape: Shape) =>
   z.object(shape).meta({ additionalProperties: true })
+export const EncryptedWire: z.ZodObject<{ encrypted: z.ZodUnknown }> =
+  /* @__PURE__ */ object({ encrypted: z.unknown() }).meta({
+    id: 'EncryptedWire',
+  })
 
 /**
  * Firmware build identity attached to each RPC reply.
@@ -78,11 +82,12 @@ export const SetupEvent: z.ZodUnion<
   })
 export const FlashParams: z.ZodObject<{
   mode: typeof FlashMode
-  password: z.ZodString
   /**
-   * Browser IANA timezone (e.g. "America/New_York") captured by the wizard.
-   * Carried into the fresh eMMC config since the wizard's live set-timezone
-   * only reaches the throwaway microSD overlay. Optional for older clients.
+   * Encrypted to the key from `setup.get-pubkey`.
+   */
+  password: typeof EncryptedWire
+  /**
+   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
    */
   timezone: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -90,15 +95,18 @@ export const FlashParams: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   mode: FlashMode,
-  password: z.string(),
   /**
-   * Browser IANA timezone (e.g. "America/New_York") captured by the wizard.
-   * Carried into the fresh eMMC config since the wizard's live set-timezone
-   * only reaches the throwaway microSD overlay. Optional for older clients.
+   * Encrypted to the key from `setup.get-pubkey`.
+   */
+  password: EncryptedWire.meta({
+    description: 'Encrypted to the key from `setup.get-pubkey`.',
+  }),
+  /**
+   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
    */
   timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
     description:
-      'Browser IANA timezone (e.g. "America/New_York") captured by the wizard.\nCarried into the fresh eMMC config since the wizard\'s live set-timezone\nonly reaches the throwaway microSD overlay. Optional for older clients.',
+      'IANA timezone name, e.g. "America/New_York". An unknown name is skipped.',
   }),
 }).meta({
   id: 'FlashParams',

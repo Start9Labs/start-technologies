@@ -22,6 +22,7 @@ export abstract class ApiService {
   abstract getUci(params: GetUciReq): Promise<GetUciRes>
   abstract setUci(params: SetUciReq): Promise<SetUciRes>
   abstract systemInfo(timeout?: number): Promise<SystemInfoRes>
+  abstract configCheck(): Promise<ConfigCheck>
   abstract systemNewerVersions(): Promise<VersionInfo[]>
   abstract systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes>
   abstract systemRestart(): Promise<null>
@@ -69,6 +70,7 @@ export abstract class ApiService {
     params: SetInitialPasswordReq,
   ): Promise<RpcReturnType<Api, 'auth.set-initial-password'>>
   abstract setupStatus(): Promise<SetupStatusRes>
+  abstract getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>>
   abstract systemFactoryReset(): Promise<null>
   abstract systemLogs(): Promise<LogsResponse>
   abstract followLogs(): Promise<RpcReturnType<Api, 'system.logs-follow'>>
@@ -134,6 +136,15 @@ export abstract class ApiService {
     params: RpcParamType<Api, 'backup.restore'>,
   ): Promise<BackupRestoreRes>
   abstract diagnosticsCreate(): Promise<DiagnosticsCreateRes>
+
+  async encrypt(password: string): Promise<EncryptedWire> {
+    // A dynamic import of node-jose itself has only a default export.
+    const [{ encrypt }, pubkey] = await Promise.all([
+      import('./encrypt'),
+      this.getPubkey(),
+    ])
+    return encrypt(pubkey, password)
+  }
 }
 
 export type BackupCreateRes = RpcReturnType<Api, 'backup.create'>
@@ -193,6 +204,12 @@ export type SetUciReq = RpcParamType<Api, 'uci.set'>
 export type SetUciRes = RpcReturnType<Api, 'uci.set'>
 
 export type SystemInfoRes = RpcReturnType<Api, 'system.info'>
+
+export type ConfigCheck = RpcReturnType<Api, 'config.check'>
+
+export type ConfigFinding = ConfigCheck['findings'][number]
+
+export type ConfigView = ConfigFinding['views'][number]
 
 export type VersionInfo = RpcReturnType<Api, 'system.newer-versions'>[number]
 
@@ -298,6 +315,8 @@ export type SetInitialPasswordReq = RpcParamType<
 >
 
 export type SetupStatusRes = RpcReturnType<Api, 'setup.status'>
+
+export type EncryptedWire = Bindings.EncryptedWireInput
 
 export type SetupFlashReq = Events.FlashParamsInput
 

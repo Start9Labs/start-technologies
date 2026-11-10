@@ -12,10 +12,103 @@ fn client(host: Url, key_path: PathBuf) -> CliContext {
         config_root: key_path.parent().unwrap().to_owned(),
         configs_only: true,
         host: Some(host),
+        root_ca: Vec::new(),
     })
     .unwrap();
     Arc::get_mut(&mut ctx.0).unwrap().id_key_path = key_path;
     ctx
+}
+
+#[tokio::test]
+async fn configured_root_ca_applies_to_http_and_websocket_clients() {
+    use std::io::{Read, Write};
+
+    use openssl::asn1::Asn1Time;
+    use openssl::hash::MessageDigest;
+    use openssl::pkey::PKey;
+    use openssl::ssl::{SslAcceptor, SslMethod};
+    use openssl::x509::extension::{BasicConstraints, SubjectAlternativeName};
+    use openssl::x509::{X509NameBuilder, X509};
+
+    let key = PKey::from_rsa(openssl::rsa::Rsa::generate(2048).unwrap()).unwrap();
+    let mut name = X509NameBuilder::new().unwrap();
+    name.append_entry_by_text("CN", "WRT CLI integration fixture")
+        .unwrap();
+    let name = name.build();
+    let mut cert = X509::builder().unwrap();
+    cert.set_version(2).unwrap();
+    cert.set_subject_name(&name).unwrap();
+    cert.set_issuer_name(&name).unwrap();
+    cert.set_pubkey(&key).unwrap();
+    cert.set_not_before(&Asn1Time::days_from_now(0).unwrap())
+        .unwrap();
+    cert.set_not_after(&Asn1Time::days_from_now(1).unwrap())
+        .unwrap();
+    cert.append_extension(BasicConstraints::new().critical().ca().build().unwrap())
+        .unwrap();
+    let san = SubjectAlternativeName::new()
+        .ip("127.0.0.1")
+        .build(&cert.x509v3_context(None, None))
+        .unwrap();
+    cert.append_extension(san).unwrap();
+    cert.sign(&key, MessageDigest::sha256()).unwrap();
+    let cert = cert.build();
+    let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+    acceptor.set_private_key(&key).unwrap();
+    acceptor.set_certificate(&cert).unwrap();
+    let acceptor = acceptor.build();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let host: Url = format!("https://{}/rpc/v1", listener.local_addr().unwrap())
+        .parse()
+        .unwrap();
+    let server = tokio::task::spawn_blocking(move || {
+        for _ in 0..4 {
+            let (socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            if let Ok(mut socket) = acceptor.accept(socket) {
+                let mut request = [0; 4096];
+                socket.read(&mut request).unwrap();
+                socket
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
+                    )
+                    .unwrap();
+            }
+        }
+    });
+    let temp = tempfile::tempdir().unwrap();
+    let untrusted = client(host.clone(), temp.path().join("identity.pem"));
+    for client in [&untrusted.client, &untrusted.websocket_client] {
+        assert!(client.get(host.clone()).send().await.is_err());
+    }
+    let ca = temp.path().join("ca.pem");
+    std::fs::write(&ca, cert.to_pem().unwrap()).unwrap();
+    let trusted = CliContext::init(CliArgs {
+        config_root: temp.path().to_owned(),
+        configs_only: true,
+        host: Some(host.clone()),
+        root_ca: vec![ca],
+    })
+    .unwrap();
+    for client in [&trusted.client, &trusted.websocket_client] {
+        assert_eq!(
+            client
+                .get(host.clone())
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap(),
+            "OK"
+        );
+    }
+    server.await.unwrap();
 }
 
 #[tokio::test]

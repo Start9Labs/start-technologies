@@ -8608,6 +8608,7 @@ dependencies = [
  "include_dir",
  "ipnet",
  "itertools 0.14.0",
+ "josekit",
  "libc",
  "macaddr",
  "mime_guess",
