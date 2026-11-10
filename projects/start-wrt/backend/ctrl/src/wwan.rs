@@ -4,8 +4,13 @@
 //! interface joins the `wan` firewall zone, so profiles that route through the
 //! WAN, published ports and remote access treat it as the WAN. netifd picks the
 //! uplink with the lower route metric while both have a default route.
+//!
+//! The band carrying the uplink has its own Wi-Fi off while the uplink is not
+//! connected. [`watch`] stops an uplink the router cannot join, which brings
+//! that Wi-Fi back.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::{Duration, Instant};
 
 use rpc_toolkit::{from_fn_async_local, ParentHandler};
 use serde::{Deserialize, Serialize};
@@ -26,6 +31,18 @@ const BACKUP_METRIC: u32 = 20;
 
 const MAX_SSID_LEN: usize = 32;
 
+/// How long a new or changed uplink has to connect.
+const JOIN_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a network in range may refuse the router.
+const REFUSED_TIMEOUT: Duration = Duration::from_secs(120);
+/// How old a sighting may be and still put the network in range.
+const SEEN_RECENTLY: Duration = Duration::from_secs(90);
+/// Weaker signal counts as out of range.
+const USABLE_SIGNAL_DBM: i32 = -75;
+const WATCH_INTERVAL: Duration = Duration::from_secs(5);
+/// The `startwrt` section that records why the uplink was stopped.
+const STOP_SECTION: &str = "wwan";
+
 /// A client-mode Wi-Fi interface, read without the access-point options.
 #[derive(Debug, Clone, TypedSection)]
 #[uci(ty = "wifi-iface")]
@@ -43,6 +60,22 @@ pub(crate) struct UplinkStation {
     key: Option<String>,
     #[uci(default_value = false)]
     pub(crate) disabled: bool,
+}
+
+/// The `disabled` option of a `wifi-iface`, written without touching its other options.
+#[derive(Debug, Default, TypedSection)]
+#[uci(ty = "wifi-iface")]
+struct StationSwitch {
+    #[uci(default_value = false)]
+    disabled: bool,
+}
+
+/// Why StartWRT stopped the uplink.
+#[derive(Debug, Default, TypedSection)]
+#[uci(ty = "wwan")]
+struct UplinkStop {
+    #[uci(default)]
+    reason: Option<String>,
 }
 
 /// The uplink's network interface. A wireless interface names no `device`.
@@ -122,6 +155,45 @@ pub struct WwanRadio {
 }
 rpc_toolkit::reflect_ts!(WwanRadio);
 
+/// Why the router is not trying to join the uplink's network.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, visit_rs::VisitVariants)]
+#[serde(rename_all = "camelCase")]
+pub enum WwanStopReason {
+    /// The network was in range and did not accept the router.
+    Rejected,
+    /// The network was not found when the router tried to join it.
+    Unreachable,
+    /// Turned off outside StartWRT.
+    Disabled,
+}
+rpc_toolkit::reflect_ts!(WwanStopReason);
+
+impl WwanStopReason {
+    fn as_uci(self) -> &'static str {
+        match self {
+            WwanStopReason::Rejected => "rejected",
+            WwanStopReason::Unreachable => "unreachable",
+            WwanStopReason::Disabled => "disabled",
+        }
+    }
+
+    fn from_uci(reason: &str) -> Self {
+        match reason {
+            "rejected" => WwanStopReason::Rejected,
+            "unreachable" => WwanStopReason::Unreachable,
+            _ => WwanStopReason::Disabled,
+        }
+    }
+
+    fn detail(self) -> &'static str {
+        match self {
+            WwanStopReason::Rejected => "the network did not accept the router",
+            WwanStopReason::Unreachable => "the network was not found",
+            WwanStopReason::Disabled => "the uplink was turned off",
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct WwanUplink {
@@ -130,8 +202,22 @@ pub struct WwanUplink {
     pub ssid: String,
     pub security: WwanSecurity,
     pub priority: WwanPriority,
+    /// Set while the router is not trying to join the network.
+    pub stopped: Option<WwanStopReason>,
 }
 rpc_toolkit::reflect_ts!(WwanUplink);
+
+/// How a join ended.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, visit_rs::VisitVariants)]
+#[serde(rename_all = "camelCase")]
+pub enum WwanJoinOutcome {
+    Connected,
+    /// The router stopped trying; the uplink's `stopped` says why.
+    Stopped,
+    /// Undecided when the call returned.
+    Joining,
+}
+rpc_toolkit::reflect_ts!(WwanJoinOutcome);
 
 /// What the router observes of the uplink. Absent off the router.
 #[derive(Debug, Default, Serialize, Deserialize, visit_rs::VisitFields)]
@@ -216,6 +302,10 @@ pub fn wwan<C: CtrlContext + Clone>() -> ParentHandler<C> {
             from_fn_async_local(connect::<C>).with_display_serializable(),
         )
         .subcommand(
+            "reconnect",
+            from_fn_async_local(reconnect::<C>).with_display_serializable(),
+        )
+        .subcommand(
             "priority-set",
             from_fn_async_local(priority_set::<C>).with_display_serializable(),
         )
@@ -279,6 +369,26 @@ fn priority_of(cfgs: &Configs) -> Result<WwanPriority, Error> {
     })
 }
 
+fn is_stop_section(section: &uciedit::Section) -> bool {
+    section.ty() == UplinkStop::TY && section.name().as_deref() == Some(STOP_SECTION)
+}
+
+fn stop_reason(cfgs: &Configs) -> Result<WwanStopReason, Error> {
+    for section in cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter(|s| is_stop_section(s))
+    {
+        if let Some(stop) = section.get_typed::<UplinkStop>()? {
+            return Ok(stop
+                .reason
+                .as_deref()
+                .map_or(WwanStopReason::Disabled, WwanStopReason::from_uci));
+        }
+    }
+    Ok(WwanStopReason::Disabled)
+}
+
 fn get_config(cfgs: &Configs) -> Result<WwanResponse, Error> {
     let radios_by_name = radios(cfgs)?;
     let mut uplink = None;
@@ -303,6 +413,7 @@ fn get_config(cfgs: &Configs) -> Result<WwanResponse, Error> {
             ssid: station.ssid,
             security,
             priority: priority_of(cfgs)?,
+            stopped: station.disabled.then(|| stop_reason(cfgs)).transpose()?,
         });
     }
     Ok(WwanResponse {
@@ -375,10 +486,7 @@ async fn read_state() -> WwanState {
     }
     let radios = wireless_status().await.unwrap_or_default();
     if let Some(ifname) = ifname_of(&radios, WWAN_INTERFACE) {
-        // A station's carrier is up once it authenticates; iwinfo's bssid is its own address.
-        state.associated = tokio::fs::read_to_string(format!("/sys/class/net/{ifname}/operstate"))
-            .await
-            .is_ok_and(|s| s.trim() == "up");
+        state.associated = associated(ifname).await;
         if let Some(info) = ubus_call(
             "iwinfo",
             "info",
@@ -398,6 +506,118 @@ async fn read_state() -> WwanState {
     }
     state.active = crate::system::active_uplink().await.as_deref() == Some(WWAN_INTERFACE);
     state
+}
+
+/// A station's carrier is up once it authenticates; iwinfo's bssid is its own address.
+async fn associated(ifname: &str) -> bool {
+    tokio::fs::read_to_string(format!("/sys/class/net/{ifname}/operstate"))
+        .await
+        .is_ok_and(|s| s.trim() == "up")
+}
+
+async fn uplink_associated() -> bool {
+    let status = wireless_status().await.unwrap_or_default();
+    match ifname_of(&status, WWAN_INTERFACE) {
+        Some(ifname) => associated(ifname).await,
+        None => false,
+    }
+}
+
+// ── Sightings ───────────────────────────────────────────────
+
+/// One entry of the station's scan results for the uplink's network.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Sighting {
+    /// Since the network was last seen.
+    age: Duration,
+    /// Signal strength in dBm.
+    level: i32,
+}
+
+/// The id, level, age and ssid of each entry, delimited.
+const BSS_MASK: u32 = 0x1 | 0x80 | 0x200 | 0x1000 | 0x20000;
+/// Bounds the pages read from one station.
+const MAX_BSS_PAGES: usize = 8;
+
+/// wpa_supplicant's escaping of an SSID in its control replies.
+fn wpa_ssid_text(ssid: &str) -> String {
+    let mut text = String::new();
+    for &byte in ssid.as_bytes() {
+        match byte {
+            b'"' => text.push_str("\\\""),
+            b'\\' => text.push_str("\\\\"),
+            0x1b => text.push_str("\\e"),
+            b'\n' => text.push_str("\\n"),
+            b'\r' => text.push_str("\\r"),
+            b'\t' => text.push_str("\\t"),
+            32..=126 => text.push(byte as char),
+            _ => text.push_str(&format!("\\x{byte:02x}")),
+        }
+    }
+    text
+}
+
+/// One page of `BSS RANGE` output: the sightings of `ssid`, the last id read,
+/// and whether the page reached the final entry.
+fn parse_bss_page(page: &str, ssid: &str) -> (Vec<Sighting>, Option<u32>, bool) {
+    let wanted = wpa_ssid_text(ssid);
+    let mut sightings = Vec::new();
+    let mut last_id = None;
+    let mut entry: BTreeMap<&str, &str> = BTreeMap::new();
+    let mut complete = false;
+    for line in page.lines() {
+        if line == "====" || line == "####" {
+            if let Some(id) = entry.get("id").and_then(|v| v.parse().ok()) {
+                last_id = Some(id);
+            }
+            let level = entry.get("level").and_then(|v| v.parse().ok());
+            let age = entry.get("age").and_then(|v| v.parse().ok());
+            if let (Some(level), Some(age), Some(true)) =
+                (level, age, entry.get("ssid").map(|s| *s == wanted))
+            {
+                sightings.push(Sighting {
+                    age: Duration::from_secs(age),
+                    level,
+                });
+            }
+            entry.clear();
+            complete = line == "####";
+        } else if let Some((key, value)) = line.split_once('=') {
+            entry.insert(key, value);
+        }
+    }
+    (sightings, last_id, complete)
+}
+
+/// Where the station's wpa_supplicant last saw `ssid`; empty when it is not running.
+async fn sightings(ifname: &str, ssid: &str) -> Vec<Sighting> {
+    let object = format!("wpa_supplicant.{ifname}");
+    let mut found = Vec::new();
+    let mut from = 0;
+    // A reply holds 4 KiB, so a crowded band takes several pages.
+    for _ in 0..MAX_BSS_PAGES {
+        let command = format!("BSS RANGE={from}- MASK={BSS_MASK:x}");
+        let Some(reply) = ubus_call(
+            &object,
+            "control",
+            Some(serde_json::json!({ "command": command })),
+        )
+        .await
+        else {
+            break;
+        };
+        let page = reply
+            .get("result")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let (mut seen, last_id, complete) = parse_bss_page(page, ssid);
+        found.append(&mut seen);
+        match last_id {
+            Some(id) if !complete => from = id + 1,
+            _ => break,
+        }
+    }
+    found
 }
 
 // ── Scan results ────────────────────────────────────────────
@@ -566,6 +786,92 @@ fn remove_sections(cfgs: &mut Configs) {
             .sections
             .retain(|s| s.name().as_deref() != Some(WWAN_INTERFACE));
     }
+    clear_stop(cfgs);
+}
+
+fn clear_stop(cfgs: &mut Configs) {
+    cfgs["startwrt"].sections.retain(|s| !is_stop_section(s));
+}
+
+/// The uplink's settings the router joins with. A change to any is a new join.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Attempted {
+    device: String,
+    ssid: String,
+    encryption: String,
+    key: Option<String>,
+}
+
+impl From<UplinkStation> for Attempted {
+    fn from(station: UplinkStation) -> Self {
+        Attempted {
+            device: station.device,
+            ssid: station.ssid,
+            encryption: station.encryption,
+            key: station.key,
+        }
+    }
+}
+
+/// StartWRT's uplink, unless it is absent or stopped.
+fn running_uplink(cfgs: &Configs) -> Result<Option<Attempted>, Error> {
+    Ok(stations(cfgs)?
+        .into_iter()
+        .find(|(name, _)| name.as_deref() == Some(WWAN_INTERFACE))
+        .filter(|(_, station)| !station.disabled)
+        .map(|(_, station)| station.into()))
+}
+
+fn set_station_disabled(cfgs: &mut Configs, disabled: bool) -> Result<(), Error> {
+    for section in &mut cfgs["wireless"].sections {
+        if section.name().as_deref() == Some(WWAN_INTERFACE) {
+            if let Some(mut station) = section.get_typed::<StationSwitch>()? {
+                station.disabled = disabled;
+                section.set(&station)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// False when the uplink is no longer the one that was attempted.
+fn apply_stop(
+    cfgs: &mut Configs,
+    attempted: &Attempted,
+    reason: WwanStopReason,
+) -> Result<bool, Error> {
+    if running_uplink(cfgs)?.as_ref() != Some(attempted) {
+        return Ok(false);
+    }
+    set_station_disabled(cfgs, true)?;
+    clear_stop(cfgs);
+    cfgs["startwrt"].append(
+        &UplinkStop {
+            reason: Some(reason.as_uci().to_string()),
+        },
+        Some(STOP_SECTION),
+    )?;
+    Ok(true)
+}
+
+fn apply_reconnect(cfgs: &mut Configs) -> Result<(), Error> {
+    let station = stations(cfgs)?
+        .into_iter()
+        .find(|(name, _)| name.as_deref() == Some(WWAN_INTERFACE))
+        .map(|(_, station)| station)
+        .ok_or_else(|| Error::new(eyre!("no Wi-Fi uplink"), ErrorKind::NotFound))?;
+    if radios(cfgs)?
+        .get(&station.device)
+        .map_or(true, |d| d.disabled)
+    {
+        return Err(Error::new(
+            eyre!("radio {} is off or missing", station.device),
+            ErrorKind::WifiRadioUnavailable,
+        ));
+    }
+    set_station_disabled(cfgs, false)?;
+    clear_stop(cfgs);
+    Ok(())
 }
 
 fn apply_connect(cfgs: &mut Configs, req: &WwanConnectRequest) -> Result<(), Error> {
@@ -642,13 +948,11 @@ fn require_uplink(cfgs: &Configs) -> Result<(), Error> {
     }
 }
 
-/// Re-reads, re-applies and writes on a config conflict, then logs the outcome.
-async fn write<C: CtrlContext>(
+/// Re-reads and re-applies on a config conflict. False when `apply` declined to write.
+async fn update<C: CtrlContext>(
     ctx: &C,
-    action: &str,
-    summary: &str,
-    apply: impl Fn(&mut Configs) -> Result<(), Error>,
-) -> Result<(), Error> {
+    apply: impl Fn(&mut Configs) -> Result<bool, Error>,
+) -> Result<bool, Error> {
     let mut retries = 4;
     loop {
         let arena = Arena::new();
@@ -658,9 +962,8 @@ async fn write<C: CtrlContext>(
             &["wireless", "network", "firewall", "startwrt"],
         )
         .await?;
-        if let Err(err) = apply(&mut cfgs) {
-            crate::activity::log("wwan", action, false, summary, Some(&err.to_string()));
-            return Err(err);
+        if !apply(&mut cfgs)? {
+            return Ok(false);
         }
         let dump_result = dump_all(ctx.uci_root(), cfgs).await;
         drop(arena);
@@ -668,19 +971,53 @@ async fn write<C: CtrlContext>(
             Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
                 retries -= 1;
             }
-            Err(err) => {
-                crate::activity::log("wwan", action, false, summary, Some(&err.to_string()));
-                return Err(err.into());
-            }
-            Ok(()) => {
-                crate::activity::log("wwan", action, true, summary, None);
-                if ctx.effectful() {
-                    profiles::reload_system().await?;
-                }
-                return Ok(());
-            }
+            Err(err) => return Err(err.into()),
+            Ok(()) => return Ok(true),
         }
     }
+}
+
+/// Writes, logs the outcome, and reloads the network.
+async fn write<C: CtrlContext>(
+    ctx: &C,
+    action: &str,
+    summary: &str,
+    apply: impl Fn(&mut Configs) -> Result<(), Error>,
+) -> Result<(), Error> {
+    if let Err(err) = update(ctx, |cfgs| apply(cfgs).map(|()| true)).await {
+        crate::activity::log("wwan", action, false, summary, Some(&err.to_string()));
+        return Err(err);
+    }
+    crate::activity::log("wwan", action, true, summary, None);
+    if ctx.effectful() {
+        profiles::reload_system().await?;
+    }
+    Ok(())
+}
+
+/// Waits for the watcher to settle a join.
+async fn await_join<C: CtrlContext>(ctx: &C) -> Result<WwanJoinOutcome, Error> {
+    if !ctx.effectful() {
+        return Ok(WwanJoinOutcome::Joining);
+    }
+    // The watcher notices the change within one interval and decides by JOIN_TIMEOUT.
+    let deadline = Instant::now() + JOIN_TIMEOUT + WATCH_INTERVAL * 3;
+    while Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let stopped = {
+            let arena = Arena::new();
+            let cfgs =
+                parse_all(ctx.uci_root(), &arena, &["wireless", "network", "startwrt"]).await?;
+            get_config(&cfgs)?.uplink.map(|u| u.stopped.is_some())
+        };
+        match stopped {
+            None => return Ok(WwanJoinOutcome::Joining),
+            Some(true) => return Ok(WwanJoinOutcome::Stopped),
+            Some(false) if uplink_associated().await => return Ok(WwanJoinOutcome::Connected),
+            Some(false) => {}
+        }
+    }
+    Ok(WwanJoinOutcome::Joining)
 }
 
 // ── Handlers ────────────────────────────────────────────────
@@ -689,10 +1026,10 @@ async fn write<C: CtrlContext>(
 pub async fn get<C: CtrlContext>(ctx: C) -> Result<WwanResponse, Error> {
     let mut res = {
         let arena = Arena::new();
-        let cfgs = parse_all(ctx.uci_root(), &arena, &["wireless", "network"]).await?;
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["wireless", "network", "startwrt"]).await?;
         get_config(&cfgs)?
     };
-    if ctx.effectful() && res.uplink.is_some() {
+    if ctx.effectful() && res.uplink.as_ref().is_some_and(|u| u.stopped.is_none()) {
         res.state = Some(read_state().await);
     }
     Ok(res)
@@ -743,14 +1080,21 @@ pub async fn scan<C: CtrlContext>(
 pub async fn connect<C: CtrlContext>(
     ctx: C,
     DeserializeStdin(req): DeserializeStdin<WwanConnectRequest>,
-) -> Result<(), Error> {
+) -> Result<WwanJoinOutcome, Error> {
     write(
         &ctx,
-        "connected",
-        &format!("Joined Wi-Fi uplink {}", req.ssid),
+        "added",
+        &format!("Added Wi-Fi uplink {}", req.ssid),
         |cfgs| apply_connect(cfgs, &req),
     )
-    .await
+    .await?;
+    await_join(&ctx).await
+}
+
+#[instrument(skip_all)]
+pub async fn reconnect<C: CtrlContext>(ctx: C) -> Result<WwanJoinOutcome, Error> {
+    write(&ctx, "retried", "Retried Wi-Fi uplink", apply_reconnect).await?;
+    await_join(&ctx).await
 }
 
 #[instrument(skip_all)]
@@ -776,6 +1120,165 @@ pub async fn disconnect<C: CtrlContext>(ctx: C) -> Result<(), Error> {
         apply_disconnect(cfgs)
     })
     .await
+}
+
+// ── Watcher ─────────────────────────────────────────────────
+
+#[derive(Debug, PartialEq, Eq)]
+enum Verdict {
+    Wait,
+    Joined,
+    /// Gives up, during a join or after one.
+    Stop {
+        reason: WwanStopReason,
+        joining: bool,
+    },
+}
+
+struct Attempt {
+    uplink: Attempted,
+    /// Added or changed while the watcher ran, and not connected since.
+    joining: bool,
+    /// When the router last had the connection, or began this attempt.
+    since: Instant,
+    /// When the network was last seen with usable signal after `since`.
+    seen: Option<Instant>,
+}
+
+/// Decides when to give up on an uplink, from one observation every interval.
+#[derive(Default)]
+struct Tracker {
+    started: bool,
+    attempt: Option<Attempt>,
+}
+
+impl Tracker {
+    /// No uplink is running.
+    fn idle(&mut self) {
+        self.started = true;
+        self.attempt = None;
+    }
+
+    fn observe(
+        &mut self,
+        uplink: Attempted,
+        now: Instant,
+        connected: bool,
+        sightings: &[Sighting],
+    ) -> Verdict {
+        let joining = self.started;
+        self.started = true;
+        let attempt = match &mut self.attempt {
+            Some(attempt) if attempt.uplink == uplink => attempt,
+            slot => slot.insert(Attempt {
+                uplink,
+                joining,
+                since: now,
+                seen: None,
+            }),
+        };
+        if connected {
+            let joined = attempt.joining;
+            attempt.joining = false;
+            attempt.since = now;
+            attempt.seen = None;
+            return if joined {
+                Verdict::Joined
+            } else {
+                Verdict::Wait
+            };
+        }
+        for sighting in sightings {
+            let at = now.checked_sub(sighting.age).unwrap_or(now);
+            if sighting.level >= USABLE_SIGNAL_DBM && at > attempt.since {
+                attempt.seen = Some(attempt.seen.map_or(at, |seen| seen.max(at)));
+            }
+        }
+        let elapsed = now.saturating_duration_since(attempt.since);
+        if attempt.joining {
+            if elapsed >= JOIN_TIMEOUT {
+                let reason = if attempt.seen.is_some() {
+                    WwanStopReason::Rejected
+                } else {
+                    WwanStopReason::Unreachable
+                };
+                return Verdict::Stop {
+                    reason,
+                    joining: true,
+                };
+            }
+        } else if elapsed >= REFUSED_TIMEOUT
+            && attempt
+                .seen
+                .is_some_and(|at| now.saturating_duration_since(at) <= SEEN_RECENTLY)
+        {
+            return Verdict::Stop {
+                reason: WwanStopReason::Rejected,
+                joining: false,
+            };
+        }
+        Verdict::Wait
+    }
+}
+
+/// Stops the uplink when the router cannot join its network, for the daemon's lifetime.
+pub async fn watch() {
+    let ctx = crate::ServerContext::default();
+    let mut tracker = Tracker::default();
+    let mut ticks = tokio::time::interval(WATCH_INTERVAL);
+    loop {
+        ticks.tick().await;
+        if let Err(e) = watch_once(&ctx, &mut tracker).await {
+            tracing::warn!("Wi-Fi uplink watch failed: {e}");
+        }
+    }
+}
+
+async fn watch_once<C: CtrlContext>(ctx: &C, tracker: &mut Tracker) -> Result<(), Error> {
+    let uplink = {
+        let arena = Arena::new();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["wireless"]).await?;
+        running_uplink(&cfgs)?
+    };
+    let Some(uplink) = uplink else {
+        tracker.idle();
+        return Ok(());
+    };
+    let status = wireless_status().await.unwrap_or_default();
+    let ifname = ifname_of(&status, WWAN_INTERFACE);
+    let connected = match ifname {
+        Some(ifname) => associated(ifname).await,
+        None => false,
+    };
+    let seen = match ifname {
+        Some(ifname) if !connected => sightings(ifname, &uplink.ssid).await,
+        _ => Vec::new(),
+    };
+    match tracker.observe(uplink.clone(), Instant::now(), connected, &seen) {
+        Verdict::Wait => {}
+        Verdict::Joined => crate::activity::log(
+            "wwan",
+            "joined",
+            true,
+            &format!("Joined Wi-Fi uplink {}", uplink.ssid),
+            None,
+        ),
+        Verdict::Stop { reason, joining } => {
+            if update(ctx, |cfgs| apply_stop(cfgs, &uplink, reason)).await? {
+                let summary = if joining {
+                    format!("Couldn't join Wi-Fi uplink {}", uplink.ssid)
+                } else {
+                    format!("Stopped Wi-Fi uplink {}", uplink.ssid)
+                };
+                crate::activity::log("wwan", "stopped", false, &summary, Some(reason.detail()));
+                if ctx.effectful() {
+                    profiles::reload_system().await?;
+                }
+            }
+            tracker.idle();
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1310,5 +1813,425 @@ config zone 'wan_zone'
             Some(WwanSecurity::Wpa2)
         );
         assert_eq!(WwanSecurity::from_encryption("wpa2"), None);
+    }
+
+    async fn stop_with(dir: &Path, attempted: &Attempted, reason: WwanStopReason) -> bool {
+        update(&TestContext(dir.to_path_buf()), |cfgs| {
+            apply_stop(cfgs, attempted, reason)
+        })
+        .await
+        .unwrap()
+    }
+
+    fn attempted(key: &str) -> Attempted {
+        Attempted {
+            device: "radio0".into(),
+            ssid: "Upstream".into(),
+            encryption: "psk2".into(),
+            key: Some(key.into()),
+        }
+    }
+
+    #[tokio::test]
+    async fn stopped_uplink_reports_why_and_frees_its_radio() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = setup(dir.path(), WIRELESS, "");
+        connect(
+            ctx.clone(),
+            DeserializeStdin(connect_req(WwanSecurity::Wpa2, Some("upstreampass"))),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            get(ctx.clone()).await.unwrap().uplink.unwrap().stopped,
+            None
+        );
+
+        assert!(
+            stop_with(
+                dir.path(),
+                &attempted("upstreampass"),
+                WwanStopReason::Rejected
+            )
+            .await
+        );
+        assert!(section(dir.path(), "wireless", WWAN_INTERFACE)
+            .unwrap()
+            .contains("option disabled '1'"));
+        assert!(section(dir.path(), "startwrt", STOP_SECTION)
+            .unwrap()
+            .contains("option reason 'rejected'"));
+        let res = get(ctx).await.unwrap();
+        assert_eq!(res.uplink.unwrap().stopped, Some(WwanStopReason::Rejected));
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path().to_path_buf(), &arena, &["wireless"])
+            .await
+            .unwrap();
+        assert!(uplink_radios(&cfgs).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn uplink_turned_off_elsewhere_reads_as_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = setup(dir.path(), WIRELESS, "");
+        connect(
+            ctx.clone(),
+            DeserializeStdin(connect_req(WwanSecurity::Wpa2, Some("upstreampass"))),
+        )
+        .await
+        .unwrap();
+        let wireless = read(dir.path(), "wireless").replace(
+            "option key 'upstreampass'\n",
+            "option key 'upstreampass'\n\toption disabled '1'\n",
+        );
+        std::fs::write(dir.path().join("wireless"), wireless).unwrap();
+        assert_eq!(
+            get(ctx).await.unwrap().uplink.unwrap().stopped,
+            Some(WwanStopReason::Disabled)
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_leaves_a_changed_or_stopped_uplink_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = setup(dir.path(), WIRELESS, "");
+        connect(
+            ctx.clone(),
+            DeserializeStdin(connect_req(WwanSecurity::Wpa2, Some("newpassword"))),
+        )
+        .await
+        .unwrap();
+        let before = read(dir.path(), "wireless");
+        assert!(
+            !stop_with(
+                dir.path(),
+                &attempted("upstreampass"),
+                WwanStopReason::Rejected
+            )
+            .await
+        );
+        assert_eq!(read(dir.path(), "wireless"), before);
+
+        assert!(
+            stop_with(
+                dir.path(),
+                &attempted("newpassword"),
+                WwanStopReason::Unreachable
+            )
+            .await
+        );
+        let stopped = read(dir.path(), "startwrt");
+        assert!(
+            !stop_with(
+                dir.path(),
+                &attempted("newpassword"),
+                WwanStopReason::Rejected
+            )
+            .await
+        );
+        assert_eq!(read(dir.path(), "startwrt"), stopped);
+    }
+
+    #[tokio::test]
+    async fn reconnect_clears_the_stop() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = setup(dir.path(), WIRELESS, "");
+        connect(
+            ctx.clone(),
+            DeserializeStdin(connect_req(WwanSecurity::Wpa2, Some("upstreampass"))),
+        )
+        .await
+        .unwrap();
+        stop_with(
+            dir.path(),
+            &attempted("upstreampass"),
+            WwanStopReason::Rejected,
+        )
+        .await;
+
+        assert_eq!(
+            reconnect(ctx.clone()).await.unwrap(),
+            WwanJoinOutcome::Joining
+        );
+        assert!(!section(dir.path(), "wireless", WWAN_INTERFACE)
+            .unwrap()
+            .contains("option disabled '1'"));
+        assert!(section(dir.path(), "startwrt", STOP_SECTION).is_none());
+        assert_eq!(get(ctx).await.unwrap().uplink.unwrap().stopped, None);
+    }
+
+    #[tokio::test]
+    async fn reconnect_needs_an_uplink_on_a_radio_that_is_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = setup(dir.path(), WIRELESS, "");
+        let err = reconnect(ctx.clone()).await.unwrap_err();
+        assert_eq!(err.kind, ErrorKind::NotFound);
+
+        connect(
+            ctx.clone(),
+            DeserializeStdin(connect_req(WwanSecurity::Wpa2, Some("upstreampass"))),
+        )
+        .await
+        .unwrap();
+        stop_with(
+            dir.path(),
+            &attempted("upstreampass"),
+            WwanStopReason::Rejected,
+        )
+        .await;
+        let wireless = read(dir.path(), "wireless").replacen(
+            "\toption channel 'auto'\n",
+            "\toption channel 'auto'\n\toption disabled '1'\n",
+            1,
+        );
+        std::fs::write(dir.path().join("wireless"), &wireless).unwrap();
+        let err = reconnect(ctx).await.unwrap_err();
+        assert_eq!(err.kind, ErrorKind::WifiRadioUnavailable);
+        assert_eq!(read(dir.path(), "wireless"), wireless);
+    }
+
+    #[tokio::test]
+    async fn connect_and_disconnect_clear_the_stop() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = setup(dir.path(), WIRELESS, "");
+        for leave in [true, false] {
+            connect(
+                ctx.clone(),
+                DeserializeStdin(connect_req(WwanSecurity::Wpa2, Some("upstreampass"))),
+            )
+            .await
+            .unwrap();
+            stop_with(
+                dir.path(),
+                &attempted("upstreampass"),
+                WwanStopReason::Rejected,
+            )
+            .await;
+            if leave {
+                disconnect(ctx.clone()).await.unwrap();
+            } else {
+                connect(
+                    ctx.clone(),
+                    DeserializeStdin(connect_req(WwanSecurity::Wpa2, Some("upstreampass"))),
+                )
+                .await
+                .unwrap();
+            }
+            assert!(section(dir.path(), "startwrt", STOP_SECTION).is_none());
+        }
+    }
+
+    fn secs(n: u64) -> Duration {
+        Duration::from_secs(n)
+    }
+
+    /// Seen \`ago\` before \`now\`.
+    fn sighting(ago: u64, level: i32) -> Sighting {
+        Sighting {
+            age: secs(ago),
+            level,
+        }
+    }
+
+    /// A tracker past its first observation, and a time to count from.
+    fn started() -> (Tracker, Instant) {
+        let mut tracker = Tracker::default();
+        tracker.idle();
+        (tracker, Instant::now())
+    }
+
+    #[test]
+    fn join_that_never_connects_stops_as_unreachable() {
+        let (mut tracker, t0) = started();
+        let uplink = attempted("upstreampass");
+        assert_eq!(
+            tracker.observe(uplink.clone(), t0, false, &[]),
+            Verdict::Wait
+        );
+        assert_eq!(
+            tracker.observe(uplink.clone(), t0 + secs(25), false, &[]),
+            Verdict::Wait
+        );
+        assert_eq!(
+            tracker.observe(uplink, t0 + JOIN_TIMEOUT, false, &[]),
+            Verdict::Stop {
+                reason: WwanStopReason::Unreachable,
+                joining: true
+            }
+        );
+    }
+
+    #[test]
+    fn join_refused_in_range_stops_as_rejected() {
+        let (mut tracker, t0) = started();
+        let uplink = attempted("upstreampass");
+        tracker.observe(uplink.clone(), t0, false, &[]);
+        tracker.observe(uplink.clone(), t0 + secs(15), false, &[sighting(2, -40)]);
+        assert_eq!(
+            tracker.observe(uplink, t0 + JOIN_TIMEOUT, false, &[sighting(17, -40)]),
+            Verdict::Stop {
+                reason: WwanStopReason::Rejected,
+                joining: true
+            }
+        );
+    }
+
+    #[test]
+    fn join_to_a_weak_network_stops_as_unreachable() {
+        let (mut tracker, t0) = started();
+        let uplink = attempted("upstreampass");
+        tracker.observe(uplink.clone(), t0, false, &[]);
+        assert_eq!(
+            tracker.observe(uplink, t0 + JOIN_TIMEOUT, false, &[sighting(1, -82)]),
+            Verdict::Stop {
+                reason: WwanStopReason::Unreachable,
+                joining: true
+            }
+        );
+    }
+
+    #[test]
+    fn join_that_connects_is_reported_once() {
+        let (mut tracker, t0) = started();
+        let uplink = attempted("upstreampass");
+        tracker.observe(uplink.clone(), t0, false, &[]);
+        assert_eq!(
+            tracker.observe(uplink.clone(), t0 + secs(10), true, &[]),
+            Verdict::Joined
+        );
+        assert_eq!(
+            tracker.observe(uplink.clone(), t0 + secs(15), true, &[]),
+            Verdict::Wait
+        );
+        // Dropping later is no longer a join.
+        assert_eq!(
+            tracker.observe(uplink, t0 + secs(15) + JOIN_TIMEOUT, false, &[]),
+            Verdict::Wait
+        );
+    }
+
+    #[test]
+    fn uplink_found_at_startup_is_not_a_join() {
+        let mut tracker = Tracker::default();
+        let t0 = Instant::now();
+        let uplink = attempted("upstreampass");
+        tracker.observe(uplink.clone(), t0, false, &[]);
+        assert_eq!(
+            tracker.observe(uplink.clone(), t0 + JOIN_TIMEOUT, false, &[]),
+            Verdict::Wait
+        );
+        assert_eq!(
+            tracker.observe(uplink, t0 + secs(600), false, &[]),
+            Verdict::Wait
+        );
+    }
+
+    #[test]
+    fn network_refusing_in_range_stops_after_two_minutes() {
+        let mut tracker = Tracker::default();
+        let t0 = Instant::now();
+        let uplink = attempted("upstreampass");
+        tracker.observe(uplink.clone(), t0, true, &[]);
+        // Refused from here on: seen on every retry.
+        tracker.observe(uplink.clone(), t0 + secs(5), false, &[sighting(1, -50)]);
+        assert_eq!(
+            tracker.observe(uplink.clone(), t0 + secs(100), false, &[sighting(30, -50)]),
+            Verdict::Wait
+        );
+        assert_eq!(
+            tracker.observe(uplink, t0 + REFUSED_TIMEOUT, false, &[sighting(60, -50)]),
+            Verdict::Stop {
+                reason: WwanStopReason::Rejected,
+                joining: false
+            }
+        );
+    }
+
+    #[test]
+    fn network_gone_since_the_drop_keeps_retrying() {
+        let mut tracker = Tracker::default();
+        let t0 = Instant::now();
+        let uplink = attempted("upstreampass");
+        tracker.observe(uplink.clone(), t0, true, &[]);
+        // Last seen before the drop.
+        for t in [10, 60, 125, 400] {
+            assert_eq!(
+                tracker.observe(uplink.clone(), t0 + secs(t), false, &[sighting(t + 3, -40)]),
+                Verdict::Wait
+            );
+        }
+    }
+
+    #[test]
+    fn network_last_seen_long_ago_keeps_retrying() {
+        let mut tracker = Tracker::default();
+        let t0 = Instant::now();
+        let uplink = attempted("upstreampass");
+        tracker.observe(uplink.clone(), t0, true, &[]);
+        tracker.observe(uplink.clone(), t0 + secs(10), false, &[sighting(1, -40)]);
+        assert_eq!(
+            tracker.observe(uplink.clone(), t0 + secs(130), false, &[]),
+            Verdict::Wait
+        );
+        assert_eq!(
+            tracker.observe(uplink, t0 + secs(300), false, &[]),
+            Verdict::Wait
+        );
+    }
+
+    #[test]
+    fn weak_network_keeps_retrying() {
+        let mut tracker = Tracker::default();
+        let t0 = Instant::now();
+        let uplink = attempted("upstreampass");
+        tracker.observe(uplink.clone(), t0, true, &[]);
+        for t in [10, 60, 125, 400] {
+            assert_eq!(
+                tracker.observe(uplink.clone(), t0 + secs(t), false, &[sighting(1, -80)]),
+                Verdict::Wait
+            );
+        }
+    }
+
+    #[test]
+    fn changed_uplink_is_a_new_join() {
+        let mut tracker = Tracker::default();
+        let t0 = Instant::now();
+        tracker.observe(attempted("upstreampass"), t0, true, &[]);
+        let changed = attempted("newpassword");
+        tracker.observe(changed.clone(), t0 + secs(5), false, &[]);
+        assert_eq!(
+            tracker.observe(changed, t0 + secs(5) + JOIN_TIMEOUT, false, &[]),
+            Verdict::Stop {
+                reason: WwanStopReason::Unreachable,
+                joining: true
+            }
+        );
+    }
+
+    #[test]
+    fn ssid_text_matches_wpa_supplicant() {
+        assert_eq!(wpa_ssid_text("Home"), "Home");
+        assert_eq!(
+            wpa_ssid_text("Café \"A\\B\"\t"),
+            "Caf\\xc3\\xa9 \\\"A\\\\B\\\"\\t"
+        );
+    }
+
+    #[test]
+    fn bss_pages_yield_sightings_of_the_network() {
+        let page = "id=3\nlevel=-48\nage=4\nssid=Upstream\n====\nid=5\nlevel=-70\nage=12\nssid=Neighbor\n====\nid=9\nlevel=-61\nage=0\nssid=Upstream\n####";
+        let (seen, last, complete) = parse_bss_page(page, "Upstream");
+        assert_eq!(seen, vec![sighting(4, -48), sighting(0, -61)]);
+        assert_eq!(last, Some(9));
+        assert!(complete);
+
+        let truncated = "id=3\nlevel=-48\nage=4\nssid=Caf\\xc3\\xa9\n====\n";
+        let (seen, last, complete) = parse_bss_page(truncated, "Café");
+        assert_eq!(seen, vec![sighting(4, -48)]);
+        assert_eq!(last, Some(3));
+        assert!(!complete);
+
+        assert_eq!(parse_bss_page("", "Upstream"), (Vec::new(), None, false));
     }
 }

@@ -1587,6 +1587,18 @@ export const WifiRadio: z.ZodObject<{
 })
 
 /**
+ * How a join ended.
+ */
+export const WwanJoinOutcome: z.ZodEnum<{
+  connected: 'connected'
+  stopped: 'stopped'
+  joining: 'joining'
+}> = /* @__PURE__ */ z.enum(['connected', 'stopped', 'joining']).meta({
+  id: 'WwanJoinOutcome',
+  description: 'How a join ended.',
+})
+
+/**
  * Which uplink carries traffic while both the WAN port and the Wi-Fi uplink are up.
  */
 export const WwanPriority: z.ZodEnum<{
@@ -1681,6 +1693,18 @@ export const WwanState: z.ZodObject<{
 }).meta({
   id: 'WwanState',
   description: 'What the router observes of the uplink. Absent off the router.',
+})
+
+/**
+ * Why the router is not trying to join the uplink's network.
+ */
+export const WwanStopReason: z.ZodEnum<{
+  rejected: 'rejected'
+  unreachable: 'unreachable'
+  disabled: 'disabled'
+}> = /* @__PURE__ */ z.enum(['rejected', 'unreachable', 'disabled']).meta({
+  id: 'WwanStopReason',
+  description: "Why the router is not trying to join the uplink's network.",
 })
 export const ActivityListResponse: z.ZodObject<{
   entries: z.ZodArray<typeof ActivityEntry>
@@ -3186,12 +3210,28 @@ export const WwanUplink: z.ZodObject<{
   ssid: z.ZodString
   security: typeof WwanSecurity
   priority: typeof WwanPriority
+  /**
+   * Set while the router is not trying to join the network.
+   */
+  stopped: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof WwanStopReason>>,
+    z.ZodNullable<typeof WwanStopReason>
+  >
 }> = /* @__PURE__ */ object({
   radio: z.string(),
   band: z.string(),
   ssid: z.string(),
   security: WwanSecurity,
   priority: WwanPriority,
+  /**
+   * Set while the router is not trying to join the network.
+   */
+  stopped: wire(
+    WwanStopReason.nullable().optional(),
+    WwanStopReason.nullable(),
+  ).meta({
+    description: 'Set while the router is not trying to join the network.',
+  }),
 }).meta({
   id: 'WwanUplink',
 })
@@ -4735,7 +4775,7 @@ export const Api = {
                 'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
             }),
           ),
-          _RETURN: /* @__PURE__ */ z.null(),
+          _RETURN: /* @__PURE__ */ WwanJoinOutcome,
         },
         disconnect: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4784,6 +4824,21 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+        },
+        reconnect: {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            empty,
+          ),
+          _RETURN: /* @__PURE__ */ WwanJoinOutcome,
         },
         scan: {
           _PARAMS: /* @__PURE__ */ z.intersection(

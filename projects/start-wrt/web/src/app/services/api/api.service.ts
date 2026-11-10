@@ -100,7 +100,8 @@ export abstract class ApiService {
   abstract wanDdnsSet(params: WanDdnsSetRequest): Promise<null>
   abstract wwanGet(): Promise<WwanResponse>
   abstract wwanScan(params: WwanScanRequest): Promise<WwanNetwork[]>
-  abstract wwanConnect(params: WwanConnectRequest): Promise<null>
+  abstract wwanConnect(params: WwanConnectRequest): Promise<WwanJoinOutcome>
+  abstract wwanReconnect(): Promise<WwanJoinOutcome>
   abstract wwanPrioritySet(params: WwanPrioritySetRequest): Promise<null>
   abstract wwanDisconnect(): Promise<null>
   abstract publishedPortsList(): Promise<PublishedPortFromApi[]>
@@ -355,9 +356,15 @@ export type WwanResponse = RpcReturnType<Api, 'wwan.get'>
 
 export type WwanNetwork = Bindings.WwanNetwork
 
+export type WwanUplink = Bindings.WwanUplink
+
 export type WwanSecurity = Bindings.WwanSecurity
 
 export type WwanPriority = Bindings.WwanPriority
+
+export type WwanStopReason = Bindings.WwanStopReason
+
+export type WwanJoinOutcome = Bindings.WwanJoinOutcome
 
 export type WwanScanRequest = RpcParamType<Api, 'wwan.scan'>
 

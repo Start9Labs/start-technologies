@@ -352,6 +352,20 @@ async fn inner_main() -> Result<(), Error> {
             tracing::error!("Failed to start IPv6 tracker: {e}");
         }
 
+        // Its config reads hold a uciedit `Arena` across awaits too.
+        if let Err(e) = std::thread::Builder::new()
+            .name("wwan-watch".into())
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("wwan-watch runtime")
+                    .block_on(crate::wwan::watch());
+            })
+        {
+            tracing::error!("Failed to start the Wi-Fi uplink watcher: {e}");
+        }
+
         app_state = AppState {
             flash_in_progress: Arc::new(AtomicBool::new(false)),
         };

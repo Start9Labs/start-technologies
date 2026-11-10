@@ -65,6 +65,7 @@ import {
   WanDdnsResponse,
   WanDdnsSetRequest,
   WwanConnectRequest,
+  WwanJoinOutcome,
   WwanNetwork,
   WwanPrioritySetRequest,
   WwanResponse,
@@ -644,7 +645,8 @@ export class MockApiService extends ApiService {
 
   async wifiSet(params: WifiConfig): Promise<WifiSetResult> {
     await pauseFor(250)
-    const uplinkBand = this.mockWwanUplink?.band
+    const uplink = this.mockWwanUplink
+    const uplinkBand = uplink && !uplink.stopped ? uplink.band : null
     if (
       Object.values(params.radios).some(
         r => r.band === uplinkBand && !r.enabled,
@@ -1774,13 +1776,16 @@ export class MockApiService extends ApiService {
         { radio: 'radio1', band: '5g', enabled: enabled('5g') },
       ],
       uplink: structuredClone(this.mockWwanUplink),
-      state: this.mockWwanUplink && {
-        associated: true,
-        address: '192.168.43.27',
-        signal: -48,
-        channel: 6,
-        active: this.mockWwanUplink.priority === 'preferred',
-      },
+      state:
+        this.mockWwanUplink && !this.mockWwanUplink.stopped
+          ? {
+              associated: true,
+              address: '192.168.43.27',
+              signal: -48,
+              channel: 6,
+              active: this.mockWwanUplink.priority === 'preferred',
+            }
+          : null,
       unmanaged: [],
     }
   }
@@ -1790,7 +1795,7 @@ export class MockApiService extends ApiService {
     return structuredClone(this.mockWwanNetworks)
   }
 
-  async wwanConnect(params: WwanConnectRequest): Promise<null> {
+  async wwanConnect(params: WwanConnectRequest): Promise<WwanJoinOutcome> {
     await pauseFor(1000)
     this.mockWwanUplink = {
       radio: params.radio,
@@ -1798,9 +1803,18 @@ export class MockApiService extends ApiService {
       ssid: params.ssid,
       security: params.security,
       priority: params.priority,
+      stopped: null,
     }
-    this.logActivity('wwan', 'connected', `Joined Wi-Fi uplink ${params.ssid}`)
-    return null
+    this.logActivity('wwan', 'added', `Added Wi-Fi uplink ${params.ssid}`)
+    this.logActivity('wwan', 'joined', `Joined Wi-Fi uplink ${params.ssid}`)
+    return 'connected'
+  }
+
+  async wwanReconnect(): Promise<WwanJoinOutcome> {
+    await pauseFor(1000)
+    if (this.mockWwanUplink) this.mockWwanUplink.stopped = null
+    this.logActivity('wwan', 'retried', 'Retried Wi-Fi uplink')
+    return 'connected'
   }
 
   async wwanPrioritySet(params: WwanPrioritySetRequest): Promise<null> {

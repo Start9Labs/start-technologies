@@ -60,6 +60,7 @@ import {
   WanDdnsResponse,
   WanDdnsSetRequest,
   WwanConnectRequest,
+  WwanJoinOutcome,
   WwanNetwork,
   WwanPrioritySetRequest,
   WwanResponse,
@@ -409,8 +410,12 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'wwan.scan', params })
   }
 
-  async wwanConnect(params: WwanConnectRequest): Promise<null> {
+  async wwanConnect(params: WwanConnectRequest): Promise<WwanJoinOutcome> {
     return this.rpc.request({ method: 'wwan.connect', params })
+  }
+
+  async wwanReconnect(): Promise<WwanJoinOutcome> {
+    return this.rpc.request({ method: 'wwan.reconnect', params: {} })
   }
 
   async wwanPrioritySet(params: WwanPrioritySetRequest): Promise<null> {

@@ -2412,6 +2412,16 @@ sections of `wireless` and `network`; the `wwan` interface is a member of the
 `wan` firewall zone. A client-mode `wifi-iface` under another name (one set up
 in LuCI) is reported in `unmanaged` and never written.
 
+A watcher in the daemon (`wwan::watch`, every 5 s) stops the uplink it cannot
+join: it sets `wireless.wwan.disabled '1'`, which turns the band's own access
+point back on, and records why in `startwrt.wwan.reason`. A new or changed
+uplink stops after 30 s without connecting: `rejected` if wpa_supplicant saw
+the network at −75 dBm or better since, `unreachable` otherwise. An uplink that
+loses its connection stops as `rejected` once the network has refused it for
+120 s while seen at that signal within the last 90 s; an out-of-range or weak
+network is retried indefinitely. Sightings come from `ubus call
+wpa_supplicant.<ifname> control '{"command":"BSS RANGE=…"}'`.
+
 ### `wwan.get`
 
 ```rust
@@ -2432,11 +2442,25 @@ enum WwanPriority {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum WwanStopReason {
+    /// The network was in range and did not accept the router.
+    Rejected,
+    /// The network was not found when the router tried to join it.
+    Unreachable,
+    /// Turned off outside StartWRT.
+    Disabled,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct WwanResponse {
     /// Every `wifi-device`, e.g. { radio: "radio0", band: "2g", enabled: true }.
     radios: Vec<WwanRadio>,
-    uplink: Option<WwanUplink>,  // { radio, band, ssid, security, priority }
-    /// Absent off the router and while there is no uplink.
+    /// { radio, band, ssid, security, priority, stopped: Option<WwanStopReason> }
+    uplink: Option<WwanUplink>,
+    /// Absent off the router, without an uplink, and while it is stopped.
     state: Option<WwanState>,    // { associated, address, signal (dBm), channel, active }
     /// Client-mode Wi-Fi interfaces StartWRT did not create, by section name.
     unmanaged: Vec<String>,
@@ -2482,14 +2506,35 @@ struct WwanConnectRequest {
     password: Option<String>,   // 8–63 characters, no control characters; ignored for Open
     priority: WwanPriority,
 }
-// Response: null
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum WwanJoinOutcome {
+    Connected,
+    /// The router stopped trying; `uplink.stopped` says why.
+    Stopped,
+    /// Undecided when the call returned.
+    Joining,
+}
+// Response: WwanJoinOutcome
 // Backend: replaces any `wwan` sections with a client-mode `wifi-iface 'wwan'`
 // (`network 'wwan'`) and a DHCP `interface 'wwan'`, adds `wwan` to the `wan`
 // zone, and writes route metrics: 10 on the preferred uplink, 20 on the other.
 // `peerdns '0'` follows a custom WAN DNS setting. Rejects an off or missing
 // radio (`WifiRadioUnavailable`), a bad name or password (`InvalidValue`), and
 // an unmanaged client interface (`WifiUplinkConfiguredElsewhere`, 1028), writing
-// nothing. Then reload_system().
+// nothing. Then reload_system(), and waits up to 45 s for the station to
+// authenticate or the watcher to stop it.
+```
+
+### `wwan.reconnect`
+
+```rust
+// Request: {}
+// Response: WwanJoinOutcome
+// Backend: clears `wireless.wwan.disabled` and `startwrt.wwan`, then
+// reload_system() and waits as `wwan.connect` does. `NotFound` without an
+// uplink; an off or missing radio is rejected with `WifiRadioUnavailable`.
 ```
 
 ### `wwan.priority-set`
@@ -2506,7 +2551,7 @@ struct WwanPrioritySetRequest { priority: WwanPriority }
 ```rust
 // Request: {}
 // Response: null
-// Backend: deletes the `wwan` sections, takes `wwan` out of the `wan` zone and
+// Backend: deletes the `wwan` sections and `startwrt.wwan`, takes `wwan` out of the `wan` zone and
 // clears `network.wan.metric`; `NotFound` without an uplink.
 ```
 
@@ -2568,6 +2613,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `wwan.get`                          | Wireless WAN    |                             |
 | `wwan.scan`                         | Wireless WAN    |                             |
 | `wwan.connect`                      | Wireless WAN    |                             |
+| `wwan.reconnect`                    | Wireless WAN    |                             |
 | `wwan.priority-set`                 | Wireless WAN    |                             |
 | `wwan.disconnect`                   | Wireless WAN    |                             |
 | `lan.ipv4-get`                      | LAN             |                             |
@@ -2630,7 +2676,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `dns.injected-list`                 | DNS Injection   |                             |
 | `config.check`                      | Config Check    |                             |
 
-**Totals:** 90 RPC methods across 19 categories, plus the HTTP/WebSocket routes
+**Totals:** 91 RPC methods across 19 categories, plus the HTTP/WebSocket routes
 table above and the deprecated generic endpoints below.
 
 ---

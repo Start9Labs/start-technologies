@@ -258,6 +258,11 @@ export type WifiRadio = z.output<typeof schemas.WifiRadio>
 export type WifiRadioInput = z.input<typeof schemas.WifiRadio>
 
 /**
+ * How a join ended.
+ */
+export type WwanJoinOutcome = z.output<typeof schemas.WwanJoinOutcome>
+
+/**
  * Which uplink carries traffic while both the WAN port and the Wi-Fi uplink are up.
  */
 export type WwanPriority = z.output<typeof schemas.WwanPriority>
@@ -275,6 +280,11 @@ export type WwanSecurityInput = z.input<typeof schemas.WwanSecurity>
  * What the router observes of the uplink. Absent off the router.
  */
 export type WwanState = z.output<typeof schemas.WwanState>
+
+/**
+ * Why the router is not trying to join the uplink's network.
+ */
+export type WwanStopReason = z.output<typeof schemas.WwanStopReason>
 export type ActivityListResponse = z.output<typeof schemas.ActivityListResponse>
 
 /**
