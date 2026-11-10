@@ -9,6 +9,7 @@ pub mod bins;
 pub mod boot;
 pub mod boot0;
 pub mod captive;
+pub mod config_check;
 pub mod continuations;
 pub mod device_ident;
 pub mod device_names;
@@ -134,9 +135,12 @@ pub struct CliArgs {
     pub config_root: PathBuf,
     #[clap(long)]
     pub configs_only: bool,
-    /// Server URL [default: http://127.0.0.1/rpc/v1 on the router, else http://router.lan/rpc/v1]
+    /// Server URL [default: http://127.0.0.1/rpc/v1 on the router, else https://router.lan/rpc/v1]
     #[clap(long)]
     pub host: Option<Url>,
+    /// PEM certificate authority to trust, such as the router's from /static/local-root-ca.crt. Repeatable.
+    #[clap(long = "root-ca", value_name = "PEM_PATH")]
+    pub root_ca: Vec<PathBuf>,
 }
 
 pub struct CliContextSeed {
@@ -164,7 +168,7 @@ fn default_host(on_router: bool) -> Url {
     if on_router {
         "http://127.0.0.1/rpc/v1"
     } else {
-        "http://router.lan/rpc/v1"
+        "https://router.lan/rpc/v1"
     }
     .parse()
     .unwrap()
@@ -175,7 +179,15 @@ impl CliContext {
         let on_router = std::fs::read_to_string(crate::auth::LOCAL_AUTH_COOKIE_PATH).is_ok();
         let host = args.host.unwrap_or_else(|| default_host(on_router));
 
-        let client = Client::builder().build().map_err(|e| {
+        let mut builder = Client::builder();
+        for path in &args.root_ca {
+            let pem = std::fs::read(path)
+                .map_err(|e| Error::new(eyre!("{}: {e}", path.display()), ErrorKind::Filesystem))?;
+            let cert = reqwest::Certificate::from_pem(&pem)
+                .map_err(|e| Error::new(eyre!("{}: {e}", path.display()), ErrorKind::OpenSsl))?;
+            builder = builder.add_root_certificate(cert);
+        }
+        let client = builder.build().map_err(|e| {
             Error::new(
                 eyre!("Failed to build HTTP client: {}", e),
                 ErrorKind::Network,
@@ -421,6 +433,7 @@ pub fn main_api<C: CtrlContext + Clone>() -> ParentHandler<C> {
         .subcommand("activity", activity::activity::<C>())
         .subcommand("backup", backup::backup::<C>())
         .subcommand("diagnostics", diagnostics::diagnostics::<C>())
+        .subcommand("config", config_check::config::<C>())
 }
 
 /// Spawn a command with stdio redirected to /dev/null and wait for the

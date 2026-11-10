@@ -4,6 +4,7 @@ import { pauseFor, RPCErrorDetails, RpcError } from '@start9labs/shared'
 import { GIT_HASH } from 'src/app/utils/workspace-config'
 import {
   ApiService,
+  ConfigCheck,
   ExecReq,
   ExecRes,
   GetFileReq,
@@ -289,6 +290,11 @@ export class MockApiService extends ApiService {
   async systemInfo(_timeout?: number): Promise<SystemInfoRes> {
     await pauseFor(250)
     return { ...this.mockSystemInfo, date: new Date().toISOString() }
+  }
+
+  async configCheck(): Promise<ConfigCheck> {
+    await pauseFor(100)
+    return { findings: [] }
   }
 
   async systemNewerVersions(): Promise<VersionInfo[]> {
@@ -1166,6 +1172,16 @@ export class MockApiService extends ApiService {
   async setupStatus(): Promise<SetupStatusRes> {
     await pauseFor(250)
     return { setupMode: false, disk: { emmcFound: true, hasFirmware: true } }
+  }
+
+  async getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>> {
+    await pauseFor(250)
+    return {
+      kty: 'EC',
+      crv: 'P-256',
+      x: 'yHTDYSfjU809fkSv9MmN4wuojf5c3cnD7ZDN13n-jz4',
+      y: '8Mpkn744A5KDag0DmX2YivB63srjbugYZzWc3JOpQXI',
+    }
   }
 
   async systemFactoryReset(): Promise<null> {

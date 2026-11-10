@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core'
 import {
   ApiService,
+  ConfigCheck,
   ExecReq,
   ExecRes,
   GetFileReq,
@@ -129,6 +130,10 @@ export class LiveApiService extends ApiService {
 
   async systemInfo(timeout?: number): Promise<SystemInfoRes> {
     return this.rpc.request({ method: 'system.info', params: {}, timeout })
+  }
+
+  async configCheck(): Promise<ConfigCheck> {
+    return this.rpc.request({ method: 'config.check', params: {} })
   }
 
   async systemNewerVersions(): Promise<VersionInfo[]> {
@@ -270,6 +275,10 @@ export class LiveApiService extends ApiService {
       method: 'setup.status',
       params: {},
     })
+  }
+
+  async getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>> {
+    return this.rpc.request({ method: 'setup.get-pubkey', params: {} })
   }
 
   async systemFactoryReset(): Promise<null> {
