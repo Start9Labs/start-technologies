@@ -629,4 +629,5 @@ export default {
   665: 'No compatible',
   666: 'No se encontraron redes',
   667: 'La banda {band} lleva el enlace Wi-Fi a {ssid}. Su Wi-Fi sigue el canal de esa red y está apagada mientras el enlace está desconectado. Para apagar esta banda, quite primero el enlace.',
+  668: 'Este enlace Wi-Fi se configuró fuera de StartWRT. La Wi-Fi de su banda sigue el canal de la red de origen y está apagada mientras el enlace está desconectado. Para apagar esa banda, quita primero el enlace en LuCI.',
 } satisfies i18n

@@ -25,6 +25,7 @@ const VIEWS = [
   'ethernet',
   'wifi',
   'inbound',
+  'wwan',
 ] as const satisfies readonly ConfigView[]
 
 /** RPC errors raised by configuration StartWRT cannot read or model. */

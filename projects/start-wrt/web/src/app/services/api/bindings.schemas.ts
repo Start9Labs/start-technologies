@@ -242,6 +242,7 @@ export const ConfigProblem: z.ZodEnum<{
   absent: 'absent'
   extra: 'extra'
   unmanaged: 'unmanaged'
+  uplink: 'uplink'
 }> = /* @__PURE__ */ z
   .enum([
     'syntax',
@@ -252,6 +253,7 @@ export const ConfigProblem: z.ZodEnum<{
     'absent',
     'extra',
     'unmanaged',
+    'uplink',
   ])
   .meta({
     id: 'ConfigProblem',
@@ -271,6 +273,7 @@ export const ConfigView: z.ZodEnum<{
   ethernet: 'ethernet'
   wifi: 'wifi'
   inbound: 'inbound'
+  wwan: 'wwan'
 }> = /* @__PURE__ */ z
   .enum([
     'wan',
@@ -282,6 +285,7 @@ export const ConfigView: z.ZodEnum<{
     'ethernet',
     'wifi',
     'inbound',
+    'wwan',
   ])
   .meta({
     id: 'ConfigView',

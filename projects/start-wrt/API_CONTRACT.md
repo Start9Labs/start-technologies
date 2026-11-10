@@ -2364,7 +2364,7 @@ finding marked `notice` is shown above the form instead.
 #[serde(rename_all = "kebab-case")]
 enum ConfigView {
     // Settings, which holds the recovery tools, is never one.
-    Wan, PublishedPorts, Outbound, Lan, Devices, Profiles, Ethernet, Wifi, Inbound,
+    Wan, PublishedPorts, Outbound, Lan, Devices, Profiles, Ethernet, Wifi, Inbound, Wwan,
 }
 
 #[derive(Serialize)]
@@ -2378,6 +2378,7 @@ enum ConfigProblem {
     Absent,       // a section the page requires is absent
     Extra,        // a section beyond the one the page shows in its place
     Unmanaged,    // a value beyond the one the page manages, left as written
+    Uplink,       // a client-mode interface set up outside StartWRT
 }
 
 #[derive(Serialize)]
@@ -2404,7 +2405,7 @@ struct ConfigCheck {
 
 ---
 
-## 18. Wireless WAN
+## 19. Wireless WAN
 
 The router as a Wi-Fi client of another network. StartWRT owns the `wwan`
 sections of `wireless` and `network`; the `wwan` interface is a member of the
@@ -2442,7 +2443,8 @@ struct WwanResponse {
 }
 // Backend: `state.active` is true while `wwan` carries the default route
 // (`system::active_uplink`, from `network.interface dump`). The priority reads
-// back from the two interfaces' route metrics.
+// back from the two interfaces' route metrics. An `encryption` on
+// `wifi-iface 'wwan'` outside the four above is rejected with `CorruptedWifi`.
 ```
 
 ### `wwan.scan`

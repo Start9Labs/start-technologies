@@ -29,20 +29,20 @@ const MAX_SSID_LEN: usize = 32;
 /// A client-mode Wi-Fi interface, read without the access-point options.
 #[derive(Debug, Clone, TypedSection)]
 #[uci(ty = "wifi-iface")]
-struct UplinkStation {
+pub(crate) struct UplinkStation {
     device: String,
     #[uci(default)]
-    mode: WifiMode,
+    pub(crate) mode: WifiMode,
     #[uci(default)]
     network: Option<String>,
     #[uci(default)]
     ssid: String,
     #[uci(default_value = "none".to_string())]
-    encryption: String,
+    pub(crate) encryption: String,
     #[uci(default)]
     key: Option<String>,
     #[uci(default_value = false)]
-    disabled: bool,
+    pub(crate) disabled: bool,
 }
 
 /// The uplink's network interface. A wireless interface names no `device`.
@@ -62,7 +62,7 @@ struct UplinkInterface {
 /// The `metric` option of an interface, written without touching its other options.
 #[derive(Debug, Default, TypedSection)]
 #[uci(ty = "interface")]
-struct InterfaceMetric {
+pub(crate) struct InterfaceMetric {
     #[uci(default)]
     metric: Option<u32>,
 }
@@ -90,7 +90,7 @@ impl WwanSecurity {
     }
 
     /// `None` for an encryption StartWRT does not offer, such as WPA Enterprise.
-    fn from_encryption(encryption: &str) -> Option<Self> {
+    pub(crate) fn from_encryption(encryption: &str) -> Option<Self> {
         match encryption.split('+').next()? {
             "none" => Some(WwanSecurity::Open),
             "psk2" | "psk-mixed" => Some(WwanSecurity::Wpa2),
@@ -291,7 +291,7 @@ fn get_config(cfgs: &Configs) -> Result<WwanResponse, Error> {
         let security = WwanSecurity::from_encryption(&station.encryption).ok_or_else(|| {
             Error::new(
                 eyre!("unsupported uplink encryption {}", station.encryption),
-                ErrorKind::InvalidValue,
+                ErrorKind::CorruptedWifi,
             )
         })?;
         uplink = Some(WwanUplink {
@@ -1053,6 +1053,50 @@ config zone 'wan_zone'
         let err = disconnect(ctx).await.unwrap_err();
         assert_eq!(err.kind, ErrorKind::NotFound);
         assert_eq!(read(dir.path(), "wireless"), wireless);
+    }
+
+    #[tokio::test]
+    async fn connect_and_disconnect_keep_a_zone_written_as_an_option() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = setup(dir.path(), WIRELESS, "");
+        let firewall = read(dir.path(), "firewall").replace(
+            "\tlist network 'wan'\n\tlist network 'wan6'\n",
+            "\toption network 'wan wan6'\n",
+        );
+        std::fs::write(dir.path().join("firewall"), &firewall).unwrap();
+        async fn members(dir: &Path) -> Vec<String> {
+            let arena = Arena::new();
+            let cfgs = parse_all(dir.to_path_buf(), &arena, &["firewall"])
+                .await
+                .unwrap();
+            cfgs["firewall"].sections[0]
+                .get::<FirewallZone>()
+                .unwrap()
+                .network
+        }
+
+        connect(
+            ctx.clone(),
+            DeserializeStdin(connect_req(WwanSecurity::Open, None)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(members(dir.path()).await, ["wan", "wan6", "wwan"]);
+        assert!(!read(dir.path(), "firewall").contains("option network"));
+
+        disconnect(ctx).await.unwrap();
+        assert_eq!(members(dir.path()).await, ["wan", "wan6"]);
+    }
+
+    #[tokio::test]
+    async fn get_refuses_an_uplink_encryption_it_cannot_show() {
+        let dir = tempfile::tempdir().unwrap();
+        let wireless = format!(
+            "{WIRELESS}\nconfig wifi-iface 'wwan'\n\toption device 'radio0'\n\toption mode 'sta'\n\toption network 'wwan'\n\toption ssid 'Upstream'\n\toption encryption 'wpa2'\n",
+        );
+        let ctx = setup(dir.path(), &wireless, "");
+        let err = get(ctx).await.unwrap_err();
+        assert_eq!(err.kind, ErrorKind::CorruptedWifi);
     }
 
     #[tokio::test]

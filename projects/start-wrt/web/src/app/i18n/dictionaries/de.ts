@@ -629,4 +629,5 @@ export default {
   665: 'Nicht unterstützt',
   666: 'Keine Netzwerke gefunden',
   667: 'Das Frequenzband {band} trägt den WLAN-Uplink zu {ssid}. Sein WLAN folgt dem Kanal dieses Netzwerks und ist aus, solange der Uplink getrennt ist. Um dieses Frequenzband auszuschalten, entfernen Sie zuerst den Uplink.',
+  668: 'Dieser WLAN-Uplink wurde außerhalb von StartWRT eingerichtet. Das WLAN auf seinem Frequenzband folgt dem Kanal des vorgelagerten Netzwerks und ist aus, solange der Uplink getrennt ist. Um dieses Frequenzband auszuschalten, entfernen Sie zuerst den Uplink in LuCI.',
 } satisfies i18n

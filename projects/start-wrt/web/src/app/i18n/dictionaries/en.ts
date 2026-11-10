@@ -634,4 +634,5 @@ export const ENGLISH: Record<string, number> = {
   'Unsupported': 665,
   'No networks found': 666,
   'The {band} band carries the Wi-Fi uplink to {ssid}. Its Wi-Fi follows that network’s channel and is off while the uplink is disconnected. To turn this band off, remove the uplink first.': 667,
+  'This Wi-Fi uplink was set up outside StartWRT. Wi-Fi on its band follows the upstream network’s channel and is off while the uplink is disconnected. To turn that band off, remove the uplink in LuCI first.': 668,
 }

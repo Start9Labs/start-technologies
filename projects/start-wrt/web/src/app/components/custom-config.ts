@@ -20,6 +20,8 @@ const PROBLEMS: Record<ConfigFinding['problem'], i18nKey> = {
     'StartWRT shows one of these per radio. This one was added outside StartWRT.',
   unmanaged:
     'This section also has {option} {value}, set outside StartWRT. StartWRT shows the first value and leaves this one as it is.',
+  uplink:
+    'This Wi-Fi uplink was set up outside StartWRT. Wi-Fi on its band follows the upstream network’s channel and is off while the uplink is disconnected. To turn that band off, remove the uplink in LuCI first.',
 }
 
 function key(finding: ConfigFinding): string {

@@ -629,4 +629,5 @@ export default {
   665: 'Non pris en charge',
   666: 'Aucun réseau trouvé',
   667: 'La bande {band} porte la liaison montante Wi-Fi vers {ssid}. Son Wi-Fi suit le canal de ce réseau et est éteint tant que la liaison est déconnectée. Pour éteindre cette bande, supprimez d’abord la liaison.',
+  668: 'Cette liaison montante Wi-Fi a été configurée en dehors de StartWRT. Le Wi-Fi de sa bande suit le canal du réseau amont et est éteint tant que la liaison est déconnectée. Pour éteindre cette bande, supprimez d’abord la liaison dans LuCI.',
 } satisfies i18n

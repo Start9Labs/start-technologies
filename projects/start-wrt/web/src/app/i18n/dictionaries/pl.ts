@@ -629,4 +629,5 @@ export default {
   665: 'Nieobsługiwane',
   666: 'Nie znaleziono sieci',
   667: 'Pasmo {band} obsługuje łącze Wi-Fi do {ssid}. Jego Wi-Fi korzysta z kanału tamtej sieci i jest wyłączone, gdy łącze jest rozłączone. Aby wyłączyć to pasmo, najpierw usuń łącze.',
+  668: 'To łącze Wi-Fi skonfigurowano poza StartWRT. Wi-Fi w jego paśmie korzysta z kanału sieci nadrzędnej i jest wyłączone, gdy łącze jest rozłączone. Aby wyłączyć to pasmo, najpierw usuń łącze w LuCI.',
 } satisfies i18n
