@@ -111,6 +111,24 @@ impl Host {
             )
     }
 }
+/// Keeps the previous public IPv4 and GUA rows of a gateway that has no `ip_info`.
+fn carry_forward(
+    available: &mut BTreeSet<HostnameInfo>,
+    previous: &BTreeSet<HostnameInfo>,
+    gateway: &GatewayId,
+) {
+    available.extend(
+        previous
+            .iter()
+            .filter(|h| match &h.metadata {
+                HostnameMetadata::Ipv4 { gateway: g } => g == gateway && h.public,
+                HostnameMetadata::Ipv6 { gateway: g, .. } => g == gateway && h.gua().is_some(),
+                _ => false,
+            })
+            .cloned(),
+    );
+}
+
 /// Gateways over which `<hostname>.local` is resolvable: a LAN interface
 /// serves it by mDNS multicast; a WireGuard interface only once its resolver
 /// has accepted the injected record (`net::dns_update`), tracked as its
@@ -189,14 +207,16 @@ impl Model<Host> {
             let opt = bind.as_options().de()?;
 
             // Preserve existing plugin-provided addresses across recomputation
-            let mut available = bind.as_addresses().as_available().de()?;
-            let mdns_gateways = mdns_gateways(gateways, &available);
+            let previous = bind.as_addresses().as_available().de()?;
+            let mut available = previous.clone();
+            let mdns_gateways = mdns_gateways(gateways, &previous);
             available.retain(|h| matches!(h.metadata, HostnameMetadata::Plugin { .. }));
             for (gid, g) in gateways {
                 if g.gateway_type == GatewayType::OutboundOnly {
                     continue;
                 }
                 let Some(ip_info) = &g.ip_info else {
+                    carry_forward(&mut available, &previous, gid);
                     continue;
                 };
                 let gateway_secure = g.secure();
@@ -378,6 +398,7 @@ impl Model<Host> {
             }
             let mut addresses = bind.as_addresses().de()?;
             addresses.set_available(available);
+            addresses.migrate_renumbered_ips(&previous);
             bind.as_addresses_mut().ser(&addresses)?;
         }
 
@@ -391,8 +412,9 @@ impl Model<Host> {
             let port = range.as_external_start_port().de()?;
 
             // Preserve any plugin-provided addresses across recomputation.
-            let mut available = range.as_addresses().as_available().de()?;
-            let mdns_gateways = mdns_gateways(gateways, &available);
+            let previous = range.as_addresses().as_available().de()?;
+            let mut available = previous.clone();
+            let mdns_gateways = mdns_gateways(gateways, &previous);
             available.retain(|h| matches!(h.metadata, HostnameMetadata::Plugin { .. }));
 
             for (gid, g) in gateways {
@@ -400,6 +422,7 @@ impl Model<Host> {
                     continue;
                 }
                 let Some(ip_info) = &g.ip_info else {
+                    carry_forward(&mut available, &previous, gid);
                     continue;
                 };
                 for subnet in &ip_info.subnets {
@@ -466,10 +489,11 @@ impl Model<Host> {
                 });
             }
 
-            range
-                .as_addresses_mut()
-                .as_available_mut()
-                .ser(&available)?;
+            range.as_addresses_mut().mutate(|a| {
+                a.available = available;
+                a.migrate_renumbered_ips(&previous);
+                Ok(())
+            })?;
         }
 
         // compute port forwards from enabled public addresses. A non-exported
@@ -1079,6 +1103,339 @@ mod tests {
             &address.metadata,
             HostnameMetadata::Ipv4 { gateway } if gateway == &gw("wg-out")
         )));
+    }
+
+    fn exported_host(ports: &mut AvailablePorts, port: u16) -> Model<Host> {
+        use crate::net::service_interface::{AddressInfo, ServiceInterface, ServiceInterfaceType};
+
+        let mut host = host();
+        host.add_binding(ports, port, plain(port), false).unwrap();
+        host.as_bindings_mut()
+            .mutate(|b| {
+                let id: crate::ServiceInterfaceId = "ui".parse().unwrap();
+                b.get_mut(&port).unwrap().interfaces.insert(
+                    id.clone(),
+                    ServiceInterface {
+                        id,
+                        name: "ui".into(),
+                        description: String::new(),
+                        masked: false,
+                        address_info: AddressInfo {
+                            username: None,
+                            host_id: "host".parse().unwrap(),
+                            internal_port: port,
+                            scheme: Some(InternedString::intern("http")),
+                            ssl_scheme: None,
+                            suffix: String::new(),
+                        },
+                        interface_type: ServiceInterfaceType::Ui,
+                        preferred_launcher_address: None,
+                    },
+                );
+                Ok(())
+            })
+            .unwrap();
+        host
+    }
+
+    fn converge(
+        host: &mut Model<Host>,
+        gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+        ports: &AvailablePorts,
+    ) {
+        host.update_addresses(
+            &ServerHostname::new(InternedString::intern("server")).unwrap(),
+            gateways,
+            ports,
+        )
+        .unwrap();
+    }
+
+    fn wan_of(host: &Model<Host>, port: u16) -> Vec<String> {
+        host.de().unwrap().bindings[&port]
+            .addresses
+            .enabled
+            .iter()
+            .map(|sa| sa.to_string())
+            .collect()
+    }
+
+    fn forward_srcs(host: &Model<Host>) -> Vec<String> {
+        host.de()
+            .unwrap()
+            .port_forwards
+            .iter()
+            .map(|f| f.src.to_string())
+            .collect()
+    }
+
+    fn renumber(
+        host: &mut Model<Host>,
+        gateways: &mut OrdMap<GatewayId, NetworkInterfaceInfo>,
+        ports: &AvailablePorts,
+        change: impl FnOnce(&mut NetworkInterfaceInfo),
+    ) {
+        let mut info = gateways[&gw("wg-in")].clone();
+        change(&mut info);
+        gateways.insert(gw("wg-in"), info);
+        converge(host, gateways, ports);
+    }
+
+    fn set_wan_ip(info: &mut NetworkInterfaceInfo, wan_ip: Ipv4Addr) {
+        Arc::make_mut(info.ip_info.as_mut().unwrap()).wan_ip = Some(wan_ip);
+    }
+
+    fn enable_wan(host: &mut Model<Host>, port: u16, sa: &str) {
+        host.as_bindings_mut()
+            .mutate(|b| {
+                b.get_mut(&port)
+                    .unwrap()
+                    .addresses
+                    .enabled
+                    .insert(sa.parse().unwrap());
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn an_enabled_wan_address_survives_a_detected_renumber_and_keeps_its_forward() {
+        let mut gateways: OrdMap<GatewayId, NetworkInterfaceInfo> =
+            [(gw("wg-in"), wireguard(GatewayType::InboundOutbound))]
+                .into_iter()
+                .collect();
+        let mut ports = AvailablePorts::new();
+        let mut host = exported_host(&mut ports, 9735);
+
+        converge(&mut host, &gateways, &ports);
+        enable_wan(&mut host, 9735, "198.51.100.2:9735");
+        converge(&mut host, &gateways, &ports);
+        assert_eq!(forward_srcs(&host), ["198.51.100.2:9735"]);
+
+        renumber(&mut host, &mut gateways, &ports, |info| {
+            set_wan_ip(info, Ipv4Addr::new(203, 0, 113, 9))
+        });
+
+        assert_eq!(
+            wan_of(&host, 9735),
+            ["203.0.113.9:9735"],
+            "the opt-in follows the address and the stale entry is gone"
+        );
+        assert_eq!(forward_srcs(&host), ["203.0.113.9:9735"]);
+    }
+
+    #[test]
+    fn a_renumber_does_not_enable_a_second_gateway_the_operator_never_opted_into() {
+        let mut other = wireguard(GatewayType::InboundOutbound);
+        set_wan_ip(&mut other, Ipv4Addr::new(192, 0, 2, 50));
+        let mut gateways: OrdMap<GatewayId, NetworkInterfaceInfo> = [
+            (gw("wg-in"), wireguard(GatewayType::InboundOutbound)),
+            (gw("wg-other"), other),
+        ]
+        .into_iter()
+        .collect();
+        let mut ports = AvailablePorts::new();
+        let mut host = exported_host(&mut ports, 9735);
+
+        converge(&mut host, &gateways, &ports);
+        enable_wan(&mut host, 9735, "198.51.100.2:9735");
+        converge(&mut host, &gateways, &ports);
+
+        renumber(&mut host, &mut gateways, &ports, |info| {
+            set_wan_ip(info, Ipv4Addr::new(203, 0, 113, 9))
+        });
+
+        assert_eq!(
+            wan_of(&host, 9735),
+            ["203.0.113.9:9735"],
+            "the other gateway's WAN address stays opt-in"
+        );
+        assert_eq!(forward_srcs(&host), ["203.0.113.9:9735"]);
+    }
+
+    #[test]
+    fn a_range_carries_its_wan_opt_in_through_a_renumber() {
+        let mut gateways: OrdMap<GatewayId, NetworkInterfaceInfo> =
+            [(gw("wg-in"), wireguard(GatewayType::InboundOutbound))]
+                .into_iter()
+                .collect();
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding_range(&mut ports, 28332, 40000, 4, false)
+            .unwrap();
+
+        converge(&mut host, &gateways, &ports);
+        host.as_binding_ranges_mut()
+            .mutate(|r| {
+                r.get_mut(&28332)
+                    .unwrap()
+                    .addresses
+                    .enabled
+                    .insert("198.51.100.2:40000".parse().unwrap());
+                Ok(())
+            })
+            .unwrap();
+
+        renumber(&mut host, &mut gateways, &ports, |info| {
+            set_wan_ip(info, Ipv4Addr::new(203, 0, 113, 9))
+        });
+
+        assert_eq!(
+            host.de().unwrap().binding_ranges[&28332]
+                .addresses
+                .enabled
+                .iter()
+                .map(|sa| sa.to_string())
+                .collect::<Vec<_>>(),
+            ["203.0.113.9:40000"]
+        );
+    }
+
+    #[test]
+    fn an_enabled_wan_address_survives_a_renumber_across_a_link_drop() {
+        let mut gateways: OrdMap<GatewayId, NetworkInterfaceInfo> =
+            [(gw("wg-in"), wireguard(GatewayType::InboundOutbound))]
+                .into_iter()
+                .collect();
+        let mut ports = AvailablePorts::new();
+        let mut host = exported_host(&mut ports, 9735);
+
+        converge(&mut host, &gateways, &ports);
+        enable_wan(&mut host, 9735, "198.51.100.2:9735");
+        converge(&mut host, &gateways, &ports);
+
+        renumber(&mut host, &mut gateways, &ports, |info| info.ip_info = None);
+        assert_eq!(
+            wan_of(&host, 9735),
+            ["198.51.100.2:9735"],
+            "a downed gateway keeps offering its last address"
+        );
+        assert!(
+            forward_srcs(&host).is_empty(),
+            "a port forward needs the live gateway"
+        );
+
+        renumber(&mut host, &mut gateways, &ports, |info| {
+            *info = wireguard(GatewayType::InboundOutbound);
+            set_wan_ip(info, Ipv4Addr::new(203, 0, 113, 9));
+        });
+        assert_eq!(
+            wan_of(&host, 9735),
+            ["203.0.113.9:9735"],
+            "the opt-in made it across the drop"
+        );
+        assert_eq!(forward_srcs(&host), ["203.0.113.9:9735"]);
+    }
+
+    #[test]
+    fn a_renumber_reaches_a_gateway_whose_downed_twin_offers_the_old_address() {
+        let mut gateways: OrdMap<GatewayId, NetworkInterfaceInfo> = [
+            (gw("wg-in"), wireguard(GatewayType::InboundOutbound)),
+            (gw("wg-twin"), wireguard(GatewayType::InboundOutbound)),
+        ]
+        .into_iter()
+        .collect();
+        let mut ports = AvailablePorts::new();
+        let mut host = exported_host(&mut ports, 9735);
+
+        converge(&mut host, &gateways, &ports);
+        enable_wan(&mut host, 9735, "198.51.100.2:9735");
+        converge(&mut host, &gateways, &ports);
+
+        let mut twin = gateways[&gw("wg-twin")].clone();
+        twin.ip_info = None;
+        gateways.insert(gw("wg-twin"), twin);
+        converge(&mut host, &gateways, &ports);
+
+        renumber(&mut host, &mut gateways, &ports, |info| {
+            set_wan_ip(info, Ipv4Addr::new(203, 0, 113, 9))
+        });
+
+        assert_eq!(
+            wan_of(&host, 9735),
+            ["198.51.100.2:9735", "203.0.113.9:9735"],
+            "the downed twin keeps its last address"
+        );
+        assert_eq!(forward_srcs(&host), ["203.0.113.9:9735"]);
+    }
+
+    #[test]
+    fn a_deleted_gateway_takes_its_addresses_with_it() {
+        let mut gateways: OrdMap<GatewayId, NetworkInterfaceInfo> =
+            [(gw("wg-in"), wireguard(GatewayType::InboundOutbound))]
+                .into_iter()
+                .collect();
+        let mut ports = AvailablePorts::new();
+        let mut host = exported_host(&mut ports, 9735);
+
+        converge(&mut host, &gateways, &ports);
+        enable_wan(&mut host, 9735, "198.51.100.2:9735");
+        converge(&mut host, &gateways, &ports);
+
+        gateways.remove(&gw("wg-in"));
+        converge(&mut host, &gateways, &ports);
+
+        let available = host.de().unwrap().bindings[&9735]
+            .addresses
+            .available
+            .clone();
+        assert!(
+            available
+                .iter()
+                .all(|h| h.hostname.to_string() != "198.51.100.2"),
+            "a deleted gateway's address is no longer offered: {available:?}"
+        );
+        assert!(forward_srcs(&host).is_empty());
+    }
+
+    #[test]
+    fn a_plain_public_domain_stays_on_with_its_renumbered_address() {
+        let mut gateways: OrdMap<GatewayId, NetworkInterfaceInfo> =
+            [(gw("wg-in"), wireguard(GatewayType::InboundOutbound))]
+                .into_iter()
+                .collect();
+        let mut ports = AvailablePorts::new();
+        let mut host = exported_host(&mut ports, 5223);
+        let domain = InternedString::intern("smp.example.com");
+        host.as_public_domains_mut()
+            .insert(
+                &domain,
+                &PublicDomainConfig {
+                    gateway: gw("wg-in"),
+                    acme: None,
+                },
+            )
+            .unwrap();
+
+        converge(&mut host, &gateways, &ports);
+        enable_wan(&mut host, 5223, "198.51.100.2:5223");
+        host.as_bindings_mut()
+            .mutate(|b| {
+                b.get_mut(&5223)
+                    .unwrap()
+                    .addresses
+                    .disabled
+                    .remove(&(domain.clone(), 5223));
+                Ok(())
+            })
+            .unwrap();
+        converge(&mut host, &gateways, &ports);
+        let domain_on = |host: &Model<Host>| {
+            host.de().unwrap().bindings[&5223]
+                .addresses
+                .enabled()
+                .iter()
+                .any(|a| a.hostname == domain)
+        };
+        assert!(domain_on(&host));
+
+        renumber(&mut host, &mut gateways, &ports, |info| {
+            set_wan_ip(info, Ipv4Addr::new(203, 0, 113, 9))
+        });
+
+        assert_eq!(wan_of(&host, 5223), ["203.0.113.9:5223"]);
+        assert!(domain_on(&host), "the domain's group stays on");
+        assert_eq!(forward_srcs(&host), ["203.0.113.9:5223"]);
     }
 
     fn mdns_rows(host: &Model<Host>, port: u16) -> Vec<BTreeSet<GatewayId>> {
