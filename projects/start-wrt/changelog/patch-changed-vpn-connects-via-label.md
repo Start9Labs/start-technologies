@@ -1,5 +1,5 @@
 ---
-release-notes: true
+release-notes: false
 ---
 
-- **Outbound VPNs' "Target" and "Connects to" settings are now both labelled "Connects via".** They were one setting under two names. "Connects via" names it everywhere and says what it chooses: the route a VPN takes to its own VPN server, either directly over the Internet or through another VPN.
+- An outbound VPN's **Target** setting (called **Connects to** on its page) is now labelled **Connects via** everywhere. It chooses how the VPN reaches its own server: directly over the Internet, or through another VPN.
