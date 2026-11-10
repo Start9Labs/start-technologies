@@ -378,11 +378,7 @@ pub struct AddTrustedKeyParams {
     #[arg(long, default_value = "", help = "help.arg.trusted-key-name")]
     pub name: String,
     /// Ed25519 public keys in PEM or armored GPG format.
-    #[arg(
-        required = true,
-        allow_hyphen_values = true,
-        help = "help.arg.trusted-public-keys"
-    )]
+    #[arg(required = true, help = "help.arg.trusted-public-keys")]
     pub public_keys: Vec<String>,
     /// Grants this permission to every imported key, including existing keys.
     #[serde(default)]
@@ -531,16 +527,18 @@ mod tests {
     #[test]
     fn cli_parses_trusted_key_commands() {
         use clap::Parser;
+        let key = initial_signers().into_keys().next().unwrap().to_string();
         let add = AddTrustedKeyParams::try_parse_from([
             "add",
-            "-----BEGIN",
-            "second",
+            key.as_str(),
             "--trust-for",
             "os",
+            "--name",
+            "Signer",
         ])
         .unwrap();
-        assert_eq!(add.public_keys, ["-----BEGIN", "second"]);
-        assert_eq!(add.name, "");
+        assert_eq!(add.public_keys, [key.as_str()]);
+        assert_eq!(add.name, "Signer");
         assert!(matches!(add.trust_for, Some(TrustContext::Os)));
         assert!(AddTrustedKeyParams::try_parse_from(["add"]).is_err());
         let update = UpdateTrustedKeyParams::try_parse_from([
@@ -572,6 +570,31 @@ mod tests {
                 .id,
             "id"
         );
+    }
+
+    #[test]
+    fn cli_imports_armored_keys_after_the_option_delimiter() {
+        use clap::Parser;
+        let key = initial_signers().into_keys().next().unwrap();
+        let pem = format!("-----BEGIN PUBLIC KEY-----\n{key}\n-----END PUBLIC KEY-----");
+        let gpg = include_str!("sign/fixtures/ed25519-signers.asc");
+        let add = AddTrustedKeyParams::try_parse_from([
+            "add",
+            "--name",
+            "Signer",
+            "--trust-for",
+            "os",
+            "--",
+            pem.as_str(),
+            gpg,
+        ])
+        .unwrap();
+        assert_eq!(add.public_keys, [pem.as_str(), gpg]);
+        let imported = parse_public_keys(&add.public_keys).unwrap();
+        let mut keys = TrustedKeys::new();
+        let result = import_individual_keys(&mut keys, add.name, imported, add.trust_for).unwrap();
+        assert!(!result.added.is_empty());
+        assert!(keys.values().all(|key| key.os && key.marketplace));
     }
 
     #[test]

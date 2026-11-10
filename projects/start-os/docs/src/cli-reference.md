@@ -241,7 +241,7 @@ List trusted keys by ID, with each key's name and whether it is trusted for pack
 
 ### `start-cli server trusted-keys add <PUBLIC_KEYS>...`
 
-Import Ed25519 public keys in PEM or armored GPG format. Imported keys are trusted for packages.
+Import Ed25519 public keys in PEM or armored GPG format. Put options before `--` and the quoted keys after it. Newly added keys are trusted for packages; `--trust-for os` additionally trusts them for StartOS updates.
 
 - `--name <NAME>` — Name for the keys; blank names each GPG key after its identity
 - `--trust-for <marketplace|os>` — Grant this trust to every imported key, including keys already present

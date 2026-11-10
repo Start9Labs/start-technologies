@@ -5037,11 +5037,11 @@ help.arg.trusted-key-name:
   pl_PL: "Nazwa klucza; pusta nadaje każdemu kluczowi GPG nazwę jego tożsamości"
 
 help.arg.trusted-public-keys:
-  en_US: "Ed25519 public keys in PEM or armored GPG format"
-  de_DE: "Öffentliche Ed25519-Schlüssel im PEM- oder ASCII-armierten GPG-Format"
-  es_ES: "Claves públicas Ed25519 en formato PEM o GPG blindado"
-  fr_FR: "Clés publiques Ed25519 au format PEM ou GPG armuré"
-  pl_PL: "Klucze publiczne Ed25519 w formacie PEM lub GPG z pancerzem ASCII"
+  en_US: "Ed25519 public keys in PEM or armored GPG format; put options before -- and keys after it"
+  de_DE: "Öffentliche Ed25519-Schlüssel im PEM- oder ASCII-armierten GPG-Format; Optionen vor -- und Schlüssel danach angeben"
+  es_ES: "Claves públicas Ed25519 en formato PEM o GPG blindado; coloque las opciones antes de -- y las claves después"
+  fr_FR: "Clés publiques Ed25519 au format PEM ou GPG armuré ; placer les options avant -- et les clés après"
+  pl_PL: "Klucze publiczne Ed25519 w formacie PEM lub GPG z pancerzem ASCII; opcje podaj przed --, a klucze po nim"
 
 help.arg.tunnel-address:
   en_US: "Tunnel server address"
@@ -5844,11 +5844,11 @@ about.add-ssh-key:
   pl_PL: "Dodaj klucz ssh"
 
 about.add-trusted-key:
-  en_US: "Import public keys, trusted for packages unless --trust-for says otherwise"
-  de_DE: "Öffentliche Schlüssel importieren, für Pakete vertraut, sofern --trust-for nichts anderes angibt"
-  es_ES: "Importar claves públicas, de confianza para paquetes salvo que --trust-for indique otra cosa"
-  fr_FR: "Importer des clés publiques, approuvées pour les paquets sauf indication contraire de --trust-for"
-  pl_PL: "Zaimportuj klucze publiczne, zaufane dla pakietów, chyba że --trust-for stanowi inaczej"
+  en_US: "Import public keys; newly added keys are trusted for packages"
+  de_DE: "Öffentliche Schlüssel importieren; neu hinzugefügten Schlüsseln wird für Pakete vertraut"
+  es_ES: "Importar claves públicas; las claves recién añadidas son de confianza para los paquetes"
+  fr_FR: "Importer des clés publiques ; les clés nouvellement ajoutées sont approuvées pour les paquets"
+  pl_PL: "Zaimportuj klucze publiczne; nowo dodane klucze są zaufane dla pakietów"
 
 about.add-version-signer:
   en_US: "Add version signer"

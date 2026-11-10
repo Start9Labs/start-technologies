@@ -51,7 +51,7 @@ Diagnostic updates use PEM keys in `/etc/startos/os-signers`, seeded with the dr
 
 ```sh
 start-cli server trusted-keys list
-start-cli server trusted-keys add "$(cat signer.pem)" --name "My release signer" --trust-for os
+start-cli server trusted-keys add --name "My release signer" --trust-for os -- "$(cat signer.pem)"
 start-cli server trusted-keys update <ID> --name "Renamed signer" --marketplace true --os true
 start-cli server trusted-keys remove <ID>
 ```
