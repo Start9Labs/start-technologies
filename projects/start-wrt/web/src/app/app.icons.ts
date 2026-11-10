@@ -47,6 +47,7 @@ import network from '@taiga-ui/icons/src/network.svg'
 import pencil from '@taiga-ui/icons/src/pencil.svg'
 import plus from '@taiga-ui/icons/src/plus.svg'
 import qrCode from '@taiga-ui/icons/src/qr-code.svg'
+import radioTower from '@taiga-ui/icons/src/radio-tower.svg'
 import radio from '@taiga-ui/icons/src/radio.svg'
 import refreshCw from '@taiga-ui/icons/src/refresh-cw.svg'
 import repeat from '@taiga-ui/icons/src/repeat.svg'
@@ -59,6 +60,9 @@ import shield from '@taiga-ui/icons/src/shield.svg'
 import terminal from '@taiga-ui/icons/src/terminal.svg'
 import trash from '@taiga-ui/icons/src/trash.svg'
 import userLock from '@taiga-ui/icons/src/user-lock.svg'
+import wifiHigh from '@taiga-ui/icons/src/wifi-high.svg'
+import wifiLow from '@taiga-ui/icons/src/wifi-low.svg'
+import wifiOff from '@taiga-ui/icons/src/wifi-off.svg'
 import wifi from '@taiga-ui/icons/src/wifi.svg'
 import x from '@taiga-ui/icons/src/x.svg'
 
@@ -113,6 +117,7 @@ export const ICONS = {
   '@tui.plus': plus,
   '@tui.qr-code': qrCode,
   '@tui.radio': radio,
+  '@tui.radio-tower': radioTower,
   '@tui.refresh-cw': refreshCw,
   '@tui.repeat': repeat,
   '@tui.rocket': rocket,
@@ -125,5 +130,8 @@ export const ICONS = {
   '@tui.trash': trash,
   '@tui.user-lock': userLock,
   '@tui.wifi': wifi,
+  '@tui.wifi-high': wifiHigh,
+  '@tui.wifi-low': wifiLow,
+  '@tui.wifi-off': wifiOff,
   '@tui.x': x,
 }
