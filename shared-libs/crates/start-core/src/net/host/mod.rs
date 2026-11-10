@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
-use crate::db::model::public::{GatewayType, NetworkInterfaceInfo, NetworkInterfaceType};
+use crate::db::model::public::{GatewayType, IpInfo, NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::hostname::ServerHostname;
 use crate::net::forward::AvailablePorts;
 use crate::net::host::address::{HostAddress, PublicDomainConfig, address_api};
@@ -111,18 +111,24 @@ impl Host {
             )
     }
 }
-/// Keeps the previous public IPv4 and GUA rows of a gateway that has no `ip_info`.
+/// Public IPv4 history survives reconnect until WAN discovery supplies a replacement.
+/// GUA history survives while the gateway has no `ip_info`.
 fn carry_forward(
     available: &mut BTreeSet<HostnameInfo>,
     previous: &BTreeSet<HostnameInfo>,
     gateway: &GatewayId,
+    ip_info: Option<&IpInfo>,
 ) {
     available.extend(
         previous
             .iter()
             .filter(|h| match &h.metadata {
-                HostnameMetadata::Ipv4 { gateway: g } => g == gateway && h.public,
-                HostnameMetadata::Ipv6 { gateway: g, .. } => g == gateway && h.gua().is_some(),
+                HostnameMetadata::Ipv4 { gateway: g } => {
+                    g == gateway && h.public && ip_info.is_none_or(|ip| ip.wan_ip.is_none())
+                }
+                HostnameMetadata::Ipv6 { gateway: g, .. } => {
+                    g == gateway && h.gua().is_some() && ip_info.is_none()
+                }
                 _ => false,
             })
             .cloned(),
@@ -215,8 +221,8 @@ impl Model<Host> {
                 if g.gateway_type == GatewayType::OutboundOnly {
                     continue;
                 }
+                carry_forward(&mut available, &previous, gid, g.ip_info.as_deref());
                 let Some(ip_info) = &g.ip_info else {
-                    carry_forward(&mut available, &previous, gid);
                     continue;
                 };
                 let gateway_secure = g.secure();
@@ -421,8 +427,8 @@ impl Model<Host> {
                 if g.gateway_type == GatewayType::OutboundOnly {
                     continue;
                 }
+                carry_forward(&mut available, &previous, gid, g.ip_info.as_deref());
                 let Some(ip_info) = &g.ip_info else {
-                    carry_forward(&mut available, &previous, gid);
                     continue;
                 };
                 for subnet in &ip_info.subnets {
@@ -1276,6 +1282,20 @@ mod tests {
             })
             .unwrap();
 
+        renumber(&mut host, &mut gateways, &ports, |info| info.ip_info = None);
+        renumber(&mut host, &mut gateways, &ports, |info| {
+            *info = wireguard(GatewayType::InboundOutbound);
+            Arc::make_mut(info.ip_info.as_mut().unwrap()).wan_ip = None;
+        });
+        assert!(
+            host.de().unwrap().binding_ranges[&28332]
+                .addresses
+                .available
+                .iter()
+                .any(|a| a.public && &*a.hostname == "198.51.100.2"),
+            "the range retains its WAN row while discovery is pending"
+        );
+
         renumber(&mut host, &mut gateways, &ports, |info| {
             set_wan_ip(info, Ipv4Addr::new(203, 0, 113, 9))
         });
@@ -1317,6 +1337,19 @@ mod tests {
 
         renumber(&mut host, &mut gateways, &ports, |info| {
             *info = wireguard(GatewayType::InboundOutbound);
+            Arc::make_mut(info.ip_info.as_mut().unwrap()).wan_ip = None;
+        });
+        assert!(
+            host.de().unwrap().bindings[&9735]
+                .addresses
+                .available
+                .iter()
+                .any(|a| a.public && &*a.hostname == "198.51.100.2"),
+            "the WAN row survives the LAN-first reconnect notification"
+        );
+        assert!(forward_srcs(&host).is_empty());
+
+        renumber(&mut host, &mut gateways, &ports, |info| {
             set_wan_ip(info, Ipv4Addr::new(203, 0, 113, 9));
         });
         assert_eq!(
