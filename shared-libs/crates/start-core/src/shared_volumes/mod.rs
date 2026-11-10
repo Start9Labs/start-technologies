@@ -149,8 +149,14 @@ impl std::fmt::Debug for SharedVolumeCredentials {
     }
 }
 
-pub fn local_path(data_dir: impl AsRef<Path>, id: &SharedVolumeId) -> PathBuf {
-    data_dir.as_ref().join("shared-volumes").join(id.as_ref())
+/// Managed shared-volume storage beneath the mounted package-data partition.
+pub fn local_directory(package_data: impl AsRef<Path>) -> PathBuf {
+    package_data.as_ref().join("shared-volumes")
+}
+
+/// The root must be the mounted package-data partition.
+pub fn local_path(package_data: impl AsRef<Path>, id: &SharedVolumeId) -> PathBuf {
+    local_directory(package_data).join(id.as_ref())
 }
 
 impl SharedVolume {
@@ -229,7 +235,7 @@ pub async fn create(
     let id = SharedVolumeId::new();
     let (source, credentials) = match source {
         CreateSharedVolumeSource::Local => {
-            source::create_local_directory(&local_path(crate::DATA_DIR, &id)).await?;
+            source::create_local_directory(&local_path(crate::PACKAGE_DATA, &id)).await?;
             (SharedVolumeSource::Local, None)
         }
         CreateSharedVolumeSource::Disk { logicalname, path } => (
@@ -242,7 +248,7 @@ pub async fn create(
         }
     };
     let directory =
-        matches!(source, SharedVolumeSource::Local).then(|| local_path(crate::DATA_DIR, &id));
+        matches!(source, SharedVolumeSource::Local).then(|| local_path(crate::PACKAGE_DATA, &id));
     let publication = ctx
         .db
         .mutate(|db| {
@@ -521,7 +527,7 @@ async fn delete_retained_data(ctx: &RpcContext, id: &SharedVolumeId) -> Result<(
     {
         return Ok(());
     }
-    crate::util::io::delete_dir(local_path(crate::DATA_DIR, id)).await?;
+    crate::util::io::delete_dir(local_path(crate::PACKAGE_DATA, id)).await?;
     ctx.db
         .mutate(|db| {
             db.as_private_mut()

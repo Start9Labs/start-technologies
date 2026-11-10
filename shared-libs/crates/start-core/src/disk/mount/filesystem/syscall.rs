@@ -258,15 +258,7 @@ fn move_mount_at(
     check(r, "move_mount")
 }
 
-/// `mount_setattr(fd, "", AT_EMPTY_PATH, attr, sizeof(attr))` toggling
-/// `MOUNT_ATTR_RDONLY`.
-fn mount_setattr_ro(fd: BorrowedFd, ro: bool) -> Result<(), Error> {
-    let attr = MountAttr {
-        attr_set: if ro { MOUNT_ATTR_RDONLY } else { 0 },
-        attr_clr: if ro { 0 } else { MOUNT_ATTR_RDONLY },
-        propagation: 0,
-        userns_fd: 0,
-    };
+fn mount_setattr(fd: BorrowedFd, attr: &MountAttr) -> Result<(), Error> {
     let empty = cstr_str("")?;
     let r = unsafe {
         libc::syscall(
@@ -274,11 +266,11 @@ fn mount_setattr_ro(fd: BorrowedFd, ro: bool) -> Result<(), Error> {
             fd.as_raw_fd(),
             empty.as_ptr(),
             AT_EMPTY_PATH,
-            &attr as *const _ as *const libc::c_void,
+            attr as *const _ as *const libc::c_void,
             std::mem::size_of::<MountAttr>(),
         )
     };
-    check(r, "mount_setattr RDONLY")
+    check(r, "mount_setattr")
 }
 
 /// A detached mount fd (from `open_tree`/`open_tree_attr`). Not visible at any
@@ -293,7 +285,24 @@ impl DetachedMount {
     }
     /// Toggle `MOUNT_ATTR_RDONLY` on the detached mount.
     pub fn set_readonly(&self, ro: bool) -> Result<(), Error> {
-        mount_setattr_ro(self.fd.as_fd(), ro)
+        mount_setattr(
+            self.fd.as_fd(),
+            &MountAttr {
+                attr_set: if ro { MOUNT_ATTR_RDONLY } else { 0 },
+                attr_clr: if ro { 0 } else { MOUNT_ATTR_RDONLY },
+                ..Default::default()
+            },
+        )
+    }
+    /// Isolates the clone from its source's propagation peer group.
+    pub fn set_private(&self) -> Result<(), Error> {
+        mount_setattr(
+            self.fd.as_fd(),
+            &MountAttr {
+                propagation: libc::MS_PRIVATE as u64,
+                ..Default::default()
+            },
+        )
     }
     /// Attach the detached mount at the requested path.
     pub fn attach(self, mountpoint: &Path) -> Result<(), Error> {

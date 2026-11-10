@@ -111,7 +111,9 @@ impl SourceDefinition {
 
     pub(super) fn filesystem(&self, id: &SharedVolumeId) -> SourceFilesystem {
         match &self.source {
-            SharedVolumeSource::Local => SourceFilesystem::Local(local_path(crate::DATA_DIR, id)),
+            SharedVolumeSource::Local => {
+                SourceFilesystem::Local(local_path(crate::PACKAGE_DATA, id))
+            }
             SharedVolumeSource::Disk { logicalname, .. } => SourceFilesystem::external(logicalname),
             SharedVolumeSource::Cifs { .. } => {
                 SourceFilesystem::Cifs(SharedCifs(self.cifs().unwrap()))

@@ -32,7 +32,7 @@ use crate::util::{FromStrParser, VersionString};
 pub(crate) mod catalog;
 pub mod cifs;
 pub mod conversion;
-pub use catalog::BackupTarget;
+pub use catalog::{BackupTarget, local_directory};
 pub(crate) use catalog::{BackupTargetSource, TargetMount};
 
 #[cfg(test)]

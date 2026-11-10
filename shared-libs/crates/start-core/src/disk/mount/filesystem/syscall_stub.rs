@@ -64,6 +64,9 @@ impl DetachedMount {
     pub fn set_readonly(&self, _ro: bool) -> Result<(), Error> {
         unsupported()
     }
+    pub fn set_private(&self) -> Result<(), Error> {
+        unsupported()
+    }
     pub fn attach(self, _mountpoint: &Path) -> Result<(), Error> {
         unsupported()
     }

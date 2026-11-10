@@ -1,6 +1,7 @@
 import { Component, computed, effect, inject } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { CopyService, i18nPipe, TaskService } from '@start9labs/shared'
+import { managedStorage } from '@start9labs/start-core'
 import { TuiButton, TuiDialogContext, TuiIcon, TuiInput } from '@taiga-ui/core'
 import { TuiConfirmService } from '@taiga-ui/kit'
 import { TuiForm } from '@taiga-ui/layout'
@@ -24,7 +25,7 @@ import { BackupService } from './backup.service'
         {{ target.name }}
       </div>
       <div tuiForm="l">
-        <source-fields [edit]="edit" [localPath]="localPath()" />
+        <source-fields [edit]="edit" [localPath]="localPath" />
         <tui-textfield>
           <label tuiLabel>{{ 'Target ID' | i18n }}</label>
           <input tuiInput [readonly]="true" [ngModel]="context.data.id" />
@@ -99,9 +100,7 @@ export class BackupTargetManage {
     () => this.service.targets()[this.context.data.id],
   )
   protected readonly edit = sourceEdit(this.target)
-  protected readonly localPath = computed(
-    () => `/media/startos/data/backup-targets/${this.context.data.id}`,
-  )
+  protected readonly localPath = `${managedStorage.backupTargets}/${this.context.data.id}`
 
   constructor() {
     effect(() =>

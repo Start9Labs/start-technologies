@@ -27,6 +27,8 @@ impl AttachedMount {
         namespace: Arc<MountNamespace>,
     ) -> Result<Self, Error> {
         let detached = DetachedMount::from_fd(open_tree_clone_fd(source.as_fd())?);
+        // Clones inherit target propagation without joining the source's peer group.
+        detached.set_private()?;
         detached.set_readonly(readonly)?;
         let mount = namespace.run(|| detached.attach_to_fd(destination.as_fd()))?;
         Ok(Self {
@@ -537,6 +539,82 @@ mod tests {
         source.unmount().await.unwrap();
         first_tree.unmount(false).await.unwrap();
         second_tree.unmount(false).await.unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires root in a private Linux mount namespace"]
+    async fn old_attachment_teardown_preserves_replacement_with_shared_placeholder_source() {
+        use crate::disk::mount::filesystem::ReadWrite;
+        use crate::disk::mount::filesystem::bind::Bind;
+        use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
+        use crate::util::Invoke;
+
+        let fixture = tempfile::tempdir().unwrap();
+        let empty = Path::new(crate::DATA_DIR).join("volume-unavailable");
+        std::fs::create_dir_all(&empty).unwrap();
+        let empty_tree = MountGuard::mount(&Bind::new(&empty), &empty, ReadWrite)
+            .await
+            .unwrap();
+        tokio::process::Command::new("mount")
+            .arg("--make-shared")
+            .arg(&empty)
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+        let namespace = Arc::new(MountNamespace::for_process(std::process::id()).unwrap());
+        let mut services = Vec::new();
+        let mut sources = Vec::new();
+        let mut trees = Vec::new();
+        for name in ["old", "replacement"] {
+            let root = fixture.path().join(name);
+            let source_path = fixture.path().join(format!("{name}-source"));
+            std::fs::create_dir_all(root.join("data")).unwrap();
+            std::fs::create_dir(&source_path).unwrap();
+            std::fs::write(source_path.join("sentinel"), name).unwrap();
+            trees.push(
+                MountGuard::mount(&Bind::new(&root), &root, ReadWrite)
+                    .await
+                    .unwrap(),
+            );
+            let source = TmpMountGuard::mount(&Bind::new(&source_path), ReadWrite)
+                .await
+                .unwrap();
+            let guid = Guid::new();
+            let mut mounts = SharedVolumeMounts::default();
+            let target = PreparedTarget::open(root.clone(), "data".into(), namespace.clone())
+                .await
+                .unwrap();
+            let location = mounts.prepare(&guid, target).await.unwrap();
+            mounts
+                .attach(
+                    &guid,
+                    location,
+                    SharedVolumeId::new(),
+                    PreparedSource::open(source.clone(), None).await.unwrap(),
+                    false,
+                )
+                .unwrap();
+            assert_eq!(
+                std::fs::read_to_string(root.join("data/sentinel")).unwrap(),
+                name
+            );
+            services.push(mounts);
+            sources.push(source);
+        }
+        services[0].clear();
+        assert_eq!(
+            std::fs::read_to_string(fixture.path().join("replacement/data/sentinel")).unwrap(),
+            "replacement"
+        );
+        services[1].clear();
+        for source in sources {
+            source.unmount().await.unwrap();
+        }
+        for tree in trees {
+            tree.unmount(false).await.unwrap();
+        }
+        empty_tree.unmount(false).await.unwrap();
     }
 
     #[cfg(target_os = "linux")]

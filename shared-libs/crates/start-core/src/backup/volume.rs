@@ -321,13 +321,13 @@ fn new_local_restore(name: String) -> (SharedVolumeId, SharedVolume) {
 }
 
 async fn restore_local_copy<F: Future<Output = Result<(), Error>>>(
-    data_dir: &Path,
+    package_data: &Path,
     source: &Path,
     name: String,
     publish: impl FnOnce(SharedVolumeId, SharedVolume) -> F,
 ) -> Result<SharedVolumeId, Error> {
     let (id, volume) = new_local_restore(name);
-    let path = local_path(data_dir, &id);
+    let path = local_path(package_data, &id);
     tokio::fs::create_dir_all(path.parent().expect("local volume parent")).await?;
     tokio::fs::create_dir(&path).await?;
     let mut incomplete = IncompleteRestore(Some(path.clone()));
@@ -362,7 +362,7 @@ pub(super) async fn restore_volume<G: GenericMountGuard>(
         .or_not_found(id)?;
     let source = generation_path(&backup.shared_volume_data(id), info)?;
     restore_local_copy(
-        Path::new(crate::DATA_DIR),
+        Path::new(crate::PACKAGE_DATA),
         &source,
         info.name.clone(),
         |id, volume| async move {

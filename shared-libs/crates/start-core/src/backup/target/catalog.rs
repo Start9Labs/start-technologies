@@ -53,7 +53,7 @@ pub(crate) fn filesystem(
     definition: &SourceDefinition,
 ) -> PreparedFilesystem<BlockDev<PathBuf>, Cifs> {
     match definition.source() {
-        SharedVolumeSource::Local => PreparedFilesystem::Local(local_path(crate::DATA_DIR, id)),
+        SharedVolumeSource::Local => PreparedFilesystem::Local(local_path(crate::PACKAGE_DATA, id)),
         SharedVolumeSource::Disk { logicalname, .. } => {
             PreparedFilesystem::Disk(BlockDev::new(logicalname.clone()))
         }
@@ -61,8 +61,14 @@ pub(crate) fn filesystem(
     }
 }
 
-pub fn local_path(data_dir: impl AsRef<Path>, id: &BackupTargetId) -> PathBuf {
-    data_dir.as_ref().join("backup-targets").join(id.as_ref())
+/// Managed backup-target storage beneath the mounted package-data partition.
+pub fn local_directory(package_data: impl AsRef<Path>) -> PathBuf {
+    package_data.as_ref().join("backup-targets")
+}
+
+/// The root must be the mounted package-data partition.
+pub fn local_path(package_data: impl AsRef<Path>, id: &BackupTargetId) -> PathBuf {
+    local_directory(package_data).join(id.as_ref())
 }
 
 impl BackupTargetSource {
@@ -115,7 +121,7 @@ pub async fn create(
     let id = BackupTargetId::new();
     let (source, credentials) = match source {
         CreateSharedVolumeSource::Local => {
-            let path = local_path(crate::DATA_DIR, &id);
+            let path = local_path(crate::PACKAGE_DATA, &id);
             tokio::fs::create_dir_all(&path).await?;
             use std::os::unix::fs::PermissionsExt;
             tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).await?;
@@ -131,7 +137,7 @@ pub async fn create(
         }
     };
     let directory =
-        matches!(source, SharedVolumeSource::Local).then(|| local_path(crate::DATA_DIR, &id));
+        matches!(source, SharedVolumeSource::Local).then(|| local_path(crate::PACKAGE_DATA, &id));
     let publication = ctx
         .db
         .mutate(|db| {
@@ -273,13 +279,13 @@ pub(super) fn ensure_cifs(db: &DatabaseModel, id: &BackupTargetId) -> Result<(),
 }
 
 pub async fn remove(ctx: RpcContext, TargetParams { id }: TargetParams) -> Result<(), Error> {
-    remove_target(&ctx.db, &id, Path::new(crate::DATA_DIR)).await
+    remove_target(&ctx.db, &id, Path::new(crate::PACKAGE_DATA)).await
 }
 
 async fn remove_target(
     database: &TypedPatchDb<crate::db::model::Database>,
     id: &BackupTargetId,
-    data_dir: &Path,
+    package_data: &Path,
 ) -> Result<(), Error> {
     let db = database.peek().await;
     let source = db
@@ -289,7 +295,7 @@ async fn remove_target(
         .map(|target| target.as_source().de())
         .transpose()?;
     let local = matches!(source, None | Some(SharedVolumeSource::Local));
-    let path = local_path(data_dir, id);
+    let path = local_path(package_data, id);
     let _unused = if local {
         Some(TmpMountGuard::reserve_unmounted(&Bind::new(&path), ReadOnly).await?)
     } else {

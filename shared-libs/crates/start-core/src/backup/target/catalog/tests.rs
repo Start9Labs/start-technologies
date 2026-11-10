@@ -2,6 +2,17 @@ use patch_db::json_ptr::ROOT;
 
 use super::*;
 
+#[test]
+fn local_filesystem_uses_persisted_package_data_partition() {
+    let id = BackupTargetId::new();
+    let definition = SourceDefinition::new(SharedVolumeSource::Local, None);
+    let PreparedFilesystem::Local(path) = filesystem(&id, &definition) else {
+        panic!("local filesystem")
+    };
+    assert!(path.starts_with(crate::PACKAGE_DATA));
+    assert!(path.ends_with(Path::new("backup-targets").join(id.as_ref())));
+}
+
 #[tokio::test]
 async fn failed_local_deletion_stays_registered_and_can_be_retried() {
     let directory = tempfile::tempdir().unwrap();

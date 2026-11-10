@@ -1,5 +1,16 @@
 use super::*;
 
+#[test]
+fn local_filesystem_uses_persisted_package_data_partition() {
+    let id = SharedVolumeId::new();
+    let definition = SourceDefinition::new(SharedVolumeSource::Local, None);
+    let PreparedFilesystem::Local(path) = definition.filesystem(&id) else {
+        panic!("local filesystem")
+    };
+    assert!(path.starts_with(crate::PACKAGE_DATA));
+    assert!(path.ends_with(Path::new("shared-volumes").join(id.as_ref())));
+}
+
 #[tokio::test]
 async fn failed_publications_remove_new_directories_and_successful_ones_preserve_contents() {
     let root = tempfile::tempdir().unwrap();

@@ -2,6 +2,7 @@ import { Component, computed, effect, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { FormsModule } from '@angular/forms'
 import { CopyService, i18nPipe, TaskService } from '@start9labs/shared'
+import { managedStorage } from '@start9labs/start-core'
 import {
   TuiButton,
   TuiCell,
@@ -33,7 +34,7 @@ import { SOURCE_MANAGE_STYLES } from './manage.styles'
         {{ volume.name }}
       </div>
       <div tuiForm="l">
-        <source-fields [edit]="edit" [localPath]="localPath()" />
+        <source-fields [edit]="edit" [localPath]="localPath" />
         <tui-textfield>
           <label tuiLabel>{{ 'Volume ID' | i18n }}</label>
           <input tuiInput [readonly]="true" [ngModel]="context.data.id" />
@@ -168,9 +169,7 @@ export class VolumeManage {
       .map(getCurrentManifest)
       .filter(manifest => manifest.sharedVolumes),
   )
-  protected readonly localPath = computed(
-    () => `/media/startos/data/shared-volumes/${this.context.data.id}`,
-  )
+  protected readonly localPath = `${managedStorage.sharedVolumes}/${this.context.data.id}`
   protected readonly changed = computed(
     () =>
       this.edit.changed() ||
