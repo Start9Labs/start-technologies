@@ -6,6 +6,7 @@ import {
 } from 'src/app/services/patch-db/data-model'
 import { knownAuthorities } from 'src/app/utils/acme'
 import { Mock } from './api.fixures'
+import { mockBitTorrentBinding } from './bittorrent.fixture'
 const version = require('../../../../../../../../package.json').version
 
 function mockService(
@@ -168,6 +169,7 @@ export const mockPatchData: DataModel = {
       },
       host: {
         bindings: {
+          6881: mockBitTorrentBinding(),
           80: {
             enabled: true,
             net: {
@@ -259,6 +261,7 @@ export const mockPatchData: DataModel = {
               ],
             },
             options: {
+              publicOnly: false,
               preferredExternalPort: 80,
               addSsl: {
                 upstreamCertValidation: null,
@@ -456,7 +459,7 @@ export const mockPatchData: DataModel = {
     smtp: null,
     echoipUrls: ['https://ipconfig.me', 'https://ifconfig.co'],
     zram: false,
-    bittorrent: { downloads: true, seeding: false, incoming: false },
+    bittorrent: { downloads: true, seeding: false },
     governor: 'performance',
     epp: 'balance_power',
     ram: 8 * 1024 * 1024 * 1024,
@@ -861,6 +864,7 @@ export const mockPatchData: DataModel = {
                 ],
               },
               options: {
+                publicOnly: false,
                 preferredExternalPort: 42443,
                 addSsl: {
                   upstreamCertValidation: null,
@@ -1074,6 +1078,7 @@ export const mockPatchData: DataModel = {
               options: {
                 addSsl: null,
                 preferredExternalPort: 48332,
+                publicOnly: false,
                 secure: { ssl: false },
                 proxy: null,
               },
@@ -1121,6 +1126,7 @@ export const mockPatchData: DataModel = {
               options: {
                 addSsl: null,
                 preferredExternalPort: 48333,
+                publicOnly: false,
                 secure: { ssl: false },
                 proxy: null,
               },

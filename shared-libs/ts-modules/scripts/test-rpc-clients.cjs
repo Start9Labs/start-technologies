@@ -497,13 +497,13 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
   assert.equal(data.serverInfo.trustedKeys[ids[2]].os, true)
 })
 
-test('StartOS BitTorrent mock cascades preferences through PatchDB revisions', async () => {
+test('StartOS BitTorrent mock uses address opt-ins and clears them when either parent is off', async () => {
   const { applyPatch } = require('fast-json-patch')
   const storage = Symbol('session storage')
   const data = {
     ui: { registries: {} },
     serverInfo: {
-      bittorrent: { downloads: true, seeding: false, incoming: false },
+      bittorrent: { downloads: true, seeding: false },
       network: { host: { bindings: {} } },
       trustedKeys: {},
       registryKeys: {},
@@ -518,40 +518,55 @@ test('StartOS BitTorrent mock cascades preferences through PatchDB revisions', a
       ['./md-sample.md', ''],
     ]),
   )
+  const fixtures = load(
+    'projects/start-os/web/ui/src/app/services/api/bittorrent.fixture.ts',
+  )
+  const port = fixtures.BITTORRENT_INTERFACE.addressInfo.internalPort
+  data.serverInfo.network.host.bindings[port] = fixtures.mockBitTorrentBinding()
+  const binding = () => data.serverInfo.network.host.bindings[port]
   dependencies.set(storage, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
   dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: data }))
   const client = new (load(
     'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
   ).MockApiService)()
-  const subscription = client.mockWsSource$.subscribe(revision => {
-    applyPatch(data, revision.patch)
-  })
+  const subscription = client.mockWsSource$.subscribe(revision =>
+    applyPatch(data, revision.patch),
+  )
   const config = await client.rpc.server.bittorrent.config({})
   assert.equal(config.available, true)
   assert.equal(config.interface.type, 'p2p')
-  for (const [patch, expected] of [
-    [{ incoming: true }, { downloads: true, seeding: false, incoming: false }],
-    [{ seeding: true }, { downloads: true, seeding: true, incoming: false }],
-    [{ incoming: true }, { downloads: true, seeding: true, incoming: true }],
-    [{ seeding: false }, { downloads: true, seeding: false, incoming: false }],
-    [{ seeding: true }, { downloads: true, seeding: true, incoming: false }],
-    [
-      { downloads: false },
-      { downloads: false, seeding: false, incoming: false },
-    ],
-    [{ downloads: true }, { downloads: true, seeding: false, incoming: false }],
-  ]) {
+  assert.equal(binding().enabled, false)
+  assert.equal(binding().addresses.enabled.length, 0)
+  assert.ok(binding().addresses.available.every(address => address.public))
+  for (const off of [{ seeding: false }, { downloads: false }]) {
     assert.deepEqual(
-      { ...(await client.rpc.server.bittorrent.setPreferences(patch)) },
-      expected,
+      {
+        ...(await client.rpc.server.bittorrent.setPreferences({
+          downloads: true,
+          seeding: true,
+        })),
+      },
+      { downloads: true, seeding: true },
     )
-    assert.deepEqual({ ...data.serverInfo.bittorrent }, expected)
-    const binding =
-      data.serverInfo.network.host.bindings[
-        config.interface.addressInfo.internalPort
-      ]
-    if (binding) assert.equal(binding.enabled, expected.incoming)
+    assert.equal(binding().enabled, true)
+    assert.equal(binding().addresses.enabled.length, 0)
+    await client.rpc.package.host.binding.setAddressEnabled({
+      package: 'start-os',
+      host: 'admin',
+      internalPort: port,
+      address: binding().addresses.available[0],
+      enabled: true,
+    })
+    assert.equal(binding().addresses.enabled.length, 1)
+    await client.rpc.server.bittorrent.setPreferences(off)
+    assert.equal(binding().enabled, false)
+    assert.equal(binding().addresses.enabled.length, 0)
+    await client.rpc.server.bittorrent.setPreferences({
+      downloads: true,
+      seeding: true,
+    })
+    assert.equal(binding().addresses.enabled.length, 0)
   }
   subscription.unsubscribe()
 })

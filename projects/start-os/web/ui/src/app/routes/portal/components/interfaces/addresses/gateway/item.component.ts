@@ -29,9 +29,7 @@ import { DomainHealthService } from './domain-health.service'
         />
       </td>
       <td class="access">
-        @if (address.gua) {
-          <!-- A GUA's Local vs Public is its WAN opt-in (the public flag), so
-               it shows like the other rows but as a dropdown to change it. -->
+        @if (address.gua && !value()?.publicOnly) {
           <button
             tuiButton
             tuiDropdown

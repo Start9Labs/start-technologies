@@ -12,11 +12,6 @@ import {
 import { toAuthorityName } from 'src/app/utils/acme'
 import { getManifest } from 'src/app/utils/get-package-data'
 
-// An IPv6 global-unicast address (GUA) — not loopback / ULA (fc00::/7) /
-// link-local (fe80::/10). Mirrors the backend's `ipv6_is_local` complement, so
-// the UI offers the Local/Public dropdown for exactly the addresses the
-// backend treats as GUAs. A GUA's WAN opt-in lives in its `public` flag
-// (projected from `gua_wan`); enable/disable uses the generic rules.
 function isGua(h: T.HostnameInfo): boolean {
   if (h.metadata.kind !== 'ipv6') return false
   const first = h.hostname.split(':')[0]
@@ -117,33 +112,14 @@ export class InterfaceService {
 
     const single = all
       .sort(tuiDefaultSort)
-      .map<MappedServiceInterface>(iFace => {
-        const hostId = iFace.addressInfo.hostId || ''
-        const host = hosts[hostId]
-        const sharedHostNames = all
-          .filter(si => si.addressInfo.hostId === hostId && si.id !== iFace.id)
-          .map(si => si.name)
-
-        return {
-          ...iFace,
-          gatewayGroups: host
-            ? this.getGatewayGroups(iFace, host, gateways)
-            : [],
-          pluginGroups: host
-            ? this.getPluginGroups(iFace, host, allPackageData)
-            : [],
-          // A public domain applies to the whole host, so the CA selector must
-          // appear whenever any binding on it is SSL — not only this interface's.
-          anyAddSsl: Object.values(host?.bindings ?? {}).some(
-            b => !!b.options.addSsl,
-          ),
-          // This interface's own binding: gates whether port/firewall tests are
-          // meaningful while the service is stopped (see MappedServiceInterface).
-          addSsl:
-            !!host?.bindings[iFace.addressInfo.internalPort]?.options.addSsl,
-          sharedHostNames,
-        }
-      })
+      .map(iFace =>
+        this.mapServiceInterface(
+          iFace,
+          hosts[iFace.addressInfo.hostId || ''],
+          gateways,
+          allPackageData,
+        ),
+      )
 
     const ranges = Object.entries(hosts)
       .flatMap(([hostId, host]) =>
@@ -167,6 +143,7 @@ export class InterfaceService {
 
             return {
               id: iface.id,
+              publicOnly: false,
               name: iface.name,
               description: iface.description,
               masked: false,
@@ -197,6 +174,30 @@ export class InterfaceService {
       .sort((a, b) => a.addressInfo.internalPort - b.addressInfo.internalPort)
 
     return [...single, ...ranges]
+  }
+
+  mapServiceInterface(
+    iface: T.ServiceInterface,
+    host: T.Host | undefined,
+    gateways: GatewayPlus[],
+    allPackageData?: Record<string, PackageDataEntry>,
+  ): MappedServiceInterface {
+    const bindings = Object.values(host?.bindings ?? {})
+    const binding = host?.bindings[iface.addressInfo.internalPort]
+    return {
+      ...iface,
+      publicOnly: binding?.options.publicOnly ?? false,
+      gatewayGroups: host ? this.getGatewayGroups(iface, host, gateways) : [],
+      pluginGroups: host
+        ? this.getPluginGroups(iface, host, allPackageData)
+        : [],
+      anyAddSsl: bindings.some(binding => !!binding.options.addSsl),
+      addSsl: !!binding?.options.addSsl,
+      sharedHostNames: bindings
+        .flatMap(binding => Object.values(binding.interfaces))
+        .filter(other => other.id !== iface.id)
+        .map(other => other.name),
+    }
   }
 
   getGatewayGroups(
@@ -462,6 +463,7 @@ export type PluginAddressGroup = {
 }
 
 export type MappedServiceInterface = T.ServiceInterface & {
+  publicOnly: boolean
   gatewayGroups: GatewayAddressGroup[]
   pluginGroups: PluginAddressGroup[]
   // True when any binding on this interface's host adds SSL, not just this

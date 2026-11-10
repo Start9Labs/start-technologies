@@ -30,11 +30,14 @@ impl VersionT for Version {
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
         let info = server_info(db)?;
         let seeding = info.remove("registrySeeding").map(from_value).transpose()?;
-        if !info.contains_key("bittorrent") {
-            let preferences = crate::registry::bittorrent::TorrentPreferences::default()
-                .update(None, seeding, None);
-            info.insert("bittorrent".into(), to_value(&preferences)?);
-        }
+        let preferences: crate::registry::bittorrent::TorrentPreferences =
+            match info.get("bittorrent") {
+                Some(preferences) => from_value(preferences.clone())?,
+                None => {
+                    crate::registry::bittorrent::TorrentPreferences::default().update(None, seeding)
+                }
+            };
+        info.insert("bittorrent".into(), to_value(&preferences)?);
         Ok(Value::Null)
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
@@ -66,7 +69,7 @@ mod tests {
             Version.up(&mut db, ()).unwrap();
             assert_eq!(
                 db["public"]["serverInfo"]["bittorrent"],
-                imbl_value::json!({"downloads": true, "seeding": enabled, "incoming": false})
+                imbl_value::json!({"downloads": true, "seeding": enabled})
             );
             assert!(db["public"]["serverInfo"].get("registrySeeding").is_none());
         }
@@ -75,11 +78,23 @@ mod tests {
     #[test]
     fn rerunning_migration_preserves_current_preferences() {
         let mut db = imbl_value::json!({"public": {"serverInfo": {
-            "bittorrent": {"downloads": false, "seeding": false, "incoming": false}
+            "bittorrent": {"downloads": false, "seeding": false}
         }}});
         let original = db.clone();
         Version.up(&mut db, ()).unwrap();
         assert_eq!(db, original);
+    }
+
+    #[test]
+    fn obsolete_incoming_switch_is_not_retained_as_an_ingress_opt_in() {
+        let mut db = imbl_value::json!({"public": {"serverInfo": {
+            "bittorrent": {"downloads": true, "seeding": true, "incoming": true}
+        }}});
+        Version.up(&mut db, ()).unwrap();
+        assert_eq!(
+            db["public"]["serverInfo"]["bittorrent"],
+            imbl_value::json!({"downloads": true, "seeding": true})
+        );
     }
 
     #[test]
@@ -89,7 +104,7 @@ mod tests {
         Version.up(&mut db, ()).unwrap();
         assert_eq!(
             db["public"]["serverInfo"]["bittorrent"],
-            imbl_value::json!({"downloads": true, "seeding": false, "incoming": false})
+            imbl_value::json!({"downloads": true, "seeding": false})
         );
         Version.down(&mut db).unwrap();
         assert_eq!(db, original);

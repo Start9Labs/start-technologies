@@ -1634,20 +1634,18 @@ export const TimeInfo: z.ZodObject<{ now: z.ZodString; uptime: z.ZodInt }> =
   })
 
 /**
- * Downloads start enabled; seeding and incoming connections start disabled.
+ * Downloads start enabled; sharing stored software starts disabled.
  */
 export const TorrentPreferences: z.ZodObject<{
   downloads: z.ZodBoolean
   seeding: z.ZodBoolean
-  incoming: z.ZodBoolean
 }> = /* @__PURE__ */ object({
   downloads: z.boolean(),
   seeding: z.boolean(),
-  incoming: z.boolean(),
 }).meta({
   id: 'TorrentPreferences',
   description:
-    'Downloads start enabled; seeding and incoming connections start disabled.',
+    'Downloads start enabled; sharing stored software starts disabled.',
 })
 export const TrustContext: z.ZodEnum<{ marketplace: 'marketplace'; os: 'os' }> =
   /* @__PURE__ */ z.enum(['marketplace', 'os']).meta({
@@ -5908,8 +5906,9 @@ export const DerivedAddressInfo: z.ZodObject<{
   /**
    * User override: IPv6 global-unicast addresses opted into WAN exposure.
    * Projected into `HostnameInfo.public` by `update_addresses`, so `public`
-   * stays the single source of truth for WAN reachability (P2P address
-   * selection, upstream pinholes). A GUA not in this set is LAN-only.
+   * stays the single source of truth for WAN classification.
+   * Public-only bindings offer GUAs as public
+   * candidates independently of this set; `enabled` still owns their opt-in.
    */
   guaWan: z.ZodCodec<
     z.ZodOptional<z.ZodArray<z.ZodString>>,
@@ -5944,12 +5943,13 @@ export const DerivedAddressInfo: z.ZodObject<{
   /**
    * User override: IPv6 global-unicast addresses opted into WAN exposure.
    * Projected into `HostnameInfo.public` by `update_addresses`, so `public`
-   * stays the single source of truth for WAN reachability (P2P address
-   * selection, upstream pinholes). A GUA not in this set is LAN-only.
+   * stays the single source of truth for WAN classification.
+   * Public-only bindings offer GUAs as public
+   * candidates independently of this set; `enabled` still owns their opt-in.
    */
   guaWan: wire(z.array(z.string()).optional(), z.array(z.string())).meta({
     description:
-      'User override: IPv6 global-unicast addresses opted into WAN exposure.\nProjected into `HostnameInfo.public` by `update_addresses`, so `public`\nstays the single source of truth for WAN reachability (P2P address\nselection, upstream pinholes). A GUA not in this set is LAN-only.',
+      'User override: IPv6 global-unicast addresses opted into WAN exposure.\nProjected into `HostnameInfo.public` by `update_addresses`, so `public`\nstays the single source of truth for WAN classification.\nPublic-only bindings offer GUAs as public\ncandidates independently of this set; `enabled` still owns their opt-in.',
   }),
   /**
    * User override: enable these private IPs regardless of their mDNS address.
@@ -6367,6 +6367,7 @@ export const CompatibleBindOptions: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof ProxyOptions>>,
     z.ZodNullable<typeof ProxyOptions>
   >
+  publicOnly: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   preferredExternalPort: z.int(),
   addSsl: wire(
@@ -6375,6 +6376,7 @@ export const CompatibleBindOptions: z.ZodObject<{
   ),
   secure: wire(Security.nullable().optional(), Security.nullable()),
   proxy: wire(ProxyOptions.nullable().optional(), ProxyOptions.nullable()),
+  publicOnly: wire(z.boolean().optional(), z.boolean()),
 }).meta({
   id: 'CompatibleBindOptions',
 })
@@ -6435,6 +6437,11 @@ export const BindOptions: z.ZodCodec<
      * Proxy protocol shared by every exposed leg of this binding.
      */
     proxy: z.ZodNullable<typeof ProxyOptions>
+    /**
+     * Offers public-address opt-ins; omits LAN/private address rows.
+     * Inactive bindings clear their selections and reject address opt-ins.
+     */
+    publicOnly: z.ZodBoolean
   }>
 > = /* @__PURE__ */ wire(
   CompatibleBindOptions,
@@ -6448,6 +6455,14 @@ export const BindOptions: z.ZodCodec<
     proxy: ProxyOptions.nullable().meta({
       description:
         'Proxy protocol shared by every exposed leg of this binding.',
+    }),
+    /**
+     * Offers public-address opt-ins; omits LAN/private address rows.
+     * Inactive bindings clear their selections and reject address opt-ins.
+     */
+    publicOnly: z.boolean().meta({
+      description:
+        'Offers public-address opt-ins; omits LAN/private address rows.\nInactive bindings clear their selections and reject address opt-ins.',
     }),
   }),
 ).meta({

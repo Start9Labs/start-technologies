@@ -492,6 +492,10 @@ impl RpcContext {
             .watch("/public/serverInfo/bittorrent".parse().unwrap())
             .await
             .typed::<crate::registry::bittorrent::TorrentPreferences>();
+        let bindings = res
+            .db
+            .watch("/public/serverInfo/network/host/bindings".parse().unwrap())
+            .await;
         let torrents = res.torrents.clone();
         let weak = Arc::downgrade(&seed);
         let incoming_context = weak.clone();
@@ -499,13 +503,13 @@ impl RpcContext {
             if let Err(error) = torrents
                 .maintain_preferences(
                     preferences,
-                    |enabled| {
+                    bindings,
+                    || {
                         let context = incoming_context.upgrade().map(Self);
                         async move {
                             match context {
                                 Some(context) => {
-                                    crate::system::bittorrent::configure_incoming(&context, enabled)
-                                        .await
+                                    crate::system::bittorrent::configure_incoming(&context).await
                                 }
                                 None => Ok(None),
                             }

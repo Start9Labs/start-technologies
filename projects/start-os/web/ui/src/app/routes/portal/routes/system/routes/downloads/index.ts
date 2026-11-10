@@ -90,24 +90,6 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
           </span>
           <input tuiSwitch type="checkbox" [formControl]="controls.seeding" />
         </label>
-        <label tuiCell>
-          <span tuiTitle>
-            <b>{{ 'Allow incoming peer connections' | i18n }}</b>
-            <span tuiSubtitle>
-              {{
-                'Seeding can use outgoing connections without a forwarded port. Incoming connections let more peers connect.'
-                  | i18n
-              }}
-            </span>
-          </span>
-          <input tuiSwitch type="checkbox" [formControl]="controls.incoming" />
-        </label>
-        <p class="g-secondary">
-          {{
-            'Turning off a setting also turns off the settings below it. Turning it back on does not restore them.'
-              | i18n
-          }}
-        </p>
         <p class="g-secondary">
           {{
             'Active BitTorrent downloads can upload even when sharing stored software is off.'
@@ -123,7 +105,7 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
       </div>
       <p class="g-secondary">
         {{
-          'Outgoing BitTorrent connections use the StartOS default gateway. With StartTunnel, peers see its exit IP. Incoming connections expose the enabled addresses below.'
+          'Outgoing BitTorrent connections use the StartOS default gateway. With StartTunnel, peers see its exit IP.'
             | i18n
         }}
       </p>
@@ -168,23 +150,36 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
         }
       }
     </section>
-    @if (
-      settings?.incoming &&
-      configuration !== 'loading' &&
-      configuration !== 'error' &&
-      configuration.available
-    ) {
+    @if (configuration !== 'loading' && configuration !== 'error') {
       <section tuiCardLarge>
         <header tuiHeader="body-l">
           <h3 tuiTitle>{{ 'Incoming peer addresses' | i18n }}</h3>
         </header>
+        @if (incomingEnabled()) {
+          <p class="g-secondary">
+            {{
+              'Incoming connections expose the enabled addresses below.' | i18n
+            }}
+          </p>
+        }
         <p class="g-secondary">
           {{
-            'Enable the addresses peers should use. Address Requirements checks reachability; port forwarding uses PCP/UPnP when supported by the gateway.'
+            'Enable the public addresses peers should use. Address Requirements checks reachability; port forwarding uses PCP/UPnP when supported by the gateway.'
               | i18n
           }}
         </p>
-        <service-interface packageId="start-os" [value]="incomingInterface()" />
+        <p class="g-secondary">
+          {{
+            'Seeding can use outgoing connections without a forwarded port.'
+              | i18n
+          }}
+        </p>
+        <fieldset [disabled]="!editable() || !settings?.seeding">
+          <service-interface
+            packageId="start-os"
+            [value]="incomingInterface()"
+          />
+        </fieldset>
       </section>
     }
   `,
@@ -195,6 +190,13 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
 
     p {
       margin: 0;
+    }
+
+    fieldset {
+      border: 0;
+      margin: 0;
+      padding: 0;
+      min-inline-size: 0;
     }
   `,
   host: { class: 'g-subpage' },
@@ -232,13 +234,21 @@ export default class Downloads {
     'loading',
   )
   protected readonly saving = signal(false)
+  protected readonly editable = computed(() => {
+    const config = this.config()
+    return (
+      config !== 'loading' &&
+      config !== 'error' &&
+      config.available &&
+      !this.saving()
+    )
+  })
   protected readonly controls: Record<
     keyof T.TorrentPreferences,
     FormControl<boolean>
   > = {
     downloads: new FormControl(false, { nonNullable: true }),
     seeding: new FormControl(false, { nonNullable: true }),
-    incoming: new FormControl(false, { nonNullable: true }),
   }
   private readonly preferenceKeys = Object.keys(
     this.controls,
@@ -261,6 +271,19 @@ export default class Downloads {
         this.packages(),
       )
       .find(iface => iface.id === config.interface.id)
+  })
+
+  protected readonly incomingEnabled = computed(() => {
+    const config = this.config()
+    if (config === 'loading' || config === 'error') return false
+    const binding =
+      this.network()?.host.bindings[config.interface.addressInfo.internalPort]
+    return (
+      !!binding?.enabled &&
+      !!this.incomingInterface()?.gatewayGroups.some(group =>
+        group.addresses.some(address => address.enabled),
+      )
+    )
   })
 
   constructor() {
@@ -287,16 +310,9 @@ export default class Downloads {
   }
 
   private syncControls(preferences: T.TorrentPreferences) {
-    const config = this.config()
-    const editable =
-      config !== 'loading' &&
-      config !== 'error' &&
-      config.available &&
-      !this.saving()
     const enabled = {
-      downloads: editable,
-      seeding: editable && preferences.downloads,
-      incoming: editable && preferences.seeding,
+      downloads: this.editable(),
+      seeding: this.editable() && preferences.downloads,
     }
     for (const preference of this.preferenceKeys) {
       const control = this.controls[preference]

@@ -67,8 +67,9 @@ pub struct DerivedAddressInfo {
     pub disabled: BTreeSet<(InternedString, u16)>,
     /// User override: IPv6 global-unicast addresses opted into WAN exposure.
     /// Projected into `HostnameInfo.public` by `update_addresses`, so `public`
-    /// stays the single source of truth for WAN reachability (P2P address
-    /// selection, upstream pinholes). A GUA not in this set is LAN-only.
+    /// stays the single source of truth for WAN classification.
+    /// Public-only bindings offer GUAs as public
+    /// candidates independently of this set; `enabled` still owns their opt-in.
     #[serde(default)]
     pub gua_wan: BTreeSet<SocketAddrV6>,
     /// User override: enable these private IPs regardless of their mDNS address.
@@ -169,16 +170,26 @@ impl DerivedAddressInfo {
         }
     }
 
-    pub(super) fn set_available(&mut self, available: BTreeSet<HostnameInfo>) {
+    pub(super) fn set_available(&mut self, available: BTreeSet<HostnameInfo>, public_only: bool) {
         self.available = available
             .into_iter()
+            .filter(|address| !public_only || address.public || address.gua().is_some())
             .map(|mut address| {
                 if let Some(gua) = address.gua() {
-                    address.public = self.gua_wan.contains(&gua);
+                    address.public = public_only || self.gua_wan.contains(&gua);
                 }
                 address
             })
             .collect();
+    }
+
+    /// Clears saved opt-ins; recomputing addresses does not restore them.
+    pub(crate) fn disable_all(&mut self) {
+        self.enabled.clear();
+        self.gua_wan.clear();
+        self.lan_enabled.clear();
+        self.disabled
+            .extend(self.available.iter().map(override_key));
     }
 
     fn public_ip_on(&self, address: &HostnameInfo) -> bool {
@@ -534,6 +545,28 @@ impl BindInfo {
         }
     }
 
+    pub(crate) fn set_address_enabled(
+        &mut self,
+        address: &HostnameInfo,
+        enabled: bool,
+    ) -> Result<(), Error> {
+        if self.options.public_only
+            && (!self.enabled || !self.addresses.available.contains(address))
+        {
+            return Err(Error::new(
+                eyre!("{}", t!("net.host.binding.address-unavailable")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        if self.options.public_only {
+            if let Some(gua) = address.gua() {
+                set_gua_wan_on(&mut self.addresses, address, gua, enabled);
+                return Ok(());
+            }
+        }
+        set_address_enabled_on(&mut self.addresses, address, enabled)
+    }
+
     pub fn new(
         available_ports: &mut AvailablePorts,
         options: BindOptions,
@@ -644,6 +677,10 @@ pub struct BindOptions {
     pub secure: Option<Security>,
     /// Proxy protocol shared by every exposed leg of this binding.
     pub proxy: Option<ProxyOptions>,
+    /// Offers public-address opt-ins; omits LAN/private address rows.
+    /// Inactive bindings clear their selections and reject address opt-ins.
+    #[serde(default)]
+    pub public_only: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, VisitVariants)]
@@ -676,6 +713,8 @@ struct CompatibleBindOptions {
     add_ssl: Option<LegacyProxySslOptions>,
     secure: Option<Security>,
     proxy: Option<ProxyOptions>,
+    #[serde(default)]
+    public_only: bool,
 }
 
 rpc_toolkit::reflect_ts!(CompatibleBindOptions);
@@ -708,6 +747,7 @@ impl TryFrom<CompatibleBindOptions> for BindOptions {
             legacy.ssl
         });
         let options = Self {
+            public_only: options.public_only,
             preferred_external_port: options.preferred_external_port,
             add_ssl,
             secure: options.secure,
@@ -1333,7 +1373,7 @@ pub async fn set_address_enabled<Kind: HostApiKind>(
                 .as_bindings_mut()
                 .mutate(|b| {
                     let bind = b.get_mut(&internal_port).or_not_found(internal_port)?;
-                    set_address_enabled_on(&mut bind.addresses, &address, enabled)
+                    bind.set_address_enabled(&address, enabled)
                 })?;
             let hostname = ServerHostname::load(db.as_public().as_server_info())?;
             let gateways = db
@@ -1415,11 +1455,41 @@ pub struct CliBindingSetGuaWanParams {
     wan: bool,
 }
 
-/// Opt a single IPv6 GUA on a binding into (or out of) WAN exposure. The flag
-/// is projected into `HostnameInfo.public` by `update_addresses`, so the row's
-/// enable/disable override set switches (`disabled` while local, `enabled`
-/// while public) — the current on/off state is carried across the flip. Errors
-/// if `address` is not an IPv6 global-unicast address.
+fn set_gua_wan_on(
+    addresses: &mut DerivedAddressInfo,
+    address: &HostnameInfo,
+    gua: SocketAddrV6,
+    wan: bool,
+) {
+    let gateway = match &address.metadata {
+        HostnameMetadata::Ipv6 { gateway, .. } if !address.ssl => Some(gateway),
+        _ => None,
+    };
+    match gateway {
+        Some(gateway) if has_nonssl_public_domain(addresses, gateway, gua.port()) => {
+            set_nonssl_wan_group(addresses, gateway, gua.port(), wan);
+        }
+        Some(gateway) => {
+            if wan {
+                addresses.gua_wan.insert(gua);
+            } else {
+                addresses.gua_wan.remove(&gua);
+            }
+            resolve_nonssl_gua(addresses, gateway, gua.port());
+        }
+        None => {
+            if wan {
+                addresses.gua_wan.insert(gua);
+                addresses.enabled.insert(SocketAddr::V6(gua));
+            } else {
+                addresses.gua_wan.remove(&gua);
+                addresses.enabled.remove(&SocketAddr::V6(gua));
+            }
+        }
+    }
+}
+
+/// Selects WAN exposure for a global-unicast IPv6 address; linked public domains follow.
 pub async fn set_gua_wan<Kind: HostApiKind>(
     ctx: RpcContext,
     BindingSetGuaWanParams {
@@ -1441,43 +1511,10 @@ pub async fn set_gua_wan<Kind: HostApiKind>(
                 .as_bindings_mut()
                 .mutate(|b| {
                     let bind = b.get_mut(&internal_port).or_not_found(internal_port)?;
-                    let addrs = &mut bind.addresses;
-                    let sa = SocketAddr::V6(gua);
-                    // A GUA's WAN opt-in is the stored `gua_wan` / `public` flag.
-                    // With a co-located public domain, flipping the GUA drives the
-                    // whole WAN level (the public domain and bare WAN IPv4 follow —
-                    // correct precisely because a public domain is present).
-                    // Otherwise it is a standalone opt-in; `resolve_nonssl_gua`
-                    // derives the GUA's reachability from `gua_wan` + the LAN level.
-                    let gua_gw = match &address.metadata {
-                        HostnameMetadata::Ipv6 { gateway, .. } if !address.ssl => {
-                            Some(gateway.clone())
-                        }
-                        _ => None,
-                    };
-                    match gua_gw {
-                        Some(gateway) if has_nonssl_public_domain(addrs, &gateway, gua.port()) => {
-                            set_nonssl_wan_group(addrs, &gateway, gua.port(), wan);
-                        }
-                        Some(gateway) => {
-                            if wan {
-                                addrs.gua_wan.insert(gua);
-                            } else {
-                                addrs.gua_wan.remove(&gua);
-                            }
-                            resolve_nonssl_gua(addrs, &gateway, gua.port());
-                        }
-                        None => {
-                            // SSL / non-linkable GUA: a plain WAN opt-in toggle.
-                            if wan {
-                                addrs.gua_wan.insert(gua);
-                                addrs.enabled.insert(sa);
-                            } else {
-                                addrs.gua_wan.remove(&gua);
-                                addrs.enabled.remove(&sa);
-                            }
-                        }
+                    if bind.options.public_only {
+                        return bind.set_address_enabled(&address, wan);
                     }
+                    set_gua_wan_on(&mut bind.addresses, &address, gua, wan);
                     Ok(())
                 })?;
             let hostname = ServerHostname::load(db.as_public().as_server_info())?;
@@ -1722,6 +1759,7 @@ mod test {
 
     fn opts(preferred: u16, add_ssl: Option<u16>, ssl: Option<bool>) -> BindOptions {
         BindOptions {
+            public_only: false,
             preferred_external_port: preferred,
             add_ssl: add_ssl.map(|preferred_external_port| AddSslOptions {
                 preferred_external_port,
@@ -1812,7 +1850,10 @@ mod test {
             });
             let options: BindOptions = serde_json::from_value(input.clone()).unwrap();
             assert_eq!(options.proxy, Some(ProxyOptions::Tcp));
-            assert_eq!(serde_json::to_value(options).unwrap(), input);
+            assert!(!options.public_only);
+            let mut expected = input;
+            expected["publicOnly"] = serde_json::json!(false);
+            assert_eq!(serde_json::to_value(options).unwrap(), expected);
         }
     }
 
@@ -2270,9 +2311,9 @@ mod test {
 
     fn refresh(info: &mut DerivedAddressInfo, available: BTreeSet<HostnameInfo>) {
         let previous = info.clone();
-        info.set_available(available.clone());
+        info.set_available(available.clone(), false);
         info.resolve_address_groups(&previous);
-        info.set_available(available);
+        info.set_available(available, false);
     }
 
     fn domain_row(hostname: &str, ssl: bool, port: u16) -> HostnameInfo {

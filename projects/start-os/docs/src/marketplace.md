@@ -39,7 +39,7 @@ Sharing compatible installed S9PKs and OS images already stored by StartOS is di
 start-cli server bittorrent set-preferences --downloads true --seeding true
 ```
 
-The page has three cascading preferences: downloads (on by default), sharing stored software (off by default), and incoming connections (off by default). Turning a preference off clears and disables the preferences below it. Turning it back on does not restore them. Changes apply live and persist across restarts. Active BitTorrent downloads can upload even when sharing stored software is off. Use `--seeding false` to stop sharing stored software, or `--downloads false` to stop all peer transfers.
+Downloads start enabled and sharing stored software starts disabled. Changes apply live and persist across restarts. Active BitTorrent downloads can upload even when sharing stored software is off. Use `--seeding false` to stop sharing stored software, or `--downloads false` to stop all peer transfers.
 
 StartOS discovers advertisements for installed packages from their recorded registry and for stored OS images from the selected update registry. It also remembers torrent metadata from new installations and updates, including downloads that fall back to HTTP. Files without an advertised source are not assigned a swarm.
 
@@ -47,11 +47,11 @@ Sharing requires an exact byte match with the advertised torrent. Installation c
 
 Sharing adds only source-path, commitment and torrent-metadata records under `/media/startos/data/package-data/registry-torrents`. It creates no extra payload copies or extended retention: installation, uninstall and native image cleanup still control the software files. Disabling sharing keeps this ordinary file management unchanged.
 
-Uploads can use outgoing peer connections without an incoming port forward. To accept incoming peers, turn on **Allow incoming peer connections** or use `start-cli server bittorrent set-preferences --incoming true` while sharing is enabled. StartOS manages the TCP listener, external port allocation and forwarding through its existing interface system; librqbit does not create a separate UPnP mapping.
+Uploads can use outgoing peer connections without an incoming port forward. To accept incoming peers, enable public addresses in the **Incoming peer addresses** table on the same page. These rows start off and require both downloads and sharing to be enabled. Disabling either switch clears and disables the rows; re-enabling the switches requires a fresh address opt-in. LAN/private addresses are excluded.
 
-On the same page, enable the gateway addresses peers should use and open their standard **Address Requirements** dialog to check reachability. Native forwarding uses PCP/UPnP where supported. A configured listener or mapping alone does not establish public reachability. Turning incoming connections off closes the listener and disables the native binding, preserving its saved address choices.
+StartOS manages the TCP listener, external port allocation and forwarding through its existing interface system. Open an address’s standard **Address Requirements** dialog to check reachability. Native forwarding uses PCP/UPnP where supported; a configured listener or mapping alone does not establish public reachability.
 
-The `directory` option under `bittorrent-seed` in `/media/startos/config/config.yaml` overrides the metadata-catalog location, not a payload-storage location. It does not enable sharing. The administrator’s `bittorrent: false` configuration disables peer transport regardless of the saved preferences; changing that configuration requires a restart.
+The `directory` option under `bittorrent-seed` in `/media/startos/config/config.yaml` overrides the metadata-catalog location, not a payload-storage location. It does not enable sharing. The administrator’s `bittorrent: false` configuration disables peer transport and clears incoming address selections without changing the download/sharing preferences; changing that configuration requires a restart.
 
 ## Open Ecosystem
 

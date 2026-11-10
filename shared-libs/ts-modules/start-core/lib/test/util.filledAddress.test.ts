@@ -7,6 +7,7 @@ const host = (fingerprint: string): Host => ({
     5223: {
       enabled: true,
       options: {
+        publicOnly: false,
         preferredExternalPort: 5223,
         addSsl: null,
         secure: null,

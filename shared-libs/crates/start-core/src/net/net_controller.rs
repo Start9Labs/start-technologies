@@ -251,6 +251,7 @@ impl NetController {
                 HostId::admin(),
                 80,
                 BindOptions {
+                    public_only: false,
                     preferred_external_port: 80,
                     add_ssl: Some(AddSslOptions {
                         preferred_external_port: 443,
@@ -1239,6 +1240,56 @@ pub struct NetService {
     sync_task: NonDetachingJoinHandle<()>,
     synced: Watch<u64>,
 }
+pub(crate) fn bind_in(
+    db: &mut crate::db::model::DatabaseModel,
+    package: &PackageId,
+    id: &HostId,
+    internal_port: u16,
+    options: BindOptions,
+) -> Result<(), Error> {
+    let gateways = db
+        .as_public()
+        .as_server_info()
+        .as_network()
+        .as_gateways()
+        .de()?;
+    let hostname = ServerHostname::load(db.as_public().as_server_info())?;
+    let mut ports = db.as_private().as_available_ports().de()?;
+    let host = host_for(db, package, id)?;
+    let is_new = !host.as_bindings().contains_key(&internal_port)?;
+    host.add_binding(&mut ports, internal_port, options, package.is_start_os())?;
+    host.update_addresses(&hostname, &gateways, &ports)?;
+    if is_new {
+        host.reconcile_public_domains_on_new_binding(internal_port)?;
+        host.update_addresses(&hostname, &gateways, &ports)?;
+    }
+    db.as_private_mut().as_available_ports_mut().ser(&ports)?;
+    Ok(())
+}
+
+pub(crate) fn export_interface_in(
+    db: &mut crate::db::model::DatabaseModel,
+    package: &PackageId,
+    interface: ServiceInterface,
+) -> Result<(), Error> {
+    let gateways = db
+        .as_public()
+        .as_server_info()
+        .as_network()
+        .as_gateways()
+        .de()?;
+    let hostname = ServerHostname::load(db.as_public().as_server_info())?;
+    let ports = db.as_private().as_available_ports().de()?;
+    let host = host_for(db, package, &interface.address_info.host_id)?;
+    host.as_bindings_mut()
+        .as_idx_mut(&interface.address_info.internal_port)
+        .or_not_found(interface.address_info.internal_port)?
+        .as_interfaces_mut()
+        .insert(&interface.id, &interface)?;
+    host.update_addresses(&hostname, &gateways, &ports)?;
+    Ok(())
+}
+
 impl NetService {
     pub(crate) fn dummy() -> Self {
         Self {
@@ -1402,31 +1453,8 @@ impl NetService {
                 data.id.clone().unwrap_or_else(PackageId::start_os),
             )
         };
-        // StartOS runs as root, so the admin UI may claim 80 and 443.
-        let privileged = pkg_id.is_start_os();
         ctrl.db
-            .mutate(|db| {
-                let gateways = db
-                    .as_public()
-                    .as_server_info()
-                    .as_network()
-                    .as_gateways()
-                    .de()?;
-                let hostname = ServerHostname::load(db.as_public().as_server_info())?;
-                let mut ports = db.as_private().as_available_ports().de()?;
-                let host = host_for(db, &pkg_id, &id)?;
-                let is_new = !host.as_bindings().contains_key(&internal_port)?;
-                host.add_binding(&mut ports, internal_port, options, privileged)?;
-                host.update_addresses(&hostname, &gateways, &ports)?;
-                // Isolate a newly-bound binding from any pre-existing public
-                // domain on this host, then re-derive so port forwards match.
-                if is_new {
-                    host.reconcile_public_domains_on_new_binding(internal_port)?;
-                    host.update_addresses(&hostname, &gateways, &ports)?;
-                }
-                db.as_private_mut().as_available_ports_mut().ser(&ports)?;
-                Ok(())
-            })
+            .mutate(|db| bind_in(db, &pkg_id, &id, internal_port, options))
             .await
             .result
     }
@@ -1440,60 +1468,7 @@ impl NetService {
             )
         };
         ctrl.db
-            .mutate(|db| {
-                let gateways = db
-                    .as_public()
-                    .as_server_info()
-                    .as_network()
-                    .as_gateways()
-                    .de()?;
-                let hostname = ServerHostname::load(db.as_public().as_server_info())?;
-                let ports = db.as_private().as_available_ports().de()?;
-                let host = host_for(db, &pkg_id, &interface.address_info.host_id)?;
-                host.as_bindings_mut()
-                    .as_idx_mut(&interface.address_info.internal_port)
-                    .or_not_found(interface.address_info.internal_port)?
-                    .as_interfaces_mut()
-                    .insert(&interface.id, &interface)?;
-                host.update_addresses(&hostname, &gateways, &ports)?;
-                Ok(())
-            })
-            .await
-            .result
-    }
-
-    pub(crate) async fn disable_binding(
-        &self,
-        id: HostId,
-        internal_port: u16,
-    ) -> Result<(), Error> {
-        let (ctrl, pkg_id) = {
-            let data = self.data.lock().await;
-            (
-                data.net_controller()?,
-                data.id.clone().unwrap_or_else(PackageId::start_os),
-            )
-        };
-        ctrl.db
-            .mutate(|db| {
-                let gateways = db
-                    .as_public()
-                    .as_server_info()
-                    .as_network()
-                    .as_gateways()
-                    .de()?;
-                let hostname = ServerHostname::load(db.as_public().as_server_info())?;
-                let ports = db.as_private().as_available_ports().de()?;
-                let host = host_for(db, &pkg_id, &id)?;
-                if let Some(binding) = host.as_bindings_mut().as_idx_mut(&internal_port) {
-                    binding.mutate(|binding| {
-                        binding.disable();
-                        Ok(())
-                    })?;
-                    host.update_addresses(&hostname, &gateways, &ports)?;
-                }
-                Ok(())
-            })
+            .mutate(|db| export_interface_in(db, &pkg_id, interface))
             .await
             .result
     }
@@ -1797,6 +1772,7 @@ mod tests {
         alpn: Option<AlpnInfo>,
     ) -> BindOptions {
         BindOptions {
+            public_only: false,
             preferred_external_port: 443,
             add_ssl: add_ssl.then(|| AddSslOptions {
                 preferred_external_port: 443,

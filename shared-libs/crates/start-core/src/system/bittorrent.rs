@@ -57,8 +57,6 @@ struct SetPreferencesParams {
     downloads: Option<bool>,
     #[arg(long, action = clap::ArgAction::Set, help = "help.arg.seeding-enabled")]
     seeding: Option<bool>,
-    #[arg(long, action = clap::ArgAction::Set, help = "help.arg.bittorrent-incoming")]
-    incoming: Option<bool>,
 }
 
 rpc_toolkit::reflect_ts!(SetPreferencesParams);
@@ -77,8 +75,11 @@ async fn update_preferences(
     db.mutate(|db| {
         let stored = db.as_public_mut().as_server_info_mut().as_bittorrent_mut();
         let preferences: TorrentPreferences = stored.de()?;
-        let preferences = preferences.update(params.downloads, params.seeding, params.incoming);
+        let preferences = preferences.update(params.downloads, params.seeding);
         stored.ser(&preferences)?;
+        if !preferences.seeding {
+            incoming::clear_selections(db)?;
+        }
         Ok(preferences)
     })
     .await
@@ -95,7 +96,8 @@ mod tests {
         db.put(
             &patch_db::json_ptr::ROOT,
             &imbl_value::json!({"public": {"serverInfo": {
-                "bittorrent": to_value(&TorrentPreferences::default())?
+                "bittorrent": to_value(&TorrentPreferences::default())?,
+                "network": {"host": {"bindings": {}}}
             }}}),
         )
         .await?;
@@ -103,7 +105,6 @@ mod tests {
             &db,
             SetPreferencesParams {
                 seeding: Some(true),
-                incoming: Some(true),
                 ..Default::default()
             },
         )
@@ -112,8 +113,7 @@ mod tests {
             enabled,
             TorrentPreferences {
                 downloads: true,
-                seeding: true,
-                incoming: true
+                seeding: true
             }
         );
         let disabled = update_preferences(
@@ -128,8 +128,7 @@ mod tests {
             disabled,
             TorrentPreferences {
                 downloads: false,
-                seeding: false,
-                incoming: false
+                seeding: false
             }
         );
         assert_eq!(
@@ -155,9 +154,154 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn address_rows_are_the_ingress_opt_in_and_either_parent_clears_them() -> Result<(), Error>
+    {
+        use std::sync::Arc;
+
+        use crate::db::model::public::{GatewayType, IpInfo, NetworkInterfaceInfo};
+        use crate::net::forward::AvailablePorts;
+        use crate::net::host::Host;
+
+        for disable_downloads in [false, true] {
+            let gateway = NetworkInterfaceInfo {
+                gateway_type: GatewayType::InboundOutbound,
+                ip_info: Some(Arc::new(IpInfo {
+                    subnets: ["192.168.1.2/24".parse::<ipnet::IpNet>().unwrap()]
+                        .into_iter()
+                        .collect(),
+                    wan_ip: Some("203.0.113.45".parse().unwrap()),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            let db = TypedPatchDb::<Database>::load_unchecked(PatchDb::in_memory());
+            db.put(&patch_db::json_ptr::ROOT, &imbl_value::json!({
+                "public": {"serverInfo": {
+                    "hostname": "server",
+                    "bittorrent": to_value(&TorrentPreferences::default())?,
+                    "network": {"host": to_value(&Host::default())?, "gateways": {"eth0": to_value(&gateway)?}}
+                }},
+                "private": {"availablePorts": to_value(&AvailablePorts::new())?}
+            })).await?;
+            assert!(
+                db.mutate(|db| incoming::configure_in(db, true))
+                    .await
+                    .result?
+                    .is_none()
+            );
+            let binding = db
+                .peek()
+                .await
+                .as_public()
+                .as_server_info()
+                .as_network()
+                .as_host()
+                .as_bindings()
+                .as_idx(&6881)
+                .unwrap()
+                .de()?;
+            assert!(!binding.enabled);
+            assert!(binding.addresses.enabled().is_empty());
+            assert_eq!(binding.addresses.available.len(), 1);
+            let address = binding.addresses.available.first().unwrap().clone();
+            assert_eq!(address.hostname, InternedString::intern("203.0.113.45"));
+            assert!(address.public);
+            update_preferences(
+                &db,
+                SetPreferencesParams {
+                    seeding: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await?;
+            assert!(
+                db.mutate(|db| incoming::configure_in(db, true))
+                    .await
+                    .result?
+                    .is_none()
+            );
+            db.mutate(|db| {
+                db.as_public_mut()
+                    .as_server_info_mut()
+                    .as_network_mut()
+                    .as_host_mut()
+                    .as_bindings_mut()
+                    .as_idx_mut(&6881)
+                    .unwrap()
+                    .mutate(|binding| binding.set_address_enabled(&address, true))
+            })
+            .await
+            .result?;
+            assert!(
+                db.mutate(|db| incoming::configure_in(db, true))
+                    .await
+                    .result?
+                    .is_some()
+            );
+            update_preferences(
+                &db,
+                SetPreferencesParams {
+                    downloads: disable_downloads.then_some(false),
+                    seeding: (!disable_downloads).then_some(false),
+                },
+            )
+            .await?;
+            let binding = db
+                .peek()
+                .await
+                .as_public()
+                .as_server_info()
+                .as_network()
+                .as_host()
+                .as_bindings()
+                .as_idx(&6881)
+                .unwrap()
+                .de()?;
+            assert!(!binding.enabled);
+            assert!(binding.addresses.enabled().is_empty());
+            assert!(
+                db.mutate(|db| incoming::configure_in(db, true))
+                    .await
+                    .result?
+                    .is_none()
+            );
+            update_preferences(
+                &db,
+                SetPreferencesParams {
+                    downloads: Some(true),
+                    seeding: Some(true),
+                },
+            )
+            .await?;
+            assert!(
+                db.mutate(|db| incoming::configure_in(db, true))
+                    .await
+                    .result?
+                    .is_none()
+            );
+            assert!(
+                db.peek()
+                    .await
+                    .as_public()
+                    .as_server_info()
+                    .as_network()
+                    .as_host()
+                    .as_bindings()
+                    .as_idx(&6881)
+                    .unwrap()
+                    .de()?
+                    .addresses
+                    .enabled()
+                    .is_empty()
+            );
+        }
+        Ok(())
+    }
+
     #[test]
     fn preference_flags_require_explicit_booleans() {
-        for flag in ["--downloads", "--seeding", "--incoming"] {
+        for flag in ["--downloads", "--seeding"] {
             assert!(SetPreferencesParams::try_parse_from(["set-preferences", flag]).is_err());
             assert!(
                 SetPreferencesParams::try_parse_from(["set-preferences", flag, "false"]).is_ok()

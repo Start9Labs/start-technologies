@@ -48,6 +48,7 @@ function hostWith(
   const bindInfo = {
     enabled: true,
     options: {
+      publicOnly: false,
       preferredExternalPort: 80,
       addSsl: null,
       secure: null,

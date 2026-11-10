@@ -2712,6 +2712,7 @@ PersistentKeepalive = 25`
             options: {
               addSsl: null,
               preferredExternalPort: 443,
+              publicOnly: false,
               secure: { ssl: true },
               proxy: null,
             },
@@ -2759,6 +2760,7 @@ PersistentKeepalive = 25`
             options: {
               addSsl: null,
               preferredExternalPort: 8332,
+              publicOnly: false,
               secure: { ssl: false },
               proxy: null,
             },
@@ -2806,6 +2808,7 @@ PersistentKeepalive = 25`
             options: {
               addSsl: null,
               preferredExternalPort: 8333,
+              publicOnly: false,
               secure: { ssl: false },
               proxy: null,
             },

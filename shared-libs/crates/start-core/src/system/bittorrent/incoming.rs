@@ -1,10 +1,13 @@
 use librqbit::ListenerOptions;
 
 use crate::context::RpcContext;
+use crate::db::model::DatabaseModel;
 use crate::net::host::binding::{BindInfo, BindOptions, ProxyOptions, Security};
+use crate::net::net_controller::{bind_in, export_interface_in};
 use crate::net::service_interface::{AddressInfo, ServiceInterface, ServiceInterfaceType};
 use crate::prelude::*;
-use crate::{HostId, Id, ServiceInterfaceId};
+use crate::registry::bittorrent::TorrentPreferences;
+use crate::{HostId, Id, PackageId, ServiceInterfaceId};
 
 const INTERNAL_PORT: u16 = 6881;
 
@@ -27,20 +30,36 @@ pub(super) fn interface() -> ServiceInterface {
     }
 }
 
-pub(crate) async fn configure_incoming(
-    ctx: &RpcContext,
-    enabled: bool,
-) -> Result<Option<ListenerOptions>, Error> {
-    if !enabled {
-        ctx.os_net_service
-            .disable_binding(HostId::admin(), INTERNAL_PORT)
-            .await?;
-        return Ok(None);
+/// Address rows own ingress opt-in; disabling either parent clears their selections.
+pub(super) fn clear_selections(db: &mut DatabaseModel) -> Result<(), Error> {
+    if let Some(binding) = db
+        .as_public_mut()
+        .as_server_info_mut()
+        .as_network_mut()
+        .as_host_mut()
+        .as_bindings_mut()
+        .as_idx_mut(&INTERNAL_PORT)
+    {
+        binding.mutate(|binding| {
+            binding.addresses.disable_all();
+            binding.disable();
+            Ok(())
+        })?;
     }
-    let binding: Option<BindInfo> = ctx
-        .db
-        .peek()
-        .await
+    Ok(())
+}
+
+pub(crate) async fn configure_incoming(ctx: &RpcContext) -> Result<Option<ListenerOptions>, Error> {
+    let available = ctx.torrents.available();
+    ctx.db.mutate(|db| configure_in(db, available)).await.result
+}
+
+pub(super) fn configure_in(
+    db: &mut DatabaseModel,
+    available: bool,
+) -> Result<Option<ListenerOptions>, Error> {
+    let preferences: TorrentPreferences = db.as_public().as_server_info().as_bittorrent().de()?;
+    let binding: Option<BindInfo> = db
         .as_public()
         .as_server_info()
         .as_network()
@@ -49,37 +68,50 @@ pub(crate) async fn configure_incoming(
         .as_idx(&INTERNAL_PORT)
         .map(|binding| binding.de())
         .transpose()?;
-    if !binding.as_ref().is_some_and(|binding| {
-        binding.enabled
-            && matches!(binding.options.proxy, Some(ProxyOptions::Tcp))
+    let configured = binding.as_ref().is_some_and(|binding| {
+        matches!(binding.options.proxy, Some(ProxyOptions::Tcp))
             && binding.options.secure.is_some_and(|security| !security.ssl)
-    }) {
-        ctx.os_net_service
-            .bind(
-                HostId::admin(),
-                INTERNAL_PORT,
-                binding_options(binding.as_ref().map(|binding| binding.options.clone())),
-            )
-            .await?;
+            && binding.options.public_only
+    });
+    if !configured {
+        clear_selections(db)?;
+        bind_in(
+            db,
+            &PackageId::start_os(),
+            &HostId::admin(),
+            INTERNAL_PORT,
+            binding_options(binding.as_ref().map(|binding| binding.options.clone())),
+        )?;
     }
-    ctx.os_net_service.export_interface(interface()).await?;
-    let assigned_port = ctx
-        .db
-        .peek()
-        .await
-        .as_public()
-        .as_server_info()
-        .as_network()
-        .as_host()
-        .as_bindings()
-        .as_idx(&INTERNAL_PORT)
+    let interface = interface();
+    if binding
+        .as_ref()
+        .is_none_or(|binding| !binding.interfaces.contains_key(&interface.id))
+    {
+        export_interface_in(db, &PackageId::start_os(), interface)?;
+    }
+    db.as_public_mut()
+        .as_server_info_mut()
+        .as_network_mut()
+        .as_host_mut()
+        .as_bindings_mut()
+        .as_idx_mut(&INTERNAL_PORT)
         .or_not_found(INTERNAL_PORT)?
-        .as_net()
-        .de()?
-        .assigned_port;
-    Ok(Some(listener(
-        assigned_port.or_not_found("BitTorrent external port")?,
-    )))
+        .mutate(|binding| {
+            binding.enabled = available && preferences.seeding;
+            if !binding.enabled {
+                binding.addresses.disable_all();
+            }
+            if !binding.enabled || binding.enabled_addresses().is_empty() {
+                return Ok(None);
+            }
+            Ok(Some(listener(
+                binding
+                    .net
+                    .assigned_port
+                    .or_not_found("BitTorrent external port")?,
+            )))
+        })
 }
 
 fn binding_options(existing: Option<BindOptions>) -> BindOptions {
@@ -88,9 +120,11 @@ fn binding_options(existing: Option<BindOptions>) -> BindOptions {
         add_ssl: None,
         secure: None,
         proxy: None,
+        public_only: true,
     });
     options.proxy = Some(ProxyOptions::Tcp);
     options.secure = Some(Security { ssl: false });
+    options.public_only = true;
     options
 }
 
@@ -107,15 +141,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn existing_binding_keeps_its_port_and_switches_to_raw_tcp() {
+    fn existing_binding_keeps_its_port_and_switches_to_public_only_tcp() {
         let mut previous = binding_options(None);
         previous.preferred_external_port = 45678;
         previous.proxy = None;
         previous.secure = None;
+        previous.public_only = false;
         let options = binding_options(Some(previous));
         assert_eq!(options.preferred_external_port, 45678);
         assert_eq!(options.proxy, Some(ProxyOptions::Tcp));
         assert!(options.secure.is_some_and(|security| !security.ssl));
+        assert!(options.public_only);
     }
 
     #[test]

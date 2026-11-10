@@ -644,6 +644,7 @@ async fn slow_metadata_discovery_does_not_block_sharing_or_disable() -> Result<(
         .watch(patch_db::json_ptr::ROOT.to_owned())
         .await
         .typed::<TorrentPreferences>();
+    let bindings = db.watch("/bindings".parse().unwrap()).await;
     let started = Arc::new(AtomicUsize::new(0));
     let cancelled = Arc::new(AtomicUsize::new(0));
     let owner = client.clone();
@@ -652,7 +653,8 @@ async fn slow_metadata_discovery_does_not_block_sharing_or_disable() -> Result<(
         owner
             .maintain_preferences(
                 watch,
-                |_| async { Ok(None) },
+                bindings,
+                || async { Ok(None) },
                 move || {
                     let (started, cancelled) = (began.clone(), ended.clone());
                     async move {
@@ -890,6 +892,59 @@ async fn stored_hybrid_registration_keeps_metadata_only_and_waits_for_opt_in() -
     Ok(())
 }
 
+#[tokio::test]
+async fn native_address_changes_reconcile_without_waiting_for_periodic_refresh() -> Result<(), Error>
+{
+    let cache = TmpDir::new().await?;
+    let client = Arc::new(TorrentClient::for_server(
+        TorrentDownloadConfig::default(),
+        Some(TorrentSeedConfig {
+            directory: cache.to_path_buf(),
+        }),
+    ));
+    let db = patch_db::PatchDb::in_memory();
+    db.put(
+        &patch_db::json_ptr::ROOT,
+        &imbl_value::json!({"preferences": sharing_preferences(true), "bindings": 0}),
+    )
+    .await?;
+    let preferences = db
+        .watch("/preferences".parse().unwrap())
+        .await
+        .typed::<TorrentPreferences>();
+    let bindings = db.watch("/bindings".parse().unwrap()).await;
+    let configured = Arc::new(AtomicUsize::new(0));
+    let observer = configured.clone();
+    let owner = client.clone();
+    let task: NonDetachingJoinHandle<_> = tokio::spawn(async move {
+        owner
+            .maintain_preferences(
+                preferences,
+                bindings,
+                move || {
+                    observer.fetch_add(1, Ordering::SeqCst);
+                    async { Ok(None) }
+                },
+                || async { Ok(()) },
+            )
+            .await
+    })
+    .into();
+    wait_for_seeding(&client, true).await;
+    let before = configured.load(Ordering::SeqCst);
+    db.put(&"/bindings".parse().unwrap(), &1).await?;
+    timeout(Duration::from_secs(10), async {
+        while configured.load(Ordering::SeqCst) == before {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("address selections did not wake the existing maintenance task");
+    drop(task);
+    client.shutdown().await;
+    Ok(())
+}
+
 fn sharing_preferences(seeding: bool) -> TorrentPreferences {
     TorrentPreferences {
         seeding,
@@ -921,10 +976,11 @@ async fn seeding_follows_persisted_intent_and_can_restart_with_an_old_service_re
     let ptr = patch_db::json_ptr::ROOT.to_owned();
     db.put(&ptr, &sharing_preferences(false)).await?;
     let watch = db.watch(ptr.clone()).await.typed::<TorrentPreferences>();
+    let bindings = db.watch("/bindings".parse().unwrap()).await;
     let owner = client.clone();
     let task: NonDetachingJoinHandle<_> = tokio::spawn(async move {
         owner
-            .maintain_preferences(watch, |_| async { Ok(None) }, || async { Ok(()) })
+            .maintain_preferences(watch, bindings, || async { Ok(None) }, || async { Ok(()) })
             .await
     })
     .into();
@@ -994,9 +1050,14 @@ async fn cancelling_the_seeding_worker_prevents_late_service_publication() -> Re
         .watch(patch_db::json_ptr::ROOT.to_owned())
         .await
         .typed::<TorrentPreferences>();
+    let bindings = db.watch("/bindings".parse().unwrap()).await;
     let publication = client.seeds.write().await;
-    let mut worker =
-        Box::pin(client.maintain_preferences(watch, |_| async { Ok(None) }, || async { Ok(()) }));
+    let mut worker = Box::pin(client.maintain_preferences(
+        watch,
+        bindings,
+        || async { Ok(None) },
+        || async { Ok(()) },
+    ));
     assert!(futures::poll!(&mut worker).is_pending());
     drop(worker);
     drop(publication);

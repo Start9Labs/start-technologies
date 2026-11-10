@@ -319,7 +319,7 @@ export type TermSizeInput = z.input<typeof schemas.TermSize>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 
 /**
- * Downloads start enabled; seeding and incoming connections start disabled.
+ * Downloads start enabled; sharing stored software starts disabled.
  */
 export type TorrentPreferences = z.output<typeof schemas.TorrentPreferences>
 export type TrustCaParamsInput = z.input<typeof schemas.TrustCaParams>

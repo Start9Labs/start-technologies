@@ -378,13 +378,14 @@ impl TorrentClient {
     pub(crate) async fn maintain_preferences<F, Fut, G, Incoming>(
         &self,
         mut preferences: patch_db::TypedDbWatch<TorrentPreferences>,
+        mut bindings: patch_db::DbWatch,
         configure_incoming: G,
         discover: F,
     ) -> Result<(), Error>
     where
         F: Fn() -> Fut + Send + Sync,
         Fut: std::future::Future<Output = Result<(), Error>> + Send,
-        G: Fn(bool) -> Incoming + Send + Sync,
+        G: Fn() -> Incoming + Send + Sync,
         Incoming:
             std::future::Future<Output = Result<Option<librqbit::ListenerOptions>, Error>> + Send,
     {
@@ -395,12 +396,13 @@ impl TorrentClient {
             let should_seed = self.available && current.seeding;
             let changed = tokio::select! {
                 biased;
-                result = preferences.changed() => result,
-                _ = async {
+                result = preferences.changed() => result.map_err(Error::from),
+                result = async {
                     let maintenance = async {
                         loop {
                             let result = async {
-                                let listener = configure_incoming(should_seed && current.incoming).await?;
+                                bindings.peek_and_mark_seen()?;
+                                let listener = configure_incoming().await?;
                                 if should_seed {
                                     let service = self.seeds.read().await.clone();
                                     match service {
@@ -419,7 +421,13 @@ impl TorrentClient {
                                 self.stop_seeding().await;
                                 tracing::warn!(%error, "Cannot refresh stored-artifact sharing");
                             }
-                            tokio::time::sleep(Duration::from_secs(30)).await;
+                            let changed = tokio::select! {
+                                result = bindings.changed() => result,
+                                _ = tokio::time::sleep(Duration::from_secs(30)) => Ok(()),
+                            };
+                            if let Err(error) = changed {
+                                break Err::<(), Error>(error.into());
+                            }
                         }
                     };
                     let discovery = async {
@@ -431,10 +439,11 @@ impl TorrentClient {
                                 tokio::time::sleep(DISCOVERY_INTERVAL).await;
                             }
                         }
-                        std::future::pending::<()>().await
+                        std::future::pending::<Result<(), Error>>().await
                     };
-                    futures::future::join(maintenance, discovery).await;
-                } => unreachable!(),
+                    futures::future::try_join(maintenance, discovery).await?;
+                    Ok::<_, Error>(())
+                } => result,
             };
             changed?;
             let next: TorrentPreferences = from_value(preferences.as_mut().peek()?)?;

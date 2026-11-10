@@ -81,11 +81,10 @@ Show whether the administrator’s configuration permits BitTorrent and describe
 
 Update the server’s persisted preferences without restarting. Omitted flags keep their current values:
 
-- `--downloads <true|false>` — Prefer BitTorrent with HTTP fallback; enabled by default. Disabling it stops active peer transfers and clears seeding and incoming intent.
-- `--seeding <true|false>` — Share compatible installed S9PKs and OS images already stored by StartOS; disabled by default. Requires downloads and clears incoming intent when disabled.
-- `--incoming <true|false>` — Allow incoming TCP peer connections through the native interface; disabled by default and requires seeding. Configure addresses and inspect **Address Requirements** on **System → Software sharing**.
+- `--downloads <true|false>` — Prefer BitTorrent with HTTP fallback; enabled by default. Disabling it stops active peer transfers, disables seeding and clears incoming address selections.
+- `--seeding <true|false>` — Share compatible installed S9PKs and OS images already stored by StartOS; disabled by default. Requires downloads and clears incoming address selections when disabled.
 
-Turning a parent back on does not restore its children. Sharing creates no extra payload copies or extended retention. These flags control the server, not local CLI transfers; active server downloads can upload while sharing stored software is off. See [Software Sharing](marketplace.md#software-sharing) for compatibility, forwarding, storage and peer visibility.
+Configure incoming peer connections through the initially-off public-address rows on **System → Software sharing** and inspect **Address Requirements** there. Re-enabling downloads/sharing requires a fresh address opt-in. Sharing creates no extra payload copies or extended retention. These flags control the server, not local CLI transfers; active server downloads can upload while sharing stored software is off. See [Software Sharing](marketplace.md#software-sharing) for compatibility, forwarding, storage and peer visibility.
 
 ### `start-cli server restart`
 

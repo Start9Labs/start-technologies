@@ -41,7 +41,7 @@ const { GatewayService } = await import('src/app/services/gateway.service')
 const { InterfaceService } =
   await import('src/app/routes/portal/components/interfaces/interface.service')
 
-const defaults = { downloads: true, seeding: false, incoming: false }
+const defaults = { downloads: true, seeding: false }
 const config = {
   available: true,
   interface: {
@@ -116,25 +116,18 @@ for (const scenario of [
     initial: defaults,
     preference: 'downloads',
     desired: false,
-    observed: { downloads: false, seeding: false, incoming: false },
+    observed: { downloads: false, seeding: false },
   },
   {
     name: 'enable seeding',
     initial: defaults,
     preference: 'seeding',
     desired: true,
-    observed: { downloads: true, seeding: true, incoming: false },
+    observed: { downloads: true, seeding: true },
   },
   {
-    name: 'enable incoming',
-    initial: { downloads: true, seeding: true, incoming: false },
-    preference: 'incoming',
-    desired: true,
-    observed: { downloads: true, seeding: true, incoming: true },
-  },
-  {
-    name: 'disable seeding and incoming',
-    initial: { downloads: true, seeding: true, incoming: true },
+    name: 'disable seeding',
+    initial: { downloads: true, seeding: true },
     preference: 'seeding',
     desired: false,
     observed: defaults,
@@ -144,7 +137,7 @@ for (const scenario of [
     initial: defaults,
     preference: 'seeding',
     desired: true,
-    observed: { downloads: false, seeding: false, incoming: false },
+    observed: { downloads: false, seeding: false },
   },
   {
     name: 'restore after failure',
@@ -159,15 +152,15 @@ for (const scenario of [
     initial: defaults,
     preference: 'seeding',
     desired: true,
-    observed: { downloads: true, seeding: true, incoming: false },
+    observed: { downloads: true, seeding: true },
     failure: true,
   },
   {
     name: 'restore newer disabled intent',
-    initial: { downloads: true, seeding: true, incoming: true },
-    preference: 'incoming',
+    initial: { downloads: true, seeding: true },
+    preference: 'downloads',
     desired: false,
-    observed: { downloads: false, seeding: false, incoming: false },
+    observed: { downloads: false, seeding: false },
     failure: true,
   },
 ]) {
@@ -201,7 +194,6 @@ for (const scenario of [
     assert.deepEqual(page.preferences(), scenario.observed)
     assert.equal(control.value, scenario.observed[scenario.preference])
     assert.equal(page.controls.seeding.disabled, !scenario.observed.downloads)
-    assert.equal(page.controls.incoming.disabled, !scenario.observed.seeding)
     assert.deepEqual(requests, [{ [scenario.preference]: scenario.desired }])
     assert.equal(errors.length, scenario.failure ? 1 : 0)
   })
@@ -211,18 +203,15 @@ test('software sharing: delayed patches and later updates always reach the actua
   const { page, reading, observe } = fixture(t, defaults, async () => ({
     downloads: true,
     seeding: true,
-    incoming: false,
   }))
   await reading
   page.controls.seeding.setValue(true, { emitEvent: false })
   await page.save('seeding', true)
   assert.equal(page.controls.seeding.value, false)
-  observe({ downloads: true, seeding: true, incoming: false })
+  observe({ downloads: true, seeding: true })
   assert.equal(page.controls.seeding.value, true)
-  assert.equal(page.controls.incoming.enabled, true)
   observe(defaults)
   assert.equal(page.controls.seeding.value, false)
-  assert.equal(page.controls.incoming.enabled, false)
 })
 
 test('software sharing: configured availability is separate from persisted intent', async t => {

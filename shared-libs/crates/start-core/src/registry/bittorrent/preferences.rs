@@ -2,14 +2,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::prelude::*;
 
-/// Downloads start enabled; seeding and incoming connections start disabled.
+/// Downloads start enabled; sharing stored software starts disabled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct TorrentPreferences {
     pub downloads: bool,
     pub seeding: bool,
-    pub incoming: bool,
 }
 
 impl Default for TorrentPreferences {
@@ -17,26 +16,15 @@ impl Default for TorrentPreferences {
         Self {
             downloads: true,
             seeding: false,
-            incoming: false,
         }
     }
 }
 
 impl TorrentPreferences {
-    pub(crate) fn update(
-        self,
-        downloads: Option<bool>,
-        seeding: Option<bool>,
-        incoming: Option<bool>,
-    ) -> Self {
+    pub(crate) fn update(self, downloads: Option<bool>, seeding: Option<bool>) -> Self {
         let downloads = downloads.unwrap_or(self.downloads);
         let seeding = downloads && seeding.unwrap_or(self.seeding);
-        let incoming = seeding && incoming.unwrap_or(self.incoming);
-        Self {
-            downloads,
-            seeding,
-            incoming,
-        }
+        Self { downloads, seeding }
     }
 }
 
@@ -51,50 +39,36 @@ mod tests {
     fn defaults_enable_only_downloads() {
         assert_eq!(
             serde_json::to_value(TorrentPreferences::default()).unwrap(),
-            serde_json::json!({"downloads": true, "seeding": false, "incoming": false})
+            serde_json::json!({"downloads": true, "seeding": false})
         );
     }
 
     #[test]
-    fn disabling_a_parent_clears_its_children() {
+    fn disabling_downloads_clears_sharing() {
         let enabled = TorrentPreferences {
             downloads: true,
             seeding: true,
-            incoming: true,
         };
         assert_eq!(
-            enabled.update(Some(false), None, None),
+            enabled.update(Some(false), None),
             TorrentPreferences {
                 downloads: false,
-                seeding: false,
-                incoming: false,
+                seeding: false
             }
         );
         assert_eq!(
-            enabled.update(None, Some(false), None),
+            enabled.update(None, Some(false)),
             TorrentPreferences::default()
-        );
-        assert_eq!(
-            enabled.update(None, None, Some(false)),
-            TorrentPreferences {
-                downloads: true,
-                seeding: true,
-                incoming: false,
-            }
         );
     }
 
     #[test]
-    fn enabling_a_parent_does_not_restore_its_children() {
-        let disabled = TorrentPreferences::default().update(Some(false), None, None);
+    fn enabling_downloads_does_not_restore_sharing() {
+        let disabled = TorrentPreferences::default().update(Some(false), None);
         assert_eq!(
-            disabled.update(Some(true), None, None),
+            disabled.update(Some(true), None),
             TorrentPreferences::default()
         );
-        assert_eq!(disabled.update(None, Some(true), Some(true)), disabled);
-        assert_eq!(
-            TorrentPreferences::default().update(None, None, Some(true)),
-            TorrentPreferences::default()
-        );
+        assert_eq!(disabled.update(None, Some(true)), disabled);
     }
 }

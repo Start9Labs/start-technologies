@@ -769,6 +769,7 @@ mod test {
         BindInfo::new(
             &mut AvailablePorts::new(),
             BindOptions {
+                public_only: false,
                 preferred_external_port: port,
                 add_ssl: ssl_port.map(|preferred_external_port| AddSslOptions {
                     preferred_external_port,

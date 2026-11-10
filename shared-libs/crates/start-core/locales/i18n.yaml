@@ -2110,6 +2110,13 @@ net.host.binding.address-not-found:
   fr_FR: "%{address} n'est pas une adresse de la liaison %{port}. Ses adresses sont :"
   pl_PL: "%{address} nie jest adresem powiązania %{port}. Jego adresy to:"
 
+net.host.binding.address-unavailable:
+  en_US: "This address is unavailable for this binding."
+  de_DE: "Diese Adresse ist für diese Bindung nicht verfügbar."
+  es_ES: "Esta dirección no está disponible para este vínculo."
+  fr_FR: "Cette adresse n'est pas disponible pour cette liaison."
+  pl_PL: "Ten adres jest niedostępny dla tego powiązania."
+
 net.host.binding.choose-address:
   en_US: "%{address} matches several addresses of binding %{port}; choose one:"
   de_DE: "%{address} passt auf mehrere Adressen der Bindung %{port}; wählen Sie eine aus:"
@@ -4171,13 +4178,6 @@ help.arg.bittorrent-downloads:
   es_ES: "Habilitar descargas BitTorrent; al deshabilitar se desactivan también la siembra y las conexiones entrantes"
   fr_FR: "Activer les téléchargements BitTorrent ; la désactivation coupe aussi le partage et les connexions entrantes"
   pl_PL: "Włącz pobieranie BitTorrent; wyłączenie wyłącza również wysyłanie i połączenia przychodzące"
-
-help.arg.bittorrent-incoming:
-  en_US: "Accept incoming peer connections through the native network interface"
-  de_DE: "Eingehende Peer-Verbindungen über die native Netzwerkschnittstelle annehmen"
-  es_ES: "Aceptar conexiones de pares entrantes mediante la interfaz de red nativa"
-  fr_FR: "Accepter les connexions entrantes des pairs via l'interface réseau native"
-  pl_PL: "Akceptuj przychodzące połączenia peerów przez natywny interfejs sieciowy"
 
 help.arg.ca-certificate:
   en_US: "PEM-encoded CA certificate"

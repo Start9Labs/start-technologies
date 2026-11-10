@@ -82,6 +82,7 @@ import {
   WebsocketConfig,
 } from './api.types'
 import { ApiService, FileUploadOptions } from './embassy-api.service'
+import { BITTORRENT_INTERFACE } from './bittorrent.fixture'
 import { mockPatchData } from './mock-patch'
 
 import markdown from './md-sample.md'
@@ -121,67 +122,6 @@ const INIT_PROGRESS: T.FullProgress = {
     { name: 'Generating configuration', progress: false },
     { name: 'Migrating data', progress: { done: 0, total: 8, units: 'steps' } },
   ],
-}
-
-const BITTORRENT_INTERFACE: T.ServiceInterface = {
-  id: 'bittorrent',
-  name: 'BitTorrent peers',
-  description: 'Incoming BitTorrent connections for sharing stored software',
-  masked: false,
-  addressInfo: {
-    username: null,
-    hostId: 'admin',
-    internalPort: 6881,
-    scheme: 'tcp',
-    sslScheme: null,
-    suffix: '',
-  },
-  type: 'p2p',
-  preferredLauncherAddress: null,
-}
-
-function mockBitTorrentBinding(): T.BindInfo {
-  const port = BITTORRENT_INTERFACE.addressInfo.internalPort
-  return {
-    enabled: true,
-    options: {
-      preferredExternalPort: port,
-      addSsl: null,
-      secure: { ssl: false },
-      proxy: { type: 'tcp' },
-    },
-    net: { assignedPort: port, assignedSslPort: null },
-    interfaces: { [BITTORRENT_INTERFACE.id]: BITTORRENT_INTERFACE },
-    addresses: {
-      enabled: [],
-      disabled: [],
-      guaWan: [],
-      lanEnabled: [],
-      available: [
-        {
-          hostname: '10.0.0.1',
-          port,
-          ssl: false,
-          public: false,
-          metadata: { kind: 'ipv4', gateway: 'eth0' },
-        },
-        {
-          hostname: '203.0.113.45',
-          port,
-          ssl: false,
-          public: true,
-          metadata: { kind: 'ipv4', gateway: 'eth0' },
-        },
-        {
-          hostname: '203.0.113.45',
-          port,
-          ssl: false,
-          public: true,
-          metadata: { kind: 'ipv4', gateway: 'wireguard1' },
-        },
-      ],
-    },
-  }
 }
 
 @Injectable()
@@ -304,8 +244,7 @@ export class MockApiService extends ApiService {
       ) as T.TorrentPreferences
       const downloads = params.downloads ?? current.downloads
       const seeding = downloads && (params.seeding ?? current.seeding)
-      const incoming = seeding && (params.incoming ?? current.incoming)
-      const preferences = { downloads, seeding, incoming }
+      const preferences = { downloads, seeding }
       const patches: Operation<unknown>[] = [
         {
           op: PatchOp.REPLACE,
@@ -315,20 +254,27 @@ export class MockApiService extends ApiService {
       ]
       const port = BITTORRENT_INTERFACE.addressInfo.internalPort
       const bindingPath = '/serverInfo/network/host/bindings/' + port
-      const binding = this.mockData(bindingPath) as T.BindInfo | undefined
-      if (incoming) {
-        patches.push({
-          op: PatchOp.ADD,
-          path: bindingPath,
-          value: { ...(binding ?? mockBitTorrentBinding()), enabled: true },
-        })
-      } else if (binding) {
-        patches.push({
-          op: PatchOp.REPLACE,
-          path: bindingPath + '/enabled',
-          value: false,
-        })
-      }
+      const binding = this.mockData(bindingPath) as T.BindInfo
+      patches.push({
+        op: PatchOp.REPLACE,
+        path: bindingPath,
+        value: {
+          ...binding,
+          enabled: seeding,
+          addresses: seeding
+            ? binding.addresses
+            : {
+                ...binding.addresses,
+                enabled: [],
+                disabled: binding.addresses.available.map(address => [
+                  address.hostname,
+                  address.port ?? 0,
+                ]),
+                guaWan: [],
+                lanEnabled: [],
+              },
+        },
+      })
       await this.mockRevision(patches)
       return preferences
     },
