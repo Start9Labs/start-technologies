@@ -184,12 +184,15 @@ export class InterfaceService {
   ): MappedServiceInterface {
     const bindings = Object.values(host?.bindings ?? {})
     const binding = host?.bindings[iface.addressInfo.internalPort]
+    const publicOnly = binding?.options.publicOnly ?? false
     return {
       ...iface,
-      publicOnly: binding?.options.publicOnly ?? false,
+      publicOnly,
       gatewayGroups: host ? this.getGatewayGroups(iface, host, gateways) : [],
       pluginGroups: host
-        ? this.getPluginGroups(iface, host, allPackageData)
+        ? this.getPluginGroups(iface, host, allPackageData).filter(
+            group => !publicOnly || group.addresses.length > 0,
+          )
         : [],
       anyAddSsl: bindings.some(binding => !!binding.options.addSsl),
       addSsl: !!binding?.options.addSsl,
