@@ -41,8 +41,8 @@ pub(crate) fn profile_networks(cfgs: &Configs, lookup: &Lookup) -> Vec<ProfileNe
                 .ok()?;
             let address = if iface.proto == InterfaceProto::STATIC {
                 iface
-                    .ipaddr
-                    .zip(iface.netmask)
+                    .ipv4()
+                    .zip(iface.ipv4_netmask())
                     .and_then(|(ip, mask)| Ipv4Net::with_netmask(ip, mask).ok())
             } else {
                 None

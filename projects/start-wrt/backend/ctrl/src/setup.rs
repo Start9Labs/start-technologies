@@ -4,6 +4,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use imbl_value::Value;
+use josekit::jwk::Jwk;
 use rpc_toolkit::{from_fn_async, Context, HandlerExt, ParentHandler};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -842,13 +843,28 @@ async fn setup_status_impl(_ctx: ServerContext) -> Result<SetupStatusRes, Error>
     })
 }
 
+/// Changes each time the daemon starts.
+#[instrument(skip_all)]
+async fn get_pubkey(ctx: ServerContext) -> Result<Jwk, Error> {
+    AsRef::<Jwk>::as_ref(&ctx)
+        .to_public_key()
+        .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::OpenSsl))
+}
+
 pub fn setup<C: Context>() -> ParentHandler<C> {
-    ParentHandler::new().subcommand(
-        "status",
-        from_fn_async(setup_status_impl)
-            .with_metadata("authenticated", Value::Bool(false))
-            .no_cli(),
-    )
+    ParentHandler::new()
+        .subcommand(
+            "status",
+            from_fn_async(setup_status_impl)
+                .with_metadata("authenticated", Value::Bool(false))
+                .no_cli(),
+        )
+        .subcommand(
+            "get-pubkey",
+            from_fn_async(get_pubkey)
+                .with_metadata("authenticated", Value::Bool(false))
+                .no_cli(),
+        )
 }
 
 #[cfg(test)]
@@ -1187,6 +1203,22 @@ Conffiles:
 
         let restored = fs::read_to_string(root.join("etc/config/deep/nested/file.conf")).unwrap();
         assert_eq!(restored, "content");
+    }
+
+    // ── get_pubkey ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn published_key_decrypts_setup_passwords() {
+        let ctx = ServerContext::default();
+        let pubkey = get_pubkey(ctx.clone()).await.unwrap();
+        assert!(pubkey.parameter("d").is_none());
+
+        let wire = startos::util::crypto::EncryptedWire::encrypt("initial-admin-password", &pubkey)
+            .unwrap();
+        assert_eq!(
+            crate::auth::decrypt_password(&ctx, wire).unwrap(),
+            "initial-admin-password"
+        );
     }
 
     // ── write_admin_password ─────────────────────────────────────────

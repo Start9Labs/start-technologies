@@ -188,14 +188,14 @@ Ausgehende VPNs leiten Ihren Internetverkehr durch verschlüsselte Tunnel zu ent
 
 ### VPN-Verkettung
 
-Leiten Sie ein VPN durch ein anderes für zusätzliche Privatsphäre. Ihr Datenverkehr verlässt das Netz über mehrere Server, wodurch es schwieriger wird, ihn bis zu Ihnen zurückzuverfolgen. Beachten Sie, dass die Verkettung die Latenz erhöht.
+Leiten Sie ein VPN durch ein anderes für zusätzliche Privatsphäre. Ihr Datenverkehr läuft über mehrere Server, wodurch es schwieriger wird, ihn bis zu Ihnen zurückzuverfolgen. Beachten Sie, dass die Verkettung die Latenz erhöht.
 
 ### Erste Schritte
 
 Laden Sie eine WireGuard-Konfigurationsdatei von Ihrem VPN-Anbieter (Mullvad, ProtonVPN, IVPN usw.) hoch, um einen neuen VPN-Client zu erstellen.`,
   '/outbound/vpn': `## Ausgehende VPNs
 
-<details><summary>Bezeichnung</summary> Ein einprägsamer Name zur Identifizierung dieser VPN-Verbindung. Verwenden Sie etwas Aussagekräftiges wie „Mullvad Schweden“ oder „Arbeits-VPN“. </details> <details><summary>Verbindet sich über</summary> Wohin der Datenverkehr von diesem VPN geleitet werden soll:<ul><li><b>Internet:</b> Der Datenverkehr gelangt über dieses VPN direkt ins Internet.</li><li><b>Ein weiteres VPN:</b> Zuerst durch ein weiteres VPN verketten für zusätzliche Privatsphäre. Ihr Datenverkehr wird mehrfach verschlüsselt und verlässt das Netz über mehrere Server.</li></ul><b>Hinweis:</b> Das Verketten von VPNs erhöht die Latenz und kann die Geschwindigkeit verringern. </details> <details><summary>DNS-Server</summary> Resolver, die über dieses VPN geroutete Profile ohne eigene DNS-Server durch den Tunnel erreichen. Leer lassen, um die benutzerdefinierten DNS-Server des Systems durch den Tunnel zu nutzen – oder, wenn das System das DNS Ihres Internetanbieters verwendet, dessen Server außerhalb des Tunnels. </details> <details><summary>Verbindungspfad</summary> Zeigt die verschlüsselten Tunnel, durch die Ihr Datenverkehr auf dem Weg ins Internet läuft. Jeder Tunnel beginnt am Router und endet an seinem VPN-Server. Wenn dieses VPN über ein anderes verbindet, verläuft sein Tunnel innerhalb des anderen: Der Server jenes VPN öffnet den äußeren Tunnel und leitet den inneren an den Server dieses VPN weiter, wo Ihr Datenverkehr ins Internet gelangt.</details>`,
+<details><summary>Bezeichnung</summary> Ein einprägsamer Name zur Identifizierung dieser VPN-Verbindung. Verwenden Sie etwas Aussagekräftiges wie „Mullvad Schweden“ oder „Arbeits-VPN“. </details> <details><summary>Verbindet sich über</summary> Wie dieses VPN seinen eigenen VPN-Server erreicht:<ul><li><b>Internet:</b> Direkt über das Internet.</li><li><b>Ein weiteres VPN:</b> Durch den Tunnel des anderen VPN, für zusätzliche Privatsphäre. Ihr Datenverkehr wird mehrfach verschlüsselt, läuft über mehrere Server und gelangt dann vom Server dieses VPN ins Internet.</li></ul><b>Hinweis:</b> Das Verketten von VPNs erhöht die Latenz und kann die Geschwindigkeit verringern. </details> <details><summary>DNS-Server</summary> Resolver, die über dieses VPN geroutete Profile ohne eigene DNS-Server durch den Tunnel erreichen. Leer lassen, um die benutzerdefinierten DNS-Server des Systems durch den Tunnel zu nutzen – oder, wenn das System das DNS Ihres Internetanbieters verwendet, dessen Server außerhalb des Tunnels. </details> <details><summary>Verbindungspfad</summary> Zeigt die verschlüsselten Tunnel, durch die Ihr Datenverkehr auf dem Weg ins Internet läuft. Jeder Tunnel beginnt am Router und endet an seinem VPN-Server. Wenn dieses VPN über ein anderes verbindet, verläuft sein Tunnel innerhalb des anderen: Der Server jenes VPN öffnet den äußeren Tunnel und leitet den inneren an den Server dieses VPN weiter, wo Ihr Datenverkehr ins Internet gelangt.</details>`,
   '/outbound/dialog': `## Ausgehende VPNs
 
 VPN-Clients stellen eine ausgehende Verbindung zu einem VPN-Server her und ermöglichen es Geräten, Daten so zu senden und zu empfangen, als wären sie direkt mit dem privaten Netzwerk verbunden. Verbirgt Ihre IP-Adresse, umgeht geografische Beschränkungen und schützt sensible Daten in öffentlichen Wi-Fi-Netzwerken.
@@ -461,22 +461,22 @@ Die Start- und Endzeiten für die Sperrzeit. WiFi wird zwischen diesen Zeiten an
 Wählen Sie aus, an welchen Wochentagen die Sperrzeit aktiv sein soll.`,
   '/wifi/passwords': `## Wi-Fi – Passwörter
 
-Verwalten Sie die Passwörter für drahtlose Netzwerke. Jeder Eintrag steht für ein Wi-Fi-Netzwerk mit eigenem Passwort und eigenem Sicherheitsprofil, das die Zugriffsberechtigungen steuert.
+Verwalten Sie die Passwörter für drahtlose Netzwerke. Jedes Passwort verbindet mit demselben Wi-Fi-Netzwerk, dessen Name unter Wi-Fi › Einstellungen festgelegt wird. Das Passwort, mit dem sich ein Gerät verbindet, bestimmt sein Sicherheitsprofil.
 
 ### Sicherheitsprofil
 
 Steuert, worauf das verbundene Gerät im Netzwerk zugreifen kann. Weisen Sie ein Sicherheitsprofil zu, um den Zugriff auf bestimmte Ressourcen einzuschränken oder zu gewähren.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Passwörter
 
-Jeder Eintrag steht für ein Wi-Fi-Netzwerk mit eigenem Passwort und eigenem Sicherheitsprofil, das die Zugriffsberechtigungen steuert.
+Jedes Passwort verbindet mit demselben Wi-Fi-Netzwerk, dessen Name unter Wi-Fi › Einstellungen festgelegt wird. Das Passwort, mit dem sich ein Gerät verbindet, bestimmt sein Sicherheitsprofil.
 
 ### Bezeichnung
 
-Ein aussagekräftiger Name für dieses Wi-Fi-Netzwerk, etwa „Zuhause“ oder „Gastnetzwerk“. Dies ist der Netzwerkname (SSID), den Geräte sehen.
+Ein aussagekräftiger Name für dieses Passwort, etwa „Zuhause“ oder „Gastnetzwerk“. Er erscheint nur in dieser Oberfläche; Geräte sehen ihn nie.
 
 ### Passwort
 
-Das Passwort, das Geräte zum Verbinden verwenden. Muss mindestens 8 Zeichen lang sein. Verwenden Sie die Schaltfläche zum Generieren, um ein starkes, zufälliges Passwort zu erstellen.
+Das Passwort, das Geräte zum Verbinden verwenden. Muss mindestens 8 Zeichen lang sein. Verwenden Sie die Schaltfläche zum Generieren, um ein starkes, zufälliges Passwort zu erstellen. Eine Passwortänderung kann kurzzeitig alle Wi-Fi-Geräte trennen. Geräte, die das alte Passwort verwenden, müssen sich mit dem neuen erneut verbinden.
 
 ### Sicherheitsprofil
 

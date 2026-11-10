@@ -188,14 +188,14 @@ Les VPN sortants acheminent votre trafic Internet par des tunnels chiffrés vers
 
 ### Chaînage de VPN
 
-Acheminez un VPN par un autre pour davantage de confidentialité. Votre trafic ressort par plusieurs serveurs, ce qui le rend plus difficile à retracer jusqu’à vous. Notez que le chaînage augmente la latence.
+Acheminez un VPN par un autre pour davantage de confidentialité. Votre trafic passe par plusieurs serveurs, ce qui le rend plus difficile à retracer jusqu’à vous. Notez que le chaînage augmente la latence.
 
 ### Pour commencer
 
 Téléversez un fichier de configuration WireGuard fourni par votre fournisseur de VPN (Mullvad, ProtonVPN, IVPN, etc.) pour créer un nouveau client VPN.`,
   '/outbound/vpn': `## VPN sortants
 
-<details><summary>Étiquette</summary> Un nom convivial pour identifier cette connexion VPN. Utilisez un nom descriptif comme « Mullvad Suède » ou « VPN du travail ». </details> <details><summary>Se connecte via</summary> L’endroit où le trafic de ce VPN doit être acheminé :<ul><li><b>Internet :</b> Le trafic ressort directement vers Internet par ce VPN.</li><li><b>Un autre VPN :</b> Chaîner d’abord par un autre VPN pour plus de confidentialité. Votre trafic sera chiffré plusieurs fois et ressortira par plusieurs serveurs.</li></ul><b>Remarque :</b> Le chaînage de VPN augmente la latence et peut réduire les débits. </details> <details><summary>Serveurs DNS</summary> Résolveurs joints via le tunnel par les profils acheminés par ce VPN qui n’ont pas de serveurs DNS propres. Laissez vide pour utiliser les serveurs DNS personnalisés du système via le tunnel — ou, si le système utilise le DNS de votre fournisseur d’accès, les serveurs de celui-ci hors du tunnel. </details> <details><summary>Chemin de connexion</summary> Affiche les tunnels chiffrés que traverse votre trafic jusqu’à Internet. Chaque tunnel commence au routeur et se termine à son serveur VPN. Lorsque ce VPN se connecte via un autre, son tunnel passe à l’intérieur de l’autre : le serveur de cet autre VPN ouvre le tunnel extérieur et transmet le tunnel intérieur au serveur de ce VPN, d’où votre trafic sort vers Internet.</details>`,
+<details><summary>Étiquette</summary> Un nom convivial pour identifier cette connexion VPN. Utilisez un nom descriptif comme « Mullvad Suède » ou « VPN du travail ». </details> <details><summary>Se connecte via</summary> Comment ce VPN atteint son propre serveur VPN :<ul><li><b>Internet :</b> Directement par internet.</li><li><b>Un autre VPN :</b> Par le tunnel de l’autre VPN, pour plus de confidentialité. Votre trafic est chiffré plusieurs fois et passe par plusieurs serveurs, puis ressort vers internet depuis le serveur de ce VPN.</li></ul><b>Remarque :</b> Le chaînage de VPN augmente la latence et peut réduire les débits. </details> <details><summary>Serveurs DNS</summary> Résolveurs joints via le tunnel par les profils acheminés par ce VPN qui n’ont pas de serveurs DNS propres. Laissez vide pour utiliser les serveurs DNS personnalisés du système via le tunnel — ou, si le système utilise le DNS de votre fournisseur d’accès, les serveurs de celui-ci hors du tunnel. </details> <details><summary>Chemin de connexion</summary> Affiche les tunnels chiffrés que traverse votre trafic jusqu’à Internet. Chaque tunnel commence au routeur et se termine à son serveur VPN. Lorsque ce VPN se connecte via un autre, son tunnel passe à l’intérieur de l’autre : le serveur de cet autre VPN ouvre le tunnel extérieur et transmet le tunnel intérieur au serveur de ce VPN, d’où votre trafic sort vers Internet.</details>`,
   '/outbound/dialog': `## VPN sortants
 
 Les clients VPN établissent une connexion sortante vers un serveur VPN, permettant aux appareils d’envoyer et de recevoir des données comme s’ils étaient directement connectés au réseau privé. Masque votre adresse IP, contourne les restrictions géographiques et protège les données sensibles sur les réseaux Wi-Fi publics.
@@ -461,22 +461,22 @@ Les heures de début et de fin de la période d’extinction. Le Wi-Fi sera dés
 Sélectionnez les jours de la semaine où la plage d’extinction doit être active.`,
   '/wifi/passwords': `## Wi-Fi – Mots de passe
 
-Gérez les mots de passe des réseaux sans fil. Chaque entrée représente un réseau Wi-Fi avec son propre mot de passe et son profil de sécurité contrôlant les autorisations d’accès.
+Gérez les mots de passe du réseau sans fil. Tous les mots de passe rejoignent le même réseau Wi-Fi, dont le nom se définit dans Wi-Fi › Paramètres. Le mot de passe avec lequel un appareil se connecte détermine son profil de sécurité.
 
 ### Profil de sécurité
 
 Contrôle ce à quoi l’appareil connecté peut accéder sur le réseau. Attribuez un profil de sécurité pour limiter ou accorder l’accès à des ressources spécifiques.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Mots de passe
 
-Chaque entrée représente un réseau Wi-Fi avec son propre mot de passe et son profil de sécurité contrôlant les autorisations d’accès.
+Tous les mots de passe rejoignent le même réseau Wi-Fi, dont le nom se définit dans Wi-Fi › Paramètres. Le mot de passe avec lequel un appareil se connecte détermine son profil de sécurité.
 
 ### Étiquette
 
-Un nom descriptif pour ce réseau Wi-Fi, tel que « Maison » ou « Réseau invité ». C’est le nom du réseau (SSID) que les appareils verront.
+Un nom descriptif pour ce mot de passe, tel que « Maison » ou « Réseau invité ». Il n’apparaît que dans cette interface ; les appareils ne le voient jamais.
 
 ### Mot de passe
 
-Le mot de passe que les appareils utiliseront pour se connecter. Doit comporter au moins 8 caractères. Utilisez le bouton de génération pour créer un mot de passe aléatoire fort.
+Le mot de passe que les appareils utiliseront pour se connecter. Doit comporter au moins 8 caractères. Utilisez le bouton de génération pour créer un mot de passe aléatoire fort. Modifier un mot de passe peut déconnecter brièvement tous les appareils Wi-Fi. Les appareils qui utilisent l’ancien mot de passe doivent se reconnecter avec le nouveau.
 
 ### Profil de sécurité
 

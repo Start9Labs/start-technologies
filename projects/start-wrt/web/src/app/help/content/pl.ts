@@ -188,14 +188,14 @@ Wychodzące VPN kierują Twój ruch internetowy przez szyfrowane tunele do zdaln
 
 ### Łańcuchowanie VPN
 
-Kieruj jeden VPN przez drugi w celu dodatkowej prywatności. Twój ruch wychodzi przez wiele serwerów, co utrudnia wyśledzenie go z powrotem do Ciebie. Pamiętaj, że łańcuchowanie zwiększa opóźnienia.
+Kieruj jeden VPN przez drugi w celu dodatkowej prywatności. Twój ruch przechodzi przez wiele serwerów, co utrudnia wyśledzenie go z powrotem do Ciebie. Pamiętaj, że łańcuchowanie zwiększa opóźnienia.
 
 ### Rozpoczęcie pracy
 
 Prześlij plik konfiguracyjny WireGuard od swojego dostawcy VPN (Mullvad, ProtonVPN, IVPN itp.), aby utworzyć nowego klienta VPN.`,
   '/outbound/vpn': `## Wychodzące VPN
 
-<details><summary>Etykieta</summary> Przyjazna nazwa identyfikująca to połączenie VPN. Użyj czegoś opisowego, jak „Mullvad Szwecja” lub „Praca VPN”. </details> <details><summary>Łączy się przez</summary> Dokąd powinien być kierowany ruch z tego VPN:<ul><li><b>Internet:</b> Ruch wychodzi bezpośrednio do internetu przez ten VPN.</li><li><b>Inny VPN:</b> Najpierw połącz łańcuchowo przez inny VPN dla dodatkowej prywatności. Twój ruch zostanie zaszyfrowany wielokrotnie i wyjdzie przez wiele serwerów.</li></ul><b>Uwaga:</b> Łańcuchowanie VPN zwiększa opóźnienia i może zmniejszyć prędkości. </details> <details><summary>Serwery DNS</summary> Serwery, z którymi przez tunel łączą się profile kierowane przez tę sieć VPN, niemające własnych serwerów DNS. Pozostaw puste, aby używać własnych systemowych serwerów DNS przez tunel — lub, gdy system używa DNS dostawcy internetu, jego serwerów poza tunelem. </details> <details><summary>Ścieżka połączenia</summary> Pokazuje szyfrowane tunele, przez które przechodzi Twój ruch w drodze do internetu. Każdy tunel zaczyna się na routerze i kończy na swoim serwerze VPN. Gdy ten VPN łączy się przez inny, jego tunel biegnie wewnątrz tamtego: serwer tamtego VPN otwiera tunel zewnętrzny i przekazuje wewnętrzny do serwera tego VPN, skąd Twój ruch wychodzi do internetu.</details>`,
+<details><summary>Etykieta</summary> Przyjazna nazwa identyfikująca to połączenie VPN. Użyj czegoś opisowego, jak „Mullvad Szwecja” lub „Praca VPN”. </details> <details><summary>Łączy się przez</summary> Jak ten VPN dociera do własnego serwera VPN:<ul><li><b>Internet:</b> Bezpośrednio przez internet.</li><li><b>Inny VPN:</b> Przez tunel innego VPN, dla dodatkowej prywatności. Twój ruch jest szyfrowany wielokrotnie i przechodzi przez wiele serwerów, a następnie wychodzi do internetu z serwera tego VPN.</li></ul><b>Uwaga:</b> Łańcuchowanie VPN zwiększa opóźnienia i może zmniejszyć prędkości. </details> <details><summary>Serwery DNS</summary> Serwery, z którymi przez tunel łączą się profile kierowane przez tę sieć VPN, niemające własnych serwerów DNS. Pozostaw puste, aby używać własnych systemowych serwerów DNS przez tunel — lub, gdy system używa DNS dostawcy internetu, jego serwerów poza tunelem. </details> <details><summary>Ścieżka połączenia</summary> Pokazuje szyfrowane tunele, przez które przechodzi Twój ruch w drodze do internetu. Każdy tunel zaczyna się na routerze i kończy na swoim serwerze VPN. Gdy ten VPN łączy się przez inny, jego tunel biegnie wewnątrz tamtego: serwer tamtego VPN otwiera tunel zewnętrzny i przekazuje wewnętrzny do serwera tego VPN, skąd Twój ruch wychodzi do internetu.</details>`,
   '/outbound/dialog': `## Wychodzące VPN
 
 Klienci VPN tworzą wychodzące połączenie z serwerem VPN, umożliwiając urządzeniom wysyłanie i odbieranie danych tak, jakby były bezpośrednio połączone z siecią prywatną. Maskuje Twój adres IP, omija ograniczenia geograficzne i chroni poufne dane w publicznych sieciach Wi-Fi.
@@ -461,22 +461,22 @@ Czas rozpoczęcia i zakończenia okresu wyłączenia. WiFi będzie wyłączone m
 Wybierz, w które dni tygodnia okno wyłączenia ma być aktywne.`,
   '/wifi/passwords': `## Wi-Fi – Hasła
 
-Zarządzaj hasłami sieci bezprzewodowych. Każdy wpis reprezentuje sieć Wi-Fi z własnym hasłem i profilem bezpieczeństwa kontrolującym uprawnienia dostępu.
+Zarządzaj hasłami sieci bezprzewodowej. Każde hasło łączy z tą samą siecią Wi-Fi, której nazwę ustawia się w Wi-Fi › Ustawienia. Hasło, którym łączy się urządzenie, decyduje o jego profilu bezpieczeństwa.
 
 ### Profil bezpieczeństwa
 
 Kontroluje, do czego podłączone urządzenie może mieć dostęp w sieci. Przypisz profil bezpieczeństwa, aby ograniczyć lub przyznać dostęp do określonych zasobów.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Hasła
 
-Każdy wpis reprezentuje sieć Wi-Fi z własnym hasłem i profilem bezpieczeństwa kontrolującym uprawnienia dostępu.
+Każde hasło łączy z tą samą siecią Wi-Fi, której nazwę ustawia się w Wi-Fi › Ustawienia. Hasło, którym łączy się urządzenie, decyduje o jego profilu bezpieczeństwa.
 
 ### Etykieta
 
-Opisowa nazwa tej sieci Wi-Fi, taka jak „Dom” lub „Sieć dla gości”. Jest to nazwa sieci (SSID), którą zobaczą urządzenia.
+Opisowa nazwa tego hasła, taka jak „Dom” lub „Sieć dla gości”. Pojawia się tylko w tym interfejsie; urządzenia nigdy jej nie widzą.
 
 ### Hasło
 
-Hasło, którego urządzenia będą używać do łączenia się. Musi mieć co najmniej 8 znaków. Użyj przycisku generowania, aby utworzyć silne losowe hasło.
+Hasło, którego urządzenia będą używać do łączenia się. Musi mieć co najmniej 8 znaków. Użyj przycisku generowania, aby utworzyć silne losowe hasło. Zmiana hasła może na krótko rozłączyć wszystkie urządzenia Wi-Fi. Urządzenia używające starego hasła muszą połączyć się ponownie przy użyciu nowego.
 
 ### Profil bezpieczeństwa
 

@@ -188,14 +188,14 @@ Outbound VPNs route your internet traffic through encrypted tunnels to remote se
 
 ### VPN Chaining
 
-Route one VPN through another for additional privacy. Your traffic exits through multiple servers, making it harder to trace back to you. Note that chaining increases latency.
+Route one VPN through another for additional privacy. Your traffic passes through multiple servers, making it harder to trace back to you. Note that chaining increases latency.
 
 ### Getting Started
 
 Upload a WireGuard configuration file from your VPN provider (Mullvad, ProtonVPN, IVPN, etc.) to create a new VPN client.`,
   '/outbound/vpn': `## Outbound VPNs
 
-<details><summary>Label</summary> A friendly name to identify this VPN connection. Use something descriptive like "Mullvad Sweden" or "Work VPN". </details> <details><summary>Connects via</summary> Where traffic from this VPN should be routed:<ul><li><b>Internet:</b> Traffic exits directly to the internet through this VPN.</li><li><b>Another VPN:</b> Chain through another VPN first for extra privacy. Your traffic will be encrypted multiple times and exit through multiple servers.</li></ul><b>Note:</b> Chaining VPNs increases latency and may reduce speeds. </details> <details><summary>DNS Servers</summary> Resolvers reached through the tunnel by profiles routed through this VPN that have no DNS servers of their own. Leave blank to use the system's custom DNS servers through the tunnel — or, when the system uses your ISP's DNS, your ISP's servers outside it. </details> <details><summary>Connection Path</summary> Shows the encrypted tunnels your traffic travels through on its way to the internet. Each tunnel starts at the router and ends at its VPN server. When this VPN connects through another, its tunnel runs inside the other one: that VPN's server opens the outer tunnel and passes the inner one on to this VPN's server, where your traffic leaves for the internet.</details>`,
+<details><summary>Label</summary> A friendly name to identify this VPN connection. Use something descriptive like "Mullvad Sweden" or "Work VPN". </details> <details><summary>Connects via</summary> How this VPN reaches its own VPN server:<ul><li><b>Internet:</b> Directly over the internet.</li><li><b>Another VPN:</b> Through the other VPN's tunnel, for extra privacy. Your traffic is encrypted multiple times and passes through multiple servers, then leaves for the internet from this VPN's server.</li></ul><b>Note:</b> Chaining VPNs increases latency and may reduce speeds. </details> <details><summary>DNS Servers</summary> Resolvers reached through the tunnel by profiles routed through this VPN that have no DNS servers of their own. Leave blank to use the system's custom DNS servers through the tunnel — or, when the system uses your ISP's DNS, your ISP's servers outside it. </details> <details><summary>Connection Path</summary> Shows the encrypted tunnels your traffic travels through on its way to the internet. Each tunnel starts at the router and ends at its VPN server. When this VPN connects through another, its tunnel runs inside the other one: that VPN's server opens the outer tunnel and passes the inner one on to this VPN's server, where your traffic leaves for the internet.</details>`,
   '/outbound/dialog': `## Outbound VPNs
 
 VPN clients create an outbound connection to a VPN server, allowing devices to send and receive data as if they were directly connected to the private network. Masks your IP address, bypasses geographic restrictions, and protects sensitive data on public Wi-Fi networks.
@@ -459,22 +459,22 @@ The start and end times for the blackout period. WiFi will be disabled between t
 Select which days of the week the blackout window should be active.`,
   '/wifi/passwords': `## Wi-Fi – Passwords
 
-Manage wireless network passwords. Each entry represents a Wi-Fi network with its own password and security profile controlling access permissions.
+Manage wireless network passwords. Every password joins the same Wi-Fi network, named under Wi-Fi › Settings. The password a device connects with decides its security profile.
 
 ### Security Profile
 
 Controls what the connected device can access on the network. Assign a security profile to limit or grant access to specific resources.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Passwords
 
-Each entry represents a Wi-Fi network with its own password and security profile controlling access permissions.
+Every password joins the same Wi-Fi network, named under Wi-Fi › Settings. The password a device connects with decides its security profile.
 
 ### Label
 
-A descriptive name for this Wi-Fi network, such as "Home" or "Guest Network". This is the network name (SSID) that devices will see.
+A descriptive name for this password, such as "Home" or "Guest Network". It appears only in this interface; devices never see it.
 
 ### Password
 
-The password devices will use to connect. Must be at least 8 characters. Use the generate button to create a strong random password.
+The password devices will use to connect. Must be at least 8 characters. Use the generate button to create a strong random password. Changing a password may briefly disconnect all Wi-Fi devices. Devices using the old password must reconnect with the new one.
 
 ### Security Profile
 
