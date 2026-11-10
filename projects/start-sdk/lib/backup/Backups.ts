@@ -1024,6 +1024,7 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
 
   /**
    * Execute the restore: runs pre-hook, rsyncs all configured paths from backup to data, restores the data version, then runs post-hook.
+   * Missing sync sources leave destinations unchanged; other source lookup errors reject restore.
    * Restore runs as part of init, so progress reports through the init tracker.
    * @param effects - The effects context
    * @param progress - Tracker from the init harness (falls back to a no-op tracker)
@@ -1056,13 +1057,11 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
     for (let i = 0; i < this.backupSet.length; i++) {
       const item = this.backupSet[i]!
       const phase = syncs[i]!
-      // A backup taken before this source was added has nothing to restore for it.
-      if (
-        !(await fs.access(item.backupPath).then(
-          () => true,
-          () => false,
-        ))
-      ) {
+      const source = await fs.lstat(item.backupPath).catch(error => {
+        if (error.code !== 'ENOENT') throw error
+        return null
+      })
+      if (source === null) {
         phase.complete()
         continue
       }
