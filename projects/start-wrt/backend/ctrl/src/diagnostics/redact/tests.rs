@@ -180,6 +180,17 @@ fn query_secrets_include_slashes_and_semicolons() {
 }
 
 #[test]
+fn a_query_secret_after_a_semicolon_keeps_its_slashes() {
+    assert_eq!(
+        plain().line(
+            "request https://example.org/x;stok=abc/y?page=2;token=old/token?secret#top",
+            false
+        ),
+        "request https://example.org/x;stok=[redacted]/y?page=2;token=[redacted]#top"
+    );
+}
+
+#[test]
 fn a_mac_keeps_its_vendor_and_one_token_across_daemons() {
     let redactor = plain();
     let dhcp = redactor.line(

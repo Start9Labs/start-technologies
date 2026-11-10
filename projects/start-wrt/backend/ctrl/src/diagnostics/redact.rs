@@ -79,18 +79,8 @@ static CONSOLE_LOGIN: LazyLock<Regex> =
     LazyLock::new(|| compile(r"(invalid password for ')(.*)(' on)"));
 static URL_USERINFO: LazyLock<Regex> =
     LazyLock::new(|| compile(r#"([A-Za-z][A-Za-z0-9+.-]*://)[^/\s@'"]+@"#));
-const URL_SECRET_OPTIONS: &str =
-    "password|passwd|pass|pwd|token|key|secret|apikey|api_key|stok|auth";
-
 static URL_SECRET_PARAM: LazyLock<Regex> = LazyLock::new(|| {
-    compile(&format!(
-        r##"(?i)([?&](?:{URL_SECRET_OPTIONS})=)[^&\s'"#]*"##,
-    ))
-});
-static URL_PATH_TOKEN: LazyLock<Regex> = LazyLock::new(|| {
-    compile(&format!(
-        r##"(?i)(;(?:{URL_SECRET_OPTIONS})=)[^/&\s'"?#;]*"##,
-    ))
+    compile(r"(?i)[?&;](?:password|passwd|pass|pwd|token|key|secret|apikey|api_key|stok|auth)=")
 });
 
 static SSH_FINGERPRINT: LazyLock<Regex> = LazyLock::new(|| compile(r"SHA256:[A-Za-z0-9+/]{43}=?"));
@@ -524,9 +514,7 @@ impl Redactor {
         replace_cow(&mut s, |s| {
             URL_USERINFO.replace_all(s, format!("${{1}}{REDACTED}@"))
         });
-        for re in [&*URL_SECRET_PARAM, &*URL_PATH_TOKEN] {
-            replace_cow(&mut s, |s| re.replace_all(s, format!("${{1}}{REDACTED}")));
-        }
+        replace_cow(&mut s, url_secret_params);
         s
     }
 
@@ -743,6 +731,37 @@ fn line_chunks(log: &[u8], count: usize) -> Vec<&[u8]> {
         rest = tail;
     }
     chunks
+}
+
+/// A query value runs to `&`; a path parameter's also stops at `/`, `;` or `?`.
+fn url_secret_params(s: &str) -> Cow<'_, str> {
+    let mut out = String::new();
+    let mut last = 0;
+    for m in URL_SECRET_PARAM.find_iter(s) {
+        if m.start() < last {
+            continue;
+        }
+        let url = s[..m.start()]
+            .rsplit(|c: char| c.is_whitespace() || matches!(c, '\'' | '"'))
+            .next()
+            .unwrap_or_default();
+        let path = m.as_str().starts_with(';') && !url.contains('?');
+        let end = s[m.end()..]
+            .find(|c: char| {
+                c.is_whitespace()
+                    || matches!(c, '&' | '#' | '\'' | '"')
+                    || (path && matches!(c, '/' | ';' | '?'))
+            })
+            .map_or(s.len(), |at| m.end() + at);
+        out.push_str(&s[last..m.end()]);
+        out.push_str(REDACTED);
+        last = end;
+    }
+    if last == 0 {
+        return Cow::Borrowed(s);
+    }
+    out.push_str(&s[last..]);
+    Cow::Owned(out)
 }
 
 /// Ranges of quoted values, each ending at the last closing quote before the
