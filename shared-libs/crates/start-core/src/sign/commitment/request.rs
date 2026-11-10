@@ -113,14 +113,20 @@ pub struct RequestProof {
 }
 
 impl RequestProof {
-    /// Signs through the configured identity provider without exporting its private key.
+    /// Emits pure Ed25519 through the configured provider without exporting private keys.
     pub async fn sign_commitment(
         signer: &Signer,
         body: &[u8],
         context: &str,
     ) -> Result<Self, Error> {
         let commitment = RequestCommitment::for_bytes(body);
-        let signature = signer.sign_commitment(&commitment, context).await?;
+        let signature = signer
+            .sign_message(&crate::sign::signing_message(
+                crate::sign::COMMITMENT_SIG_TAG,
+                &commitment,
+                context,
+            )?)
+            .await?;
         Ok(Self {
             commitment,
             signer: signer.verifying_key().await?,

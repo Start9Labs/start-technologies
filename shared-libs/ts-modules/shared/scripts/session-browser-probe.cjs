@@ -4,6 +4,10 @@ const http = require('node:http')
 const net = require('node:net')
 const path = require('node:path')
 const { once } = require('node:events')
+const { decodeFirst } = require('@start9labs/start-core/auth/cbor')
+const {
+  SIGNATURE_PROFILE,
+} = require('@start9labs/start-core/osBindings/signature-profile')
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const native = new URL(process.argv[2])
 const fingerprint = process.argv[3]
@@ -75,19 +79,31 @@ const bundle = fs.readFileSync(
     let binary = 0,
       plaintext = 0
     const hellos = []
-    cdp.on('Network.webSocketFrameSent', ({ response }) => {
-      if (response.opcode === 1) plaintext++
+    const serverHellos = []
+    const urls = []
+    const captureHello = (response, destination) => {
       if (response.opcode !== 2) return
-      binary++
       const wire = Buffer.from(response.payloadData, 'base64').subarray(2)
       try {
-        const envelope = JSON.parse(wire.toString())
-        const body = JSON.parse(
-          Buffer.from(envelope.payload, 'base64').toString(),
-        )
-        hellos.push({ body, proof: new URLSearchParams(envelope.proof) })
+        const body = decodeFirst(wire)
+        const proof = decodeFirst(wire.subarray(body.length))
+        if (body.value?.protocol !== 'Start-RPC-Session') return
+        destination.push({
+          body: body.value,
+          proof: proof.value,
+          complete: body.length + proof.length === wire.length,
+        })
       } catch {}
+    }
+    cdp.on('Network.webSocketCreated', ({ url }) => urls.push(new URL(url)))
+    cdp.on('Network.webSocketFrameSent', ({ response }) => {
+      if (response.opcode === 1) plaintext++
+      if (response.opcode === 2) binary++
+      captureHello(response, hellos)
     })
+    cdp.on('Network.webSocketFrameReceived', ({ response }) =>
+      captureHello(response, serverHellos),
+    )
     await page.goto(`http://127.0.0.1:${server.address().port}/`)
     await page.waitForFunction(() => window.sessionProbe)
     assert.equal(await page.evaluate(() => sessionProbe.enroll()), false)
@@ -96,7 +112,7 @@ const bundle = fs.readFileSync(
       17 * 1024 * 1024,
     )
     console.log(
-      'PASS real Chromium opaque Ed client / native Ed25519ph server and 17 MiB RPC reply',
+      'PASS real Chromium opaque pure-Ed25519 client / pure-Ed25519 server and 17 MiB RPC reply',
     )
     await fetch(new URL('probe/size?bytes=0', native), { method: 'POST' })
     const ids = await page.evaluate(() => sessionProbe.sequence())
@@ -134,11 +150,38 @@ const bundle = fs.readFileSync(
     assert.ok(binary > 20)
     assert.ok(hellos.length >= 20)
     assert.equal(
-      new Set(hellos.map(hello => hello.proof.get('nonce'))).size,
+      new Set(hellos.map(hello => hello.proof.commitment.nonce.toString()))
+        .size,
       hellos.length,
     )
     assert.ok(
       hellos.every(hello => hello.body.protocol === 'Start-RPC-Session'),
+    )
+    assert.ok(
+      hellos.every(
+        hello =>
+          hello.body.hello.ephemeral instanceof Uint8Array &&
+          hello.proof.signer instanceof Uint8Array &&
+          hello.proof.signature instanceof Uint8Array,
+      ),
+    )
+    assert.ok(serverHellos.length > 0)
+    for (const hello of [...hellos, ...serverHellos]) {
+      assert.equal(hello.complete, true)
+      const prefix = SIGNATURE_PROFILE.ed25519.signaturePrefix
+      assert.equal(
+        hello.proof.signature.length,
+        prefix.length + SIGNATURE_PROFILE.signatureBytes,
+      )
+      assert.ok(
+        prefix.every((byte, index) => hello.proof.signature[index] === byte),
+      )
+    }
+    assert.ok(
+      urls.every(
+        url =>
+          !url.searchParams.has('secure') && !url.searchParams.has('context'),
+      ),
     )
     assert.deepEqual(errors, [])
     console.log(

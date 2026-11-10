@@ -141,41 +141,51 @@ async fn missing_or_unconfigured_ingress_identities_fail_before_nonce_consumptio
 }
 
 #[tokio::test]
-async fn pure_ed25519_client_and_ed25519ph_server_use_the_shared_proof_abstractions() {
-    let key = signer(3);
-    let mut client = client(&key).await;
-    let (body, mut proof) = split_proof(client.message());
-    proof.signature = key
-        .sign_message(
-            &crate::sign::signing_message(
-                crate::sign::COMMITMENT_SIG_TAG,
-                &proof.commitment,
-                "server.test",
-            )
-            .unwrap(),
-        )
-        .await
-        .unwrap();
+async fn generated_client_and_server_handshake_proofs_use_pure_ed25519() {
+    let client = client(&signer(3)).await;
     assert!(matches!(
-        proof.signature,
+        split_proof(client.message()).1.signature,
         crate::sign::AnySignature::Ed25519(_)
     ));
-    client.message = with_proof(body, &proof);
     let (_, response, mut server) = accept_rpc(&signer(4), client.message()).await;
     assert!(matches!(
-        decode(&response, &["server.test".into()])
-            .await
-            .unwrap()
-            .1
-            .signature,
-        crate::sign::AnySignature::Ed25519ph(_)
+        split_proof(&response).1.signature,
+        crate::sign::AnySignature::Ed25519(_)
     ));
     let (_, mut client) = client.finish(&response).await.unwrap();
     let mut plain = [0; 64];
     let n = server
-        .read_message(&encrypted(&mut client, b"independent schemes"), &mut plain)
+        .read_message(&encrypted(&mut client, b"pure Ed25519"), &mut plain)
         .unwrap();
-    assert_eq!(&plain[..n], b"independent schemes");
+    assert_eq!(&plain[..n], b"pure Ed25519");
+}
+
+#[tokio::test]
+async fn compatibility_ed25519ph_proofs_remain_accepted_in_both_roles() {
+    let client_key = signer(3);
+    let server_key = signer(4);
+    let mut client = client(&client_key).await;
+    let (body, mut proof) = split_proof(client.message());
+    proof.signature = client_key
+        .sign_commitment(&proof.commitment, "server.test")
+        .await
+        .unwrap();
+    assert!(matches!(
+        proof.signature,
+        crate::sign::AnySignature::Ed25519ph(_)
+    ));
+    client.message = with_proof(body, &proof);
+    let (_, response, _) = accept_rpc(&server_key, client.message()).await;
+    let (body, mut proof) = split_proof(&response);
+    proof.signature = server_key
+        .sign_commitment(&proof.commitment, "server.test")
+        .await
+        .unwrap();
+    assert!(matches!(
+        proof.signature,
+        crate::sign::AnySignature::Ed25519ph(_)
+    ));
+    client.finish(&with_proof(body, &proof)).await.unwrap();
 }
 
 #[tokio::test]

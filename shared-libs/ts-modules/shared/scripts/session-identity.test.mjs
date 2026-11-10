@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { auth } from '@start9labs/start-core'
+import { decodeFirst, encode } from '@start9labs/start-core/auth/cbor'
 import './typescript-loader.mjs'
 
 const { prepareSession } = await import('../src/services/session-identity.ts')
@@ -16,9 +17,10 @@ const fixture = JSON.parse(
 const bytes = value => new Uint8Array(Buffer.from(value, 'base64'))
 const client = bytes(fixture.client)
 const server = bytes(fixture.server)
-const envelope = JSON.parse(new TextDecoder().decode(client))
-const payload = bytes(envelope.payload)
+const payload = client.subarray(0, decodeFirst(client).length)
+const proof = client.subarray(payload.length)
 const encoder = new TextEncoder()
+const concatenate = (...parts) => new Uint8Array(Buffer.concat(parts))
 
 async function frozenClient(context) {
   const secret = Uint8Array.from(Buffer.from(fixture.clientPrivate, 'hex'))
@@ -48,11 +50,19 @@ async function frozenClient(context) {
       sign: async (name, body) => {
         assert.equal(name, fixture.context)
         assert.deepEqual(body, payload)
-        return envelope.proof
+        return proof
       },
     },
     fixture.context,
     'rpc',
+  )
+}
+
+async function signedResponse(body) {
+  const key = await auth.generateAuthKey()
+  return concatenate(
+    body,
+    await auth.requestSigner(key).sign(fixture.context, body),
   )
 }
 
@@ -70,22 +80,26 @@ test('opaque fresh initiation signs once per connection and binds exact GUID int
   assert.ok(
     exported.mock.calls.every(call => call.arguments[1].type === 'public'),
   )
-  const decode = prepared => {
-    const wire = JSON.parse(new TextDecoder().decode(prepared.message))
-    const payload = bytes(wire.payload)
+  const decode = async prepared => {
+    const body = decodeFirst(prepared.message)
+    const proof = prepared.message.subarray(body.length)
     assert.equal(
-      auth.verifyRequestProof(wire.proof, fixture.context, payload),
+      await auth.verifyRequestProof(
+        proof,
+        fixture.context,
+        prepared.message.subarray(0, body.length),
+      ),
       auth.normalizeDer64(key.pubkeyPem),
     )
     return {
-      hello: JSON.parse(new TextDecoder().decode(payload)).hello,
-      nonce: new URLSearchParams(wire.proof).get('nonce'),
+      hello: body.value.hello,
+      nonce: decodeFirst(proof).value.commitment.nonce,
     }
   }
-  const a = decode(one),
-    b = decode(two)
-  assert.notEqual(a.hello.ephemeral, b.hello.ephemeral)
-  assert.notEqual(a.nonce, b.nonce)
+  const a = await decode(one),
+    b = await decode(two)
+  assert.notDeepEqual(a.hello.ephemeral, b.hello.ephemeral)
+  assert.notEqual(BigInt(a.nonce), BigInt(b.nonce))
   assert.deepEqual(a.hello.target, {
     continuation: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
   })
@@ -110,34 +124,47 @@ test('independent WebCrypto golden matches both directional records and full cap
   await assert.rejects(prepared.finish(server), /already consumed/)
 })
 
-test('admission rejects unknown envelope fields and preserves BOM rejection', async context => {
-  for (const mode of ['unknown', 'bom']) {
+test('admission rejects unknown signed fields and invalid binary shapes', async context => {
+  const signer = auth.requestSigner(await auth.generateAuthKey())
+  for (const mode of ['unknown', 'text', 'array', 'length']) {
     const prepared = await frozenClient(context)
-    const envelope = JSON.parse(new TextDecoder().decode(server))
-    if (mode === 'unknown') envelope.unexpected = true
-    const response = encoder.encode(
-      (mode === 'bom' ? '\uFEFF' : '') + JSON.stringify(envelope),
+    const body = decodeFirst(server).value
+    if (mode === 'unknown') body.hello.unexpected = true
+    if (mode === 'text') body.hello.ephemeral = fixture.serverPublic
+    if (mode === 'array') body.hello.ephemeral = [...body.hello.ephemeral]
+    if (mode === 'length')
+      body.hello.ephemeral = body.hello.ephemeral.subarray(1)
+    const captured = encode(body)
+    await assert.rejects(
+      prepared.finish(
+        concatenate(captured, await signer.sign(fixture.context, captured)),
+      ),
     )
+    context.mock.restoreAll()
+  }
+})
+
+test('admission requires exactly two CBOR objects and rejects the JSON predecessor', async context => {
+  for (const response of [
+    concatenate(server, encode(null)),
+    server.subarray(0, server.length - 1),
+    encoder.encode(
+      JSON.stringify({ payload: fixture.server, proof: 'unused' }),
+    ),
+    concatenate(encoder.encode('\uFEFF'), server),
+  ]) {
+    const prepared = await frozenClient(context)
     await assert.rejects(prepared.finish(response))
     context.mock.restoreAll()
   }
 })
 
-test('native unpadded envelope Base64 is accepted without changing captured transcript bytes', async context => {
+test('a valid signed response for another captured client hello cannot admit this connection', async context => {
+  const body = decodeFirst(server.slice()).value
+  body.hello.clientHello[0] ^= 1
+  const response = await signedResponse(encode(body))
   const prepared = await frozenClient(context)
-  const envelope = JSON.parse(new TextDecoder().decode(server))
-  envelope.payload = envelope.payload.replace(/=+$/, '')
-  const admitted = await prepared.finish(
-    encoder.encode(JSON.stringify(envelope)),
-  )
-  assert.equal(admitted.peer, fixture.serverIdentity)
-})
-
-test('a signed response for another captured client hello cannot admit this connection', async context => {
-  const prepared = await frozenClient(context)
-  const changed = JSON.parse(new TextDecoder().decode(server))
-  changed.proof = envelope.proof
-  await assert.rejects(prepared.finish(encoder.encode(JSON.stringify(changed))))
+  await assert.rejects(prepared.finish(response), /does not bind/)
 })
 
 test('tamper, replay and reflected directional ciphertext fail authentication', async context => {

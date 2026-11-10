@@ -164,7 +164,7 @@ test('plaintext downgrade never opens admission or exposes RPC data', async () =
   assert.ok(raw.closed)
   assert.ok(raw.writes.every(value => typeof value !== 'string'))
   const url = new URL(raw.url)
-  assert.equal(url.searchParams.get('secure'), '1')
+  assert.equal(url.searchParams.has('secure'), false)
   assert.equal(url.searchParams.has('context'), false)
   assert.equal(url.searchParams.get('existing'), 'kept')
 })
