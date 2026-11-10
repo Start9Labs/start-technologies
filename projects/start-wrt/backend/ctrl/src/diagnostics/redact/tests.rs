@@ -140,6 +140,18 @@ fn a_typed_login_name_is_removed_unless_it_is_root() {
 }
 
 #[test]
+fn login_names_with_spaces_are_removed_without_live_config() {
+    let out = plain().line(
+        "luci: failed login on / for old password with spaces from 192.168.0.2",
+        false,
+    );
+    assert_eq!(
+        out,
+        "luci: failed login on / for [redacted] from 192.168.0.2"
+    );
+}
+
+#[test]
 fn credentials_in_urls_are_removed() {
     let redactor = plain();
     let out = redactor.line(
@@ -154,6 +166,17 @@ fn credentials_in_urls_are_removed() {
         redactor.line("for url (http://127.0.0.1:8080/cgi-bin/luci/;stok=0a1b2c/admin?token=xyz&page=2)", false),
         "for url (http://127.0.0.1:8080/cgi-bin/luci/;stok=[redacted]/admin?token=[redacted]&page=2)"
     );
+}
+
+#[test]
+fn query_secrets_include_slashes_and_semicolons() {
+    for secret in ["old/token/secret", "old;token;secret"] {
+        let out = plain().line(
+            &format!("request https://example.org/?token={secret}&page=2"),
+            false,
+        );
+        assert_eq!(out, "request https://example.org/?token=[redacted]&page=2");
+    }
 }
 
 #[test]
@@ -337,6 +360,68 @@ fn activity_names_become_profiles_or_tokens() {
 
     let syslog = "ddns-scripts[3]: wan: retry for 'Kids'";
     assert_eq!(redactor.line(syslog, false), syslog);
+}
+
+#[test]
+fn vpn_source_profiles_are_replaced() {
+    let out = configured().line(
+        "auth.login OK Logged in from 10.0.0.2 (Kids profile, VPN) using curl/8.1",
+        true,
+    );
+    assert_eq!(
+        out,
+        "auth.login OK Logged in from 10.0.0.2 (<profile-voorv> profile, VPN) using curl/8.1"
+    );
+}
+
+#[test]
+fn parenthesized_profile_names_are_replaced() {
+    let redactor = redactor(
+        &[(
+            "startwrt",
+            "config profile 'work'\n\toption fullname 'Alice (work)'\n\toption interface 'work'\n",
+        )],
+        &[],
+    );
+    assert_eq!(
+        redactor.line("Logged in from 10.0.0.2 (Alice (work) profile, VPN)", true),
+        "Logged in from 10.0.0.2 (<profile-work> profile, VPN)"
+    );
+}
+
+#[test]
+fn token_like_names_are_private() {
+    let redactor = configured();
+    assert_eq!(
+        redactor.line("Added peer '<Alice phone>'", true),
+        format!("Added peer '{}'", redactor.name("<Alice phone>"))
+    );
+    assert_eq!(
+        redactor.line("Changed domain 'home.example.org'", true),
+        format!("Changed domain '{}'", redactor.domain("home.example.org"))
+    );
+}
+
+#[test]
+fn possessive_names_are_replaced_as_whole_values() {
+    let redactor = redactor(
+        &[(
+            "startwrt",
+            "config profile 'kids'\n\toption fullname \"Kid's devices\"\n\toption interface 'kids'\n",
+        )],
+        &[],
+    );
+    let out = redactor.line(
+        "Added peer 'Alice's personal phone' to inbound VPN for profile 'Kid's devices'",
+        true,
+    );
+    assert_eq!(
+        out,
+        format!(
+            "Added peer '{}' to inbound VPN for profile '<profile-kids>'",
+            redactor.name("Alice's personal phone")
+        )
+    );
 }
 
 #[test]

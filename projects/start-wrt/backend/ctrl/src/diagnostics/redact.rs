@@ -74,15 +74,22 @@ static INVALID_PSK: LazyLock<Regex> = LazyLock::new(|| compile(r"(Invalid PSK ')
 static WG_BAD_KEY: LazyLock<Regex> =
     LazyLock::new(|| compile(r"(Key is not the correct length or format: `).*(')"));
 static LUCI_LOGIN: LazyLock<Regex> =
-    LazyLock::new(|| compile(r"(luci: (?:accepted|failed) login on \S* for )(\S+)( from)"));
+    LazyLock::new(|| compile(r"(luci: (?:accepted|failed) login on \S* for )(.*)( from)"));
 static CONSOLE_LOGIN: LazyLock<Regex> =
     LazyLock::new(|| compile(r"(invalid password for ')(.*)(' on)"));
 static URL_USERINFO: LazyLock<Regex> =
     LazyLock::new(|| compile(r#"([A-Za-z][A-Za-z0-9+.-]*://)[^/\s@'"]+@"#));
+const URL_SECRET_OPTIONS: &str = "password|passwd|pass|pwd|token|key|secret|apikey|api_key|stok|auth";
+
 static URL_SECRET_PARAM: LazyLock<Regex> = LazyLock::new(|| {
-    compile(
-        r##"(?i)([?&;](?:password|passwd|pass|pwd|token|key|secret|apikey|api_key|stok|auth)=)[^&\s'"#;/]*"##,
-    )
+    compile(&format!(
+        r##"(?i)([?&](?:{URL_SECRET_OPTIONS})=)[^&\s'"#]*"##,
+    ))
+});
+static URL_PATH_TOKEN: LazyLock<Regex> = LazyLock::new(|| {
+    compile(&format!(
+        r##"(?i)(;(?:{URL_SECRET_OPTIONS})=)[^/&\s'"?#;]*"##,
+    ))
 });
 
 static SSH_FINGERPRINT: LazyLock<Regex> = LazyLock::new(|| compile(r"SHA256:[A-Za-z0-9+/]{43}=?"));
@@ -116,9 +123,10 @@ static DOMAIN_NAMES: LazyLock<[Regex; 5]> = LazyLock::new(|| {
         compile(r"(: `)([^`'\[\]]+?)(:\d+'\. Trying again)"),
     ]
 });
-/// An apostrophe inside a word opens no quote.
-static QUOTED: LazyLock<Regex> = LazyLock::new(|| compile(r"(?:^|\W)'([^']+)'"));
-static PROFILE_NETWORK: LazyLock<Regex> = LazyLock::new(|| compile(r"\(([^()]+) profile\)"));
+/// An apostrophe inside a word opens or closes no quote.
+static QUOTED: LazyLock<Regex> = LazyLock::new(|| compile(r"(?:^|\W)'((?:[^']|\b'\b)+)'"));
+static PROFILE_NETWORK: LazyLock<Regex> =
+    LazyLock::new(|| compile(r"\((.+?) profile(, VPN)?\)"));
 
 /// Values read from the router's configuration.
 #[derive(Default)]
@@ -333,6 +341,9 @@ impl Redactor {
     pub fn line(&self, line: &str, activity: bool) -> String {
         let mut s = line.to_owned();
         update(&mut s, |s| self.secrets(s));
+        if activity {
+            update(&mut s, |s| self.activity_names(s));
+        }
         if let Some((re, forms)) = &self.users {
             update(&mut s, |s| {
                 replace_with(re, s, |s, r| {
@@ -351,9 +362,6 @@ impl Redactor {
                     .then(|| self.domain(&s[r]))
                 })
             });
-        }
-        if activity {
-            update(&mut s, |s| self.activity_names(s));
         }
         update(&mut s, |s| {
             DHCP_NAME.replace_all(s, |c: &Captures| format!("{}{}", &c[1], self.host(&c[2])))
@@ -518,34 +526,28 @@ impl Redactor {
         replace_cow(&mut s, |s| {
             URL_USERINFO.replace_all(s, format!("${{1}}{REDACTED}@"))
         });
-        replace_cow(&mut s, |s| {
-            URL_SECRET_PARAM.replace_all(s, format!("${{1}}{REDACTED}"))
-        });
+        for re in [&*URL_SECRET_PARAM, &*URL_PATH_TOKEN] {
+            replace_cow(&mut s, |s| re.replace_all(s, format!("${{1}}{REDACTED}")));
+        }
         s
     }
 
-    /// Profile names become their interface; other quoted names become tokens.
+    /// Quoted values remain private even when they resemble rendered tokens.
     fn activity_names<'h>(&self, s: &'h str) -> Cow<'h, str> {
         let mut s = Cow::Borrowed(s);
-        replace_cow(&mut s, |s| {
-            PROFILE_NETWORK.replace_all(s, |c: &Captures| {
-                format!("({} profile)", self.profile_or_name(&c[1]))
-            })
-        });
         replace_cow(&mut s, |s| {
             let mut out = String::new();
             let mut last = 0;
             for value in QUOTED.captures_iter(s).filter_map(|c| c.get(1)) {
                 let open = value.start() - 1;
-                if value.as_str().starts_with('<')
-                    || QUOTED_SETTINGS
-                        .iter()
-                        .any(|context| s[..open].ends_with(context))
+                if QUOTED_SETTINGS
+                    .iter()
+                    .any(|context| s[..open].ends_with(context))
                 {
                     continue;
                 }
                 out.push_str(&s[last..value.start()]);
-                out.push_str(&self.profile_or_name(value.as_str()));
+                out.push_str(&self.activity_name(value.as_str()));
                 last = value.end();
             }
             if last == 0 {
@@ -554,14 +556,34 @@ impl Redactor {
             out.push_str(&s[last..]);
             Cow::Owned(out)
         });
+        replace_cow(&mut s, |s| {
+            PROFILE_NETWORK.replace_all(s, |c: &Captures| {
+                format!(
+                    "({} profile{})",
+                    self.activity_name(&c[1]),
+                    c.get(2).map_or("", |m| m.as_str())
+                )
+            })
+        });
         s
     }
 
-    fn profile_or_name(&self, value: &str) -> String {
-        match self.profiles.get(value) {
-            Some(interface) => format!("<profile-{interface}>"),
-            None => self.name(value),
+    fn activity_name(&self, value: &str) -> String {
+        if let Some(interface) = self.profiles.get(value) {
+            return format!("<profile-{interface}>");
         }
+        if let Some((_, forms)) = &self.users {
+            if let Some(user) = forms.get(value) {
+                return self.user(user);
+            }
+        }
+        if self.domains.as_ref().is_some_and(|re| {
+            re.find(value)
+                .is_some_and(|m| m.start() == 0 && m.end() == value.len())
+        }) {
+            return self.domain(value);
+        }
+        self.name(value)
     }
 
     /// Colon-separated hex longer than a MAC: DUIDs, client IDs, MD5 fingerprints.
