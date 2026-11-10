@@ -159,7 +159,7 @@ pub async fn remove_usb_port<C: CtrlContext>(
             );
             if ctx.effectful() {
                 // netifd would give a later port of the same name this one's VLAN.
-                tokio::spawn(reload_bridge_ports());
+                reload_bridge_ports().await;
             }
         }
         Err(e) => crate::activity::log(
