@@ -111,23 +111,28 @@ impl Host {
             )
     }
 }
-/// Public IPv4 history survives reconnect until WAN discovery supplies a replacement.
-/// GUA history survives while the gateway has no `ip_info`.
+/// Keeps a gateway's previous public IPv4 rows until it reports a WAN IP, and its
+/// GUA rows until it reports a GUA.
 fn carry_forward(
     available: &mut BTreeSet<HostnameInfo>,
     previous: &BTreeSet<HostnameInfo>,
     gateway: &GatewayId,
     ip_info: Option<&IpInfo>,
 ) {
+    let has_wan_ip = ip_info.is_some_and(|ip| ip.wan_ip.is_some());
+    let has_gua = ip_info.is_some_and(|ip| {
+        ip.subnets.iter().any(|s| match s.addr() {
+            IpAddr::V6(v6) => !crate::net::utils::ipv6_is_local(v6),
+            IpAddr::V4(_) => false,
+        })
+    });
     available.extend(
         previous
             .iter()
             .filter(|h| match &h.metadata {
-                HostnameMetadata::Ipv4 { gateway: g } => {
-                    g == gateway && h.public && ip_info.is_none_or(|ip| ip.wan_ip.is_none())
-                }
+                HostnameMetadata::Ipv4 { gateway: g } => g == gateway && h.public && !has_wan_ip,
                 HostnameMetadata::Ipv6 { gateway: g, .. } => {
-                    g == gateway && h.gua().is_some() && ip_info.is_none()
+                    g == gateway && h.gua().is_some() && !has_gua
                 }
                 _ => false,
             })
@@ -1469,6 +1474,67 @@ mod tests {
         assert_eq!(wan_of(&host, 5223), ["203.0.113.9:5223"]);
         assert!(domain_on(&host), "the domain's group stays on");
         assert_eq!(forward_srcs(&host), ["203.0.113.9:5223"]);
+    }
+
+    #[test]
+    fn a_gua_opt_in_survives_a_link_drop_that_restores_ipv4_first() {
+        let dual_stack = |gua: Option<&str>| {
+            let mut info = wireguard(GatewayType::InboundOutbound);
+            let ip_info = Arc::make_mut(info.ip_info.as_mut().unwrap());
+            ip_info.wan_ip = None;
+            ip_info.subnets = ["192.0.2.2/24"]
+                .into_iter()
+                .chain(gua)
+                .map(|s| s.parse::<IpNet>().unwrap())
+                .collect();
+            info
+        };
+        let mut gateways: OrdMap<GatewayId, NetworkInterfaceInfo> =
+            [(gw("wg-in"), dual_stack(Some("2001:db8:1::5/64")))]
+                .into_iter()
+                .collect();
+        let mut ports = AvailablePorts::new();
+        let mut host = exported_host(&mut ports, 9735);
+
+        converge(&mut host, &gateways, &ports);
+        host.as_bindings_mut()
+            .mutate(|b| {
+                let old: std::net::SocketAddrV6 = "[2001:db8:1::5]:9735".parse().unwrap();
+                let addresses = &mut b.get_mut(&9735).unwrap().addresses;
+                addresses.enabled.insert(old.into());
+                addresses.gua_wan.insert(old);
+                Ok(())
+            })
+            .unwrap();
+        converge(&mut host, &gateways, &ports);
+        assert_eq!(wan_of(&host, 9735), ["[2001:db8:1::5]:9735"]);
+
+        renumber(&mut host, &mut gateways, &ports, |info| info.ip_info = None);
+        renumber(&mut host, &mut gateways, &ports, |info| {
+            *info = dual_stack(None)
+        });
+        assert!(
+            host.de().unwrap().bindings[&9735]
+                .addresses
+                .available
+                .iter()
+                .any(|a| a.public && &*a.hostname == "2001:db8:1::5"),
+            "the GUA row survives until the gateway reports a GUA"
+        );
+
+        renumber(&mut host, &mut gateways, &ports, |info| {
+            *info = dual_stack(Some("2001:db8:2::5/64"))
+        });
+        let addresses = host.de().unwrap().bindings[&9735].addresses.clone();
+        assert_eq!(
+            addresses.gua_wan,
+            ["[2001:db8:2::5]:9735"
+                .parse::<std::net::SocketAddrV6>()
+                .unwrap()]
+            .into_iter()
+            .collect()
+        );
+        assert_eq!(wan_of(&host, 9735), ["[2001:db8:2::5]:9735"]);
     }
 
     fn mdns_rows(host: &Model<Host>, port: u16) -> Vec<BTreeSet<GatewayId>> {
