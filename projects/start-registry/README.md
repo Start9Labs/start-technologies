@@ -8,6 +8,7 @@ This directory is a thin product wrapper inside the `start-technologies` monorep
 
 - Serves a **package index** (services, versions, dependency ranges, assets) and an **OS index** (StartOS versions and downloadable images).
 - Hosts `.s9pk` and OS image **assets** with content-addressed (Blake3) commitments.
+- Redirects visitors at `/` to `https://marketplace.start9.com/` with the registry selected.
 - Exposes a JSON-RPC API over HTTP, WebSocket, and a REST continuation channel.
 - Tracks **admins** and package **signers**, verifies signatures on uploaded content, and proposes administrator-selected signers for Marketplace trust when users connect.
 - Records anonymous **metrics** (downloads / users) for admin reporting.
@@ -81,8 +82,9 @@ Disabled registries refuse `/os/security` upgrades with HTTP 403 and create no s
 Server state lives in `<datadir>/registry.db` (PatchDB) plus a SQLite metrics database and hosted asset files.
 
 > [!NOTE]
-> **Non-StartOS deployments only:** A separately managed reverse proxy must forward `/rpc/`,
-> `/ws/rpc/`, `/rest/rpc/`, `/icons/`, and `/os/security`. The WebSocket routes also need HTTP/1.1 upgrade forwarding and a
+> **Non-StartOS deployments only:** A separately managed reverse proxy must forward `/`, `/rpc/`,
+> `/ws/rpc/`, `/rest/rpc/`, `/icons/`, and `/os/security`. Preserve the public `Host` header and set
+> `X-Forwarded-Proto` to the public scheme (`http` or `https`) for the root redirect. The WebSocket routes also need HTTP/1.1 upgrade forwarding and a
 > long-lived idle timeout. StartOS-hosted registries expose these routes through their exported
 > `protocol: 'http'` interface automatically.
 

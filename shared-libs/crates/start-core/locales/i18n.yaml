@@ -3169,6 +3169,20 @@ service.mod.deleting-task-action-no-longer-exists:
   pl_PL: "Usuwanie zadania %{id}, ponieważ akcja już nie istnieje"
 
 # service/action.rs
+service.action-files.invalid-transfer:
+  en_US: "Invalid or expired action file transfer"
+  de_DE: "Ungültige oder abgelaufene Dateiübertragung einer Aktion"
+  es_ES: "Transferencia de archivo de acción no válida o caducada"
+  fr_FR: "Transfert de fichier d’action invalide ou expiré"
+  pl_PL: "Nieprawidłowy lub wygasły transfer pliku akcji"
+
+service.action-files.size-limit:
+  en_US: "The uploaded file exceeds the maximum size of %{max} bytes"
+  de_DE: "Die hochgeladene Datei überschreitet die maximale Größe von %{max} Bytes"
+  es_ES: "El archivo cargado supera el tamaño máximo de %{max} bytes"
+  fr_FR: "Le fichier envoyé dépasse la taille maximale de %{max} octets"
+  pl_PL: "Przesłany plik przekracza maksymalny rozmiar %{max} bajtów"
+
 service.action.action-request-invalid-state:
   en_US: "action request exists in an invalid state %{task}"
   de_DE: "Aktionsanfrage existiert in ungültigem Zustand %{task}"
@@ -4378,11 +4392,11 @@ help.arg.format-label:
   pl_PL: "Etykieta systemu plików o długości najwyżej 255 bajtów (domyślnie: StartOS Backups)"
 
 help.arg.from-registry-url:
-  en_US: "Source registry URL to promote from"
-  de_DE: "Quell-Registry-URL zum Heraufstufen"
-  es_ES: "URL del registro de origen para promover"
-  fr_FR: "URL du registre source pour la promotion"
-  pl_PL: "URL rejestru źródłowego do promowania"
+  en_US: "Source registry URL or profile name to promote from"
+  de_DE: "Quell-Registry-URL oder Profilname zum Heraufstufen"
+  es_ES: "URL o nombre de perfil del registro de origen para promover"
+  fr_FR: "URL ou nom de profil du registre source pour la promotion"
+  pl_PL: "URL lub nazwa profilu rejestru źródłowego do promowania"
 
 help.arg.host-url:
   en_US: "URL of the StartOS server"
@@ -4974,11 +4988,11 @@ help.arg.target-version-range:
   pl_PL: "Ograniczenie zakresu wersji docelowej"
 
 help.arg.to-registry-url:
-  en_US: "Destination registry URL to promote to"
-  de_DE: "Ziel-Registry-URL zum Heraufstufen"
-  es_ES: "URL del registro de destino para promover"
-  fr_FR: "URL du registre de destination pour la promotion"
-  pl_PL: "URL rejestru docelowego do promowania"
+  en_US: "Destination registry URL or profile name to promote to"
+  de_DE: "Ziel-Registry-URL oder Profilname zum Heraufstufen"
+  es_ES: "URL o nombre de perfil del registro de destino para promover"
+  fr_FR: "URL ou nom de profil du registre de destination pour la promotion"
+  pl_PL: "URL lub nazwa profilu rejestru docelowego do promowania"
 
 help.arg.token-name:
   en_US: "Name shown for the token in the session list"

@@ -12,7 +12,9 @@ use uciedit::openwrt::{
     NetworkRoute6, NetworkRule, NetworkRule6, NetworkVlanPort, NetworkVlanPortTagging,
     ProfileDnsmasq, WifiStation, WifiVlan,
 };
-use uciedit::{dump_all, parse_all, Arena, Configs, Line, LineComment, Token, TypedSection};
+use uciedit::{
+    dump_all, parse_all, Arena, Configs, Line, LineComment, Section, Token, TypedSection,
+};
 
 use crate::dns::{self, DnsServer};
 use crate::ethernet::find_lan_bridge;
@@ -108,7 +110,10 @@ pub fn profiles<C: CtrlContext>() -> ParentHandler<C> {
             "set",
             from_fn_async_local(set::<C>).with_display_serializable(),
         )
-        .subcommand("delete", from_fn_async_local(delete::<C>).no_display())
+        .subcommand(
+            "delete",
+            from_fn_async_local(delete::<C>).with_display_serializable(),
+        )
         .subcommand(
             "list",
             from_fn_async_local(list::<C>).with_display_serializable(),
@@ -172,6 +177,45 @@ pub struct ProfileIdOpt {
     pub vlan_tag: Option<u16>,
 }
 rpc_toolkit::reflect_ts!(ProfileIdOpt);
+
+/// `profiles.delete` request. With `preview`, nothing is deleted.
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
+pub struct ProfileDeleteRequest {
+    #[serde(flatten)]
+    #[clap(flatten)]
+    pub id: ProfileIdOpt,
+    #[serde(default)]
+    #[clap(long)]
+    pub preview: bool,
+}
+rpc_toolkit::reflect_ts!(ProfileDeleteRequest);
+
+/// The reservations and published ports deleted with the profile.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, visit_rs::VisitFields)]
+pub struct ProfileDeleteResult {
+    pub reservations: Vec<DeletedReservation>,
+    pub published_ports: Vec<crate::published_ports::DeletedPublishedPort>,
+}
+rpc_toolkit::reflect_ts!(ProfileDeleteResult);
+
+#[derive(Debug, Clone, Deserialize, Serialize, visit_rs::VisitFields)]
+pub struct DeletedReservation {
+    pub mac: String,
+    pub name: Option<String>,
+    pub ipv4: String,
+}
+rpc_toolkit::reflect_ts!(DeletedReservation);
+
+impl ProfileDeleteResult {
+    fn name_devices(&mut self, names: &HashMap<String, String>) {
+        for reservation in &mut self.reservations {
+            reservation.name = names.get(&reservation.mac).cloned();
+        }
+        for port in &mut self.published_ports {
+            port.name = names.get(&port.mac).cloned();
+        }
+    }
+}
 
 impl From<ProfileId> for ProfileIdOpt {
     fn from(id: ProfileId) -> Self {
@@ -427,7 +471,7 @@ pub(crate) fn rewrite_all_dns_forwarding(cfgs: &mut Configs) -> Result<(), Error
                         .iter()
                         .find_map(|s| {
                             if s.name().as_deref() == Some(interface) {
-                                s.get::<NetworkInterface>().ok().and_then(|i| i.ipaddr)
+                                s.get::<NetworkInterface>().ok().and_then(|i| i.ipv4())
                             } else {
                                 None
                             }
@@ -515,32 +559,21 @@ fn dns_forwarding_snapshot(cfgs: &Configs) -> [Vec<String>; 2] {
 /// Rewrite the DNS-Override DNAT redirect rule for a single profile.
 /// Adds or removes the redirect based on whether the profile needs DNS hijacking.
 fn rewrite_dns_redirect(cfgs: &mut Configs, profile: &Profile) -> Result<(), Error> {
-    // Find this profile's firewall zone name
-    let zone_name = cfgs["firewall"]
-        .sections
-        .iter()
-        .find_map(|s| {
-            let zone = s.get::<FirewallZone>().ok()?;
-            if zone.network.iter().any(|n| n == &profile.id.interface) {
-                Some(zone.name.clone())
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| format!("vlan_{}", profile.id.interface));
+    let zone_name = find_zone_for_interface(cfgs, &profile.id.interface);
+    reconcile_dns_redirect(cfgs, profile, zone_name)
+}
 
-    // Remove existing DNS-Override redirect for this profile
-    cfgs["firewall"].sections.retain(|section| {
-        let Ok(redir) = section.get::<FirewallRedirect>() else {
-            return true;
-        };
-        !(redir.src == zone_name && redir.name.contains("DNS-Override"))
-    });
-
-    // Add redirect if this profile needs DNS hijacking
+fn reconcile_dns_redirect(
+    cfgs: &mut Configs,
+    profile: &Profile,
+    zone_name: String,
+) -> Result<(), Error> {
+    let name = owned_name(&profile.id.interface, "dns_override");
+    let mut desired = Vec::new();
     if profile_dns(cfgs, profile).redirects() {
-        cfgs["firewall"].append(
-            &FirewallRedirect {
+        desired.push((
+            name.clone(),
+            FirewallRedirect {
                 name: format!("DNS-Override-{}", profile.id.fullname.replace(" ", "-"),),
                 src: zone_name,
                 proto: vec!["tcp".into(), "udp".into()],
@@ -550,8 +583,94 @@ fn rewrite_dns_redirect(cfgs: &mut Configs, profile: &Profile) -> Result<(), Err
                 target: "DNAT".into(),
                 ..Default::default()
             },
-            None,
-        )?;
+        ));
+    }
+    reconcile_owned(&mut cfgs["firewall"], &name, &desired)
+}
+
+/// Every firewall section a profile generates is named with this prefix; a
+/// profile save leaves sections without it in place.
+fn owned_prefix(interface: &str) -> String {
+    format!("profile_{interface}_")
+}
+
+fn owned_name(interface: &str, role: &str) -> String {
+    format!("{}{role}", owned_prefix(interface))
+}
+
+fn zone_of<'z>(
+    all_zones: &'z BTreeMap<String, String>,
+    interface: &str,
+) -> Result<&'z String, Error> {
+    all_zones.get(interface).ok_or_else(|| {
+        Error::new(
+            eyre!("missing firewall zone for interface: {interface}"),
+            ErrorKind::MissingFirewallZone,
+        )
+    })
+}
+
+fn lan_forwarding_name(interface: &str, dest_zone: &str) -> String {
+    let dest: String = dest_zone
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    owned_name(interface, &format!("to_{dest}"))
+}
+
+fn upsert_named<'a, T: TypedSection<'a>>(
+    config: &mut uciedit::Config<'a>,
+    name: &str,
+    value: &T,
+) -> Result<(), Error> {
+    match config
+        .sections
+        .iter_mut()
+        .find(|s| T::is_type(&s.ty()) && s.name().as_deref() == Some(name))
+    {
+        Some(section) => section.set(value)?,
+        None => config.append(value, Some(name))?,
+    }
+    Ok(())
+}
+
+/// Makes the sections of type `T` named with `prefix` exactly `desired`, in
+/// that order. A kept section stays in place and keeps the options `T` does
+/// not model; a new one joins them, or goes last when there are none.
+fn reconcile_owned<'a, T: TypedSection<'a>>(
+    config: &mut uciedit::Config<'a>,
+    prefix: &str,
+    desired: &[(String, T)],
+) -> Result<(), Error> {
+    let named =
+        |s: &Section<'a>, name: &str| T::is_type(&s.ty()) && s.name().as_deref() == Some(name);
+    let wanted = |s: &Section<'a>| desired.iter().any(|(name, _)| named(s, name));
+    let owned =
+        |s: &Section<'a>| T::is_type(&s.ty()) && s.name().is_some_and(|n| n.starts_with(prefix));
+    let mut cursor = config.sections.iter().position(|s| owned(s) || wanted(s));
+    config.sections.retain(|s| !owned(s) || wanted(s));
+    for (name, value) in desired {
+        let found = config.sections.iter().position(|s| named(s, name));
+        cursor = Some(match (found, cursor) {
+            (Some(index), Some(cursor)) if index < cursor => {
+                let mut section = config.sections.remove(index);
+                section.set(value)?;
+                config.sections.insert(cursor - 1, section);
+                cursor
+            }
+            (Some(index), _) => {
+                config.sections[index].set(value)?;
+                index + 1
+            }
+            (None, Some(cursor)) => {
+                config.insert(cursor, value, Some(name.as_str()))?;
+                cursor + 1
+            }
+            (None, None) => {
+                config.append(value, Some(name.as_str()))?;
+                config.sections.len()
+            }
+        });
     }
     Ok(())
 }
@@ -705,7 +824,7 @@ pub(crate) fn get_config(
                         ErrorKind::CorruptedProfile,
                     ));
                 }
-                if let Some(ip) = iface.ipaddr {
+                if let Some(ip) = iface.ipv4() {
                     wip_profile.gateway_ip = ip;
                 } else {
                     return Err(Error::new(
@@ -747,8 +866,20 @@ pub(crate) fn get_config(
 }
 
 #[instrument(skip_all)]
-pub async fn delete<C: CtrlContext>(ctx: C, id: ProfileIdOpt) -> Result<(), Error> {
+pub async fn delete<C: CtrlContext>(
+    ctx: C,
+    ProfileDeleteRequest { id, preview }: ProfileDeleteRequest,
+) -> Result<ProfileDeleteResult, Error> {
     let name = id.fullname.clone().unwrap_or_default();
+    const CONFIGS: &[&str] = &["startwrt", "network", "firewall", "dhcp", "wireless"];
+
+    if preview {
+        let arena = Arena::new();
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, CONFIGS).await?;
+        let mut deleted = delete_config(ctx.clone(), &mut cfgs, &id)?;
+        deleted.name_devices(&crate::port_control::device_display_names(&cfgs["dhcp"])?);
+        return Ok(deleted);
+    }
 
     // Resolve the profile interface name before the retry loop so we can
     // use it for ifdown after dump_all succeeds (delete_config consumes the query).
@@ -763,22 +894,21 @@ pub async fn delete<C: CtrlContext>(ctx: C, id: ProfileIdOpt) -> Result<(), Erro
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all(
-            ctx.uci_root(),
-            &arena,
-            &["startwrt", "network", "firewall", "dhcp", "wireless"],
-        )
-        .await?;
-        if let Err(e) = delete_config(ctx.clone(), &mut cfgs, &id) {
-            crate::activity::log(
-                "profile",
-                "deleted",
-                false,
-                &format!("Failed to delete profile '{name}'"),
-                Some(&e.to_string()),
-            );
-            return Err(e);
-        }
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, CONFIGS).await?;
+        let mut deleted = match delete_config(ctx.clone(), &mut cfgs, &id) {
+            Ok(deleted) => deleted,
+            Err(e) => {
+                crate::activity::log(
+                    "profile",
+                    "deleted",
+                    false,
+                    &format!("Failed to delete profile '{name}'"),
+                    Some(&e.to_string()),
+                );
+                return Err(e);
+            }
+        };
+        deleted.name_devices(&crate::port_control::device_display_names(&cfgs["dhcp"])?);
         let dump_result = dump_all(ctx.uci_root(), cfgs).await;
         drop(arena);
         match dump_result {
@@ -809,6 +939,7 @@ pub async fn delete<C: CtrlContext>(ctx: C, id: ProfileIdOpt) -> Result<(), Erro
                         tokio::process::Command::new("ifdown").arg(&wg_interface_name),
                     )
                     .await;
+                    crate::published_ports::sync_v6_mac_bind_logged(ctx.uci_root()).await;
                     reload_system_and_wifi().await?;
                 }
                 // Regenerate schedule crontab to remove deleted profile's entries
@@ -830,17 +961,19 @@ pub async fn delete<C: CtrlContext>(ctx: C, id: ProfileIdOpt) -> Result<(), Erro
                     &format!("Deleted profile '{name}'"),
                     None,
                 );
-                return Ok(());
+                return Ok(deleted);
             }
         }
     }
 }
 
+/// Returns the reservations and published ports deleted with the profile,
+/// unnamed.
 fn delete_config(
     ctx: impl CtrlContext,
     cfgs: &mut Configs,
     query: &ProfileIdOpt,
-) -> Result<(), Error> {
+) -> Result<ProfileDeleteResult, Error> {
     let wan_v4 = ctx.wan_ipv4_addrs();
     let lookup = Lookup::parse(ctx, cfgs)?;
     let id = lookup.resolve(query)?.clone();
@@ -852,6 +985,23 @@ fn delete_config(
             ErrorKind::CannotDeleteLanOwner,
         ));
     }
+
+    let subnet = crate::reservations::profile_networks(cfgs, &lookup)
+        .into_iter()
+        .find(|p| p.vlan == id.vlan_tag)
+        .and_then(|p| p.address);
+    let published_ports = crate::published_ports::remove_profile_ports(cfgs, &lookup, &id.fullname);
+    let reservations = match subnet {
+        Some(subnet) => crate::reservations::remove_in_subnet(&mut cfgs["dhcp"], subnet)?,
+        None => Vec::new(),
+    }
+    .into_iter()
+    .map(|(mac, ip)| DeletedReservation {
+        mac,
+        name: None,
+        ipv4: ip.to_string(),
+    })
+    .collect();
 
     // Remove profile and its VPN server metadata from startwrt config
     let wg_interface_name = format!("wg_{}", id.interface);
@@ -1023,7 +1173,10 @@ fn delete_config(
     // redirects outright over the now-unknown name.
     crate::published_ports::sync_hairpin(&mut cfgs["firewall"], &wan_v4)?;
 
-    Ok(())
+    Ok(ProfileDeleteResult {
+        reservations,
+        published_ports,
+    })
 }
 
 #[instrument(skip_all)]
@@ -1414,7 +1567,7 @@ fn get_lan_ip(cfgs: &uciedit::Configs) -> Option<Ipv4Addr> {
     for section in &cfgs["network"].sections {
         if section.name().as_deref() == Some(crate::lan::LAN_INTERFACE) {
             if let Ok(Some(iface)) = section.get_typed::<NetworkInterface>() {
-                return iface.ipaddr;
+                return iface.ipv4();
             }
         }
     }
@@ -1475,7 +1628,7 @@ pub(crate) fn guard_subnet_collision(
             .iter()
             .find(|s| s.name().as_deref() == Some(iface))
             .and_then(|s| s.get_typed::<NetworkInterface>().ok().flatten())
-            .and_then(|i| i.ipaddr)
+            .and_then(|i| i.ipv4())
     });
     if let Some(cur) = current_ip {
         let c = cur.octets();
@@ -1495,7 +1648,7 @@ pub(crate) fn guard_subnet_collision(
             .iter()
             .find(|s| s.name().as_deref() == Some(existing.interface.as_str()))
             .and_then(|s| s.get_typed::<NetworkInterface>().ok().flatten())
-            .and_then(|i| i.ipaddr);
+            .and_then(|i| i.ipv4());
         if let Some(ip) = existing_ip {
             let o = ip.octets();
             if o[0] == new[0] && o[1] == new[1] && o[2] == new[2] {
@@ -1608,10 +1761,10 @@ fn set_config<C: CtrlContext>(
             }
             if name == profile.id.interface {
                 if let Some(ref mut old) = old_state {
-                    old.gateway_ip = iface.ipaddr;
+                    old.gateway_ip = iface.ipv4();
                 }
                 iface.proto = InterfaceProto::STATIC;
-                iface.ipaddr = Some(profile.gateway_ip);
+                iface.ipaddr = Some(profile.gateway_ip.into());
                 iface.netmask = Some(Ipv4Addr::new(255, 255, 255, 0));
                 // The admin LAN's prefix delegation is owned by lan::ipv6_set
                 // (the LAN IPv6 page) and uses the user-configured prefix — don't
@@ -1634,7 +1787,7 @@ fn set_config<C: CtrlContext>(
             &NetworkInterface {
                 device: format!("{}.{}", found_bridge, profile.id.vlan_tag),
                 proto: InterfaceProto::STATIC,
-                ipaddr: Some(profile.gateway_ip),
+                ipaddr: Some(profile.gateway_ip.into()),
                 netmask: Some(Ipv4Addr::new(255, 255, 255, 0)),
                 ip6assign: if ipv6 { Some("64".into()) } else { None },
                 ..Default::default()
@@ -1933,7 +2086,7 @@ fn create_config(
             &NetworkInterface {
                 device: format!("{found_bridge}.{vlan_tag}"),
                 proto: InterfaceProto::STATIC,
-                ipaddr: Some(profile.gateway_ip),
+                ipaddr: Some(profile.gateway_ip.into()),
                 netmask: Some(Ipv4Addr::new(255, 255, 255, 0)),
                 ip6assign: if ipv6 { Some("64".into()) } else { None },
                 ..Default::default()
@@ -2103,137 +2256,57 @@ fn rewrite_firewall(
     // on VPN egress without touching wan6.
     let outbound_zone = resolve_outbound_zone(&profile.outbound);
 
-    // Setup forwarding for DNS and DHCP
-    let mut found_dhcp_dns_rule = false;
-    cfgs["firewall"].sections.retain(|section| {
-        let Ok(rule) = section.get::<FirewallRule>() else {
-            return true;
-        };
-        if rule.src == this_zone_name && rule.name.contains("DHCP") && rule.name.contains("DNS") {
-            if remake_zone {
-                return false;
-            } else {
-                found_dhcp_dns_rule = true;
-            }
-        }
-        true
-    });
-    if !found_dhcp_dns_rule {
-        cfgs["firewall"].append(
-            &FirewallRule {
-                name: format!("Allow-DHCP-DNS-{}", profile.id.fullname.replace(" ", "-")),
+    let interface = &profile.id.interface;
+    let fullname = profile.id.fullname.replace(" ", "-");
+
+    // The schedule evaluator re-adds a blackout rule toward the new egress.
+    let schedule_rule = format!("{SCHEDULE_RULE_PREFIX}{interface}");
+    cfgs["firewall"]
+        .sections
+        .retain(|s| s.name().as_deref() != Some(schedule_rule.as_str()));
+
+    let dhcp_dns = owned_name(interface, "dhcp_dns");
+    reconcile_owned(
+        &mut cfgs["firewall"],
+        &dhcp_dns,
+        &[(
+            dhcp_dns.clone(),
+            FirewallRule {
+                name: format!("Allow-DHCP-DNS-{fullname}"),
                 src: this_zone_name.clone(),
                 dest_port: Some("53 67 68".into()),
                 proto: vec!["tcp".into(), "udp".into(), "icmp".into()],
                 target: FirewallTarget::ACCEPT,
                 ..Default::default()
             },
-            None,
-        )?;
-    }
-
-    // Clean up old DNS override redirects for this profile
-    cfgs["firewall"].sections.retain(|section| {
-        let Ok(redir) = section.get::<FirewallRedirect>() else {
-            return true;
-        };
-        !(redir.src == this_zone_name && redir.name.contains("DNS-Override"))
-    });
+        )],
+    )?;
 
     // DNS hijacking: redirect all port 53 traffic to the profile's gateway,
     // where per-profile dnsmasq handles .lan locally and forwards the rest
     // via SmartDNS (for custom/system DNS) or directly (for VPN DNS).
-    if profile_dns(cfgs, profile).redirects() {
-        cfgs["firewall"].append(
-            &FirewallRedirect {
-                name: format!("DNS-Override-{}", profile.id.fullname.replace(" ", "-"),),
+    reconcile_dns_redirect(cfgs, profile, this_zone_name.clone())?;
+
+    let mut forwardings = Vec::new();
+    let lan_zones: BTreeSet<&String> = match &profile.lan_access {
+        LanAccess::All => all_zones
+            .values()
+            .filter(|zone| **zone != this_zone_name)
+            .collect(),
+        LanAccess::SameProfile => BTreeSet::new(),
+        LanAccess::OtherProfiles(profile_ids) => profile_ids
+            .iter()
+            .map(|other| zone_of(&all_zones, &other.interface))
+            .collect::<Result<_, _>>()?,
+    };
+    for dest in lan_zones {
+        forwardings.push((
+            lan_forwarding_name(interface, dest),
+            FirewallForwarding {
                 src: this_zone_name.clone(),
-                proto: vec!["tcp".into(), "udp".into()],
-                src_dport: Some("53".into()),
-                dest_ip: Some(profile.gateway_ip.to_string()),
-                dest_port: Some("53".into()),
-                target: "DNAT".into(),
-                ..Default::default()
+                dest: dest.clone(),
             },
-            None,
-        )?;
-    }
-
-    // Clean up old WAN-access rules for this profile. The dest could be either
-    // "wan" or a previous "vpn_<X>" zone (if the profile's outbound changed),
-    // so match on src + non-DHCP name only. (Schedule `sched_*` rules are
-    // re-applied separately by evaluate_and_apply_schedules after reload.)
-    cfgs["firewall"].sections.retain(|section| {
-        let Ok(rule) = section.get::<FirewallRule>() else {
-            return true;
-        };
-        !(rule.src == this_zone_name && !rule.name.contains("DHCP"))
-    });
-
-    // Setup forwarding for lan access
-    cfgs["firewall"].sections.retain(|section| {
-        let Ok(fwd) = section.get::<FirewallForwarding>() else {
-            return true;
-        };
-        fwd.src != this_zone_name
-    });
-    match &profile.lan_access {
-        LanAccess::All => {
-            for other_zone in all_zones.values() {
-                if other_zone != &this_zone_name {
-                    cfgs["firewall"].append(
-                        &FirewallForwarding {
-                            src: this_zone_name.clone(),
-                            dest: other_zone.clone(),
-                        },
-                        None,
-                    )?;
-                }
-            }
-        }
-        LanAccess::SameProfile => (),
-        LanAccess::OtherProfiles(profile_ids) => {
-            for other_profile in profile_ids {
-                match all_zones.get(&other_profile.interface) {
-                    Some(other_zone) => cfgs["firewall"].append(
-                        &FirewallForwarding {
-                            src: this_zone_name.clone(),
-                            dest: other_zone.clone(),
-                        },
-                        None,
-                    )?,
-                    None => {
-                        return Err(Error::new(
-                            eyre!(
-                                "missing firewall zone for interface: {}",
-                                other_profile.interface
-                            ),
-                            ErrorKind::MissingFirewallZone,
-                        ));
-                    }
-                }
-            }
-        }
-    }
-    for other_profile in wants_access {
-        match all_zones.get(&other_profile.interface) {
-            Some(other_zone) => cfgs["firewall"].append(
-                &FirewallForwarding {
-                    src: other_zone.clone(),
-                    dest: this_zone_name.clone(),
-                },
-                None,
-            )?,
-            None => {
-                return Err(Error::new(
-                    eyre!(
-                        "missing firewall zone for interface: {}",
-                        other_profile.interface
-                    ),
-                    ErrorKind::MissingFirewallZone,
-                ));
-            }
-        }
+        ));
     }
 
     // Setup forwarding for wan access. `outbound_zone` is "wan" for wan-routed
@@ -2248,86 +2321,91 @@ fn rewrite_firewall(
     // dedicated wan-egress zone with masq6=1, mirroring ensure_vpn_outbound_zone).
     // Today v6 internet for non-admin profiles works only via a GUA (larger ISP
     // delegation) or VPN egress (masq6 on the vpn_<X> zone).
-    match &profile.wan_access {
-        WanAccess::All => cfgs["firewall"].append(
-            &FirewallForwarding {
+    if !matches!(profile.wan_access, WanAccess::None) {
+        forwardings.push((
+            owned_name(interface, "wan"),
+            FirewallForwarding {
                 src: this_zone_name.clone(),
                 dest: outbound_zone.clone(),
             },
-            None,
-        )?,
-        WanAccess::None => (),
+        ));
+    }
+    // Forwardings keep their places; fw4 applies them in any order.
+    forwardings.sort_by_cached_key(|(name, _)| {
+        cfgs["firewall"]
+            .sections
+            .iter()
+            .position(|s| s.name().as_deref() == Some(name.as_str()))
+            .unwrap_or(usize::MAX)
+    });
+    reconcile_owned(
+        &mut cfgs["firewall"],
+        &owned_prefix(interface),
+        &forwardings,
+    )?;
+
+    for other_profile in wants_access {
+        let other_zone = zone_of(&all_zones, &other_profile.interface)?;
+        upsert_named(
+            &mut cfgs["firewall"],
+            &lan_forwarding_name(&other_profile.interface, &this_zone_name),
+            &FirewallForwarding {
+                src: other_zone.clone(),
+                dest: this_zone_name.clone(),
+            },
+        )?;
+    }
+
+    let wan_rule = |name: String, dest_ip: Option<&String>, target| FirewallRule {
+        name,
+        src: this_zone_name.clone(),
+        dest: Some(outbound_zone.clone()),
+        dest_ip: dest_ip.cloned(),
+        proto: vec!["all".into()],
+        target,
+        ..Default::default()
+    };
+    let mut wan_rules = Vec::new();
+    match &profile.wan_access {
+        WanAccess::All | WanAccess::None => (),
         WanAccess::Whitelist(destinations) => {
-            // Forwarding needed so rule matching works in the forward chain
-            cfgs["firewall"].append(
-                &FirewallForwarding {
-                    src: this_zone_name.clone(),
-                    dest: outbound_zone.clone(),
-                },
-                None,
-            )?;
-            // ACCEPT rules for each allowed destination
-            for dest_ip in destinations {
-                cfgs["firewall"].append(
-                    &FirewallRule {
-                        name: format!(
-                            "WAN-WL-{}-{}",
-                            profile.id.fullname.replace(" ", "-"),
-                            dest_ip
-                        ),
-                        src: this_zone_name.clone(),
-                        dest: Some(outbound_zone.clone()),
-                        dest_ip: Some(dest_ip.clone()),
-                        proto: vec!["all".into()],
-                        target: FirewallTarget::ACCEPT,
-                        ..Default::default()
-                    },
-                    None,
-                )?;
+            for (index, dest_ip) in destinations.iter().enumerate() {
+                wan_rules.push((
+                    owned_name(interface, &format!("wan_allow_{index}")),
+                    wan_rule(
+                        format!("WAN-WL-{fullname}-{dest_ip}"),
+                        Some(dest_ip),
+                        FirewallTarget::ACCEPT,
+                    ),
+                ));
             }
-            // Catch-all REJECT for everything else
-            cfgs["firewall"].append(
-                &FirewallRule {
-                    name: format!("WAN-WL-{}-reject", profile.id.fullname.replace(" ", "-")),
-                    src: this_zone_name.clone(),
-                    dest: Some(outbound_zone.clone()),
-                    proto: vec!["all".into()],
-                    target: FirewallTarget::REJECT,
-                    ..Default::default()
-                },
-                None,
-            )?;
+            wan_rules.push((
+                owned_name(interface, "wan_reject"),
+                wan_rule(
+                    format!("WAN-WL-{fullname}-reject"),
+                    None,
+                    FirewallTarget::REJECT,
+                ),
+            ));
         }
         WanAccess::Blacklist(destinations) => {
-            // Default allow via forwarding
-            cfgs["firewall"].append(
-                &FirewallForwarding {
-                    src: this_zone_name.clone(),
-                    dest: outbound_zone.clone(),
-                },
-                None,
-            )?;
-            // REJECT rules for each blocked destination
-            for dest_ip in destinations {
-                cfgs["firewall"].append(
-                    &FirewallRule {
-                        name: format!(
-                            "WAN-BL-{}-{}",
-                            profile.id.fullname.replace(" ", "-"),
-                            dest_ip
-                        ),
-                        src: this_zone_name.clone(),
-                        dest: Some(outbound_zone.clone()),
-                        dest_ip: Some(dest_ip.clone()),
-                        proto: vec!["all".into()],
-                        target: FirewallTarget::REJECT,
-                        ..Default::default()
-                    },
-                    None,
-                )?;
+            for (index, dest_ip) in destinations.iter().enumerate() {
+                wan_rules.push((
+                    owned_name(interface, &format!("wan_block_{index}")),
+                    wan_rule(
+                        format!("WAN-BL-{fullname}-{dest_ip}"),
+                        Some(dest_ip),
+                        FirewallTarget::REJECT,
+                    ),
+                ));
             }
         }
     }
+    reconcile_owned(
+        &mut cfgs["firewall"],
+        &owned_name(interface, "wan_"),
+        &wan_rules,
+    )?;
 
     // The forwardings and egress rules just changed; every hairpin
     // projection is derived from them.
@@ -2785,7 +2863,7 @@ pub(crate) fn sync_cross_subnet_routes(cfgs: &mut Configs) -> Result<(), Error> 
             if !iface.device.starts_with("br-lan") {
                 return None;
             }
-            let ip = iface.ipaddr?;
+            let ip = iface.ipv4()?;
             let o = ip.octets();
             Some((name, format!("{}.{}.{}.0/24", o[0], o[1], o[2])))
         })
@@ -3181,13 +3259,18 @@ pub async fn bootstrap_admin_profile(uci_root: &str) -> Result<(), Error> {
     let arena = Arena::new();
     let mut cfgs = parse_all(uci_root, &arena, &["startwrt"]).await?;
 
-    // Check if a LAN owner profile already exists
-    for section in &cfgs["startwrt"].sections {
-        if let Ok(profile) = section.get::<UciProfile>() {
-            if profile.interface == "lan" {
-                return Ok(());
-            }
-        }
+    // Read without the typed reader, which a hand-edited owner would fail.
+    let owns_lan = |section: &uciedit::Section| {
+        section.ty() == UciProfile::TY
+            && (section.name().as_deref() == Some(crate::lan::LAN_INTERFACE)
+                || section.lines.iter().any(|line| {
+                    matches!(line, Line::Option { option, value, .. }
+                        if option.as_str() == "interface"
+                            && value.as_str() == crate::lan::LAN_INTERFACE)
+                }))
+    };
+    if cfgs["startwrt"].sections.iter().any(owns_lan) {
+        return Ok(());
     }
 
     // Register the existing LAN as the Admin profile
@@ -3246,37 +3329,125 @@ pub(crate) fn migrate_lan_access_mode(
     Ok(!migrated.is_empty())
 }
 
-/// Repair IPv6 state that a pre-1.0.2 router could be left in, where the LAN
-/// says IPv6 is off while individual profiles carry on advertising it.
-///
-/// Before the `!profile.owns_lan` guard in [`rewrite_dhcp`], any profile rewrite
-/// re-derived `dhcp.lan.ra` from the *Admin* profile's outbound, and would write
-/// `disabled` there while touching nothing else. The result is a router where
-/// `dhcp.lan.ra = 'disabled'` — which is what `is_ipv6_enabled`, the LAN IPv6
-/// page, and the IPv6 published-port guard all read — but the profile VLANs
-/// still hold `ra 'server'` and their `ip6assign`, so they keep handing out
-/// addresses. The UI says one thing and the network does another, and nothing
-/// converges them: the guard stops the divergence arising, it cannot undo one
-/// that already has.
-///
-/// Detection is deliberately narrow. On current code this combination is
-/// unreachable: [`lan::ipv6_set`](crate::lan::ipv6_set) writes the LAN and every
-/// profile in one transaction, and [`rewrite_dhcp`] derives each profile's `ra`
-/// from [`is_ipv6_enabled`], which reads `dhcp.lan.ra`. Firing only on the
-/// impossible state therefore cannot clobber a legitimate configuration.
-///
-/// The repair reconciles *down*, toward off — the direction every other part of
-/// the system already believes. That makes reality match what the product is
-/// already asserting, and it is fully recoverable: the LAN IPv6 toggle now works
-/// correctly and turns everything back on together. Reconciling *up* would be a
-/// guess at intent that silently resumes advertising on VLANs the user has been
-/// told are quiet.
-///
-/// NOTE: if a per-profile IPv6 toggle is ever introduced (the ULA→GUA redesign
-/// contemplates one), "LAN off, profile on" becomes a legitimate state and this
-/// heal must be revisited or removed — it would otherwise silently fight it.
-///
-/// Idempotent: a no-op, with no reload, once the state is consistent.
+/// Names each unnamed firewall section an earlier release generated for a
+/// profile. Sections it does not recognize stay unnamed.
+pub(crate) fn name_profile_firewall_sections(cfgs: &mut Configs) -> Result<bool, Error> {
+    let static_interfaces: BTreeSet<String> = cfgs["network"]
+        .sections
+        .iter()
+        .filter(|s| {
+            s.get::<NetworkInterface>()
+                .is_ok_and(|iface| iface.proto == InterfaceProto::STATIC)
+        })
+        .filter_map(|s| Some(s.name()?.into_owned()))
+        .collect();
+    let mut static_zones = BTreeMap::new();
+    for zone in cfgs["firewall"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<FirewallZone>().ok())
+    {
+        for network in zone.network {
+            if static_interfaces.contains(&network) {
+                static_zones.insert(network, zone.name.clone());
+            }
+        }
+    }
+    let mut owners = BTreeMap::new();
+    for section in &cfgs["startwrt"].sections {
+        if let Some(profile) = section.get_typed::<UciProfile>()? {
+            let zone = find_zone_for_interface(cfgs, &profile.interface);
+            let egress = resolve_outbound_zone(profile.outbound.as_deref().unwrap_or("wan"));
+            let lan_zones: BTreeSet<String> = match profile.lan_access {
+                Some(LanAccessMode::SameProfile) => BTreeSet::new(),
+                Some(LanAccessMode::Whitelist) => profile
+                    .lan_access_list
+                    .iter()
+                    .filter_map(|iface| static_zones.get(iface).cloned())
+                    .collect(),
+                _ => static_zones.values().cloned().collect(),
+            };
+            owners.insert(zone, (profile.interface, egress, lan_zones));
+        }
+    }
+    let mut taken: BTreeSet<String> = cfgs["firewall"]
+        .sections
+        .iter()
+        .filter_map(|s| Some(s.name()?.into_owned()))
+        .collect();
+    let mut counts = BTreeMap::new();
+    let mut renames = Vec::new();
+    for (index, section) in cfgs["firewall"].sections.iter().enumerate() {
+        if section.name().is_some() {
+            continue;
+        }
+        let mut count = |interface: &str, role: &'static str| {
+            let n = counts.entry((interface.to_string(), role)).or_insert(0);
+            *n += 1;
+            owned_name(interface, &format!("{role}_{}", *n - 1))
+        };
+        let name = if let Ok(rule) = section.get::<FirewallRule>() {
+            let Some((interface, _, _)) = owners.get(&rule.src) else {
+                continue;
+            };
+            if rule.name.starts_with("Allow-DHCP-DNS-") {
+                owned_name(interface, "dhcp_dns")
+            } else if rule.name.starts_with("WAN-WL-")
+                && rule.target == FirewallTarget::REJECT
+                && rule.dest_ip.is_none()
+            {
+                owned_name(interface, "wan_reject")
+            } else if rule.name.starts_with("WAN-WL-") {
+                count(interface, "wan_allow")
+            } else if rule.name.starts_with("WAN-BL-") {
+                count(interface, "wan_block")
+            } else {
+                continue;
+            }
+        } else if let Ok(redirect) = section.get::<FirewallRedirect>() {
+            match owners.get(&redirect.src) {
+                Some((interface, _, _)) if redirect.name.starts_with("DNS-Override-") => {
+                    owned_name(interface, "dns_override")
+                }
+                _ => continue,
+            }
+        } else if let Ok(fwd) = section.get::<FirewallForwarding>() {
+            let Some((interface, egress, lan_zones)) = owners.get(&fwd.src) else {
+                continue;
+            };
+            if fwd.dest == *egress {
+                owned_name(interface, "wan")
+            } else if fwd.dest != fwd.src
+                && (fwd.dest == DEFAULT_WAN_ZONE
+                    || fwd.dest.starts_with("vpn_")
+                    || lan_zones.contains(&fwd.dest))
+            {
+                lan_forwarding_name(interface, &fwd.dest)
+            } else {
+                continue;
+            }
+        } else {
+            continue;
+        };
+        let mut unique = name.clone();
+        for k in 1.. {
+            if taken.insert(unique.clone()) {
+                break;
+            }
+            unique = format!("{name}_{k}");
+        }
+        renames.push((index, unique));
+    }
+    for (index, name) in &renames {
+        cfgs["firewall"].sections[*index].set_name(name);
+    }
+    Ok(!renames.is_empty())
+}
+
+/// Turns IPv6 off on every profile VLAN still advertising it while the LAN says
+/// it is off, a state a pre-1.0.2 profile rewrite could leave behind. Runs only
+/// when `dhcp.lan` reads and has both `ra` and `dhcpv6` off, so a relay or a
+/// hand-written LAN section is left alone. A no-op once consistent.
 pub async fn heal_ipv6_state(uci_root: &str) -> Result<(), Error> {
     let arena = Arena::new();
     let mut cfgs = parse_all(uci_root, &arena, &["network", "dhcp", "startwrt"]).await?;
@@ -3309,13 +3480,24 @@ pub async fn heal_ipv6_state(uci_root: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// The LAN's IPv6 is in the off state StartWRT writes. An unreadable `dhcp.lan`,
+/// or one relaying in LuCI, is not.
+fn lan_ipv6_off(cfgs: &Configs) -> bool {
+    let off = |mode: &Option<String>| matches!(mode.as_deref(), None | Some("disabled"));
+    cfgs["dhcp"].sections.iter().any(|s| {
+        s.name().as_deref() == Some(crate::lan::LAN_INTERFACE)
+            && s.get_typed::<Dhcp>()
+                .ok()
+                .flatten()
+                .is_some_and(|d| off(&d.ra) && off(&d.dhcpv6))
+    })
+}
+
 /// The config half of [`heal_ipv6_state`], split out so it can be tested
 /// without spawning init scripts. Returns the interfaces it changed, sorted;
 /// empty means the state was already consistent and nothing should be applied.
 fn heal_ipv6_state_in_cfgs(cfgs: &mut Configs) -> Result<Vec<String>, Error> {
-    // Nothing to repair while the LAN is serving IPv6: profiles advertising
-    // alongside it is the normal, consistent state.
-    if is_ipv6_enabled(cfgs) {
+    if !lan_ipv6_off(cfgs) {
         return Ok(Vec::new());
     }
 
@@ -4039,6 +4221,31 @@ config dhcp 'iot'
     }
 
     #[tokio::test]
+    async fn bootstrap_keeps_an_unreadable_admin_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let startwrt = "config profile 'lan'\n\toption fullname 'Admin'\n\toption interface 'lan'\n\toption vlan_tag 'one'\n";
+        std::fs::write(dir.path().join("startwrt"), startwrt).unwrap();
+        bootstrap_admin_profile(dir.path().to_str().unwrap())
+            .await
+            .unwrap();
+        let after = std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
+        assert_eq!(after, startwrt);
+    }
+
+    #[tokio::test]
+    async fn heal_ipv6_leaves_a_lan_it_cannot_read_alone() {
+        let relaying = heal_dhcp("relay", "server");
+        let unreadable =
+            heal_dhcp("disabled", "server").replacen("\toption leasetime '12h'\n", "", 1);
+        for dhcp in [relaying, unreadable] {
+            let (repaired, network, _) =
+                run_ipv6_heal(HEAL_NETWORK_DIVERGED, &dhcp, HEAL_STARTWRT).await;
+            assert!(repaired.is_empty(), "healed {dhcp}: {repaired:?}");
+            assert_eq!(network.matches("ip6assign").count(), 3);
+        }
+    }
+
+    #[tokio::test]
     async fn heal_ipv6_is_idempotent() {
         // Feed the first run's own output back in: the second pass must report
         // no change, or the heal would restart the network on every boot.
@@ -4212,15 +4419,15 @@ config zone
 \toption output 'ACCEPT'
 \toption forward 'ACCEPT'
 
-config forwarding
+config forwarding 'profile_lan_wan'
 \toption src 'lan'
 \toption dest 'wan'
 
-config forwarding
+config forwarding 'profile_guest_wan'
 \toption src 'vlan_guest'
 \toption dest 'wan'
 
-config rule
+config rule 'profile_guest_dhcp_dns'
 \toption name 'Allow-DHCP-DNS-Guest'
 \toption src 'vlan_guest'
 \toption dest_port '53 67 68'
@@ -4294,7 +4501,7 @@ config wifi-vlan
         fw = fw.replace(wan, &format!("{wan}\toption masq '1'\n"));
         if with_guest_access {
             fw.push_str(
-                "\nconfig forwarding 'fwd_guest_lan'\n\toption src 'vlan_guest'\n\toption dest 'lan'\n",
+                "\nconfig forwarding 'profile_guest_to_lan'\n\toption src 'vlan_guest'\n\toption dest 'lan'\n",
             );
         }
         let zones = if with_guest_access {
@@ -4552,6 +4759,202 @@ config wifi-vlan
             reflection_list(&cfgs, "apf_aabbccddeeff_9000"),
             vec!["lan".to_string()]
         );
+    }
+
+    /// `setup_configs` plus two devices with Guest reservations, one also
+    /// reserved on Admin, and published ports into each profile.
+    fn seed_profile_owned_settings(dir: &std::path::Path) {
+        seed_reflection_firewall(dir, false);
+        let mut fw = std::fs::read_to_string(dir.join("firewall")).unwrap();
+        fw.push_str(
+            "
+config redirect 'pp_y'
+\toption name 'Phone Admin'
+\toption src 'wan'
+\toption dest 'lan'
+\toption target 'DNAT'
+\tlist proto 'tcp'
+\toption src_dport '8080'
+\toption dest_ip '192.168.1.20'
+\toption dest_port '8080'
+\toption _pp_id 'y'
+\toption _pp_mac 'AA:BB:CC:DD:EE:01'
+
+config redirect 'pp_g'
+\toption name 'Phone Guest'
+\toption src 'wan'
+\toption dest 'vlan_guest'
+\toption target 'DNAT'
+\tlist proto 'tcp'
+\toption src_dport '443'
+\toption dest_ip '192.168.101.20'
+\toption dest_port '443'
+\toption _pp_id 'g'
+\toption _pp_mac 'AA:BB:CC:DD:EE:01'
+
+config rule 'pp_g_v6'
+\toption name 'Phone Guest'
+\toption family 'ipv6'
+\toption src 'wan'
+\toption dest 'vlan_guest'
+\toption dest_ip '2001:db8:101::20'
+\toption dest_port '443'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+\toption _pp_id 'g'
+\toption _pp_mac 'AA:BB:CC:DD:EE:01'
+
+config rule 'pp_h_v6'
+\toption name 'Tablet Guest'
+\toption family 'ipv6'
+\toption src 'wan'
+\toption dest 'vlan_guest'
+\toption dest_ip '2001:db8:101::30'
+\toption dest_port '22'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+\toption _pp_id 'h'
+\toption _pp_mac 'AA:BB:CC:DD:EE:02'
+",
+        );
+        std::fs::write(dir.join("firewall"), fw).unwrap();
+        let mut dhcp = std::fs::read_to_string(dir.join("dhcp")).unwrap();
+        dhcp.push_str(
+            "
+config host 'host_aabbccddee01'
+\toption mac 'AA:BB:CC:DD:EE:01'
+\toption ip '192.168.101.20'
+\toption name 'phone'
+\toption _allow_pcp '1'
+
+config host 'host_aabbccddee01_2'
+\toption mac 'AA:BB:CC:DD:EE:01'
+\toption ip '192.168.1.20'
+\toption name 'phone'
+
+config host 'host_aabbccddee02'
+\toption mac 'AA:BB:CC:DD:EE:02'
+\toption ip '192.168.101.30'
+\toption name 'tablet'
+\toption _allow_dns_inject '1'
+",
+        );
+        std::fs::write(dir.join("dhcp"), dhcp).unwrap();
+    }
+
+    fn guest_query() -> ProfileIdOpt {
+        ProfileIdOpt {
+            fullname: None,
+            interface: Some("guest".into()),
+            vlan_tag: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn deleting_profile_deletes_its_reservations_and_published_ports() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        seed_profile_owned_settings(dir.path());
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+
+        let deleted = delete_config(ctx.clone(), &mut cfgs, &guest_query()).unwrap();
+
+        let reservations: Vec<(&str, &str)> = deleted
+            .reservations
+            .iter()
+            .map(|r| (r.mac.as_str(), r.ipv4.as_str()))
+            .collect();
+        assert_eq!(
+            reservations,
+            vec![
+                ("AA:BB:CC:DD:EE:01", "192.168.101.20"),
+                ("AA:BB:CC:DD:EE:02", "192.168.101.30"),
+            ]
+        );
+        let ports: Vec<(&str, &str, &str)> = deleted
+            .published_ports
+            .iter()
+            .map(|p| (p.id.as_str(), p.label.as_str(), p.mac.as_str()))
+            .collect();
+        assert_eq!(
+            ports,
+            vec![
+                ("g", "Phone Guest", "AA:BB:CC:DD:EE:01"),
+                ("h", "Tablet Guest", "AA:BB:CC:DD:EE:02"),
+            ]
+        );
+
+        let hosts: Vec<uciedit::openwrt::DhcpHost> = cfgs["dhcp"]
+            .sections
+            .iter()
+            .filter_map(|s| s.get_typed::<uciedit::openwrt::DhcpHost>().ok().flatten())
+            .collect();
+        let phone: Vec<&uciedit::openwrt::DhcpHost> = hosts
+            .iter()
+            .filter(|h| h.mac == "AA:BB:CC:DD:EE:01")
+            .collect();
+        assert_eq!(phone.len(), 1);
+        assert_eq!(phone[0].ip.as_deref(), Some("192.168.1.20"));
+        assert_eq!(phone[0].name.as_deref(), Some("phone"));
+        assert_eq!(phone[0]._allow_pcp.as_deref(), Some("1"));
+        let tablet: Vec<&uciedit::openwrt::DhcpHost> = hosts
+            .iter()
+            .filter(|h| h.mac == "AA:BB:CC:DD:EE:02")
+            .collect();
+        assert_eq!(tablet.len(), 1);
+        assert_eq!(tablet[0].ip, None);
+        assert_eq!(tablet[0].name.as_deref(), Some("tablet"));
+        assert_eq!(tablet[0]._allow_dns_inject.as_deref(), Some("1"));
+
+        let names: Vec<String> = cfgs["firewall"]
+            .sections
+            .iter()
+            .filter_map(|s| s.name().map(|n| n.into_owned()))
+            .filter(|n| n.starts_with("pp_"))
+            .collect();
+        assert_eq!(names, vec!["pp_x".to_string(), "pp_y".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn previewing_profile_delete_lists_settings_and_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        seed_profile_owned_settings(dir.path());
+        let read = |name: &str| std::fs::read_to_string(dir.path().join(name)).unwrap();
+        let before: Vec<String> = ["startwrt", "network", "firewall", "dhcp", "wireless"]
+            .iter()
+            .map(|c| read(c))
+            .collect();
+
+        let deleted = delete(
+            ctx,
+            ProfileDeleteRequest {
+                id: guest_query(),
+                preview: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(deleted.reservations.len(), 2);
+        assert_eq!(deleted.reservations[0].name.as_deref(), Some("phone"));
+        assert_eq!(deleted.published_ports.len(), 2);
+        assert_eq!(deleted.published_ports[1].name.as_deref(), Some("tablet"));
+        let after: Vec<String> = ["startwrt", "network", "firewall", "dhcp", "wireless"]
+            .iter()
+            .map(|c| read(c))
+            .collect();
+        assert_eq!(before, after);
     }
 
     /// The reverse transition: granting a profile Access to the LAN must add
@@ -4906,7 +5309,7 @@ config zone
 \toption output 'ACCEPT'
 \toption forward 'REJECT'
 
-config forwarding
+config forwarding 'profile_lan_wan'
 \toption src 'lan'
 \toption dest 'wan'
 ",
@@ -6566,15 +6969,15 @@ config zone
 \toption output 'ACCEPT'
 \toption forward 'ACCEPT'
 
-config forwarding
+config forwarding 'profile_lan_wan'
 \toption src 'lan'
 \toption dest 'wan'
 
-config forwarding
+config forwarding 'profile_guest_wan'
 \toption src 'vlan_guest'
 \toption dest 'wan'
 
-config rule
+config rule 'profile_guest_dhcp_dns'
 \toption name 'Allow-DHCP-DNS-Guest'
 \toption src 'vlan_guest'
 \toption dest_port '53 67 68'
@@ -8598,5 +9001,549 @@ config dhcp 'guest'
         );
         let guest = get_config(ctx, &cfgs, guest_via("wg_v4", Vec::new()).id).unwrap();
         assert_eq!(guest.dns_source, "system");
+    }
+
+    const LUCI_IOT_ZONE: &str = "
+config zone
+\toption name 'iot'
+\tlist network 'iot'
+\toption input 'REJECT'
+\toption output 'ACCEPT'
+\toption forward 'REJECT'
+";
+
+    const LUCI_IOT_RULE: &str = "
+config rule
+\toption name 'Allow-NAS-to-printer'
+\toption src 'lan'
+\toption dest 'iot'
+\toption dest_ip '192.168.30.20'
+\toption target 'ACCEPT'
+";
+
+    const LUCI_IOT_FORWARDING: &str = "
+config forwarding
+\toption src 'lan'
+\toption dest 'iot'
+";
+
+    fn admin_profile(wan_access: WanAccess) -> Profile<ProfileIdOpt> {
+        Profile {
+            id: ProfileIdOpt {
+                fullname: Some("Admin".into()),
+                interface: Some("lan".into()),
+                vlan_tag: Some(99),
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 1, 1),
+            owns_lan: true,
+            ..guest_profile_with_wan(LanAccess::SameProfile, wan_access)
+        }
+    }
+
+    fn whitelisted_guest(destinations: &[&str]) -> Profile<ProfileIdOpt> {
+        guest_profile_with_wan(
+            LanAccess::SameProfile,
+            WanAccess::Whitelist(destinations.iter().map(|d| d.to_string()).collect()),
+        )
+    }
+
+    fn rule_names(cfgs: &Configs) -> Vec<Option<String>> {
+        cfgs["firewall"]
+            .sections
+            .iter()
+            .filter(|s| s.ty() == FirewallRule::TY)
+            .map(|s| s.name().map(|n| n.into_owned()))
+            .collect()
+    }
+
+    fn named_section<'c, 'a>(cfgs: &'c mut Configs<'a>, name: &str) -> &'c mut Section<'a> {
+        cfgs["firewall"]
+            .sections
+            .iter_mut()
+            .find(|s| s.name().as_deref() == Some(name))
+            .unwrap_or_else(|| panic!("missing firewall section {name}"))
+    }
+
+    #[derive(Debug, TypedSection, Default)]
+    #[uci(ty = "rule")]
+    struct RuleLog {
+        log: Option<String>,
+    }
+
+    #[tokio::test]
+    async fn profile_save_keeps_sections_added_in_luci() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        append(
+            dir.path(),
+            "firewall",
+            &format!("{LUCI_IOT_ZONE}{LUCI_IOT_RULE}{LUCI_IOT_FORWARDING}"),
+        );
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+
+        set_config(ctx.clone(), &mut cfgs, &admin_profile(WanAccess::None)).unwrap();
+        set_config(ctx.clone(), &mut cfgs, &whitelisted_guest(&["1.1.1.1/32"])).unwrap();
+
+        let firewall = cfgs["firewall"].dump_str();
+        assert!(firewall.contains(LUCI_IOT_RULE), "{firewall}");
+        assert!(firewall.contains(LUCI_IOT_FORWARDING), "{firewall}");
+        let forwardings = forwardings(&cfgs);
+        assert!(!forwardings.contains(&("lan".into(), "wan".into())));
+        assert!(forwardings.contains(&("vlan_guest".into(), "wan".into())));
+    }
+
+    #[tokio::test]
+    async fn profile_save_updates_its_own_sections_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+        let two = whitelisted_guest(&["1.1.1.1/32", "8.8.8.8/32"]);
+        set_config(ctx.clone(), &mut cfgs, &two).unwrap();
+        cfgs["firewall"]
+            .append(
+                &FirewallRule {
+                    name: "Allow-Guest-Printer".into(),
+                    src: "vlan_guest".into(),
+                    dest: Some("lan".into()),
+                    dest_ip: Some("192.168.1.20".into()),
+                    target: FirewallTarget::ACCEPT,
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap();
+        named_section(&mut cfgs, "profile_guest_wan_reject")
+            .set(&RuleLog {
+                log: Some("1".into()),
+            })
+            .unwrap();
+
+        let before = cfgs["firewall"].dump_str();
+        set_config(ctx.clone(), &mut cfgs, &two).unwrap();
+        assert_eq!(cfgs["firewall"].dump_str(), before);
+
+        set_config(
+            ctx.clone(),
+            &mut cfgs,
+            &whitelisted_guest(&["1.1.1.1/32", "8.8.8.8/32", "9.9.9.9/32"]),
+        )
+        .unwrap();
+        let names = rule_names(&cfgs);
+        assert_eq!(
+            names[names.len() - 5..],
+            [
+                Some("profile_guest_wan_allow_0".into()),
+                Some("profile_guest_wan_allow_1".into()),
+                Some("profile_guest_wan_allow_2".into()),
+                Some("profile_guest_wan_reject".into()),
+                None,
+            ]
+        );
+        let reject = named_section(&mut cfgs, "profile_guest_wan_reject");
+        assert_eq!(reject.get::<RuleLog>().unwrap().log.as_deref(), Some("1"));
+        assert_eq!(
+            reject.get::<FirewallRule>().unwrap().target,
+            FirewallTarget::REJECT
+        );
+    }
+
+    #[tokio::test]
+    async fn profile_save_restores_the_order_of_its_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+        let profile = whitelisted_guest(&["1.1.1.1/32"]);
+        set_config(ctx.clone(), &mut cfgs, &profile).unwrap();
+        let sections = &mut cfgs["firewall"].sections;
+        let reject = sections
+            .iter()
+            .position(|s| s.name().as_deref() == Some("profile_guest_wan_reject"))
+            .unwrap();
+        let reject = sections.remove(reject);
+        let allow = sections
+            .iter()
+            .position(|s| s.name().as_deref() == Some("profile_guest_wan_allow_0"))
+            .unwrap();
+        sections.insert(allow, reject);
+
+        set_config(ctx.clone(), &mut cfgs, &profile).unwrap();
+        let names = rule_names(&cfgs);
+        assert_eq!(
+            names[names.len() - 2..],
+            [
+                Some("profile_guest_wan_allow_0".into()),
+                Some("profile_guest_wan_reject".into()),
+            ]
+        );
+    }
+
+    const LEGACY_FIREWALL: &str = "\
+config zone
+\toption name 'lan'
+\tlist network 'lan'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone
+\toption name 'wan'
+\tlist network 'wan'
+\toption input 'REJECT'
+\toption output 'ACCEPT'
+\toption forward 'REJECT'
+
+config zone
+\toption name 'vlan_guest'
+\tlist network 'guest'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config rule
+\toption name 'Allow-DHCP-DNS-Admin'
+\toption src 'lan'
+\toption dest_port '53 67 68'
+\tlist proto 'tcp'
+\tlist proto 'udp'
+\tlist proto 'icmp'
+\toption target 'ACCEPT'
+
+config forwarding
+\toption src 'lan'
+\toption dest 'wan'
+
+config forwarding
+\toption src 'lan'
+\toption dest 'vlan_guest'
+
+config forwarding
+\toption src 'vlan_guest'
+\toption dest 'wan'
+
+config forwarding
+\toption src 'vlan_guest'
+\toption dest 'vpn_wg_old'
+
+config rule
+\toption name 'Allow-DHCP-DNS-Guest'
+\toption src 'vlan_guest'
+\toption dest_port '53 67 68'
+\tlist proto 'tcp'
+\tlist proto 'udp'
+\tlist proto 'icmp'
+\toption target 'ACCEPT'
+
+config redirect
+\toption name 'DNS-Override-Guest'
+\toption src 'vlan_guest'
+\tlist proto 'tcp'
+\tlist proto 'udp'
+\toption src_dport '53'
+\toption dest_ip '192.168.101.1'
+\toption dest_port '53'
+\toption target 'DNAT'
+
+config rule
+\toption name 'WAN-WL-Guest-1.1.1.1/32'
+\toption src 'vlan_guest'
+\toption dest 'wan'
+\toption dest_ip '1.1.1.1/32'
+\tlist proto 'all'
+\toption target 'ACCEPT'
+
+config rule
+\toption name 'WAN-WL-Guest-8.8.8.8/32'
+\toption src 'vlan_guest'
+\toption dest 'wan'
+\toption dest_ip '8.8.8.8/32'
+\tlist proto 'all'
+\toption target 'ACCEPT'
+
+config rule
+\toption name 'WAN-WL-Guest-reject'
+\toption src 'vlan_guest'
+\toption dest 'wan'
+\tlist proto 'all'
+\toption target 'REJECT'
+
+config rule 'sched_guest'
+\toption name 'WAN-Schedule-guest'
+\toption src 'vlan_guest'
+\toption dest 'wan'
+\toption target 'REJECT'
+";
+
+    fn section_names(cfgs: &Configs) -> Vec<Option<String>> {
+        cfgs["firewall"]
+            .sections
+            .iter()
+            .map(|s| s.name().map(|n| n.into_owned()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn migration_names_the_sections_profiles_generated() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        std::fs::write(
+            dir.path().join("firewall"),
+            format!("{LEGACY_FIREWALL}{LUCI_IOT_ZONE}{LUCI_IOT_RULE}{LUCI_IOT_FORWARDING}"),
+        )
+        .unwrap();
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+
+        assert!(name_profile_firewall_sections(&mut cfgs).unwrap());
+        let named = |name: &str| Some(name.to_string());
+        assert_eq!(
+            section_names(&cfgs),
+            [
+                None,
+                None,
+                None,
+                named("profile_lan_dhcp_dns"),
+                named("profile_lan_wan"),
+                named("profile_lan_to_vlan_guest"),
+                named("profile_guest_wan"),
+                named("profile_guest_to_vpn_wg_old"),
+                named("profile_guest_dhcp_dns"),
+                named("profile_guest_dns_override"),
+                named("profile_guest_wan_allow_0"),
+                named("profile_guest_wan_allow_1"),
+                named("profile_guest_wan_reject"),
+                named("sched_guest"),
+                None,
+                None,
+                None,
+            ]
+        );
+        let migrated = cfgs["firewall"].dump_str();
+        assert!(!name_profile_firewall_sections(&mut cfgs).unwrap());
+        assert_eq!(cfgs["firewall"].dump_str(), migrated);
+
+        set_config(
+            ctx.clone(),
+            &mut cfgs,
+            &Profile {
+                lan_access: LanAccess::All,
+                ..admin_profile(WanAccess::All)
+            },
+        )
+        .unwrap();
+        assert_eq!(cfgs["firewall"].dump_str(), migrated);
+
+        set_config(
+            ctx.clone(),
+            &mut cfgs,
+            &guest_profile(LanAccess::SameProfile),
+        )
+        .unwrap();
+        let firewall = cfgs["firewall"].dump_str();
+        assert!(firewall.contains(LUCI_IOT_RULE), "{firewall}");
+        assert!(firewall.contains(LUCI_IOT_FORWARDING), "{firewall}");
+        let guest: Vec<_> = forwardings(&cfgs)
+            .into_iter()
+            .filter(|(src, _)| src == "vlan_guest")
+            .collect();
+        assert_eq!(guest, [("vlan_guest".to_string(), "wan".to_string())]);
+        assert!(!rule_names(&cfgs)
+            .iter()
+            .flatten()
+            .any(|name| name.starts_with("profile_guest_wan_")));
+    }
+
+    #[tokio::test]
+    async fn migration_claims_only_forwardings_lan_access_covers() {
+        let firewall = "\
+config zone
+\toption name 'lan'
+\tlist network 'lan'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone
+\toption name 'wan'
+\tlist network 'wan'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone
+\toption name 'vlan_guest'
+\tlist network 'guest'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone
+\toption name 'iot'
+\tlist network 'iot'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone
+\toption name 'cams'
+\tlist network 'cams'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config forwarding
+\toption src 'lan'
+\toption dest 'wan'
+
+config forwarding
+\toption src 'lan'
+\toption dest 'vlan_guest'
+
+config forwarding
+\toption src 'lan'
+\toption dest 'iot'
+
+config forwarding
+\toption src 'lan'
+\toption dest 'cams'
+
+config forwarding
+\toption src 'vlan_guest'
+\toption dest 'lan'
+
+config forwarding
+\toption src 'vlan_guest'
+\toption dest 'wan'
+";
+        let named = |name: &str| Some(name.to_string());
+        for (lan_access, guest_access, expected) in [
+            (
+                "option lan_access 'all'",
+                "option lan_access 'same_profile'",
+                [
+                    named("profile_lan_wan"),
+                    named("profile_lan_to_vlan_guest"),
+                    named("profile_lan_to_iot"),
+                    None,
+                    None,
+                    named("profile_guest_wan"),
+                ],
+            ),
+            (
+                "option lan_access 'whitelist'\n\tlist lan_access_list 'guest'",
+                "option lan_access 'whitelist'\n\tlist lan_access_list 'lan'",
+                [
+                    named("profile_lan_wan"),
+                    named("profile_lan_to_vlan_guest"),
+                    None,
+                    None,
+                    named("profile_guest_to_lan"),
+                    named("profile_guest_wan"),
+                ],
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            setup_configs(dir.path());
+            std::fs::write(
+                dir.path().join("startwrt"),
+                format!(
+                    "\
+config profile lan
+\toption fullname 'Admin'
+\toption interface 'lan'
+\toption vlan_tag '99'
+\t{lan_access}
+
+config profile guest
+\toption fullname 'Guest'
+\toption interface 'guest'
+\toption vlan_tag '101'
+\t{guest_access}
+"
+                ),
+            )
+            .unwrap();
+            let network = std::fs::read_to_string(dir.path().join("network")).unwrap();
+            std::fs::write(
+                dir.path().join("network"),
+                format!("{network}\nconfig interface 'iot'\n\toption proto 'static'\n"),
+            )
+            .unwrap();
+            std::fs::write(dir.path().join("firewall"), firewall).unwrap();
+            let arena = Arena::new();
+            let mut cfgs = parse_all(dir.path(), &arena, &["startwrt", "network", "firewall"])
+                .await
+                .unwrap();
+
+            name_profile_firewall_sections(&mut cfgs).unwrap();
+            let names: Vec<_> = cfgs["firewall"]
+                .sections
+                .iter()
+                .filter(|s| s.get::<FirewallForwarding>().is_ok())
+                .map(|s| s.name().map(|n| n.into_owned()))
+                .collect();
+            assert_eq!(names, expected, "{lan_access} / {guest_access}");
+        }
+    }
+
+    #[tokio::test]
+    async fn shipped_wan_forwarding_belongs_to_the_admin_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        std::fs::write(
+            dir.path().join("firewall"),
+            include_str!("../../firstboot_config/firewall"),
+        )
+        .unwrap();
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+        let admin_wan = |cfgs: &Configs| {
+            forwardings(cfgs)
+                .into_iter()
+                .filter(|(src, dest)| src == "lan" && dest == "wan")
+                .count()
+        };
+
+        set_config(ctx.clone(), &mut cfgs, &admin_profile(WanAccess::All)).unwrap();
+        assert_eq!(admin_wan(&cfgs), 1);
+        set_config(ctx.clone(), &mut cfgs, &admin_profile(WanAccess::None)).unwrap();
+        assert_eq!(admin_wan(&cfgs), 0);
     }
 }

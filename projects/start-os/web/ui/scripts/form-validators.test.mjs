@@ -4,14 +4,7 @@ import '@angular/compiler'
 import { FormControl } from '@angular/forms'
 import { loadTypeScript } from './typescript-loader.mjs'
 
-loadTypeScript(
-  new Map([
-    [
-      '@taiga-ui/kit',
-      'export const tuiCreateFileFormatValidator = () => () => null',
-    ],
-  ]),
-)
+loadTypeScript(new Map())
 const { datetimeMax, textLengthInRange, listUnique } =
   await import('src/app/services/form.service')
 

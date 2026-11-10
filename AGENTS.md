@@ -143,6 +143,10 @@ make -k generated-artifacts-check # regenerate and check man pages, TS bindings,
 cd shared-libs/crates/start-core && cargo test <test_name> --features=test
 ```
 
+Release-tooling tests (`make release-notes-test`, also included in `make test`) require
+`apt-utils`, `dpkg-dev`, and `gnupg`. CI installs them through the shared
+`.github/actions/setup-release-tests` action.
+
 Preserve level-3 optimization in development and test profiles. Unoptimized builds have hit binary-size limits and async stack overflows; lowering optimization requires verification of both constraints.
 
 Each product's `AGENTS.md` covers its own scoped tests.

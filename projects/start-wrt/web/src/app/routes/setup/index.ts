@@ -149,7 +149,7 @@ export default class Setup {
 
     try {
       await this.api.setInitialPassword({
-        password: this.form.value.password!,
+        password: await this.api.encrypt(this.form.getRawValue().password),
         timezone: getBrowserTimezone(),
       })
       this.auth.initialized.set(true)

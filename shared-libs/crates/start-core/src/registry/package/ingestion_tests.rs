@@ -8,8 +8,8 @@ use axum::routing::get;
 use ed25519_dalek::SigningKey;
 use serde_json::Value;
 
+use super::test_utils::{context, registry_server};
 use super::*;
-use crate::registry::client::Product;
 use crate::registry::package::add::{AddMirrorParams, AddPackageParams, add_mirror, add_package};
 use crate::rpc_continuations::Guid;
 use crate::s9pk::S9pk;
@@ -42,40 +42,6 @@ fn larger_bound_fixture() -> (Vec<u8>, MerkleArchiveCommitment) {
     bytes[35..99].copy_from_slice(&signature.to_bytes());
     bytes[131..139].copy_from_slice(&commitment.root_maxsize.to_be_bytes());
     (bytes, commitment)
-}
-
-pub(super) async fn context(datadir: PathBuf, uploader: AnyVerifyingKey) -> RegistryContext {
-    tokio::fs::create_dir_all(&datadir).await.unwrap();
-    let db =
-        TypedPatchDb::load_unchecked(PatchDb::open(datadir.join("registry.db")).await.unwrap());
-    let mut database = RegistryDatabase::init();
-    let guid = Guid::new();
-    database.admins.insert(guid.clone());
-    database.index.trust_signers.insert(guid.clone());
-    database.index.signers.insert(
-        guid,
-        SignerInfo {
-            name: "Uploader".into(),
-            contact: vec![],
-            keys: [uploader].into(),
-            gpg_exports: Default::default(),
-        },
-    );
-    db.put(&ROOT, &database).await.unwrap();
-    RegistryContext(Arc::new(RegistryContextSeed {
-        hostnames: vec!["localhost".into(), "127.0.0.1".into()],
-        listen: "127.0.0.1:0".parse().unwrap(),
-        db,
-        datadir,
-        product: Product::StartOs,
-        rpc_continuations: RpcContinuations::new(),
-        open_authed_continuations: OpenAuthedContinuations::new(),
-        auth_sig_nonce_cache: SyncMutex::new(Default::default()),
-        client: Client::new(),
-        shutdown: tokio::sync::broadcast::channel(1).0,
-        metrics_db: SyncMutex::new(Connection::open_in_memory().unwrap()),
-        security_feed: None,
-    }))
 }
 
 type Requests = Arc<Mutex<Vec<Option<(usize, usize)>>>>;
@@ -160,25 +126,10 @@ async fn local_package() -> S9pk {
     S9pk::from_file(file).await.unwrap()
 }
 
-async fn registry_server(
-    ctx: RegistryContext,
-) -> (Url, crate::util::future::NonDetachingJoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/", listener.local_addr().unwrap())
-        .parse()
-        .unwrap();
-    let task = tokio::spawn(async move {
-        axum::serve(listener, crate::registry::registry_router(ctx))
-            .await
-            .unwrap();
-    });
-    (url, task.into())
-}
-
 #[tokio::test]
 async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserves_mirror_and_promotion()
  {
-    use crate::context::config::ClientConfig;
+    use crate::context::config::{ClientConfig, Profiles};
     use crate::developer::write_signing_key;
     use crate::registry::package::add::cli_add_package_impl;
     use crate::registry::package::promote::{CliPromoteParams, cli_promote};
@@ -197,11 +148,17 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     )
     .await;
     let (registry, registry_task) = registry_server(ctx.clone()).await;
+    let target = context(temp.path().join("second"), uploader.clone()).await;
+    let (destination, destination_task) = registry_server(target.clone()).await;
     let key_path = temp.path().join("identity.pem");
     write_signing_key(&uploader_key, &key_path).await.unwrap();
     let cli = CliContext::init(ClientConfig {
         id_key_path: Some(key_path.clone()),
-        registry: Some(registry.to_string().parse().unwrap()),
+        registry: Some(Profiles(BTreeMap::from([
+            ("default".into(), registry.to_string()),
+            ("source".into(), registry.to_string()),
+            ("destination".into(), destination.to_string()),
+        ]))),
         ..Default::default()
     })
     .unwrap();
@@ -245,13 +202,11 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     assert_eq!(mirrored.signatures, asset.signatures);
     assert_eq!(mirrored.urls.len(), 2);
 
-    let target = context(temp.path().join("second"), uploader.clone()).await;
-    let (destination, destination_task) = registry_server(target.clone()).await;
     cli_promote(
         cli.clone(),
         CliPromoteParams {
-            from: Some(registry),
-            to: Some(destination),
+            from: Some("source".into()),
+            to: Some("destination".into()),
             id: "trust-fixture".parse().unwrap(),
             version: version.clone(),
         },
