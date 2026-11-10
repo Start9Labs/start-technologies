@@ -23,12 +23,22 @@ pub trait TypedSection<'a>: Sized {
 }
 pub use uciedit_macros::TypedSection;
 
-#[derive(Debug, serde::Serialize)]
+/// Lines are zero-based; `Display` shows them one-based.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum Source {
     Unknown,
     UnknownLine(usize),
     Line(PathBuf, usize),
     Path(PathBuf),
+}
+
+impl Source {
+    pub fn line(&self) -> Option<usize> {
+        match self {
+            Source::UnknownLine(line) | Source::Line(_, line) => Some(*line),
+            Source::Unknown | Source::Path(_) => None,
+        }
+    }
 }
 
 impl From<usize> for Source {
@@ -41,8 +51,8 @@ impl fmt::Display for Source {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Source::Unknown => write!(f, "???"),
-            Source::UnknownLine(line) => write!(f, "???:{}", line),
-            Source::Line(path, line) => write!(f, "{}:{}", path.display(), line),
+            Source::UnknownLine(line) => write!(f, "???:{}", line + 1),
+            Source::Line(path, line) => write!(f, "{}:{}", path.display(), line + 1),
             Source::Path(path) => write!(f, "{}", path.display()),
         }
     }
@@ -95,13 +105,38 @@ pub enum Error {
     },
     #[error("error parsing a value at {src}: {desc:?}")]
     ValueMsg { src: Source, desc: String },
-    #[error("error parsing a value at {src}: {found:?} should be a boolean")]
-    ValueBoolean { src: Source, found: String },
+    #[error("invalid value {found:?} for option {option:?} at {src}: {desc}")]
+    InvalidValue {
+        src: Source,
+        option: String,
+        found: String,
+        desc: String,
+    },
     #[error("missing option {missing:?} at {src}")]
     MissingOption { src: Source, missing: String },
 }
 
 impl Error {
+    pub fn src(&self) -> &Source {
+        use Error::*;
+        match self {
+            Io { src, .. }
+            | Utf8 { src, .. }
+            | Conflict { src }
+            | FdLock { src, .. }
+            | BadSection { src, .. }
+            | BadPackage { src, .. }
+            | BadOption { src, .. }
+            | BadList { src, .. }
+            | UnknownKeyword { src, .. }
+            | ExpectedSection { src }
+            | ExpectedSectionType { src, .. }
+            | ValueMsg { src, .. }
+            | InvalidValue { src, .. }
+            | MissingOption { src, .. } => src,
+        }
+    }
+
     pub fn map_src(self, with: impl FnOnce(Source) -> Source) -> Self {
         use Error::*;
         match self {
@@ -152,9 +187,16 @@ impl Error {
                 src: with(src),
                 desc,
             },
-            ValueBoolean { src, found } => ValueBoolean {
-                src: with(src),
+            InvalidValue {
+                src,
+                option,
                 found,
+                desc,
+            } => InvalidValue {
+                src: with(src),
+                option,
+                found,
+                desc,
             },
             MissingOption { src, missing } => MissingOption {
                 src: with(src),
@@ -357,14 +399,27 @@ impl ConfigBytes {
         let mut configs = Configs {
             map: BTreeMap::new(),
         };
-        for (name, modified, text) in self.entries {
-            let text = arena.alloc(text);
-            let mut cfg = Config::parse_str(arena, text)
-                .map_err(|e| e.map_src(|_| Source::Path(Path::new(&name).to_path_buf())))?;
-            cfg.modified = modified;
-            configs.map.insert(name, cfg);
+        for (name, result) in self.parse_each(arena) {
+            configs.map.insert(name, result?);
         }
         Ok(configs)
+    }
+
+    /// Parses every file, so one that fails does not hide the others.
+    pub fn parse_each<'a>(self, arena: &'a Arena) -> Vec<(String, Result<Config<'a>, Error>)> {
+        self.entries
+            .into_iter()
+            .map(|(name, modified, text)| {
+                let text = arena.alloc(text);
+                let result = Config::parse_str(arena, text)
+                    .with_path(Path::new(&name))
+                    .map(|mut cfg| {
+                        cfg.modified = modified;
+                        cfg
+                    });
+                (name, result)
+            })
+            .collect()
     }
 }
 

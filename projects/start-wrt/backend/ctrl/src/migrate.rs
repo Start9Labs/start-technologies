@@ -40,6 +40,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::ScopeReservedNames,
     Migration::ReissueRootCa,
     Migration::NameProfileFirewallSections,
+    Migration::BindLuciToLoopback,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -73,6 +74,8 @@ enum Migration {
     ReissueRootCa,
     /// Earlier releases generated a profile's firewall sections without names.
     NameProfileFirewallSections,
+    /// Earlier images served LuCI's uhttpd on every address.
+    BindLuciToLoopback,
 }
 
 impl Migration {
@@ -91,6 +94,7 @@ impl Migration {
             Migration::ScopeReservedNames => scope_reserved_names(root).await,
             Migration::ReissueRootCa => reissue_root_ca(root).await,
             Migration::NameProfileFirewallSections => name_profile_firewall_sections(root).await,
+            Migration::BindLuciToLoopback => bind_luci_to_loopback(root).await,
         }
     }
 
@@ -122,6 +126,7 @@ impl Migration {
             Migration::NameProfileFirewallSections => {
                 "name each profile's firewall sections so saving a profile keeps changes made in LuCI"
             }
+            Migration::BindLuciToLoopback => "serve LuCI only over HTTPS",
         }
     }
 }
@@ -367,6 +372,33 @@ async fn reissue_root_ca(root: &Path) -> Result<(), Error> {
         delete_file(under(root, &path)).await?;
     }
     crate::ssl::write_pem(&cert_path, reissued.to_pem()?, 0o644).await
+}
+
+#[derive(Debug, TypedSection, Default)]
+#[uci(ty = "uhttpd")]
+struct Uhttpd {
+    #[uci(default)]
+    listen_http: Vec<String>,
+}
+
+/// A listen list other than the shipped one is a later choice and stays.
+async fn bind_luci_to_loopback(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["uhttpd"]).await?;
+    let mut changed = false;
+    for section in &mut cfgs["uhttpd"].sections {
+        if let Some(mut uhttpd) = section.get_typed::<Uhttpd>()? {
+            if uhttpd.listen_http == ["0.0.0.0:8080", "[::]:8080"] {
+                uhttpd.listen_http = vec!["127.0.0.1:8080".to_string()];
+                section.set(&uhttpd)?;
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, TypedSection, Default)]
@@ -621,6 +653,17 @@ config defaults
 \toption forward 'REJECT'
 ";
 
+    const LEGACY_UHTTPD: &str = "\
+config uhttpd 'main'
+\tlist listen_http '0.0.0.0:8080'
+\tlist listen_http '[::]:8080'
+\toption redirect_https '0'
+\toption home '/www'
+
+config cert 'defaults'
+\toption days '397'
+";
+
     const PPPOE_WAN: &str = "\
 config interface 'wan'
 \toption device 'eth1'
@@ -788,6 +831,7 @@ config forwarding
         write(&dir, "etc/config/startwrt", LEGACY_PROFILES);
         write(&dir, "etc/config/system", SHIPPED_SYSTEM);
         write(&dir, "etc/config/dhcp", LEGACY_DHCP);
+        write(&dir, "etc/config/uhttpd", LEGACY_UHTTPD);
         for migration in MIGRATIONS {
             migration.apply(dir.path()).await.unwrap();
         }
@@ -797,6 +841,7 @@ config forwarding
             read(&dir, "etc/config/startwrt"),
             read(&dir, "etc/config/system"),
             read(&dir, "etc/config/dhcp"),
+            read(&dir, "etc/config/uhttpd"),
         ];
         for migration in MIGRATIONS {
             migration.apply(dir.path()).await.unwrap();
@@ -806,11 +851,13 @@ config forwarding
         assert_eq!(read(&dir, "etc/config/startwrt"), migrated[2]);
         assert_eq!(read(&dir, "etc/config/system"), migrated[3]);
         assert_eq!(read(&dir, "etc/config/dhcp"), migrated[4]);
+        assert_eq!(read(&dir, "etc/config/uhttpd"), migrated[5]);
         assert_eq!(wan_ipv6(&dir).as_deref(), Some("1"));
         assert!(migrated[1].contains("option dest 'vlan_guest'"));
         assert!(migrated[1].contains("option flow_offloading '1'"));
         assert!(migrated[2].contains("option lan_access 'all'"));
         assert!(migrated[2].contains("option lan_access 'same_profile'"));
+        assert!(migrated[5].contains("list listen_http '127.0.0.1:8080'"));
     }
 
     #[tokio::test]
@@ -1007,6 +1054,29 @@ config forwarding
         assert!(!host.contains("option dns"));
         assert!(host.contains("option name 'nas'"));
         assert!(host.contains("option ip '192.168.1.50'"));
+    }
+
+    #[tokio::test]
+    async fn luci_listens_on_loopback_unless_changed() {
+        let dir = router(Some("13\n"), true);
+        write(&dir, "etc/config/uhttpd", LEGACY_UHTTPD);
+        run(dir.path()).await.unwrap();
+        assert_eq!(record(&dir), current());
+        let uhttpd = read(&dir, "etc/config/uhttpd");
+        assert!(
+            uhttpd.contains("list listen_http '127.0.0.1:8080'"),
+            "{uhttpd}"
+        );
+        assert!(!uhttpd.contains("0.0.0.0:8080"), "{uhttpd}");
+        assert!(!uhttpd.contains("[::]:8080"), "{uhttpd}");
+        assert!(uhttpd.contains("option home '/www'"), "{uhttpd}");
+        assert!(uhttpd.contains("option days '397'"), "{uhttpd}");
+
+        let custom = LEGACY_UHTTPD.replace("[::]:8080", "[::]:8443");
+        let dir = router(Some("13\n"), true);
+        write(&dir, "etc/config/uhttpd", &custom);
+        run(dir.path()).await.unwrap();
+        assert_eq!(read(&dir, "etc/config/uhttpd"), custom);
     }
 
     #[tokio::test]
