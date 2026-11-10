@@ -18,6 +18,7 @@ pub(crate) async fn server() -> (
     crate::ServerContext,
     NonDetachingJoinHandle<()>,
     std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
 ) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/", listener.local_addr().unwrap())
@@ -35,10 +36,13 @@ pub(crate) async fn server() -> (
     let served = ctx.clone();
     let http_calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed = http_calls.clone();
+    let upgrades = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let upgraded = upgrades.clone();
     let local_addr = listener.local_addr().unwrap();
     let app = super::router(served).layer(axum::middleware::from_fn(
         move |mut request: axum::extract::Request, next: axum::middleware::Next| {
             let observed = observed.clone();
+            let upgraded = upgraded.clone();
             async move {
                 let peer_addr = request
                     .extensions()
@@ -54,6 +58,9 @@ pub(crate) async fn server() -> (
                 if request.uri().path() == "/rpc/v1" {
                     observed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
+                if request.uri().path() == "/ws/rpc" {
+                    upgraded.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
                 next.run(request).await
             }
         },
@@ -66,7 +73,7 @@ pub(crate) async fn server() -> (
         .await
         .unwrap();
     });
-    (url, ctx, task.into(), http_calls)
+    (url, ctx, task.into(), http_calls, upgrades)
 }
 
 pub(crate) async fn enroll(
@@ -107,7 +114,7 @@ fn check(reply: &Value) {
 
 #[tokio::test]
 async fn http_retains_firmware_header_and_authentication_errors() {
-    let (url, _, _task, _) = server().await;
+    let (url, _, _task, _, _) = server().await;
     let response = reqwest::Client::new()
         .post(url.join("rpc/v1").unwrap())
         .json(&json!({"jsonrpc":"2.0", "id":42, "method":"auth.session.list", "params":{}}))
@@ -123,7 +130,7 @@ async fn http_retains_firmware_header_and_authentication_errors() {
 
 #[tokio::test]
 async fn encrypted_rpc_uses_live_auth_and_authenticated_firmware_metadata() {
-    let (url, ctx, _task, _) = server().await;
+    let (url, ctx, _task, _, _) = server().await;
     let signer: Signer = AnySigningKey::generate().into();
     let prepared = PreparedClient::new(&signer, "router.lan", Target::Rpc)
         .await

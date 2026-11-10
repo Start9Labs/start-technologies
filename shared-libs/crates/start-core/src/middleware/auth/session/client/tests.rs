@@ -35,6 +35,64 @@ fn cli(url: &Url, signer: Signer) -> (CliContext, tempfile::TempDir) {
     (ctx, directory)
 }
 
+#[tokio::test]
+async fn actual_cli_reuses_connections_after_application_errors_and_scopes_headers_and_signers() {
+    let (_temp, registry, admin, _, _) = crate::registry::tests::fixture().await;
+    let upgrades = Arc::new(AtomicUsize::new(0));
+    let observed = upgrades.clone();
+    let app = crate::registry::registry_router(registry).layer(axum::middleware::from_fn(
+        move |request: axum::extract::Request, next: axum::middleware::Next| {
+            if request.uri().path().ends_with("/ws/rpc") {
+                observed.fetch_add(1, Ordering::SeqCst);
+            }
+            async move { next.run(request).await }
+        },
+    ));
+    let (url, _server) = server(app).await;
+    let (ctx, _identity) = cli(&url, admin.clone());
+    assert_eq!(upgrades.load(Ordering::SeqCst), 0);
+    for method in ["registry.info", "registry.missing-method", "registry.info"] {
+        let result = <CliContext as CallRemote<RegistryContext>>::call_remote(
+            &ctx,
+            method,
+            Default::default(),
+            imbl_value::json!({}),
+            rpc_toolkit::Empty {},
+        )
+        .await;
+        assert_eq!(result.is_err(), method == "registry.missing-method");
+    }
+    assert_eq!(upgrades.load(Ordering::SeqCst), 1);
+    let ws = super::RpcSessionUpgrader::url(url).unwrap();
+    let mut headers = HeaderMap::new();
+    headers.insert("x-instance", "other".parse().unwrap());
+    ctx.rpc_client
+        .call(
+            &admin,
+            ws.clone(),
+            "127.0.0.1",
+            headers,
+            "info",
+            imbl_value::json!({}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(upgrades.load(Ordering::SeqCst), 2);
+    let unknown: Signer = crate::sign::AnySigningKey::generate().into();
+    ctx.rpc_client
+        .call(
+            &unknown,
+            ws,
+            "127.0.0.1",
+            HeaderMap::new(),
+            "info",
+            imbl_value::json!({}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(upgrades.load(Ordering::SeqCst), 3);
+}
+
 #[test]
 fn rpc_endpoint_replacement_retains_prefix_query_and_ipv6() {
     for (source, expected) in [
@@ -526,7 +584,7 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
         .await
         .is_err()
     );
-    let trusted = CliContext::init(ClientConfig {
+    let trusted_config = || ClientConfig {
         id_key_path: Some(_temp.path().join("id.pem")),
         root_ca: Some(vec![ca.path().to_owned()]),
         registry: Some(url.as_str().parse().unwrap()),
@@ -536,8 +594,8 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
                 .unwrap(),
         ),
         ..Default::default()
-    })
-    .unwrap();
+    };
+    let trusted = CliContext::init(trusted_config()).unwrap();
     trusted.id_key.set(admin.clone()).unwrap();
     let result = crate::registry::package::promote::call_registry(
         &trusted,
@@ -572,8 +630,24 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
     );
     assert_eq!(calls.load(Ordering::Relaxed), 0);
     refuse.store(true, Ordering::Relaxed);
-    let rejected = <CliContext as CallRemote<crate::tunnel::context::TunnelContext>>::call_remote(
+    let reused = <CliContext as CallRemote<crate::tunnel::context::TunnelContext>>::call_remote(
         &trusted,
+        "tunnel.db.dump",
+        Default::default(),
+        imbl_value::json!({}),
+        rpc_toolkit::Empty {},
+    )
+    .await
+    .unwrap();
+    assert!(
+        reused["value"]["index"]["package"]["packages"]
+            .get("secret")
+            .is_some()
+    );
+    let fresh = CliContext::init(trusted_config()).unwrap();
+    fresh.id_key.set(admin.clone()).unwrap();
+    let rejected = <CliContext as CallRemote<crate::tunnel::context::TunnelContext>>::call_remote(
+        &fresh,
         "tunnel.db.dump",
         Default::default(),
         imbl_value::json!({}),

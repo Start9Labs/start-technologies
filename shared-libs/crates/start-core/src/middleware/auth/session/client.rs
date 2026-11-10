@@ -22,6 +22,9 @@ use crate::util::net::tungstenite::reqwest_transport;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const WRITE_TIMEOUT: Duration = Duration::from_secs(15);
 
+mod reusable;
+pub use reusable::Client as SessionClient;
+
 #[cfg(test)]
 mod tests;
 
@@ -116,22 +119,6 @@ pub(crate) fn request_body(method: &str, params: Value) -> Result<String, RpcErr
     let mut body = rpc_request_body(method, params)?;
     body.insert_str(1, "\"jsonrpc\":\"2.0\",");
     Ok(body)
-}
-
-/// Calls an encrypted RPC using an HTTP/1-only client with the caller's network policy.
-pub async fn call(
-    client: &Client,
-    signer: &Signer,
-    websocket_url: Url,
-    address: &str,
-    headers: HeaderMap,
-    method: &str,
-    params: Value,
-) -> Result<Value, RpcError> {
-    let body = request_body(method, params)?;
-    let (_, mut socket) =
-        connect(client, signer, websocket_url, address, Target::Rpc, headers).await?;
-    request(&mut socket, body).await
 }
 
 pub(crate) async fn request(socket: &mut EncryptedSocket, body: String) -> Result<Value, RpcError> {

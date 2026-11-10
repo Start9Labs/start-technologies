@@ -1,34 +1,53 @@
 use std::collections::BTreeMap;
+use std::ops::Deref;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicUsize;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 
 use futures::future::BoxFuture;
-use futures::{FutureExt, TryFutureExt};
+use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt};
 use lazy_async_pool::Pool;
-use rpc_toolkit::yajrc::{self, Id, RpcError, RpcMethod, RpcRequest, RpcResponse};
+use rpc_toolkit::yajrc::{Id, RpcError, RpcMethod, RpcRequest, RpcResponse};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex, OnceCell, oneshot};
 
+use crate::util::GeneralGuard;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::TmpDir;
+use crate::util::sync::SyncMutex;
 use crate::{Error, ErrorKind, ResultExt};
 
-type DynWrite = Box<dyn AsyncWrite + Unpin + Send + Sync + 'static>;
-type ResponseMap = BTreeMap<Id, oneshot::Sender<Result<Value, RpcError>>>;
+#[cfg(test)]
+mod tests;
 
-const MAX_TRIES: u64 = 3;
+type MessageWriter = Pin<Box<dyn Sink<String, Error = Error> + Send>>;
+type ResponseMap = BTreeMap<Id, oneshot::Sender<Result<Value, RpcError>>>;
+type Responses = SyncMutex<Option<ResponseMap>>;
+
+pub(crate) struct CapturedRequest {
+    id: Id,
+    body: String,
+}
 
 pub struct RpcClient {
     id: Arc<AtomicUsize>,
     handler: NonDetachingJoinHandle<()>,
-    writer: DynWrite,
-    responses: Weak<Mutex<ResponseMap>>,
+    writer: Mutex<MessageWriter>,
+    responses: Weak<Responses>,
 }
+
+fn disconnected() -> Error {
+    Error::new(
+        std::io::Error::from(std::io::ErrorKind::UnexpectedEof),
+        ErrorKind::Network,
+    )
+}
+
 impl RpcClient {
     pub fn new<
         W: AsyncWrite + Unpin + Send + Sync + 'static,
@@ -38,130 +57,150 @@ impl RpcClient {
         reader: R,
         id: Arc<AtomicUsize>,
     ) -> Self {
-        let writer: DynWrite = Box::new(writer);
-        let responses = Arc::new(Mutex::new(ResponseMap::new()));
+        let writer = futures::sink::unfold(writer, |mut writer, body: String| async move {
+            writer.write_all((body + "\n").as_bytes()).await?;
+            Ok(writer)
+        });
+        let reader =
+            futures::stream::try_unfold(BufReader::new(reader).lines(), |mut lines| async move {
+                Ok(lines.next_line().await?.map(|line| (line, lines)))
+            });
+        Self::messages(writer, reader, id)
+    }
+
+    pub(crate) fn messages(
+        writer: impl Sink<String, Error = Error> + Send + 'static,
+        reader: impl Stream<Item = Result<String, Error>> + Send + 'static,
+        id: Arc<AtomicUsize>,
+    ) -> Self {
+        let responses = Arc::new(Responses::new(Some(ResponseMap::new())));
         let weak_responses = Arc::downgrade(&responses);
-        RpcClient {
-            id,
-            handler: tokio::spawn(async move {
-                let mut lines = BufReader::new(reader).lines();
-                while let Some(line) = lines.next_line().await.transpose() {
-                    match line.map_err(Error::from).and_then(|l| {
-                        serde_json::from_str::<RpcResponse>(&l)
-                            .with_kind(ErrorKind::Deserialization)
-                    }) {
-                        Ok(l) => {
-                            if let Some(id) = l.id {
-                                if let Some(res) = responses.lock().await.remove(&id) {
-                                    if let Err(e) = res.send(l.result) {
-                                        tracing::warn!(
-                                            "RpcClient Response after request aborted: {:?}",
-                                            e
-                                        );
-                                    }
-                                } else {
-                                    tracing::warn!(
-                                        "RpcClient Response for Unknown ID: {:?}",
-                                        l.result
-                                    );
-                                }
-                            } else {
-                                tracing::info!("RpcClient Notification: {:?}", l);
+        let handler = tokio::spawn(async move {
+            let closed = responses.clone();
+            let _disconnect = GeneralGuard::new(move || closed.replace(None));
+            let mut messages = Box::pin(reader);
+            while let Some(message) = messages.next().await {
+                let response = message.and_then(|body| {
+                    serde_json::from_str::<RpcResponse>(&body).with_kind(ErrorKind::Deserialization)
+                });
+                match response {
+                    Ok(response) => {
+                        if let Some(id) = response.id {
+                            if let Some(sender) = responses.mutate(|pending| {
+                                pending.as_mut().and_then(|pending| pending.remove(&id))
+                            }) {
+                                let _ = sender.send(response.result);
                             }
-                        }
-                        Err(e) => {
-                            tracing::error!("RpcClient Error: {}", e);
-                            tracing::debug!("{:?}", e);
+                        } else {
+                            tracing::info!("RpcClient Notification: {:?}", response);
                         }
                     }
-                }
-                for (_, res) in std::mem::take(&mut *responses.lock().await) {
-                    if let Err(e) = res.send(Err(RpcError {
-                        data: Some("client disconnected before response received".into()),
-                        ..yajrc::INTERNAL_ERROR
-                    })) {
-                        tracing::warn!("RpcClient Response after request aborted: {:?}", e);
+                    Err(error) => {
+                        tracing::error!("RpcClient Error: {}", error);
+                        tracing::debug!("{:?}", error);
+                        break;
                     }
                 }
-            })
-            .into(),
-            writer,
+            }
+        });
+        Self {
+            id,
+            handler: handler.into(),
+            writer: Mutex::new(Box::pin(writer)),
             responses: weak_responses,
         }
     }
 
-    pub async fn request<T: RpcMethod>(
-        &mut self,
+    pub fn is_closed(&self) -> bool {
+        self.responses
+            .upgrade()
+            .is_none_or(|responses| responses.peek(Option::is_none))
+    }
+
+    pub(crate) fn capture<T: RpcMethod + Serialize>(
+        ids: &AtomicUsize,
+        method: T,
+        params: T::Params,
+    ) -> Result<CapturedRequest, RpcError>
+    where
+        T::Params: Serialize,
+    {
+        let id = Id::Number(ids.fetch_add(1, Ordering::SeqCst).into());
+        let mut body = serde_json::to_string(&RpcRequest {
+            id: Some(id.clone()),
+            method,
+            params,
+        })?;
+        body.insert_str(1, "\"jsonrpc\":\"2.0\",");
+        Ok(CapturedRequest { id, body })
+    }
+
+    async fn send(&self, body: String) -> Result<(), Error> {
+        let mut writer = self.writer.lock().await;
+        if self.is_closed() {
+            return Err(disconnected());
+        }
+        let result = writer.send(body).await;
+        if let Err(error) = result {
+            if let Some(responses) = self.responses.upgrade() {
+                responses.replace(None);
+            }
+            self.handler.abort();
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// Consumes a captured request once; transport failure never replays it.
+    pub(crate) async fn send_request(
+        &self,
+        request: CapturedRequest,
+    ) -> Result<Result<Value, RpcError>, Error> {
+        let responses = self.responses.upgrade().ok_or_else(disconnected)?;
+        let (sender, receiver) = oneshot::channel();
+        responses.mutate(|pending| {
+            pending
+                .as_mut()
+                .ok_or_else(disconnected)?
+                .insert(request.id.clone(), sender);
+            Ok::<_, Error>(())
+        })?;
+        let pending = responses.clone();
+        let _cancel = GeneralGuard::new(move || {
+            pending.mutate(|map| map.as_mut().and_then(|map| map.remove(&request.id)))
+        });
+        self.send(request.body).await?;
+        receiver.await.map_err(|_| disconnected())
+    }
+
+    pub async fn request<T: RpcMethod + Serialize>(
+        &self,
         method: T,
         params: T::Params,
     ) -> Result<T::Response, RpcError>
     where
-        T: Serialize,
         T::Params: Serialize,
         T::Response: for<'de> Deserialize<'de>,
     {
-        let id = Id::Number(
-            self.id
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                .into(),
-        );
-        let request = RpcRequest {
-            id: Some(id.clone()),
-            method,
-            params,
-        };
-        if let Some(w) = self.responses.upgrade() {
-            let (send, recv) = oneshot::channel();
-            w.lock().await.insert(id.clone(), send);
-            self.writer
-                .write_all((serde_json::to_string(&request)? + "\n").as_bytes())
-                .await
-                .map_err(|e| {
-                    let mut err = rpc_toolkit::yajrc::INTERNAL_ERROR.clone();
-                    err.data = Some(json!(e.to_string()));
-                    err
-                })?;
-            match recv.await {
-                Ok(val) => {
-                    return Ok(serde_json::from_value(val?)?);
-                }
-                Err(_err) => {
-                    tokio::task::yield_now().await;
-                }
-            }
-        }
-        tracing::debug!(
-            "Client has finished {:?}",
-            futures::poll!(&mut self.handler)
-        );
-        let mut err = rpc_toolkit::yajrc::INTERNAL_ERROR.clone();
-        err.data = Some(json!("RpcClient thread has terminated"));
-        Err(err)
+        let request = Self::capture(&self.id, method, params)?;
+        Ok(serde_json::from_value(self.send_request(request).await??)?)
     }
 
-    pub async fn notify<T: RpcMethod>(
-        &mut self,
+    pub async fn notify<T: RpcMethod + Serialize>(
+        &self,
         method: T,
         params: T::Params,
     ) -> Result<(), RpcError>
     where
-        T: Serialize,
         T::Params: Serialize,
     {
-        let request = RpcRequest {
-            id: None,
-            method,
-            params,
-        };
-        self.writer
-            .write_all((serde_json::to_string(&request)? + "\n").as_bytes())
-            .await
-            .map_err(|e| {
-                let mut err = rpc_toolkit::yajrc::INTERNAL_ERROR.clone();
-                err.data = Some(json!(e.to_string()));
-                err
-            })?;
-        Ok(())
+        Ok(self
+            .send(serde_json::to_string(&RpcRequest {
+                id: None,
+                method,
+                params,
+            })?)
+            .await?)
     }
 }
 
@@ -187,9 +226,7 @@ impl UnixRpcClient {
                     let id = id.clone();
                     let tmpdir = tmpdir.clone();
                     NonDetachingJoinHandle::from(rt.spawn(async move {
-                        if path.as_os_str().len() >= 108
-                        // libc::sockaddr_un.sun_path.len()
-                        {
+                        if path.as_os_str().len() >= 108 {
                             let new_path = tmpdir
                                 .get_or_try_init(|| TmpDir::new())
                                 .await
@@ -213,72 +250,37 @@ impl UnixRpcClient {
         }
     }
 
-    pub async fn request<T: RpcMethod>(
+    async fn client(&self) -> Result<impl Deref<Target = RpcClient>, std::io::Error> {
+        loop {
+            let client = self.pool.clone().get().await?;
+            if client.is_closed() {
+                client.destroy();
+            } else {
+                return Ok(client);
+            }
+        }
+    }
+
+    pub async fn request<T: RpcMethod + Serialize>(
         &self,
         method: T,
         params: T::Params,
     ) -> Result<T::Response, RpcError>
     where
-        T: Serialize + Clone,
-        T::Params: Serialize + Clone,
+        T::Params: Serialize,
         T::Response: for<'de> Deserialize<'de>,
     {
-        let mut tries = 0;
-        let res = loop {
-            let mut client = self.pool.clone().get().await?;
-            if client.handler.is_finished() {
-                client.destroy();
-                continue;
-            }
-            let res = client.request(method.clone(), params.clone()).await;
-            match &res {
-                Err(e) if e.code == rpc_toolkit::yajrc::INTERNAL_ERROR.code => {
-                    let mut e = Error::from(e.clone());
-                    e.kind = ErrorKind::Filesystem;
-                    tracing::error!("{e}");
-                    tracing::debug!("{e:?}");
-                    client.destroy();
-                }
-                _ => break res,
-            }
-            tries += 1;
-            if tries > MAX_TRIES {
-                tracing::warn!("Max Tries exceeded");
-                break res;
-            }
-        };
-        res
+        self.client().await?.request(method, params).await
     }
 
-    pub async fn notify<T: RpcMethod>(&self, method: T, params: T::Params) -> Result<(), RpcError>
+    pub async fn notify<T: RpcMethod + Serialize>(
+        &self,
+        method: T,
+        params: T::Params,
+    ) -> Result<(), RpcError>
     where
-        T: Serialize + Clone,
-        T::Params: Serialize + Clone,
+        T::Params: Serialize,
     {
-        let mut tries = 0;
-        let res = loop {
-            let mut client = self.pool.clone().get().await?;
-            if client.handler.is_finished() {
-                client.destroy();
-                continue;
-            }
-            let res = client.notify(method.clone(), params.clone()).await;
-            match &res {
-                Err(e) if e.code == rpc_toolkit::yajrc::INTERNAL_ERROR.code => {
-                    let mut e = Error::from(e.clone());
-                    e.kind = ErrorKind::Filesystem;
-                    tracing::error!("{e}");
-                    tracing::debug!("{e:?}");
-                    client.destroy();
-                }
-                _ => break res,
-            }
-            tries += 1;
-            if tries > MAX_TRIES {
-                tracing::warn!("Max Tries exceeded");
-                break res;
-            }
-        };
-        res
+        self.client().await?.notify(method, params).await
     }
 }

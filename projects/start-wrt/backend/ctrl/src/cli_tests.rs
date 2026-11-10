@@ -114,7 +114,7 @@ async fn configured_root_ca_applies_to_http_and_websocket_clients() {
 #[tokio::test]
 async fn keyed_cli_uses_production_encrypted_admission_and_live_authorization() {
     let temp = tempfile::tempdir().unwrap();
-    let (url, server, _task, http_calls) = crate::rpc::tests::server().await;
+    let (url, server, _task, http_calls, upgrades) = crate::rpc::tests::server().await;
     let ctx = client(
         url.join("rpc/v1").unwrap(),
         temp.path().join("identity.pem"),
@@ -122,6 +122,7 @@ async fn keyed_cli_uses_production_encrypted_admission_and_live_authorization() 
     let signer: Signer = AnySigningKey::generate().into();
     ctx.id_key.set(signer.clone()).unwrap();
     let key = crate::rpc::tests::enroll(&server, &signer).await;
+    assert_eq!(upgrades.load(Ordering::Relaxed), 0);
     let response = <CliContext as CallRemote<ServerContext>>::call_remote(
         &ctx,
         "auth.session.list",
@@ -142,12 +143,13 @@ async fn keyed_cli_uses_production_encrypted_admission_and_live_authorization() 
         34
     );
     assert_eq!(http_calls.load(Ordering::Relaxed), 0);
+    assert_eq!(upgrades.load(Ordering::Relaxed), 1);
 }
 
 #[tokio::test]
 async fn absent_identity_keeps_http_but_malformed_identity_never_downgrades() {
     let temp = tempfile::tempdir().unwrap();
-    let (url, _, _task, http_calls) = crate::rpc::tests::server().await;
+    let (url, _, _task, http_calls, _) = crate::rpc::tests::server().await;
     let path = temp.path().join("identity.pem");
     let ctx = client(url.join("rpc/v1").unwrap(), path.clone());
     assert_eq!(
@@ -219,7 +221,7 @@ async fn built_wrt_cli_uses_encrypted_admission_without_stdout_changes() {
     .unwrap();
     let signer: Signer =
         AnySigningKey::Ed25519(startos::developer::load_signing_key(path).unwrap()).into();
-    let (url, server, _task, http_calls) = crate::rpc::tests::server().await;
+    let (url, server, _task, http_calls, _) = crate::rpc::tests::server().await;
     let key = crate::rpc::tests::enroll(&server, &signer).await;
     let output = tokio::process::Command::new(binary)
         .env("HOME", temp.path())

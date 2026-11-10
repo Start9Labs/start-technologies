@@ -257,27 +257,27 @@ pub(crate) async fn call_cli(
     use crate::middleware::auth::session::client;
     super::compat::pem_wire(&mut params);
     if let Some(signer) = ctx.rpc_signer(&headers)? {
-        let body = client::request_body(method, params)?;
-        let (peer, mut socket) = client::connect(
-            &ctx.websocket_client,
-            &signer,
-            client::websocket_url(url.clone())?,
-            address,
-            crate::sign::session::Target::Rpc,
-            headers,
-        )
-        .await?;
+        let request = ctx.rpc_client.capture(method, params)?;
+        let connection = ctx
+            .rpc_client
+            .session(
+                &signer,
+                client::websocket_url(url.clone())?,
+                address,
+                headers,
+            )
+            .await?;
         for warning in super::cli_identity::observe(
             &ctx.id_key_path.with_file_name("registry-identities"),
             &url,
             address,
-            &peer,
+            &connection.peer,
         )
         .await
         {
             rpc_toolkit::output::advisory(format_args!("{}", warning));
         }
-        client::request(&mut socket, body).await
+        connection.request(request).await
     } else {
         crate::middleware::auth::signature::call_http(
             ctx.client.clone(),

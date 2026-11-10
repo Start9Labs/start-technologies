@@ -148,6 +148,7 @@ pub struct CliContextSeed {
     pub host: Url,
     pub client: Client,
     pub websocket_client: Client,
+    pub rpc_client: startos::middleware::auth::session::client::SessionClient,
     pub id_key_path: PathBuf,
     id_key: OnceLock<Signer>,
     runtime: OnceLock<Arc<Runtime>>,
@@ -213,6 +214,9 @@ impl CliContext {
             configs_only: args.configs_only,
             host,
             client,
+            rpc_client: startos::middleware::auth::session::client::SessionClient::new(
+                websocket_client.clone(),
+            ),
             websocket_client,
             id_key_path: id_key_path(),
             id_key: OnceLock::new(),
@@ -248,16 +252,17 @@ impl CliContext {
             }
         }
         if let Some(signer) = self.rpc_signer(&headers)? {
-            return startos::middleware::auth::session::client::call(
-                &self.websocket_client,
-                &signer,
-                startos::middleware::auth::session::client::websocket_url(self.host.clone())?,
-                self.host.host_str().unwrap_or_default(),
-                headers,
-                method,
-                params,
-            )
-            .await;
+            return self
+                .rpc_client
+                .call(
+                    &signer,
+                    startos::middleware::auth::session::client::websocket_url(self.host.clone())?,
+                    self.host.host_str().unwrap_or_default(),
+                    headers,
+                    method,
+                    params,
+                )
+                .await;
         }
         startos::middleware::auth::signature::call_http(
             self.client.clone(),

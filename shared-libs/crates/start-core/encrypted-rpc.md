@@ -48,9 +48,19 @@ session scope; HTTP resources retain their own authentication policy.
 
 ## Native clients and registry compatibility
 
-`session::client::{admit,request_body,request}` share admission deadlines, captured JSON
-bytes and response handling between Reqwest and the existing SOCKS connector. Each
-connection prepares its own signed hello before the 30-second network deadline,
+`session::client::SessionClient` establishes connections lazily inside `call()` and
+retains them with the CLI context. Its immutable HTTP/1 client owns network policy;
+endpoint, selected signing name, signer and upgrade headers scope reuse. The existing
+`util::rpc_client::RpcClient` dispatches correlated responses through separate Unix-line
+and encrypted-WebSocket adapters. Its idle reader drives the existing WebSocket keepalive.
+Cancellation removes pending response slots without closing siblings. Application errors
+retain healthy sockets; transport failure invalidates them without replaying sent calls.
+The Unix pool likewise never retries a possibly executed request.
+
+Backend discovery keeps its separate short-lived workflow through
+`session::client::{admit,request_body,request}`, sharing admission and framing rather than
+a second persistent manager. Handshake proofs emit pure Ed25519; verification retains
+Ed25519ph compatibility. Each connection prepares its own signed hello before the 30-second network deadline,
 including opaque GPG signing. The standard signed timestamp freshness policy still
 applies. The upgrade retains device-info headers, proxy/TLS policy, remote DNS and the
 selected hostname rather than a pinned dial address. RPC upgrades do not redirect.

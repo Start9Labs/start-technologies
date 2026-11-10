@@ -3,6 +3,7 @@ release-notes: false
 ---
 
 - Encrypt keyed browser and CLI RPC after signed ephemeral-DH admission, with same-peer, intended-GUID admission for secure-origin continuations, while preserving anonymous setup, local-token access, HTTP/header compatibility and reconnect behavior.
+- Establish keyed CLI connections on the first call and reuse them for subsequent calls without silently repeating a possibly executed request.
 - Detect firmware changes through authenticated reply metadata and verify the requested version before reporting recovery from an interrupted update.
 - Remember the browser's verified server identity and warn on changes without blocking the connection, with fingerprint details for verification.
 - Bound replay-cache memory when clock synchronization is unavailable.

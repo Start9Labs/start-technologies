@@ -83,6 +83,7 @@ pub struct CliContextSeed {
     pub tunnel_listen: Option<SocketAddr>,
     pub client: Client,
     pub websocket_client: Client,
+    pub rpc_client: crate::middleware::auth::session::client::SessionClient,
     pub id_key_path: PathBuf,
     pub id_key_gpg: Option<String>,
     pub id_key: OnceCell<Signer>,
@@ -168,6 +169,9 @@ impl CliContext {
             tunnel_listen: config.tunnel_listen,
             host_identity,
             client,
+            rpc_client: crate::middleware::auth::session::client::SessionClient::new(
+                websocket_client.clone(),
+            ),
             websocket_client,
             id_key_path: config.id_key_path.unwrap_or_else(default_id_key_path),
             id_key_gpg: config.id_key_gpg,
@@ -260,16 +264,17 @@ impl CliContext {
         params: Value,
     ) -> Result<Value, RpcError> {
         if let Some(signer) = self.rpc_signer(&headers)? {
-            return crate::middleware::auth::session::client::call(
-                &self.websocket_client,
-                &signer,
-                crate::middleware::auth::session::client::websocket_url(url)?,
-                address,
-                headers,
-                method,
-                params,
-            )
-            .await;
+            return self
+                .rpc_client
+                .call(
+                    &signer,
+                    crate::middleware::auth::session::client::websocket_url(url)?,
+                    address,
+                    headers,
+                    method,
+                    params,
+                )
+                .await;
         }
         crate::middleware::auth::signature::call_http(
             self.client.clone(),
