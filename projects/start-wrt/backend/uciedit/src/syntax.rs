@@ -271,6 +271,17 @@ impl<'a> Section<'a> {
         panic!("section missing header")
     }
 
+    /// Where its `config` line was read from.
+    pub fn header_src(&self) -> Source {
+        self.lines
+            .iter()
+            .find_map(|line| match line {
+                Line::Section { ty, .. } => Some(ty.src()),
+                _ => None,
+            })
+            .unwrap_or(Source::Unknown)
+    }
+
     pub fn get_typed<T: TypedSection<'a>>(&self) -> Result<Option<T>, Error> {
         if T::is_type(&self.ty()) {
             Ok(Some(T::read(self)?))
@@ -574,7 +585,10 @@ impl<'a> Lexer<'a> {
     /// A missing value is the empty string.
     fn option_args(&mut self) -> Result<(Token<'a>, Token<'a>, LineComment<'a>), String> {
         let name = self.token()?.ok_or("missing option name")?;
-        let value = self.token()?.unwrap_or(Token { raw: "" });
+        let value = self.token()?.unwrap_or(Token {
+            raw: "",
+            line: name.line,
+        });
         let comment = self.end_statement()?;
         Ok((name, value, comment))
     }
@@ -602,6 +616,7 @@ impl<'a> Lexer<'a> {
     fn token(&mut self) -> Result<Option<Token<'a>>, String> {
         self.skip_blanks();
         let start = self.pos;
+        let line = self.line;
         while let Some(b) = self.peek() {
             match b {
                 b'\'' | b'"' => self.quoted(b)?,
@@ -614,6 +629,7 @@ impl<'a> Lexer<'a> {
         let text = self.text;
         Ok((self.pos > start).then(|| Token {
             raw: &text[start..self.pos],
+            line: Some(line),
         }))
     }
 
@@ -714,11 +730,30 @@ fn quote(s: &str) -> String {
 #[derive(Clone, Copy, Debug)]
 pub struct Token<'a> {
     raw: &'a str,
+    line: Option<usize>,
 }
 
 impl<'a> Token<'a> {
     pub fn unquoted_string(self) -> String {
         self.as_str().into_owned()
+    }
+
+    /// The zero-based file line it was read from; unset when constructed.
+    pub fn line(&self) -> Option<usize> {
+        self.line
+    }
+
+    pub fn src(&self) -> Source {
+        self.line.map_or(Source::Unknown, Source::UnknownLine)
+    }
+
+    fn invalid(self, option: &str, desc: impl fmt::Display) -> Error {
+        Error::InvalidValue {
+            src: self.src(),
+            option: option.into(),
+            found: self.unquoted_string(),
+            desc: desc.to_string(),
+        }
     }
 
     pub fn as_str(&self) -> Cow<'a, str> {
@@ -739,6 +774,7 @@ impl<'a> Token<'a> {
     pub fn from_string(s: String, arena: &'a Arena) -> Self {
         Token {
             raw: arena.alloc(quote(&s)),
+            line: None,
         }
     }
 
@@ -747,52 +783,53 @@ impl<'a> Token<'a> {
         let word = !s.is_empty()
             && s.bytes()
                 .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'));
-        if word {
-            Token { raw: s }
-        } else {
-            Token {
-                raw: arena.alloc(quote(s)),
-            }
+        Token {
+            raw: if word {
+                s
+            } else {
+                arena.alloc(quote(s)).as_str()
+            },
+            line: None,
         }
     }
 
     pub fn from_bool(s: bool) -> Self {
         Token {
             raw: if s { "'1'" } else { "'0'" },
+            line: None,
         }
     }
 
-    pub fn parse_fromstr<T: FromStr>(self, line_number: usize) -> Result<T, Error>
+    /// The whitespace-separated words of the value, as OpenWrt reads a list written as an
+    /// `option`.
+    pub fn words(self, arena: &'a Arena) -> Vec<Token<'a>> {
+        self.as_str()
+            .split_whitespace()
+            .map(|word| Token {
+                raw: arena.alloc(quote(word)).as_str(),
+                line: self.line,
+            })
+            .collect()
+    }
+
+    pub fn parse_fromstr<T: FromStr>(self, option: &str) -> Result<T, Error>
     where
         T::Err: std::error::Error + Sync + Send + 'static,
     {
-        match self.as_str().parse::<T>() {
-            Ok(v) => Ok(v),
-            Err(e) => Err(Error::ValueMsg {
-                src: Source::UnknownLine(line_number),
-                desc: e.to_string(),
-            }),
-        }
+        self.as_str()
+            .parse::<T>()
+            .map_err(|e| self.invalid(option, e))
     }
 
-    pub fn parse_inpt<T: Inpt<'a>>(self, line_number: usize, arena: &'a Arena) -> Result<T, Error> {
-        match inpt(self.as_arena_str(arena)) {
-            Ok(v) => Ok(v),
-            Err(e) => Err(Error::ValueMsg {
-                src: Source::UnknownLine(line_number),
-                desc: e.to_string(),
-            }),
-        }
+    pub fn parse_inpt<T: Inpt<'a>>(self, option: &str, arena: &'a Arena) -> Result<T, Error> {
+        inpt(self.as_arena_str(arena)).map_err(|e| self.invalid(option, e))
     }
 
-    pub fn parse_bool(self, line_number: usize) -> Result<bool, Error> {
+    pub fn parse_bool(self, option: &str) -> Result<bool, Error> {
         match self.as_str().trim() {
             "0" | "no" | "off" | "false" | "disabled" => Ok(false),
             "1" | "yes" | "on" | "true" | "enabled" => Ok(true),
-            other => Err(Error::ValueBoolean {
-                src: Source::UnknownLine(line_number),
-                found: other.to_string(),
-            }),
+            _ => Err(self.invalid(option, "not a boolean")),
         }
     }
 }

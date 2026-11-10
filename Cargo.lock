@@ -8487,7 +8487,7 @@ dependencies = [
 
 [[package]]
 name = "start-os"
-version = "0.4.2"
+version = "0.4.2-rev.1"
 dependencies = [
  "include_dir",
  "start-core",
@@ -8571,6 +8571,7 @@ dependencies = [
  "include_dir",
  "ipnet",
  "itertools 0.14.0",
+ "josekit",
  "libc",
  "macaddr",
  "mime_guess",
