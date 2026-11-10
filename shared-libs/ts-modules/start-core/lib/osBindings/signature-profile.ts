@@ -4,6 +4,7 @@ export const SIGNATURE_PROFILE = {
     45, 83, 105, 103, 32, 118, 49, 0,
   ],
   requestType: 3,
+  requestName: 'request',
   ed25519: {
     keyPrefix: [48, 42, 48, 5, 6, 3, 43, 101, 112, 3, 33, 0],
     keyBytes: 32,

@@ -1294,6 +1294,13 @@ export const RegistryKeyDropped: z.ZodIntersection<
     description:
       'A key a connected registry stopped offering; its trust is unchanged.',
   })
+export const RegistryStatus: z.ZodEnum<{
+  connecting: 'connecting'
+  connected: 'connected'
+  error: 'error'
+}> = /* @__PURE__ */ z.enum(['connecting', 'connected', 'error']).meta({
+  id: 'RegistryStatus',
+})
 export const RemoveAssetParams: z.ZodObject<{
   version: z.ZodString
   platform: z.ZodString
@@ -5096,11 +5103,14 @@ export const NotificationWithId: z.ZodIntersection<
 export const OsUpdateCache: z.ZodObject<{
   registry: z.ZodString
   versions: z.ZodRecord<z.ZodString, typeof OsVersionInfo>
-  connected: z.ZodBoolean
+  status: z.ZodCodec<
+    z.ZodOptional<typeof RegistryStatus>,
+    typeof RegistryStatus
+  >
 }> = /* @__PURE__ */ object({
   registry: z.string(),
   versions: z.record(z.string(), OsVersionInfo),
-  connected: z.boolean(),
+  status: wire(RegistryStatus.optional(), RegistryStatus),
 }).meta({
   id: 'OsUpdateCache',
   description: 'Compatible releases from the selected StartOS update source.',
@@ -6440,11 +6450,14 @@ export const PackageIndex: z.ZodObject<{
 export const RegistryCache: z.ZodObject<{
   info: typeof RegistryInfo
   packages: z.ZodRecord<z.ZodString, typeof GetPackageResponse>
-  connected: z.ZodBoolean
+  status: z.ZodCodec<
+    z.ZodOptional<typeof RegistryStatus>,
+    typeof RegistryStatus
+  >
 }> = /* @__PURE__ */ object({
   info: RegistryInfo,
   packages: z.record(z.string(), GetPackageResponse),
-  connected: z.boolean(),
+  status: wire(RegistryStatus.optional(), RegistryStatus),
 }).meta({
   id: 'RegistryCache',
   description:

@@ -1,15 +1,54 @@
 import { z } from 'zod'
 const object = <Shape extends z.core.$ZodLooseShape>(shape: Shape) =>
   z.object(shape).meta({ additionalProperties: true })
-const literal_0 = /* @__PURE__ */ z.string()
-export const Envelope: z.ZodObject<{
-  payload: typeof literal_0
-  proof: z.ZodString
-}> = /* @__PURE__ */ object({ payload: literal_0, proof: z.string() }).meta({
-  id: 'Envelope',
+const literal_0 = /* @__PURE__ */ z.union([z.bigint(), z.number().int().safe()])
+const literal_1 = /* @__PURE__ */ z.instanceof(Uint8Array)
+const literal_2 = /* @__PURE__ */ z.string()
+export const BinaryRequestCommitment: z.ZodObject<{
+  timestamp: typeof literal_0
+  nonce: typeof literal_0
+  size: typeof literal_0
+  blake3: typeof literal_1
+}> = /* @__PURE__ */ object({
+  timestamp: literal_0.meta({
+    description: 'A CBOR integer whose JavaScript decoder may return a bigint.',
+  }),
+  nonce: literal_0.meta({
+    description: 'A CBOR integer whose JavaScript decoder may return a bigint.',
+  }),
+  size: literal_0.meta({
+    description: 'A CBOR integer whose JavaScript decoder may return a bigint.',
+  }),
+  blake3: literal_1.meta({
+    description:
+      'A binary byte string, without a text encoding or an integer-array fallback.',
+  }),
+}).meta({
+  id: 'BinaryRequestCommitment',
 })
-export const Guid: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
+export const Guid: typeof literal_2 = /* @__PURE__ */ literal_2.meta({
   id: 'Guid',
+})
+
+/**
+ * Binary request proofs retain the generic commitment domain, not HTTP header framing.
+ */
+export const BinaryRequestProof: z.ZodObject<{
+  commitment: typeof BinaryRequestCommitment
+  signer: typeof literal_1
+  signature: typeof literal_1
+}> = /* @__PURE__ */ object({
+  commitment: BinaryRequestCommitment,
+  signer: literal_1.meta({
+    description: 'An algorithm-tagged DER value carried as a byte string.',
+  }),
+  signature: literal_1.meta({
+    description: 'An algorithm-tagged DER value carried as a byte string.',
+  }),
+}).meta({
+  id: 'BinaryRequestProof',
+  description:
+    'Binary request proofs retain the generic commitment domain, not HTTP header framing.',
 })
 
 /**
@@ -52,13 +91,13 @@ export const Hello: z.ZodUnion<
   readonly [
     z.ZodIntersection<
       z.ZodObject<{ role: z.ZodLiteral<'client'> }>,
-      z.ZodObject<{ ephemeral: typeof literal_0; target: typeof Target }>
+      z.ZodObject<{ ephemeral: typeof literal_1; target: typeof Target }>
     >,
     z.ZodIntersection<
       z.ZodObject<{ role: z.ZodLiteral<'server'> }>,
       z.ZodObject<{
-        ephemeral: typeof literal_0
-        clientHello: typeof literal_0
+        ephemeral: typeof literal_1
+        clientHello: typeof literal_1
       }>
     >,
   ]
@@ -66,11 +105,26 @@ export const Hello: z.ZodUnion<
   .union([
     z.intersection(
       object({ role: z.literal('client') }),
-      object({ ephemeral: literal_0, target: Target }),
+      object({
+        ephemeral: literal_1.meta({
+          description:
+            'A binary byte string, without a text encoding or an integer-array fallback.',
+        }),
+        target: Target,
+      }),
     ),
     z.intersection(
       object({ role: z.literal('server') }),
-      object({ ephemeral: literal_0, clientHello: literal_0 }),
+      object({
+        ephemeral: literal_1.meta({
+          description:
+            'A binary byte string, without a text encoding or an integer-array fallback.',
+        }),
+        clientHello: literal_1.meta({
+          description:
+            'A binary byte string, without a text encoding or an integer-array fallback.',
+        }),
+      }),
     ),
   ])
   .meta({

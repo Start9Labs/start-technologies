@@ -7,7 +7,7 @@ use tokio_tungstenite::tungstenite::Message as WireMessage;
 use url::Url;
 
 use super::session_rpc_router;
-use crate::middleware::auth::session::{RpcSessionUpgrader, session_url};
+use crate::middleware::auth::session::RpcSessionUpgrader;
 use crate::registry::context::RegistryContext;
 use crate::registry::registry_server;
 use crate::sign::Signer;
@@ -91,7 +91,6 @@ async fn session_router_accepts_http2_extended_connect() {
 async fn encrypted(url: &Url, path: &str, signer: &Signer) -> EncryptedSocket {
     let mut url = url.join(path).unwrap();
     url.set_scheme("ws").unwrap();
-    let url = session_url(url, "127.0.0.1").unwrap();
     let target = if path == RpcSessionUpgrader::PATH {
         Target::Rpc
     } else {

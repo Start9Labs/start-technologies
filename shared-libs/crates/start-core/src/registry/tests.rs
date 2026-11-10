@@ -98,7 +98,7 @@ async fn rpc(url: &Url, method: &str, params: Value, signer: Option<&Signer>) ->
 
 async fn registry_socket(url: &Url, signer: &Signer) -> crate::util::net::secure::EncryptedSocket {
     let url = url
-        .join("ws/rpc?secure=1&context=127.0.0.1")
+        .join("ws/rpc")
         .unwrap()
         .to_string()
         .replacen("http:", "ws:", 1);
@@ -152,7 +152,8 @@ async fn root_signature_fields_neither_authenticate_nor_override_http_headers() 
 }
 
 #[tokio::test]
-async fn websocket_upgrade_headers_and_root_fields_do_not_authenticate_plaintext_calls() {
+async fn websocket_upgrade_headers_and_root_fields_cannot_override_an_unknown_encrypted_peer() {
+    use axum::extract::ws::Message as LogicalMessage;
     let (_temp, ctx, admin, _reader, _) = fixture().await;
     let (url, _task) = server(ctx).await;
     let mut request = url
@@ -169,9 +170,24 @@ async fn websocket_upgrade_headers_and_root_fields_do_not_authenticate_plaintext
             .unwrap()
             .to_header(),
     );
-    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    let (socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    let key: Signer = crate::sign::AnySigningKey::generate().into();
+    let prepared = crate::sign::session::PreparedClient::new(
+        &key,
+        "127.0.0.1",
+        crate::sign::session::Target::Rpc,
+    )
+    .await
+    .unwrap();
+    let (_, mut socket) = crate::util::net::secure::EncryptedSocket::initiate(
+        crate::util::net::tungstenite::transport(socket),
+        prepared,
+        std::num::NonZeroUsize::new(64 * 1024 * 1024).unwrap(),
+    )
+    .await
+    .unwrap();
     socket
-        .send(Message::Text(
+        .send(LogicalMessage::Text(
             json!({"jsonrpc":"2.0","id":1,"method":"package.access.get","params":{"id":"secret"}})
                 .to_string()
                 .into(),
@@ -197,7 +213,7 @@ async fn websocket_upgrade_headers_and_root_fields_do_not_authenticate_plaintext
         json!({"jsonrpc":"2.0","id":3,"method":"index"}),
     ]);
     socket
-        .send(Message::Text(batch.to_string().into()))
+        .send(LogicalMessage::Text(batch.to_string().into()))
         .await
         .unwrap();
     let response: Value = serde_json::from_str(
@@ -231,7 +247,7 @@ async fn websocket_upgrade_headers_and_root_fields_do_not_authenticate_plaintext
             .is_none(),
         "{unsigned}"
     );
-    socket.close(None).await.unwrap();
+    futures::SinkExt::close(&mut socket).await.unwrap();
 }
 
 #[tokio::test]

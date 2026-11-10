@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::*;
 use crate::sign::AnySigningKey;
+use crate::util::serde::{Base64, DerEncoding};
 
 fn signer(seed: u8) -> Signer {
     AnySigningKey::Ed25519(ed25519_dalek::SigningKey::from_bytes(&[seed; 32])).into()
@@ -14,36 +15,60 @@ async fn client(key: &Signer) -> PreparedClient {
 }
 
 async fn accept_rpc(key: &Signer, wire: &[u8]) -> (AnyVerifyingKey, Vec<u8>, SessionCipher) {
-    accept(key, "server.test", wire, &Target::Rpc, None, |_| async {
-        Ok(())
-    })
+    let (peer, context, response, cipher) = accept(
+        key,
+        &["server.test".into()],
+        wire,
+        &Target::Rpc,
+        None,
+        |_| async { Ok(()) },
+    )
     .await
-    .unwrap()
+    .unwrap();
+    assert_eq!(&*context, "server.test");
+    (peer, response, cipher)
 }
 
 async fn reject_before_nonce(wire: &[u8], context: &str, peer: Option<&AnyVerifyingKey>) {
     assert!(
-        accept(&signer(2), context, wire, &Target::Rpc, peer, |_| async {
-            panic!("invalid initiation reached nonce policy")
-        })
+        accept(
+            &signer(2),
+            &[context.into()],
+            wire,
+            &Target::Rpc,
+            peer,
+            |_| async { panic!("invalid initiation reached nonce policy") }
+        )
         .await
         .is_err()
     );
 }
 
+fn split_proof(wire: &[u8]) -> (&[u8], RequestProof) {
+    let mut reader = std::io::Cursor::new(wire);
+    let _: Message = serde_cbor::de::from_reader(&mut reader).unwrap();
+    let end = reader.position() as usize;
+    let proof: BinaryRequestProof = serde_cbor::de::from_reader(&mut reader).unwrap();
+    assert_eq!(reader.position() as usize, wire.len());
+    (&wire[..end], proof.into())
+}
+
+fn with_proof(body: &[u8], proof: &RequestProof) -> Vec<u8> {
+    let mut wire = body.to_vec();
+    serde_cbor::ser::into_writer(&BinaryRequestProof::from(proof), &mut wire).unwrap();
+    wire
+}
+
 async fn resign(wire: &[u8], key: &Signer, change: impl FnOnce(&mut Message)) -> Vec<u8> {
-    let mut envelope: Envelope = serde_json::from_slice(wire).unwrap();
-    let mut message: Message = serde_json::from_slice(&envelope.payload).unwrap();
+    let (body, _) = split_proof(wire);
+    let mut message: Message = serde_cbor::de::from_reader(body).unwrap();
     change(&mut message);
-    envelope.payload = Base64(serde_json::to_vec(&message).unwrap());
-    envelope.proof = RequestProof::sign_commitment(key, &envelope.payload, "server.test")
+    let mut body = Vec::new();
+    serde_cbor::ser::into_writer(&message, &mut body).unwrap();
+    let proof = RequestProof::sign_commitment(key, &body, "server.test")
         .await
-        .unwrap()
-        .to_header()
-        .to_str()
-        .unwrap()
-        .into();
-    serde_json::to_vec(&envelope).unwrap()
+        .unwrap();
+    with_proof(&body, &proof)
 }
 
 async fn pair() -> (SessionCipher, SessionCipher) {
@@ -65,9 +90,9 @@ async fn two_messages_authenticate_both_identities_and_both_record_directions() 
     let server_key = signer(2);
     let client = client(&client_key).await;
     let called = AtomicBool::new(false);
-    let (peer, response, mut server) = accept(
+    let (peer, context, response, mut server) = accept(
         &server_key,
-        "server.test",
+        &["other.test".into(), "server.test".into()],
         client.message(),
         &Target::Rpc,
         None,
@@ -79,6 +104,7 @@ async fn two_messages_authenticate_both_identities_and_both_record_directions() 
     .await
     .unwrap();
     assert!(called.load(Ordering::SeqCst));
+    assert_eq!(&*context, "server.test");
     assert_eq!(peer, client_key.verifying_key().await.unwrap());
     assert!(client.message().len() <= MAX_HANDSHAKE_BYTES);
     assert!(response.len() <= MAX_HANDSHAKE_BYTES);
@@ -96,12 +122,29 @@ async fn two_messages_authenticate_both_identities_and_both_record_directions() 
 }
 
 #[tokio::test]
+async fn missing_or_unconfigured_ingress_identities_fail_before_nonce_consumption() {
+    let client = client(&signer(25)).await;
+    for contexts in [vec![], vec!["other.test".into()]] {
+        assert!(
+            accept(
+                &signer(26),
+                &contexts,
+                client.message(),
+                &Target::Rpc,
+                None,
+                |_| async { panic!("unconfigured context reached nonce policy") }
+            )
+            .await
+            .is_err()
+        );
+    }
+}
+
+#[tokio::test]
 async fn pure_ed25519_client_and_ed25519ph_server_use_the_shared_proof_abstractions() {
     let key = signer(3);
     let mut client = client(&key).await;
-    let mut envelope: Envelope = serde_json::from_slice(client.message()).unwrap();
-    let mut proof =
-        RequestProof::from_header(&http::HeaderValue::from_str(&envelope.proof).unwrap()).unwrap();
+    let (body, mut proof) = split_proof(client.message());
     proof.signature = key
         .sign_message(
             &crate::sign::signing_message(
@@ -117,11 +160,14 @@ async fn pure_ed25519_client_and_ed25519ph_server_use_the_shared_proof_abstracti
         proof.signature,
         crate::sign::AnySignature::Ed25519(_)
     ));
-    envelope.proof = proof.to_header().to_str().unwrap().into();
-    client.message = serde_json::to_vec(&envelope).unwrap();
+    client.message = with_proof(body, &proof);
     let (_, response, mut server) = accept_rpc(&signer(4), client.message()).await;
     assert!(matches!(
-        decode(&response, "server.test").await.unwrap().1.signature,
+        decode(&response, &["server.test".into()])
+            .await
+            .unwrap()
+            .1
+            .signature,
         crate::sign::AnySignature::Ed25519ph(_)
     ));
     let (_, mut client) = client.finish(&response).await.unwrap();
@@ -137,28 +183,29 @@ async fn initiation_is_fresh_for_each_connection() {
     let first = client(&signer(5)).await;
     let second = client(&signer(5)).await;
     assert_ne!(first.message(), second.message());
-    let (_, a) = decode(first.message(), "server.test").await.unwrap();
-    let (_, b) = decode(second.message(), "server.test").await.unwrap();
+    let (_, a, _) = decode(first.message(), &["server.test".into()])
+        .await
+        .unwrap();
+    let (_, b, _) = decode(second.message(), &["server.test".into()])
+        .await
+        .unwrap();
     assert_ne!(a.commitment.nonce, b.commitment.nonce);
 }
 
 #[tokio::test]
-async fn full_width_nonce_reaches_the_existing_replay_policy_without_json_rounding() {
+async fn full_width_nonce_reaches_the_existing_replay_policy_without_precision_loss() {
     let key = signer(6);
     let mut client = client(&key).await;
-    let mut envelope: Envelope = serde_json::from_slice(client.message()).unwrap();
-    let mut proof =
-        RequestProof::from_header(&http::HeaderValue::from_str(&envelope.proof).unwrap()).unwrap();
+    let (body, mut proof) = split_proof(client.message());
     proof.commitment.nonce = u64::MAX;
     proof.signature = key
         .sign_commitment(&proof.commitment, "server.test")
         .await
         .unwrap();
-    envelope.proof = proof.to_header().to_str().unwrap().into();
-    client.message = serde_json::to_vec(&envelope).unwrap();
-    let (_, response, _) = accept(
+    client.message = with_proof(body, &proof);
+    let (_, _, response, _) = accept(
         &signer(7),
-        "server.test",
+        &["server.test".into()],
         client.message(),
         &Target::Rpc,
         None,
@@ -194,8 +241,8 @@ async fn context_role_and_protocol_are_authenticated() {
         .await,
         resign(client.message(), &key, |message| {
             message.hello = Hello::Server {
-                ephemeral: Base64([1; 32]),
-                client_hello: Base64([0; 32]),
+                ephemeral: ByteString([1; 32]),
+                client_hello: ByteString([0; 32]),
             }
         })
         .await,
@@ -216,7 +263,7 @@ async fn expected_peer_and_contributory_dh_are_checked_before_nonce_policy() {
     .await;
     let low_order = resign(client.message(), &key, |message| {
         message.hello = Hello::Client {
-            ephemeral: Base64([0; 32]),
+            ephemeral: ByteString([0; 32]),
             target: Target::Rpc,
         };
     })
@@ -241,7 +288,7 @@ async fn signed_intent_cannot_be_redirected_between_rpc_and_continuations_or_bet
         assert!(
             accept(
                 &signer(23),
-                "server.test",
+                &["server.test".into()],
                 client.message(),
                 &actual,
                 Some(&peer),
@@ -254,9 +301,9 @@ async fn signed_intent_cannot_be_redirected_between_rpc_and_continuations_or_bet
     let client = PreparedClient::new(&key, "server.test", a.clone())
         .await
         .unwrap();
-    let (_, response, mut server) = accept(
+    let (_, _, response, mut server) = accept(
         &signer(23),
-        "server.test",
+        &["server.test".into()],
         client.message(),
         &a,
         Some(&peer),
@@ -281,7 +328,7 @@ async fn replay_policy_rejection_cannot_produce_a_session() {
     assert!(
         accept(
             &signer(16),
-            "server.test",
+            &["server.test".into()],
             client.message(),
             &Target::Rpc,
             None,
@@ -295,15 +342,18 @@ async fn replay_policy_rejection_cannot_produce_a_session() {
 #[tokio::test]
 async fn body_and_identity_substitution_fail_proof_verification() {
     let client = client(&signer(17)).await;
-    let mut envelope: Envelope = serde_json::from_slice(client.message()).unwrap();
-    envelope.payload.0.push(b' ');
-    reject_before_nonce(&serde_json::to_vec(&envelope).unwrap(), "server.test", None).await;
-    let mut envelope: Envelope = serde_json::from_slice(client.message()).unwrap();
-    let mut proof =
-        RequestProof::from_header(&http::HeaderValue::from_str(&envelope.proof).unwrap()).unwrap();
+    let (body, mut proof) = split_proof(client.message());
+    let mut reordered: serde_cbor::Value = serde_cbor::de::from_reader(body).unwrap();
+    let serde_cbor::Value::Map(fields) = &mut reordered else {
+        panic!("expected body map")
+    };
+    fields.reverse();
+    let mut changed = Vec::new();
+    serde_cbor::ser::into_writer(&reordered, &mut changed).unwrap();
+    assert_ne!(changed, body);
+    reject_before_nonce(&with_proof(&changed, &proof), "server.test", None).await;
     proof.signer = signer(19).verifying_key().await.unwrap();
-    envelope.proof = proof.to_header().to_str().unwrap().into();
-    reject_before_nonce(&serde_json::to_vec(&envelope).unwrap(), "server.test", None).await;
+    reject_before_nonce(&with_proof(body, &proof), "server.test", None).await;
 }
 
 #[tokio::test]
@@ -369,7 +419,7 @@ fn fixture_client(fixture: &WebCryptoFixture) -> PreparedClient {
         secret: StaticSecret::from(
             <[u8; 32]>::try_from(hex::decode(&fixture.client_private).unwrap()).unwrap(),
         ),
-        context: fixture.context.clone(),
+        context: fixture.context.as_str().into(),
         message: fixture.client.0.clone(),
     }
 }
@@ -403,9 +453,9 @@ async fn independent_webcrypto_proofs_dh_hkdf_and_aes_gcm_match_in_both_directio
 #[tokio::test]
 async fn native_server_accepts_webcrypto_identity_and_request_commitment() {
     let fixture = fixture();
-    let (peer, response, mut server) = accept(
+    let (peer, _, response, mut server) = accept(
         &signer(21),
-        &fixture.context,
+        &[fixture.context.as_str().into()],
         &fixture.client,
         &Target::Rpc,
         None,
@@ -422,6 +472,76 @@ async fn native_server_accepts_webcrypto_identity_and_request_commitment() {
     let mut plain = [0; 128];
     let n = server.read_message(&ciphertext, &mut plain).unwrap();
     assert_eq!(&plain[..n], b"WebCrypto initiation with native server");
+}
+
+#[tokio::test]
+async fn handshake_is_two_cbor_maps_with_binary_key_material_and_no_outer_envelope() {
+    fn field<'a>(value: &'a serde_cbor::Value, name: &str) -> &'a serde_cbor::Value {
+        &value
+            .as_map()
+            .unwrap()
+            .iter()
+            .find(|(key, _)| key.as_text() == Some(name))
+            .unwrap()
+            .1
+    }
+    let client = client(&signer(27)).await;
+    let mut reader = std::io::Cursor::new(client.message());
+    let body: serde_cbor::Value = serde_cbor::de::from_reader(&mut reader).unwrap();
+    let proof: serde_cbor::Value = serde_cbor::de::from_reader(&mut reader).unwrap();
+    assert_eq!(reader.position() as usize, client.message().len());
+    assert_eq!(body.as_map().unwrap().len(), 3);
+    assert_eq!(proof.as_map().unwrap().len(), 3);
+    assert_eq!(
+        field(field(&body, "hello"), "ephemeral")
+            .as_bytes()
+            .unwrap()
+            .len(),
+        32
+    );
+    assert_eq!(
+        field(field(&proof, "commitment"), "blake3")
+            .as_bytes()
+            .unwrap()
+            .len(),
+        32
+    );
+    assert_eq!(
+        field(&proof, "signer").as_bytes().unwrap(),
+        &signer(27)
+            .verifying_key()
+            .await
+            .unwrap()
+            .to_der::<serde_json::Error>()
+            .unwrap()
+    );
+    assert!(field(&proof, "signature").as_bytes().is_some());
+}
+
+#[tokio::test]
+async fn extra_objects_unknown_fields_and_duplicate_fields_fail_before_nonce_policy() {
+    let key = signer(28);
+    let client = client(&key).await;
+    let mut trailing = client.message().to_vec();
+    trailing.push(0xf6);
+    reject_before_nonce(&trailing, "server.test", None).await;
+    let (body, _) = split_proof(client.message());
+    for duplicate in [false, true] {
+        let mut value: serde_cbor::Value = serde_cbor::de::from_reader(body).unwrap();
+        let serde_cbor::Value::Map(fields) = &mut value else {
+            panic!("expected body map")
+        };
+        fields.push((
+            serde_cbor::Value::Text(if duplicate { "protocol" } else { "unexpected" }.into()),
+            serde_cbor::Value::Text("Start-RPC-Session".into()),
+        ));
+        let mut body = Vec::new();
+        serde_cbor::ser::into_writer(&value, &mut body).unwrap();
+        let proof = RequestProof::sign_commitment(&key, &body, "server.test")
+            .await
+            .unwrap();
+        reject_before_nonce(&with_proof(&body, &proof), "server.test", None).await;
+    }
 }
 
 #[tokio::test]

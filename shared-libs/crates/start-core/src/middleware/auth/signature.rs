@@ -86,6 +86,12 @@ pub fn check_enrolled(
 pub trait SignatureAuthContext: DbContext + SessionContext {
     type AdditionalMetadata: DeserializeOwned + SignatureAuthMetadata + Send;
     type CheckPubkeyRes: Send;
+    fn server_identity(&self) -> Result<Signer, Error>;
+    /// Acquires admission replay policy without retaining the authentication owner.
+    fn replay_check(&self) -> RequestReplayCheck;
+    fn with_secure_session(self, session: crate::middleware::auth::session::SecureSession) -> Self
+    where
+        Self: Sized;
     /// How far a key's persisted `last_active` may lag its latest request.
     /// Zero persists every request.
     const LAST_ACTIVE_RESOLUTION: TimeDelta = TimeDelta::zero();
@@ -190,6 +196,15 @@ impl HasUnenrolledKeys {
 }
 
 impl SignatureAuthContext for RpcContext {
+    fn server_identity(&self) -> Result<Signer, Error> {
+        RpcContext::server_identity(self)
+    }
+    fn replay_check(&self) -> RequestReplayCheck {
+        RpcContext::replay_check(self)
+    }
+    fn with_secure_session(self, session: crate::middleware::auth::session::SecureSession) -> Self {
+        RpcContext::with_secure_session(self, session)
+    }
     type AdditionalMetadata = LoginMetadata;
     type CheckPubkeyRes = Option<InternedString>;
     fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T {
@@ -333,7 +348,17 @@ pub(crate) fn request_identities<'a, C: SignatureAuthContext>(
     context: &'a C,
     request: &'a Request,
 ) -> impl Future<Output = Result<Vec<InternedString>, Error>> + Send + 'a {
-    signing_identities(context, request.extensions(), loopback_identity(request))
+    let identities = signing_identities(context, request.extensions(), loopback_identity(request));
+    let host = request_authority(request).map(|authority| authority.host().to_owned());
+    async move {
+        let mut identities = identities.await?;
+        if let Some(host) = host {
+            if let Some(index) = identities.iter().position(|identity| &**identity == host) {
+                identities.swap(0, index);
+            }
+        }
+        Ok(identities)
+    }
 }
 
 async fn signing_identities<C: SignatureAuthContext>(

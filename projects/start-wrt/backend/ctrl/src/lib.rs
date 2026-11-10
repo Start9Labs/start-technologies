@@ -425,8 +425,8 @@ impl startos::middleware::auth::session::SessionContext for ServerContext {
         self.secure_session.as_deref()
     }
 }
-impl startos::middleware::auth::session::SecureRpcContext for ServerContext {
-    fn replay_check(&self) -> startos::middleware::auth::signature::RequestReplayCheck {
+impl ServerContext {
+    pub(crate) fn replay_check(&self) -> startos::middleware::auth::signature::RequestReplayCheck {
         let continuations = Arc::downgrade(&self.continuations);
         let server_identity = self.server_identity.clone();
         startos::middleware::auth::signature::RequestReplayCheck::new(&self.auth, move |auth| {
@@ -438,10 +438,10 @@ impl startos::middleware::auth::session::SecureRpcContext for ServerContext {
             })
         })
     }
-    fn server_identity(&self) -> Result<startos::sign::Signer, startos::Error> {
+    pub(crate) fn server_identity(&self) -> Result<startos::sign::Signer, startos::Error> {
         Ok(self.server_identity.clone())
     }
-    fn with_secure_session(
+    pub(crate) fn with_secure_session(
         mut self,
         session: startos::middleware::auth::session::SecureSession,
     ) -> Self {

@@ -37,7 +37,7 @@ Defined in `shared-libs/crates/start-core/src/registry/mod.rs`:
 
 - `GET /` — HTTP 307 to `https://marketplace.start9.com/?registry=<encoded-origin>`, using the request authority and `X-Forwarded-Proto` (plain HTTP by default).
 - `POST /rpc/{*path}` — JSON-RPC through outer CORS and shared `Auth` (local + signature auth) and `DeviceInfoMiddleware`.
-- `GET /ws/rpc` — multiplexed JSON-RPC and opt-in `rpcstream` responses with the same middleware. `secure=1&context=<configured-hostname>` selects signed ephemeral-DH admission; live method authorization uses the completed session's peer identity. Missing opt-in retains legacy/public behavior; an upgrade-body signature does not authenticate subsequent messages.
+- `GET /ws/rpc` — encrypted multiplexed JSON-RPC and opt-in `rpcstream` responses. Signed ephemeral-DH admission uses two consecutive CBOR objects per hello, without URL selectors. Valid unknown keys can call public methods; per-method authorization observes current enrollment and permissions on the same open connection. Upgrade headers cannot replace its verified peer identity.
 - `GET /ws/rpc/{*path}` — WebSocket RPC continuations, keyed by a `Guid`.
 - `/rest/rpc/{*path}` — REST continuation channel (e.g. large asset streams), keyed by a `Guid`.
 - `GET /icons/{*path}` — a package or dependency icon from the content-addressed store. Access follows the visibility of packages referencing the bytes. Public references permit immutable public caching; private-only references require an authorized request signature and return `private, no-store`. Package versions refer to an icon by this path, `blake3/<hash>.<ext>`; `DeviceInfoMiddleware` inlines it as a data URL for StartOS before 0.4.0.3.

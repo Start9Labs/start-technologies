@@ -116,16 +116,16 @@ impl SessionContext for RegistryContext {
         self.1.as_deref()
     }
 }
-impl crate::middleware::auth::session::SecureRpcContext for RegistryContext {
-    fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
+impl RegistryContext {
+    pub(crate) fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
         crate::middleware::auth::signature::RequestReplayCheck::new(&self.0, |seed| {
             Some(Self(seed, None))
         })
     }
-    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+    pub(crate) fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
         Ok(self.server_identity.clone())
     }
-    fn with_secure_session(
+    pub(crate) fn with_secure_session(
         mut self,
         session: crate::middleware::auth::session::SecureSession,
     ) -> Self {
@@ -510,6 +510,15 @@ impl LocalAuthContext for RegistryContext {
     const LOCAL_AUTH_COOKIE_OWNERSHIP: &str = "root:root";
 }
 impl SignatureAuthContext for RegistryContext {
+    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+        RegistryContext::server_identity(self)
+    }
+    fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
+        RegistryContext::replay_check(self)
+    }
+    fn with_secure_session(self, session: crate::middleware::auth::session::SecureSession) -> Self {
+        RegistryContext::with_secure_session(self, session)
+    }
     type AdditionalMetadata = RegistryAuthMetadata;
     type CheckPubkeyRes = Option<(AnyVerifyingKey, SignerInfo)>;
     fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T {

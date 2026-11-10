@@ -1355,6 +1355,7 @@ pub fn apply_expr(input: jaq_core::Val, expr: &str) -> Result<jaq_core::Val, Err
     Ok(res)
 }
 
+pub mod binary;
 pub mod der64;
 pub use der64::{Der64, DerEncoding};
 

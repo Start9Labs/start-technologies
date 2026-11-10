@@ -20,10 +20,11 @@ requires extending that owner; transport code does not impose a signing scheme.
 
 ## Admission and authorization
 
-`middleware/auth/session.rs::RpcSessionUpgrader` selects admission with
-`secure=1&context=<selected-server-name>`. The existing `request_identities` policy checks
-the selected name against ingress and loopback identities. Missing opt-in retains legacy
-behavior; invalid versions, contexts and encrypted admission fail closed.
+`middleware/auth/session.rs::RpcSessionUpgrader` requires encrypted admission on bare
+`/ws/rpc`. The signed CBOR body carries the protocol and version; URL selectors cannot
+choose plaintext mode or a signing identity. `request_identities` supplies allowed ingress
+and loopback names, ranking the preserved Host authority first. Signature verification
+selects a matching permitted identity, preserving logical names through IP pinning.
 
 The client signs a fresh hello for its logical target, ordinary RPC or a particular
 existing `Guid`. The server verifies that intent before consuming a nonce or invoking a
@@ -38,8 +39,10 @@ An unpolled check cannot keep the owner alive. WRT acquires both authentication 
 continuation owners weakly.
 
 The toolkit's connection-local context carries provenance into handlers.
-`SignatureAuth` still checks current enrollment, roles, expiry, revocation and hooks on
-every RPC. Request claims cannot replace the encrypted peer. Local/bearer credentials
+`SignatureAuthContext` owns admission capabilities and per-call authentication.
+A valid unknown key completes admission without roles. `SignatureAuth` checks current
+enrollment, roles, expiry, revocation and hooks on every RPC, including enrollment or
+revocation on an already-open connection. Request claims cannot replace the encrypted peer. Local/bearer credentials
 retain their separate precedence. Setup, initialization and diagnostic contexts have no
 session scope; HTTP resources retain their own authentication policy.
 
@@ -119,8 +122,10 @@ The handshake module loads lazily and requires WebCrypto Ed25519, X25519, HKDF a
 in a secure context. Identity private keys remain nonextractable. A key/provider lease may persist; each
 connection needs fresh DH/nonce/proof data. Existing RxJS refcounts, key-rotation/logout
 cancellation, metadata fences and product reconnect/recovery owners remain authoritative.
-A stale local-closing socket's error cannot reset its replacement; abnormal unverified
-closure remains code 1006 with `wasClean: false`. Active transport loss still errors.
+A stale local-closing socket's error cannot reset its replacement. Frontend stream success
+and errors belong to `rpcstream` terminal events, not WebSocket close codes or reasons.
+Active transport closure follows reconnection policy; disposal must not create replacement
+sockets. Socket loss cancels every pending initialization and active subscription it owns.
 
 Normal keyed browser RPC and secure-origin GUIDs cannot downgrade from unauthenticated
 state replies or failed admission. Startup/state/init/diagnostic callers deliberately use

@@ -191,6 +191,18 @@ impl DbContext for ServerContext {
 }
 
 impl SignatureAuthContext for ServerContext {
+    fn server_identity(&self) -> Result<startos::sign::Signer, startos::Error> {
+        ServerContext::server_identity(self)
+    }
+    fn replay_check(&self) -> startos::middleware::auth::signature::RequestReplayCheck {
+        ServerContext::replay_check(self)
+    }
+    fn with_secure_session(
+        self,
+        session: startos::middleware::auth::session::SecureSession,
+    ) -> Self {
+        ServerContext::with_secure_session(self, session)
+    }
     type AdditionalMetadata = LoginMetadata;
     type CheckPubkeyRes = Option<InternedString>;
     /// Routine requests never write to flash.

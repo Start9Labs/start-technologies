@@ -1,4 +1,6 @@
-//! `connected` reports synchronization availability, including successful polling without a persistent socket.
+//! Registries expose connecting/connected/error independently of cached catalog contents.
+//! Connecting retains cached data; an empty connecting catalog is loading, not empty.
+//! Connected includes successful polling without a persistent socket.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -25,6 +27,17 @@ use crate::util::future::NonDetachingJoinHandle;
 pub(crate) mod connection;
 mod polling;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, VisitVariants)]
+#[serde(rename_all = "camelCase")]
+pub enum RegistryStatus {
+    #[default]
+    Connecting,
+    Connected,
+    Error,
+}
+
+rpc_toolkit::reflect_ts!(RegistryStatus);
+
 /// Last synchronized package listings and registry trust proposals.
 #[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -32,7 +45,8 @@ mod polling;
 pub struct RegistryCache {
     pub info: RegistryInfo,
     pub packages: GetPackagesResponse,
-    pub connected: bool,
+    #[serde(default)]
+    pub status: RegistryStatus,
 }
 
 rpc_toolkit::reflect_ts!(RegistryCache);
@@ -44,7 +58,8 @@ rpc_toolkit::reflect_ts!(RegistryCache);
 pub struct OsUpdateCache {
     pub registry: Url,
     pub versions: BTreeMap<exver::Version, OsVersionInfo>,
-    pub connected: bool,
+    #[serde(default)]
+    pub status: RegistryStatus,
 }
 
 rpc_toolkit::reflect_ts!(OsUpdateCache);
@@ -168,7 +183,7 @@ pub async fn watch_registries(
                             .filter(|subscriptions| !tasks.contains_key(*subscriptions))
                         {
                             for subscription in subscriptions {
-                                set_disconnected(db, subscription)?;
+                                set_status(db, subscription, RegistryStatus::Connecting)?;
                             }
                         }
                         Ok::<_, Error>(())
@@ -214,7 +229,7 @@ fn reconcile(
     db.as_public_mut().mutate(|public| {
         public.registry_cache.retain(|url, cache| {
             if reset {
-                cache.connected = false;
+                cache.status = RegistryStatus::Connecting;
             }
             desired.contains(&Subscription::Index(url.clone()))
         });
@@ -227,7 +242,7 @@ fn reconcile(
         }
         if reset {
             if let Some(cache) = &mut public.os_update_cache {
-                cache.connected = false;
+                cache.status = RegistryStatus::Connecting;
             }
         }
         Ok(())
@@ -250,6 +265,15 @@ async fn watch_registry(
 ) {
     let mut backoff = 30;
     loop {
+        let _ = db
+            .mutate(|db| {
+                for subscription in &subscriptions {
+                    set_status(db, subscription, RegistryStatus::Connecting)?;
+                }
+                Ok::<_, Error>(())
+            })
+            .await
+            .result;
         let next_poll = tokio::time::Instant::now() + polling::INTERVAL;
         let result = connection::subscribe(&db, &subscriptions, &context, &mut backoff).await;
         let polling = result
@@ -279,7 +303,7 @@ async fn watch_registry(
             let _ = db
                 .mutate(|db| {
                     for subscription in &subscriptions {
-                        set_disconnected(db, subscription)?;
+                        set_status(db, subscription, RegistryStatus::Error)?;
                     }
                     Ok::<_, Error>(())
                 })
@@ -300,7 +324,11 @@ async fn watch_registry(
     }
 }
 
-fn set_disconnected(db: &mut DatabaseModel, subscription: &Subscription) -> Result<(), Error> {
+fn set_status(
+    db: &mut DatabaseModel,
+    subscription: &Subscription,
+    status: RegistryStatus,
+) -> Result<(), Error> {
     if !subscription.selected(&db.as_public().as_ui().de()?) {
         return Ok(());
     }
@@ -314,9 +342,9 @@ fn set_disconnected(db: &mut DatabaseModel, subscription: &Subscription) -> Resu
                         .or_insert_with(|| RegistryCache {
                             info: RegistryInfo::default(),
                             packages: BTreeMap::new(),
-                            connected: false,
+                            status,
                         })
-                        .connected = false;
+                        .status = status;
                     Ok(())
                 })?;
         }
@@ -328,10 +356,10 @@ fn set_disconnected(db: &mut DatabaseModel, subscription: &Subscription) -> Resu
                         *cache = Some(OsUpdateCache {
                             registry: url.clone(),
                             versions: BTreeMap::new(),
-                            connected: false,
+                            status,
                         });
                     } else if let Some(cache) = cache {
-                        cache.connected = false;
+                        cache.status = status;
                     }
                     Ok(())
                 })?;
@@ -389,7 +417,7 @@ fn publish_snapshot(
                 &RegistryCache {
                     info,
                     packages,
-                    connected: true,
+                    status: RegistryStatus::Connected,
                 },
             )?;
         }
@@ -414,7 +442,7 @@ fn publish_snapshot(
                 .ser(&Some(OsUpdateCache {
                     registry: url.clone(),
                     versions,
-                    connected: true,
+                    status: RegistryStatus::Connected,
                 }))?;
         }
     }

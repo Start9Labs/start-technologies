@@ -240,16 +240,16 @@ impl SessionContext for TunnelContext {
         self.1.as_deref()
     }
 }
-impl crate::middleware::auth::session::SecureRpcContext for TunnelContext {
-    fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
+impl TunnelContext {
+    pub(crate) fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
         crate::middleware::auth::signature::RequestReplayCheck::new(&self.0, |seed| {
             Some(Self(seed, None))
         })
     }
-    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+    pub(crate) fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
         Ok(self.server_identity.clone())
     }
-    fn with_secure_session(
+    pub(crate) fn with_secure_session(
         mut self,
         session: crate::middleware::auth::session::SecureSession,
     ) -> Self {

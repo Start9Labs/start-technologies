@@ -139,6 +139,15 @@ pub(crate) mod tests {
     impl crate::middleware::auth::session::SessionContext for TestCtx {}
 
     impl SignatureAuthContext for TestCtx {
+        fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+            panic!("HTTP-only fixture")
+        }
+        fn replay_check(&self) -> super::super::signature::RequestReplayCheck {
+            super::super::signature::RequestReplayCheck::new(&self.0, |state| Some(Self(state)))
+        }
+        fn with_secure_session(self, _: crate::middleware::auth::session::SecureSession) -> Self {
+            panic!("HTTP-only fixture")
+        }
         type AdditionalMetadata = LoginMetadata;
         type CheckPubkeyRes = ();
         fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T {

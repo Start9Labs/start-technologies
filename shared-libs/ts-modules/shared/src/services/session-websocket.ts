@@ -96,9 +96,6 @@ export function sessionWebSocketConstructor(
     constructor(url: string | URL, protocols?: string | string[]) {
       super()
       const endpoint = new URL(url)
-      const negotiation = { ...SESSION_PROFILE.negotiation, context }
-      for (const [name, value] of Object.entries(negotiation))
-        endpoint.searchParams.set(name, String(value))
       this.url = endpoint.href
       for (const type of ['open', 'message', 'error', 'close'] as const)
         this.addEventListener(type, event => {

@@ -69,9 +69,9 @@ async fn states() -> (SessionCipher, SessionCipher) {
     let prepared = PreparedClient::new(&signer(41), CONTEXT, Target::Rpc)
         .await
         .unwrap();
-    let (_, response, server) = crate::sign::session::accept(
+    let (_, _, response, server) = crate::sign::session::accept(
         &signer(42),
-        CONTEXT,
+        &[CONTEXT.into()],
         prepared.message(),
         &Target::Rpc,
         None,
@@ -447,7 +447,7 @@ async fn silent_handshake_is_bounded() {
     let result = EncryptedSocket::accept(
         Box::new(StalledSocket),
         &signer(42),
-        CONTEXT,
+        &[CONTEXT.into()],
         NonZeroUsize::new(1024).unwrap(),
         &Target::Rpc,
         None,
@@ -490,10 +490,10 @@ impl WebSocketUpgrader<PeerContext> for SecureUpgrade {
                 .verifying_key()
                 .await
                 .map_err(|error| axum::Error::new(error.source))?;
-            let (peer, socket) = EncryptedSocket::accept(
+            let (peer, _, socket) = EncryptedSocket::accept(
                 Box::new(socket),
                 &signer(42),
-                CONTEXT,
+                &[CONTEXT.into()],
                 options.max_message_size,
                 &Target::Rpc,
                 Some(&expected),
@@ -578,10 +578,10 @@ async fn closing_server(
         let done = done.clone();
         async move {
             upgrade.on_upgrade(move |socket| async move {
-                let (_, socket) = EncryptedSocket::accept(
+                let (_, _, socket) = EncryptedSocket::accept(
                     Box::new(socket),
                     &signer(42),
-                    CONTEXT,
+                    &[CONTEXT.into()],
                     NonZeroUsize::new(1024).unwrap(),
                     &Target::Rpc,
                     None,

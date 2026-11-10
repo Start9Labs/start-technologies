@@ -5,7 +5,7 @@ use std::time::Duration;
 use axum::extract::ws::Message;
 use futures::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use startos::middleware::auth::session::{session_url, RpcSessionUpgrader};
+use startos::middleware::auth::session::RpcSessionUpgrader;
 use startos::sign::session::{PreparedClient, Target};
 use startos::sign::{AnySigningKey, Signer};
 use startos::util::future::NonDetachingJoinHandle;
@@ -128,7 +128,7 @@ async fn encrypted_rpc_uses_live_auth_and_authenticated_firmware_metadata() {
     let prepared = PreparedClient::new(&signer, "router.lan", Target::Rpc)
         .await
         .unwrap();
-    let mut url = session_url(url.join(RpcSessionUpgrader::PATH).unwrap(), "router.lan").unwrap();
+    let mut url = url.join(RpcSessionUpgrader::PATH).unwrap();
     url.set_scheme("ws").unwrap();
     let mut request = url.as_str().into_client_request().unwrap();
     request

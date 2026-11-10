@@ -133,17 +133,18 @@ async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selec
         .unwrap()
         .de()
         .unwrap();
-    assert!(cache.connected);
+    assert_eq!(cache.status, RegistryStatus::Connected);
     assert_eq!(cache.info.name.as_deref(), Some("Legacy Registry"));
     assert!(cache.packages.contains_key("test"));
-    assert!(
+    assert_eq!(
         snapshot
             .as_public()
             .as_os_update_cache()
             .de()
             .unwrap()
             .unwrap()
-            .connected
+            .status,
+        RegistryStatus::Connected
     );
     let selection = cached_response(
         &snapshot,

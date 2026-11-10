@@ -589,14 +589,16 @@ async fn closure_can_cancel_an_in_flight_initiating_call() {
 #[tokio::test]
 async fn disconnect_drops_pending_calls_and_active_sources() {
     let (mut socket, context, _server) = connect(WebSocketOptions::default()).await;
-    send(&mut socket, request(wire!(9), "nested.watch", 1)).await;
-    receive(&mut socket).await;
-    receive(&mut socket).await;
+    for id in [9, 11] {
+        send(&mut socket, request(wire!(id), "nested.watch", 1)).await;
+        receive(&mut socket).await;
+        receive(&mut socket).await;
+    }
     send(&mut socket, request(wire!(10), "blocked", 1)).await;
     context.started.notified().await;
     drop(socket);
     tokio::time::timeout(Duration::from_secs(3), async {
-        while context.dropped.load(Ordering::SeqCst) < 2 {
+        while context.dropped.load(Ordering::SeqCst) < 3 {
             context.drop_signal.notified().await;
         }
     })

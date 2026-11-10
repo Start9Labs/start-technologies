@@ -9,17 +9,19 @@ use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroizing;
 
+use super::commitment::request::binary::BinaryRequestProof;
 use super::commitment::request::{RequestCommitment, RequestProof};
 use super::{AnyVerifyingKey, Signer};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
-use crate::util::serde::Base64;
+use crate::util::serde::binary::ByteString;
 
 const PROTOCOL: &str = "Start-RPC-Session";
 pub(crate) const VERSION: u8 = 1;
 const CIPHER_KEY_BYTES: usize = 32;
 const NONCE_BYTES: usize = 12;
 pub(crate) const MAX_HANDSHAKE_BYTES: usize = 1024;
+pub(crate) const MAX_HANDSHAKE_DEPTH: usize = 16;
 pub(crate) const TAG_BYTES: usize = 16;
 const MAX_RECORDS_PER_KEY: u64 = 1 << 32;
 
@@ -38,16 +40,6 @@ rpc_toolkit::ts_export!(Target, namespaces = ["session"]);
 
 #[derive(Serialize, Deserialize, VisitFields)]
 #[serde(deny_unknown_fields)]
-struct Envelope {
-    payload: Base64<Vec<u8>>,
-    proof: String,
-}
-
-rpc_toolkit::reflect_ts!(Envelope);
-rpc_toolkit::ts_export!(Envelope, namespaces = ["session"]);
-
-#[derive(Serialize, Deserialize, VisitFields)]
-#[serde(deny_unknown_fields)]
 struct Message {
     protocol: String,
     version: u8,
@@ -61,13 +53,13 @@ rpc_toolkit::ts_export!(Message, namespaces = ["session"]);
 #[serde(tag = "role", rename_all = "camelCase", deny_unknown_fields)]
 enum Hello {
     Client {
-        ephemeral: Base64<[u8; 32]>,
+        ephemeral: ByteString<[u8; 32]>,
         target: Target,
     },
     Server {
-        ephemeral: Base64<[u8; 32]>,
+        ephemeral: ByteString<[u8; 32]>,
         #[serde(rename = "clientHello")]
-        client_hello: Base64<[u8; 32]>,
+        client_hello: ByteString<[u8; 32]>,
     },
 }
 
@@ -85,42 +77,49 @@ fn ephemeral() -> StaticSecret {
 }
 
 async fn encode(signer: &Signer, context: &str, hello: Hello) -> Result<Vec<u8>, Error> {
-    let payload = serde_json::to_vec(&Message {
-        protocol: PROTOCOL.into(),
-        version: VERSION,
-        hello,
-    })
+    let mut wire = Vec::new();
+    serde_cbor::ser::into_writer(
+        &Message {
+            protocol: PROTOCOL.into(),
+            version: VERSION,
+            hello,
+        },
+        &mut wire,
+    )
     .with_kind(ErrorKind::Serialization)?;
-    let proof = RequestProof::sign_commitment(signer, &payload, context).await?;
-    let wire = serde_json::to_vec(&Envelope {
-        payload: Base64(payload),
-        proof: proof
-            .to_header()
-            .to_str()
-            .with_kind(ErrorKind::Serialization)?
-            .into(),
-    })
-    .with_kind(ErrorKind::Serialization)?;
+    let proof = RequestProof::sign_commitment(signer, &wire, context).await?;
+    serde_cbor::ser::into_writer(&BinaryRequestProof::from(&proof), &mut wire)
+        .with_kind(ErrorKind::Serialization)?;
     if wire.len() > MAX_HANDSHAKE_BYTES {
         return Err(invalid());
     }
     Ok(wire)
 }
 
-async fn decode(wire: &[u8], context: &str) -> Result<(Hello, RequestProof), Error> {
+async fn decode(
+    wire: &[u8],
+    contexts: &[InternedString],
+) -> Result<(Hello, RequestProof, InternedString), Error> {
     if wire.len() > MAX_HANDSHAKE_BYTES {
         return Err(invalid());
     }
-    let envelope: Envelope = serde_json::from_slice(wire).map_err(|_| invalid())?;
-    let proof = RequestProof::from_header(
-        &http::HeaderValue::from_str(&envelope.proof).map_err(|_| invalid())?,
-    )?;
-    proof.verify_commitment(&envelope.payload, context).await?;
-    let message: Message = serde_json::from_slice(&envelope.payload).map_err(|_| invalid())?;
+    let mut reader = std::io::Cursor::new(wire);
+    let message: Message =
+        serde_cbor::de::from_reader_with_recursion_limit(&mut reader, MAX_HANDSHAKE_DEPTH)
+            .map_err(|_| invalid())?;
+    let body_end = reader.position() as usize;
+    let proof: BinaryRequestProof =
+        serde_cbor::de::from_reader_with_recursion_limit(&mut reader, MAX_HANDSHAKE_DEPTH)
+            .map_err(|_| invalid())?;
+    if reader.position() as usize != wire.len() {
+        return Err(invalid());
+    }
+    let proof = RequestProof::from(proof);
+    let context = proof.verify_commitment(&wire[..body_end], contexts).await?;
     if message.protocol != PROTOCOL || message.version != VERSION {
         return Err(invalid());
     }
-    Ok((message.hello, proof))
+    Ok((message.hello, proof, context))
 }
 
 fn transcript(client: &[u8], server: &[u8]) -> [u8; 32] {
@@ -135,7 +134,7 @@ fn transcript(client: &[u8], server: &[u8]) -> [u8; 32] {
 /// A single connection's signed initiation, prepared before network deadlines.
 pub struct PreparedClient {
     secret: StaticSecret,
-    context: String,
+    context: InternedString,
     message: Vec<u8>,
 }
 
@@ -147,7 +146,7 @@ impl PreparedClient {
             signer,
             context,
             Hello::Client {
-                ephemeral: Base64(PublicKey::from(&secret).to_bytes()),
+                ephemeral: ByteString(PublicKey::from(&secret).to_bytes()),
                 target,
             },
         )
@@ -172,14 +171,15 @@ impl PreparedClient {
                 client_hello,
             },
             proof,
-        ) = decode(response, &self.context).await?
+            _,
+        ) = decode(response, std::slice::from_ref(&self.context)).await?
         else {
             return Err(invalid());
         };
-        if *client_hello != <[u8; 32]>::from(Sha256::digest(&self.message)) {
+        if client_hello.0 != <[u8; 32]>::from(Sha256::digest(&self.message)) {
             return Err(invalid());
         }
-        let shared = self.secret.diffie_hellman(&PublicKey::from(*ephemeral));
+        let shared = self.secret.diffie_hellman(&PublicKey::from(ephemeral.0));
         if !shared.was_contributory() {
             return Err(invalid());
         }
@@ -196,12 +196,12 @@ impl PreparedClient {
 /// The expected target comes from the accepting route, not the client's claim.
 pub async fn accept<F, Fut>(
     signer: &Signer,
-    context: &str,
+    contexts: &[InternedString],
     request: &[u8],
     expected_target: &Target,
     expected_peer: Option<&AnyVerifyingKey>,
     accept_nonce: F,
-) -> Result<(AnyVerifyingKey, Vec<u8>, SessionCipher), Error>
+) -> Result<(AnyVerifyingKey, InternedString, Vec<u8>, SessionCipher), Error>
 where
     F: FnOnce(RequestCommitment) -> Fut,
     Fut: Future<Output = Result<(), Error>>,
@@ -212,7 +212,8 @@ where
             target,
         },
         proof,
-    ) = decode(request, context).await?
+        context,
+    ) = decode(request, contexts).await?
     else {
         return Err(invalid());
     };
@@ -221,17 +222,17 @@ where
         return Err(invalid());
     }
     let secret = ephemeral();
-    let shared = secret.diffie_hellman(&PublicKey::from(*remote));
+    let shared = secret.diffie_hellman(&PublicKey::from(remote.0));
     if !shared.was_contributory() {
         return Err(invalid());
     }
     accept_nonce(proof.commitment).await?;
     let response = encode(
         signer,
-        context,
+        &context,
         Hello::Server {
-            ephemeral: Base64(PublicKey::from(&secret).to_bytes()),
-            client_hello: Base64(Sha256::digest(request).into()),
+            ephemeral: ByteString(PublicKey::from(&secret).to_bytes()),
+            client_hello: ByteString(Sha256::digest(request).into()),
         },
     )
     .await?;
@@ -240,7 +241,7 @@ where
         &transcript(request, &response),
         Side::Server,
     )?;
-    Ok((proof.signer, response, cipher))
+    Ok((proof.signer, context, response, cipher))
 }
 
 fn protocol_label() -> Vec<u8> {

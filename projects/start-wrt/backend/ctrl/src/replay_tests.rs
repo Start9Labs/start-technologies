@@ -1,4 +1,3 @@
-use startos::middleware::auth::session::SecureRpcContext;
 use startos::sign::commitment::request::{RequestCommitment, RequestProof};
 
 use super::*;
@@ -9,7 +8,7 @@ async fn commitment() -> RequestCommitment {
         .await
         .unwrap();
     proof
-        .verify_commitment(b"hello", "router.lan")
+        .verify_commitment(b"hello", &["router.lan".into()])
         .await
         .unwrap();
     proof.commitment

@@ -20,11 +20,11 @@ async fn admission_keeps_the_selected_identity_when_the_dial_host_is_pinned() {
         .layer(axum::middleware::from_fn(
             |request: axum::extract::Request, next: axum::middleware::Next| async move {
                 if request.uri().path().ends_with("/ws/rpc")
-                    && !request
+                    && request
                         .uri()
                         .query()
                         .unwrap_or_default()
-                        .contains("context=selected.local")
+                        .contains("context=")
                 {
                     return http::StatusCode::FORBIDDEN.into_response();
                 }

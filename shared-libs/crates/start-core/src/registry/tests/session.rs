@@ -80,7 +80,7 @@ async fn call(socket: &mut EncryptedSocket, request: Value) -> Value {
 }
 
 fn secure_url(url: &Url) -> String {
-    ws_url(url, "secure?secure=1&context=127.0.0.1")
+    ws_url(url, "secure")
 }
 
 async fn subscribe(socket: &mut EncryptedSocket) -> String {
@@ -109,6 +109,76 @@ async fn revoke_private_reader(ctx: &RegistryContext) {
         .await
         .result
         .unwrap();
+}
+
+#[tokio::test]
+async fn unknown_key_admission_observes_enrollment_and_revocation_on_the_same_connection() {
+    use crate::middleware::auth::signature::SignatureAuthContext;
+    let (_temp, ctx, _admin, _reader, _) = fixture().await;
+    let (url, _task) = session_server(ctx.clone()).await;
+    let key: Signer = crate::sign::AnySigningKey::generate().into();
+    let public = key.verifying_key().await.unwrap();
+    let mut socket = encrypted(&ws_url(&url, "ws/rpc"), &key).await;
+    let info = call(&mut socket, json!({"jsonrpc":"2.0","id":1,"method":"info"})).await;
+    assert!(info.get("result").is_some(), "{info}");
+    let request = json!({"jsonrpc":"2.0","id":2,"method":"admin.list"});
+    let denied = call(&mut socket, request.clone()).await;
+    assert_eq!(
+        denied["error"]["code"],
+        json!(ErrorKind::Authorization as i32)
+    );
+    let signer = crate::registry::admin::add_signer(
+        ctx.clone(),
+        crate::registry::admin::AddSignerParams {
+            name: "Admitted unknown key".into(),
+            contact: vec![],
+            keys: vec![public.interned_der64().to_string()],
+            gpg_exports: Default::default(),
+        },
+    )
+    .await
+    .unwrap();
+    crate::registry::admin::add_admin(
+        ctx.clone(),
+        crate::registry::admin::AddAdminParams { signer },
+    )
+    .await
+    .unwrap();
+    let accepted = call(&mut socket, request.clone()).await;
+    assert!(accepted.get("result").is_some(), "{accepted}");
+    ctx.unenroll([public.interned_der64()]).await.unwrap();
+    let denied = call(&mut socket, request).await;
+    assert_eq!(
+        denied["error"]["code"],
+        json!(ErrorKind::Authorization as i32)
+    );
+    assert!(
+        call(&mut socket, json!({"jsonrpc":"2.0","id":3,"method":"info"}))
+            .await
+            .get("result")
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn bare_rpc_rejects_plaintext_without_a_negotiation_flag() {
+    let (_temp, ctx, _admin, _reader, _) = fixture().await;
+    let (url, _task) = session_server(ctx).await;
+    let mut socket = raw_socket(&ws_url(&url, "ws/rpc")).await;
+    socket
+        .send(LogicalMessage::Text(
+            json!({"jsonrpc":"2.0","id":1,"method":"info"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    assert!(!matches!(
+        tokio::time::timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap(),
+        Some(Ok(LogicalMessage::Text(_)))
+    ));
 }
 
 #[tokio::test]
@@ -286,16 +356,23 @@ async fn legacy_created_guid_remains_plain_for_the_same_key_used_securely() {
 }
 
 #[tokio::test]
-async fn handshake_rejects_unconfigured_name_and_mismatched_transcript_context() {
+async fn handshake_selects_verified_ingress_identity_not_a_query_hint() {
     let (_temp, ctx, admin, _reader, _) = fixture().await;
     let (url, _task) = session_server(ctx).await;
-    let mut raw = raw_socket(&ws_url(&url, "secure?secure=1&context=unconfigured.test")).await;
-    assert!(!matches!(
-        tokio::time::timeout(Duration::from_secs(3), raw.next())
-            .await
-            .unwrap(),
-        Some(Ok(LogicalMessage::Text(_)))
-    ));
+    let mut socket = encrypted(
+        &ws_url(&url, "secure?secure=1&context=unconfigured.test"),
+        &admin,
+    )
+    .await;
+    assert!(
+        call(
+            &mut socket,
+            json!({"jsonrpc":"2.0", "id":1, "method":"info"})
+        )
+        .await
+        .get("result")
+        .is_some()
+    );
     let prepared = PreparedClient::new(&admin, "wrong.test", Target::Rpc)
         .await
         .unwrap();

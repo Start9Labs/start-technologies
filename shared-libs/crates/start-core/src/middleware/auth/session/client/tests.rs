@@ -379,10 +379,7 @@ async fn registry_cli_websocket_keeps_the_configured_http_proxy() {
     assert_eq!(response["private"].as_bool(), Some(true));
     let headers = request.await.unwrap();
     assert!(headers.starts_with("GET http://"), "{headers}");
-    assert!(
-        headers.contains("/nested/ws/rpc?secure=1&context=127.0.0.1"),
-        "{headers}"
-    );
+    assert!(headers.contains("/nested/ws/rpc "), "{headers}");
     assert!(!headers.to_lowercase().contains("x-start-auth-sig"));
 }
 

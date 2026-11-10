@@ -1,5 +1,6 @@
 use super::*;
 use crate::sign::commitment::request::RequestProof;
+use crate::sign::commitment::request::binary::BinaryRequestProof;
 
 async fn rejected(url: &str, wire: &[u8]) {
     let mut raw = raw_socket(url).await;
@@ -16,9 +17,12 @@ async fn rejected(url: &str, wire: &[u8]) {
     ));
 }
 
-fn proof(wire: &[u8]) -> RequestProof {
-    let envelope: serde_json::Value = serde_json::from_slice(wire).unwrap();
-    RequestProof::from_header(&envelope["proof"].as_str().unwrap().parse().unwrap()).unwrap()
+fn proof(wire: &[u8]) -> (&[u8], RequestProof) {
+    let mut reader = std::io::Cursor::new(wire);
+    let _: serde_cbor::Value = serde_cbor::de::from_reader(&mut reader).unwrap();
+    let end = reader.position() as usize;
+    let proof: BinaryRequestProof = serde_cbor::de::from_reader(&mut reader).unwrap();
+    (&wire[..end], proof.into())
 }
 
 #[tokio::test]
@@ -95,7 +99,7 @@ async fn rpc_and_guid_admission_consume_the_same_nonce_cache() {
     let prepared = PreparedClient::new(&reader, "127.0.0.1", Target::Rpc)
         .await
         .unwrap();
-    let nonce = proof(prepared.message()).commitment.nonce;
+    let nonce = proof(prepared.message()).1.commitment.nonce;
     let (_, mut socket) = EncryptedSocket::initiate(
         raw_socket(&secure_url(&url)).await,
         prepared,
@@ -111,17 +115,13 @@ async fn rpc_and_guid_admission_consume_the_same_nonce_cache() {
     )
     .await
     .unwrap();
-    let mut header = proof(prepared.message());
+    let (body, mut header) = proof(prepared.message());
     header.commitment.nonce = nonce;
     header.signature = reader
         .sign_commitment(&header.commitment, "127.0.0.1")
         .await
         .unwrap();
-    let mut envelope: serde_json::Value = serde_json::from_slice(prepared.message()).unwrap();
-    envelope["proof"] = header.to_header().to_str().unwrap().into();
-    rejected(
-        &ws_url(&url, &format!("ws/rpc/{guid}")),
-        &serde_json::to_vec(&envelope).unwrap(),
-    )
-    .await;
+    let mut wire = body.to_vec();
+    serde_cbor::ser::into_writer(&BinaryRequestProof::from(&header), &mut wire).unwrap();
+    rejected(&ws_url(&url, &format!("ws/rpc/{guid}")), &wire).await;
 }

@@ -124,10 +124,7 @@ test(
     const closed = Promise.withResolvers()
     socket.onclose = event => closed.resolve(event)
     const native = await Socket.created.promise
-    assert.match(
-      native.url,
-      /\/ws\/rpc\/continuation\?secure=1&context=server.test$/,
-    )
+    assert.match(native.url, /\/ws\/rpc\/continuation$/)
     socket.close()
     await closed.promise
     assert.ok(native.closed)

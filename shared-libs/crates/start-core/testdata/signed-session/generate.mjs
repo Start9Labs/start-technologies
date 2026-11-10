@@ -7,12 +7,20 @@ const require = createRequire(
   new URL('../../../../ts-modules/start-core/package.json', import.meta.url),
 )
 const { blake3 } = require('@noble/hashes/blake3')
+const CBOR = require('cbor-web')
+const encode = value =>
+  CBOR.encodeOne(value, {
+    canonical: true,
+    genTypes: [
+      Uint8Array,
+      (encoder, bytes) => encoder.pushAny(bytes.slice().buffer),
+    ],
+  })
 const { subtle } = webcrypto
 const utf8 = value => new TextEncoder().encode(value)
 const concat = (...parts) => Buffer.concat(parts.map(part => Buffer.from(part)))
 const hex = value => Buffer.from(value, 'hex')
 const b64 = value => Buffer.from(value).toString('base64')
-const b64url = value => Buffer.from(value).toString('base64url')
 const hash = async value =>
   new Uint8Array(await subtle.digest('SHA-256', value))
 const context = 'server.test'
@@ -44,9 +52,7 @@ async function dh(privateHex) {
 }
 
 async function signed(hello, key, nonce) {
-  const payload = utf8(
-    JSON.stringify({ protocol: 'Start-RPC-Session', version: 1, hello }),
-  )
+  const payload = encode({ protocol: 'Start-RPC-Session', version: 1, hello })
   const commitment = new Uint8Array(56)
   const view = new DataView(commitment.buffer)
   const timestamp = 1792644825n
@@ -62,18 +68,17 @@ async function signed(hello, key, nonce) {
     commitment,
   )
   const signature = await subtle.sign('Ed25519', key.privateKey, message)
-  const proof = new URLSearchParams({
-    commitment: 'request',
-    timestamp: timestamp.toString(),
-    nonce: nonce.toString(),
-    size: payload.length.toString(),
-    blake3: b64url(commitment.subarray(24)),
-    signer: b64url(key.publicDer),
-    signature: b64url(concat(hex('3049300506032b65700440'), signature)),
+  const proof = encode({
+    commitment: {
+      timestamp,
+      nonce,
+      size: BigInt(payload.length),
+      blake3: commitment.subarray(24),
+    },
+    signer: new Uint8Array(key.publicDer),
+    signature: new Uint8Array(concat(hex('3049300506032b65700440'), signature)),
   })
-  return utf8(
-    JSON.stringify({ payload: b64(payload), proof: proof.toString() }),
-  )
+  return concat(payload, proof)
 }
 
 const clientPrivate =
@@ -85,15 +90,15 @@ const serverDh = await dh(serverPrivate)
 const clientIdentity = await identity(31)
 const serverIdentity = await identity(32)
 const client = await signed(
-  { role: 'client', ephemeral: b64(clientDh.public), target: 'rpc' },
+  { role: 'client', ephemeral: new Uint8Array(clientDh.public), target: 'rpc' },
   clientIdentity,
   0xffffffffffffffffn,
 )
 const server = await signed(
   {
     role: 'server',
-    ephemeral: b64(serverDh.public),
-    clientHello: b64(await hash(client)),
+    ephemeral: new Uint8Array(serverDh.public),
+    clientHello: await hash(client),
   },
   serverIdentity,
   0xfffffffffffffffen,

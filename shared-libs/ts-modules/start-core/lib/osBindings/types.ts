@@ -368,6 +368,8 @@ export type RegistryKeyDropped = z.output<typeof schemas.RegistryKeyDropped>
  * A key a connected registry stopped offering; its trust is unchanged.
  */
 export type RegistryKeyDroppedInput = z.input<typeof schemas.RegistryKeyDropped>
+export type RegistryStatus = z.output<typeof schemas.RegistryStatus>
+export type RegistryStatusInput = z.input<typeof schemas.RegistryStatus>
 export type RemoveAssetParams = z.output<typeof schemas.RemoveAssetParams>
 export type RemoveAssetParamsInput = z.input<typeof schemas.RemoveAssetParams>
 export type RemoveCategoryParams = z.output<typeof schemas.RemoveCategoryParams>

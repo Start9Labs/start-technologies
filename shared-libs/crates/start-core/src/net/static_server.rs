@@ -251,10 +251,10 @@ fn is_local_host(host: &str) -> bool {
             .is_some_and(|(_, tld)| tld.eq_ignore_ascii_case("local"))
 }
 
-/// RPC and continuation routes with optional encrypted WebSocket admission.
+/// Encrypted RPC and legacy-compatible continuation routes.
 pub fn session_rpc_router<C>(ctx: C, server: HttpServer<C>) -> Router
 where
-    C: crate::middleware::auth::session::SecureRpcContext + AsRef<RpcContinuations>,
+    C: crate::middleware::auth::signature::SignatureAuthContext + Clone + AsRef<RpcContinuations>,
 {
     use crate::middleware::auth::session::RpcSessionUpgrader;
 

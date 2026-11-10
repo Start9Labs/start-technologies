@@ -1,17 +1,13 @@
 import { auth, z } from '@start9labs/start-core'
+import { decodeFirst, encode } from '@start9labs/start-core/auth/cbor'
 import { SESSION_PROFILE } from '@start9labs/start-core/osBindings/session-profile'
 import type { Target, Message } from '@start9labs/start-core/osBindings/session'
-import {
-  Envelope,
-  Message as MessageSchema,
-} from '@start9labs/start-core/osBindings/session.schemas'
+import { Message as MessageSchema } from '@start9labs/start-core/osBindings/session.schemas'
 
 export { verifyingKeyFingerprint } from '@start9labs/start-core/auth/signature'
 
 const profile = SESSION_PROFILE.identity
 const maximum = SESSION_PROFILE.transport.maxHandshakeRecordBytes
-const encoder = new TextEncoder()
-const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 
 function sameFields(original: unknown, parsed: unknown): void {
   if (original === null || typeof original !== 'object') return
@@ -26,25 +22,11 @@ function sameFields(original: unknown, parsed: unknown): void {
   for (const key of keys) sameFields(raw[key], shaped[key])
 }
 
-function parseHandshake<T>(schema: z.ZodType<T>, bytes: Uint8Array): T {
-  const raw: unknown = JSON.parse(decoder.decode(bytes))
+function parseHandshake<T>(schema: z.ZodType<T>, raw: unknown): T {
   const parsed = schema.parse(raw)
   // Generated RPC schemas strip unknown fields; admission rejects them.
   sameFields(raw, parsed)
   return parsed
-}
-
-function decodeBase64(value: string, length?: number): Uint8Array<ArrayBuffer> {
-  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value))
-    throw new Error('Invalid handshake Base64')
-  const normalized = value.padEnd(Math.ceil(value.length / 4) * 4, '=')
-  const bytes = new Uint8Array(auth.base64ToBytes(normalized))
-  if (
-    auth.bytesToBase64(bytes) !== normalized ||
-    (length !== undefined && bytes.length !== length)
-  )
-    throw new Error('Invalid handshake Base64')
-  return bytes
 }
 
 async function digest(bytes: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
@@ -132,13 +114,13 @@ export async function prepareSession(
   const body: Message = {
     protocol: profile.protocol,
     version: profile.version,
-    hello: { role: 'client', ephemeral: auth.bytesToBase64(ephemeral), target },
+    hello: { role: 'client', ephemeral, target },
   }
-  const payload = encoder.encode(JSON.stringify(body))
+  const payload = encode(body)
   const proof = await signer.sign(context, payload)
-  const wire = encoder.encode(
-    JSON.stringify({ payload: auth.bytesToBase64(payload), proof }),
-  )
+  const wire = new Uint8Array(payload.length + proof.length)
+  wire.set(payload)
+  wire.set(proof, payload.length)
   if (wire.length > maximum) throw new Error('Oversized signed handshake')
   let secret: CryptoKey | undefined = dh.privateKey
   return {
@@ -151,10 +133,13 @@ export async function prepareSession(
       if (!key) throw new Error('Session initiation was already consumed')
       if (response.length > maximum)
         throw new Error('Oversized signed handshake')
-      const envelope = parseHandshake(Envelope, response)
-      const payload = decodeBase64(envelope.payload)
-      const peer = auth.verifyRequestProof(envelope.proof, context, payload)
-      const message = parseHandshake(MessageSchema, payload)
+      const captured = decodeFirst(response)
+      const peer = await auth.verifyRequestProof(
+        response.subarray(captured.length),
+        context,
+        response.subarray(0, captured.length),
+      )
+      const message = parseHandshake(MessageSchema, captured.value)
       if (
         message.protocol !== profile.protocol ||
         message.version !== profile.version ||
@@ -164,14 +149,13 @@ export async function prepareSession(
       const hello = message.hello
       const clientHash = await digest(wire)
       if (
-        !decodeBase64(hello.clientHello, clientHash.length).every(
-          (byte, i) => byte === clientHash[i],
-        )
+        hello.clientHello.length !== clientHash.length ||
+        !hello.clientHello.every((byte, i) => byte === clientHash[i])
       )
         throw new Error('Server handshake does not bind this initiation')
       const remote = await crypto.subtle.importKey(
         'raw',
-        decodeBase64(hello.ephemeral, ephemeral.length),
+        new Uint8Array(hello.ephemeral),
         profile.dh,
         false,
         [],

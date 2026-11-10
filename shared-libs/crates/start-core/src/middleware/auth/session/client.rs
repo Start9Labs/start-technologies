@@ -11,7 +11,7 @@ use rpc_toolkit::{BoxWebSocket, RpcResponse};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use url::Url;
 
-use super::{RpcSessionUpgrader, session_url};
+use super::RpcSessionUpgrader;
 use crate::middleware::auth::signature::rpc_request_body;
 use crate::prelude::*;
 use crate::sign::session::{PreparedClient, Target};
@@ -82,7 +82,6 @@ pub async fn connect(
     target: Target,
     headers: HeaderMap,
 ) -> Result<(AnyVerifyingKey, EncryptedSocket), Error> {
-    let url = session_url(url, address)?;
     admit(
         signer,
         address,

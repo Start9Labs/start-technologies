@@ -17,6 +17,8 @@ use crate::sign::commitment::{Commitment, Digestable, SignedCommitment};
 use crate::sign::{AnySignature, AnyVerifyingKey, Signer};
 use crate::util::serde::{Base64, DerEncoding};
 
+pub mod binary;
+
 #[derive(Clone, Debug, Deserialize, Serialize, HasModel, PartialEq, Eq, VisitFields)]
 #[serde(rename_all = "camelCase", tag = "type", rename = "request")]
 #[model = "Model<Self>"]
@@ -127,10 +129,26 @@ impl RequestProof {
     }
 
     /// Verifies identity and captured bytes, independently of replay or authorization policy.
-    pub async fn verify_commitment(&self, body: &[u8], context: &str) -> Result<(), Error> {
-        self.signer
-            .verify_commitment(&self.commitment, context, &self.signature)?;
-        self.commitment.verify_bytes(body).await
+    pub async fn verify_commitment(
+        &self,
+        body: &[u8],
+        contexts: &[InternedString],
+    ) -> Result<InternedString, Error> {
+        let context = contexts
+            .iter()
+            .find(|context| {
+                self.signer
+                    .verify_commitment(&self.commitment, context, &self.signature)
+                    .is_ok()
+            })
+            .ok_or_else(|| {
+                Error::new(
+                    eyre!("{}", t!("middleware.auth.invalid-request-signature")),
+                    ErrorKind::InvalidSignature,
+                )
+            })?;
+        self.commitment.verify_bytes(body).await?;
+        Ok(context.clone())
     }
 
     /// Encodes full-width commitment fields and algorithm-tagged DER identities/signatures.

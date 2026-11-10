@@ -1,5 +1,5 @@
 use super::*;
-use crate::middleware::auth::session::session_url;
+use crate::middleware::auth::session::RpcSessionUpgrader;
 use crate::middleware::auth::signature::AUTH_SIG_HEADER;
 use crate::sign::session::Target;
 use crate::sign::{AnySigningKey, Signer};
@@ -18,10 +18,10 @@ pub(super) async fn encrypted_server(
     let identity = Signer::Key(AnySigningKey::Ed25519(
         ed25519_dalek::SigningKey::from_bytes(&[72; 32]),
     ));
-    let (_, socket) = EncryptedSocket::accept(
+    let (_, _, socket) = EncryptedSocket::accept(
         transport(socket),
         &identity,
-        "registry.test",
+        &["registry.test".into()],
         std::num::NonZeroUsize::new(1024 * 1024).unwrap(),
         &Target::Rpc,
         Some(&signer().verifying_key().await.unwrap()),
@@ -102,9 +102,8 @@ async fn one_socket_demultiplexes_large_dumps_and_interleaved_revisions() {
                 assert!(!request.headers().contains_key(AUTH_SIG_HEADER));
                 assert_eq!(request.uri().path(), "/catalog/ws/rpc");
                 let query: BTreeMap<String, String> =
-                    serde_urlencoded::from_str(request.uri().query().unwrap()).unwrap();
-                assert_eq!(query["secure"], "1");
-                assert_eq!(query["context"], "registry.test");
+                    serde_urlencoded::from_str(request.uri().query().unwrap_or_default()).unwrap();
+                assert!(query.is_empty());
                 Ok(response)
             },
         )
@@ -169,7 +168,7 @@ async fn one_socket_demultiplexes_large_dumps_and_interleaved_revisions() {
         .unwrap()
         .de()
         .unwrap();
-    assert!(cache.connected);
+    assert_eq!(cache.status, RegistryStatus::Connected);
     assert_eq!(cache.info.name.unwrap().len(), 5 * 1024 * 1024);
     let os_cache = snapshot
         .as_public()
@@ -177,7 +176,7 @@ async fn one_socket_demultiplexes_large_dumps_and_interleaved_revisions() {
         .de()
         .unwrap()
         .unwrap();
-    assert!(os_cache.connected);
+    assert_eq!(os_cache.status, RegistryStatus::Connected);
     assert!(os_cache.versions.contains_key(&"0.4.0.6".parse().unwrap()));
 }
 
@@ -222,24 +221,19 @@ async fn native_connection_rejects_plaintext_registry_without_fallback() {
 }
 
 #[test]
-fn session_negotiation_preserves_endpoints_and_binds_the_shared_profile() {
-    let target = session_url(
-        "wss://registry.test:8443/catalog/ws/rpc?keep=value"
+fn rpc_endpoint_preserves_deployment_prefix_and_existing_query_without_negotiation() {
+    let target = RpcSessionUpgrader::url(
+        "https://registry.test:8443/catalog?keep=value"
             .parse()
             .unwrap(),
-        "registry.test",
     )
     .unwrap();
     assert_eq!(
         target.as_str(),
-        "wss://registry.test:8443/catalog/ws/rpc?keep=value&secure=1&context=registry.test"
+        "wss://registry.test:8443/catalog/ws/rpc?keep=value"
     );
-    let target = session_url("ws://[::1]:5959/ws/rpc".parse().unwrap(), "[::1]").unwrap();
-    let query: BTreeMap<String, String> = target
-        .query_pairs()
-        .map(|(key, value)| (key.into_owned(), value.into_owned()))
-        .collect();
-    assert_eq!(query["context"], "[::1]");
+    let target = RpcSessionUpgrader::url("http://[::1]:5959".parse().unwrap()).unwrap();
+    assert_eq!(target.as_str(), "ws://[::1]:5959/ws/rpc");
 }
 
 async fn wait_for(db: &TypedPatchDb<Database>, predicate: impl Fn(&DatabaseModel) -> bool) {
@@ -325,7 +319,7 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
             .as_os_update_cache()
             .de()
             .unwrap()
-            .is_some_and(|cache| cache.connected)
+            .is_some_and(|cache| cache.status == RegistryStatus::Connected)
     })
     .await;
     registry
@@ -372,7 +366,7 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
             .as_os_update_cache()
             .de()
             .unwrap()
-            .is_some_and(|cache| cache.connected)
+            .is_some_and(|cache| cache.status == RegistryStatus::Connected)
             && db
                 .as_private()
                 .as_registry_indexes()

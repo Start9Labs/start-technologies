@@ -1,5 +1,4 @@
 use super::*;
-use crate::middleware::auth::session::SecureRpcContext;
 
 #[tokio::test]
 #[ignore = "Requires START_SESSION_BROWSER_PROBE and its built browser fixture"]

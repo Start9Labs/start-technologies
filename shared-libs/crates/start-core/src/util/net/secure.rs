@@ -57,6 +57,7 @@ pub(crate) fn browser_profile() -> serde_json::Value {
         "maxRecordBytes": MAX_RECORD,
         "maxPlaintextBytes": MAX_PLAINTEXT,
         "maxHandshakeRecordBytes": MAX_HANDSHAKE_RECORD,
+        "maxHandshakeDepth": crate::sign::session::MAX_HANDSHAKE_DEPTH,
         "handshakeTimeoutMs": HANDSHAKE_TIMEOUT.as_millis(),
         "writeTimeoutMs": Duration::from_secs(15).as_millis(),
         "maxIncomingBytes": logical.get(),
@@ -366,12 +367,12 @@ impl EncryptedSocket {
     pub async fn accept<F, Fut>(
         mut socket: BoxWebSocket,
         signer: &Signer,
-        context: &str,
+        contexts: &[InternedString],
         incoming: NonZeroUsize,
         target: &Target,
         expected: Option<&AnyVerifyingKey>,
         accept_nonce: F,
-    ) -> Result<(AnyVerifyingKey, Self), Error>
+    ) -> Result<(AnyVerifyingKey, InternedString, Self), Error>
     where
         F: FnOnce(RequestCommitment) -> Fut,
         Fut: Future<Output = Result<(), Error>>,
@@ -379,9 +380,9 @@ impl EncryptedSocket {
         tokio::time::timeout(HANDSHAKE_TIMEOUT, async move {
             let mut records = HandshakeRecords::new();
             let request = records.receive(&mut socket).await?;
-            let (peer, response, state) = crate::sign::session::accept(
+            let (peer, context, response, state) = crate::sign::session::accept(
                 signer,
-                context,
+                contexts,
                 &request,
                 target,
                 expected,
@@ -389,7 +390,7 @@ impl EncryptedSocket {
             )
             .await?;
             send_handshake(&mut socket, &response).await?;
-            Ok((peer, Self::new(socket, state, records, incoming)))
+            Ok((peer, context, Self::new(socket, state, records, incoming)))
         })
         .await
         .with_kind(ErrorKind::Network)?

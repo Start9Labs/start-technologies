@@ -1,5 +1,4 @@
 use super::*;
-use crate::middleware::auth::session::SecureRpcContext;
 use crate::sign::commitment::request::RequestProof;
 
 async fn context() -> (tempfile::TempDir, crate::registry::context::RegistryContext) {
@@ -23,7 +22,7 @@ async fn verified(commitment: RequestCommitment) -> RequestCommitment {
         commitment,
     };
     proof
-        .verify_commitment(b"hello", "localhost")
+        .verify_commitment(b"hello", &["localhost".into()])
         .await
         .unwrap();
     proof.commitment

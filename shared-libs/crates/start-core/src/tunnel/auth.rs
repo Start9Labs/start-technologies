@@ -28,6 +28,15 @@ impl DbContext for TunnelContext {
     }
 }
 impl SignatureAuthContext for TunnelContext {
+    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+        TunnelContext::server_identity(self)
+    }
+    fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
+        TunnelContext::replay_check(self)
+    }
+    fn with_secure_session(self, session: crate::middleware::auth::session::SecureSession) -> Self {
+        TunnelContext::with_secure_session(self, session)
+    }
     type AdditionalMetadata = LoginMetadata;
     type CheckPubkeyRes = Option<InternedString>;
     fn mutate_nonce_cache<

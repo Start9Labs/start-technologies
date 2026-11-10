@@ -1,6 +1,8 @@
 import { webcrypto } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { decodeFirst, encode } from '../auth/cbor'
+import type { BinaryRequestProof } from '../osBindings/session'
 import {
   ed25519PublicKeyDer64,
   normalizeDer64,
@@ -73,7 +75,7 @@ test('HTTP signature headers retain their base64url envelope', async () => {
   }
 })
 
-test('independent native-consumed WebCrypto proofs preserve full-u64 commitments', () => {
+test('independent native-consumed WebCrypto proofs preserve full-u64 commitments', async () => {
   const fixture = JSON.parse(
     readFileSync(
       resolve(
@@ -84,39 +86,63 @@ test('independent native-consumed WebCrypto proofs preserve full-u64 commitments
     ),
   )
   for (const side of ['client', 'server']) {
-    const envelope = JSON.parse(Buffer.from(fixture[side], 'base64').toString())
-    const payload = new Uint8Array(Buffer.from(envelope.payload, 'base64'))
-    expect(verifyRequestProof(envelope.proof, fixture.context, payload)).toBe(
-      fixture[side + 'Identity'],
-    )
-    expect(() =>
-      verifyRequestProof(envelope.proof, 'another.test', payload),
-    ).toThrow()
-    expect(() =>
+    const wire = new Uint8Array(Buffer.from(fixture[side], 'base64'))
+    const body = decodeFirst(wire)
+    const payload = wire.subarray(0, body.length)
+    const proof = wire.subarray(body.length)
+    const decoded = decodeFirst(proof).value as BinaryRequestProof
+    await expect(
+      verifyRequestProof(proof, fixture.context, payload),
+    ).resolves.toBe(fixture[side + 'Identity'])
+    await expect(
+      verifyRequestProof(proof, 'another.test', payload),
+    ).rejects.toThrow()
+    await expect(
       verifyRequestProof(
-        envelope.proof,
+        proof,
         fixture.context,
         new Uint8Array([...payload, 0]),
       ),
-    ).toThrow()
-    const query = new URLSearchParams(envelope.proof)
-    expect(BigInt(query.get('nonce')!)).toBeGreaterThan(
+    ).rejects.toThrow()
+    expect(BigInt(decoded.commitment.nonce)).toBeGreaterThan(
       BigInt(Number.MAX_SAFE_INTEGER),
     )
     for (const [name, value] of [
-      ['nonce', '18446744073709551616'],
-      ['timestamp', '9223372036854775808'],
-      ['size', '-1'],
-    ]) {
-      const changed = new URLSearchParams(query)
-      changed.set(name, value)
-      expect(() =>
-        verifyRequestProof(changed.toString(), fixture.context, payload),
-      ).toThrow()
+      ['nonce', 18446744073709551616n],
+      ['timestamp', 9223372036854775808n],
+      ['size', -1n],
+    ] as const) {
+      const changed = encode({
+        ...decoded,
+        commitment: { ...decoded.commitment, [name]: value },
+      })
+      await expect(
+        verifyRequestProof(changed, fixture.context, payload),
+      ).rejects.toThrow()
     }
-    expect(() =>
-      verifyRequestProof(envelope.proof + '&nonce=0', fixture.context, payload),
-    ).toThrow('Duplicate')
+    const duplicate = new Uint8Array([
+      ...proof,
+      ...encode('signature'),
+      ...encode(decoded.signature),
+    ])
+    duplicate[0] = 0xa4
+    await expect(
+      verifyRequestProof(duplicate, fixture.context, payload),
+    ).rejects.toThrow('Duplicate')
+    await expect(
+      verifyRequestProof(
+        new Uint8Array([...proof, 0xf6]),
+        fixture.context,
+        payload,
+      ),
+    ).rejects.toThrow('Trailing')
+    await expect(
+      verifyRequestProof(
+        encode({ ...decoded, unexpected: 0 }),
+        fixture.context,
+        payload,
+      ),
+    ).rejects.toThrow()
   }
 })
 
@@ -128,17 +154,22 @@ test('generic opaque signer shares commitment serialization without crossing the
   )
   const proof = await provider.sign('server.test', bytes)
   expect(key.privateKey.extractable).toBe(false)
-  expect(verifyRequestProof(proof, 'server.test', bytes)).toBe(
+  await expect(verifyRequestProof(proof, 'server.test', bytes)).resolves.toBe(
     normalizeDer64(key.pubkeyPem),
   )
-  expect(new URLSearchParams(proof).get('nonce')).not.toBe(
-    new URLSearchParams(await provider.sign('server.test', bytes)).get('nonce'),
+  const first = decodeFirst(proof).value as BinaryRequestProof
+  const second = decodeFirst(await provider.sign('server.test', bytes))
+    .value as BinaryRequestProof
+  expect(BigInt(first.commitment.nonce)).not.toBe(
+    BigInt(second.commitment.nonce),
   )
-  expect(() =>
+  await expect(
     verifyRequestProof(proof, 'server.test', bytes.subarray(3)),
-  ).toThrow()
+  ).rejects.toThrow()
   const header = await signRequest(key, 'server.test', bytes)
-  expect(() => verifyRequestProof(header, 'server.test', bytes)).toThrow()
+  await expect(
+    verifyRequestProof(new TextEncoder().encode(header), 'server.test', bytes),
+  ).rejects.toThrow()
 })
 
 test('generic identity fingerprints preserve existing raw-Ed25519 history', async () => {

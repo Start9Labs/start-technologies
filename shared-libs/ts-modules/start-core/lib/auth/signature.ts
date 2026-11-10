@@ -1,6 +1,7 @@
 import { ed25519, ed25519ph } from '@noble/curves/ed25519'
 import { blake3 } from '@noble/hashes/blake3'
 import { bytesToHex, concatBytes } from '@noble/hashes/utils'
+import type { BinaryRequestProof } from '../osBindings/session'
 import { SIGNATURE_PROFILE } from '../osBindings/signature-profile'
 
 const REQUEST_AUTH_TAG = new Uint8Array(SIGNATURE_PROFILE.http.tag)
@@ -19,16 +20,18 @@ export interface AuthKey {
   pubkeyPem: string
 }
 
-/** Produces a fresh generic request proof without exposing private key material. */
+/** Signs captured body bytes and returns a binary CBOR request proof without exporting private keys. */
 export interface RequestSigner {
-  sign(context: string, body: Uint8Array): Promise<string>
+  sign(context: string, body: Uint8Array): Promise<Uint8Array<ArrayBuffer>>
 }
 
 /** Uses the enrolled opaque WebCrypto identity for generic request commitments. */
 export function requestSigner(key: AuthKey): RequestSigner {
   return {
-    sign: (context, body) =>
-      signTaggedRequest(key, context, body, COMMITMENT_TAG),
+    sign: async (context, body) => {
+      const { encode } = await import('./cbor')
+      return encode(await signTaggedRequest(key, context, body, COMMITMENT_TAG))
+    },
   }
 }
 
@@ -48,7 +51,16 @@ export async function signRequest(
   context: string,
   body: Uint8Array,
 ): Promise<string> {
-  return signTaggedRequest(key, context, body, REQUEST_AUTH_TAG)
+  const proof = await signTaggedRequest(key, context, body, REQUEST_AUTH_TAG)
+  return new URLSearchParams({
+    commitment: SIGNATURE_PROFILE.requestName,
+    timestamp: proof.commitment.timestamp.toString(),
+    nonce: proof.commitment.nonce.toString(),
+    size: proof.commitment.size.toString(),
+    blake3: base64UrlEncode(proof.commitment.blake3),
+    signer: base64UrlEncode(proof.signer),
+    signature: base64UrlEncode(proof.signature),
+  }).toString()
 }
 
 function requestCommitment(
@@ -81,7 +93,7 @@ async function signTaggedRequest(
   context: string,
   body: Uint8Array,
   tag: Uint8Array,
-): Promise<string> {
+): Promise<BinaryRequestProof> {
   const timestamp = BigInt(Math.floor(Date.now() / 1000))
   const nonce = crypto.getRandomValues(new BigUint64Array(1))[0]
   const size = BigInt(body.length)
@@ -95,46 +107,36 @@ async function signTaggedRequest(
   const signature = new Uint8Array(
     await crypto.subtle.sign('Ed25519', key.privateKey, message),
   )
-  return new URLSearchParams({
-    commitment: 'request',
-    timestamp: timestamp.toString(),
-    nonce: nonce.toString(),
-    size: size.toString(),
-    blake3: base64UrlEncode(hash),
-    signer: base64UrlEncode(base64ToBytes(normalizeDer64(key.pubkeyPem))),
-    signature: base64UrlEncode(concatBytes(SIGNATURE_PREFIX, signature)),
-  }).toString()
+  return {
+    commitment: { timestamp, nonce, size, blake3: new Uint8Array(hash) },
+    signer: new Uint8Array(base64ToBytes(normalizeDer64(key.pubkeyPem))),
+    signature: new Uint8Array(concatBytes(SIGNATURE_PREFIX, signature)),
+  }
 }
 
 /** Verifies captured bytes with prime-order Ed25519/Ed25519ph points and returns canonical identity DER64. Replay policy remains with the receiver. */
-export function verifyRequestProof(
-  proof: string,
+export async function verifyRequestProof(
+  encodedProof: Uint8Array,
   context: string,
   body: Uint8Array,
-): string {
-  const query = new URLSearchParams(proof)
-  const fields = new Map<string, string>()
-  for (const [key, value] of query) {
-    if (fields.has(key)) throw new Error('Duplicate request proof field')
-    fields.set(key, value)
-  }
-  const field = (name: string) => {
-    const value = fields.get(name)
-    if (value === undefined) throw new Error('Missing request proof field')
-    return value
-  }
-  const integer = (name: string) => {
-    const value = field(name)
-    if (!/^-?\d+$/.test(value)) throw new Error('Invalid request proof integer')
-    return BigInt(value)
-  }
-  if (field('commitment') !== 'request')
-    throw new Error('Unsupported request commitment')
-  const hash = decodeBase64Url(field('blake3'))
-  const size = integer('size')
+): Promise<string> {
+  const [{ decodeFirst }, schemas] = await Promise.all([
+    import('./cbor'),
+    import('../osBindings/session.schemas'),
+  ])
+  const decoded = decodeFirst(encodedProof)
+  if (decoded.length !== encodedProof.length)
+    throw new Error('Trailing request proof data')
+  const proof = schemas.BinaryRequestProof.extend({
+    commitment: schemas.BinaryRequestCommitment.strict(),
+  })
+    .strict()
+    .parse(decoded.value)
+  const hash = proof.commitment.blake3
+  const size = BigInt(proof.commitment.size)
   const commitment = requestCommitment(
-    integer('timestamp'),
-    integer('nonce'),
+    BigInt(proof.commitment.timestamp),
+    BigInt(proof.commitment.nonce),
     size,
     hash,
   )
@@ -143,12 +145,11 @@ export function verifyRequestProof(
     !blake3(body).every((value, i) => value === hash[i])
   )
     throw new Error('Request proof body mismatch')
-  const signer = bytesToBase64(decodeBase64Url(field('signer')))
+  const signer = bytesToBase64(proof.signer)
   const key = parseEd25519PublicKey(signer)
-  const signature = bytesToBase64(decodeBase64Url(field('signature')))
   const pure = SIGNATURE_PROFILE.ed25519.signaturePrefix
   const prehash = SIGNATURE_PROFILE.ed25519ph.signaturePrefix
-  const encoded = base64ToBytes(signature)
+  const encoded = proof.signature
   const matches = (prefix: readonly number[]) =>
     encoded.length === prefix.length + SIGNATURE_PROFILE.signatureBytes &&
     prefix.every((byte, i) => encoded[i] === byte)
@@ -244,15 +245,6 @@ function base64UrlEncode(bytes: Uint8Array): string {
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '')
-}
-
-function decodeBase64Url(value: string): Uint8Array {
-  if (!/^[A-Za-z0-9_-]+$/.test(value))
-    throw new Error('Invalid Base64 URL encoding')
-  const bytes = base64ToBytes(normalizeDer64(value))
-  if (base64UrlEncode(bytes) !== value)
-    throw new Error('Invalid Base64 URL encoding')
-  return bytes
 }
 
 export function bytesToBase64(bytes: Uint8Array): string {

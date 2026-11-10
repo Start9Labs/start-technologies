@@ -1,9 +1,23 @@
 import type { z } from 'zod'
 import type * as schemas from './session.schemas'
-export type Envelope = z.output<typeof schemas.Envelope>
-export type EnvelopeInput = z.input<typeof schemas.Envelope>
+export type BinaryRequestCommitment = z.output<
+  typeof schemas.BinaryRequestCommitment
+>
+export type BinaryRequestCommitmentInput = z.input<
+  typeof schemas.BinaryRequestCommitment
+>
 export type Guid = z.output<typeof schemas.Guid>
 export type GuidInput = z.input<typeof schemas.Guid>
+
+/**
+ * Binary request proofs retain the generic commitment domain, not HTTP header framing.
+ */
+export type BinaryRequestProof = z.output<typeof schemas.BinaryRequestProof>
+
+/**
+ * Binary request proofs retain the generic commitment domain, not HTTP header framing.
+ */
+export type BinaryRequestProofInput = z.input<typeof schemas.BinaryRequestProof>
 
 /**
  * Logical admission intent, independent of deployment prefixes.

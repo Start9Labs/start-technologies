@@ -9,7 +9,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 use super::*;
 use crate::context::rpc::ReloadableHttpClient;
-use crate::middleware::auth::session::{RpcSessionUpgrader, client as session_client, session_url};
+use crate::middleware::auth::session::{RpcSessionUpgrader, client as session_client};
 use crate::middleware::auth::signature::SigningContext;
 use crate::sign::Signer;
 use crate::sign::session::Target;
@@ -59,7 +59,7 @@ pub(crate) async fn connect(
     headers: http::HeaderMap,
 ) -> Result<EncryptedSocket, Error> {
     let address = registry.host_str().or_not_found("registry hostname")?;
-    let url = session_url(websocket_url(registry)?, address)?;
+    let url = websocket_url(registry)?;
     let mut request = url.into_client_request().with_kind(ErrorKind::Network)?;
     request.headers_mut().extend(headers);
     session_client::admit(signer, address, Target::Rpc, async {

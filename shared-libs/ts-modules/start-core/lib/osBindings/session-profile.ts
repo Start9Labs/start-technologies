@@ -41,6 +41,7 @@ export const SESSION_PROFILE = {
     maxRecordBytes: 65535,
     maxPlaintextBytes: 65519,
     maxHandshakeRecordBytes: 1024,
+    maxHandshakeDepth: 16,
     handshakeTimeoutMs: 30000,
     writeTimeoutMs: 15000,
     maxIncomingBytes: 67108864,
@@ -62,10 +63,6 @@ export const SESSION_PROFILE = {
       binary: 1,
       close: 2,
     },
-  },
-  negotiation: {
-    secure: 1,
-    context: '',
   },
   rpcPath: '/ws/rpc',
 } as const

@@ -6,13 +6,12 @@ use axum::extract::Request;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use rpc_toolkit::{UpgradedWebSocket, WebSocketOptions, WebSocketUpgrader};
-use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::signature::{RequestReplayCheck, SignatureAuthContext, request_identities};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
-use crate::sign::session::{Target, VERSION};
+use crate::sign::session::Target;
 use crate::sign::{AnyVerifyingKey, Signer};
 use crate::util::net::secure::{EncryptedSocket, wire_message_size};
 
@@ -42,10 +41,10 @@ impl SecureSession {
         incoming: NonZeroUsize,
         guid: &Guid,
     ) -> Result<EncryptedSocket, Error> {
-        let (_, socket) = EncryptedSocket::accept(
+        let (_, _, socket) = EncryptedSocket::accept(
             socket,
             &self.server_identity,
-            &self.address,
+            std::slice::from_ref(&self.address),
             incoming,
             &Target::Continuation(guid.clone()),
             Some(&self.peer),
@@ -63,29 +62,6 @@ pub trait SessionContext {
     }
 }
 
-/// Supplies the server identity and installs verified, connection-local provenance.
-pub trait SecureRpcContext: SignatureAuthContext + Clone {
-    fn server_identity(&self) -> Result<Signer, Error>;
-    /// Acquires admission replay policy without retaining its context.
-    fn replay_check(&self) -> super::signature::RequestReplayCheck;
-    fn with_secure_session(self, session: SecureSession) -> Self;
-}
-
-/// Selects encrypted admission while preserving other endpoint parameters.
-pub fn session_url(mut url: Url, address: &str) -> Result<Url, Error> {
-    let query = serde_urlencoded::to_string(Negotiation {
-        secure: Some(VERSION),
-        context: Some(address.into()),
-    })
-    .with_kind(ErrorKind::Serialization)?;
-    let query = match url.query() {
-        Some(existing) => format!("{existing}&{query}"),
-        None => query,
-    };
-    url.set_query(Some(&query));
-    Ok(url)
-}
-
 /// Browser transport settings generated from the native protocol owners.
 pub fn browser_profile() -> serde_json::Value {
     let mut identity = crate::sign::session::wire_profile();
@@ -93,21 +69,11 @@ pub fn browser_profile() -> serde_json::Value {
     serde_json::json!({
         "identity": identity,
         "transport": crate::util::net::secure::browser_profile(),
-        "negotiation": Negotiation {
-            secure: Some(VERSION),
-            context: Some("".into()),
-        },
         "rpcPath": RpcSessionUpgrader::PATH,
     })
 }
 
-#[derive(Deserialize, Serialize)]
-struct Negotiation {
-    secure: Option<u8>,
-    context: Option<InternedString>,
-}
-
-/// Opts into encrypted admission with `secure=1&context=<server-name>`; missing opt-in stays legacy.
+/// Encrypted admission is mandatory for the bare RPC endpoint.
 pub struct RpcSessionUpgrader;
 
 impl RpcSessionUpgrader {
@@ -138,7 +104,7 @@ impl RpcSessionUpgrader {
     }
 
     /// WebSocket RPC admission with optional encrypted peer authentication.
-    pub fn route<C: SecureRpcContext>(
+    pub fn route<C: SignatureAuthContext + Clone>(
         server: rpc_toolkit::HttpServer<C>,
     ) -> axum::routing::MethodRouter {
         axum::routing::any(server.for_websocket().with_upgrader(Self))
@@ -151,7 +117,7 @@ pub mod client;
 #[cfg(test)]
 mod tests;
 
-impl<C: SecureRpcContext> WebSocketUpgrader<C> for RpcSessionUpgrader {
+impl<C: SignatureAuthContext + Clone> WebSocketUpgrader<C> for RpcSessionUpgrader {
     fn max_wire_message_size(&self, logical: NonZeroUsize) -> NonZeroUsize {
         wire_message_size(logical)
     }
@@ -167,42 +133,17 @@ impl<C: SecureRpcContext> WebSocketUpgrader<C> for RpcSessionUpgrader {
     ) -> BoxFuture<'static, Result<UpgradedWebSocket<C>, axum::Error>> {
         async move {
             let request = Request::from_parts(parts, Body::empty());
-            let axum::extract::Query(negotiation) =
-                axum::extract::Query::<Negotiation>::try_from_uri(request.uri())
-                    .map_err(axum::Error::new)?;
-            match negotiation.secure {
-                None => {
-                    return Ok(UpgradedWebSocket {
-                        context,
-                        socket: Box::new(socket),
-                    });
-                }
-                Some(VERSION) => (),
-                _ => {
-                    return Err(axum::Error::new(std::io::Error::from(
-                        std::io::ErrorKind::InvalidInput,
-                    )));
-                }
-            }
-            let address = negotiation.context.ok_or_else(|| {
-                axum::Error::new(std::io::Error::from(std::io::ErrorKind::InvalidInput))
-            })?;
             let allowed = request_identities(&*context, &request)
                 .await
                 .map_err(|error| axum::Error::new(error.source))?;
-            if !allowed.contains(&address) {
-                return Err(axum::Error::new(std::io::Error::from(
-                    std::io::ErrorKind::PermissionDenied,
-                )));
-            }
             let server_identity = context
                 .server_identity()
                 .map_err(|error| axum::Error::new(error.source))?;
             let replay_check = context.replay_check();
-            let (peer, socket) = EncryptedSocket::accept(
+            let (peer, address, socket) = EncryptedSocket::accept(
                 Box::new(socket),
                 &server_identity,
-                &address,
+                &allowed,
                 options.max_message_size,
                 &Target::Rpc,
                 None,

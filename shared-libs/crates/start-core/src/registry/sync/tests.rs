@@ -195,7 +195,7 @@ fn package_and_signer_changes_publish_atomically_without_granting_trust() {
         .unwrap()
         .de()
         .unwrap();
-    assert!(cache.connected);
+    assert_eq!(cache.status, RegistryStatus::Connected);
     assert_eq!(cache.info.name.as_deref(), Some("Test Registry"));
     assert!(
         cache.packages["test"]
@@ -251,7 +251,7 @@ fn cached_package_queries_keep_target_and_source_selection_while_offline() {
         &device(),
     )
     .unwrap();
-    set_disconnected(&mut db, &Subscription::Index(url())).unwrap();
+    set_status(&mut db, &Subscription::Index(url()), RegistryStatus::Error).unwrap();
     let result = cached_response(
         &db,
         &url(),
@@ -295,24 +295,26 @@ fn cached_package_queries_keep_target_and_source_selection_while_offline() {
 #[test]
 fn first_connection_failure_publishes_availability_and_does_not_fetch_on_cache_queries() {
     let mut db = database();
-    set_disconnected(&mut db, &Subscription::Index(url())).unwrap();
-    set_disconnected(&mut db, &Subscription::Os(url())).unwrap();
-    assert!(
-        !db.as_public()
+    set_status(&mut db, &Subscription::Index(url()), RegistryStatus::Error).unwrap();
+    set_status(&mut db, &Subscription::Os(url()), RegistryStatus::Error).unwrap();
+    assert_eq!(
+        db.as_public()
             .as_registry_cache()
             .as_idx(&url())
             .unwrap()
             .de()
             .unwrap()
-            .connected
+            .status,
+        RegistryStatus::Error
     );
-    assert!(
-        !db.as_public()
+    assert_eq!(
+        db.as_public()
             .as_os_update_cache()
             .de()
             .unwrap()
             .unwrap()
-            .connected
+            .status,
+        RegistryStatus::Error
     );
     let result = cached_response(
         &db,
@@ -344,9 +346,110 @@ fn first_connection_failure_publishes_availability_and_does_not_fetch_on_cache_q
         .unwrap()
         .de()
         .unwrap();
-    assert!(!cache.connected);
+    assert_eq!(cache.status, RegistryStatus::Connecting);
     assert_eq!(cache.info.name.as_deref(), Some("Test Registry"));
     assert!(!cache.packages.is_empty());
+}
+
+#[test]
+fn registry_status_distinguishes_loading_empty_success_error_and_retry() {
+    let mut db = database();
+    let subscription = Subscription::Index(url());
+    for status in [
+        RegistryStatus::Connecting,
+        RegistryStatus::Error,
+        RegistryStatus::Connecting,
+    ] {
+        set_status(&mut db, &subscription, status).unwrap();
+        let cache = db
+            .as_public()
+            .as_registry_cache()
+            .as_idx(&url())
+            .unwrap()
+            .de()
+            .unwrap();
+        assert_eq!(cache.status, status);
+        assert!(cache.packages.is_empty());
+    }
+    publish_snapshot(
+        &mut db,
+        &subscription,
+        &to_value(&FullIndex::default()).unwrap(),
+        &device(),
+    )
+    .unwrap();
+    let cache = db
+        .as_public()
+        .as_registry_cache()
+        .as_idx(&url())
+        .unwrap()
+        .de()
+        .unwrap();
+    assert_eq!(cache.status, RegistryStatus::Connected);
+    assert!(cache.packages.is_empty());
+    publish_snapshot(
+        &mut db,
+        &subscription,
+        &to_value(&index()).unwrap(),
+        &device(),
+    )
+    .unwrap();
+    let packages = db
+        .as_public()
+        .as_registry_cache()
+        .as_idx(&url())
+        .unwrap()
+        .de()
+        .unwrap()
+        .packages;
+    assert!(!packages.is_empty());
+    for status in [RegistryStatus::Error, RegistryStatus::Connecting] {
+        set_status(&mut db, &subscription, status).unwrap();
+        let cache = db
+            .as_public()
+            .as_registry_cache()
+            .as_idx(&url())
+            .unwrap()
+            .de()
+            .unwrap();
+        assert_eq!(cache.status, status);
+        assert_eq!(
+            to_value(&cache.packages).unwrap(),
+            to_value(&packages).unwrap()
+        );
+    }
+}
+
+#[test]
+fn os_catalog_status_distinguishes_initial_attempt_failure_and_success() {
+    let mut db = database();
+    let subscription = Subscription::Os(url());
+    for status in [
+        RegistryStatus::Connecting,
+        RegistryStatus::Error,
+        RegistryStatus::Connecting,
+    ] {
+        set_status(&mut db, &subscription, status).unwrap();
+        let cache = db.as_public().as_os_update_cache().de().unwrap().unwrap();
+        assert_eq!(cache.status, status);
+        assert!(cache.versions.is_empty());
+    }
+    publish_snapshot(
+        &mut db,
+        &subscription,
+        &to_value(&OsIndex::default()).unwrap(),
+        &device(),
+    )
+    .unwrap();
+    assert_eq!(
+        db.as_public()
+            .as_os_update_cache()
+            .de()
+            .unwrap()
+            .unwrap()
+            .status,
+        RegistryStatus::Connected
+    );
 }
 
 #[test]
@@ -415,7 +518,7 @@ fn os_cache_excludes_other_platforms_and_incompatible_sources() {
     )
     .unwrap();
     let cache = db.as_public().as_os_update_cache().de().unwrap().unwrap();
-    assert!(cache.connected);
+    assert_eq!(cache.status, RegistryStatus::Connected);
     assert_eq!(cache.versions.len(), 1);
     assert!(cache.versions.contains_key(&"0.4.0.6".parse().unwrap()));
     assert!(

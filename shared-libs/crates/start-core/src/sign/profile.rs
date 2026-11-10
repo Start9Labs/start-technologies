@@ -22,6 +22,7 @@ pub fn browser_profile() -> serde_json::Value {
     serde_json::json!({
         "commitmentTag": COMMITMENT_SIG_TAG,
         "requestType": RequestCommitment::TYPE_ID,
+        "requestName": RequestCommitment::TYPE_NAME,
         "ed25519": {
             "keyPrefix": key_prefix, "keyBytes": key_len,
             "signaturePrefix": prefix(AnySignature::Ed25519(signature)),
