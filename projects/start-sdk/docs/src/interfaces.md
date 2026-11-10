@@ -643,6 +643,10 @@ On a raw-TCP binding (`protocol: null`), `secure` says whether the protocol is s
 
 Bind the wildcard both families answer on: `::` (or `[::]:<port>`), which accepts IPv4 too unless the daemon sets `IPV6_V6ONLY`, or the daemon's own all-families form — lightningd's empty host, `bind-addr=:9735`. Spellings differ per daemon, and some accept only an IPv4 literal; check its documentation, and where it has a separate IPv6 option, set that as well.
 
+A single dual-stack socket presents IPv4 clients to the daemon as IPv4-mapped addresses (`::ffff:192.0.2.1`). Where the daemon compares client addresses against stored or configured IPv4 data — bans, allowlists, account IP locks — bind IPv4 and IPv6 as separate sockets if it offers that, rather than one `::` socket.
+
+When the daemon cannot listen on IPv6 at all, or only on a single dual-stack socket that would break those comparisons, leave it on IPv4 and say so in `README.md`: the interface listens on IPv4 only because of the upstream limitation, StartOS still lists its IPv6 addresses, and connections to them are refused. Don't add a relay in front of it — an IPv4 socket cannot receive an IPv6 client's address, so every IPv6 client would reach the daemon as the relay.
+
 An HTTP-proxied binding, with or without `addSsl`, reaches your container over IPv4, so a `0.0.0.0` listener behind it loses nothing.
 
 ## Authenticating at the Proxy
