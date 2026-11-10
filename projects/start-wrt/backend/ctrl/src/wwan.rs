@@ -375,6 +375,10 @@ async fn read_state() -> WwanState {
     }
     let radios = wireless_status().await.unwrap_or_default();
     if let Some(ifname) = ifname_of(&radios, WWAN_INTERFACE) {
+        // A station's carrier is up once it authenticates; iwinfo's bssid is its own address.
+        state.associated = tokio::fs::read_to_string(format!("/sys/class/net/{ifname}/operstate"))
+            .await
+            .is_ok_and(|s| s.trim() == "up");
         if let Some(info) = ubus_call(
             "iwinfo",
             "info",
@@ -382,10 +386,6 @@ async fn read_state() -> WwanState {
         )
         .await
         {
-            state.associated = info
-                .get("bssid")
-                .and_then(|v| v.as_str())
-                .is_some_and(|b| !b.is_empty() && b != "00:00:00:00:00:00");
             state.signal = info
                 .get("signal")
                 .and_then(|v| v.as_i64())
