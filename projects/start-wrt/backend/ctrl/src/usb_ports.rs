@@ -582,6 +582,10 @@ async fn handle(sys: &Sys, uci_root: &Path, ifname: &str) -> Result<(), Error> {
     let port_bridge = bridge(port);
     ip(&["link", "set", ifname, "master", port_bridge.as_str()]).await?;
     ip(&["link", "set", ifname, "up"]).await?;
+    // Packet steering otherwise reaches a hot-plugged interface at the next network reload.
+    if let Err(e) = command("/etc/init.d/packet_steering", &["reload"]).await {
+        tracing::warn!("usb-ports: {ifname}: {e}");
+    }
     if registered.first_seen {
         crate::activity::log(
             "ethernet",
