@@ -118,7 +118,7 @@ impl Sys {
         }
         let root_hub: PathBuf = devices.join(parts[..=hub].iter().collect::<PathBuf>());
         let usb_device = root_hub.join(chain.iter().collect::<PathBuf>());
-        let mut port = std::fs::canonicalize(usb_device.join("port")).ok()?;
+        let mut port = port_node(&usb_device)?;
         let mut side = "";
         if read_trim(root_hub.join("speed")).and_then(|s| s.parse::<u32>().ok()) >= Some(5000) {
             match std::fs::canonicalize(port.join("peer")) {
@@ -134,6 +134,19 @@ impl Sys {
             .collect();
         Some(format!("{}:{side}{chain}", controller.join("/")))
     }
+}
+
+/// The hub port node a USB device sits in, present before the device's own `port` link.
+fn port_node(usb_device: &Path) -> Option<PathBuf> {
+    let name = usb_device.file_name()?.to_str()?;
+    let n = name.rsplit(['.', '-']).next()?;
+    let hub_dir = usb_device.parent()?;
+    let hub = hub_dir.file_name()?.to_str()?;
+    let node = match hub.strip_prefix("usb").filter(|_| is_root_hub(hub)) {
+        Some(bus) => format!("{bus}-0:1.0/{hub}-port{n}"),
+        None => format!("{hub}:1.0/{hub}-port{n}"),
+    };
+    std::fs::canonicalize(hub_dir.join(node)).ok()
 }
 
 fn read_trim(path: impl AsRef<Path>) -> Option<String> {
@@ -731,26 +744,15 @@ mod tests {
 
         /// A USB device in a port, with `ports` downstream ports if it is a hub.
         fn device(&self, bus: &str, devpath: &str, ports: u32) -> PathBuf {
-            let (parent, n) = match devpath.rsplit_once('.') {
-                Some((parent, n)) => (Some(parent), n),
-                None => (None, devpath),
-            };
+            let parent = devpath.rsplit_once('.').map(|(parent, _)| parent);
             let hub = self.host().join(format!("usb{bus}"));
-            let (dir, port) = match parent {
-                None => (
-                    hub.join(format!("{bus}-{devpath}")),
-                    hub.join(format!("{bus}-0:1.0/usb{bus}-port{n}")),
-                ),
-                Some(parent) => {
-                    let parent_dir = self.device_dir(bus, parent);
-                    (
-                        parent_dir.join(format!("{bus}-{devpath}")),
-                        parent_dir.join(format!("{bus}-{parent}:1.0/{bus}-{parent}-port{n}")),
-                    )
-                }
+            let dir = match parent {
+                None => hub.join(format!("{bus}-{devpath}")),
+                Some(parent) => self
+                    .device_dir(bus, parent)
+                    .join(format!("{bus}-{devpath}")),
             };
             std::fs::create_dir_all(&dir).unwrap();
-            symlink(&port, dir.join("port")).unwrap();
             for p in 1..=ports {
                 std::fs::create_dir_all(
                     dir.join(format!("{bus}-{devpath}:1.0/{bus}-{devpath}-port{p}")),
