@@ -53,8 +53,6 @@ rpc_toolkit::reflect_ts!(WanIpv4Mode);
 pub struct WanIpv4Response {
     pub mode: WanIpv4Mode,
     pub assigned_ip: Option<String>,
-    /// The IPv4 address of the uplink carrying traffic, the WAN port or the Wi-Fi uplink.
-    pub uplink_ip: Option<String>,
     /// Whether the WAN port has link. A failed read reports link.
     pub carrier: bool,
     pub address: Option<String>,
@@ -374,21 +372,17 @@ pub async fn ipv4_get<C: CtrlContext>(ctx: C) -> Result<WanIpv4Response, Error> 
 
     match result {
         Some((mode, iface)) => {
-            let (assigned_ip, uplink_ip, carrier) = if effectful {
+            let (assigned_ip, carrier) = if effectful {
                 (
                     get_assigned_wan_ip().await,
-                    crate::system::get_wan_ipv4()
-                        .await?
-                        .map(|ip| ip.to_string()),
                     get_wan_carrier(&iface.device).await,
                 )
             } else {
-                (None, None, true)
+                (None, true)
             };
             Ok(WanIpv4Response {
                 mode,
                 assigned_ip,
-                uplink_ip,
                 carrier,
                 address: iface.ipv4().map(|ip| ip.to_string()),
                 netmask: iface.ipv4_netmask().map(|m| m.to_string()),

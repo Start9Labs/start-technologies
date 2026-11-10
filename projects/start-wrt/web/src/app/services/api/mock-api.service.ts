@@ -1549,7 +1549,6 @@ export class MockApiService extends ApiService {
   private mockWanIpv4: WanIpv4Response = {
     mode: 'dhcp',
     assigned_ip: '203.0.113.45',
-    uplink_ip: '203.0.113.45',
     carrier: true,
     address: null,
     netmask: null,
@@ -1565,10 +1564,8 @@ export class MockApiService extends ApiService {
   }
 
   async wanIpv4Get(): Promise<WanIpv4Response> {
-    return {
-      ...structuredClone(this.mockWanIpv4),
-      uplink_ip: await this.wanUplinkIpv4(),
-    }
+    await pauseFor(250)
+    return structuredClone(this.mockWanIpv4)
   }
 
   async wanIpv4Set(params: WanIpv4SetRequest): Promise<null> {

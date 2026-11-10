@@ -556,9 +556,8 @@ fn rejected_wan_ssh_inodes(
         .map(IpAddr::V4)
         .chain(wan_ipv6s.iter().copied().map(IpAddr::V6))
         .collect();
-    let admits = |source| {
-        remote_access_admits(mode, source, uplinks.active.first().copied(), wan_ipv6s)
-    };
+    let admits =
+        |source| remote_access_admits(mode, source, uplinks.active.first().copied(), wan_ipv6s);
     table
         .lines()
         .skip(1)

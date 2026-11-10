@@ -2805,13 +2805,6 @@ export const WanIpv4Response: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   /**
-   * The IPv4 address of the uplink carrying traffic, the WAN port or the Wi-Fi uplink.
-   */
-  uplink_ip: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
    * Whether the WAN port has link. A failed read reports link.
    */
   carrier: z.ZodBoolean
@@ -2842,15 +2835,6 @@ export const WanIpv4Response: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   mode: WanIpv4Mode,
   assigned_ip: wire(z.string().nullable().optional(), z.string().nullable()),
-  /**
-   * The IPv4 address of the uplink carrying traffic, the WAN port or the Wi-Fi uplink.
-   */
-  uplink_ip: wire(z.string().nullable().optional(), z.string().nullable()).meta(
-    {
-      description:
-        'The IPv4 address of the uplink carrying traffic, the WAN port or the Wi-Fi uplink.',
-    },
-  ),
   /**
    * Whether the WAN port has link. A failed read reports link.
    */
@@ -4639,7 +4623,7 @@ export const Api = {
         },
         'uplink-ipv4': {
           _PARAMS: /* @__PURE__ */ empty,
-          _RETURN: /* @__PURE__ */ z.null(),
+          _RETURN: /* @__PURE__ */ z.string().nullable(),
         },
       },
     },

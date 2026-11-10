@@ -426,9 +426,6 @@ struct WanIpv4Response {
     mode: WanIpv4Mode,
     /// Actual assigned IP (from ubus/runtime), regardless of mode
     assigned_ip: Option<String>,
-    /// The IPv4 address of the uplink carrying traffic: the WAN port's, or the
-    /// Wi-Fi uplink's while `wwan` holds the default route. Public endpoints show it.
-    uplink_ip: Option<String>,
     /// Whether the WAN port has link (from ubus `network.device` status). A failed read reports link.
     carrier: bool,
     /// Static/PPPoE config fields (populated when relevant)
