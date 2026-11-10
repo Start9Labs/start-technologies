@@ -107,14 +107,15 @@ export type Ready = {
    *
    * If omitted, polls every 1 s while `starting` or `failure` and every
    * 30 s otherwise (including `starting` with `waiting: true`), except that
-   * a daemon's `loading` or `waiting: true` before its first `success`
-   * backs off from 1 s, doubling to 30 s.
+   * `loading` or `waiting: true` before the first `success` backs off from
+   * 1 s, doubling to 30 s.
    */
   trigger?: Trigger
 }
 
 /**
  * Options for running a daemon as a shell command inside a subcontainer.
+ * Non-init commands inherit each output stream without a callback from the runtime.
  */
 export type ExecCommandOptions = {
   /** The command and arguments to execute (e.g. `['bitcoind', '-conf=/etc/bitcoin.conf']`) */
