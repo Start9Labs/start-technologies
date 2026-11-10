@@ -8,4 +8,5 @@ release-notes: false
 - Remember the browser's verified server identity and warn on changes without blocking the connection, with fingerprint details for verification.
 - Bound replay-cache memory when clock synchronization is unavailable.
 - Preserve request IDs on middleware errors.
+- Prevent duplicate operations when a Unix RPC fails or loses its response.
 - Keep encrypted browser RPC available over HTTP/2 connections.

@@ -1,6 +1,7 @@
 import { inject, Injectable } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { sameUrl } from '@start9labs/shared'
+import { registryStatus } from '@start9labs/marketplace'
 import { Version } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
@@ -36,8 +37,9 @@ export class OSService {
 
   private readonly gitHash$ = new BehaviorSubject<string | null>(null)
 
-  readonly connected$ = this.catalog$.pipe(
-    map(cache => cache?.connected ?? null),
+  readonly registryStatus$ = this.catalog$.pipe(
+    map(registryStatus),
+    distinctUntilChanged(),
   )
 
   readonly updateCandidates$ = combineLatest([
@@ -114,8 +116,11 @@ export class OSService {
     const gitHash = await this.api.rpc.gitInfo({})
     this.gitHash$.next(gitHash.trim())
     const cache = await firstValueFrom(
-      this.catalog$.pipe(filter(cache => !!cache)),
+      this.catalog$.pipe(
+        filter(cache => !!cache && registryStatus(cache) !== 'connecting'),
+      ),
     )
-    if (!cache.connected) throw new Error('registry unavailable')
+    if (registryStatus(cache) === 'error')
+      throw new Error('registry unavailable')
   }
 }

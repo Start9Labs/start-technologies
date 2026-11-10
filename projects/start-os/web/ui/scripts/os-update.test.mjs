@@ -159,6 +159,7 @@ boundaries.set(
     'trust.ts',
     'key-identity.ts',
     'types.ts',
+    'registry-state.ts',
     'services/abstract-marketplace.service.ts',
     'util/icon.ts',
   ]
@@ -167,7 +168,7 @@ boundaries.set(
         `export * from ${JSON.stringify(new URL(`../../../../../shared-libs/ts-modules/marketplace/src/${file}`, import.meta.url).href)};`,
     )
     .join('\n') +
-    '\nexport class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {} export class MarketplaceSignersComponent {} export class MarketplaceSignerChipsComponent {} export class MarketplaceAboutComponent {} export class MarketplaceDependenciesComponent {} export class MarketplaceLinksComponent {} export class MarketplaceReleaseNotesComponent {}',
+    '\nexport class RegistryStatus {} export class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {} export class MarketplaceSignersComponent {} export class MarketplaceSignerChipsComponent {} export class MarketplaceAboutComponent {} export class MarketplaceDependenciesComponent {} export class MarketplaceLinksComponent {} export class MarketplaceReleaseNotesComponent {}',
 )
 loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
@@ -430,9 +431,9 @@ function fixture(t, cachedVersion, providers = []) {
     },
     publish(
       versions = catalog,
-      { registry = 'https://registry.test/', connected = true } = {},
+      { registry = 'https://registry.test/', status = 'connected' } = {},
     ) {
-      osUpdateCache = { registry, versions, connected }
+      osUpdateCache = { registry, versions, status }
       source.next([
         {
           id: ++revision,
@@ -910,8 +911,8 @@ test('strictly newer candidates sort descending; offline cache remains readable;
   assert.deepEqual(f.os.updateCandidates(), candidates)
   assert.equal(f.availability.at(-1), true)
   assert.equal(f.shown.at(-1), true)
-  f.publish(catalog, { connected: false })
-  assert.equal(await firstValueFrom(f.os.connected$), false)
+  f.publish(catalog, { status: 'error' })
+  assert.equal(await firstValueFrom(f.os.registryStatus$), 'error')
   await assert.rejects(f.os.loadOS(), /registry unavailable/)
   assert.deepEqual(f.os.updateCandidates(), candidates)
   f.version('0.4.0.3')
@@ -1083,7 +1084,7 @@ test('General does not announce up-to-date after a failed manual check', async t
   const f = fixture(t, '0.4.0.2')
   f.make(General).onUpdate()
   await tick()
-  f.publish({}, { connected: false })
+  f.publish({}, { status: 'error' })
   await Promise.all(f.tasks)
   await tick()
   assert.deepEqual(f.opened, [])
@@ -2402,12 +2403,35 @@ test('clearing a pending sideload validation keeps its eventual result hidden', 
   assert.equal(page.error(), null)
 })
 
+test('OS first sync waits through Connecting and distinguishes empty success from failure', async t => {
+  const f = fixture(t, '0.4.0.2')
+  f.publish({}, { status: 'connecting' })
+  let settled = false
+  const loading = f.os.loadOS().then(() => {
+    settled = true
+  })
+  await tick()
+  assert.equal(settled, false)
+  assert.equal(await firstValueFrom(f.os.registryStatus$), 'connecting')
+  f.publish({})
+  await loading
+  assert.deepEqual(f.os.updateCandidates(), [])
+  assert.equal(await firstValueFrom(f.os.registryStatus$), 'connected')
+  f.publish(catalog, { status: 'connecting' })
+  const retry = f.os.loadOS()
+  await tick()
+  assert.deepEqual(f.os.updateCandidates(), candidates)
+  f.publish(catalog, { status: 'error' })
+  await assert.rejects(retry, /registry unavailable/)
+  assert.deepEqual(f.os.updateCandidates(), candidates)
+})
+
 test('switching the OS registry discards the old catalog until the matching cache arrives', async t => {
   const f = fixture(t, '0.4.0.2')
   await f.load()
   f.selectRegistry('https://other.test')
   assert.deepEqual(f.os.updateCandidates(), [])
-  assert.equal(await firstValueFrom(f.os.connected$), null)
+  assert.equal(await firstValueFrom(f.os.registryStatus$), 'connecting')
   const loading = f.os.loadOS()
   f.publish(catalog)
   assert.deepEqual(f.os.updateCandidates(), [])
@@ -2417,7 +2441,7 @@ test('switching the OS registry discards the old catalog until the matching cach
   )
   await loading
   assert.deepEqual(f.os.updateCandidates(), [candidates[1]])
-  assert.equal(await firstValueFrom(f.os.connected$), true)
+  assert.equal(await firstValueFrom(f.os.registryStatus$), 'connected')
   assert.deepEqual(f.requests, [])
 })
 
@@ -2446,8 +2470,8 @@ const { PackageIconService: ProductionPackageIconService } =
 const { default: MarketplacePage } =
   await import('../src/app/routes/portal/routes/marketplace/marketplace.component.ts')
 
-const registryEntry = (version = '1.0.0:0', connected = true) => ({
-  connected,
+const registryEntry = (version = '1.0.0:0', status = 'connected') => ({
+  status,
   info: {
     name: 'Cached registry',
     categories: { bitcoin: { name: 'Bitcoin' } },
@@ -2580,6 +2604,60 @@ function marketplaceFixture(t, entries = {}) {
   }
 }
 
+test('registry availability distinguishes first sync, empty success and cached reconnect/error', async t => {
+  const { isRegistryLoading } = await import('@start9labs/marketplace')
+  const f = marketplaceFixture(t)
+  f.makePage()
+  const rows = f.watch(f.service.registries$)
+  const errors = f.watch(f.service.requestErrors$)
+  const stores = f.watch(f.service.currentRegistry$)
+  const info = f.watch(f.service.fetchInfo$('https://registry.test/'))
+  const packages = f.watch(f.service.getPackage$('missing', null, null))
+  assert.equal(rows.at(-1)[0].status, 'connecting')
+  assert.deepEqual(errors.at(-1), [])
+  const entry = { ...registryEntry(), status: 'connecting', packages: {} }
+  f.replace('/registryCache', { 'https://registry.test/': entry })
+  assert.equal(
+    isRegistryLoading(stores.at(-1).status, stores.at(-1).packages.length),
+    true,
+  )
+  assert.deepEqual(info, [])
+  assert.deepEqual(packages, [])
+  f.replace('/registryCache', {
+    'https://registry.test/': { ...entry, status: 'connected' },
+  })
+  assert.equal(
+    isRegistryLoading(stores.at(-1).status, stores.at(-1).packages.length),
+    false,
+  )
+  assert.equal(packages.at(-1), null)
+  assert.equal(info.length, 1)
+  for (const status of ['connected', 'connecting', 'error']) {
+    f.replace('/registryCache', {
+      'https://registry.test/': { ...registryEntry(), status },
+    })
+    assert.equal(stores.at(-1).packages.length, 1)
+    assert.equal(stores.at(-1).status, status)
+    assert.equal(
+      isRegistryLoading(status, stores.at(-1).packages.length),
+      false,
+    )
+    assert.deepEqual(
+      errors.at(-1),
+      status === 'error' ? ['https://registry.test/'] : [],
+    )
+  }
+  f.replace('/registryCache', {
+    'https://registry.test/': { ...entry, status: 'error' },
+  })
+  assert.equal(isRegistryLoading(stores.at(-1).status, 0), false)
+  assert.equal(rows.at(-1)[0].status, 'error')
+  f.replace('/registryCache', { 'https://registry.test/': entry })
+  assert.equal(rows.at(-1)[0].status, 'connecting')
+  assert.deepEqual(errors.at(-1), [])
+  assert.deepEqual(f.queries, [])
+})
+
 test('malformed saved registries do not terminate valid registry listings or cache updates', async t => {
   const entry = registryEntry()
   const f = marketplaceFixture(t, { 'https://registry.test/': entry })
@@ -2593,7 +2671,7 @@ test('malformed saved registries do not terminate valid registry listings or cac
   })
   await tick()
   assert.deepEqual(saved.at(-1), [
-    { url: 'https://registry.test/', name: 'Saved name' },
+    { url: 'https://registry.test/', name: 'Saved name', status: 'connected' },
   ])
   assert.equal(page.isRegistrySaved(), true)
   assert.equal(stores.at(-1).packages.length, 1)
@@ -2631,7 +2709,7 @@ test('the visible refresh action retries failed icons when the refreshed cache a
   assert.equal(f.iconRequests.length, 1)
 
   f.replace('/registryCache', {
-    'https://registry.test/': { ...entry, connected: false },
+    'https://registry.test/': { ...entry, status: 'error' },
   })
   assert.equal(f.iconRequests.length, 2)
   assert.equal(f.iconRequests[1], f.iconRequests[0])
@@ -2639,7 +2717,7 @@ test('the visible refresh action retries failed icons when the refreshed cache a
   await tick()
   assert.equal(visible.at(-1), 'blob:recovered-icon')
   f.replace('/registryCache', {
-    'https://registry.test/': { ...entry, connected: true },
+    'https://registry.test/': { ...entry, status: 'connected' },
   })
   await tick()
   assert.equal(visible.at(-1), 'blob:recovered-icon')
@@ -2712,11 +2790,11 @@ test('marketplace lists and metadata stream from canonical cache keys without na
     '1.0.0:0',
   )
   f.replace('/registryCache', {
-    'https://registry.test/': registryEntry('2.0.0:0', false),
+    'https://registry.test/': registryEntry('2.0.0:0', 'error'),
   })
   assert.equal(current.at(-1).packages[0].version, '2.0.0:0')
   assert.deepEqual(errors.at(-1), ['https://registry.test/'])
-  f.replace('/registryCache/https:~1~1registry.test~1/connected', true)
+  f.replace('/registryCache/https:~1~1registry.test~1/status', 'connected')
   assert.deepEqual(errors.at(-1), [])
   await f.service.connect('https://registry.test')
   f.replace('/ui/registries', {})
@@ -2754,7 +2832,7 @@ test('exact/source package queries wait for and track their registry cache, igno
   assert.equal(f.queries.length, 1)
   f.replace(
     '/registryCache/https:~1~1registry.test~1',
-    registryEntry('2.0.0:0', false),
+    registryEntry('2.0.0:0', 'error'),
   )
   assert.equal(f.queries.length, 2)
   f.responses[1].resolve(registryEntry().packages.example)

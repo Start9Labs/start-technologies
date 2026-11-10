@@ -26,6 +26,7 @@ import {
 
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreIconDirective } from './store-icon.directive'
+import { RegistryStatus } from './registry-status'
 
 @Component({
   selector: 'marketplace-registry-select',
@@ -45,6 +46,9 @@ import { StoreIconDirective } from './store-icon.directive'
       <b tuiFade>
         {{ data()?.current?.name || fetched()?.info?.name || 'Loading...' }}
       </b>
+      @if (data()?.current?.status; as status) {
+        <span [marketplaceRegistryStatus]="status"></span>
+      }
       @if (data(); as d) {
         <tui-data-list *tuiDropdown size="m">
           <div class="g-title">
@@ -82,6 +86,9 @@ import { StoreIconDirective } from './store-icon.directive'
                 {{ registry.name }}
                 <span tuiSubtitle>{{ registry.url }}</span>
               </span>
+              @if (registry.status; as status) {
+                <span [marketplaceRegistryStatus]="status"></span>
+              }
               @if (registry.selected) {
                 <tui-icon icon="@tui.check" />
               }
@@ -116,6 +123,9 @@ import { StoreIconDirective } from './store-icon.directive'
                 {{ registry.name }}
                 <span tuiSubtitle>{{ registry.url }}</span>
               </span>
+              @if (registry.status; as status) {
+                <span [marketplaceRegistryStatus]="status"></span>
+              }
               <tui-icon icon="@tui.trash" (click.stop)="delete(registry.url)" />
               @if (registry.selected) {
                 <tui-icon icon="@tui.check" />
@@ -154,6 +164,7 @@ import { StoreIconDirective } from './store-icon.directive'
     }
   `,
   imports: [
+    RegistryStatus,
     StoreIconDirective,
     RouterLink,
     TuiButton,

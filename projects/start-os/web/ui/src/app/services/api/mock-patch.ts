@@ -75,7 +75,7 @@ function mockStart9Key(
 export function mockRegistryCache(
   info: T.RegistryInfo,
 ): DataModel['registryCache'][string] {
-  return { info, packages: Mock.RegistryPackages, connected: true }
+  return { info, packages: Mock.RegistryPackages, status: 'connected' }
 }
 
 export function mockOsUpdateCache(
@@ -86,7 +86,7 @@ export function mockOsUpdateCache(
     versions: sameUrl(registry, defaultRegistries.community)
       ? {}
       : Mock.RegistryOSUpdate,
-    connected: true,
+    status: 'connected',
   }
 }
 

@@ -166,12 +166,12 @@ function mockPatchFixture(data) {
         trustSigners: {},
       },
       packages: {},
-      connected: true,
+      status: 'connected',
     }),
     mockOsUpdateCache: registry => ({
       registry,
       versions: {},
-      connected: true,
+      status: 'connected',
     }),
   }
 }

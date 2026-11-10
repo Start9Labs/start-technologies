@@ -50,12 +50,14 @@ export function packagesResponse(result: PackageResult): GetPackagesRes {
 export type StoreIdentity = {
   url: string
   name: string
+  status?: T.RegistryStatus
 }
 
 export type Marketplace = Record<string, StoreDataWithUrl | null>
 
 export type StoreData = {
   info: T.RegistryInfo
+  status?: T.RegistryStatus
   packages: MarketplacePkg[]
 }
 
