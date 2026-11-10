@@ -425,6 +425,29 @@ fn possessive_names_are_replaced_as_whole_values() {
 }
 
 #[test]
+fn names_with_an_apostrophe_beside_a_space_are_replaced_whole() {
+    let redactor = configured();
+    for name in [
+        "James' iPhone",
+        "Rock 'n roll",
+        "Alice!",
+        "Bob 'Work' laptop",
+    ] {
+        let out = redactor.line(
+            &format!("Added peer '{name}' to inbound VPN for profile 'Kids'"),
+            true,
+        );
+        assert_eq!(
+            out,
+            format!(
+                "Added peer '{}' to inbound VPN for profile '<profile-voorv>'",
+                redactor.name(name)
+            )
+        );
+    }
+}
+
+#[test]
 fn known_macs_written_as_bare_hex_are_replaced() {
     let redactor = configured();
     let tag = redactor.mac("d0:40:ef:3e:02:43").unwrap();

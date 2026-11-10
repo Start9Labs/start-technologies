@@ -79,7 +79,8 @@ static CONSOLE_LOGIN: LazyLock<Regex> =
     LazyLock::new(|| compile(r"(invalid password for ')(.*)(' on)"));
 static URL_USERINFO: LazyLock<Regex> =
     LazyLock::new(|| compile(r#"([A-Za-z][A-Za-z0-9+.-]*://)[^/\s@'"]+@"#));
-const URL_SECRET_OPTIONS: &str = "password|passwd|pass|pwd|token|key|secret|apikey|api_key|stok|auth";
+const URL_SECRET_OPTIONS: &str =
+    "password|passwd|pass|pwd|token|key|secret|apikey|api_key|stok|auth";
 
 static URL_SECRET_PARAM: LazyLock<Regex> = LazyLock::new(|| {
     compile(&format!(
@@ -123,10 +124,7 @@ static DOMAIN_NAMES: LazyLock<[Regex; 5]> = LazyLock::new(|| {
         compile(r"(: `)([^`'\[\]]+?)(:\d+'\. Trying again)"),
     ]
 });
-/// An apostrophe inside a word opens or closes no quote.
-static QUOTED: LazyLock<Regex> = LazyLock::new(|| compile(r"(?:^|\W)'((?:[^']|\b'\b)+)'"));
-static PROFILE_NETWORK: LazyLock<Regex> =
-    LazyLock::new(|| compile(r"\((.+?) profile(, VPN)?\)"));
+static PROFILE_NETWORK: LazyLock<Regex> = LazyLock::new(|| compile(r"\((.+?) profile(, VPN)?\)"));
 
 /// Values read from the router's configuration.
 #[derive(Default)]
@@ -538,17 +536,17 @@ impl Redactor {
         replace_cow(&mut s, |s| {
             let mut out = String::new();
             let mut last = 0;
-            for value in QUOTED.captures_iter(s).filter_map(|c| c.get(1)) {
-                let open = value.start() - 1;
-                if QUOTED_SETTINGS
-                    .iter()
-                    .any(|context| s[..open].ends_with(context))
+            for value in quoted(s) {
+                if value.is_empty()
+                    || QUOTED_SETTINGS
+                        .iter()
+                        .any(|context| s[..value.start - 1].ends_with(context))
                 {
                     continue;
                 }
-                out.push_str(&s[last..value.start()]);
-                out.push_str(&self.activity_name(value.as_str()));
-                last = value.end();
+                out.push_str(&s[last..value.start]);
+                out.push_str(&self.activity_name(&s[value.clone()]));
+                last = value.end;
             }
             if last == 0 {
                 return Cow::Borrowed(s);
@@ -745,6 +743,39 @@ fn line_chunks(log: &[u8], count: usize) -> Vec<&[u8]> {
         rest = tail;
     }
     chunks
+}
+
+/// Ranges of quoted values, each ending at the last closing quote before the
+/// next opening one.
+fn quoted(s: &str) -> Vec<Range<usize>> {
+    let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    let quotes: Vec<(usize, bool, bool)> = s
+        .match_indices('\'')
+        .map(|(at, _)| (at, !word(prev(s, at)), !word(next(s, at + 1))))
+        .collect();
+    let mut values = Vec::new();
+    let mut i = 0;
+    while let Some(&(open, opens, _)) = quotes.get(i) {
+        i += 1;
+        if !opens {
+            continue;
+        }
+        let mut close = None;
+        for (j, &(at, opens, closes)) in quotes.iter().enumerate().skip(i) {
+            if opens && close.is_some() {
+                break;
+            }
+            if closes {
+                close = Some((j, at));
+            }
+        }
+        let Some((j, at)) = close else {
+            break;
+        };
+        values.push(open + 1..at);
+        i = j + 1;
+    }
+    values
 }
 
 fn prev(s: &str, at: usize) -> Option<char> {
