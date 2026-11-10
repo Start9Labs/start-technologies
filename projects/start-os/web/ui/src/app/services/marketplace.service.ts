@@ -295,7 +295,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
   /** Resolves to the keys it newly trusted for packages. */
   async connectRegistry(url: string): Promise<string[]> {
-    return this.api.rpc.server.trustedKeys.connectRegistry({ url, name: null })
+    return this.api.rpc.server.registries.add({ url, name: null })
   }
 
   async add(rawUrl: string): Promise<string> {
@@ -306,7 +306,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
   /** Resolves to the registry-added keys no connected registry still offers. */
   async removeRegistry(url: string): Promise<string[]> {
-    const orphaned = await this.api.rpc.server.trustedKeys.removeRegistry({
+    const orphaned = await this.api.rpc.server.registries.remove({
       url,
     })
     const selected = this.storage.get<string>('selectedRegistry')
@@ -324,7 +324,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
   /** Resolves to the keys it newly trusted for StartOS updates. */
   async setOsRegistry(url: string): Promise<string[]> {
-    return this.api.rpc.server.trustedKeys.setOsRegistry({ url })
+    return this.api.rpc.server.registries.setOs({ url })
   }
 }
 

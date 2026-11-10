@@ -1,3 +1,4 @@
+use clap::Parser;
 use http::HeaderMap;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -8,18 +9,25 @@ use crate::middleware::auth::signature::call_remote_with_client;
 use crate::registry::info::RegistryInfo;
 use crate::registry::package::promote::registry_rpc_url;
 
-#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct TrustedRegistryParams {
+    #[arg(help = "help.arg.registry-url")]
     pub url: String,
 }
 
 rpc_toolkit::reflect_ts!(TrustedRegistryParams);
 
-#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct ConnectRegistryParams {
+    #[arg(help = "help.arg.registry-url")]
     pub url: String,
+    #[arg(long, help = "help.arg.registry-name")]
     pub name: Option<String>,
 }
 
@@ -104,6 +112,17 @@ async fn fetch_info(client: reqwest::Client, url: &Url) -> Result<RegistryInfo, 
     )
     .await?;
     from_value(value)
+}
+
+pub async fn list(ctx: RpcContext) -> Result<BTreeMap<InternedString, Option<String>>, Error> {
+    let ui = ctx.db.peek().await.as_public().as_ui().de()?;
+    Ok(ui
+        .get("registries")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .map(|(url, name)| (url.clone(), name.as_str().map(str::to_owned)))
+        .collect())
 }
 
 /// Returns the keys it added, which are trusted for packages.
@@ -451,6 +470,34 @@ fn refresh_public(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_parses_registry_commands() {
+        let add = ConnectRegistryParams::try_parse_from([
+            "add",
+            "https://registry.example",
+            "--name",
+            "Mine",
+        ])
+        .unwrap();
+        assert_eq!(
+            (add.url.as_str(), add.name.as_deref()),
+            ("https://registry.example", Some("Mine"))
+        );
+        assert_eq!(
+            ConnectRegistryParams::try_parse_from(["add", "https://registry.example"])
+                .unwrap()
+                .name,
+            None
+        );
+        assert_eq!(
+            TrustedRegistryParams::try_parse_from(["remove", "https://registry.example"])
+                .unwrap()
+                .url,
+            "https://registry.example"
+        );
+        assert!(TrustedRegistryParams::try_parse_from(["remove"]).is_err());
+    }
     use crate::util::future::NonDetachingJoinHandle;
 
     fn public() -> Public {
@@ -1360,8 +1407,7 @@ mod tests {
         }
         let before = to_value(&public).unwrap();
         assert!(distrust(&mut public, last).is_err());
-        let key = public.server_info.trusted_keys[last].public_key.clone();
-        assert!(mutate_public_keys(&mut public, |keys| legacy_remove(keys, &key)).is_err());
+        assert!(mutate_public_keys(&mut public, |keys| remove_key(keys, last)).is_err());
         assert_eq!(to_value(&public).unwrap(), before);
     }
 

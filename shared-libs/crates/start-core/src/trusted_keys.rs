@@ -4,13 +4,14 @@ use chrono::{DateTime, Utc};
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
-use crate::context::RpcContext;
+use crate::context::{CliContext, RpcContext};
 use crate::prelude::*;
 use crate::registry::signer::{AcceptSigners, ContactInfo};
 use crate::sign::AnyVerifyingKey;
 use crate::sign::gpg::{GpgPublicKeyExport, ImportedPublicKeys, parse_public_keys};
 use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners};
-mod connection;
+use crate::util::serde::HandlerExtSerde;
+pub(crate) mod connection;
 pub use connection::check_registry;
 pub(crate) use connection::ensure_builtin_registries;
 pub(crate) mod legacy;
@@ -62,10 +63,6 @@ fn manual_origin() -> String {
 }
 
 impl TrustedKey {
-    fn trusts_os_key(&self, key: &AnyVerifyingKey) -> bool {
-        self.os && &self.public_key == key
-    }
-
     /// The name in the key's first GPG user ID.
     fn identity_name(&self) -> Option<String> {
         let id = self.public_key.interned_der64();
@@ -93,7 +90,7 @@ impl TrustedKey {
 rpc_toolkit::reflect_ts!(TrustedKey);
 rpc_toolkit::ts_export!(TrustedKey, namespaces = [""]);
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, VisitVariants)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, VisitVariants, clap::ValueEnum)]
 #[serde(rename_all = "camelCase")]
 pub enum TrustContext {
     Marketplace,
@@ -334,40 +331,35 @@ pub(crate) fn protect_registry_keys(
 pub fn api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand(
-            "remove-registry",
-            from_fn_async(connection::remove)
-                .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
-        )
-        .subcommand(
-            "connect-registry",
-            from_fn_async(connection::connect)
-                .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
-        )
-        .subcommand(
-            "set-os-registry",
-            from_fn_async(connection::set_os_registry)
-                .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
+            "list",
+            from_fn_async(list)
+                .with_display_serializable()
+                .with_about("about.list-trusted-keys")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "add",
             from_fn_async(add)
                 .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
+                .with_display_serializable()
+                .with_about("about.add-trusted-key")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "update",
             from_fn_async(update)
                 .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
+                .no_display()
+                .with_about("about.update-trusted-key")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "remove",
             from_fn_async(remove)
                 .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
+                .no_display()
+                .with_about("about.remove-trusted-key")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "remove-many",
@@ -377,35 +369,53 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, clap::Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct AddTrustedKeyParams {
     /// Blank names each GPG key after its identity.
+    #[arg(long, default_value = "", help = "help.arg.trusted-key-name")]
     pub name: String,
     /// Ed25519 public keys in PEM or armored GPG format.
+    #[arg(
+        required = true,
+        allow_hyphen_values = true,
+        help = "help.arg.trusted-public-keys"
+    )]
     pub public_keys: Vec<String>,
     /// Grants this permission to every imported key, including existing keys.
     #[serde(default)]
+    #[arg(long, help = "help.arg.trust-for")]
     pub trust_for: Option<TrustContext>,
 }
 
 rpc_toolkit::reflect_ts!(AddTrustedKeyParams);
 
 /// Changes a key's name and both trust selections atomically.
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, clap::Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct UpdateTrustedKeyParams {
+    #[arg(help = "help.arg.trusted-key-id")]
     pub id: InternedString,
+    #[arg(long, help = "help.arg.trusted-key-name")]
     pub name: String,
+    #[arg(long, action = clap::ArgAction::Set, help = "help.arg.trust-marketplace")]
     pub marketplace: bool,
+    #[arg(long, action = clap::ArgAction::Set, help = "help.arg.trust-os")]
     pub os: bool,
 }
 
 rpc_toolkit::reflect_ts!(UpdateTrustedKeyParams);
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, clap::Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct RemoveTrustedKeyParams {
+    #[arg(help = "help.arg.trusted-key-id")]
     pub id: InternedString,
 }
 
@@ -468,6 +478,16 @@ fn remove_keys(keys: &mut TrustedKeys, ids: BTreeSet<InternedString>) -> Result<
     Ok(())
 }
 
+async fn list(ctx: RpcContext) -> Result<TrustedKeys, Error> {
+    ctx.db
+        .peek()
+        .await
+        .into_public()
+        .into_server_info()
+        .into_trusted_keys()
+        .de()
+}
+
 async fn add(ctx: RpcContext, params: AddTrustedKeyParams) -> Result<AddTrustedKeyRes, Error> {
     let public_keys = parse_public_keys(&params.public_keys)?;
     crate::update::signer_files::mutate(ctx.db.clone(), move |db| {
@@ -504,59 +524,55 @@ async fn remove_many(ctx: RpcContext, params: RemoveTrustedKeysParams) -> Result
     .await
 }
 
-pub fn legacy_add(
-    keys: &mut TrustedKeys,
-    key: AnyVerifyingKey,
-    label: String,
-) -> Result<(), Error> {
-    let id = key.interned_der64();
-    if let Some(existing) = keys.get_mut(&id) {
-        if existing.os {
-            return Err(Error::new(
-                eyre!("{}", t!("update.signers.already-exists")),
-                ErrorKind::InvalidRequest,
-            ));
-        }
-        existing.os = true;
-        return Ok(());
-    }
-    import_individual_keys(keys, label, vec![key].into(), None)?;
-    if let Some(added) = keys.get_mut(&id) {
-        added.os = true;
-    }
-    Ok(())
-}
-
-pub fn legacy_update(
-    keys: &mut TrustedKeys,
-    key: &AnyVerifyingKey,
-    label: String,
-) -> Result<(), Error> {
-    let entry = keys
-        .get_mut(&key.interned_der64())
-        .filter(|entry| entry.trusts_os_key(key))
-        .ok_or_else(not_found)?;
-    entry.name = key_name(label)?;
-    Ok(())
-}
-
-pub fn legacy_remove(keys: &mut TrustedKeys, key: &AnyVerifyingKey) -> Result<(), Error> {
-    let id = key.interned_der64();
-    let entry = keys
-        .get_mut(&id)
-        .filter(|entry| entry.trusts_os_key(key))
-        .ok_or_else(not_found)?;
-    if entry.removable {
-        keys.remove(&id);
-    } else {
-        entry.os = false;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_parses_trusted_key_commands() {
+        use clap::Parser;
+        let add = AddTrustedKeyParams::try_parse_from([
+            "add",
+            "-----BEGIN",
+            "second",
+            "--trust-for",
+            "os",
+        ])
+        .unwrap();
+        assert_eq!(add.public_keys, ["-----BEGIN", "second"]);
+        assert_eq!(add.name, "");
+        assert!(matches!(add.trust_for, Some(TrustContext::Os)));
+        assert!(AddTrustedKeyParams::try_parse_from(["add"]).is_err());
+        let update = UpdateTrustedKeyParams::try_parse_from([
+            "update",
+            "id",
+            "--name",
+            "Renamed",
+            "--marketplace",
+            "false",
+            "--os",
+            "true",
+        ])
+        .unwrap();
+        assert_eq!(
+            (
+                update.id.as_ref(),
+                update.name.as_str(),
+                update.marketplace,
+                update.os
+            ),
+            ("id", "Renamed", false, true)
+        );
+        assert!(
+            UpdateTrustedKeyParams::try_parse_from(["update", "id", "--name", "Renamed"]).is_err()
+        );
+        assert_eq!(
+            RemoveTrustedKeyParams::try_parse_from(["remove", "id"])
+                .unwrap()
+                .id,
+            "id"
+        );
+    }
 
     #[test]
     fn defaults_are_three_independent_start9_registry_keys() {
@@ -745,7 +761,7 @@ mod tests {
         for key in keys.values_mut() {
             key.os = true;
         }
-        legacy_remove(&mut keys, &removed).unwrap();
+        remove_key(&mut keys, &removed.interned_der64()).unwrap();
         let wire = to_value(&keys).unwrap();
         let restored: TrustedKeys = from_value(wire.clone()).unwrap();
         assert_eq!(restored.len(), 1);
@@ -764,26 +780,6 @@ mod tests {
             source
         );
         assert_eq!(legacy::decode_keys(wire, Utc::now()).unwrap(), restored);
-    }
-
-    #[test]
-    fn legacy_commands_use_single_key_identity_and_preserve_other_keys() {
-        let mut keys = initial_trusted_keys();
-        let id = keys.iter().find(|(_, key)| key.os).unwrap().0.clone();
-        keys.get_mut(&id).unwrap().removable = false;
-        let original = keys.clone();
-        let key = keys[&id].public_key.clone();
-        legacy_remove(&mut keys, &key).unwrap();
-        assert!(!keys[&id].os && keys[&id].marketplace);
-        assert!(legacy_remove(&mut keys, &key).is_err());
-        legacy_add(&mut keys, key.clone(), "Ignored".into()).unwrap();
-        assert_eq!(keys, original);
-        assert!(legacy_add(&mut keys, key.clone(), "Duplicate".into()).is_err());
-        legacy_update(&mut keys, &key, "Renamed".into()).unwrap();
-        assert_eq!(keys.remove(&id).unwrap().name, "Renamed");
-        let mut neighbors = original;
-        neighbors.remove(&id);
-        assert_eq!(keys, neighbors);
     }
 
     #[test]

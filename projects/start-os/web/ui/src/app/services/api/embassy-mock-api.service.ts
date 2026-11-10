@@ -289,7 +289,7 @@ export class MockApiService extends ApiService {
       },
       hardware: null,
     }),
-    'server.trusted-keys.connect-registry': async ({ url, name }) => {
+    'server.registries.add': async ({ url, name }) => {
       await pauseFor(2000)
       const normalized = registryUrl(url)
       const info = this.mockRegistryInfo(normalized)
@@ -304,7 +304,7 @@ export class MockApiService extends ApiService {
       await this.publishTrust()
       return added
     },
-    'server.trusted-keys.remove-registry': async ({ url }) => {
+    'server.registries.remove': async ({ url }) => {
       await pauseFor(2000)
       if (sameUrl(url, mockPatchData.ui.startosRegistry))
         throw new Error(
@@ -324,7 +324,7 @@ export class MockApiService extends ApiService {
         return key?.removable && key.origin !== 'manual'
       })
     },
-    'server.trusted-keys.set-os-registry': async ({ url }) => {
+    'server.registries.set-os': async ({ url }) => {
       await pauseFor(2000)
       if (
         !Object.keys(mockPatchData.ui.registries).some(saved =>

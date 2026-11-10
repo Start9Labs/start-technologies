@@ -1,15 +1,9 @@
 use std::collections::BTreeMap;
 
-use clap::Parser;
-use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
-use crate::context::{CliContext, RpcContext};
 use crate::prelude::*;
-use crate::sign::AnyVerifyingKey;
 pub use crate::trusted_keys::initial_signers;
-use crate::trusted_keys::{legacy_add, legacy_remove, legacy_update, os_signers};
-use crate::util::serde::HandlerExtSerde;
 
 pub type TrustedOsUpdateSigners = BTreeMap<InternedString, TrustedOsUpdateSigner>;
 
@@ -23,165 +17,16 @@ pub struct TrustedOsUpdateSigner {
 rpc_toolkit::reflect_ts!(TrustedOsUpdateSigner);
 rpc_toolkit::ts_export!(TrustedOsUpdateSigner, namespaces = [""]);
 
-pub fn api<C: Context>() -> ParentHandler<C> {
-    ParentHandler::new()
-        .subcommand(
-            "add",
-            from_fn_async(add)
-                .with_metadata("sync_db", Value::Bool(true))
-                .no_display()
-                .with_about("about.add-signer")
-                .with_call_remote::<CliContext>(),
-        )
-        .subcommand(
-            "get",
-            from_fn_async(get)
-                .with_display_serializable()
-                .with_about("about.get-os-update-signer")
-                .with_call_remote::<CliContext>(),
-        )
-        .subcommand(
-            "list",
-            from_fn_async(list)
-                .with_display_serializable()
-                .with_about("about.list-signers")
-                .with_call_remote::<CliContext>(),
-        )
-        .subcommand(
-            "update",
-            from_fn_async(update)
-                .with_metadata("sync_db", Value::Bool(true))
-                .no_display()
-                .with_about("about.edit-signer")
-                .with_call_remote::<CliContext>(),
-        )
-        .subcommand(
-            "remove",
-            from_fn_async(remove)
-                .with_metadata("sync_db", Value::Bool(true))
-                .no_display()
-                .with_about("about.remove-signer")
-                .with_call_remote::<CliContext>(),
-        )
-}
-
-#[derive(Deserialize, Serialize, Parser, VisitFields)]
-#[group(skip)]
-#[serde(rename_all = "camelCase")]
-#[command(rename_all = "kebab-case")]
-pub struct OsUpdateSignerKeyParams {
-    #[arg(allow_hyphen_values = true, help = "help.arg.signer-key")]
-    key: AnyVerifyingKey,
-}
-
-rpc_toolkit::reflect_ts!(OsUpdateSignerKeyParams);
-rpc_toolkit::ts_export!(OsUpdateSignerKeyParams, namespaces = [""]);
-
-#[derive(Deserialize, Serialize, Parser, VisitFields)]
-#[group(skip)]
-#[serde(rename_all = "camelCase")]
-#[command(rename_all = "kebab-case")]
-pub struct SetOsUpdateSignerParams {
-    #[arg(allow_hyphen_values = true, help = "help.arg.signer-key")]
-    key: AnyVerifyingKey,
-    #[arg(long, help = "help.arg.signer-name")]
-    label: String,
-}
-
-rpc_toolkit::reflect_ts!(SetOsUpdateSignerParams);
-rpc_toolkit::ts_export!(SetOsUpdateSignerParams, namespaces = [""]);
-
-fn signer_not_found() -> Error {
-    Error::new(
-        eyre!("{}", t!("update.signers.not-found")),
-        ErrorKind::NotFound,
-    )
-}
-
-fn get_signer(
-    signers: &TrustedOsUpdateSigners,
-    key: &AnyVerifyingKey,
-) -> Result<TrustedOsUpdateSigner, Error> {
-    signers
-        .get(&key.interned_der64())
-        .cloned()
-        .ok_or_else(signer_not_found)
-}
-
-pub async fn add(ctx: RpcContext, params: SetOsUpdateSignerParams) -> Result<(), Error> {
-    super::signer_files::mutate(ctx.db.clone(), move |db| {
-        db.as_public_mut().mutate(|public| {
-            crate::trusted_keys::mutate_public_keys(public, |keys| {
-                legacy_add(keys, params.key, params.label)
-            })
-        })
-    })
-    .await
-}
-
-pub async fn get(
-    ctx: RpcContext,
-    params: OsUpdateSignerKeyParams,
-) -> Result<TrustedOsUpdateSigner, Error> {
-    get_signer(&list(ctx).await?, &params.key)
-}
-
-pub async fn list(ctx: RpcContext) -> Result<TrustedOsUpdateSigners, Error> {
-    Ok(os_signers(
-        &ctx.db
-            .peek()
-            .await
-            .into_public()
-            .into_server_info()
-            .into_trusted_keys()
-            .de()?,
-    ))
-}
-
-pub async fn update(ctx: RpcContext, params: SetOsUpdateSignerParams) -> Result<(), Error> {
-    super::signer_files::mutate(ctx.db.clone(), move |db| {
-        db.as_public_mut().mutate(|public| {
-            crate::trusted_keys::mutate_public_keys(public, |keys| {
-                legacy_update(keys, &params.key, params.label)
-            })
-        })
-    })
-    .await
-}
-
-pub async fn remove(ctx: RpcContext, params: OsUpdateSignerKeyParams) -> Result<(), Error> {
-    super::signer_files::mutate(ctx.db.clone(), move |db| {
-        db.as_public_mut().mutate(|public| {
-            crate::trusted_keys::mutate_public_keys(public, |keys| legacy_remove(keys, &params.key))
-        })
-    })
-    .await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sign::AnyVerifyingKey;
 
-    #[test]
-    fn legacy_crud_uses_shared_trusted_keys() {
-        let canonical = initial_signers().into_keys().next().unwrap();
-        let key: AnyVerifyingKey = canonical.replace('\n', "\r\n").parse().unwrap();
-        let mut keys = crate::trusted_keys::TrustedKeys::new();
-        assert!(legacy_update(&mut keys, &key, "missing".into()).is_err());
-        assert!(legacy_remove(&mut keys, &key).is_err());
-        legacy_add(&mut keys, key.clone(), "custom signer".into()).unwrap();
-        assert_eq!(
-            get_signer(&os_signers(&keys), &key).unwrap().label,
-            "custom signer"
-        );
-        assert!(legacy_add(&mut keys, key.clone(), "duplicate".into()).is_err());
-        legacy_update(&mut keys, &key, "renamed".into()).unwrap();
-        assert_eq!(
-            get_signer(&os_signers(&keys), &key).unwrap().label,
-            "renamed"
-        );
-        legacy_remove(&mut keys, &key).unwrap();
-        assert!(keys.is_empty());
+    fn get_signer(
+        signers: &TrustedOsUpdateSigners,
+        key: &AnyVerifyingKey,
+    ) -> Option<TrustedOsUpdateSigner> {
+        signers.get(&key.interned_der64()).cloned()
     }
 
     #[test]
@@ -216,7 +61,7 @@ mod tests {
                 format!("-----BEGIN PUBLIC KEY-----\n{body}\n-----END PUBLIC KEY-----\n")
                     .parse()
                     .unwrap();
-            assert!(get_signer(&signers, &key).is_err());
+            assert!(get_signer(&signers, &key).is_none());
         }
     }
 
@@ -262,20 +107,5 @@ mod tests {
             get_signer(&initial_signers(), &key).unwrap().label,
             "Start9"
         );
-    }
-
-    #[test]
-    fn cli_requires_a_valid_key_and_label_for_writes() {
-        let key = initial_signers().into_keys().next().unwrap();
-        let parsed =
-            SetOsUpdateSignerParams::try_parse_from(["add", key.as_ref(), "--label", "test"])
-                .unwrap();
-        assert_eq!(parsed.key.interned_der64(), key);
-        assert_eq!(parsed.label, "test");
-        assert!(SetOsUpdateSignerParams::try_parse_from(["add", key.as_ref()]).is_err());
-        assert!(
-            SetOsUpdateSignerParams::try_parse_from(["add", "invalid", "--label", "test"]).is_err()
-        );
-        assert!(OsUpdateSignerKeyParams::try_parse_from(["get", key.as_ref()]).is_ok());
     }
 }
