@@ -3620,6 +3620,14 @@ middleware.auth.unknown-content-type:
   fr_FR: "type de contenu inconnu"
   pl_PL: "nieznany typ zawartości"
 
+# db/mod.rs
+db.registries-not-writable:
+  en_US: "Saved registries are changed through the registry settings, not as UI data"
+  de_DE: "Gespeicherte Registrys werden über die Registry-Einstellungen geändert, nicht als UI-Daten"
+  es_ES: "Los registros guardados se cambian en la configuración de registros, no como datos de la interfaz"
+  fr_FR: "Les registres enregistrés se modifient dans les paramètres des registres, pas comme données de l'interface"
+  pl_PL: "Zapisane rejestry zmienia się w ustawieniach rejestrów, a nie jako dane interfejsu"
+
 # middleware/db.rs
 middleware.db.error-writing-patch-sequence-header:
   en_US: "error writing X-Patch-Sequence header: %{error}"
@@ -7909,6 +7917,13 @@ update.signers.not-found:
   es_ES: "No se encontró el firmante de confianza de actualizaciones del sistema"
   fr_FR: "Signataire de confiance des mises à jour du système introuvable"
   pl_PL: "Nie znaleziono zaufanego sygnatariusza aktualizacji systemu"
+
+trusted-keys.builtin-registry:
+  en_US: "The Start9 and Community registries cannot be removed"
+  de_DE: "Die Start9- und Community-Registrys können nicht entfernt werden"
+  es_ES: "Los registros de Start9 y de la comunidad no se pueden eliminar"
+  fr_FR: "Les registres Start9 et Communauté ne peuvent pas être supprimés"
+  pl_PL: "Nie można usunąć rejestrów Start9 i Community"
 
 trusted-keys.invalid:
   en_US: "Enter a name and at least one Ed25519 public key"

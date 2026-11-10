@@ -51,6 +51,38 @@ pub(super) fn same_registry(first: &str, second: &str) -> bool {
     }
 }
 
+const BUILTIN_REGISTRIES: [(&str, &str); 2] = [
+    ("https://registry.start9.com/", "Start9 Registry"),
+    (
+        "https://community-registry.start9.com/",
+        "Community Registry",
+    ),
+];
+
+fn is_builtin(url: &str) -> bool {
+    BUILTIN_REGISTRIES
+        .iter()
+        .any(|(builtin, _)| same_registry(builtin, url))
+}
+
+/// Leaves a `registries` that is not an object unchanged.
+pub(crate) fn ensure_builtin_registries(ui: &mut Value) {
+    let Some(ui) = ui.as_object_mut() else {
+        return;
+    };
+    if matches!(ui.get("registries"), None | Some(Value::Null)) {
+        ui.insert("registries".into(), imbl_value::json!({}));
+    }
+    let Some(registries) = ui.get_mut("registries").and_then(Value::as_object_mut) else {
+        return;
+    };
+    for (url, name) in BUILTIN_REGISTRIES {
+        if !registries.keys().any(|saved| same_registry(saved, url)) {
+            registries.insert(url.into(), imbl_value::json!(name));
+        }
+    }
+}
+
 pub(super) fn is_connected(ui: &Value, url: &str) -> bool {
     ui.get("registries")
         .and_then(Value::as_object)
@@ -251,6 +283,12 @@ fn forget_registry(
 }
 
 fn remove_public(public: &mut Public, url: &Url) -> Result<BTreeSet<InternedString>, Error> {
+    if is_builtin(url.as_str()) {
+        return Err(Error::new(
+            eyre!("{}", t!("trusted-keys.builtin-registry")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
     if public
         .ui
         .get("startosRegistry")
@@ -1281,6 +1319,21 @@ mod tests {
             remove_public(&mut public, &first).unwrap(),
             BTreeSet::from([own.interned_der64()])
         );
+    }
+
+    #[test]
+    fn builtin_registries_cannot_be_removed() {
+        let mut public = public();
+        ensure_builtin_registries(&mut public.ui);
+        public.ui["startosRegistry"] = imbl_value::json!("https://registry.example/");
+        let before = to_value(&public).unwrap();
+        for url in [
+            "https://registry.start9.com",
+            "https://community-registry.start9.com/",
+        ] {
+            assert!(remove_public(&mut public, &registry_url(url).unwrap()).is_err());
+        }
+        assert_eq!(to_value(&public).unwrap(), before);
     }
 
     #[test]
