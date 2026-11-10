@@ -269,16 +269,11 @@ fn uplink_status(dump: &serde_json::Value) -> Option<&serde_json::Value> {
 
 fn uplink_ipv4_addrs(dump: &serde_json::Value) -> Vec<Ipv4Addr> {
     uplink_status(dump)
-        .and_then(|i| i.get("ipv4-address")?.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|e| e.get("address")?.as_str()?.parse().ok())
-                .collect()
-        })
+        .map(interface_ipv4_addrs)
         .unwrap_or_default()
 }
 
-async fn interface_dump() -> Option<serde_json::Value> {
+pub(crate) async fn interface_dump() -> Option<serde_json::Value> {
     let out = tokio::process::Command::new("ubus")
         .args(["call", "network.interface", "dump"])
         .invoke(ErrorKind::Network.into())
@@ -310,6 +305,18 @@ pub(crate) fn wan_ipv4_addrs() -> Vec<Ipv4Addr> {
 
 /// `None` when ubus is unavailable; empty when the uplink is down.
 pub(crate) fn read_wan_ipv4_addrs() -> Option<Vec<Ipv4Addr>> {
+    read_uplink_ipv4_addrs().map(|addrs| addrs.active)
+}
+
+pub(crate) struct UplinkAddrs {
+    /// On the uplink carrying traffic.
+    pub(crate) active: Vec<Ipv4Addr>,
+    /// On the WAN port and the Wi-Fi uplink together.
+    pub(crate) all: Vec<Ipv4Addr>,
+}
+
+/// `None` when ubus is unavailable.
+pub(crate) fn read_uplink_ipv4_addrs() -> Option<UplinkAddrs> {
     let out = StdCommand::new("ubus")
         .args(["call", "network.interface", "dump"])
         .output()
@@ -318,7 +325,36 @@ pub(crate) fn read_wan_ipv4_addrs() -> Option<Vec<Ipv4Addr>> {
         return None;
     }
     let dump = serde_json::from_slice::<serde_json::Value>(&out.stdout).ok()?;
-    Some(uplink_ipv4_addrs(&dump))
+    Some(UplinkAddrs {
+        active: uplink_ipv4_addrs(&dump),
+        all: every_uplink_ipv4_addr(&dump),
+    })
+}
+
+fn interface_ipv4_addrs(interface: &serde_json::Value) -> Vec<Ipv4Addr> {
+    interface
+        .get("ipv4-address")
+        .and_then(|a| a.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|e| e.get("address")?.as_str()?.parse().ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn every_uplink_ipv4_addr(dump: &serde_json::Value) -> Vec<Ipv4Addr> {
+    dump.get("interface")
+        .and_then(|i| i.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|i| {
+            i.get("interface")
+                .and_then(|v| v.as_str())
+                .is_some_and(|name| UPLINK_INTERFACES.contains(&name))
+        })
+        .flat_map(interface_ipv4_addrs)
+        .collect()
 }
 
 pub async fn get_wan_ipv6s() -> Result<Vec<Ipv6Addr>, Error> {
@@ -1127,7 +1163,10 @@ mod tests {
             uplink(vec![lan.clone(), wan(false, 10), wwan(false, 20)]),
             (Some("wan".into()), vec![])
         );
-        assert_eq!(uplink(vec![lan]), (None, vec![]));
+        assert_eq!(uplink(vec![lan.clone()]), (None, vec![]));
+
+        let dump = serde_json::json!({ "interface": [lan, wan(true, 10), wwan(true, 20)] });
+        assert_eq!(every_uplink_ipv4_addr(&dump), vec![wan_addr, wwan_addr]);
     }
 
     #[test]

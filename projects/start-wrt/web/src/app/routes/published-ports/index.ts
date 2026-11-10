@@ -114,7 +114,7 @@ export default class PublishedPorts {
 
     // Use DDNS hostname if available, otherwise WAN IP
     const ddnsHostname = ddns?.enabled ? ddns.hostname || null : null
-    this.ipv4EndpointHost.set(ddnsHostname || wanIpv4?.assigned_ip || null)
+    this.ipv4EndpointHost.set(ddnsHostname || wanIpv4?.uplink_ip || null)
   }
 
   private async loadVpnProfiles() {

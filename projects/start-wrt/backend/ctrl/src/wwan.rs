@@ -9,9 +9,11 @@
 //! connected. [`watch`] stops an uplink the router cannot join, which brings
 //! that Wi-Fi back.
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
+use ipnet::Ipv4Net;
 use rpc_toolkit::{from_fn_async_local, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{FirewallZone, InterfaceProto, WifiDevice, WifiMode};
@@ -231,6 +233,8 @@ pub struct WwanState {
     pub channel: Option<u32>,
     /// Whether the router's Internet traffic leaves through the Wi-Fi uplink.
     pub active: bool,
+    /// Whether the joined network uses the address range of one of the router's own networks.
+    pub subnet_conflict: bool,
 }
 rpc_toolkit::reflect_ts!(WwanState);
 
@@ -359,6 +363,26 @@ fn interface_metric(cfgs: &Configs, name: &str) -> Result<Option<u32>, Error> {
     Ok(None)
 }
 
+/// Gives a `wan` interface created beside the uplink the metric that keeps the priority.
+pub(crate) fn keep_wan_priority(cfgs: &mut Configs) -> Result<(), Error> {
+    let Some(wwan) = interface_metric(cfgs, WWAN_INTERFACE)? else {
+        return Ok(());
+    };
+    let metric = match wwan {
+        PREFERRED_METRIC => BACKUP_METRIC,
+        _ => PREFERRED_METRIC,
+    };
+    for section in &mut cfgs["network"].sections {
+        if section.name().as_deref() == Some(WAN_INTERFACE) {
+            if let Some(mut iface) = section.get_typed::<InterfaceMetric>()? {
+                iface.metric = Some(metric);
+                section.set(&iface)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn priority_of(cfgs: &Configs) -> Result<WwanPriority, Error> {
     let wan = interface_metric(cfgs, WAN_INTERFACE)?.unwrap_or(0);
     let wwan = interface_metric(cfgs, WWAN_INTERFACE)?.unwrap_or(0);
@@ -476,13 +500,51 @@ fn ifname_of<'a>(status: &'a BTreeMap<String, RadioStatus>, section: &str) -> Op
         .as_deref()
 }
 
+/// The IPv4 networks on each interface of a `network.interface dump`, by interface name.
+fn interface_networks(dump: &serde_json::Value) -> Vec<(&str, Ipv4Net)> {
+    dump.get("interface")
+        .and_then(|i| i.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|i| {
+            Some((
+                i.get("interface")?.as_str()?,
+                i.get("ipv4-address")?.as_array()?,
+            ))
+        })
+        .flat_map(|(name, addresses)| {
+            addresses.iter().filter_map(move |a| {
+                let address = a.get("address")?.as_str()?.parse().ok()?;
+                let mask = u8::try_from(a.get("mask")?.as_u64()?).ok()?;
+                Some((name, Ipv4Net::new(address, mask).ok()?))
+            })
+        })
+        .collect()
+}
+
+/// Whether the uplink's network overlaps one the router serves.
+fn subnet_conflict(dump: &serde_json::Value) -> bool {
+    let networks = interface_networks(dump);
+    let is_uplink = |name: &str| matches!(name, WAN_INTERFACE | WWAN_INTERFACE | "loopback");
+    networks
+        .iter()
+        .filter(|(name, _)| *name == WWAN_INTERFACE)
+        .any(|(_, uplink)| {
+            networks.iter().any(|(name, net)| {
+                !is_uplink(name)
+                    && (net.contains(&uplink.network()) || uplink.contains(&net.network()))
+            })
+        })
+}
+
 async fn read_state() -> WwanState {
     let mut state = WwanState::default();
-    if let Some(status) = ubus_call("network.interface.wwan", "status", None).await {
-        state.address = status
-            .pointer("/ipv4-address/0/address")
-            .and_then(|v| v.as_str())
-            .map(String::from);
+    if let Some(dump) = crate::system::interface_dump().await {
+        state.address = interface_networks(&dump)
+            .into_iter()
+            .find(|(name, _)| *name == WWAN_INTERFACE)
+            .map(|(_, net)| net.addr().to_string());
+        state.subnet_conflict = subnet_conflict(&dump);
     }
     let radios = wireless_status().await.unwrap_or_default();
     if let Some(ifname) = ifname_of(&radios, WWAN_INTERFACE) {
@@ -513,6 +575,12 @@ async fn associated(ifname: &str) -> bool {
     tokio::fs::read_to_string(format!("/sys/class/net/{ifname}/operstate"))
         .await
         .is_ok_and(|s| s.trim() == "up")
+}
+
+/// The kernel interface of StartWRT's uplink, while netifd has one up.
+pub(crate) async fn uplink_ifname() -> Option<String> {
+    let status = wireless_status().await?;
+    ifname_of(&status, WWAN_INTERFACE).map(String::from)
 }
 
 async fn uplink_associated() -> bool {
@@ -959,7 +1027,7 @@ async fn update<C: CtrlContext>(
         let mut cfgs = parse_all(
             ctx.uci_root(),
             &arena,
-            &["wireless", "network", "firewall", "startwrt"],
+            &["wireless", "network", "firewall", "startwrt", "ddns"],
         )
         .await?;
         if !apply(&mut cfgs)? {
@@ -977,20 +1045,33 @@ async fn update<C: CtrlContext>(
     }
 }
 
-/// Writes, logs the outcome, and reloads the network.
+/// Writes, logs the outcome, and reloads the network and a DDNS service whose source moved.
 async fn write<C: CtrlContext>(
     ctx: &C,
     action: &str,
     summary: &str,
     apply: impl Fn(&mut Configs) -> Result<(), Error>,
 ) -> Result<(), Error> {
-    if let Err(err) = update(ctx, |cfgs| apply(cfgs).map(|()| true)).await {
+    let ddns_moved = Cell::new(false);
+    let written = update(ctx, |cfgs| {
+        apply(cfgs)?;
+        ddns_moved.set(crate::wan::sync_ddns_source(cfgs)?);
+        Ok(true)
+    })
+    .await;
+    if let Err(err) = written {
         crate::activity::log("wwan", action, false, summary, Some(&err.to_string()));
         return Err(err);
     }
     crate::activity::log("wwan", action, true, summary, None);
     if ctx.effectful() {
         profiles::reload_system().await?;
+        if ddns_moved.get() {
+            let _ = crate::run_quiet_async(
+                tokio::process::Command::new("/etc/init.d/ddns").arg("restart"),
+            )
+            .await;
+        }
     }
     Ok(())
 }
@@ -1226,11 +1307,17 @@ pub async fn watch() {
     let ctx = crate::ServerContext::default();
     let mut tracker = Tracker::default();
     let mut ticks = tokio::time::interval(WATCH_INTERVAL);
+    let mut failure = None;
     loop {
         ticks.tick().await;
-        if let Err(e) = watch_once(&ctx, &mut tracker).await {
+        let failed = watch_once(&ctx, &mut tracker)
+            .await
+            .err()
+            .map(|e| e.to_string());
+        if let Some(e) = failed.as_ref().filter(|e| failure.as_ref() != Some(*e)) {
             tracing::warn!("Wi-Fi uplink watch failed: {e}");
         }
+        failure = failed;
     }
 }
 
@@ -1691,6 +1778,101 @@ config zone 'wan_zone'
         assert_eq!(read(dir.path(), "network"), network);
         assert_eq!(read(dir.path(), "firewall"), firewall);
         assert!(get(ctx).await.unwrap().uplink.is_none());
+    }
+
+    const DDNS: &str = "config service 'wan'\n\toption enabled '1'\n\toption service_name 'duckdns.org'\n\toption ip_source 'network'\n\toption ip_network 'wan'\n\toption interface 'wan'\n\toption domain 'home.duckdns.org'\n";
+
+    #[tokio::test]
+    async fn ddns_publishes_the_active_uplink_while_an_uplink_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = setup(dir.path(), WIRELESS, "");
+        std::fs::write(dir.path().join("ddns"), DDNS).unwrap();
+
+        connect(
+            ctx.clone(),
+            DeserializeStdin(connect_req(WwanSecurity::Open, None)),
+        )
+        .await
+        .unwrap();
+        let service = section(dir.path(), "ddns", "wan").unwrap();
+        assert!(service.contains("option ip_source 'script'"), "{service}");
+        assert!(
+            service.contains("option ip_script '/usr/bin/startwrt-cli wan uplink-ipv4'"),
+            "{service}"
+        );
+        assert!(!service.contains("ip_network"), "{service}");
+        assert!(service.contains("option interface 'wan'"), "{service}");
+        assert!(
+            service.contains("option domain 'home.duckdns.org'"),
+            "{service}"
+        );
+
+        disconnect(ctx).await.unwrap();
+        let service = section(dir.path(), "ddns", "wan").unwrap();
+        assert!(service.contains("option ip_source 'network'"), "{service}");
+        assert!(service.contains("option ip_network 'wan'"), "{service}");
+        assert!(!service.contains("ip_script"), "{service}");
+    }
+
+    #[tokio::test]
+    async fn wan_port_created_beside_an_uplink_keeps_the_priority() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = setup(dir.path(), WIRELESS, "");
+        let recreated = || async {
+            let arena = Arena::new();
+            let mut cfgs = parse_all(dir.path().to_path_buf(), &arena, &["network"])
+                .await
+                .unwrap();
+            cfgs["network"]
+                .sections
+                .retain(|s| s.name().as_deref() != Some(WAN_INTERFACE));
+            cfgs["network"]
+                .append(&UplinkInterface::default(), Some(WAN_INTERFACE))
+                .unwrap();
+            keep_wan_priority(&mut cfgs).unwrap();
+            interface_metric(&cfgs, WAN_INTERFACE).unwrap()
+        };
+        assert_eq!(recreated().await, None);
+
+        connect(
+            ctx.clone(),
+            DeserializeStdin(connect_req(WwanSecurity::Open, None)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(recreated().await, Some(PREFERRED_METRIC));
+
+        priority_set(
+            ctx,
+            DeserializeStdin(WwanPrioritySetRequest {
+                priority: WwanPriority::Preferred,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(recreated().await, Some(BACKUP_METRIC));
+    }
+
+    #[test]
+    fn uplink_on_a_served_address_range_is_a_conflict() {
+        let dump = |wwan: &str, mask: u8| {
+            serde_json::json!({ "interface": [
+                { "interface": "loopback", "ipv4-address": [{ "address": "127.0.0.1", "mask": 8 }] },
+                { "interface": "lan", "ipv4-address": [{ "address": "192.168.0.1", "mask": 24 }] },
+                { "interface": "vlan_guest", "ipv4-address": [{ "address": "192.168.101.1", "mask": 24 }] },
+                { "interface": "wan", "ipv4-address": [{ "address": "192.168.0.9", "mask": 24 }] },
+                { "interface": "wwan", "ipv4-address": [{ "address": wwan, "mask": mask }] },
+            ]})
+        };
+        assert!(subnet_conflict(&dump("192.168.0.57", 24)));
+        assert!(subnet_conflict(&dump("192.168.101.4", 24)));
+        assert!(subnet_conflict(&dump("192.168.3.4", 16)));
+        assert!(!subnet_conflict(&dump("192.168.1.57", 24)));
+        assert!(!subnet_conflict(&dump("10.0.0.7", 8)));
+        assert!(!subnet_conflict(&serde_json::json!({ "interface": [
+            { "interface": "lan", "ipv4-address": [{ "address": "192.168.0.1", "mask": 24 }] },
+            { "interface": "wan", "ipv4-address": [{ "address": "192.168.0.9", "mask": 24 }] },
+        ]})));
     }
 
     #[tokio::test]

@@ -1,4 +1,10 @@
-import { Component, computed, effect, inject, signal } from '@angular/core'
+import {
+  Component,
+  computed,
+  effect,
+  inject,
+  linkedSignal,
+} from '@angular/core'
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
 import { RouterLink } from '@angular/router'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
@@ -17,18 +23,17 @@ import { Footer } from 'src/app/components/footer'
 import { Form } from 'src/app/components/form'
 import { Summary } from 'src/app/components/summary'
 import {
-  ApiService,
   WwanConnectRequest,
   WwanNetwork,
   WwanPriority,
   WwanResponse,
   WwanUplink,
 } from 'src/app/services/api/api.service'
-import { ActionService } from 'src/app/services/action.service'
 import { provideFormService } from 'src/app/services/form.service'
 import { i18nKey } from 'src/app/i18n/i18n.providers'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
-import { WWAN_JOIN } from './dialog'
+import { LUCI_URL } from 'src/app/utils/luci'
+import { WWAN_JOIN, WwanJoinData } from './dialog'
 import { WwanService } from './service'
 import { WwanNetworksTable } from './table'
 import { BAND_LABELS, PRIORITY_LABELS } from './utils'
@@ -66,7 +71,8 @@ function uplinkStatus({ uplink, state }: WwanResponse): UplinkStatus {
             {{ 'Launch LuCI Interface' | i18n }}
           </a>
         </div>
-      } @else if (data.uplink; as uplink) {
+      }
+      @if (data.uplink; as uplink) {
         <header tuiHeader="h6">
           <h2 tuiTitle>{{ 'Summary' | i18n }}</h2>
           <aside tuiAccessories>
@@ -84,17 +90,25 @@ function uplinkStatus({ uplink, state }: WwanResponse): UplinkStatus {
           <form
             tuiNotification
             appearance="negative"
-            (submit.prevent)="reconnect()"
+            (submit.prevent)="service.reconnect()"
             (reset)="changePassword(uplink)"
           >
             <div tuiTitle>
               {{ 'Stopped' | i18n }}
-              <span tuiSubtitle>{{ message }}</span>
+              <span tuiSubtitle>
+                {{ message }}
+                {{
+                  'Retrying turns the router’s own Wi-Fi on this band off again until it connects.'
+                    | i18n
+                }}
+              </span>
               <div>
                 <button tuiButton size="xs">{{ 'Retry' | i18n }}</button>
-                <button tuiLink type="reset">
-                  {{ 'Change password' | i18n }}
-                </button>
+                @if (uplink.security !== 'open') {
+                  <button tuiLink type="reset">
+                    {{ 'Change password' | i18n }}
+                  </button>
+                }
               </div>
             </div>
           </form>
@@ -102,6 +116,13 @@ function uplinkStatus({ uplink, state }: WwanResponse): UplinkStatus {
           <div tuiNotification appearance="warning">
             {{
               'The router keeps trying to connect. Until it does, its own Wi-Fi on this band is off.'
+                | i18n
+            }}
+          </div>
+        } @else if (data.state?.subnetConflict) {
+          <div tuiNotification appearance="negative">
+            {{
+              'This network uses the same address range as one of your own networks, so your devices cannot reach the Internet through it. Change your range under LAN Settings or Security Profiles.'
                 | i18n
             }}
           </div>
@@ -159,7 +180,7 @@ function uplinkStatus({ uplink, state }: WwanResponse): UplinkStatus {
           </div>
           <footer appFooter></footer>
         </form>
-      } @else if (radios().length) {
+      } @else if (!data.unmanaged.length && radios().length) {
         <header tuiHeader="h6">
           <hgroup tuiTitle>
             <h2>{{ 'Available networks' | i18n }}</h2>
@@ -174,8 +195,8 @@ function uplinkStatus({ uplink, state }: WwanResponse): UplinkStatus {
             @if (radios().length > 1) {
               <tui-segmented
                 size="s"
-                [(activeItemIndex)]="radioIndex"
-                (activeItemIndexChange)="networks.set(null)"
+                [activeItemIndex]="radioIndex()"
+                (activeItemIndexChange)="radio.set(radios()[$event]?.radio)"
               >
                 @for (r of radios(); track r.radio) {
                   <button type="button">{{ band(r.band) | i18n }}</button>
@@ -209,7 +230,7 @@ function uplinkStatus({ uplink, state }: WwanResponse): UplinkStatus {
             {{ 'Scan to list the Wi-Fi networks this band can reach.' | i18n }}
           </p>
         }
-      } @else {
+      } @else if (!data.unmanaged.length) {
         <div tuiNotification appearance="info">
           {{ 'Turn on Wi-Fi to join a network.' | i18n }}
           <a tuiLink routerLink="/wifi">{{ 'Wi-Fi' | i18n }}</a>
@@ -241,13 +262,11 @@ function uplinkStatus({ uplink, state }: WwanResponse): UplinkStatus {
   ],
 })
 export default class Wwan {
-  protected readonly service = inject(WwanService)
-  private readonly api = inject(ApiService)
-  private readonly actions = inject(ActionService)
   private readonly dialogs = inject(TuiResponsiveDialogService)
   private readonly i18n = inject(i18nPipe)
 
-  protected readonly luciUrl = '/cgi-bin/luci'
+  protected readonly service = inject(WwanService)
+  protected readonly luciUrl = LUCI_URL
   protected readonly priorities: WwanPriority[] = ['backup', 'preferred']
   protected readonly form = inject(NonNullableFormBuilder).group({
     priority: ['backup' as WwanPriority],
@@ -256,8 +275,21 @@ export default class Wwan {
   protected readonly radios = computed(
     () => this.service.data()?.radios.filter(r => r.enabled) ?? [],
   )
-  protected readonly radioIndex = signal(0)
-  protected readonly networks = signal<WwanNetwork[] | null>(null)
+  protected readonly radio = linkedSignal<
+    WwanResponse['radios'],
+    string | undefined
+  >({
+    source: this.radios,
+    computation: (radios, previous) =>
+      (radios.find(r => r.radio === previous?.value) ?? radios[0])?.radio,
+  })
+  protected readonly radioIndex = computed(() =>
+    this.radios().findIndex(r => r.radio === this.radio()),
+  )
+  protected readonly networks = linkedSignal<
+    string | undefined,
+    WwanNetwork[] | null
+  >({ source: this.radio, computation: () => null })
   protected readonly stopMessage = computed(() => {
     const data = this.service.data()
     return data ? this.service.stopMessage(data) : null
@@ -280,53 +312,31 @@ export default class Wwan {
     })
   }
 
-  private selectedRadio() {
-    return this.radios()[this.radioIndex()] ?? this.radios()[0]
-  }
-
   protected async scan(): Promise<void> {
-    const radio = this.selectedRadio()
+    const radio = this.radio()
     if (!radio) return
-    await this.actions.run(
-      async () =>
-        this.networks.set(await this.api.wwanScan({ radio: radio.radio })),
-      { loading: this.i18n.transform('Scanning') },
-    )
+    const networks = await this.service.scan(radio)
+    if (networks && radio === this.radio()) this.networks.set(networks)
   }
 
   protected join(network?: WwanNetwork): void {
-    const radio = this.selectedRadio()
-    if (!radio) return
-    this.dialogs
-      .open<WwanConnectRequest>(WWAN_JOIN, {
-        data: { radio: radio.radio, band: radio.band, network },
-      })
-      .subscribe(async request => {
-        if (await this.service.connect(request)) this.networks.set(null)
-      })
+    const radio = this.radios().find(r => r.radio === this.radio())
+    if (radio) this.openJoin({ radio: radio.radio, band: radio.band, network })
   }
 
-  protected reconnect(): void {
-    this.service.reconnect()
-  }
-
-  protected changePassword(uplink: WwanUplink): void {
-    this.dialogs
-      .open<WwanConnectRequest>(WWAN_JOIN, {
-        data: {
-          radio: uplink.radio,
-          band: uplink.band,
-          network: {
-            ssid: uplink.ssid,
-            bssid: '',
-            channel: null,
-            signal: null,
-            security: uplink.security,
-          },
-          priority: uplink.priority,
-        },
-      })
-      .subscribe(request => this.service.connect(request))
+  protected changePassword({ radio, band, ...uplink }: WwanUplink): void {
+    this.openJoin({
+      radio,
+      band,
+      network: {
+        ssid: uplink.ssid,
+        bssid: '',
+        channel: null,
+        signal: null,
+        security: uplink.security,
+      },
+      priority: uplink.priority,
+    })
   }
 
   protected async savePriority(): Promise<void> {
@@ -348,6 +358,24 @@ export default class Wwan {
         },
       })
       .pipe(filter(Boolean))
-      .subscribe(() => this.service.disconnect())
+      .subscribe(async () => {
+        if (await this.service.disconnect()) {
+          this.networks.set(null)
+          this.form.reset()
+        }
+      })
+  }
+
+  private openJoin(data: Omit<WwanJoinData, 'otherBand'>): void {
+    this.dialogs
+      .open<WwanConnectRequest>(WWAN_JOIN, {
+        data: { ...data, otherBand: this.radios().length > 1 },
+      })
+      .subscribe(async request => {
+        if (await this.service.connect(request)) {
+          this.networks.set(null)
+          this.form.reset({ priority: request.priority })
+        }
+      })
   }
 }

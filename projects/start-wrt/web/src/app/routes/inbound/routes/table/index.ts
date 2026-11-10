@@ -218,8 +218,8 @@ export default class InboundTable {
       this.api.wanDdnsGet(),
     ])
 
-    if (ipv4.assigned_ip) {
-      endpoints.push({ address: ipv4.assigned_ip, label: 'WAN IPv4' })
+    if (ipv4.uplink_ip) {
+      endpoints.push({ address: ipv4.uplink_ip, label: 'WAN IPv4' })
     }
     if (ipv6.mode !== 'disabled' && ipv6.assigned_ipv6) {
       endpoints.push({ address: ipv6.assigned_ipv6, label: 'WAN IPv6' })

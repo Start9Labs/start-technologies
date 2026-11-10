@@ -1549,6 +1549,7 @@ export class MockApiService extends ApiService {
   private mockWanIpv4: WanIpv4Response = {
     mode: 'dhcp',
     assigned_ip: '203.0.113.45',
+    uplink_ip: '203.0.113.45',
     carrier: true,
     address: null,
     netmask: null,
@@ -1560,7 +1561,10 @@ export class MockApiService extends ApiService {
 
   async wanIpv4Get(): Promise<WanIpv4Response> {
     await pauseFor(250)
-    return structuredClone(this.mockWanIpv4)
+    return {
+      ...structuredClone(this.mockWanIpv4),
+      uplink_ip: this.mockWanIpv4.assigned_ip,
+    }
   }
 
   async wanIpv4Set(params: WanIpv4SetRequest): Promise<null> {
@@ -1733,86 +1737,168 @@ export class MockApiService extends ApiService {
   // --- Wireless WAN ---
 
   private mockWwanUplink: WwanResponse['uplink'] = null
+  private mockWwanJoining = false
+  private readonly mockWwanUnmanaged: string[] = []
 
-  private readonly mockWwanNetworks: WwanNetwork[] = [
-    {
-      ssid: 'Neighbor',
-      bssid: '02:11:22:33:44:01',
-      channel: 6,
-      signal: -48,
-      security: 'wpa2Wpa3',
-    },
-    {
-      ssid: 'Cafe Free Wi-Fi',
-      bssid: '02:11:22:33:44:02',
-      channel: 1,
-      signal: -63,
-      security: 'open',
-    },
-    {
-      ssid: '',
-      bssid: '02:11:22:33:44:03',
-      channel: 11,
-      signal: -70,
-      security: 'wpa2',
-    },
-    {
-      ssid: 'Office',
-      bssid: '02:11:22:33:44:04',
-      channel: 11,
-      signal: -78,
-      security: null,
-    },
-  ]
+  private readonly mockWwanNetworks: Record<string, WwanNetwork[]> = {
+    '2g': [
+      {
+        ssid: 'Neighbor',
+        bssid: '02:11:22:33:44:01',
+        channel: 6,
+        signal: -48,
+        security: 'wpa2Wpa3',
+      },
+      {
+        ssid: 'Cafe Free Wi-Fi',
+        bssid: '02:11:22:33:44:02',
+        channel: 1,
+        signal: -63,
+        security: 'open',
+      },
+      {
+        ssid: '',
+        bssid: '02:11:22:33:44:03',
+        channel: 11,
+        signal: -70,
+        security: 'wpa2',
+      },
+      {
+        ssid: 'Office',
+        bssid: '02:11:22:33:44:04',
+        channel: 11,
+        signal: -78,
+        security: null,
+      },
+    ],
+    '5g': [
+      {
+        ssid: 'Neighbor',
+        bssid: '02:11:22:33:44:11',
+        channel: 36,
+        signal: -57,
+        security: 'wpa2Wpa3',
+      },
+      {
+        ssid: 'Studio',
+        bssid: '02:11:22:33:44:12',
+        channel: 149,
+        signal: -71,
+        security: 'wpa3',
+      },
+    ],
+  }
 
-  async wwanGet(): Promise<WwanResponse> {
-    await pauseFor(250)
+  private mockWwanRadios(): WwanResponse['radios'] {
     const radios = Object.values(this.mockWifi.radios)
     const enabled = (band: string) =>
       radios.some(r => r.band === band && r.enabled)
+    return [
+      { radio: 'radio0', band: '2g', enabled: enabled('2g') },
+      { radio: 'radio1', band: '5g', enabled: enabled('5g') },
+    ]
+  }
+
+  private mockWwanBand(radio: string): string {
+    const found = this.mockWwanRadios().find(r => r.radio === radio)
+    if (!found?.enabled) {
+      throw new RpcError({
+        code: 1029,
+        message: 'Wi-Fi Radio Unavailable',
+        data: { details: `radio ${radio} is off or missing` },
+      } as RPCErrorDetails)
+    }
+    return found.band
+  }
+
+  async wwanGet(): Promise<WwanResponse> {
+    await pauseFor(250)
+    const uplink = this.mockWwanUplink
     return {
-      radios: [
-        { radio: 'radio0', band: '2g', enabled: enabled('2g') },
-        { radio: 'radio1', band: '5g', enabled: enabled('5g') },
-      ],
-      uplink: structuredClone(this.mockWwanUplink),
+      radios: this.mockWwanRadios(),
+      uplink: structuredClone(uplink),
       state:
-        this.mockWwanUplink && !this.mockWwanUplink.stopped
-          ? {
-              associated: true,
-              address: '192.168.43.27',
-              signal: -48,
-              channel: 6,
-              active: this.mockWwanUplink.priority === 'preferred',
-            }
-          : null,
-      unmanaged: [],
+        !uplink || uplink.stopped
+          ? null
+          : this.mockWwanJoining
+            ? {
+                associated: false,
+                address: null,
+                signal: null,
+                channel: null,
+                active: false,
+                subnetConflict: false,
+              }
+            : {
+                associated: true,
+                address: '192.168.43.27',
+                signal: -48,
+                channel: uplink.band === '5g' ? 36 : 6,
+                active: uplink.priority === 'preferred',
+                subnetConflict: uplink.ssid === 'Overlap',
+              },
+      unmanaged: [...this.mockWwanUnmanaged],
     }
   }
 
-  async wwanScan(_params: WwanScanRequest): Promise<WwanNetwork[]> {
+  async wwanScan({ radio }: WwanScanRequest): Promise<WwanNetwork[]> {
     await pauseFor(2000)
-    return structuredClone(this.mockWwanNetworks)
+    return structuredClone(
+      this.mockWwanNetworks[this.mockWwanBand(radio)] ?? [],
+    )
   }
 
+  // Password `wrongpass` is rejected, SSID `Missing` is unreachable, SSID `Slow` keeps joining.
   async wwanConnect(params: WwanConnectRequest): Promise<WwanJoinOutcome> {
     await pauseFor(1000)
+    const band = this.mockWwanBand(params.radio)
+    if (this.mockWwanUnmanaged.length) {
+      throw new RpcError({
+        code: 1028,
+        message: 'Wi-Fi Uplink Configured Elsewhere',
+        data: {
+          details: `a Wi-Fi uplink set up outside StartWRT exists: ${this.mockWwanUnmanaged.join(', ')}`,
+        },
+      } as RPCErrorDetails)
+    }
+    const stopped =
+      params.password === 'wrongpass'
+        ? 'rejected'
+        : params.ssid === 'Missing'
+          ? 'unreachable'
+          : null
+    this.mockWwanJoining = !stopped && params.ssid === 'Slow'
     this.mockWwanUplink = {
       radio: params.radio,
-      band: params.radio === 'radio1' ? '5g' : '2g',
+      band,
       ssid: params.ssid,
       security: params.security,
       priority: params.priority,
-      stopped: null,
+      stopped,
     }
     this.logActivity('wwan', 'added', `Added Wi-Fi uplink ${params.ssid}`)
+    if (stopped) {
+      this.logActivity(
+        'wwan',
+        'stopped',
+        `Stopped Wi-Fi uplink ${params.ssid}`,
+        false,
+      )
+      return 'stopped'
+    }
+    if (this.mockWwanJoining) return 'joining'
     this.logActivity('wwan', 'joined', `Joined Wi-Fi uplink ${params.ssid}`)
     return 'connected'
   }
 
   async wwanReconnect(): Promise<WwanJoinOutcome> {
     await pauseFor(1000)
-    if (this.mockWwanUplink) this.mockWwanUplink.stopped = null
+    const uplink = this.mockWwanUplink
+    if (uplink) {
+      this.mockWwanBand(uplink.radio)
+      uplink.stopped = null
+    }
+    this.mockWwanJoining = false
     this.logActivity('wwan', 'retried', 'Retried Wi-Fi uplink')
     return 'connected'
   }
@@ -1831,6 +1917,7 @@ export class MockApiService extends ApiService {
   async wwanDisconnect(): Promise<null> {
     await pauseFor(500)
     this.mockWwanUplink = null
+    this.mockWwanJoining = false
     this.logActivity('wwan', 'disconnected', 'Removed Wi-Fi uplink')
     return null
   }

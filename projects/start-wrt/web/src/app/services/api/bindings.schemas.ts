@@ -1668,6 +1668,10 @@ export const WwanState: z.ZodObject<{
    * Whether the router's Internet traffic leaves through the Wi-Fi uplink.
    */
   active: z.ZodBoolean
+  /**
+   * Whether the joined network uses the address range of one of the router's own networks.
+   */
+  subnetConflict: z.ZodBoolean
 }> = /* @__PURE__ */ object({
   associated: z.boolean(),
   /**
@@ -1689,6 +1693,13 @@ export const WwanState: z.ZodObject<{
   active: z.boolean().meta({
     description:
       "Whether the router's Internet traffic leaves through the Wi-Fi uplink.",
+  }),
+  /**
+   * Whether the joined network uses the address range of one of the router's own networks.
+   */
+  subnetConflict: z.boolean().meta({
+    description:
+      "Whether the joined network uses the address range of one of the router's own networks.",
   }),
 }).meta({
   id: 'WwanState',
@@ -2794,6 +2805,13 @@ export const WanIpv4Response: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   /**
+   * The IPv4 address of the uplink carrying traffic, the WAN port or the Wi-Fi uplink.
+   */
+  uplink_ip: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
    * Whether the WAN port has link. A failed read reports link.
    */
   carrier: z.ZodBoolean
@@ -2824,6 +2842,15 @@ export const WanIpv4Response: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   mode: WanIpv4Mode,
   assigned_ip: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * The IPv4 address of the uplink carrying traffic, the WAN port or the Wi-Fi uplink.
+   */
+  uplink_ip: wire(z.string().nullable().optional(), z.string().nullable()).meta(
+    {
+      description:
+        'The IPv4 address of the uplink carrying traffic, the WAN port or the Wi-Fi uplink.',
+    },
+  ),
   /**
    * Whether the WAN port has link. A failed read reports link.
    */
@@ -4608,6 +4635,10 @@ export const Api = {
                 'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
             }),
           ),
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        'uplink-ipv4': {
+          _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
         },
       },

@@ -1,4 +1,4 @@
-use rpc_toolkit::{from_fn_async_local, ParentHandler};
+use rpc_toolkit::{from_fn_async_local, HandlerExt, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
     DdnsService, InterfaceProto, NetworkDevice, NetworkInterface, UciSystemDns,
@@ -53,6 +53,8 @@ rpc_toolkit::reflect_ts!(WanIpv4Mode);
 pub struct WanIpv4Response {
     pub mode: WanIpv4Mode,
     pub assigned_ip: Option<String>,
+    /// The IPv4 address of the uplink carrying traffic, the WAN port or the Wi-Fi uplink.
+    pub uplink_ip: Option<String>,
     /// Whether the WAN port has link. A failed read reports link.
     pub carrier: bool,
     pub address: Option<String>,
@@ -257,6 +259,10 @@ pub fn wan<C: CtrlContext + Clone>() -> ParentHandler<C> {
             from_fn_async_local(ipv6_set::<C>).with_display_serializable(),
         )
         .subcommand(
+            "uplink-ipv4",
+            from_fn_async_local(uplink_ipv4::<C>).no_display(),
+        )
+        .subcommand(
             "mac-get",
             from_fn_async_local(mac_get::<C>).with_display_serializable(),
         )
@@ -363,17 +369,21 @@ pub async fn ipv4_get<C: CtrlContext>(ctx: C) -> Result<WanIpv4Response, Error> 
 
     match result {
         Some((mode, iface)) => {
-            let (assigned_ip, carrier) = if effectful {
+            let (assigned_ip, uplink_ip, carrier) = if effectful {
                 (
                     get_assigned_wan_ip().await,
+                    crate::system::get_wan_ipv4()
+                        .await?
+                        .map(|ip| ip.to_string()),
                     get_wan_carrier(&iface.device).await,
                 )
             } else {
-                (None, true)
+                (None, None, true)
             };
             Ok(WanIpv4Response {
                 mode,
                 assigned_ip,
+                uplink_ip,
                 carrier,
                 address: iface.ipv4().map(|ip| ip.to_string()),
                 netmask: iface.ipv4_netmask().map(|m| m.to_string()),
@@ -922,6 +932,91 @@ pub async fn dns_get<C: CtrlContext>(ctx: C) -> Result<WanDnsResponse, Error> {
     }
 }
 
+/// Prints the address DDNS publishes.
+const UPLINK_IPV4_COMMAND: &str = "/usr/bin/startwrt-cli wan uplink-ipv4";
+
+/// Where ddns-scripts reads the address it publishes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DdnsSource {
+    /// The WAN port's address.
+    WanPort,
+    /// The address of the uplink carrying traffic.
+    ActiveUplink,
+}
+
+impl DdnsSource {
+    fn of(cfgs: &uciedit::Configs) -> Self {
+        let wifi_uplink = cfgs["network"]
+            .sections
+            .iter()
+            .any(|s| s.ty() == NetworkInterface::TY && s.name().as_deref() == Some(WWAN_INTERFACE));
+        if wifi_uplink {
+            DdnsSource::ActiveUplink
+        } else {
+            DdnsSource::WanPort
+        }
+    }
+
+    fn ip_source(self) -> &'static str {
+        match self {
+            DdnsSource::WanPort => "network",
+            DdnsSource::ActiveUplink => "script",
+        }
+    }
+
+    fn ip_network(self) -> Option<String> {
+        (self == DdnsSource::WanPort).then(|| WAN_INTERFACE.to_string())
+    }
+
+    fn ip_script(self) -> Option<String> {
+        (self == DdnsSource::ActiveUplink).then(|| UPLINK_IPV4_COMMAND.to_string())
+    }
+}
+
+/// The address source of a DDNS service, written without touching its other options.
+#[derive(Debug, TypedSection, Default)]
+#[uci(ty = "service")]
+struct DdnsAddressSource {
+    #[uci(default)]
+    enabled: Option<String>,
+    #[uci(default)]
+    ip_source: Option<String>,
+    #[uci(default)]
+    ip_network: Option<String>,
+    #[uci(default)]
+    ip_script: Option<String>,
+}
+
+/// Points DDNS at the uplink that carries traffic. True when an enabled service changed.
+pub(crate) fn sync_ddns_source(cfgs: &mut uciedit::Configs) -> Result<bool, Error> {
+    let source = DdnsSource::of(cfgs);
+    let mut changed = false;
+    for section in &mut cfgs["ddns"].sections {
+        if section.name().as_deref() != Some(DDNS_SECTION) {
+            continue;
+        }
+        if let Some(mut service) = section.get_typed::<DdnsAddressSource>()? {
+            if service.ip_source.as_deref() == Some(source.ip_source()) {
+                continue;
+            }
+            service.ip_source = Some(source.ip_source().to_string());
+            service.ip_network = source.ip_network();
+            service.ip_script = source.ip_script();
+            changed |= service.enabled.as_deref() == Some("1");
+            section.set(&service)?;
+        }
+    }
+    Ok(changed)
+}
+
+/// Prints the IPv4 address of the uplink carrying traffic, for ddns-scripts.
+pub async fn uplink_ipv4<C: CtrlContext>(_ctx: C) -> Result<(), Error> {
+    if let Some(ip) = crate::system::get_wan_ipv4().await? {
+        println!("{ip}");
+    }
+    Ok(())
+}
+
 /// The DNS options of an interface, written without touching its other options.
 #[derive(Debug, TypedSection, Default)]
 #[uci(ty = "interface")]
@@ -1136,21 +1231,23 @@ pub async fn ddns_set<C: CtrlContext>(
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["ddns"]).await?;
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["ddns", "network"]).await?;
 
         let ddns_idx = cfgs["ddns"]
             .sections
             .iter()
             .position(|s| s.name().as_deref() == Some(DDNS_SECTION));
 
+        let source = DdnsSource::of(&cfgs);
         let new_svc = DdnsService {
             enabled: Some(if req.enabled { "1" } else { "0" }.to_string()),
             service_name: Some(provider_to_service(&req.provider).to_string()),
-            ip_source: Some("network".to_string()),
-            ip_network: Some("wan".to_string()),
+            ip_source: Some(source.ip_source().to_string()),
+            ip_network: source.ip_network(),
+            ip_script: source.ip_script(),
             // Hotplug binding: re-run the update as soon as the WAN bounces
             // instead of waiting for the daemon's next check interval
-            interface: Some("wan".to_string()),
+            interface: Some(WAN_INTERFACE.to_string()),
             use_api_check: if req.provider == DdnsProvider::Cloudflare {
                 Some("1".to_string())
             } else {

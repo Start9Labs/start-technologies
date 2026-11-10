@@ -16,6 +16,11 @@ The router joins the upstream network as a Wi-Fi client on one of its bands. You
 WPA2, WPA3 and open networks are supported. WPA Enterprise and WEP networks are listed as unsupported.
 
 > [!WARNING]
+> Devices on the network the router joins can reach the router's interface and SSH unless [Remote Access](settings.md#remote-access) is set to **Never**. The router offers to change it when you join.
+
+If the network uses the same address range as one of your own networks, such as `192.168.0.x`, the router connects but your devices cannot reach the Internet through it. The **Summary** says so. Change the range under [LAN Settings](lan.md) or on the [security profile](security-profiles.md), or use a different upstream network.
+
+> [!WARNING]
 > The band that carries the uplink belongs to it. Its Wi-Fi follows the upstream network's channel, and it is off whenever the router is not connected to that network: while it is joining, and while the network is out of range. Join from a wired device or from the other band, so you do not lose access to the router.
 
 ## When the router cannot connect
@@ -46,4 +51,5 @@ Click **Remove uplink** in the **Summary**. The router leaves the network and it
 - **Wi-Fi Blackout** — A [blackout window](wifi-schedules.md) turns every radio off, including the one carrying the uplink.
 - **LuCI** — A Wi-Fi uplink set up in LuCI is shown here but not managed. Delete it in LuCI to manage the uplink from this page.
 - **IPv6** — The Wi-Fi uplink carries IPv4. IPv6 stays on the WAN port.
-- **Dynamic DNS** — [Dynamic DNS](ddns.md) publishes the WAN port's address.
+- **Dynamic DNS** — [Dynamic DNS](ddns.md) publishes the address of whichever connection is carrying traffic.
+- **Inbound connections** — While both connections are up, published ports, remote access and inbound VPNs are reachable at the address of the one in use.

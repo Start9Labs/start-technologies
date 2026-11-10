@@ -1,10 +1,10 @@
-import { Component, input, output } from '@angular/core'
+import { Component, inject, input, output } from '@angular/core'
 import { TuiTable, TuiTableDirective } from '@taiga-ui/addon-table'
 import { TuiButton, TuiIcon } from '@taiga-ui/core'
 import { Placeholder } from 'src/app/components/placeholder'
-import { WwanNetwork } from 'src/app/services/api/api.service'
+import { WwanNetwork, WwanSecurity } from 'src/app/services/api/api.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
-import { SECURITY_LABELS } from './utils'
+import { securityLabel } from './utils'
 
 @Component({
   selector: '[wwanNetworks]',
@@ -19,7 +19,7 @@ import { SECURITY_LABELS } from './utils'
       </tr>
     </thead>
     <tbody>
-      @for (network of wwanNetworks(); track network.bssid) {
+      @for (network of wwanNetworks(); track network.bssid || $index) {
         <tr>
           <td tuiTd>
             @if (network.ssid) {
@@ -36,7 +36,7 @@ import { SECURITY_LABELS } from './utils'
           </td>
           <td tuiTd>
             @if (network.security; as security) {
-              {{ security === 'open' ? ('Open' | i18n) : labels[security] }}
+              {{ label(security) }}
             } @else {
               <span class="g-secondary">{{ 'Unsupported' | i18n }}</span>
             }
@@ -70,10 +70,13 @@ import { SECURITY_LABELS } from './utils'
   imports: [TuiTable, TuiButton, TuiIcon, Placeholder, i18nPipe],
 })
 export class WwanNetworksTable {
-  readonly wwanNetworks = input<WwanNetwork[]>([])
-  readonly join = output<WwanNetwork>()
+  private readonly i18n = inject(i18nPipe)
 
-  protected readonly labels = SECURITY_LABELS
+  protected readonly label = (security: WwanSecurity): string =>
+    securityLabel(this.i18n, security)
+
+  public readonly wwanNetworks = input<WwanNetwork[]>([])
+  public readonly join = output<WwanNetwork>()
 
   protected signalIcon(dbm: number): string {
     if (dbm >= -60) return '@tui.wifi-high'

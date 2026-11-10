@@ -411,6 +411,8 @@ Erfordert ein Konto bei einem unterstützten Anbieter. Geben Sie die Zugangsdate
 
 Der Router tritt einem anderen WLAN bei und nutzt es für den Internetzugang. Geräte in Ihrem Netzwerk erreichen das Internet darüber genau wie über den WAN-Anschluss: Profile, veröffentlichte Ports und der Fernzugriff behandeln es als WAN.
 
+Solange der Fernzugriff eingeschaltet ist, können Geräte im Netzwerk, dem der Router beitritt, seine Weboberfläche und SSH erreichen. Beim Beitreten können Sie den Fernzugriff zuerst ausschalten.
+
 ### Einem Netzwerk beitreten
 
 Wählen Sie ein Frequenzband, suchen Sie, und wählen Sie **Beitreten** neben einem Netzwerk oder **Verborgenes Netzwerk** für eines, das seinen Namen verbirgt. Unterstützt werden WPA2, WPA3 und offene Netzwerke, nicht aber WPA Enterprise.
@@ -424,7 +426,7 @@ Die Umschaltung folgt der Verbindung: Ein Upstream, der verbunden bleibt, aber d
 
 ### Das eigene WLAN des Routers
 
-Das Frequenzband des Uplinks folgt dem Kanal des Upstream-Netzwerks, und sein WLAN ist aus, solange der Router nicht mit diesem Netzwerk verbunden ist. Treten Sie von einem kabelgebundenen Gerät oder über das andere Frequenzband bei. Kann der Router einem gerade eingetragenen Netzwerk nicht beitreten oder weist ihn ein Netzwerk in Reichweite zwei Minuten lang ab, versucht er es nicht mehr, und das WLAN dieses Frequenzbands schaltet sich wieder ein; mit **Wiederholen** oder **Passwort ändern** geht es weiter. Ein WLAN-Sperrzeitraum, der dieses Frequenzband ausschaltet, trennt auch den Uplink.`,
+Das Frequenzband des Uplinks folgt dem Kanal des Upstream-Netzwerks, und sein WLAN ist aus, solange der Router nicht mit diesem Netzwerk verbunden ist. Treten Sie von einem kabelgebundenen Gerät oder, bei einem Router mit zwei Frequenzbändern, über das andere Frequenzband bei. Kann der Router einem gerade eingetragenen Netzwerk nicht beitreten oder weist ihn ein Netzwerk in Reichweite zwei Minuten lang ab, versucht er es nicht mehr, und das WLAN dieses Frequenzbands schaltet sich wieder ein; mit **Wiederholen** oder **Passwort ändern** geht es weiter, wobei sich das WLAN dieses Frequenzbands wieder ausschaltet, bis der Router verbunden ist. Ein WLAN-Sperrzeitraum, der dieses Frequenzband ausschaltet, trennt auch den Uplink.`,
   '/settings/activity': `## Einstellungen – Aktivität
 
 Zeigt aktuelle Anmeldeversuche und Sicherheitsereignisse an. Überwachen Sie verdächtige Aktivitäten und entfernen Sie bei Bedarf alte Einträge.`,

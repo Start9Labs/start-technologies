@@ -411,6 +411,8 @@ Wymaga konta u obsługiwanego dostawcy. Wprowadź dane uwierzytelniające i nazw
 
 Router dołącza do innej sieci Wi-Fi i używa jej do dostępu do Internetu. Urządzenia w Twojej sieci łączą się przez nią z Internetem tak samo jak przez port WAN: profile, opublikowane porty i dostęp zdalny traktują ją jak WAN.
 
+Dopóki dostęp zdalny jest włączony, urządzenia w sieci, do której dołącza router, mogą łączyć się z jego interfejsem WWW i SSH. Podczas dołączania możesz najpierw wyłączyć dostęp zdalny.
+
 ### Dołączanie do sieci
 
 Wybierz pasmo, uruchom skanowanie i wybierz **Dołącz** obok sieci albo **Ukryta sieć** dla sieci, która ukrywa swoją nazwę. Obsługiwane są sieci WPA2, WPA3 i otwarte; sieci WPA Enterprise nie są.
@@ -424,7 +426,7 @@ Przełączanie zależy od łącza: sieć nadrzędna, która pozostaje połączon
 
 ### Własne Wi-Fi routera
 
-Pasmo obsługujące łącze korzysta z kanału sieci nadrzędnej, a jego Wi-Fi jest wyłączone, dopóki router nie jest połączony z tą siecią. Dołącz z urządzenia przewodowego lub z drugiego pasma. Jeśli router nie może dołączyć do właśnie podanej sieci albo sieć w zasięgu odrzuca go przez dwie minuty, przestaje próbować, a Wi-Fi tego pasma włącza się ponownie; wybierz **Ponów** lub **Zmień hasło**, aby wznowić. Okno wyłączenia Wi-Fi, które wyłącza to pasmo, rozłącza również łącze.`,
+Pasmo obsługujące łącze korzysta z kanału sieci nadrzędnej, a jego Wi-Fi jest wyłączone, dopóki router nie jest połączony z tą siecią. Dołącz z urządzenia przewodowego lub, jeśli router ma dwa pasma, z drugiego pasma. Jeśli router nie może dołączyć do właśnie podanej sieci albo sieć w zasięgu odrzuca go przez dwie minuty, przestaje próbować, a Wi-Fi tego pasma włącza się ponownie; wybierz **Ponów** lub **Zmień hasło**, aby wznowić, co ponownie wyłącza Wi-Fi tego pasma do czasu połączenia routera. Okno wyłączenia Wi-Fi, które wyłącza to pasmo, rozłącza również łącze.`,
   '/settings/activity': `## Ustawienia – Aktywność
 
 Wyświetl ostatnie próby logowania i zdarzenia bezpieczeństwa. Monitoruj podejrzaną aktywność i usuwaj stare wpisy w razie potrzeby.`,

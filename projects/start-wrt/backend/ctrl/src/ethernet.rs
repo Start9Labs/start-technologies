@@ -533,6 +533,7 @@ fn set_config(
                 },
                 Some(DEFAULT_WAN_INTERFACE),
             )?;
+            crate::wwan::keep_wan_priority(cfgs)?;
         }
         if pending_ipv6 {
             cfgs["network"].append(

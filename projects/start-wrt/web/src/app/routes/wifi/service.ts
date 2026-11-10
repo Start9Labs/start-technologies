@@ -8,6 +8,7 @@ import {
 import { FormService } from 'src/app/services/form.service'
 import { isNetworkError } from 'src/app/services/connection.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { translateUplinkErrors } from 'src/app/routes/wan/routes/wireless-wan/utils'
 
 export type { WifiConfig, WifiPassword }
 
@@ -21,7 +22,7 @@ export class WifiService extends FormService<WifiConfig> {
   }
 
   async store(data: WifiConfig) {
-    await this.api.wifiSet(data)
+    await translateUplinkErrors(this.i18n, () => this.api.wifiSet(data))
   }
 
   /** The Wi-Fi devices that keep settings for a profile losing its last password. */
@@ -62,7 +63,7 @@ export class WifiService extends FormService<WifiConfig> {
     // NOT discard it, throw so the dialog can close and surface it instead of
     // spinning forever.
     this.connection.suppress()
-    return this.api.wifiSet(data).then(
+    return translateUplinkErrors(this.i18n, () => this.api.wifiSet(data)).then(
       () => true,
       e => {
         if (isNetworkError(e)) return false

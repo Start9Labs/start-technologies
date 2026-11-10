@@ -22,6 +22,9 @@ pub async fn describe(ip: IpAddr) -> String {
 
 async fn network_of(ip: IpAddr) -> Option<String> {
     let device = route_device(ip).await?;
+    if crate::wwan::uplink_ifname().await.as_deref() == Some(&*device) {
+        return Some("WAN".into());
+    }
     let bytes = uciedit::read_all("/etc/config", &["network", "startwrt"])
         .await
         .ok()?;

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Runs after ddns-scripts' 95-ddns hook, which stops the updater when wan goes down.
+[ "$ACTION" = "ifup" -o "$ACTION" = "ifupdate" -o "$ACTION" = "ifdown" ] && [ "$INTERFACE" = "wan" -o "$INTERFACE" = "wwan" ] && [ "$(uci -q get ddns.wan.ip_source)" = "script" ] && [ "$(uci -q get ddns.wan.enabled)" = "1" ] && {
+    (/etc/init.d/ddns stop wan; /etc/init.d/ddns start wan) 2>/dev/null &
+}

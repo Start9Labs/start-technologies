@@ -426,6 +426,9 @@ struct WanIpv4Response {
     mode: WanIpv4Mode,
     /// Actual assigned IP (from ubus/runtime), regardless of mode
     assigned_ip: Option<String>,
+    /// The IPv4 address of the uplink carrying traffic: the WAN port's, or the
+    /// Wi-Fi uplink's while `wwan` holds the default route. Public endpoints show it.
+    uplink_ip: Option<String>,
     /// Whether the WAN port has link (from ubus `network.device` status). A failed read reports link.
     carrier: bool,
     /// Static/PPPoE config fields (populated when relevant)
@@ -656,7 +659,21 @@ cloudflare script expects: `username 'Bearer'`, `domain 'host@zone'`
 (`'@zone'` for the apex), and `use_api_check '1'` so proxied (orange-cloud)
 records compare against the record's real content instead of the proxy IP.
 Every provider's section also gets `interface 'wan'`, binding it to hotplug
-so updates fire immediately on WAN reconnect.
+so updates fire immediately on WAN reconnect. The address comes from the
+`wan` interface (`ip_source 'network'`), or, while a Wi-Fi uplink exists, from
+`startwrt-cli wan uplink-ipv4` (`ip_source 'script'`), which prints the address
+of the uplink carrying traffic.
+
+### `wan.uplink-ipv4`
+
+```rust
+// Request: {}
+// Response: null
+```
+
+Internal endpoint, **not called from the frontend**. Run from the CLI by
+ddns-scripts, it prints the IPv4 address of the uplink carrying traffic, or
+nothing while neither uplink has one.
 
 ---
 
@@ -1348,8 +1365,8 @@ the router currently has no global prefix (a flap to "none" never wipes rules).
 ```
 
 Internal endpoint, **not called from the frontend**. Re-derives every hairpin
-projection from the firewall config and the router's current WAN IPv4
-addresses (`ubus call network.interface.wan status`) — the `reflection_zone`
+projection from the firewall config and the IPv4 addresses of the uplink
+carrying traffic (`ubus call network.interface dump`) — the `reflection_zone`
 list on each published-port and automatic-forward redirect, and the LAN-side
 copies of each IPv6 published-port rule — and writes the config only if
 something changed. A profile's WAN Whitelist and Blacklist entries are read
@@ -2442,8 +2459,6 @@ enum WwanPriority {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 enum WwanStopReason {
     /// The network was in range and did not accept the router.
     Rejected,
@@ -2461,12 +2476,14 @@ struct WwanResponse {
     /// { radio, band, ssid, security, priority, stopped: Option<WwanStopReason> }
     uplink: Option<WwanUplink>,
     /// Absent off the router, without an uplink, and while it is stopped.
-    state: Option<WwanState>,    // { associated, address, signal (dBm), channel, active }
+    state: Option<WwanState>,    // { associated, address, signal (dBm), channel, active, subnetConflict }
     /// Client-mode Wi-Fi interfaces StartWRT did not create, by section name.
     unmanaged: Vec<String>,
 }
 // Backend: `state.active` is true while `wwan` carries the default route
-// (`system::active_uplink`, from `network.interface dump`). The priority reads
+// (`system::active_uplink`, from `network.interface dump`). `state.subnetConflict`
+// is true while the uplink's network overlaps one on a LAN or profile interface
+// in that dump. The priority reads
 // back from the two interfaces' route metrics. An `encryption` on
 // `wifi-iface 'wwan'` outside the four above is rejected with `CorruptedWifi`.
 ```
@@ -2610,6 +2627,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `wan.dns-set`                       | WAN             |                             |
 | `wan.ddns-get`                      | WAN             |                             |
 | `wan.ddns-set`                      | WAN             |                             |
+| `wan.uplink-ipv4`                   | WAN             | Internal, ddns-scripts      |
 | `wwan.get`                          | Wireless WAN    |                             |
 | `wwan.scan`                         | Wireless WAN    |                             |
 | `wwan.connect`                      | Wireless WAN    |                             |
@@ -2676,7 +2694,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `dns.injected-list`                 | DNS Injection   |                             |
 | `config.check`                      | Config Check    |                             |
 
-**Totals:** 91 RPC methods across 19 categories, plus the HTTP/WebSocket routes
+**Totals:** 92 RPC methods across 19 categories, plus the HTTP/WebSocket routes
 table above and the deprecated generic endpoints below.
 
 ---
