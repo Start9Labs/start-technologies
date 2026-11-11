@@ -595,4 +595,9 @@ export default {
   631: 'Vérifier à nouveau',
   632: 'Cette section contient aussi {option} {value}, défini en dehors de StartWRT. StartWRT affiche la première valeur et laisse celle-ci telle quelle.',
   633: 'Cet appareil a demandé d’ouvrir les ports {ports} vers Internet. Le routeur a refusé, car la redirection automatique de ports est désactivée.',
+  634: 'Supprimer le port USB ?',
+  635: 'La suppression de {port} redémarre brièvement le réseau. Le port réapparaît, dans le profil Admin, la prochaine fois qu’un adaptateur Ethernet USB y est branché.',
+  636: 'Port USB supprimé',
+  637: 'Échec de la suppression du port USB',
+  638: 'Débranchez l’adaptateur pour supprimer ce port',
 } satisfies i18n

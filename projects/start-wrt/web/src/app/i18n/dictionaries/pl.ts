@@ -595,4 +595,9 @@ export default {
   631: 'Sprawdź ponownie',
   632: 'Ta sekcja ma także {option} {value}, ustawione poza StartWRT. StartWRT wyświetla pierwszą wartość, a tę pozostawia bez zmian.',
   633: 'To urządzenie poprosiło o otwarcie portów {ports} do internetu. Router odmówił, ponieważ automatyczne przekierowanie portów jest wyłączone.',
+  634: 'Usunąć port USB?',
+  635: 'Usunięcie portu {port} na chwilę restartuje sieć. Port pojawi się ponownie, w profilu Admin, gdy następnym razem zostanie do niego podłączony adapter USB–Ethernet.',
+  636: 'Port USB usunięty',
+  637: 'Nie udało się usunąć portu USB',
+  638: 'Odłącz adapter, aby usunąć ten port',
 } satisfies i18n
