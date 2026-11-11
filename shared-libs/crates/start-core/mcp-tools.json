@@ -3946,7 +3946,7 @@
               }
             },
             "insecureEnabled": {
-              "description": "Persisted consent; ordinary address changes must not grant insecure access.",
+              "description": "Persisted consent; ordinary address changes must not grant insecure access.\nAddress removal retains consent; explicit disabling or gateway removal revokes it.",
               "type": "array",
               "items": {
                 "type": "array",
@@ -10169,7 +10169,7 @@
               }
             },
             "insecureEnabled": {
-              "description": "Persisted consent; ordinary address changes must not grant insecure access.",
+              "description": "Persisted consent; ordinary address changes must not grant insecure access.\nAddress removal retains consent; explicit disabling or gateway removal revokes it.",
               "type": "array",
               "items": {
                 "type": "array",

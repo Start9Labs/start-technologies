@@ -78,6 +78,7 @@ pub struct DerivedAddressInfo {
     #[serde(default)]
     pub insecure: BTreeSet<(InternedString, u16, GatewayId)>,
     /// Persisted consent; ordinary address changes must not grant insecure access.
+    /// Address removal retains consent; explicit disabling or gateway removal revokes it.
     #[serde(default)]
     pub insecure_enabled: BTreeSet<(InternedString, u16, GatewayId)>,
     /// COMPUTED: NetServiceData::update — all possible addresses for this binding
@@ -150,6 +151,15 @@ impl DerivedAddressInfo {
             !restricted || enabled.contains(a)
         });
         self.disabled.retain(|key| !opted_names.contains(key));
+        let lan_ips: Vec<_> = self
+            .available
+            .iter()
+            .filter(|a| a.metadata.is_ip() && !a.public && !a.is_internal())
+            .map(|a| (override_key(a), enabled.contains(a)))
+            .collect();
+        for (key, on) in lan_ips {
+            self.set_lan_ip(key, on);
+        }
     }
 
     /// The UI and direct forwarding must agree on enabled/public address exposure.
@@ -240,12 +250,35 @@ impl DerivedAddressInfo {
         )
     }
 
+    /// A LAN IP inherits consent from its gateway's `.local` row.
+    fn insecure_consented(&self, address: &HostnameInfo) -> bool {
+        let Some((_, port, gateway)) = insecure_key(address).filter(|k| self.insecure.contains(k))
+        else {
+            return true;
+        };
+        self.insecure_enabled
+            .contains(&(address.hostname.clone(), port, gateway.clone()))
+            || (address.metadata.is_ip()
+                && self.available.iter().any(|mdns| {
+                    mdns_covers(mdns, address)
+                        && self.insecure_enabled.contains(&(
+                            mdns.hostname.clone(),
+                            port,
+                            gateway.clone(),
+                        ))
+                }))
+    }
+
+    /// Consent overrides the `disabled` entry its name shares with other gateways' rows.
+    fn switched_on(&self, address: &HostnameInfo) -> bool {
+        insecure_key(address).is_some_and(|k| self.insecure_enabled.contains(&k))
+            || !self.disabled.contains(&override_key(address))
+    }
+
     /// A private plain-port domain shares one consent state with its gateway IPs.
     fn insecure_allowed(&self, address: &HostnameInfo) -> bool {
         let key = override_key(address);
-        if insecure_key(address)
-            .is_some_and(|k| self.insecure.contains(&k) && !self.insecure_enabled.contains(&k))
-        {
+        if !self.insecure_consented(address) {
             return false;
         }
         if !address.ssl
@@ -259,8 +292,7 @@ impl DerivedAddressInfo {
             {
                 if nonssl_lan_group(self, gateway, key.1)
                     .iter()
-                    .filter_map(insecure_key)
-                    .any(|k| self.insecure.contains(&k) && !self.insecure_enabled.contains(&k))
+                    .any(|member| !self.insecure_consented(member))
                 {
                     return false;
                 }
@@ -284,14 +316,12 @@ impl DerivedAddressInfo {
         self.available
             .iter()
             .filter(|mdns| mdns_covers(mdns, address))
-            .all(|mdns| !self.disabled.contains(&override_key(mdns)))
+            .all(|mdns| self.switched_on(mdns))
     }
 
     /// Public GUAs remain reachable independently of the mDNS switch.
     fn mdns_on(&self, mdns: &HostnameInfo) -> bool {
-        (self.insecure_allowed(mdns)
-            && (insecure_key(mdns).is_some_and(|k| self.insecure_enabled.contains(&k))
-                || !self.disabled.contains(&override_key(mdns))))
+        (self.insecure_allowed(mdns) && self.switched_on(mdns))
             || (!mdns.ssl
                 && self
                     .available
@@ -336,9 +366,7 @@ impl DerivedAddressInfo {
                 } else if matches!(h.metadata, HostnameMetadata::Mdns { .. }) {
                     self.mdns_on(h)
                 } else {
-                    self.insecure_allowed(h)
-                        && (insecure_key(h).is_some_and(|k| self.insecure_enabled.contains(&k))
-                            || !self.disabled.contains(&override_key(h)))
+                    self.insecure_allowed(h) && self.switched_on(h)
                 }
             })
             .collect()
@@ -3308,6 +3336,43 @@ mod test {
         assert!(info.enabled().contains(&eth));
         assert!(info.enabled().contains(&wifi));
         assert!(info.enabled().contains(&mdns));
+    }
+
+    #[test]
+    fn a_lan_ip_assigned_later_follows_its_consented_local_name() {
+        let (mut info, mdns, [eth, wifi]) = lan_fixture(false);
+        let on = |gateway: &str| HostnameInfo {
+            metadata: HostnameMetadata::Mdns {
+                gateways: BTreeSet::from([GatewayId::from(InternedString::intern(gateway))]),
+            },
+            ..mdns.clone()
+        };
+        let (name, trusted) = (on("eth0"), on("wlan0"));
+        info.available = BTreeSet::from([name.clone(), eth.clone(), trusted.clone(), wifi.clone()]);
+        info.insecure = [&name, &eth].into_iter().filter_map(insecure_key).collect();
+        set_address_enabled_with_consent(&mut info, &name, true, true).unwrap();
+        set_address_enabled_with_consent(&mut info, &trusted, false, false).unwrap();
+        let renumbered = HostnameInfo {
+            hostname: InternedString::intern("192.0.2.20"),
+            ..eth.clone()
+        };
+        info.available.remove(&eth);
+        info.insecure.remove(&insecure_key(&eth).unwrap());
+        info.available.insert(renumbered.clone());
+        info.insecure.extend(insecure_key(&renumbered));
+        assert!(info.enabled().contains(&name));
+        assert!(info.enabled().contains(&renumbered));
+        assert!(!info.enabled().contains(&trusted));
+        assert!(!info.enabled().contains(&wifi));
+
+        let mut view = info.clone();
+        view.project_service_selections();
+        assert!(view.disabled.contains(&override_key(&wifi)));
+        assert!(view.lan_enabled.contains(&override_key(&renumbered)));
+
+        set_address_enabled_with_consent(&mut info, &renumbered, false, false).unwrap();
+        assert!(!info.enabled().contains(&renumbered));
+        assert!(info.enabled().contains(&name));
     }
 
     #[test]

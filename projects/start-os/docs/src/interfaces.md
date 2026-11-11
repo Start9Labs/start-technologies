@@ -89,6 +89,8 @@ Choose the intended gateway when the same name has several address rows. A JSON 
 
 The ordinary RPC and MCP `setAddressEnabled` calls accept the same acknowledgement as `allowInsecure: true`. Without it, enabling an insecure address fails with the warning. Disabling needs no acknowledgement: use its UI toggle or repeat the command with `--enabled false`. Enabled private plaintext addresses stay visible in the UI; disabled ones remain discoverable through the CLI/RPC binding list.
 
+Consent is saved by hostname, port, and gateway. It survives an address disappearing or a domain being removed; disabling that address or removing its gateway revokes it. A consented `.local` address also covers LAN IPs assigned later on that gateway, unless individually disabled.
+
 Plaintext addresses on a [secure gateway](gateways.md#secure-gateways) remain enabled by default. StartOS-served plaintext stays private, including IPv6 GUAs, while the interface's HTTPS addresses remain independently available.
 
 ### Adding Domains

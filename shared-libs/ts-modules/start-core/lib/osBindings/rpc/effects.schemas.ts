@@ -2694,6 +2694,7 @@ export const DerivedAddressInfo: z.ZodObject<{
   >
   /**
    * Persisted consent; ordinary address changes must not grant insecure access.
+   * Address removal retains consent; explicit disabling or gateway removal revokes it.
    */
   insecureEnabled: z.ZodCodec<
     z.ZodOptional<
@@ -2759,13 +2760,14 @@ export const DerivedAddressInfo: z.ZodObject<{
   }),
   /**
    * Persisted consent; ordinary address changes must not grant insecure access.
+   * Address removal retains consent; explicit disabling or gateway removal revokes it.
    */
   insecureEnabled: wire(
     z.array(z.tuple([z.string(), z.int(), GatewayId])).optional(),
     z.array(z.tuple([z.string(), z.int(), GatewayId])),
   ).meta({
     description:
-      'Persisted consent; ordinary address changes must not grant insecure access.',
+      'Persisted consent; ordinary address changes must not grant insecure access.\nAddress removal retains consent; explicit disabling or gateway removal revokes it.',
   }),
   /**
    * COMPUTED: NetServiceData::update — all possible addresses for this binding
