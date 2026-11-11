@@ -896,7 +896,7 @@ mod tests {
             ("0.4.0.4", "0.4.0.5", 3),
             ("0.4.1.2", "0.4.1.3", 0),
             ("0.4.1.3", "0.4.2", 0),
-            ("0.4.2", "0.4.2.1", 1),
+            ("0.4.2", "0.4.2.1", 2),
             ("0.4.2.1", "0.4.3", 0),
         ] {
             let previous = from_value::<Version>(json!(from))
@@ -963,9 +963,9 @@ mod tests {
         .await
         .unwrap();
         upgrade.apply(&version, &version, &mut db).unwrap();
-        assert_eq!(applied_migration_revision(&mut db).unwrap(), 1);
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 2);
         assert_eq!(
-            db["public"]["ui"]["registries"],
+            db["public"]["serverInfo"]["registries"],
             json!({
                 "https://registry.start9.com/": "Start9 Registry",
                 "https://community-registry.start9.com/": "Community Registry",
@@ -997,7 +997,7 @@ mod tests {
                     "https://community-registry.start9.com/": "Community Registry",
                 }),
             ),
-            (1, json!({ "https://registry.example/": "Custom" })),
+            (2, json!({ "https://registry.example/": "Custom" })),
         ] {
             let mut db = json!({ "public": {
                 "serverInfo": {
@@ -1006,18 +1006,21 @@ mod tests {
                     "postInitMigrationTodos": {},
                     "latestMigrationRevision": revision,
                 },
-                "ui": {
-                    "registries": { "https://registry.example/": "Custom" },
-                    "startosRegistry": "https://registry.example/",
-                    "snakeHighScore": 42,
-                },
+                "ui": { "snakeHighScore": 42 },
             } });
+            if revision < 2 {
+                db["public"]["ui"]["registries"] = json!({ "https://registry.example/": "Custom" });
+                db["public"]["ui"]["startosRegistry"] = json!("https://registry.example/");
+            } else {
+                db["public"]["serverInfo"]["registries"] = registries.clone();
+                db["public"]["serverInfo"]["osRegistry"] = json!("https://registry.example/");
+            }
             let upgrade = Upgrade::load(&previous, &current, revision).await.unwrap();
             upgrade.apply(&previous, &current, &mut db).unwrap();
-            assert_eq!(db["public"]["ui"]["registries"], registries);
-            assert_eq!(db["public"]["ui"]["snakeHighScore"], json!(42));
+            assert_eq!(db["public"]["serverInfo"]["registries"], registries);
+            assert_eq!(db["public"]["ui"], json!({ "snakeHighScore": 42 }));
             assert_eq!(
-                db["public"]["ui"]["startosRegistry"],
+                db["public"]["serverInfo"]["osRegistry"],
                 json!("https://registry.example/")
             );
             assert_eq!(

@@ -347,9 +347,6 @@ export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TrustCaParamsInput = z.input<typeof schemas.TrustCaParams>
 export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedCa = z.output<typeof schemas.TrustedCa>
-export type TrustedOsUpdateSigner = z.output<
-  typeof schemas.TrustedOsUpdateSigner
->
 export type TrustedRegistryParamsInput = z.input<
   typeof schemas.TrustedRegistryParams
 >
@@ -509,9 +506,6 @@ export type MetricsSummary = z.output<typeof schemas.MetricsSummary>
 export type MountParamsInput = z.input<typeof schemas.MountParams>
 export type Notification = z.output<typeof schemas.Notification>
 export type OsInfo = z.output<typeof schemas.OsInfo>
-export type OsUpdateSignerKeyParamsInput = z.input<
-  typeof schemas.OsUpdateSignerKeyParams
->
 export type OsVersionInfo = z.output<typeof schemas.OsVersionInfo>
 export type PackageBackupInfo = z.output<typeof schemas.PackageBackupInfo>
 
@@ -544,6 +538,7 @@ export type PublicDomainConfig = z.output<typeof schemas.PublicDomainConfig>
 export type PushSubscription = z.output<typeof schemas.PushSubscription>
 export type PushSubscriptionInput = z.input<typeof schemas.PushSubscription>
 export type RebuildParamsInput = z.input<typeof schemas.RebuildParams>
+export type RegistryIdentity = z.output<typeof schemas.RegistryIdentity>
 export type RemoveAcmeParamsInput = z.input<typeof schemas.RemoveAcmeParams>
 export type RemoveAdminParamsInput = z.input<typeof schemas.RemoveAdminParams>
 export type RemoveMirrorParamsInput = z.input<typeof schemas.RemoveMirrorParams>
@@ -591,9 +586,6 @@ export type SetIconParamsInput = z.input<typeof schemas.SetIconParams>
  * Sets verbosity for StartOS backend code in the running daemon.
  */
 export type SetLogLevelParamsInput = z.input<typeof schemas.SetLogLevelParams>
-export type SetOsUpdateSignerParamsInput = z.input<
-  typeof schemas.SetOsUpdateSignerParams
->
 export type SetOutboundGatewayParamsInput = z.input<
   typeof schemas.SetOutboundGatewayParams
 >
@@ -684,6 +676,11 @@ export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
  */
 export type Sessions = z.output<typeof schemas.Sessions>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
+
+/**
+ * Signing-key material and independent package and OS-update trust.
+ */
+export type TrustedKey = z.output<typeof schemas.TrustedKey>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type WifiListInfo = z.output<typeof schemas.WifiListInfo>
 export type ActionResult = z.output<typeof schemas.ActionResult>

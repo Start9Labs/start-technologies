@@ -14,7 +14,7 @@ StartOS ships with two [default registries](default-registries.md): the **Start9
 
 - **Manage keys** opens [Trusted Keys](trusted-keys.md) filtered to the keys the registry offers.
 - **Use for StartOS updates** makes the registry the source of StartOS updates and trusts its keys for StartOS updates. StartOS first checks that the registry publishes StartOS updates, and warns before using any registry other than the Start9 Registry.
-- **Remove** removes the registry. Afterward, StartOS offers to remove the keys it added that no connected registry still offers. The Start9 Registry and the Community Registry cannot be removed, and neither can the registry that provides StartOS updates until you choose another.
+- **Remove** removes the registry. Afterward, StartOS offers to remove the keys it added that no connected registry still offers. The registry that provides StartOS updates cannot be removed until you choose another. **Remove** isn't offered for the Start9 Registry and the Community Registry; disconnect either with [`start-cli server registries remove`](cli-reference.md#start-cli-server-registries-remove-url).
 
 ## Package Signers
 

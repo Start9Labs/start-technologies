@@ -26,7 +26,9 @@ use crate::net::vhost::{AlpnInfo, PassthroughInfo};
 use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::system::{KeyboardOptions, SmtpValue};
-use crate::trusted_keys::{TrustedKeys, initial_trusted_keys};
+use crate::trusted_keys::{
+    Registries, TrustedKeys, initial_os_registry, initial_registries, initial_trusted_keys,
+};
 use crate::util::cpupower::{Epp, Governor};
 use crate::util::lshw::LshwDevice;
 use crate::util::serde::MaybeUtf8String;
@@ -49,6 +51,8 @@ pub struct Public {
     #[serde(default)]
     pub backup_targets:
         BTreeMap<crate::backup::target::BackupTargetId, crate::backup::target::BackupTarget>,
+    /// UI-owned state. Outside `version` migrations, the backend never reads or
+    /// modifies its contents.
     pub ui: Value,
 }
 
@@ -142,6 +146,8 @@ impl Public {
                 },
                 trusted_keys: initial_trusted_keys(),
                 registry_keys: BTreeMap::new(),
+                registries: initial_registries(),
+                os_registry: initial_os_registry(),
                 unread_notification_count: 0,
                 pubkey: ssh_key::PublicKey::from(&account.ssh_key)
                     .to_openssh()
@@ -198,6 +204,12 @@ pub struct ServerInfo {
     /// Last observed trust proposals from connected registries.
     #[serde(default)]
     pub registry_keys: BTreeMap<InternedString, BTreeSet<crate::sign::AnyVerifyingKey>>,
+    /// Connected registries; written only through `server.registries`.
+    #[serde(default)]
+    pub registries: Registries,
+    /// Registry that provides StartOS updates; always connected.
+    #[serde(default = "initial_os_registry")]
+    pub os_registry: Url,
     pub pubkey: String,
     pub ca_fingerprint: String,
     #[serde(default)]

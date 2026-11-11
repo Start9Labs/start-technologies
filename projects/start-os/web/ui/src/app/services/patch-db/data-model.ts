@@ -16,9 +16,7 @@ export type DataModel = {
 export type BackupTargetEntry = T.BackupTarget
 
 export type UIData = {
-  registries: Record<string, string | null>
   snakeHighScore: number
-  startosRegistry: string
   hiddenUpdates: Record<string, string[]>
   // Absent on upgraded servers — the seed only applies at first boot.
   servicesView?: ServicesView
