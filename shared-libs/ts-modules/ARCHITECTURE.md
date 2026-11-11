@@ -60,7 +60,7 @@ The live API reads `meta.patchSequence` — after a mutating call, it waits for 
 
 The backend pushes state diffs to the frontend via WebSocket. This is the primary way components get data.
 
-- **`PatchDbSource`** (`ui/src/app/services/patch-db/patch-db-source.ts`) — Establishes a WebSocket subscription when authenticated. Buffers updates every 250ms.
+- **`PatchDbSource`** (OS and Tunnel `services/patch-db/patch-db-source.ts`) — Authenticates before subscribing. Shared `databaseSource` delivers dumps immediately, batches revisions at 250ms and treats subscription termination as recovery, including successful terminals. OS requests a two-second state refresh and waits for the next running state; Tunnel retries after 500ms. Stopping the PatchDB consumer cancels initialization, iteration and recovery. API/auth owners handle live authorization rejection; product sources retain their separate retry policies.
 - **`DataModel`** (`ui/src/app/services/patch-db/data-model.ts`) — TypeScript type for the full database shape (`ui`, `serverInfo`, `packageData`, `registryCache`, `osUpdateCache`).
 - **`PatchDB<DataModel>`** — Injected service. Use `watch$()` to observe specific paths.
 

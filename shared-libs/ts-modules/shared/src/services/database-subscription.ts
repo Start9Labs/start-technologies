@@ -4,12 +4,14 @@ import type { RPC, RpcStreamClient } from '@start9labs/start-core'
 import {
   bufferTime,
   connect,
+  concatWith,
   defer,
   filter,
   finalize,
   from,
   startWith,
   switchMap,
+  throwError,
 } from 'rxjs'
 import type { Observable, OperatorFunction } from 'rxjs'
 import type { AuthKeyService } from './auth-key.service'
@@ -66,6 +68,16 @@ export function legacyDatabaseSubscription<T>(
       const { dump, guid } = subscription as LegacySubscription
       return revisions(guid).pipe(startWith(dump as Dump<T>))
     }),
+  )
+}
+
+/** Successful subscription termination still requires source recovery. */
+export function databaseSource<T>(
+  updates: Observable<Update<T>>,
+): Observable<Update<T>[]> {
+  return updates.pipe(
+    bufferDatabaseRevisions(),
+    concatWith(throwError(() => new Error('Database subscription ended'))),
   )
 }
 

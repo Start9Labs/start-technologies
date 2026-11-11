@@ -1,10 +1,9 @@
 import { inject, Injectable, InjectionToken } from '@angular/core'
-import { bufferDatabaseRevisions } from '@start9labs/shared'
+import { databaseSource } from '@start9labs/shared'
 import { Dump, Update } from 'patch-db-client'
-import { BehaviorSubject, EMPTY, Observable, throwError } from 'rxjs'
+import { BehaviorSubject, EMPTY, Observable } from 'rxjs'
 import {
   catchError,
-  concatWith,
   filter,
   skip,
   startWith,
@@ -33,16 +32,7 @@ export class PatchDbSource extends Observable<Update<DataModel>[]> {
   private readonly state = inject(StateService)
   private readonly stream$ = inject(AuthService).isVerified$.pipe(
     switchMap(verified =>
-      verified
-        ? this.api
-            .watchDb$()
-            .pipe(
-              bufferDatabaseRevisions(),
-              concatWith(
-                throwError(() => new Error('Database subscription ended')),
-              ),
-            )
-        : EMPTY,
+      verified ? databaseSource(this.api.watchDb$()) : EMPTY,
     ),
     catchError((_, original$) => {
       this.state.retrigger(false, 2000)

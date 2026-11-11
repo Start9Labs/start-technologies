@@ -3,7 +3,8 @@
 `@start9labs/shared` (monorepo apps): `HttpService` (HTTP JSON-RPC/resources),
 `RpcSocketService` (encrypted local RPC/continuations), `AuthKeyService` (device-key and
 unenrolled admission leases), `ServerIdentityService` (normal-product verified-peer observers),
-`rpcWebSocketUrl` (shared RPC/continuation endpoint selection), `ErrorService` +
+`rpcWebSocketUrl` (shared RPC/continuation endpoint selection),
+`databaseSubscription` / `databaseSource` (admitted database updates, batching and terminal invalidation; product sources own auth/recovery), `ErrorService` +
 `getErrorMessage` / `isNetworkError`, **`TaskService.run`** (the async-action wrapper), **`DialogService`**
 (responsive + i18n prompt/confirm/alert/component), `CopyService` (clipboard + toast),
 `DownloadHTMLService`, `Exver` (version algebra façade), `SetupLogsService` +

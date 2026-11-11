@@ -1,8 +1,8 @@
 import { inject, Injectable, InjectionToken } from '@angular/core'
-import { bufferDatabaseRevisions } from '@start9labs/shared'
+import { databaseSource } from '@start9labs/shared'
 import { Dump, Update } from 'patch-db-client'
-import { BehaviorSubject, EMPTY, Observable, throwError, timer } from 'rxjs'
-import { catchError, concatWith, startWith, switchMap } from 'rxjs/operators'
+import { BehaviorSubject, EMPTY, Observable, timer } from 'rxjs'
+import { catchError, startWith, switchMap } from 'rxjs/operators'
 import { ApiService } from '../api/api.service'
 import { AuthService } from '../auth.service'
 import { TunnelData } from './data-model'
@@ -25,16 +25,7 @@ export class PatchDbSource extends Observable<Update<TunnelData>[]> {
 
   private readonly stream$ = toObservable(this.auth.authenticated).pipe(
     switchMap(verified =>
-      verified
-        ? this.api
-            .watchDb$()
-            .pipe(
-              bufferDatabaseRevisions(),
-              concatWith(
-                throwError(() => new Error('Database subscription ended')),
-              ),
-            )
-        : EMPTY,
+      verified ? databaseSource(this.api.watchDb$()) : EMPTY,
     ),
     catchError((_, watch$) => timer(500).pipe(switchMap(() => watch$))),
     startWith([{ id: 0, value: {} as TunnelData }]),
