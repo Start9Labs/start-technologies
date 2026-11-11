@@ -38,6 +38,7 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       'HttpService',
       'AuthKeyService',
       'AuthService',
+      'ConfigService',
       'RpcSocketService',
       'i18nPipe',
       'StaleUiService',
@@ -53,6 +54,7 @@ function harness(moduleOverrides = new Map(), globals = {}) {
     },
   })
   dependencies.set(tokens.RpcSocketService, {})
+  dependencies.set(tokens.ConfigService, { gitHash: 'fixture-running-build' })
   dependencies.set(tokens.StaleUiService, { checkHash() {} })
   dependencies.set(tokens.i18nPipe, { transform: value => value })
   const modules = new Map()
@@ -106,6 +108,8 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       if (request === '@start9labs/shared') return shared()
       if (request === '@start9labs/marketplace')
         return load('shared-libs/ts-modules/marketplace/src/types.ts')
+      if (request.endsWith('config.service'))
+        return { ConfigService: tokens.ConfigService }
       if (request.endsWith('auth.service'))
         return { AuthService: tokens.AuthService }
       if (request.endsWith('http.service'))

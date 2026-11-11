@@ -24,6 +24,8 @@ use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use yajrc::RpcError;
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type WatchArgs<Final = ()> =
+    HandlerArgs<TestContext, WatchParams, rpc_toolkit::Empty, Revision, Final>;
 
 #[derive(Clone, Default)]
 struct TestContext {
@@ -31,7 +33,7 @@ struct TestContext {
     drop_signal: Arc<Notify>,
     started: Arc<Notify>,
     release: Arc<Notify>,
-    producer: Arc<Mutex<Option<RpcStream>>>,
+    producer: Arc<Mutex<Option<RpcStream<Revision, Value>>>>,
     echo_calls: Arc<AtomicUsize>,
     deny: Arc<AtomicBool>,
     http_calls: Arc<AtomicUsize>,
@@ -62,7 +64,7 @@ impl Drop for ProducerGuard {
     }
 }
 
-async fn watch(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn watch(args: WatchArgs) -> Result<Dump, RpcError> {
     let value = args.params.value;
     if let Some(producer) = args.rpc_stream {
         let context = args.context;
@@ -76,7 +78,7 @@ async fn watch(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcE
     Ok(Dump { snapshot: value })
 }
 
-async fn fail(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn fail(args: WatchArgs) -> Result<Dump, RpcError> {
     watch(args).await?;
     Err(RpcError {
         code: 123,
@@ -85,7 +87,7 @@ async fn fail(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcEr
     })
 }
 
-async fn finite(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn finite(args: WatchArgs) -> Result<Dump, RpcError> {
     let producer = args.rpc_stream.unwrap();
     producer
         .send(Revision {
@@ -98,7 +100,7 @@ async fn finite(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, Rpc
     })
 }
 
-async fn finish(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn finish(args: WatchArgs<Value>) -> Result<Dump, RpcError> {
     let producer = args.rpc_stream.unwrap();
     producer
         .send(Revision {
@@ -111,7 +113,7 @@ async fn finish(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, Rpc
     })
 }
 
-async fn finish_then_fail(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn finish_then_fail(args: WatchArgs<Value>) -> Result<Dump, RpcError> {
     finish(args).await?;
     Err(RpcError {
         code: 789,
@@ -120,9 +122,9 @@ async fn finish_then_fail(args: HandlerArgs<TestContext, WatchParams>) -> Result
     })
 }
 
-async fn close_error(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn close_error(args: WatchArgs) -> Result<Dump, RpcError> {
     let _guard = ProducerGuard(args.context);
-    args.rpc_stream.unwrap().close::<(), _>(Err(RpcError {
+    args.rpc_stream.unwrap().close(Err(RpcError {
         code: 456,
         message: "source failed".into(),
         data: Some(wire!({"detail":1})),
@@ -132,7 +134,7 @@ async fn close_error(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump
     })
 }
 
-async fn push(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn push(args: WatchArgs<Value>) -> Result<Dump, RpcError> {
     let producer = args.rpc_stream.unwrap();
     producer
         .send(Revision {
@@ -145,7 +147,7 @@ async fn push(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcEr
     })
 }
 
-async fn push_fail(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn push_fail(args: WatchArgs<Value>) -> Result<Dump, RpcError> {
     push(args).await?;
     Err(RpcError {
         code: 123,
@@ -154,7 +156,7 @@ async fn push_fail(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, 
     })
 }
 
-async fn push_blocked(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn push_blocked(args: WatchArgs<Value>) -> Result<Dump, RpcError> {
     let context = args.context.clone();
     let dump = push(args).await?;
     context.started.notify_one();
@@ -162,7 +164,7 @@ async fn push_blocked(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dum
     Ok(dump)
 }
 
-async fn blocked(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn blocked(args: WatchArgs) -> Result<Dump, RpcError> {
     let guard = ProducerGuard(args.context.clone());
     args.context.started.notify_one();
     args.context.release.notified().await;
@@ -170,7 +172,7 @@ async fn blocked(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, Rp
     watch(args).await
 }
 
-async fn remember(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn remember(args: WatchArgs<Value>) -> Result<Dump, RpcError> {
     *args.context.producer.lock().unwrap() = args.rpc_stream;
     Ok(Dump {
         snapshot: args.params.value,
@@ -184,7 +186,7 @@ impl Serialize for BadSerialization {
     }
 }
 
-async fn bad_serialization(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn bad_serialization(args: WatchArgs<BadSerialization>) -> Result<Dump, RpcError> {
     args.rpc_stream
         .unwrap()
         .close(Ok::<_, RpcError>(BadSerialization))?;
@@ -193,7 +195,9 @@ async fn bad_serialization(args: HandlerArgs<TestContext, WatchParams>) -> Resul
     })
 }
 
-async fn bulk(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn bulk(
+    args: HandlerArgs<TestContext, WatchParams, rpc_toolkit::Empty, String>,
+) -> Result<Dump, RpcError> {
     let producer = args.rpc_stream.unwrap();
     let context = args.context;
     tokio::spawn(async move {
@@ -348,10 +352,10 @@ async fn async_and_thread_producers_keep_event_order_and_close_with_a_distinct_r
     sender.send(Revision { patch: 102 }).await.unwrap();
     assert_eq!(receive(&mut socket).await["result"], wire!({"patch":102}));
     let producer = std::thread::spawn(move || {
-        sender.blocking_send("from-thread").unwrap();
+        sender.blocking_send(Revision { patch: 103 }).unwrap();
         sender.close(Ok::<_, RpcError>(wire!({"total":3}))).unwrap();
     });
-    assert_eq!(receive(&mut socket).await["result"], wire!("from-thread"));
+    assert_eq!(receive(&mut socket).await["result"], wire!({"patch":103}));
     producer.join().unwrap();
     assert_eq!(
         receive(&mut socket).await,
@@ -367,7 +371,7 @@ async fn explicit_error_close_terminates_the_stream_without_closing_the_socket()
     receive(&mut socket).await;
     let sender = context.producer.lock().unwrap().take().unwrap();
     sender
-        .close::<(), _>(Err(RpcError {
+        .close(Err(RpcError {
             code: 456,
             message: "producer failed".into(),
             data: None,
@@ -635,13 +639,9 @@ async fn handle_can_send_after_initial_reply_and_drop_emits_fixed_cancellation()
     send(&mut socket, request(wire!(13), "remember", 1)).await;
     assert_eq!(receive(&mut socket).await["result"], wire!({"snapshot":1}));
     let producer = context.producer.lock().unwrap().take().unwrap();
-    assert_eq!(
-        producer.send(BadSerialization).await.unwrap_err().code,
-        -32603
-    );
-    producer.send("late event").await.unwrap();
+    producer.send(Revision { patch: 2 }).await.unwrap();
     drop(producer);
-    assert_eq!(receive(&mut socket).await["result"], wire!("late event"));
+    assert_eq!(receive(&mut socket).await["result"], wire!({"patch":2}));
     assert_eq!(
         receive(&mut socket).await,
         wire!({
@@ -954,7 +954,9 @@ async fn large_dumps_and_events_are_independent_of_the_inbound_request_limit() {
     const SNAPSHOT_BYTES: usize = 17 * 1024 * 1024;
     const EVENT_BYTES: usize = 5 * 1024 * 1024;
 
-    async fn large(args: HandlerArgs<TestContext, rpc_toolkit::Empty>) -> Result<Value, RpcError> {
+    async fn large(
+        args: HandlerArgs<TestContext, rpc_toolkit::Empty, rpc_toolkit::Empty, Value>,
+    ) -> Result<Value, RpcError> {
         let producer = args.rpc_stream.unwrap();
         tokio::spawn(async move {
             let event = wire!({"id":1, "patch":[{"op":"add", "path":"/large", "value":"y".repeat(EVENT_BYTES)}]});

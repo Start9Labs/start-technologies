@@ -338,7 +338,7 @@ where
     pub(crate) fn forward_stream<V: serde::Serialize + Send + 'static>(
         &self,
         session: T,
-        stream: rpc_toolkit::RpcStream,
+        stream: rpc_toolkit::RpcStream<V>,
         source: impl Stream<Item = Result<V, Error>> + Send + 'static,
     ) {
         let kill = self.subscribe_to_kill(session);

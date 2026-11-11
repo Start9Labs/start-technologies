@@ -110,7 +110,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     std::fs::write(
         directory.join("rpc/index.ts"),
-        "export type { Api as StartOS } from './start-os'\nexport type { Api as Setup } from './setup'\nexport type { Api as Init } from './init'\nexport type { Api as Diagnostic } from './diagnostic'\nexport type { Api as Registry } from './registry'\nexport type { Api as Tunnel } from './tunnel'\nexport type { Api as Effects } from './effects'\nexport type { RpcMethod, RpcParamType, RpcReturnType } from './start-os'\n",
+        format!(
+            "{}export type {{ {} }} from './start-os'\n",
+            "export type { Api as StartOS } from './start-os'\nexport type { Api as Setup } from './setup'\nexport type { Api as Init } from './init'\nexport type { Api as Diagnostic } from './diagnostic'\nexport type { Api as Registry } from './registry'\nexport type { Api as Tunnel } from './tunnel'\nexport type { Api as Effects } from './effects'\n",
+            rpc_toolkit::ts::type_helper_names()
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
     )?;
     Ok(())
 }

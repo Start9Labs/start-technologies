@@ -177,7 +177,12 @@ pub async fn subscribe(
         params,
         rpc_stream,
         ..
-    }: HandlerArgs<RegistryContext, SubscribeIndexParams>,
+    }: HandlerArgs<
+        RegistryContext,
+        SubscribeIndexParams,
+        rpc_toolkit::Empty,
+        patch_db::Revision,
+    >,
 ) -> Result<SubscribeIndexResult, Error> {
     let (mirror, dump, sub) = visible_subscription(&context, params).await?;
     if let Some(stream) = rpc_stream {
@@ -193,7 +198,7 @@ pub async fn subscribe(
 }
 
 fn stream_subscription(
-    stream: rpc_toolkit::RpcStream,
+    stream: rpc_toolkit::RpcStream<patch_db::Revision>,
     mirror: Arc<IndexMirror>,
     mut sub: JsonSubscriber,
 ) {

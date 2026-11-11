@@ -539,16 +539,18 @@ async fn server() -> (String, PeerContext, ServerGuard) {
             )
             .subcommand(
                 "bulk",
-                rpc_toolkit::from_fn_async(|args: HandlerArgs<PeerContext, Empty>| async move {
-                    args.context.calls.fetch_add(1, Ordering::SeqCst);
-                    let stream = args.rpc_stream.unwrap();
-                    tokio::spawn(async move {
-                        if stream.send("r".repeat(5 * 1024 * 1024)).await.is_ok() {
-                            let _ = stream.close(Ok::<_, rpc_toolkit::yajrc::RpcError>(()));
-                        }
-                    });
-                    Ok::<_, rpc_toolkit::yajrc::RpcError>("d".repeat(17 * 1024 * 1024))
-                })
+                rpc_toolkit::from_fn_async(
+                    |args: HandlerArgs<PeerContext, Empty, Empty, String>| async move {
+                        args.context.calls.fetch_add(1, Ordering::SeqCst);
+                        let stream = args.rpc_stream.unwrap();
+                        tokio::spawn(async move {
+                            if stream.send("r".repeat(5 * 1024 * 1024)).await.is_ok() {
+                                let _ = stream.close(Ok::<_, rpc_toolkit::yajrc::RpcError>(()));
+                            }
+                        });
+                        Ok::<_, rpc_toolkit::yajrc::RpcError>("d".repeat(17 * 1024 * 1024))
+                    },
+                )
                 .no_cli()
                 .no_ts(),
             ),

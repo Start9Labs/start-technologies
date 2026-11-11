@@ -225,7 +225,7 @@ pub async fn subscribe(
         params: SubscribeParams { pointer, signer },
         rpc_stream,
         ..
-    }: HandlerArgs<RpcContext, SubscribeParams>,
+    }: HandlerArgs<RpcContext, SubscribeParams, rpc_toolkit::Empty, Revision>,
 ) -> Result<SubscribeResult, Error> {
     let (dump, sub) = ctx
         .db

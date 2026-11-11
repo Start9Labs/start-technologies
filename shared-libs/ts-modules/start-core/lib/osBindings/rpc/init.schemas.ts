@@ -518,10 +518,14 @@ export const Api = {
             forget: {
               _PARAMS: /* @__PURE__ */ empty,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             repair: {
               _PARAMS: /* @__PURE__ */ empty,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -533,12 +537,16 @@ export const Api = {
         repair: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
     'git-info': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.string(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     init: {
       _PARAMS: /* @__PURE__ */ empty,
@@ -560,6 +568,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ LogResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
           _CHILDREN: {
             follow: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -581,6 +591,8 @@ export const Api = {
                 empty,
               ),
               _RETURN: /* @__PURE__ */ LogFollowResponse,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -601,6 +613,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ LogResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
           _CHILDREN: {
             follow: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -622,12 +636,16 @@ export const Api = {
                 empty,
               ),
               _RETURN: /* @__PURE__ */ LogFollowResponse,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
         subscribe: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ InitProgressRes,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -653,10 +671,14 @@ export const Api = {
                 QueryDnsParams,
               ),
               _RETURN: /* @__PURE__ */ QueryDnsRes,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             status: {
               _PARAMS: /* @__PURE__ */ empty,
               _RETURN: /* @__PURE__ */ DnsStatus,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -775,6 +797,8 @@ export const Api = {
     state: {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ ApiState,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     util: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
     wifi: {

@@ -57,7 +57,9 @@ both the server and clients, including non-null IDs and exclusive result/error f
 
 ## Producer handle
 
-`HandlerArgs::rpc_stream` contains an optional `RpcStream` producer handle. It is
+`HandlerArgs<Context, Params, InheritedParams, Item, Final>::rpc_stream` contains an optional
+`RpcStream<Item, Final>` producer. `Item` defaults to `Never` for a non-streaming endpoint;
+`Final` defaults to `()`. The initiating result remains the handler's separate `Ok` type. It is
 absent without the client's opt-in and on other transports. Existing handlers
 can use that distinction to retain their legacy continuation path; the transport
 never interprets a legacy GUID as a response stream.
@@ -66,13 +68,12 @@ The handle has one owner and is not cloneable. Move it into a producer task or
 ordinary thread, or retain it after the handler returns. `HandlerArgs` is also
 not cloneable; clone context and parameter fields separately when needed.
 
-- `send<T: Serialize>(value).await` serializes immediately and waits for bounded
-  queue capacity. Event types can vary between calls, and borrowed or non-`Send`
-  inputs need no `'static` bound. A serialization failure returns an internal
+- `send(value).await` borrows the declared `Item`, serializes immediately and waits
+  for bounded queue capacity. Borrowed or non-`Send` inputs need no `'static` bound. A serialization failure returns an internal
   error without enqueuing an event; the handle remains usable.
-- `blocking_send<T: Serialize>(value)` performs the same operation from an
+- `blocking_send(value)` performs the same operation from an
   ordinary thread. Tokio panics if it is used inside an async execution context.
-- `close<T: Serialize, E: Into<RpcError>>(result)` consumes the handle and queues
+- `close<E: Into<RpcError>>(Result<Final, E>)` consumes the handle and queues
   one terminal result. It is synchronous and uses a reserved slot even when the
   event buffer is full. A terminal serialization failure becomes an internal
   error on the wire.
@@ -85,8 +86,10 @@ acknowledgment. Applications own their producer tasks and threads and must act
 on transport closure. The runnable [example](../examples/websocket.rs) exposes
 `watch` from an async task and `watch-thread` from an ordinary thread.
 
-The initiating response and every event or terminal result have independent
-serializable types. For example, an explicit successful close can finish with a
+The initiating result, stream item and terminal value have independent serializable types.
+Generated method trees export `_ITEM` and `_FINAL` output schemas alongside `_RETURN`.
+`RpcStreamItemType`, `RpcStreamFinalType` and `RpcIsStreaming` project these facts by method path;
+opted-out TypeScript bindings leave them unknown. For example, an explicit successful close can finish with a
 summary rather than a null result:
 
 ```json

@@ -2040,15 +2040,15 @@ export const EthernetSetResult: z.ZodObject<{
 })
 export const FollowLogsRes: z.ZodObject<{
   /**
-   * Streams each new [`LogEntry`] as JSON from `/ws/rpc/{guid}`.
+   * Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.
    */
   guid: typeof Guid
 }> = /* @__PURE__ */ object({
   /**
-   * Streams each new [`LogEntry`] as JSON from `/ws/rpc/{guid}`.
+   * Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.
    */
   guid: Guid.meta({
-    description: 'Streams each new [`LogEntry`] as JSON from `/ws/rpc/{guid}`.',
+    description: 'Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.',
   }),
 }).meta({
   id: 'FollowLogsRes',
@@ -3132,10 +3132,14 @@ export const Api = {
         clear: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         delete: {
           _PARAMS: /* @__PURE__ */ ActivityDeleteParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3151,6 +3155,8 @@ export const Api = {
             ActivityListParams,
           ),
           _RETURN: /* @__PURE__ */ ActivityListResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3160,14 +3166,20 @@ export const Api = {
         'check-initialized': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ CheckInitializedRes,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         login: {
           _PARAMS: /* @__PURE__ */ LoginParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         logout: {
           _PARAMS: /* @__PURE__ */ LogoutParams,
           _RETURN: /* @__PURE__ */ HasUnenrolledKeys.nullable(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         session: {
           _PARAMS: /* @__PURE__ */ empty,
@@ -3175,6 +3187,8 @@ export const Api = {
             kill: {
               _PARAMS: /* @__PURE__ */ KillParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3190,20 +3204,28 @@ export const Api = {
                 ListParams,
               ),
               _RETURN: /* @__PURE__ */ SessionList,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
         'set-initial-password': {
           _PARAMS: /* @__PURE__ */ SetInitialPasswordParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-password': {
           _PARAMS: /* @__PURE__ */ ResetPasswordParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'verify-password': {
           _PARAMS: /* @__PURE__ */ VerifyPasswordParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3213,10 +3235,14 @@ export const Api = {
         create: {
           _PARAMS: /* @__PURE__ */ BackupCreateParams,
           _RETURN: /* @__PURE__ */ BackupCreateRes,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         restore: {
           _PARAMS: /* @__PURE__ */ BackupRestoreParams,
           _RETURN: /* @__PURE__ */ BackupRestoreRes,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3237,6 +3263,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ ConfigCheck,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3260,6 +3288,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.array(DataUsagePoint),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         forget: {
           _PARAMS: /* @__PURE__ */ DeviceMacReq.meta({
@@ -3267,6 +3297,8 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3282,6 +3314,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(Device),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-auto-forward': {
           _PARAMS: /* @__PURE__ */ SetAutoForwardRequest.meta({
@@ -3289,6 +3323,8 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-dns-injection': {
           _PARAMS: /* @__PURE__ */ SetDnsInjectionReq.meta({
@@ -3296,6 +3332,8 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-router-advertisements': {
           _PARAMS: /* @__PURE__ */ SetRouterAdvertisementsReq.meta({
@@ -3303,6 +3341,8 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         update: {
           _PARAMS: /* @__PURE__ */ DeviceUpdateReq.meta({
@@ -3310,6 +3350,8 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3319,6 +3361,8 @@ export const Api = {
         create: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ DiagnosticsCreateRes,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3339,6 +3383,8 @@ export const Api = {
             DirGetArgs,
           ),
           _RETURN: /* @__PURE__ */ z.array(DirEntry),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3359,6 +3405,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(InjectedDnsRecord),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3379,6 +3427,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3409,6 +3459,8 @@ export const Api = {
               }),
             ),
           }),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3427,6 +3479,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ EthernetSetResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3441,6 +3495,8 @@ export const Api = {
         ExecReq,
       ),
       _RETURN: /* @__PURE__ */ ExecRes,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     file: {
       _PARAMS: /* @__PURE__ */ empty,
@@ -3459,6 +3515,8 @@ export const Api = {
             GetFileArgs,
           ),
           _RETURN: /* @__PURE__ */ FileContents,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3474,6 +3532,8 @@ export const Api = {
             SetFileArgs,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3494,6 +3554,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ LanIpv4Response,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ipv4-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3512,6 +3574,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ipv6-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3527,6 +3591,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ LanIpv6Response,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ipv6-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3545,6 +3611,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3589,6 +3657,8 @@ export const Api = {
               }),
           ),
           _RETURN: /* @__PURE__ */ ProfileId,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         delete: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3604,6 +3674,8 @@ export const Api = {
             ProfileDeleteRequest,
           ),
           _RETURN: /* @__PURE__ */ ProfileDeleteResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         edit: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3619,6 +3691,8 @@ export const Api = {
             EditArgs,
           ),
           _RETURN: /* @__PURE__ */ ProfileId,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3653,6 +3727,8 @@ export const Api = {
             }),
             ProfileId,
           ),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3668,6 +3744,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(ProfileId),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'schedule-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3686,6 +3764,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.array(ScheduleWindow),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'schedule-set': {
           _PARAMS: /* @__PURE__ */ ScheduleWindows.meta({
@@ -3693,6 +3773,8 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3711,6 +3793,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ ProfileId,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3731,6 +3815,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(AutomaticPortUse),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3746,10 +3832,14 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(PublishedPort),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         reconcile: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.unknown(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         set: {
           _PARAMS: /* @__PURE__ */ PublishedPortsSetRequest.meta({
@@ -3757,14 +3847,20 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ PublishedPortsSetResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'sync-hairpin': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.unknown(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'wan-changed': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.unknown(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3774,10 +3870,14 @@ export const Api = {
         'get-pubkey': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.record(z.string(), z.unknown()),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         status: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ SetupStatusRes,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3798,10 +3898,14 @@ export const Api = {
             SshKeyAddParams,
           ),
           _RETURN: /* @__PURE__ */ SshKeyResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         delete: {
           _PARAMS: /* @__PURE__ */ SshKeyDeleteParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3817,6 +3921,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(SshKeyResponse),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3826,10 +3932,14 @@ export const Api = {
         'apply-remote-access': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.unknown(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'factory-reset': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'get-timezones': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3845,6 +3955,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(z.string()),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         info: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3860,6 +3972,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ SystemInfoResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         logs: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3875,10 +3989,14 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ LogsResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'logs-follow': {
           _PARAMS: /* @__PURE__ */ FollowLogsParams,
           _RETURN: /* @__PURE__ */ FollowLogsRes,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'newer-versions': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3894,10 +4012,14 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(VersionInfo),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         restart: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-preferences': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3916,6 +4038,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.unknown(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-timezone': {
           _PARAMS: /* @__PURE__ */ SetTimezoneParams.meta({
@@ -3923,6 +4047,8 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         update: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3938,6 +4064,8 @@ export const Api = {
             UpdateSystemParams,
           ),
           _RETURN: /* @__PURE__ */ UpdateSystemRes,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3958,6 +4086,8 @@ export const Api = {
             GetArgs,
           ),
           _RETURN: /* @__PURE__ */ z.record(z.string(), z.string()),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3973,6 +4103,8 @@ export const Api = {
             GetArgs,
           ),
           _RETURN: /* @__PURE__ */ z.record(z.string(), UciFile),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3991,6 +4123,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.record(z.string(), z.string()),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -4014,6 +4148,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ OutboundVpnCreateResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         delete: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4029,6 +4165,8 @@ export const Api = {
             OutboundVpnDeleteRequest,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4044,6 +4182,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(OutboundVpn),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-enabled': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4062,6 +4202,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         update: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4080,6 +4222,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -4100,6 +4244,8 @@ export const Api = {
             DeleteArgs,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4115,6 +4261,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ VpnServers,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'peer-add': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4133,6 +4281,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ PeerAddResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'peer-delete': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4148,6 +4298,8 @@ export const Api = {
             PeerDeleteArgs,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'peer-rename': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4163,10 +4315,14 @@ export const Api = {
             PeerRenameArgs,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'peer-set-dns-injection': {
           _PARAMS: /* @__PURE__ */ PeerSetDnsInjectionArgs,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4185,6 +4341,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -4205,6 +4363,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ WanDdnsResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ddns-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4223,6 +4383,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'dns-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4238,6 +4400,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ WanDnsResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'dns-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4256,6 +4420,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ipv4-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4271,6 +4437,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ WanIpv4Response,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ipv4-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4289,6 +4457,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ipv6-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4304,6 +4474,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ WanIpv6Response,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ipv6-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4322,6 +4494,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'mac-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4337,6 +4511,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ WanMacResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'mac-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4355,6 +4531,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -4380,6 +4558,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(BlackoutWindow),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'blackout-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4398,6 +4578,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ BlackoutSetResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         edit: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4413,6 +4595,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'generate-password': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4428,6 +4612,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.string(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4466,6 +4652,8 @@ export const Api = {
               }),
             ),
           }),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         regulatory: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4481,6 +4669,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ WifiRegulatory,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4499,6 +4689,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ WifiSetResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },

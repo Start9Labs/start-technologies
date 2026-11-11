@@ -1,5 +1,6 @@
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::future::Future;
+use std::marker::PhantomData;
 #[cfg(feature = "websocket")]
 use std::num::NonZeroUsize;
 
@@ -91,15 +92,28 @@ pub(crate) type ResponseEvents = BoxStream<'static, (Result<Value, RpcError>, bo
 
 /// A single-owner producer for an opted-in WebSocket response stream.
 ///
-/// Each event and the terminal result may have independent serializable types.
+/// Events use `Item`; successful termination uses `Final`.
 /// The transport sends the initiating JSON-RPC response before draining events.
 /// Dropping this handle without `close` terminates with `RPCSTREAM_CANCELLED_ERROR`
 /// after queued events. Initial failure, client closure, and socket loss close
 /// the receiver instead; `closed` and pending sends then wake the producer.
+///
+/// ```compile_fail
+/// fn wrong_item(stream: rpc_toolkit::RpcStream<u64, bool>) {
+///     let _ = stream.send("not a number");
+/// }
+/// ```
+///
+/// ```compile_fail
+/// fn wrong_terminal(stream: rpc_toolkit::RpcStream<u64, bool>) {
+///     let _ = stream.close(Ok::<_, rpc_toolkit::yajrc::RpcError>(42u64));
+/// }
+/// ```
 #[derive(Debug)]
-pub struct RpcStream {
+pub struct RpcStream<Item = crate::Never, Final = ()> {
     events: mpsc::Sender<Value>,
     terminal: oneshot::Sender<Result<Value, RpcError>>,
+    types: PhantomData<fn(Item) -> Final>,
 }
 
 impl RpcStream {
@@ -114,18 +128,38 @@ impl RpcStream {
             yield (result.await.unwrap_or(Err(RPCSTREAM_CANCELLED_ERROR)), true);
         }
         .boxed();
-        (Self { events, terminal }, source)
+        (
+            Self {
+                events,
+                terminal,
+                types: PhantomData,
+            },
+            source,
+        )
     }
 
+    pub(crate) fn typed<Item, Final>(self) -> RpcStream<Item, Final> {
+        RpcStream {
+            events: self.events,
+            terminal: self.terminal,
+            types: PhantomData,
+        }
+    }
+}
+
+impl<Item, Final> RpcStream<Item, Final> {
     /// Serializes an event immediately; awaiting waits for bounded queue capacity.
     ///
     /// A serialization error sends nothing and leaves the handle usable. Filling
     /// the queue before returning the initiating result can block that result.
-    pub fn send<T: Serialize>(
+    pub fn send(
         &self,
-        value: T,
-    ) -> impl Future<Output = Result<(), RpcError>> + Send + '_ {
-        let value = serialize(value);
+        value: impl Borrow<Item>,
+    ) -> impl Future<Output = Result<(), RpcError>> + Send + '_
+    where
+        Item: Serialize,
+    {
+        let value = serialize(value.borrow());
         async move {
             self.events
                 .send(value?)
@@ -139,9 +173,12 @@ impl RpcStream {
     /// # Panics
     ///
     /// Panics inside an asynchronous execution context, as Tokio's blocking sender does.
-    pub fn blocking_send<T: Serialize>(&self, value: T) -> Result<(), RpcError> {
+    pub fn blocking_send(&self, value: impl Borrow<Item>) -> Result<(), RpcError>
+    where
+        Item: Serialize,
+    {
         self.events
-            .blocking_send(serialize(value)?)
+            .blocking_send(serialize(value.borrow())?)
             .map_err(|_| RPCSTREAM_CANCELLED_ERROR)
     }
 
@@ -149,10 +186,10 @@ impl RpcStream {
     ///
     /// Uses a reserved slot, independent of event-buffer capacity. A terminal
     /// serialization failure becomes an internal-error result on the wire.
-    pub fn close<T: Serialize, E: Into<RpcError>>(
-        self,
-        result: Result<T, E>,
-    ) -> Result<(), RpcError> {
+    pub fn close<E: Into<RpcError>>(self, result: Result<Final, E>) -> Result<(), RpcError>
+    where
+        Final: Serialize,
+    {
         let result = result.map_err(Into::into).and_then(serialize);
         self.terminal
             .send(result)
@@ -183,8 +220,9 @@ mod tests {
 
     use super::*;
 
-    fn pair() -> (RpcStream, ResponseEvents) {
-        RpcStream::new(NonZeroUsize::new(1).unwrap())
+    fn pair<Item, Final>() -> (RpcStream<Item, Final>, ResponseEvents) {
+        let (producer, events) = RpcStream::new(NonZeroUsize::new(1).unwrap());
+        (producer.typed(), events)
     }
 
     fn assert_cancelled(error: RpcError) {
@@ -195,7 +233,7 @@ mod tests {
 
     #[tokio::test]
     async fn close_uses_a_reserved_slot_after_a_full_event_queue() {
-        let (producer, mut events) = pair();
+        let (producer, mut events) = pair::<u64, &str>();
         producer.send(1u64).await.unwrap();
         producer.close(Ok::<_, RpcError>("finished")).unwrap();
         assert_eq!(
@@ -210,7 +248,7 @@ mod tests {
 
     #[tokio::test]
     async fn dropping_without_close_drains_events_then_emits_fixed_cancellation() {
-        let (producer, mut events) = pair();
+        let (producer, mut events) = pair::<u64, ()>();
         producer.send(7u64).await.unwrap();
         drop(producer);
         let (value, end) = events.next().await.unwrap();
@@ -224,7 +262,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_is_backpressured_and_receiver_loss_unblocks_it() {
-        let (producer, events) = pair();
+        let (producer, events) = pair::<u64, ()>();
         producer.send(1u64).await.unwrap();
         let pending = producer.send(2u64);
         futures::pin_mut!(pending);
@@ -246,9 +284,9 @@ mod tests {
                 }
             }
         }
-        let (producer, mut events) = pair();
+        let (producer, mut events) = pair::<&str, ()>();
         producer.send("last event").await.unwrap();
-        producer.close::<(), _>(Err(Failure)).unwrap();
+        producer.close(Err(Failure)).unwrap();
         assert_eq!(
             events.next().await.unwrap().0.unwrap(),
             imbl_value::json!("last event")
@@ -261,7 +299,7 @@ mod tests {
 
     #[tokio::test]
     async fn close_reports_cancellation_when_the_receiver_has_gone() {
-        let (producer, events) = pair();
+        let (producer, events) = pair::<(), &str>();
         drop(events);
         assert_cancelled(
             producer
@@ -271,11 +309,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failed_item_serialization_does_not_enqueue_or_consume_the_producer() {
+        struct Item(bool);
+        impl Serialize for Item {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                if self.0 {
+                    serializer.serialize_bool(true)
+                } else {
+                    Err(serde::ser::Error::custom("cannot serialize fixture"))
+                }
+            }
+        }
+        let (producer, mut events) = pair::<Item, ()>();
+        assert_eq!(producer.send(Item(false)).await.unwrap_err().code, -32603);
+        producer.send(Item(true)).await.unwrap();
+        producer.close(Ok::<_, RpcError>(())).unwrap();
+        assert_eq!(
+            events.next().await.unwrap().0.unwrap(),
+            imbl_value::json!(true)
+        );
+        let (result, end) = events.next().await.unwrap();
+        assert_eq!(result.unwrap(), Value::Null);
+        assert!(end);
+        assert!(events.next().await.is_none());
+    }
+
+    #[tokio::test]
     async fn serialization_accepts_borrowed_non_send_values_before_awaiting() {
         fn is_send<T: Send>(value: T) -> T {
             value
         }
-        let (producer, mut events) = pair();
+        let (producer, mut events) = pair::<LocalValue<'_>, u64>();
         #[derive(Serialize)]
         struct LocalValue<'a> {
             text: &'a str,

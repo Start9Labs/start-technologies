@@ -56,7 +56,7 @@ impl<Context: crate::Context, Inherited: Send + Sync> HandleAnyArgs<Context, Inh
             params: imbl_value::from_value(params.clone())?,
             inherited_params: OrEmpty::from_t(inherited),
             raw_params: params,
-            rpc_stream,
+            rpc_stream: rpc_stream.map(crate::RpcStream::typed),
         })
     }
 }
@@ -194,7 +194,7 @@ impl<Context: crate::Context, Inherited: Send> HandleAny<Context>
 
 #[allow(type_alias_bounds)]
 pub type HandlerArgsFor<Context: crate::Context, H: HandlerTypes + ?Sized> =
-    HandlerArgs<Context, H::Params, H::InheritedParams>;
+    HandlerArgs<Context, H::Params, H::InheritedParams, H::Item, H::Final>;
 
 /// Per-call arguments with an optional single-owner response producer.
 ///
@@ -204,6 +204,8 @@ pub struct HandlerArgs<
     Context: crate::Context,
     Params: Send + Sync = Empty,
     InheritedParams: Send + Sync = Empty,
+    Item = Never,
+    Final = (),
 > {
     pub context: Context,
     pub parent_method: VecDeque<&'static str>,
@@ -212,7 +214,7 @@ pub struct HandlerArgs<
     pub inherited_params: InheritedParams,
     pub raw_params: Value,
     /// Event producer, present when the transport and client opt into response streaming.
-    pub rpc_stream: Option<crate::RpcStream>,
+    pub rpc_stream: Option<crate::RpcStream<Item, Final>>,
 }
 
 pub trait HandlerTypes {
@@ -220,6 +222,10 @@ pub trait HandlerTypes {
     type InheritedParams: Send + Sync;
     type Ok: Send + Sync;
     type Err: Send + Sync;
+    /// `Never` marks a non-streaming endpoint.
+    type Item;
+    /// The successful terminal value, independent of the initiating result.
+    type Final;
 }
 
 pub trait PassthroughHandlerTypes: Adapter {}
@@ -232,6 +238,8 @@ where
     type InheritedParams = <T::Inner as HandlerTypes>::InheritedParams;
     type Ok = <T::Inner as HandlerTypes>::Ok;
     type Err = <T::Inner as HandlerTypes>::Err;
+    type Item = <T::Inner as HandlerTypes>::Item;
+    type Final = <T::Inner as HandlerTypes>::Final;
 }
 
 pub trait LeafHandler {}

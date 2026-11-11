@@ -19,7 +19,9 @@ root and `shared-libs/` guidance first. `CLAUDE.md` imports this file.
   transport before RPC dispatch; wire allowances do not change logical RPC limits.
   `server/rpcstream.rs` owns single-owner producers, bounded event queues, terminal
   results, drop cancellation, and shared event encoding/decoding (`RpcStreamResponse`).
-  Forward `HandlerArgs::rpc_stream` through adapters; initialize it to `None` for
+  `HandlerTypes::Item` / `Final` and typed `RpcStream<Item, Final>` own the stream contract;
+  defaults are `Never` / `()`. Forward both facts and `HandlerArgs::rpc_stream` through
+  adapters; initialize the producer to `None` for
   non-WebSocket dispatch. Read [docs/websocket.md](docs/websocket.md) before changing
   streaming, cancellation, connection limits, or upgrade middleware.
 - `ts.rs` owns handler traversal, deferred parameter/result writers and binding

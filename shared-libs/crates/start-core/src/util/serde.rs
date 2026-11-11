@@ -544,6 +544,8 @@ impl<T: HandlerTypes> HandlerTypes for DisplaySerializable<T> {
     type InheritedParams = T::InheritedParams;
     type Ok = T::Ok;
     type Err = T::Err;
+    type Item = T::Item;
+    type Final = T::Final;
 }
 impl<T: HandlerFor<C>, C: Context> HandlerFor<C> for DisplaySerializable<T> {
     fn handle_sync(

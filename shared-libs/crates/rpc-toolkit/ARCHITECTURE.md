@@ -19,7 +19,7 @@ emitting zod schemas and TypeScript types for clients.
 ## Handlers
 
 A handler is described by `HandlerTypes` (its `Params`, `InheritedParams`, `Ok`, and `Err`
-associated types) and implemented for a context by `HandlerFor<Context>`. `HandlerArgs` bundles
+associated types, plus response-stream `Item` and `Final`) and implemented for a context by `HandlerFor<Context>`. `HandlerArgs` bundles
 everything a handler receives: the context, the parent method path, the method name, parsed and
 raw params, and inherited params.
 
@@ -72,7 +72,7 @@ Transports wrap a `Server`:
   the connection's private server factory. Raw wire allowances and post-adaptation logical limits
   are separate; the default remains a plain socket. The connection owns pending call
   futures, buffered initiating replies, and directly polled event receivers, with resource limits
-  and send deadlines. `server/rpcstream.rs` owns the single-owner `RpcStream` producer: a bounded
+  and send deadlines. `server/rpcstream.rs` owns the single-owner `RpcStream<Item, Final>` producer: a bounded
   event channel and a reserved terminal slot. Explicit close carries a result; dropping without
   close yields a fixed cancellation error after queued events. `HandlerArgs::rpc_stream` carries
   the producer through normal handler adapters; non-opted-in calls and other transports receive
@@ -126,7 +126,8 @@ param-flattening newtype, and the async plumbing (`JobRunner`, `StreamUntil`, `p
 ## TypeScript generation
 
 Under the opt-in `ts` feature, handler bindings compose parameter, return and child
-writers through `HandlerTSBindings`. Each Rust type renders once, as a zod schema
+writers through `HandlerTSBindings`. Independent `StreamTS` writers preserve stream facts
+through initiating-result overrides and binding opt-outs. Each Rust type renders once, as a zod schema
 whose `z.input` is serde's deserialization shape and whose `z.output` is its
 serialization shape. RPC parses raw `DeclarationInfo::source` and owns one
 normalization plan per direction through pinned `serde_derive_internals`

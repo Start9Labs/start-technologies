@@ -884,10 +884,14 @@ export const Api = {
             forget: {
               _PARAMS: /* @__PURE__ */ empty,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             repair: {
               _PARAMS: /* @__PURE__ */ empty,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -899,12 +903,16 @@ export const Api = {
         repair: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
     'git-info': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.string(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     init: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
     kiosk: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
@@ -929,10 +937,14 @@ export const Api = {
                 QueryDnsParams,
               ),
               _RETURN: /* @__PURE__ */ QueryDnsRes,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             status: {
               _PARAMS: /* @__PURE__ */ empty,
               _RETURN: /* @__PURE__ */ DnsStatus,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -1046,6 +1058,8 @@ export const Api = {
         attach: {
           _PARAMS: /* @__PURE__ */ AttachParams,
           _RETURN: /* @__PURE__ */ SetupProgress,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         cifs: {
           _PARAMS: /* @__PURE__ */ empty,
@@ -1056,6 +1070,8 @@ export const Api = {
                 z.string(),
                 StartOsRecoveryInfo,
               ),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -1073,6 +1089,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ SetupResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         disk: {
           _PARAMS: /* @__PURE__ */ empty,
@@ -1091,16 +1109,22 @@ export const Api = {
                 empty,
               ),
               _RETURN: /* @__PURE__ */ z.array(DiskInfo),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
         execute: {
           _PARAMS: /* @__PURE__ */ SetupExecuteParams,
           _RETURN: /* @__PURE__ */ SetupProgress,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         exit: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'get-pubkey': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1116,10 +1140,14 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.record(z.string(), z.unknown()),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'install-os': {
           _PARAMS: /* @__PURE__ */ InstallOsParams,
           _RETURN: /* @__PURE__ */ SetupInfo,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         logs: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1138,6 +1166,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ LogResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
           _CHILDREN: {
             follow: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1159,24 +1189,34 @@ export const Api = {
                 empty,
               ),
               _RETURN: /* @__PURE__ */ LogFollowResponse,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
         restart: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-keyboard': {
           _PARAMS: /* @__PURE__ */ KeyboardOptions,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-language': {
           _PARAMS: /* @__PURE__ */ SetLanguageParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         shutdown: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         status: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1192,6 +1232,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ SetupStatusRes,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },

@@ -26,6 +26,14 @@ Apps import the libs via the root `tsconfig.json` path aliases `@start9labs/shar
 
 Backend commands use JSON-RPC; prepared transfers and static resources retain HTTP.
 
+The non-Angular core module owns `createRpcClient` / `RpcClient` for ordinary calls and
+`createRpcStreamClient` / `RpcStreamClient` for typed response streams. Both compose the same
+method-path proxy; neither imports a runtime schema tree or manages connections. A stream
+transport returns the initiating result plus an `AsyncGenerator<Item, Final>`. Generated
+`RpcIsStreaming`, `RpcStreamItemType` and `RpcStreamFinalType` select toolkit-owned endpoint
+facts; non-streaming methods cannot be called on the stream client. Iterator disposal belongs
+to its transport and must cancel only that operation, without replaying it or releasing siblings.
+
 - **`HttpService`** (`shared/src/services/http.service.ts`) — HTTP transport. `rpcRequest()` prepares an unsigned request; `rpcMessage()` sends an already serialized message unchanged. Both use the shared JSON headers and response-compatibility adapter.
 - **`AuthKeyService`** (`shared/src/services/auth-key.service.ts`) — Owns the browser's enrolled, nonextractable device key and its cancellation lifetime. Replacement, rollback and logout invalidate active leases. StartOS and Tunnel use leases for encrypted RPC. StartWRT composes the same encrypted transport through its own RPC/reconnect owners; its anonymous bootstrap retains aborting HTTP. Resource requests keep header signing.
 - **`RpcSocketService`** (`shared/src/services/rpc-socket.service.ts`) — StartOS/Tunnel/WRT's authenticated RPC and continuation transport. Its per-session abort primitive lets an existing recovery owner discard a wedged multiplexed socket without invalidating the enrolled key; DOM-style continuation sockets retain caller event ownership. Active RPC calls share an RxJS WebSocket subject; its last unsubscribe closes the socket. A two-message signed-DH exchange authenticates the selected hostname and logical RPC/GUID target before application traffic; each connection prepares a fresh hello before network deadlines, without per-message proofs or plaintext fallback. Public bootstrap without a device key retains explicit HTTP transport. Request serialization precedes asynchronous identity lookup; JSON response metadata remains authoritative. The bounded `ReadableStream` adapter retains physical framing/backpressure/closure ownership; WebCrypto supplies X25519, HKDF and AES-GCM. The SDK auth module owns opaque signing providers and generic proof/key verification. Rust generates the hello schemas and transport/signature profiles.
