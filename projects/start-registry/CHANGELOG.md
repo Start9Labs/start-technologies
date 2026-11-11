@@ -2,6 +2,22 @@
 
 All notable changes to `start-registry` (the Start Registry server) are documented here. This project is versioned **independently** (starting at `1.0.0`); its version lives in `Cargo.toml`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.5.0]
+
+### Added
+
+- Accept named registry profiles in `--from` and `--to` for package and OS promotion.
+
+- Remove retained GPG exports from signers by primary-key fingerprint, preserving their signing keys and publishing permissions.
+
+- Opening a registry's root URL redirects to the public Marketplace with that registry selected.
+
+### Fixed
+
+- Registry admins can sign OS assets for any version without first being added as a signer for that version.
+
+- Preserve verified source signatures when OS versions are promoted into the registry, alongside existing destination signatures and the promoter's signature.
+
 ## [1.4.0]
 
 ### Added
