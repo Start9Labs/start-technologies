@@ -260,12 +260,12 @@ async function sweepTemps(
   swept.add(path)
 }
 
-async function syncDirectory(path: string): Promise<void> {
-  const directory = await fs.open(path, 'r')
+async function syncPath(path: string): Promise<void> {
+  const handle = await fs.open(path, 'r')
   try {
-    await directory.sync()
+    await handle.sync()
   } finally {
-    await directory.close()
+    await handle.close()
   }
 }
 
@@ -277,14 +277,9 @@ export async function copyFileBackup(
 ): Promise<void> {
   signal.throwIfAborted()
   await fs.copyFile(source, backup, fs.constants.COPYFILE_EXCL)
-  const file = await fs.open(backup, 'r')
-  try {
-    await file.sync()
-  } finally {
-    await file.close()
-  }
+  await syncPath(backup)
   signal.throwIfAborted()
-  await syncDirectory(dirname(backup))
+  await syncPath(dirname(backup))
 }
 
 export async function replaceFile(
@@ -351,7 +346,7 @@ export async function replaceFile(
         await target.close()
       }
     })
-    await syncDirectory(dirname(path))
+    await syncPath(dirname(path))
   } finally {
     if (created) await fs.rm(temp, { force: true })
     if (metadataTemp) await fs.rm(metadataTemp, { force: true })
