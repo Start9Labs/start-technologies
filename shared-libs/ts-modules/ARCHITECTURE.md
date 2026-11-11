@@ -77,13 +77,11 @@ readonly packages = toSignal(this.patch.watch$('packageData'))
 
 **In templates:** `{{ name() }}` — signals are called as functions.
 
-## WebSockets
+## Stream consumers
 
-Three WebSocket use cases, all opened via `api.openWebsocket$<T>(guid)`:
-
-1. **PatchDB** — Continuous state patches (managed by `PatchDbSource`)
-2. **Logs** — Streamed via `followServerLogs` / `followPackageLogs`, buffered every 1s
-3. **Metrics** — Real-time server metrics via `followServerMetrics`
+1. **PatchDB** — Generated typed `db.subscribe`, managed by `PatchDbSource`; ordinary GUID replies remain compatible.
+2. **Logs** — GUID continuations from server/package log-follow methods; portal batches at 1s, startup at 500ms.
+3. **Metrics** — `server.metrics.follow` GUID observations, shared while authenticated consumers observe them. The final unsubscribe releases the socket/recovery wait; logout abandons pending reply adoption and stops recovery until verified again. Ordinary initiating promises remain in flight after unsubscription; late replies cannot open a continuation.
 
 ## Navigation & Routing
 
