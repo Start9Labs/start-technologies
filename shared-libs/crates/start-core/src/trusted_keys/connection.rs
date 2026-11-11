@@ -51,6 +51,32 @@ pub(crate) fn same_registry(first: &str, second: &str) -> bool {
     }
 }
 
+const BUILTIN_REGISTRIES: [(&str, &str); 2] = [
+    ("https://registry.start9.com/", "Start9 Registry"),
+    (
+        "https://community-registry.start9.com/",
+        "Community Registry",
+    ),
+];
+
+/// Leaves a `registries` that is not an object unchanged.
+pub(crate) fn ensure_builtin_registries(ui: &mut Value) {
+    let Some(ui) = ui.as_object_mut() else {
+        return;
+    };
+    if matches!(ui.get("registries"), None | Some(Value::Null)) {
+        ui.insert("registries".into(), imbl_value::json!({}));
+    }
+    let Some(registries) = ui.get_mut("registries").and_then(Value::as_object_mut) else {
+        return;
+    };
+    for (url, name) in BUILTIN_REGISTRIES {
+        if !registries.keys().any(|saved| same_registry(saved, url)) {
+            registries.insert(url.into(), imbl_value::json!(name));
+        }
+    }
+}
+
 pub(crate) fn connected_registry_urls(ui: &Value) -> impl Iterator<Item = Result<Url, Error>> + '_ {
     ui.get("registries")
         .and_then(Value::as_object)
@@ -1296,6 +1322,27 @@ mod tests {
             remove_public(&mut public, &first).unwrap(),
             BTreeSet::from([own.interned_der64()])
         );
+    }
+
+    #[test]
+    fn builtin_registries_can_be_removed_unless_they_provide_os_updates() {
+        let mut public = public();
+        ensure_builtin_registries(&mut public.ui);
+        public.ui["startosRegistry"] = imbl_value::json!("https://registry.start9.com/");
+        let start9 = registry_url("https://registry.start9.com").unwrap();
+        assert!(remove_public(&mut public, &start9).is_err());
+        remove_public(
+            &mut public,
+            &registry_url("https://community-registry.start9.com/").unwrap(),
+        )
+        .unwrap();
+        assert!(!is_connected(
+            &public.ui,
+            "https://community-registry.start9.com"
+        ));
+        public.ui["startosRegistry"] = imbl_value::json!("https://registry.example/");
+        remove_public(&mut public, &start9).unwrap();
+        assert!(!is_connected(&public.ui, "https://registry.start9.com"));
     }
 
     #[test]

@@ -11,6 +11,7 @@ use crate::sign::AnyVerifyingKey;
 use crate::sign::gpg::{GpgPublicKeyExport, ImportedPublicKeys, parse_public_keys};
 use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners};
 pub(crate) mod connection;
+pub(crate) use connection::ensure_builtin_registries;
 pub(crate) mod legacy;
 
 pub type TrustedKeys = BTreeMap<InternedString, TrustedKey>;
