@@ -11,7 +11,7 @@ type UpdateObservation = Awaited<
   ReturnType<StartupApiService['streams']['diagnostic']['update']>
 >
 
-/** Success requires the typed terminal; disposal cancels observation, not accepted work. */
+/** Successful termination confirms staging, not activation. Disposal cancels observation, not accepted work. */
 @Service()
 export class DiagnosticUpdate {
   private readonly api = inject(StartupApiService)
