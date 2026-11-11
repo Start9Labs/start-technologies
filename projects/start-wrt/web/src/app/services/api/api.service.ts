@@ -123,6 +123,9 @@ export abstract class ApiService {
   abstract sshKeysAdd(params: SshKeysAddRequest): Promise<SshKeyFromApi>
   abstract ethernetGet(): Promise<EthernetConfig>
   abstract ethernetSet(params: EthernetSetConfig): Promise<EthernetSetResult>
+  abstract ethernetRemoveUsbPort(
+    params: RpcParamType<Api, 'ethernet.remove-usb-port'>,
+  ): Promise<null>
   abstract sshKeysDelete(params: SshKeysDeleteRequest): Promise<null>
   abstract activityList(
     params?: ActivityListParams,
@@ -156,6 +159,8 @@ export type DiagnosticsCreateRes = RpcReturnType<Api, 'diagnostics.create'>
 export type EthernetPort = RpcReturnType<Api, 'ethernet.get'>['ports'][string]
 
 export type EthernetConfig = RpcReturnType<Api, 'ethernet.get'>
+
+export type UsbPortStatus = EthernetConfig['usb_ports'][string]
 
 export type EthernetSetPort = RpcParamType<Api, 'ethernet.set'>['ports'][string]
 

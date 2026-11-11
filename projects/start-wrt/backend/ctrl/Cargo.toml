@@ -58,6 +58,7 @@ openssl = { version = "0.10", features = ["vendored"] }
 patch-db = { path = "../../../../shared-libs/crates/patch-db/core" }
 pwhash = "1.0.0"
 rand = "0.9.1"
+regex = "1.10.2"
 reqwest = { version = "0.12", default-features = false, features = [
   "rustls-tls",
   "json",

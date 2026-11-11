@@ -161,7 +161,7 @@ Creates `WifiStation` (password entries) and `WifiVlan` (VLAN mapping) sections 
 
 ### ethernet.rs — Ethernet Port Assignment
 
-Maps physical ports to profiles via bridge VLAN assignments on the LAN bridge (`br-lan`). Also manages WAN port designation (which port is the uplink). Reads/writes `NetworkBridgeVlan` and `NetworkVlanPort` in the `network` UCI config.
+Maps physical ports to profiles via bridge VLAN assignments on the LAN bridge (`br-lan`). Also manages WAN port designation (which port is the uplink). Reads/writes `NetworkBridgeVlan` and `NetworkVlanPort` in the `network` UCI config. USB ports reach the bridge through `usb_ports.rs`, and a request that omits a recorded USB port keeps its profile.
 
 ### vpn_server.rs / vpn_client.rs — VPN Management
 
@@ -201,6 +201,7 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 | `system.rs`                       | System settings, timezone, remote access rules, logs, OTA entry points, restart, factory reset                                                                                                                                                               |
 | `devices.rs`                      | Device enumeration from ARP/DHCP, rename, forget (flush ARP + lease)                                                                                                                                                                                         |
 | `wan.rs` / `lan.rs`               | WAN/LAN interface configuration                                                                                                                                                                                                                              |
+| `usb_ports.rs`                    | USB ports as LAN ports: records each physical USB port an adapter is plugged into, bridges the adapter into `br-usb_eth<N>`, joined to `br-lan` by the `usb_eth<N>` veth, and removes an empty port on request                                               |
 | `published_ports.rs`              | Port forwarding rules (firewall redirects)                                                                                                                                                                                                                   |
 | `port_control.rs`                 | Automatic port forwarding: PCP + UPnP IGD servers on the shared `start-core` protocol cores, mapping device-requested forwards onto auto-tagged UCI redirects with in-memory lease expiry; also owns the SNI demux and the port-80 redirect's admission rule |
 | `http_redirect.rs`                | HTTP→HTTPS redirect on port 80 while 443 is published: a request layer keyed on the client's subnet and the dialed address                                                                                                                                   |

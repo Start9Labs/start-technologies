@@ -1125,6 +1125,21 @@ export const PublishedPortStatus: z.ZodEnum<{
   .meta({
     id: 'PublishedPortStatus',
   })
+export const RemoveUsbPortRequest: z.ZodObject<{
+  /**
+   * The port's name among `usb_ports`.
+   */
+  port: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * The port's name among `usb_ports`.
+   */
+  port: z.string().meta({
+    description: "The port's name among `usb_ports`.",
+  }),
+}).meta({
+  id: 'RemoveUsbPortRequest',
+})
 export const ResetPasswordParams: z.ZodObject<{
   oldPassword: z.ZodString
   newPassword: z.ZodString
@@ -1368,6 +1383,31 @@ export const UpdateSystemRes: z.ZodObject<{
   progress: wire(z.string().nullable().optional(), z.string().nullable()),
 }).meta({
   id: 'UpdateSystemRes',
+})
+export const UsbPortStatus: z.ZodObject<{
+  /**
+   * A network device is plugged into the port.
+   */
+  present: z.ZodBoolean
+  /**
+   * A network device in the port has link.
+   */
+  active: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  /**
+   * A network device is plugged into the port.
+   */
+  present: z.boolean().meta({
+    description: 'A network device is plugged into the port.',
+  }),
+  /**
+   * A network device in the port has link.
+   */
+  active: z.boolean().meta({
+    description: 'A network device in the port has link.',
+  }),
+}).meta({
+  id: 'UsbPortStatus',
 })
 export const VerifyPasswordParams: z.ZodObject<{ password: z.ZodString }> =
   /* @__PURE__ */ object({ password: z.string() }).meta({
@@ -1975,6 +2015,53 @@ export const EditArgs: z.ZodObject<{
 }> = /* @__PURE__ */ object({ get: ProfileIdOpt, create: z.boolean() }).meta({
   id: 'EditArgs',
 })
+export const EthernetInfo: z.ZodIntersection<
+  z.ZodObject<{
+    /**
+     * The USB ports among `ports`.
+     */
+    usb_ports: z.ZodRecord<z.ZodString, typeof UsbPortStatus>
+  }>,
+  z.ZodObject<{
+    wan_ipv6: z.ZodBoolean
+    wan_port: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+    ports: z.ZodRecord<
+      z.ZodString,
+      z.ZodObject<{
+        profile: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<typeof ProfileId>>,
+          z.ZodNullable<typeof ProfileId>
+        >
+      }>
+    >
+  }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      /**
+       * The USB ports among `ports`.
+       */
+      usb_ports: z.record(z.string(), UsbPortStatus).meta({
+        description: 'The USB ports among `ports`.',
+      }),
+    }),
+    object({
+      wan_ipv6: z.boolean(),
+      wan_port: wire(z.string().nullable().optional(), z.string().nullable()),
+      ports: z.record(
+        z.string(),
+        object({
+          profile: wire(ProfileId.nullable().optional(), ProfileId.nullable()),
+        }),
+      ),
+    }),
+  )
+  .meta({
+    id: 'EthernetInfo',
+  })
 
 /**
  * `ethernet.set` request: the desired port layout. With `preview`, nothing is
@@ -3443,22 +3530,16 @@ export const Api = {
             ),
             empty,
           ),
-          _RETURN: /* @__PURE__ */ object({
-            wan_ipv6: z.boolean(),
-            wan_port: wire(
-              z.string().nullable().optional(),
-              z.string().nullable(),
-            ),
-            ports: z.record(
-              z.string(),
-              object({
-                profile: wire(
-                  ProfileId.nullable().optional(),
-                  ProfileId.nullable(),
-                ),
-              }),
-            ),
+          _RETURN: /* @__PURE__ */ EthernetInfo,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'remove-usb-port': {
+          _PARAMS: /* @__PURE__ */ RemoveUsbPortRequest.meta({
+            description:
+              'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
+          _RETURN: /* @__PURE__ */ z.null(),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },

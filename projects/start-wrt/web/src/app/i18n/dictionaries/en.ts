@@ -600,4 +600,9 @@ export const ENGLISH: Record<string, number> = {
   'Check again': 631,
   'This section also has {option} {value}, set outside StartWRT. StartWRT shows the first value and leaves this one as it is.': 632,
   'This device asked to open port(s) {ports} to the internet. The router refused because automatic port forwarding is off.': 633,
+  'Remove USB port?': 634,
+  'Removing {port} briefly restarts the network. The port appears again, in the Admin profile, the next time a USB Ethernet adapter is plugged into it.': 635,
+  'USB port removed': 636,
+  'Failed to remove USB port': 637,
+  'Unplug the adapter to remove this port': 638,
 }

@@ -228,6 +228,9 @@ export type ProfileIdOptInput = z.input<typeof schemas.ProfileIdOpt>
 export type Protocol = z.output<typeof schemas.Protocol>
 export type ProtocolInput = z.input<typeof schemas.Protocol>
 export type PublishedPortStatus = z.output<typeof schemas.PublishedPortStatus>
+export type RemoveUsbPortRequestInput = z.input<
+  typeof schemas.RemoveUsbPortRequest
+>
 export type ResetPasswordParamsInput = z.input<
   typeof schemas.ResetPasswordParams
 >
@@ -255,6 +258,7 @@ export type SshKeyResponse = z.output<typeof schemas.SshKeyResponse>
 export type SystemInfoResponse = z.output<typeof schemas.SystemInfoResponse>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type UpdateSystemRes = z.output<typeof schemas.UpdateSystemRes>
+export type UsbPortStatus = z.output<typeof schemas.UsbPortStatus>
 export type VerifyPasswordParamsInput = z.input<
   typeof schemas.VerifyPasswordParams
 >
@@ -298,6 +302,7 @@ export type Device = z.output<typeof schemas.Device>
 export type DiagnosticsCreateRes = z.output<typeof schemas.DiagnosticsCreateRes>
 export type DirEntry = z.output<typeof schemas.DirEntry>
 export type EditArgsInput = z.input<typeof schemas.EditArgs>
+export type EthernetInfo = z.output<typeof schemas.EthernetInfo>
 
 /**
  * `ethernet.set` request: the desired port layout. With `preview`, nothing is

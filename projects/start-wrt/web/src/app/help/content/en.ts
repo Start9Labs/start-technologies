@@ -59,7 +59,7 @@ Removes an offline device from your device list. Any custom name or reserved IP 
 
 ### Port
 
-The physical Ethernet port identifier (e.g., eth0, eth1).
+The physical port: an Ethernet port (e.g., eth0, eth1), or a USB port with a USB Ethernet adapter (e.g., usb_eth0). A USB port appears the first time a network device is plugged into it, and keeps its profile while nothing is plugged in. Each port of a USB hub is a USB port of its own. A USB port with no adapter plugged in can be removed.
 
 ### Security Profile
 
@@ -67,7 +67,7 @@ The default security profile assigned to devices connected via the specified Eth
 
 ### WAN
 
-The Wide Area Network (WAN) port connects to your ISP modem or upstream network. Only one Ethernet port can be designated as WAN at a time.
+The Wide Area Network (WAN) port connects to your ISP modem or upstream network. Only one Ethernet port can be designated as WAN at a time. The WAN port must be an Ethernet port.
 
 ### Change WAN Port
 

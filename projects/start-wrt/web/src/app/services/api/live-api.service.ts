@@ -451,6 +451,12 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'ethernet.set', params })
   }
 
+  async ethernetRemoveUsbPort(
+    params: RpcParamType<Api, 'ethernet.remove-usb-port'>,
+  ): Promise<null> {
+    return this.rpc.request({ method: 'ethernet.remove-usb-port', params })
+  }
+
   async sshKeysList(): Promise<SshKeyFromApi[]> {
     return this.rpc.request({ method: 'ssh-keys.list', params: {} })
   }
