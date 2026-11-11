@@ -114,6 +114,10 @@ async function streamFixture(context) {
     WebSocketCtor: LogicalSocket,
     serializer: value =>
       typeof value === 'string' ? value : JSON.stringify(value),
+    deserializer: event => ({
+      value: JSON.parse(event.data),
+      bytes: new TextEncoder().encode(event.data).byteLength,
+    }),
   })
   result.service.session = {
     signal: result.lease.signal,
@@ -127,98 +131,140 @@ async function streamFixture(context) {
 const version = SESSION_PROFILE.transport.rpcStreamVersion
 const tick = () => new Promise(setImmediate)
 
-test('rpcstream initialization/events/terminal are scoped to one request and preserve a pending sibling', async context => {
+test('typed initial/item/final values and metadata survive without canceling a sibling', async context => {
   const { service, lease } = await streamFixture(context)
-  const events = []
-  let ended = false
-  service.stream(body, lease).subscribe({
-    next: value => events.push(value.result),
-    complete: () => {
-      ended = true
-    },
-  })
+  const pending = service.stream(body, lease)
   const sibling = service.message(body, {}, lease)
   await tick()
   const socket = LogicalSocket.instances[0]
   const [stream, call] = socket.writes
   assert.equal(stream.rpcstream, version)
-  socket.receive({ jsonrpc: '2.0', id: stream.id, result: 'initial' })
+  socket.receive({
+    jsonrpc: '2.0',
+    id: stream.id,
+    result: 'initial',
+    meta: { patchSequence: 11 },
+  })
   socket.receive({
     rpcstream: version,
     id: stream.id,
     result: 'event',
     end: false,
   })
-  socket.receive({ rpcstream: version, id: stream.id, result: null, end: true })
-  assert.deepEqual(events, ['initial', 'event'])
-  assert.equal(ended, true)
+  socket.receive({ rpcstream: version, id: stream.id, result: 57, end: true })
+  const response = await pending
+  assert.equal(response.initial, 'initial')
+  assert.deepEqual(response.meta, { patchSequence: 11 })
+  assert.deepEqual(await response.items.next(), { value: 'event', done: false })
+  assert.deepEqual(await response.items.next(), { value: 57, done: true })
   assert.equal(socket.closed, 0)
   assert.ok(socket.writes.some(value => value.close === stream.id))
   socket.receive({ jsonrpc: '2.0', id: call.id, result: 'sibling' })
   assert.equal((await sibling).result, 'sibling')
 })
 
-test('rpcstream terminal application errors remain application envelopes, not transport failures', async context => {
+test('terminal application errors follow accepted items rather than becoming transport loss', async context => {
   const { service, lease } = await streamFixture(context)
-  const received = []
-  let ended = false
-  service.stream(body, lease).subscribe({
-    next: value => received.push(value),
-    complete: () => {
-      ended = true
-    },
-  })
+  const pending = service.stream(body, lease)
   await tick()
   const socket = LogicalSocket.instances[0]
   const { id } = socket.writes[0]
   socket.receive({ jsonrpc: '2.0', id, result: null })
+  socket.receive({ rpcstream: version, id, result: 'accepted', end: false })
   socket.receive({
     rpcstream: version,
     id,
     error: { code: 34, message: 'revoked' },
     end: true,
   })
-  assert.equal(received.at(-1).error.code, 34)
-  assert.equal(ended, true)
+  const { items } = await pending
+  assert.deepEqual(await items.next(), { value: 'accepted', done: false })
+  await assert.rejects(items.next(), error => error.code === 34)
 })
 
-test('disposing pending initialization sends close without canceling or reconnecting its sibling', async context => {
+test('aborting pending initialization and returning before first next dispose only their own IDs', async context => {
   const { service, lease } = await streamFixture(context)
-  const pending = service.stream(body, lease).subscribe()
-  const events = []
-  const sibling = service
-    .stream(body, lease)
-    .subscribe(value => events.push(value.result))
+  const abort = new AbortController()
+  const pending = service.stream(body, lease, { signal: abort.signal })
+  const rejected = assert.rejects(pending, { name: 'AbortError' })
+  const sibling = service.stream(body, lease)
   await tick()
   const socket = LogicalSocket.instances[0]
   const [a, b] = socket.writes
-  pending.unsubscribe()
+  abort.abort()
+  await rejected
   assert.ok(socket.writes.some(value => value.close === a.id))
   assert.equal(socket.closed, 0)
   socket.receive({ jsonrpc: '2.0', id: b.id, result: 'kept' })
-  assert.deepEqual(events, ['kept'])
-  sibling.unsubscribe()
+  const response = await sibling
+  assert.equal(response.initial, 'kept')
+  await response.items.return(null)
+  assert.ok(socket.writes.some(value => value.close === b.id))
   await tick()
   assert.equal(LogicalSocket.instances.length, 1)
 })
 
-test('transport loss ends every stream and pending call; only a new subscriber reconnects', async context => {
+test('transport loss cancels two established streams, pending initialization and a call without replay', async context => {
   const { service, lease } = await streamFixture(context)
-  const errors = []
-  service.stream(body, lease).subscribe({ error: error => errors.push(error) })
-  service.stream(body, lease).subscribe({ error: error => errors.push(error) })
+  const a = service.stream(body, lease)
+  const b = service.stream(body, lease)
+  const pending = service.stream(body, lease).catch(error => error)
   const call = service.message(body, {}, lease).catch(error => error)
   await tick()
-  LogicalSocket.instances[0].fail()
-  network(await call)
-  assert.equal(errors.length, 2)
-  errors.forEach(network)
+  const socket = LogicalSocket.instances[0]
+  socket.receive({ jsonrpc: '2.0', id: socket.writes[0].id, result: null })
+  socket.receive({ jsonrpc: '2.0', id: socket.writes[1].id, result: null })
+  const first = (await a).items.next().catch(error => error)
+  const second = (await b).items.next().catch(error => error)
+  socket.fail()
+  for (const result of await Promise.all([first, second, pending, call]))
+    network(result)
   await tick()
   assert.equal(LogicalSocket.instances.length, 1)
-  const fresh = service.stream(body, lease).subscribe()
+  const abort = new AbortController()
+  const fresh = service
+    .stream(body, lease, { signal: abort.signal })
+    .catch(error => error)
   await tick()
   assert.equal(LogicalSocket.instances.length, 2)
-  fresh.unsubscribe()
+  abort.abort()
+  assert.equal((await fresh).name, 'AbortError')
+})
+
+test('a slow stream fails at the bounded queue while its sibling completes', async context => {
+  const { service, lease } = await streamFixture(context)
+  const pending = service.stream(body, lease)
+  const sibling = service.message(body, {}, lease)
+  await tick()
+  const socket = LogicalSocket.instances[0]
+  const [stream, call] = socket.writes
+  socket.receive({ jsonrpc: '2.0', id: stream.id, result: null })
+  const { items } = await pending
+  for (let n = 0; n <= SESSION_PROFILE.transport.maxQueuedStreamEvents; n++)
+    socket.receive({ rpcstream: version, id: stream.id, result: n, end: false })
+  await assert.rejects(
+    items.next(),
+    error => error.code === SESSION_PROFILE.transport.rpcStreamCancelledCode,
+  )
+  assert.equal(socket.closed, 0)
+  socket.receive({ jsonrpc: '2.0', id: call.id, result: 'unblocked' })
+  assert.equal((await sibling).result, 'unblocked')
+})
+
+test('a stream initialization deadline closes only its own ID', async context => {
+  const { service, lease } = await streamFixture(context)
+  const sibling = service.message(body, {}, lease)
+  const expired = service
+    .stream(body, lease, { timeout: 10 })
+    .catch(error => error)
+  await tick()
+  const socket = LogicalSocket.instances[0]
+  const [call, stream] = socket.writes
+  network(await expired)
+  assert.ok(socket.writes.some(value => value.close === stream.id))
+  assert.equal(socket.closed, 0)
+  socket.receive({ jsonrpc: '2.0', id: call.id, result: 'survived' })
+  assert.equal((await sibling).result, 'survived')
 })
 
 test(

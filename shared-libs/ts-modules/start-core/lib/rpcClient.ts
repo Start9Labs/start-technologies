@@ -11,6 +11,9 @@ import type {
 
 export type RpcCallOptions = { timeout?: number }
 
+/** Aborting cancels initialization and iteration, including items queued after a terminal. */
+export type RpcStreamOptions = RpcCallOptions & { signal?: AbortSignal }
+
 /** Carries one call to a server; the client never sees a wire format. */
 export interface RpcTransport<Options = RpcCallOptions> {
   call(method: string, params: unknown, options?: Options): Promise<unknown>
@@ -23,7 +26,7 @@ export type RpcResponseStream<Initial, Item, Final> = {
 }
 
 /** Iterator disposal cancels this operation, never its siblings or a replacement connection. */
-export interface RpcStreamTransport<Options = RpcCallOptions> {
+export interface RpcStreamTransport<Options = RpcStreamOptions> {
   stream(
     method: string,
     params: unknown,
@@ -74,7 +77,7 @@ export type RpcClient<Tree, Options = RpcCallOptions> = Callable<
 > & { [Name in keyof Children<Tree>]: RpcClient<Children<Tree>[Name], Options> }
 
 /** Streaming methods of a generated tree, with independent initial, item and terminal types. */
-export type RpcStreamClient<Tree, Options = RpcCallOptions> = StreamCallable<
+export type RpcStreamClient<Tree, Options = RpcStreamOptions> = StreamCallable<
   Tree,
   Options
 > & {
@@ -136,7 +139,7 @@ export const createRpcClient = <Client, Options = RpcCallOptions>(
 ): Client => node(transport.call.bind(transport), []) as Client
 
 /** Builds the streaming client with the same method-path proxy as ordinary calls. */
-export const createRpcStreamClient = <Client, Options = RpcCallOptions>(
+export const createRpcStreamClient = <Client, Options = RpcStreamOptions>(
   transport: RpcStreamTransport<Options>,
 ): Client => node(transport.stream.bind(transport), []) as Client
 

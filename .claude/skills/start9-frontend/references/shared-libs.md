@@ -30,7 +30,10 @@ release-notes/flavors/dependencies/links, registry picker) abstracted over
 (`RPC.StartOS`, `Setup`, `Init`, `Diagnostic`, `Registry`, `Tunnel`, `Effects`),
 `IST`/`ISB` input-spec types/builders, `VersionRange`/`ExtendedVersion`, `S9pk`, utils,
 zod re-export. `RPC.RpcMethod`, `RpcParamType` and `RpcReturnType` select request and
-result types from method literals. Use input declarations for requests; output
+result types from method literals. `RpcStreamClient` / `createRpcStreamClient` infer
+initial, item and final types from the generated tree; `RpcStreamOptions.signal`
+cancels pending initialization as well as iteration. `RpcSocketService.stream` adapts
+the existing encrypted session to that transport and retains initiating metadata. Use input declarations for requests; output
 DTOs may contain required nullable fields absent from inputs. **Never hand-edit
 `osBindings/*.ts`** — change the owning Rust schema and run `make start-core-ts-bindings`,
 then rebuild core and SDK before checking consumers.

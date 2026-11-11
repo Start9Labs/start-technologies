@@ -10,14 +10,13 @@ import {
   RpcError,
   RPCOptions,
   RPCResponse,
-  RPCStreamResponse,
   RpcSocketService,
   rpcRequestBody,
   waitForPatchSequence,
 } from '@start9labs/shared'
 import { createRpcClient } from '@start9labs/start-core'
 import { Dump, Update } from 'patch-db-client'
-import { map } from 'rxjs'
+import { catchError } from 'rxjs'
 import type { Observable } from 'rxjs'
 import type { WebSocketSubject } from 'rxjs/webSocket'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
@@ -117,7 +116,7 @@ export class LiveApiService extends ApiService {
 
   override watchDb$(): Observable<Update<DataModel>> {
     return databaseSubscription<DataModel>(this.sockets, this.authKeys).pipe(
-      map(body => this.responseResult(body)),
+      catchError(error => this.raiseError(error)),
     )
   }
 
@@ -147,16 +146,17 @@ export class LiveApiService extends ApiService {
     return result
   }
 
-  private responseResult<T>(body: RPCResponse<T> | RPCStreamResponse<T>): T {
-    if (isRpcError(body)) {
-      if (body.error.code === 34) {
-        console.error('Unauthenticated, logging out')
-        this.auth.setUnverified()
-      }
-      throw new RpcError(body.error)
-    }
-
+  private responseResult<T>(body: RPCResponse<T>): T {
+    if (isRpcError(body)) this.raiseError(new RpcError(body.error))
     return body.result
+  }
+
+  private raiseError(error: unknown): never {
+    if (error instanceof RpcError && error.code === 34) {
+      console.error('Unauthenticated, logging out')
+      this.auth.setUnverified()
+    }
+    throw error
   }
 
   private async httpRequest<T>(opts: HttpOptions): Promise<T> {

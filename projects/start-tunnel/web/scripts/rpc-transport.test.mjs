@@ -97,10 +97,13 @@ test('database stream initialization establishes the cache fence and terminal au
   const messages = new Subject()
   const received = []
   let failure
-  instance.sockets.stream = (body, lease) => {
+  const { rpcResponseStream } = await import(
+    new URL('services/rpc-stream.ts', shared)
+  )
+  instance.sockets.stream = (body, lease, options) => {
     assert.deepEqual(JSON.parse(body), { method: 'db.subscribe', params: {} })
     assert.ok(lease.key)
-    return messages
+    return rpcResponseStream(messages, options)
   }
   const subscription = instance.watchDb$().subscribe({
     next: value => received.push(value),
@@ -110,10 +113,22 @@ test('database stream initialization establishes the cache fence and terminal au
   })
   await new Promise(setImmediate)
   const dump = { id: 10, value: {} }
-  messages.next({ result: dump, meta: { patchSequence: 999 } })
+  messages.next({
+    value: { jsonrpc: '2.0', result: dump, meta: { patchSequence: 999 } },
+    bytes: 80,
+  })
+  await new Promise(setImmediate)
   assert.deepEqual(received, [dump])
   assert.equal(instance.cache$.value.id, 0)
-  messages.next({ error: { code: 34, message: 'revoked' } })
+  messages.next({
+    value: {
+      rpcstream: '1.0',
+      end: true,
+      error: { code: 34, message: 'revoked' },
+    },
+    bytes: 80,
+  })
+  await new Promise(setImmediate)
   assert.equal(failure.code, 34)
   assert.equal(instance.rejected, 1)
   assert.equal(subscription.closed, true)

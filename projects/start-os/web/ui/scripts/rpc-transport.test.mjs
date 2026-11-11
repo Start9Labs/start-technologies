@@ -278,10 +278,13 @@ test('database streams emit their initiating dump without awaiting its cache fen
   const messages = new Subject()
   const received = []
   let failure
-  f.sockets.stream = (body, identity) => {
+  const { rpcResponseStream } = await import(
+    new URL('services/rpc-stream.ts', shared)
+  )
+  f.sockets.stream = (body, identity, options) => {
     assert.deepEqual(JSON.parse(body), { method: 'db.subscribe', params: {} })
     assert.equal(identity, f.lease)
-    return messages
+    return rpcResponseStream(messages, options)
   }
   const subscription = f.api.watchDb$().subscribe({
     next: value => received.push(value),
@@ -291,10 +294,22 @@ test('database streams emit their initiating dump without awaiting its cache fen
   })
   await flush()
   const dump = { id: 10, value: {} }
-  messages.next({ result: dump, meta: { patchSequence: 999 } })
+  messages.next({
+    value: { jsonrpc: '2.0', result: dump, meta: { patchSequence: 999 } },
+    bytes: 80,
+  })
+  await flush()
   assert.deepEqual(received, [dump])
   assert.equal(f.cache.value.id, 0)
-  messages.next({ error: { code: 34, message: 'revoked' } })
+  messages.next({
+    value: {
+      rpcstream: '1.0',
+      end: true,
+      error: { code: 34, message: 'revoked' },
+    },
+    bytes: 80,
+  })
+  await flush()
   assert.equal(failure.code, 34)
   assert.equal(f.rejected(), 1)
   assert.equal(subscription.closed, true)

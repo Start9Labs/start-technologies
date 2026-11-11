@@ -1,13 +1,17 @@
 import type * as RPC from '../osBindings/rpc'
 import { createRpcStreamClient } from '../rpcClient'
-import type { RpcStreamClient, RpcStreamTransport } from '../rpcClient'
+import type {
+  RpcStreamClient,
+  RpcStreamTransport,
+  RpcStreamOptions,
+} from '../rpcClient'
 
 type Client = RpcStreamClient<RPC.StartOS>
 const initial = { id: 1, value: {} }
 const revision = { id: 2, patch: [] }
 
 function transport(items: () => AsyncGenerator<unknown, unknown, void>) {
-  const calls: [string, unknown, { timeout?: number } | undefined][] = []
+  const calls: [string, unknown, RpcStreamOptions | undefined][] = []
   const driver: RpcStreamTransport = {
     async stream(method, params, options) {
       calls.push([method, params, options])
@@ -29,6 +33,16 @@ describe('createRpcStreamClient', () => {
     expect(await result.items.next()).toEqual({ done: true, value: null })
     expect(calls).toEqual([['db.subscribe', {}, { timeout: 1000 }]])
     expect(client.db.subscribe).toBe(client.db.subscribe)
+  })
+
+  test('passes initialization cancellation through the generated client unchanged', async () => {
+    const { client, calls } = transport(async function* () {
+      return null
+    })
+    const abort = new AbortController()
+    const response = await client.db.subscribe({}, { signal: abort.signal })
+    expect(calls[0][2]?.signal).toBe(abort.signal)
+    await response.items.return(null)
   })
 
   test('uses generated streaming capability and item/final types', () => {

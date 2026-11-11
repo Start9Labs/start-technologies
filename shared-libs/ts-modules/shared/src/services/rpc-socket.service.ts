@@ -1,12 +1,13 @@
 import { DOCUMENT, inject, Service } from '@angular/core'
 import { auth } from '@start9labs/start-core'
+import type { RpcStreamOptions } from '@start9labs/start-core'
 import { SESSION_PROFILE } from '@start9labs/start-core/osBindings/session-profile'
 import {
   catchError,
   defer,
   filter,
   firstValueFrom,
-  takeWhile,
+  map,
   throwError,
 } from 'rxjs'
 import type { Observable } from 'rxjs'
@@ -14,11 +15,7 @@ import { webSocket } from 'rxjs/webSocket'
 import type { WebSocketSubject, WebSocketSubjectConfig } from 'rxjs/webSocket'
 
 import { RELATIVE_URL } from '../tokens/relative-url'
-import type {
-  RPCOptions,
-  RPCResponse,
-  RPCStreamResponse,
-} from '../types/rpc.types'
+import type { RPCOptions, RPCResponse } from '../types/rpc.types'
 import { AUTH_SIGNING_HOST, AuthKeyService } from './auth-key.service'
 import type { AuthKeyLease } from './auth-key.service'
 import { withTimeout } from './http.service'
@@ -28,6 +25,8 @@ import {
 } from './session-websocket'
 import { ServerIdentityService } from './server-identity.service'
 import { rpcWebSocketUrl } from './rpc-request'
+import { isRpcResponse, rpcResponseStream } from './rpc-stream'
+import type { RpcFrame, SocketResponseStream } from './rpc-stream'
 
 @Service()
 export class RpcSocketService {
@@ -42,7 +41,7 @@ export class RpcSocketService {
   private session?: {
     signal: AbortSignal
     abort: AbortController
-    socket: WebSocketSubject<unknown>
+    socket: WebSocketSubject<RpcFrame>
   }
 
   /** Adds a correlation ID to an ID-less serialized RPC object. */
@@ -52,9 +51,10 @@ export class RpcSocketService {
     lease: AuthKeyLease,
   ): Promise<RPCResponse<T>> {
     let response = this.responses(body, lease).pipe(
+      map(frame => frame.value),
       filter(
         (value): value is RPCResponse<T> =>
-          isResponse(value) && 'jsonrpc' in value,
+          isRpcResponse(value) && 'jsonrpc' in value,
       ),
     )
     if (options.timeout) response = withTimeout(response, options.timeout)
@@ -65,27 +65,22 @@ export class RpcSocketService {
     }
   }
 
-  /** Emits the initiating result and events; terminals end this stream, not sibling calls. */
-  stream<T>(
+  /** Cancellation includes admission and initialization; terminal values belong to the iterator. */
+  stream<R, I, F>(
     body: string,
     lease: AuthKeyLease,
-  ): Observable<RPCResponse<T> | RPCStreamResponse<T>> {
+    options: RpcStreamOptions = {},
+  ): Promise<SocketResponseStream<R, I, F>> {
     const request = `{"rpcstream":${JSON.stringify(SESSION_PROFILE.transport.rpcStreamVersion)},${body.slice(1)}`
-    return this.responses(request, lease).pipe(
-      filter((value): value is RPCResponse<T> | RPCStreamResponse<T> =>
-        isResponse(value),
-      ),
-      takeWhile(
-        value =>
-          !('end' in value && value.end) &&
-          !('jsonrpc' in value && 'error' in value),
-        true,
-      ),
-      filter(value => 'error' in value || !('end' in value && value.end)),
-    )
+    let source = this.responses(request, lease)
+    if (options.timeout)
+      source = withTimeout(source, options.timeout).pipe(
+        catchError(cause => throwError(() => transportError(cause))),
+      )
+    return rpcResponseStream(source, options)
   }
 
-  private responses(body: string, lease: AuthKeyLease): Observable<unknown> {
+  private responses(body: string, lease: AuthKeyLease): Observable<RpcFrame> {
     return defer(() => {
       const socket = this.socket(lease)
       const id = this.document.defaultView!.crypto.randomUUID()
@@ -96,22 +91,22 @@ export class RpcSocketService {
           rpcstream: SESSION_PROFILE.transport.rpcStreamVersion,
           close: id,
         }),
-        value =>
-          value !== null &&
-          typeof value === 'object' &&
-          'id' in value &&
-          value.id === id,
+        frame =>
+          frame.value !== null &&
+          typeof frame.value === 'object' &&
+          'id' in frame.value &&
+          frame.value.id === id,
       )
     }).pipe(catchError(cause => throwError(() => transportError(cause))))
   }
 
-  private socket(lease: AuthKeyLease): WebSocketSubject<unknown> {
+  private socket(lease: AuthKeyLease): WebSocketSubject<RpcFrame> {
     const prepared = this.prepare(lease)
     lease.signal.throwIfAborted()
     if (this.session?.signal !== lease.signal) {
       const abort = new AbortController()
       const signal = AbortSignal.any([prepared.signal, abort.signal])
-      const socket = webSocket<unknown>({
+      const socket = webSocket<RpcFrame>({
         url: this.url(),
         openObserver: { next: this.opened },
         WebSocketCtor: sessionWebSocketConstructor(
@@ -121,6 +116,10 @@ export class RpcSocketService {
         ),
         serializer: value =>
           typeof value === 'string' ? value : JSON.stringify(value),
+        deserializer: event => ({
+          value: JSON.parse(event.data),
+          bytes: new TextEncoder().encode(event.data).byteLength,
+        }),
       })
       this.session = { signal: lease.signal, abort, socket }
       lease.signal.addEventListener(
@@ -194,24 +193,6 @@ export class RpcSocketService {
     current.signal.throwIfAborted()
     return { signer: auth.requestSigner(current.key), signal: current.signal }
   }
-}
-
-function isResponse(
-  value: unknown,
-): value is RPCResponse<unknown> | RPCStreamResponse<unknown> {
-  if (
-    value === null ||
-    typeof value !== 'object' ||
-    !('result' in value || 'error' in value)
-  )
-    return false
-  if ('rpcstream' in value)
-    return (
-      value.rpcstream === SESSION_PROFILE.transport.rpcStreamVersion &&
-      'end' in value &&
-      typeof value.end === 'boolean'
-    )
-  return 'jsonrpc' in value && value.jsonrpc === '2.0'
 }
 
 function transportError(cause: unknown) {

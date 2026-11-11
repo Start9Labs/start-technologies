@@ -1,7 +1,17 @@
 import type { Dump, Revision, Update } from 'patch-db-client'
-import { bufferTime, connect, defer, filter, startWith, switchMap } from 'rxjs'
+import { createRpcStreamClient } from '@start9labs/start-core'
+import type { RPC, RpcStreamClient } from '@start9labs/start-core'
+import {
+  bufferTime,
+  connect,
+  defer,
+  filter,
+  finalize,
+  from,
+  startWith,
+  switchMap,
+} from 'rxjs'
 import type { Observable, OperatorFunction } from 'rxjs'
-import type { RPCResponse, RPCStreamResponse } from '../types/rpc.types'
 import type { AuthKeyService } from './auth-key.service'
 import type { RpcSocketService } from './rpc-socket.service'
 import { rpcRequestBody } from './rpc-request'
@@ -12,17 +22,34 @@ type LegacySubscription = { dump: Dump<unknown>; guid: string }
 export function databaseSubscription<T>(
   sockets: RpcSocketService,
   authKeys: AuthKeyService,
-): Observable<RPCResponse<Update<T>> | RPCStreamResponse<Update<T>>> {
-  return defer(() => authKeys.lease()).pipe(
-    switchMap(lease => {
-      if (!lease)
-        throw new Error('Database subscriptions require an authenticated key')
-      return sockets.stream<Update<T>>(
-        rpcRequestBody({ method: 'db.subscribe', params: {} }),
-        lease,
-      )
-    }),
-  )
+): Observable<Update<T>> {
+  return defer(() => {
+    const abort = new AbortController()
+    const client = createRpcStreamClient<RpcStreamClient<RPC.StartOS>>({
+      stream: async (method, params, options) => {
+        const body = rpcRequestBody({
+          method,
+          params: params as Record<string, unknown>,
+        })
+        const lease = await authKeys.lease()
+        options?.signal?.throwIfAborted()
+        if (!lease)
+          throw new Error('Database subscriptions require an authenticated key')
+        return sockets.stream(body, lease, options)
+      },
+    })
+    return from(
+      (async function* () {
+        const { initial, items } = await client.db.subscribe(
+          {},
+          { signal: abort.signal },
+        )
+        // Opted-in subscriptions yield a dump and database-generated patches.
+        yield initial as Dump<T>
+        for await (const revision of items) yield revision as Revision
+      })(),
+    ).pipe(finalize(() => abort.abort()))
+  })
 }
 
 /** Observes the GUID result of a database subscription without rpcstream opt-in. */

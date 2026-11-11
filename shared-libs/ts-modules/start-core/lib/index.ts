@@ -20,6 +20,7 @@ export type {
   RpcStreamClient,
   RpcResponseStream,
   RpcStreamTransport,
+  RpcStreamOptions,
   RpcHandlers,
   RpcTransport,
 } from './rpcClient'

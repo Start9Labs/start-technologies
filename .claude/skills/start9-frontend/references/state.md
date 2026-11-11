@@ -59,9 +59,14 @@ promise-based**; components call `await this.api.method(params)` and never touch
   `isRpcError(body)` → `RpcError`; normal code-34 rejection forces logout. Local replies wait
   for `meta.patchSequence` through the shared fence; foreign replies never wait on the local
   cache. HTTP compatibility projects older `x-patch-sequence` headers only when JSON metadata
-  is absent. Resource requests retain HTTP/header signatures. Streams (logs, PatchDB, metrics)
-  use `api.openWebsocket$<T>(guid)` (`rxjs/webSocket`), buffered (`bufferTime(250…1000)`), with
-  retry/backoff in the source service.
+  is absent. Resource requests retain HTTP/header signatures. PatchDB uses the generated
+  `RpcStreamClient` through the same socket owner: initial dump, typed revisions, terminal outcome.
+  The initial dump establishes its own fence; never wait on that cache before delivering it.
+  The source owns one AbortSignal through key lookup, initialization and iteration, and retains
+  its existing 250ms batching/retry policy. Per-request queues bound both item count and bytes;
+  slow consumers cancel only their own request. Terminal outcomes drain accepted items;
+  physical loss discards them. Remaining GUID streams (logs/metrics) retain their existing
+  source-owned buffering/retry until their operation contracts are migrated.
 - **start-wrt retains its RPC/reconnect workflow owners**: keyed calls compose shared encrypted
   transport; anonymous bootstrap keeps its aborting `HttpService` (`withFetch()`). Deadlines
   surface `{code: 0}`; `ConnectionService` and update recovery call the shared session-abort
