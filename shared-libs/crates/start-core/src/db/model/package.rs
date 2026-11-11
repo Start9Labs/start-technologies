@@ -432,6 +432,8 @@ impl AsRef<PackageDataEntry> for PackageDataEntry {
 #[model = "Model<Self>"]
 pub struct PackagePlugin {
     pub url: Option<UrlPluginRegistration>,
+    #[serde(default)]
+    pub http_proxy: Option<crate::net::http_proxy::HttpProxyRegistration>,
 }
 
 rpc_toolkit::reflect_ts!(PackagePlugin);

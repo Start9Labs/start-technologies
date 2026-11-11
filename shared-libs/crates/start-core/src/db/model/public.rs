@@ -92,6 +92,7 @@ impl Public {
                                     },
                                     addresses: DerivedAddressInfo::default(),
                                     interfaces: BTreeMap::new(),
+                                    proxy_chain: Vec::new(),
                                 },
                             )]
                             .into_iter()

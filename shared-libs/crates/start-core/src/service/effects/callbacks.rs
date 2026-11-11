@@ -99,6 +99,7 @@ pub struct ServiceCallbacks {
     list_service_interfaces: Arc<DbWatchedCallbacks<PackageId>>,
     get_system_smtp: Arc<DbWatchedCallbacks<()>>,
     get_service_manifest: Arc<DbWatchedCallbacks<PackageId>>,
+    get_http_proxy_attachments: Arc<DbWatchedCallbacks<PackageId>>,
 }
 
 impl Default for ServiceCallbacks {
@@ -111,6 +112,9 @@ impl Default for ServiceCallbacks {
             list_service_interfaces: Arc::new(DbWatchedCallbacks::new("list_service_interfaces")),
             get_system_smtp: Arc::new(DbWatchedCallbacks::new("get_system_smtp")),
             get_service_manifest: Arc::new(DbWatchedCallbacks::new("get_service_manifest")),
+            get_http_proxy_attachments: Arc::new(DbWatchedCallbacks::new(
+                "get_http_proxy_attachments",
+            )),
         }
     }
 }
@@ -147,6 +151,7 @@ impl ServiceCallbacks {
         self.list_service_interfaces.gc();
         self.get_system_smtp.gc();
         self.get_service_manifest.gc();
+        self.get_http_proxy_attachments.gc();
     }
 
     pub(super) fn add_get_service_interface<T: Send + 'static>(
@@ -326,6 +331,16 @@ impl ServiceCallbacks {
                 .1
                 .push(handler);
         })
+    }
+
+    pub(super) fn add_get_http_proxy_attachments(
+        &self,
+        package_id: PackageId,
+        watch: TypedDbWatch<crate::db::model::package::AllPackageData>,
+        handler: CallbackHandler,
+    ) {
+        self.get_http_proxy_attachments
+            .add(package_id, watch, handler);
     }
 
     pub(super) fn add_get_service_manifest(

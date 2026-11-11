@@ -242,19 +242,32 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         // plugin
         .subcommand(
             "plugin",
-            ParentHandler::<C>::new().subcommand(
-                "url",
-                ParentHandler::<C>::new()
-                    .subcommand("register", from_fn_async(net::plugin::register).no_cli())
-                    .subcommand(
-                        "export-url",
-                        from_fn_async(net::plugin::export_url).no_cli(),
-                    )
-                    .subcommand(
-                        "clear-urls",
-                        from_fn_async(net::plugin::clear_urls).no_cli(),
-                    ),
-            ),
+            ParentHandler::<C>::new()
+                .subcommand(
+                    "http-proxy",
+                    ParentHandler::<C>::new()
+                        .subcommand(
+                            "set-profiles",
+                            from_fn_async(net::http_proxy::set_profiles).no_cli(),
+                        )
+                        .subcommand(
+                            "get-attachments",
+                            from_fn_async(net::http_proxy::get_attachments).no_cli(),
+                        ),
+                )
+                .subcommand(
+                    "url",
+                    ParentHandler::<C>::new()
+                        .subcommand("register", from_fn_async(net::plugin::register).no_cli())
+                        .subcommand(
+                            "export-url",
+                            from_fn_async(net::plugin::export_url).no_cli(),
+                        )
+                        .subcommand(
+                            "clear-urls",
+                            from_fn_async(net::plugin::clear_urls).no_cli(),
+                        ),
+                ),
         )
         .subcommand(
             "set-data-version",
