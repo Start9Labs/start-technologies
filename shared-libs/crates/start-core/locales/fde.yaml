@@ -1,0 +1,31 @@
+_version: 2
+fde.bootstrap.invalid-envelope:
+  en_US: 'Invalid encrypted bootstrap configuration'
+  de_DE: 'Ungültige verschlüsselte Bootstrap-Konfiguration'
+  es_ES: 'Configuración de arranque cifrada no válida'
+  fr_FR: 'Configuration de démarrage chiffrée invalide'
+  pl_PL: 'Nieprawidłowa zaszyfrowana konfiguracja rozruchowa'
+fde.tpm.invalid-authorization:
+  en_US: 'Invalid boot policy authorization'
+  de_DE: 'Ungültige Autorisierung der Startrichtlinie'
+  es_ES: 'Autorización de política de arranque no válida'
+  fr_FR: 'Autorisation de politique de démarrage invalide'
+  pl_PL: 'Nieprawidłowa autoryzacja polityki rozruchu'
+fde.tpm.invalid-key:
+  en_US: 'Invalid TPM bootstrap key'
+  de_DE: 'Ungültiger TPM-Bootstrap-Schlüssel'
+  es_ES: 'Clave de arranque TPM no válida'
+  fr_FR: 'Clé de démarrage TPM invalide'
+  pl_PL: 'Nieprawidłowy klucz rozruchowy TPM'
+fde.tpm.invalid-policy:
+  en_US: 'Invalid TPM boot policy'
+  de_DE: 'Ungültige TPM-Startrichtlinie'
+  es_ES: 'Política de arranque TPM no válida'
+  fr_FR: 'Politique de démarrage TPM invalide'
+  pl_PL: 'Nieprawidłowa polityka rozruchu TPM'
+fde.tpm.pcr-already-used:
+  en_US: 'The filesystem measurement register is already in use'
+  de_DE: 'Das Messregister für das Dateisystem wird bereits verwendet'
+  es_ES: 'El registro de medición del sistema de archivos ya está en uso'
+  fr_FR: 'Le registre de mesure du système de fichiers est déjà utilisé'
+  pl_PL: 'Rejestr pomiaru systemu plików jest już używany'

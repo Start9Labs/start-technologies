@@ -59,6 +59,7 @@ pub mod developer;
 pub mod diagnostic;
 pub mod disk;
 pub mod error;
+pub mod fde;
 pub mod firmware;
 pub mod hostname;
 pub mod id;
