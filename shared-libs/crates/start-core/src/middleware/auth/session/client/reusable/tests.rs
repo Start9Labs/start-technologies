@@ -7,6 +7,8 @@ use axum::extract::ws::WebSocketUpgrade;
 use axum::routing::get;
 
 use super::*;
+
+mod streaming;
 use crate::middleware::auth::session::RpcSessionUpgrader;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::net::secure::EncryptedSocket;

@@ -57,6 +57,18 @@ Cancellation removes pending response slots without closing siblings. Applicatio
 retain healthy sockets; transport failure invalidates them without replaying sent calls.
 The Unix pool likewise never retries a possibly executed request.
 
+`SessionClient::stream<Item, Final>` uses the same dispatcher for versioned encrypted
+sessions. It returns initiating data/metadata separately from the typed item receiver;
+`items.next()` propagates terminal errors and `items.finish()` returns the real successful
+terminal value. Receiver/future drop cancels its ID, including during initialization.
+Queues bound event count and serialized UTF-8 bytes, with a separate terminal slot.
+Application terminals drain accepted items; physical loss discards unfinished queues.
+Canceled IDs remain in the bounded stream slots until their close frames are written.
+The existing owned reader polls cancellation writes concurrently with incoming traffic;
+a blocked writer cannot suspend replies or keepalive reads. No per-call task or second
+connection manager owns cancellation. Container/effects Unix-line calls retain their
+ordinary reply contract; this adapter does not silently switch transports.
+
 Backend discovery keeps its separate short-lived workflow through
 `session::client::{admit,request_body,request}`, sharing admission and framing rather than
 a second persistent manager. Handshake proofs emit pure Ed25519; verification retains

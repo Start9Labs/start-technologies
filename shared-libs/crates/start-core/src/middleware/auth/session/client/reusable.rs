@@ -14,7 +14,7 @@ use crate::prelude::Value;
 use crate::sign::session::Target;
 use crate::sign::{AnyVerifyingKey, Signer};
 use crate::util::net::WebSocket;
-use crate::util::rpc_client::{CapturedRequest, RpcClient};
+use crate::util::rpc_client::{CapturedRequest, RpcClient, RpcResponseStream};
 use crate::util::sync::SyncMutex;
 use crate::{Error, ErrorKind};
 
@@ -135,6 +135,21 @@ impl Client {
         });
         *connection = Some(established.clone());
         Ok(established)
+    }
+
+    /// Cancels only this operation when its future or item receiver is dropped.
+    pub async fn stream<Item: serde::de::DeserializeOwned, Final: serde::de::DeserializeOwned>(
+        &self,
+        signer: &Signer,
+        url: Url,
+        address: &str,
+        headers: HeaderMap,
+        method: &str,
+        params: Value,
+    ) -> Result<RpcResponseStream<Value, Item, Final>, RpcError> {
+        let request = self.capture(method, params)?;
+        let connection = self.session(signer, url, address, headers).await?;
+        connection.dispatcher.send_stream(request).await
     }
 
     pub async fn call(

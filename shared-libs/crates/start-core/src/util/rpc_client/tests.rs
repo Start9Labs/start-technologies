@@ -6,6 +6,8 @@ use serde_json::json;
 
 use super::*;
 
+mod streaming;
+
 fn method(name: &str) -> GenericRpcMethod<&str, Value, Value> {
     GenericRpcMethod::new(name)
 }

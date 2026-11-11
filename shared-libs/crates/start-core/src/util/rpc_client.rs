@@ -8,13 +8,13 @@ use std::sync::{Arc, Weak};
 use futures::future::BoxFuture;
 use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt};
 use lazy_async_pool::Pool;
-use rpc_toolkit::yajrc::{Id, RpcError, RpcMethod, RpcRequest, RpcResponse};
+use rpc_toolkit::yajrc::{Id, RpcError, RpcMethod, RpcRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::runtime::Handle;
-use tokio::sync::{Mutex, OnceCell, oneshot};
+use tokio::sync::{Mutex, Notify, OnceCell, oneshot};
 
 use crate::util::GeneralGuard;
 use crate::util::future::NonDetachingJoinHandle;
@@ -22,11 +22,14 @@ use crate::util::io::TmpDir;
 use crate::util::sync::SyncMutex;
 use crate::{Error, ErrorKind, ResultExt};
 
+mod stream;
 #[cfg(test)]
 mod tests;
+use stream::{Cancellation, ResponseSlot, SlotAction, StreamSlot};
+pub use stream::{RpcResponseItems, RpcResponseStream};
 
 type MessageWriter = Pin<Box<dyn Sink<String, Error = Error> + Send>>;
-type ResponseMap = BTreeMap<Id, oneshot::Sender<Result<Value, RpcError>>>;
+type ResponseMap = BTreeMap<Id, ResponseSlot>;
 type Responses = SyncMutex<Option<ResponseMap>>;
 
 pub(crate) struct CapturedRequest {
@@ -37,8 +40,9 @@ pub(crate) struct CapturedRequest {
 pub struct RpcClient {
     id: Arc<AtomicUsize>,
     handler: NonDetachingJoinHandle<()>,
-    writer: Mutex<MessageWriter>,
+    writer: Arc<Mutex<MessageWriter>>,
     responses: Weak<Responses>,
+    cancel: Arc<Notify>,
 }
 
 fn disconnected() -> Error {
@@ -75,40 +79,122 @@ impl RpcClient {
     ) -> Self {
         let responses = Arc::new(Responses::new(Some(ResponseMap::new())));
         let weak_responses = Arc::downgrade(&responses);
+        let writer: Arc<Mutex<MessageWriter>> = Arc::new(Mutex::new(Box::pin(writer)));
+        let cancel = Arc::new(Notify::new());
+        let handler_writer = writer.clone();
+        let handler_cancel = cancel.clone();
         let handler = tokio::spawn(async move {
             let closed = responses.clone();
             let _disconnect = GeneralGuard::new(move || closed.replace(None));
             let mut messages = Box::pin(reader);
-            while let Some(message) = messages.next().await {
-                let response = message.and_then(|body| {
-                    serde_json::from_str::<RpcResponse>(&body).with_kind(ErrorKind::Deserialization)
-                });
-                match response {
-                    Ok(response) => {
-                        if let Some(id) = response.id {
-                            if let Some(sender) = responses.mutate(|pending| {
-                                pending.as_mut().and_then(|pending| pending.remove(&id))
-                            }) {
-                                let _ = sender.send(response.result);
-                            }
-                        } else {
-                            tracing::info!("RpcClient Notification: {:?}", response);
-                        }
-                    }
-                    Err(error) => {
-                        tracing::error!("RpcClient Error: {}", error);
-                        tracing::debug!("{:?}", error);
-                        break;
-                    }
+            let cancellations =
+                Self::send_cancellations(&handler_writer, &responses, &handler_cancel);
+            tokio::pin!(cancellations);
+            loop {
+                let message = tokio::select! {
+                    message = messages.next() => message,
+                    error = &mut cancellations => { if let Err(error) = error { tracing::error!("RpcClient cancellation: {error}"); } break; }
+                };
+                let Some(message) = message else { break };
+                if let Err(error) =
+                    message.and_then(|body| Self::receive(&responses, &handler_cancel, &body))
+                {
+                    tracing::error!("RpcClient Error: {}", error);
+                    tracing::debug!("{:?}", error);
+                    break;
                 }
             }
         });
         Self {
             id,
             handler: handler.into(),
-            writer: Mutex::new(Box::pin(writer)),
+            writer,
             responses: weak_responses,
+            cancel,
         }
+    }
+
+    async fn send_cancellations(
+        writer: &Mutex<MessageWriter>,
+        responses: &Responses,
+        cancel: &Notify,
+    ) -> Result<(), Error> {
+        loop {
+            cancel.notified().await;
+            loop {
+                let id = responses.peek(|pending| {
+                    pending.as_ref().and_then(|map| {
+                        map.iter().find_map(|(id, slot)| {
+                            matches!(slot, ResponseSlot::Canceled).then(|| id.clone())
+                        })
+                    })
+                });
+                let Some(id) = id else { break };
+                let body =
+                    serde_json::json!({"rpcstream": rpc_toolkit::RPCSTREAM_VERSION, "close": id})
+                        .to_string();
+                Self::write(writer, responses, body).await?;
+                responses.mutate(|pending| pending.as_mut().and_then(|map| map.remove(&id)));
+            }
+        }
+    }
+
+    fn receive(responses: &Responses, cancel: &Notify, body: &str) -> Result<(), Error> {
+        enum Incoming {
+            Reply(rpc_toolkit::RpcResponse),
+            Event(rpc_toolkit::RpcStreamResponse),
+        }
+        let value: Value = serde_json::from_str(body).with_kind(ErrorKind::Deserialization)?;
+        let incoming = if value.get("rpcstream").is_some() {
+            Incoming::Event(serde_json::from_value(value).with_kind(ErrorKind::Deserialization)?)
+        } else {
+            Incoming::Reply(serde_json::from_value(value).with_kind(ErrorKind::Deserialization)?)
+        };
+        let id = match &incoming {
+            Incoming::Reply(reply) => reply.id.clone(),
+            Incoming::Event(reply) => Some(reply.id.clone()),
+        };
+        let Some(id) = id else {
+            if let Incoming::Reply(response) = incoming {
+                tracing::info!("RpcClient Notification: {:?}", response);
+            }
+            return Ok(());
+        };
+        responses.mutate(|pending| {
+            let Some(map) = pending.as_mut() else { return };
+            let Some(slot) = map.remove(&id) else { return };
+            match slot {
+                ResponseSlot::Call(sender) => {
+                    let result = match incoming {
+                        Incoming::Reply(reply) => reply
+                            .result
+                            .and_then(|value| Ok(serde_json::to_value(value)?)),
+                        Incoming::Event(_) => Err(rpc_toolkit::yajrc::INVALID_REQUEST_ERROR),
+                    };
+                    let _ = sender.send(result);
+                }
+                ResponseSlot::Stream(mut stream) => {
+                    let action = match incoming {
+                        Incoming::Reply(reply) => stream.initial(reply),
+                        Incoming::Event(reply) => stream.event(reply, body.len()),
+                    };
+                    match action {
+                        SlotAction::Keep => {
+                            map.insert(id, ResponseSlot::Stream(stream));
+                        }
+                        SlotAction::Remove => (),
+                        SlotAction::Cancel => {
+                            map.insert(id, ResponseSlot::Canceled);
+                            cancel.notify_one();
+                        }
+                    }
+                }
+                ResponseSlot::Canceled => {
+                    map.insert(id, ResponseSlot::Canceled);
+                }
+            }
+        });
+        Ok(())
     }
 
     pub fn is_closed(&self) -> bool {
@@ -135,20 +221,29 @@ impl RpcClient {
         Ok(CapturedRequest { id, body })
     }
 
-    async fn send(&self, body: String) -> Result<(), Error> {
-        let mut writer = self.writer.lock().await;
-        if self.is_closed() {
+    async fn write(
+        writer: &Mutex<MessageWriter>,
+        responses: &Responses,
+        body: String,
+    ) -> Result<(), Error> {
+        let mut writer = writer.lock().await;
+        if responses.peek(Option::is_none) {
             return Err(disconnected());
         }
         let result = writer.send(body).await;
-        if let Err(error) = result {
-            if let Some(responses) = self.responses.upgrade() {
-                responses.replace(None);
-            }
-            self.handler.abort();
-            return Err(error);
+        if result.is_err() {
+            responses.replace(None);
         }
-        Ok(())
+        result
+    }
+
+    async fn send(&self, body: String) -> Result<(), Error> {
+        let responses = self.responses.upgrade().ok_or_else(disconnected)?;
+        let result = Self::write(&self.writer, &responses, body).await;
+        if result.is_err() {
+            self.handler.abort();
+        }
+        result
     }
 
     /// Consumes a captured request once; transport failure never replays it.
@@ -162,7 +257,7 @@ impl RpcClient {
             pending
                 .as_mut()
                 .ok_or_else(disconnected)?
-                .insert(request.id.clone(), sender);
+                .insert(request.id.clone(), ResponseSlot::Call(sender));
             Ok::<_, Error>(())
         })?;
         let pending = responses.clone();
@@ -171,6 +266,68 @@ impl RpcClient {
         });
         self.send(request.body).await?;
         receiver.await.map_err(|_| disconnected())
+    }
+
+    /// Opts into response streaming without replaying a possibly sent request.
+    pub(crate) async fn send_stream<Item, Final>(
+        &self,
+        mut request: CapturedRequest,
+    ) -> Result<RpcResponseStream<imbl_value::Value, Item, Final>, RpcError> {
+        let responses = self.responses.upgrade().ok_or_else(disconnected)?;
+        let cancel = Cancellation {
+            responses: Arc::downgrade(&responses),
+            notify: self.cancel.clone(),
+            id: request.id.clone(),
+        };
+        let (slot, initial, items) = StreamSlot::new(cancel);
+        responses.mutate(|pending| {
+            let map = pending.as_mut().ok_or_else(disconnected)?;
+            if map
+                .values()
+                .filter(|slot| !matches!(slot, ResponseSlot::Call(_)))
+                .count()
+                >= rpc_toolkit::WebSocketOptions::default().max_streams.get()
+            {
+                return Err(rpc_toolkit::RPCSTREAM_CANCELLED_ERROR);
+            }
+            map.insert(request.id.clone(), ResponseSlot::Stream(slot));
+            Ok(())
+        })?;
+        request.body.insert_str(
+            1,
+            &format!("\"rpcstream\":{:?},", rpc_toolkit::RPCSTREAM_VERSION),
+        );
+        self.send(request.body).await?;
+        let response = initial.await.map_err(|_| disconnected())??;
+        Ok(RpcResponseStream {
+            initial: response.result?,
+            meta: imbl_value::Value::Object(response.meta),
+            items,
+        })
+    }
+
+    /// Requires peer rpcstream support; never retries through another transport.
+    pub async fn request_stream<
+        T: RpcMethod + Serialize,
+        Item: serde::de::DeserializeOwned,
+        Final: serde::de::DeserializeOwned,
+    >(
+        &self,
+        method: T,
+        params: T::Params,
+    ) -> Result<RpcResponseStream<T::Response, Item, Final>, RpcError>
+    where
+        T::Params: Serialize,
+        T::Response: serde::de::DeserializeOwned,
+    {
+        let response = self
+            .send_stream(Self::capture(&self.id, method, params)?)
+            .await?;
+        Ok(RpcResponseStream {
+            initial: imbl_value::from_value(response.initial)?,
+            meta: response.meta,
+            items: response.items,
+        })
     }
 
     pub async fn request<T: RpcMethod + Serialize>(

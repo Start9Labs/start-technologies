@@ -59,7 +59,12 @@ The control API uses JSON-RPC. RPC methods are organized in a hierarchical comma
 `CliContext::call_rpc` and WRT's CLI own `session::client::SessionClient`, which lazily
 establishes and reuses connections scoped by endpoint, selected name, signer and headers.
 The message-based `util::rpc_client::RpcClient` dispatches both Unix-line and encrypted
-WebSocket responses; its idle reader drives keepalive. Transport failure never replays a
+WebSocket responses; its idle reader drives keepalive. Typed encrypted response streams
+extend the same response-slot map with bounded item queues and reserved terminals.
+Cancellation marks slots until the owned reader writes close frames concurrently with
+incoming traffic, without per-call tasks. Initiating metadata and final results remain
+separate; transport loss discards unfinished queues. Container/effects Unix-line callers
+retain ordinary replies without a transport fallback. Transport failure never replays a
 possibly sent request, and application errors retain healthy sockets. Startup CLI
 contexts and `state` select HTTP explicitly. `CliWebSocketContext` selects continuation
 admission from the originating context, without per-GUID/global-key security state.
