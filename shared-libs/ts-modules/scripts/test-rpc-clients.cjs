@@ -35,6 +35,7 @@ function harness(moduleOverrides = new Map()) {
       'HttpService',
       'AuthKeyService',
       'AuthService',
+      'ConfigService',
       'StaleUiService',
       'PATCH_CACHE',
       'RELATIVE_URL',
@@ -89,6 +90,8 @@ function harness(moduleOverrides = new Map()) {
         return { AuthService: tokens.AuthService }
       if (request.endsWith('http.service'))
         return { HttpService: tokens.HttpService }
+      if (request.endsWith('config.service'))
+        return { ConfigService: tokens.ConfigService }
       if (request.endsWith('stale-ui.service'))
         return { StaleUiService: tokens.StaleUiService }
       if (request.endsWith('patch-db-source'))
@@ -128,6 +131,7 @@ function harness(moduleOverrides = new Map()) {
     location: { origin: 'https://router.test' },
     defaultView: { location: { host: 'server.test', protocol: 'https:' } },
   })
+  dependencies.set(tokens.ConfigService, { gitHash: 'mock-os-build' })
   dependencies.set(tokens.RELATIVE_URL, '/rpc/v1')
   return { dependencies, tokens, load }
 }
@@ -369,7 +373,7 @@ test('Brochure serves each registry root through its own client', async () => {
   assert.equal(calls[1].url, 'https://registry.test/base/rpc/v0')
 })
 
-test('StartOS mock registry calls reach list and single-package fixtures', async () => {
+test('StartOS mock uses its configured build and registry fixtures', async () => {
   const storage = Symbol('session storage')
   const pkg = { categories: [], best: {}, otherVersions: {} }
   const version = { ...pkg, best: { '1.0.0': {} } }
@@ -389,9 +393,11 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
   dependencies.set(storage, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
   dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: {} }))
+  dependencies.set(tokens.ConfigService, { gitHash: 'configured-os-build' })
   const client = new (load(
     'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
   ).MockApiService)()
+  assert.equal(await client.rpc.gitInfo({}), 'configured-os-build')
   const params = {
     registry: 'https://registry.test/',
     id: null,
