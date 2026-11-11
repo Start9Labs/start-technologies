@@ -210,6 +210,48 @@ async fn mounted_directory_checks_initialize_and_revalidate_target_contents_with
 }
 
 #[tokio::test]
+async fn change_stream_ignores_unrelated_state_but_observes_private_credentials() {
+    use futures::StreamExt;
+    use patch_db::ModelExt;
+
+    let (mut db, volume_id, _) = database();
+    let initial = db.as_value().clone();
+    db.as_value_mut()["public"]["ui"] = imbl_value::json!({ "snakeHighScore": 42 });
+    let unrelated = db.as_value().clone();
+    db.as_private_mut()
+        .as_shared_volume_credentials_mut()
+        .insert(
+            &volume_id,
+            &SharedVolumeCredentials {
+                password: Some("rotated".into()),
+            },
+        )
+        .unwrap();
+    let rotated = db.as_value().clone();
+    db.as_public_mut()
+        .as_shared_volumes_mut()
+        .as_idx_mut(&volume_id)
+        .unwrap()
+        .mutate(|volume| {
+            volume.inspection = SharedVolumeInspection::available(Some(42));
+            Ok(())
+        })
+        .unwrap();
+    let observations = changes(futures::stream::iter([
+        Ok(initial),
+        Ok(unrelated),
+        Ok(rotated),
+        Ok(db.into_value()),
+    ]))
+    .collect::<Vec<_>>()
+    .await;
+    assert_eq!(observations.len(), 3);
+    for observation in observations {
+        observation.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn existing_registered_sources_do_not_cold_mount() {
     let (db, _, _) = database();
     for source in snapshot(&db).unwrap().into_values() {

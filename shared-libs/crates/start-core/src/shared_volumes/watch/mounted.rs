@@ -13,7 +13,8 @@ use crate::disk::mount::filesystem::cifs::health::KernelState;
 use crate::disk::mount::guard::WeakMountGuard;
 use crate::prelude::*;
 use crate::shared_volumes::{SharedVolumeInspection, SharedVolumeSource, source};
-use crate::util::future::NonDetachingJoinHandle;
+use crate::util::actor::background::BackgroundJobQueue;
+use crate::util::future::CancellationHandle;
 
 const HEALTH_INTERVAL: Duration = Duration::from_secs(30);
 const CAPACITY_INTERVAL: Duration = Duration::from_secs(180);
@@ -45,7 +46,7 @@ struct Group {
 
 struct Query<T> {
     result: Option<Result<T, String>>,
-    task: Option<NonDetachingJoinHandle<()>>,
+    task: Option<CancellationHandle>,
 }
 
 impl<T> Default for Query<T> {
@@ -57,7 +58,27 @@ impl<T> Default for Query<T> {
     }
 }
 
+impl<T> Drop for Query<T> {
+    fn drop(&mut self) {
+        if let Some(task) = &mut self.task {
+            task.cancel();
+        }
+    }
+}
+
 impl<T> Query<T> {
+    fn try_start<F: Future<Output = ()> + Send + 'static>(
+        &mut self,
+        jobs: &BackgroundJobQueue,
+        operation: impl FnOnce() -> F,
+    ) -> bool {
+        if self.task.is_some() {
+            return false;
+        }
+        self.task = Some(jobs.add_cancellable_job(operation()));
+        true
+    }
+
     fn update(&mut self, observation: Observation<T>) {
         if matches!(observation, Observation::Finished(_)) {
             self.task = None;
@@ -141,16 +162,22 @@ pub(super) struct MountedChecks {
     next_capacity: Instant,
     probes: BTreeMap<usize, Probe>,
     send: mpsc::Sender<Event>,
+    jobs: BackgroundJobQueue,
 }
 
 impl MountedChecks {
-    pub(super) fn new(send: mpsc::Sender<Event>) -> Self {
+    pub(super) fn new(send: mpsc::Sender<Event>, jobs: BackgroundJobQueue) -> Self {
         Self {
             next_health: Instant::now(),
             next_capacity: Instant::now(),
             probes: BTreeMap::new(),
             send,
+            jobs,
         }
+    }
+
+    pub(super) fn deadline(&self) -> Instant {
+        self.next_health
     }
 
     pub(super) fn invalidate(&mut self) {
@@ -272,25 +299,21 @@ impl MountedChecks {
                 .retain(|path, directory| directory.task.is_some() || paths.contains(path));
             for relative in paths {
                 let directory = probe.directories.entry(relative.clone()).or_default();
-                if directory.task.is_some() {
-                    continue;
-                }
-                directory.result = None;
-                let sender = self.send.clone();
-                let mount = probe.mount.clone();
-                let root = group.path.clone();
-                let registration = super::registered::directory_inspector(
-                    probe
-                        .sources
-                        .iter()
-                        .filter(|source| source.relative_path() == relative)
-                        .map(|source| &source.source),
-                )
-                .unwrap()
-                .clone();
-                let server_id = server_id.to_owned();
-                directory.task = Some(
-                    tokio::spawn(async move {
+                let started = directory.try_start(&self.jobs, || {
+                    let sender = self.send.clone();
+                    let mount = probe.mount.clone();
+                    let root = group.path.clone();
+                    let registration = super::registered::directory_inspector(
+                        probe
+                            .sources
+                            .iter()
+                            .filter(|source| source.relative_path() == relative)
+                            .map(|source| &source.source),
+                    )
+                    .unwrap()
+                    .clone();
+                    let server_id = server_id.to_owned();
+                    async move {
                         let operation = async {
                             registration
                                 .check_directory(root, server_id)
@@ -315,20 +338,18 @@ impl MountedChecks {
                             }
                         })
                         .await;
-                    })
-                    .into(),
-                );
+                    }
+                });
+                if started {
+                    directory.result = None;
+                }
             }
-            if probe.space.task.is_none()
-                && (capacity
-                    || (group.cifs && connection.is_none())
-                    || probe.space.result.is_none())
-            {
-                let sender = self.send.clone();
-                let mount = probe.mount.clone();
-                let path = group.path;
-                probe.space.task = Some(
-                    tokio::spawn(async move {
+            if capacity || (group.cifs && connection.is_none()) || probe.space.result.is_none() {
+                probe.space.try_start(&self.jobs, || {
+                    let sender = self.send.clone();
+                    let mount = probe.mount.clone();
+                    let path = group.path;
+                    async move {
                         let operation = async {
                             crate::disk::util::get_available(&path)
                                 .await
@@ -348,9 +369,8 @@ impl MountedChecks {
                             }
                         })
                         .await;
-                    })
-                    .into(),
-                );
+                    }
+                });
             }
         }
     }
@@ -418,6 +438,61 @@ where
 mod tests {
     use super::*;
     use crate::shared_volumes::SharedVolumeAvailability;
+
+    #[tokio::test]
+    async fn a_timed_out_query_keeps_its_only_work_slot_until_completion() {
+        let (jobs, mut runner) = BackgroundJobQueue::new();
+        let (finish, pending) = tokio::sync::oneshot::channel();
+        let (send, mut receive) = mpsc::unbounded_channel();
+        let mut query = Query::<u64>::default();
+        assert!(query.try_start(&jobs, || observe_query(
+            async { pending.await.unwrap() },
+            Duration::from_millis(1),
+            move |observation| {
+                let send = send.clone();
+                async move { send.send(observation).is_ok() }
+            },
+        )));
+        runner
+            .run_while(async {
+                query.update(receive.recv().await.unwrap());
+                assert!(query.result.as_ref().unwrap().is_err());
+                assert!(!query.try_start(&jobs, || async { panic!("duplicate work scheduled") }));
+                let (done, completed) = tokio::sync::oneshot::channel();
+                let mut other = Query::<()>::default();
+                assert!(other.try_start(&jobs, || async move {
+                    done.send(()).unwrap();
+                }));
+                completed.await.unwrap();
+                assert!(!query.task.as_ref().unwrap().is_finished());
+                finish.send(Ok(42)).unwrap();
+                query.update(receive.recv().await.unwrap());
+                assert!(query.task.is_none());
+                assert_eq!(query.result.as_ref().unwrap().as_ref().unwrap(), &42);
+                assert!(query.try_start(&jobs, || async {}));
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn retiring_a_query_cancels_its_owned_future() {
+        let (jobs, mut runner) = BackgroundJobQueue::new();
+        let (send, recv) = tokio::sync::oneshot::channel();
+        let operation = crate::util::future::DropSignaling::new(async move {
+            send.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        let mut dropped = operation.subscribe();
+        let mut query = Query::<()>::default();
+        query.try_start(&jobs, || operation);
+        runner
+            .run_while(async {
+                recv.await.unwrap();
+                drop(query);
+                dropped.wait().await;
+            })
+            .await;
+    }
 
     #[test]
     fn capacity_scheduling_respects_health_freshness_and_slow_deadlines() {
@@ -490,58 +565,64 @@ mod tests {
 
     #[tokio::test]
     async fn selected_folder_can_fail_and_recover_while_capacity_remains_unfinished() {
-        let (complete, pending) = tokio::sync::oneshot::channel();
-        let (send, mut receive) = mpsc::unbounded_channel();
-        let mut space = Query::<u64> {
-            result: None,
-            task: Some(
-                tokio::spawn(observe_query(
-                    async { pending.await.unwrap() },
-                    Duration::from_millis(1),
-                    move |observation| {
-                        let send = send.clone();
-                        async move { send.send(observation).is_ok() }
-                    },
-                ))
-                .into(),
-            ),
-        };
-        space.update(receive.recv().await.unwrap());
-        assert!(space.result.as_ref().unwrap().is_err());
-        assert!(!space.task.as_ref().unwrap().is_finished());
-        let root = tempfile::tempdir().unwrap();
-        let selected = Path::new("selected");
-        let mut directory = Query::<()>::default();
-        directory.update(Observation::Finished(check_directory(
-            root.path(),
-            selected,
-        )));
-        assert_eq!(
-            source_inspection(Some(true), directory.result.as_ref(), space.result.as_ref())
-                .unwrap()
-                .availability,
-            SharedVolumeAvailability::Unavailable
-        );
-        std::fs::create_dir(root.path().join(selected)).unwrap();
-        directory.update(Observation::Finished(check_directory(
-            root.path(),
-            selected,
-        )));
-        let recovered =
-            source_inspection(Some(true), directory.result.as_ref(), space.result.as_ref())
-                .unwrap();
-        assert_eq!(recovered.availability, SharedVolumeAvailability::Available);
-        assert!(recovered.error.is_some());
-        assert!(!space.task.as_ref().unwrap().is_finished());
-        complete.send(Ok(42)).unwrap();
-        space.update(receive.recv().await.unwrap());
-        assert!(space.task.is_none());
-        assert_eq!(
-            source_inspection(Some(true), directory.result.as_ref(), space.result.as_ref())
-                .unwrap()
-                .available,
-            Some(42)
-        );
+        let (jobs, mut runner) = BackgroundJobQueue::new();
+        runner
+            .run_while(async {
+                let parent = tokio::task::try_id();
+                let (complete, pending) = tokio::sync::oneshot::channel();
+                let (send, mut receive) = mpsc::unbounded_channel();
+                let mut space = Query::<u64> {
+                    result: None,
+                    task: Some(jobs.add_cancellable_job(observe_query(
+                        async move {
+                            assert_eq!(tokio::task::try_id(), parent);
+                            pending.await.unwrap()
+                        },
+                        Duration::from_millis(1),
+                        move |observation| {
+                            let send = send.clone();
+                            async move { send.send(observation).is_ok() }
+                        },
+                    ))),
+                };
+                space.update(receive.recv().await.unwrap());
+                assert!(space.result.as_ref().unwrap().is_err());
+                assert!(!space.task.as_ref().unwrap().is_finished());
+                let root = tempfile::tempdir().unwrap();
+                let selected = Path::new("selected");
+                let mut directory = Query::<()>::default();
+                directory.update(Observation::Finished(check_directory(
+                    root.path(),
+                    selected,
+                )));
+                assert_eq!(
+                    source_inspection(Some(true), directory.result.as_ref(), space.result.as_ref())
+                        .unwrap()
+                        .availability,
+                    SharedVolumeAvailability::Unavailable
+                );
+                std::fs::create_dir(root.path().join(selected)).unwrap();
+                directory.update(Observation::Finished(check_directory(
+                    root.path(),
+                    selected,
+                )));
+                let recovered =
+                    source_inspection(Some(true), directory.result.as_ref(), space.result.as_ref())
+                        .unwrap();
+                assert_eq!(recovered.availability, SharedVolumeAvailability::Available);
+                assert!(recovered.error.is_some());
+                assert!(!space.task.as_ref().unwrap().is_finished());
+                complete.send(Ok(42)).unwrap();
+                space.update(receive.recv().await.unwrap());
+                assert!(space.task.is_none());
+                assert_eq!(
+                    source_inspection(Some(true), directory.result.as_ref(), space.result.as_ref())
+                        .unwrap()
+                        .available,
+                    Some(42)
+                );
+            })
+            .await;
     }
 
     #[tokio::test]

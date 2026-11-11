@@ -2,7 +2,7 @@ use std::io::{self, IoSliceMut};
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::time::Duration;
 
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use nix::sys::socket::{
     AddressFamily, ControlMessageOwned, MsgFlags, NetlinkAddr, SockFlag, SockProtocol, SockType,
     bind, recvmsg, setsockopt, socket, sockopt,
@@ -12,8 +12,7 @@ use tokio::sync::mpsc::Sender;
 
 use super::Event;
 use crate::prelude::*;
-use crate::util::future::NonDetachingJoinHandle;
-
+use crate::util::future::Until;
 #[derive(Clone, Copy)]
 enum Kind {
     Udev,
@@ -29,12 +28,12 @@ impl Kind {
     }
 }
 
-pub(super) fn subscribe(send: Sender<Event>) -> Vec<NonDetachingJoinHandle<()>> {
-    let mut listeners = Vec::new();
+pub(super) async fn watch(send: Sender<Event>) {
+    let listeners = futures::stream::FuturesUnordered::new();
     for kind in [Kind::Udev, Kind::Route] {
         let send = send.clone();
         listeners.push(
-            tokio::spawn(async move {
+            async move {
                 loop {
                     if let Err(error) = listen(kind, &send).await {
                         tracing::warn!(
@@ -47,12 +46,12 @@ pub(super) fn subscribe(send: Sender<Event>) -> Vec<NonDetachingJoinHandle<()>> 
                     }
                     tokio::time::sleep(Duration::from_secs(5)).await;
                 }
-            })
-            .into(),
+            }
+            .boxed(),
         );
     }
     listeners.push(
-        tokio::spawn(async move {
+        async move {
             loop {
                 if let Err(error) = browse(&send).await {
                     tracing::warn!(
@@ -65,10 +64,10 @@ pub(super) fn subscribe(send: Sender<Event>) -> Vec<NonDetachingJoinHandle<()>> 
                 }
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
-        })
-        .into(),
+        }
+        .boxed(),
     );
-    listeners
+    listeners.collect::<Vec<_>>().await;
 }
 
 fn open(kind: Kind) -> io::Result<AsyncFd<OwnedFd>> {
@@ -174,7 +173,7 @@ async fn browse(send: &Sender<Event>) -> Result<(), Error> {
         "org.freedesktop.Avahi.Server2",
     )
     .await?;
-    let mut owners = server.receive_owner_changed().await?;
+    let owners = server.receive_owner_changed().await?;
     let path: zbus::zvariant::OwnedObjectPath = server
         .call(
             "ServiceBrowserPrepare",
@@ -190,29 +189,30 @@ async fn browse(send: &Sender<Event>) -> Result<(), Error> {
     .await?;
     let mut signals = browser.receive_all_signals().await?;
     browser.call::<_, _, ()>("Start", &()).await?;
-    loop {
-        let Some(signal) = (tokio::select! {
-            signal = signals.next() => signal,
-            _ = owners.next() => return Ok(()),
-        }) else {
-            break;
-        };
-        match signal.header().member().map(|member| member.as_str()) {
-            Some("ItemNew" | "ItemRemove") => {
-                send.send(Event::Network)
-                    .await
-                    .with_kind(ErrorKind::Network)?;
+    let mut until = Until::new().with_stream(owners.map(|_| Ok(())));
+    until
+        .run(async {
+            loop {
+                let signal = signals.next().await.ok_or_else(|| {
+                    Error::new(eyre!("Avahi service browser closed"), ErrorKind::Network)
+                })?;
+                match signal.header().member().map(|member| member.as_str()) {
+                    Some("ItemNew" | "ItemRemove") => {
+                        send.send(Event::Network)
+                            .await
+                            .with_kind(ErrorKind::Network)?;
+                    }
+                    Some("Failure") => {
+                        return Err(Error::new(
+                            eyre!("Avahi service browser failed"),
+                            ErrorKind::Network,
+                        ));
+                    }
+                    _ => {}
+                }
             }
-            Some("Failure") => {
-                return Err(Error::new(
-                    eyre!("Avahi service browser failed"),
-                    ErrorKind::Network,
-                ));
-            }
-            _ => {}
-        }
-    }
-    Ok(())
+        })
+        .await
 }
 
 #[cfg(test)]

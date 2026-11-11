@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use futures::{Stream, TryStreamExt};
+
 use crate::backup::target::{BackupTargetId, catalog};
 use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
@@ -33,12 +35,26 @@ pub(super) enum DirectoryContents {
     Target(catalog::TargetContents),
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(super) struct RegisteredSource {
     pub id: SourceId,
     pub definition: SourceDefinition,
     pub inspection: SharedVolumeInspection,
     pub check_unmounted: bool,
+}
+
+pub(super) fn changes(
+    updates: impl Stream<Item = Result<Value, Error>>,
+) -> impl Stream<Item = Result<(), Error>> {
+    let mut previous = None;
+    updates.try_filter_map(move |value| {
+        let result = snapshot(&DatabaseModel::from(value)).map(|current| {
+            let changed = previous.as_ref() != Some(&current);
+            previous = Some(current);
+            changed.then_some(())
+        });
+        std::future::ready(result)
+    })
 }
 
 pub(super) fn snapshot(db: &DatabaseModel) -> Result<BTreeMap<SourceId, RegisteredSource>, Error> {
