@@ -80,6 +80,12 @@ GUID WebSocket continuations carry explicit `WebSocketPolicy` and optional `Secu
 
 See [rpc-toolkit.md](rpc-toolkit.md) for full handler patterns and configuration.
 
+`InitContext` retains the actual RpcContext initialization result in its existing watch. Its
+boot owners publish that result; firmware/reboot branches remain pending. `init.subscribe`
+forwards progress until that result through typed same-ID events or the ordinary GUID
+continuation. Dropped result ownership is cancellation, not completion. State probes still
+establish the running daemon's availability after router replacement.
+
 ## Action file transfers
 
 `ServiceSeed.action_files` owns transient prepared descriptors and completed upload receipts; `RpcContinuations` owns their single-use HTTP endpoints. The store scopes IDs to the service and procedure event, with expiry independent of SDK form caching. Successful uploads remain service-owned. Returning a File result arms its requested download cleanup after action/task processing succeeds. Service teardown cancels active transfers.

@@ -6,7 +6,6 @@ use tokio::sync::broadcast::Sender;
 use tokio::sync::watch;
 use tracing::instrument;
 
-use crate::Error;
 use crate::context::config::ServerConfig;
 use crate::context::startup::StartupRpc;
 use crate::middleware::auth::session::{SecureSession, SessionContext};
@@ -14,12 +13,13 @@ use crate::middleware::auth::signature::{NonceCache, RequestReplayCheck, Signatu
 use crate::net::dns::DnsController;
 use crate::progress::FullProgressTracker;
 use crate::rpc_continuations::RpcContinuations;
+use crate::{Error, ErrorKind, ResultExt};
 
 pub struct InitContextSeed {
     pub(crate) startup_rpc: StartupRpc,
     pub(crate) dns: Arc<DnsController>,
     pub config: ServerConfig,
-    pub error: watch::Sender<Option<Error>>,
+    result: watch::Sender<Option<Result<(), Error>>>,
     pub progress: FullProgressTracker,
     pub shutdown: Sender<()>,
     pub rpc_continuations: RpcContinuations,
@@ -57,6 +57,33 @@ impl SignatureAuthContext for InitContext {
     }
 }
 impl InitContext {
+    /// Records RpcContext initialization, independently of percentages and observation.
+    pub(crate) fn complete(&self, result: Result<(), Error>) {
+        if result.is_ok() {
+            self.progress.complete();
+        }
+        self.result.send_replace(Some(result));
+    }
+
+    pub(crate) fn progress_stream(
+        &self,
+    ) -> impl futures::Stream<Item = Result<crate::progress::FullProgress, Error>> + Send + 'static
+    {
+        let mut result = self.result.subscribe();
+        crate::progress::progress_until_complete(self.progress.clone(), async move {
+            let result = result
+                .wait_for(Option::is_some)
+                .await
+                .with_kind(ErrorKind::Cancelled)?;
+            result
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .map(|_| ())
+                .map_err(Error::clone_output)
+        })
+    }
+
     #[instrument(skip_all)]
     pub async fn init(cfg: &ServerConfig, dns: Arc<DnsController>) -> Result<Self, Error> {
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
@@ -67,7 +94,7 @@ impl InitContext {
                 startup_rpc: StartupRpc::new(),
                 dns,
                 config: cfg.clone(),
-                error: watch::channel(None).0,
+                result: watch::channel(None).0,
                 progress,
                 shutdown,
                 rpc_continuations: RpcContinuations::new(),

@@ -2184,6 +2184,20 @@ test('diagnostic mock reuses its initiating result and progress producer for typ
       'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
     ).MockApiService.prototype,
   )
+  const legacyInit = await mock.initSubscription()
+  assert.equal(legacyInit.guid, 'init-progress-guid')
+  const init = await mock.initSubscriptionStream()
+  assert.equal(init.initial.guid, null)
+  assert.equal((await init.items.next()).value.overall.done, 0)
+  const initProgress = (await init.items.next()).value
+  assert.equal(initProgress.overall.done, initProgress.overall.total)
+  assert.equal((await init.items.next()).done, true)
+  const canceledInit = new AbortController()
+  canceledInit.abort()
+  await assert.rejects(
+    mock.initSubscriptionStream({ signal: canceledInit.signal }),
+    { name: 'AbortError' },
+  )
   const legacy = await mock.diagnosticUpdate()
   assert.equal(legacy.progress, 'update-progress-guid')
   const response = await mock.diagnosticUpdateStream()
@@ -2208,6 +2222,101 @@ test('diagnostic mock reuses its initiating result and progress producer for typ
     name: 'AbortError',
   })
 })
+
+function initializingHarness(subscribe) {
+  const StateService = Symbol('state')
+  const { dependencies, tokens, load } = harness(
+    new Map([['src/app/services/state.service', { StateService }]]),
+    { AbortController, Error },
+  )
+  const probes = []
+  const destroy = []
+  const { StartupApiService } = load(
+    'projects/start-os/web/ui/src/app/services/api/startup-api.service.ts',
+  )
+  dependencies.set(StartupApiService, { streams: { init: { subscribe } } })
+  dependencies.set(StateService, { retrigger: (...args) => probes.push(args) })
+  dependencies.set(tokens.DestroyRef, {
+    onDestroy: callback => destroy.push(callback),
+  })
+  const service = new (load(
+    'projects/start-os/web/ui/src/app/routes/initializing/service.ts',
+  ).InitializingProgress)()
+  return {
+    service,
+    probes,
+    destroy: () => destroy.forEach(callback => callback()),
+  }
+}
+
+for (const failed of [false, true]) {
+  test(`initializing probes state after the actual terminal, not 100 percent: ${failed ? 'failure' : 'success'}`, async () => {
+    const reached = Promise.withResolvers()
+    const terminal = Promise.withResolvers()
+    const retried = Promise.withResolvers()
+    let calls = 0
+    let signal
+    const fixture = initializingHarness(async (_, options) => {
+      signal = options.signal
+      if (++calls > 1) {
+        retried.resolve()
+        return new Promise(() => {})
+      }
+      return {
+        initial: { progress: { overall: false, phases: [] }, guid: null },
+        items: (async function* () {
+          yield { overall: true, phases: [] }
+          reached.resolve()
+          await terminal.promise
+          if (failed) throw new Error('late init failure')
+          return null
+        })(),
+      }
+    })
+    await reached.promise
+    assert.equal(fixture.service.progress().total, 1)
+    assert.equal(fixture.probes.length, 0)
+    terminal.resolve()
+    if (failed) await retried.promise
+    else await new Promise(setImmediate)
+    assert.equal(fixture.probes.length, 1)
+    assert.equal(fixture.probes[0][0], true)
+    assert.equal(fixture.probes[0][1], 250)
+    assert.equal(calls, failed ? 2 : 1)
+    fixture.destroy()
+    assert.equal(signal.aborted, true)
+  })
+}
+
+for (const pendingInitial of [false, true]) {
+  test(`initializing disposal cancels ${pendingInitial ? 'acquisition' : 'iteration'} without a late state probe or retry`, async () => {
+    const blocked = Promise.withResolvers()
+    const reached = Promise.withResolvers()
+    let signal
+    let calls = 0
+    const fixture = initializingHarness(async (_, options) => {
+      calls++
+      signal = options.signal
+      if (pendingInitial) await blocked.promise
+      return {
+        initial: { progress: { overall: false, phases: [] }, guid: null },
+        items: (async function* () {
+          reached.resolve()
+          await blocked.promise
+          throw new Error('disposed init')
+        })(),
+      }
+    })
+    if (!pendingInitial) await reached.promise
+    fixture.destroy()
+    assert.equal(signal.aborted, true)
+    blocked.resolve()
+    await new Promise(setImmediate)
+    assert.equal(fixture.probes.length, 0)
+    assert.equal(calls, 1)
+    assert.equal(fixture.service.progress().total, 0)
+  })
+}
 
 function diagnosticUpdateHarness(update) {
   const { dependencies, tokens, load } = harness(new Map(), {

@@ -3,8 +3,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use axum::extract::ws;
-use futures::StreamExt;
 use itertools::Itertools;
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
@@ -25,7 +23,7 @@ use crate::net::socks::DEFAULT_SOCKS_LISTEN;
 use crate::net::web_server::WebServerAcceptorSetter;
 use crate::prelude::*;
 use crate::progress::{
-    FullProgress, FullProgressTracker, PhaseProgressTrackerHandle, PhasedProgressBar, ProgressUnits,
+    FullProgress, FullProgressTracker, PhaseProgressTrackerHandle, ProgressUnits,
 };
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::ssh::SSH_DIR;
@@ -513,16 +511,32 @@ pub fn init_api<C: Context>() -> ParentHandler<C> {
 #[serde(rename_all = "camelCase")]
 pub struct InitProgressRes {
     pub progress: FullProgress,
-    pub guid: Guid,
+    /// Present for ordinary replies; typed streams use same-ID events.
+    pub guid: Option<Guid>,
 }
 
 rpc_toolkit::reflect_ts!(InitProgressRes);
 rpc_toolkit::ts_export!(InitProgressRes, namespaces = [""]);
 
-pub async fn init_progress(ctx: InitContext) -> Result<InitProgressRes, Error> {
-    let progress_tracker = ctx.progress.clone();
-    let progress = progress_tracker.snapshot();
-    let mut error = ctx.error.subscribe();
+pub async fn init_progress(
+    HandlerArgs {
+        context: ctx,
+        rpc_stream,
+        ..
+    }: HandlerArgs<InitContext, Empty, Empty, FullProgress>,
+) -> Result<InitProgressRes, Error> {
+    let progress = ctx.progress.snapshot();
+    let source = ctx.progress_stream();
+    if let Some(stream) = rpc_stream {
+        tokio::spawn(async move {
+            let result = stream.forward(source).await;
+            let _ = stream.close(result);
+        });
+        return Ok(InitProgressRes {
+            progress,
+            guid: None,
+        });
+    }
     let guid = Guid::new();
     ctx.rpc_continuations
         .add(
@@ -530,41 +544,8 @@ pub async fn init_progress(ctx: InitContext) -> Result<InitProgressRes, Error> {
             RpcContinuation::ws(
                 WebSocketPolicy::Public,
                 ctx.secure_session().cloned(),
-                |mut ws| async move {
-                    let res = tokio::try_join!(
-                        async {
-                            let mut stream =
-                                progress_tracker.stream(Some(Duration::from_millis(100)));
-                            while let Some(progress) = stream.next().await {
-                                ws.send(ws::Message::Text(
-                                    serde_json::to_string(&progress)
-                                        .with_kind(ErrorKind::Serialization)?
-                                        .into(),
-                                ))
-                                .await
-                                .with_kind(ErrorKind::Network)?;
-                                if progress.overall.is_complete() {
-                                    break;
-                                }
-                            }
-
-                            Ok::<_, Error>(())
-                        },
-                        async {
-                            if let Some(e) = error
-                                .wait_for(|e| e.is_some())
-                                .await
-                                .ok()
-                                .and_then(|e| e.as_ref().map(|e| e.clone_output()))
-                            {
-                                Err::<(), _>(e)
-                            } else {
-                                Ok(())
-                            }
-                        }
-                    );
-
-                    if let Err(e) = ws.close_result(res.map(|_| "complete")).await {
+                |ws| async move {
+                    if let Err(e) = crate::progress::forward_progress(ws, source).await {
                         if !crate::util::net::is_ws_reset_without_close(&e) {
                             tracing::error!("{}", t!("init.error-closing-websocket", error = e));
                             tracing::debug!("{e:?}");
@@ -575,7 +556,10 @@ pub async fn init_progress(ctx: InitContext) -> Result<InitProgressRes, Error> {
             ),
         )
         .await;
-    Ok(InitProgressRes { progress, guid })
+    Ok(InitProgressRes {
+        progress,
+        guid: Some(guid),
+    })
 }
 
 pub async fn cli_init_progress(
@@ -587,22 +571,14 @@ pub async fn cli_init_progress(
         ..
     }: HandlerArgs<CliContext>,
 ) -> Result<(), Error> {
-    let res: InitProgressRes = from_value(
-        ctx.call_remote::<InitContext>(
-            &parent_method
-                .into_iter()
-                .chain(method.into_iter())
-                .join("."),
+    let response = ctx
+        .call_startup_stream::<FullProgress, ()>(
+            &parent_method.into_iter().chain(method).join("."),
             raw_params,
+            http::HeaderMap::new(),
         )
-        .await?,
-    )?;
-    let mut ws = ctx.ws_continuation::<InitContext>(res.guid).await?;
-    let mut bar = PhasedProgressBar::new(&t!("init.initializing"));
-    while let Some(msg) = crate::util::net::tungstenite::next_text(&mut ws).await? {
-        bar.update(&serde_json::from_str(&msg).with_kind(ErrorKind::Deserialization)?);
-    }
-    Ok(())
+        .await?;
+    crate::progress::with_cli_progress(response.items, &t!("init.initializing")).await
 }
 
 #[cfg(test)]

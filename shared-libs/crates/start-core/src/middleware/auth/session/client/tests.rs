@@ -354,7 +354,10 @@ async fn all_startup_contexts_ignore_an_unavailable_stored_signer() {
                 .unwrap(),
         )
         .unwrap();
-        let mut socket = ctx.ws_continuation::<C>(subscription.guid).await.unwrap();
+        let mut socket = ctx
+            .ws_continuation::<C>(subscription.guid.unwrap())
+            .await
+            .unwrap();
         let snapshot: crate::progress::FullProgress =
             crate::util::net::tungstenite::next_json(&mut socket)
                 .await

@@ -4882,8 +4882,23 @@ export const ImageConfigRepr: z.ZodObject<{
 })
 export const InitProgressRes: z.ZodObject<{
   progress: typeof FullProgress
-  guid: typeof Guid
-}> = /* @__PURE__ */ object({ progress: FullProgress, guid: Guid }).meta({
+  /**
+   * Present for ordinary replies; typed streams use same-ID events.
+   */
+  guid: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
+}> = /* @__PURE__ */ object({
+  progress: FullProgress,
+  /**
+   * Present for ordinary replies; typed streams use same-ID events.
+   */
+  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Present for ordinary replies; typed streams use same-ID events.',
+  }),
+}).meta({
   id: 'InitProgressRes',
 })
 export const InstallParams: z.ZodObject<{

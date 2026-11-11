@@ -233,13 +233,7 @@ export class MockApiService extends ApiService implements StartupApiService {
     'diagnostic.logs': async params => {
       return this.handlers['server.logs']!(params)
     },
-    'init.subscribe': async () => {
-      await pauseFor(250)
-      return {
-        progress: PROGRESS,
-        guid: 'init-progress-guid',
-      }
-    },
+    'init.subscribe': () => this.initSubscription(),
     'init.logs.follow': async () => {
       await pauseFor(2000)
       return {
@@ -1743,9 +1737,14 @@ export class MockApiService extends ApiService implements StartupApiService {
     StartupApiService['streams']
   >({
     stream: async (method, params, options) => {
-      if (method !== 'diagnostic.update')
-        throw new Error(`No mock stream for ${method}`)
-      return this.diagnosticUpdateStream(options)
+      switch (method) {
+        case 'init.subscribe':
+          return this.initSubscriptionStream(options)
+        case 'diagnostic.update':
+          return this.diagnosticUpdateStream(options)
+        default:
+          throw new Error(`No mock stream for ${method}`)
+      }
     },
   })
 
@@ -2030,19 +2029,43 @@ export class MockApiService extends ApiService implements StartupApiService {
     options?.signal?.throwIfAborted()
     const initial = await this.diagnosticUpdate(options?.signal)
     options?.signal?.throwIfAborted()
-    const progress = () => this.initProgress(options?.signal)
+    const progress = () => this.initializationProgress(options?.signal)
     return {
       initial: { ...initial, progress: null },
       items: (async function* () {
         if (initial.target) {
-          options?.signal?.throwIfAborted()
-          yield PROGRESS
-          yield await progress()
+          yield* progress()
         }
         options?.signal?.throwIfAborted()
         return null
       })(),
     }
+  }
+
+  private async initSubscription(
+    signal?: AbortSignal,
+  ): Promise<Result<'init.subscribe'>> {
+    await pauseFor(250, signal)
+    return { progress: PROGRESS, guid: 'init-progress-guid' }
+  }
+
+  private async initSubscriptionStream(
+    options?: import('@start9labs/start-core').RpcStreamOptions,
+  ) {
+    const initial = await this.initSubscription(options?.signal)
+    options?.signal?.throwIfAborted()
+    return {
+      initial: { ...initial, guid: null },
+      items: this.initializationProgress(options?.signal),
+    }
+  }
+
+  private async *initializationProgress(signal?: AbortSignal) {
+    signal?.throwIfAborted()
+    yield PROGRESS
+    yield await this.initProgress(signal)
+    signal?.throwIfAborted()
+    return null
   }
 
   private async diagnosticUpdate(

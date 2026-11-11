@@ -130,7 +130,7 @@ async fn startup_rpc_and_guid_keep_logical_authority_after_dial_pinning() {
         )
         .unwrap();
         let mut socket = ctx
-            .ws_continuation::<InitContext>(subscription.guid)
+            .ws_continuation::<InitContext>(subscription.guid.unwrap())
             .await
             .unwrap();
         let snapshot: crate::progress::FullProgress =

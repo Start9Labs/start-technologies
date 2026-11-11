@@ -32,6 +32,222 @@ async fn server(router: Router) -> (String, WebServer<tokio::net::TcpListener>) 
 }
 
 #[tokio::test]
+async fn initialization_owner_loss_is_cancellation_not_success() {
+    let ctx = context().await;
+    let source = ctx.progress_stream();
+    drop(ctx);
+    tokio::pin!(source);
+    assert!(!source.next().await.unwrap().unwrap().overall.is_complete());
+    assert_eq!(
+        source.next().await.unwrap().unwrap_err().kind,
+        ErrorKind::Cancelled
+    );
+}
+
+#[tokio::test]
+#[ignore = "Requires START_CLI_BIN pointing to the built CLI"]
+async fn actual_init_cli_uses_startup_possession_and_the_actual_terminal() {
+    let binary = std::env::var("START_CLI_BIN").unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let key = temp.path().join("malformed.pem");
+    tokio::fs::write(&key, "not a key").await.unwrap();
+    for failed in [false, true] {
+        let ctx = context().await;
+        ctx.complete(if failed {
+            Err(Error::new(
+                eyre!("actual init failure"),
+                ErrorKind::Filesystem,
+            ))
+        } else {
+            Ok(())
+        });
+        let (host, _server) = server(ui_router(ctx)).await;
+        let output = tokio::time::timeout(
+            Duration::from_secs(15),
+            tokio::process::Command::new(&binary)
+                .current_dir(temp.path())
+                .env("HOME", temp.path())
+                .args([
+                    "--host",
+                    &host,
+                    "--id-key-path",
+                    key.to_str().unwrap(),
+                    "--id-key-gpg",
+                    "unavailable-init-fixture",
+                    "init",
+                    "subscribe",
+                ])
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            output.status.success(),
+            !failed,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if failed {
+            assert_eq!(output.status.code(), Some(ErrorKind::Filesystem as i32));
+        }
+        assert_eq!(tokio::fs::read_to_string(&key).await.unwrap(), "not a key");
+    }
+}
+
+#[tokio::test]
+async fn initialization_percentage_does_not_hide_a_late_typed_error() {
+    let ctx = context().await;
+    let (host, _server) = server(ui_router(ctx.clone())).await;
+    let cli =
+        CliContext::init(ClientConfig::try_parse_from(["test", "-H", &host]).unwrap()).unwrap();
+    let mut response = cli
+        .call_startup_stream::<crate::progress::FullProgress, ()>(
+            "init.subscribe",
+            imbl_value::json!({}),
+            http::HeaderMap::new(),
+        )
+        .await
+        .unwrap();
+    assert!(response.initial["guid"].is_null());
+    ctx.progress.complete();
+    while !response
+        .items
+        .next()
+        .await
+        .unwrap()
+        .unwrap()
+        .overall
+        .is_complete()
+    {}
+    {
+        let next = response.items.next();
+        tokio::pin!(next);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut next)
+                .await
+                .is_err()
+        );
+    }
+    ctx.complete(Err(Error::new(
+        eyre!("late init failure"),
+        ErrorKind::Filesystem,
+    )));
+    let error = loop {
+        match response.items.next().await {
+            Ok(Some(_)) => (),
+            Err(error) => break error,
+            Ok(None) => panic!("percentage completed initialization"),
+        }
+    };
+    assert_eq!(error.code, ErrorKind::Filesystem as i32);
+    assert_eq!(error.data.unwrap()["details"], "late init failure");
+    assert_eq!(
+        cli.call_remote::<InitContext>("state", imbl_value::json!({}))
+            .await
+            .unwrap()
+            .as_str(),
+        Some("initializing")
+    );
+}
+
+#[tokio::test]
+async fn initialization_success_survives_observer_drop_and_is_replayed_to_new_observers() {
+    let ctx = context().await;
+    let dropped = ctx.progress_stream();
+    drop(dropped);
+    ctx.complete(Ok(()));
+    assert!(ctx.progress.snapshot().overall.is_complete());
+    for _ in 0..2 {
+        let source = ctx.progress_stream();
+        tokio::pin!(source);
+        assert!(source.next().await.unwrap().unwrap().overall.is_complete());
+        assert!(source.next().await.is_none());
+    }
+    let (host, _server) = server(ui_router(ctx)).await;
+    let cli =
+        CliContext::init(ClientConfig::try_parse_from(["test", "-H", &host]).unwrap()).unwrap();
+    let mut response = cli
+        .call_startup_stream::<crate::progress::FullProgress, ()>(
+            "init.subscribe",
+            imbl_value::json!({}),
+            http::HeaderMap::new(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        response
+            .items
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .overall
+            .is_complete()
+    );
+    assert!(response.items.next().await.unwrap().is_none());
+    response.items.finish().await.unwrap();
+    let response: crate::init::InitProgressRes = from_value(
+        cli.call_remote::<InitContext>("init.subscribe", imbl_value::json!({}))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let mut continuation = cli
+        .ws_continuation::<InitContext>(response.guid.unwrap())
+        .await
+        .unwrap();
+    assert!(
+        crate::util::net::tungstenite::next_json::<crate::progress::FullProgress, _>(
+            &mut continuation
+        )
+        .await
+        .unwrap()
+        .overall
+        .is_complete()
+    );
+    assert!(
+        crate::util::net::tungstenite::next_text(&mut continuation)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn initialization_error_remains_an_error_for_late_legacy_observers() {
+    let ctx = context().await;
+    ctx.complete(Err(Error::new(
+        eyre!("cached init failure"),
+        ErrorKind::Filesystem,
+    )));
+    assert!(!ctx.progress.snapshot().overall.is_complete());
+    let (host, _server) = server(ui_router(ctx)).await;
+    let cli =
+        CliContext::init(ClientConfig::try_parse_from(["test", "-H", &host]).unwrap()).unwrap();
+    let response: crate::init::InitProgressRes = from_value(
+        cli.call_remote::<InitContext>("init.subscribe", imbl_value::json!({}))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let mut continuation = cli
+        .ws_continuation::<InitContext>(response.guid.unwrap())
+        .await
+        .unwrap();
+    crate::util::net::tungstenite::next_json::<crate::progress::FullProgress, _>(&mut continuation)
+        .await
+        .unwrap();
+    assert!(
+        crate::util::net::tungstenite::next_text(&mut continuation)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("cached init failure")
+    );
+}
+
+#[tokio::test]
 async fn actual_startup_context_admits_without_a_database_and_preserves_http_and_host_policy() {
     let ctx = context().await;
     let (host, _server) = server(ui_router(ctx.clone())).await;
@@ -111,7 +327,7 @@ async fn actual_startup_context_admits_without_a_database_and_preserves_http_and
     )
     .unwrap();
     let mut continuation = cli
-        .ws_continuation::<InitContext>(progress.guid)
+        .ws_continuation::<InitContext>(progress.guid.unwrap())
         .await
         .unwrap();
     let snapshot: crate::progress::FullProgress =

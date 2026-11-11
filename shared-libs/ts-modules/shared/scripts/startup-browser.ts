@@ -42,6 +42,8 @@ Object.assign(window, {
       Array.from({ length: 4 }, () => api.rpc.state({})),
     )
     const subscription = await api.rpc.init.subscribe({})
+    if (subscription.guid === null)
+      throw Error('Ordinary init response omitted its GUID')
     const progress = await firstValueFrom(
       api.openWebsocket$<T.FullProgress>(subscription.guid),
     )

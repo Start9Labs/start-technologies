@@ -388,6 +388,27 @@ impl CliContext {
             .await
     }
 
+    pub(crate) async fn call_startup_stream<
+        Item: serde::de::DeserializeOwned,
+        Final: serde::de::DeserializeOwned,
+    >(
+        &self,
+        method: &str,
+        params: Value,
+        headers: HeaderMap,
+    ) -> Result<crate::util::rpc_client::RpcResponseStream<Value, Item, Final>, RpcError> {
+        self.rpc_client
+            .stream(
+                self.rpc_client.ephemeral_signer(),
+                crate::middleware::auth::session::client::websocket_url(self.rpc_url()?)?,
+                self.host_identity.as_deref().unwrap_or_default(),
+                headers,
+                method,
+                params,
+            )
+            .await
+    }
+
     pub(crate) async fn call_diagnostic_stream<
         Item: serde::de::DeserializeOwned,
         Final: serde::de::DeserializeOwned,
@@ -401,15 +422,7 @@ impl CliContext {
         if let Some(auth) = local_auth_header_for_url::<DiagnosticContext>(&url).await {
             headers.insert(AUTHORIZATION, auth);
         }
-        self.rpc_client
-            .stream(
-                self.rpc_client.ephemeral_signer(),
-                crate::middleware::auth::session::client::websocket_url(url)?,
-                self.host_identity.as_deref().unwrap_or_default(),
-                headers,
-                method,
-                params,
-            )
+        self.call_startup_stream(method, params, headers)
             .await
             .map_err(Error::from)
             .with_ctx(|error| (error.kind, method))
