@@ -24,7 +24,26 @@ providers: [tuiLinkOptionsProvider({ appearance: 'action-grayscale' })]
 `<header tuiHeader><h3 tuiTitle>` + `<ul tuiList="s">`. A `role="table"` div grid with 60 lines
 of CSS becomes `tuiCell` rows + `| keyvalue`; label/value pairs are a `<dl tuiList>` of `dt`/`dd`
 (`compact` when dense), not `tuiSubtitle` stacks. If you're writing flexbox to lay out a
-title/subtitle/actions row, you missed a primitive.
+title/subtitle/actions row, you missed a primitive. The same sweep goes for the pieces inside:
+
+```html
+<!-- BEFORE: ._avatar circle, ._chip pill, styled <code>, tui-icon { color } — ~80 lines of CSS -->
+<article tuiCardLarge="compact" appearance="floating">
+  <header tuiHeader="body-s">
+    <span tuiAvatar="@tui.shield-alert" appearance="negative"></span>
+    <span tuiTitle>
+      Notice of a security incident
+      <small tuiSubtitle>Your vendor's security team</small>
+    </span>
+    <aside tuiAccessories>
+      <span tuiBadge appearance="positive" iconStart="@tui.lock">StartTunnel</span>
+    </aside>
+  </header>
+  <p tuiDescription>…</p>
+</article>
+<span tuiChip iconStart="@tui.eye">Vendor</span>
+<code tuiChip size="xs">start-cli</code>
+```
 
 **3. Per-component loader + try/catch + error toast → `TaskService.run(task, 'Saving')`.**
 (One sweep collapsed ~50 copies into one 30-line service.) Caveat from the follow-up commit:
