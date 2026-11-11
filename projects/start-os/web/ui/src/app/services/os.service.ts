@@ -6,7 +6,6 @@ import {
   BehaviorSubject,
   combineLatest,
   distinctUntilChanged,
-  firstValueFrom,
   map,
   shareReplay,
 } from 'rxjs'
@@ -98,8 +97,8 @@ export class OSService {
   /** Older in-flight loads cannot replace a later request's catalog. */
   async loadOS(registry?: string): Promise<void> {
     const sequence = ++this.loadSequence
-    const { id } = await getServerInfo(this.patch)
-    registry ??= (await firstValueFrom(this.patch.watch$('ui'))).startosRegistry
+    const { id, osRegistry } = await getServerInfo(this.patch)
+    registry ??= osRegistry
 
     const [versions, gitHash] = await Promise.all([
       this.api.rpc.registry.os.version.get({
