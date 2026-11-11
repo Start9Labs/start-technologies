@@ -214,7 +214,8 @@ export interface FileHelper<A> {
   ): Promise<null>
   /**
    * Deep-merges partial data under the writer lock; arrays are replaced.
-   * Invalid file syntax falls back to schema defaults. Transformer errors reject.
+   * Invalid file syntax falls back to schema defaults, after the file is copied
+   * to `<path>.unparseable-<timestamp>`. Transformer errors reject.
    */
   merge(
     effects: T.Effects,
@@ -256,14 +257,20 @@ class FileHelperImpl<A> implements FileHelper<A> {
   readonly readData = (stringValue: string): unknown =>
     this.transformRead(this.parseData(stringValue))
 
-  private readMergeData(raw: string | null): unknown {
+  /** Null for an unparseable file, after copying it aside. */
+  private async readMergeData(
+    raw: string | null,
+    path: string,
+  ): Promise<unknown> {
     if (raw === null) return null
     let parsed: unknown
     try {
       parsed = this.parseData(raw)
     } catch (e) {
+      const backup = `${path}.unparseable-${new Date().toISOString()}`
+      await fs.copyFile(path, backup, fs.constants.COPYFILE_EXCL)
       console.warn(
-        `${this.path} could not be parsed; rebuilding it from the schema defaults: ${asError(e).message}`,
+        `${this.path} could not be parsed; copied it to ${backup} and rebuilt it from the schema defaults: ${asError(e).message}`,
       )
       return null
     }
@@ -465,8 +472,8 @@ class FileHelperImpl<A> implements FileHelper<A> {
   ) {
     return this.modify(
       effects,
-      async raw => {
-        let fileData: any = this.readMergeData(raw)
+      async (raw, path) => {
+        let fileData: any = await this.readMergeData(raw, path)
         try {
           fileData = this.validate(fileData)
         } catch (_) {}

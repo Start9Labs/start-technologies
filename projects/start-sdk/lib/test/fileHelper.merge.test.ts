@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'fs'
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { FileHelper } from '../util/fileHelper'
@@ -250,9 +250,10 @@ describe('FileHelper.merge', () => {
     ['yaml', 'A: [keep'],
     ['toml', 'A = "keep'],
   ])(
-    '%s rebuilds a file it cannot parse from the defaults',
+    '%s backs up a file it cannot parse, then rebuilds it from the defaults',
     async (kind, before) => {
-      const path = seeded(`unparseable.${kind}`, before)
+      const name = `unparseable.${kind}`
+      const path = seeded(name, before)
       const file = (FileHelper as any)[kind](
         path,
         z.looseObject({ A: z.string().catch('default') }),
@@ -261,6 +262,11 @@ describe('FileHelper.merge', () => {
       await file.merge(effects, {})
 
       expect(await file.read().once()).toEqual({ A: 'default' })
+      const backups = readdirSync(dir).filter(f =>
+        f.startsWith(`${name}.unparseable-`),
+      )
+      expect(backups).toHaveLength(1)
+      expect(readFileSync(join(dir, backups[0]), 'utf-8')).toBe(before)
     },
   )
 })

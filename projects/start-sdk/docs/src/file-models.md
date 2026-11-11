@@ -231,14 +231,14 @@ Writes replace the file atomically, preserving its owner, access ACL, permission
 
 Every `merge()` — including `merge(effects, {})` — reads the file, parses it through your schema, deep-merges the patch over the parsed value, re-serializes, and writes only if the result differs from what was on disk. With an empty patch, against a file that already exists:
 
-| Existing content        | Result                                                                |
-| ----------------------- | --------------------------------------------------------------------- |
-| Key present and valid   | Untouched                                                             |
-| Key missing             | Filled from its `.catch()` default                                    |
-| Key present but invalid | **Replaced** by its `.catch()` default — this is the self-healing     |
-| Key outside the schema  | Preserved (see [Unknown Key Preservation](#unknown-key-preservation)) |
-| Comments, formatting    | **Not preserved** — the file is re-serialized from the parsed value   |
-| File that doesn't parse | **Rebuilt** from the `.catch()` defaults, with a warning in the logs  |
+| Existing content        | Result                                                                                                                                   |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Key present and valid   | Untouched                                                                                                                                |
+| Key missing             | Filled from its `.catch()` default                                                                                                       |
+| Key present but invalid | **Replaced** by its `.catch()` default — this is the self-healing                                                                        |
+| Key outside the schema  | Preserved (see [Unknown Key Preservation](#unknown-key-preservation))                                                                    |
+| Comments, formatting    | **Not preserved** — the file is re-serialized from the parsed value                                                                      |
+| File that doesn't parse | **Rebuilt** from the `.catch()` defaults after a copy is saved beside it as `<file>.unparseable-<timestamp>`, with a warning in the logs |
 
 So `merge(effects, {})` is safe to call on every init: it seeds a fresh file, repairs a corrupted one, and does nothing to a file that already round-trips cleanly. The parse is why [every key needs `.catch()`](#every-key-should-have-catch) — a value the schema can't repair makes `merge()` throw rather than heal.
 
