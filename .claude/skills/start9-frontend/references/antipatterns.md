@@ -121,6 +121,9 @@ after the upgrade), unused imports, five font families the day the design settle
 copies get centralized, one-off spacing classes (`.padding-top`) get deleted. The global
 stylesheet count goes down, never up. A global modifier that only one component uses
 (`.g-markdown._document`) moves into that component as `:host ::ng-deep .g-markdown { … }`.
+A positional rule in a global utility goes inside `:where()`, so a component's `:host` still
+wins: `.g-section:where(:nth-of-type(even)) { background: … }`, never a background a section
+must move into `host: { style }` to beat.
 
 **16. Copy-pasted markup branches → data-driven rendering.** Three hand-written dropdown
 templates + eight nav buttons → one `navigation` object rendered via `| keyvalue: asIs` (with

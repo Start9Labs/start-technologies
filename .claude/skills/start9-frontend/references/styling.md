@@ -15,6 +15,9 @@ ladder from SKILL.md doctrine #3, expanded:
    - **Type size comes from the element, not CSS.** `tuiHeader="h6"` (or `body-s`, `h2`, …)
      sizes any element, a `dd` or a price included; fine print is `<small>`. A
      `font: var(--tui-typography-…)` rule on an element a primitive can size gets deleted.
+     `tuiHeader`, `tuiChip` and `tuiBadge` set the `font` shorthand on their own
+     element, so `<b tuiChip>` loses its bold: nest it, `<code tuiChip><b>…</b></code>`.
+     `tuiHeader` also sets `text-align: start`, so a centred heading keeps its own type rule.
 2. **Appearances are the color system**: `appearance="primary | secondary | flat | outline |
 accent | positive | negative | warning | info | icon | floating | primary-destructive |
 flat-grayscale | outline-grayscale | action-grayscale | …"` on buttons/badges/cells/
@@ -43,6 +46,11 @@ flat-grayscale | outline-grayscale | action-grayscale | …"` on buttons/badges/
    Taiga SCSS utils import into inline styles: `@use '@taiga-ui/styles/utils' as taiga` +
    `@include taiga.transition(...)`. A state class nests under its element
    (`.search { …; &._open { … } }`).
+
+**`tuiCardLarge` owns its stack.** Its column `gap` and `align-items: stretch` sit at specificity
+0,3,0, so a component's `[tuiCardLarge] { gap; align-items: center }` silently loses. A card that
+is one row carries the row primitive on itself, `<div tuiCardLarge="compact" tuiHeader="body-s">`,
+which the stack rule skips; content that must centre keeps a plain `:host` box.
 
 **Floating cards in the light theme pool their shadows.** Large cards close together
 (`appearance="floating"`, `--tui-shadow-medium`) blur into a grey wash between them. Where cards

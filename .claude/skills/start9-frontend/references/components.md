@@ -203,6 +203,8 @@ validation`).
   `safeLinks` directive (forces `target="_blank" rel="noreferrer"` on external links).
 - Text stacks use `tuiTitle`/`tuiSubtitle` with `<b>` for the title — never custom
   heading/caption CSS: `<span tuiTitle><b>{{ title }}</b><span tuiSubtitle>{{ sub }}</span></span>`.
+  `tuiSubtitle` is grey only inside `tuiHeader` or `tuiCell`; in a bare `tuiTitle` it inherits
+  the text colour, so it takes `class="g-secondary"` there.
 - **A cell's children sit flat in the `[tuiCell]`.** A single-line title is one element,
   `<span tuiTitle tuiFade>`, with no inner span. Trailing `<time tuiSubtitle>`, badges and
   statuses are direct children, and the title's own flex pushes them to the end. Taiga already
