@@ -2573,6 +2573,7 @@ test('production mocks support inspection, independent failed backups and new-lo
     { provide: WA_CRYPTO, useValue: webcrypto },
     { provide: WA_SESSION_STORAGE, useValue: {} },
     { provide: PATCH_CACHE, useValue: cache },
+    { provide: ConfigService, useValue: { gitHash: runningGitHash } },
   ])
   const api = runInInjectionContext(injector, () => new MockApiService())
   const patch = new PatchDB(
@@ -2585,6 +2586,7 @@ test('production mocks support inspection, independent failed backups and new-lo
     injector.destroy()
   })
   t.mock.timers.enable({ apis: ['setTimeout'] })
+  assert.equal(await api.rpc.gitInfo({}), runningGitHash)
   const targetId = await api.rpc.backup.target.create({
     name: 'Archive',
     source: { kind: 'local' },
