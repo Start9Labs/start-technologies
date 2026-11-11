@@ -37,7 +37,7 @@ The profile belongs to the router's USB port, not to the adapter:
 - An unplugged USB port stays in the list, marked "Not connected", and keeps its profile.
 - Each port of a USB hub is a USB port of its own, with its own profile. Moving the hub to another USB port moves its adapters to new USB ports.
 
-To remove a USB port from the list, unplug its adapter and click the trash icon in its row. While an adapter is plugged in, the router asks you to unplug it first. The network restarts briefly. The port appears again, in the Admin profile, the next time an adapter is plugged into it.
+To remove a USB port from the list, unplug its adapter and click the trash icon in its row. The icon is greyed out while an adapter is plugged in. The network restarts briefly. The port appears again, in the Admin profile, the next time an adapter is plugged into it.
 
 Adapters with Realtek (RTL8152, RTL8153, RTL8156) or ASIX (AX88179, AX88772) chips work, as do adapters that use the standard USB Ethernet classes (CDC ECM, CDC NCM, RNDIS). The router's USB-C port supplies its power and does not take an adapter. An adapter with a USB-C plug needs a USB-C to USB-A adapter. The WAN port must be an Ethernet port.
 

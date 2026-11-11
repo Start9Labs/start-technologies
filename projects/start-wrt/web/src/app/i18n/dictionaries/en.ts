@@ -603,6 +603,5 @@ export const ENGLISH: Record<string, number> = {
   'Removing {port} briefly restarts the network. The port appears again, in the Admin profile, the next time a USB Ethernet adapter is plugged into it.': 634,
   'USB port removed': 635,
   'Failed to remove USB port': 636,
-  'Unplug the adapter from {port}, then remove the port.': 637,
-  'Adapter plugged in': 638,
+  'Unplug the adapter to remove this port': 637,
 }

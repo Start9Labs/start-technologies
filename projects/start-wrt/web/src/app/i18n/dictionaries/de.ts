@@ -598,6 +598,5 @@ export default {
   634: 'Das Entfernen von {port} startet das Netzwerk kurz neu. Der Port erscheint wieder im Admin-Profil, sobald das nächste Mal ein USB-Ethernet-Adapter daran angeschlossen wird.',
   635: 'USB-Port entfernt',
   636: 'USB-Port konnte nicht entfernt werden',
-  637: 'Ziehen Sie den Adapter von {port} ab und entfernen Sie dann den Port.',
-  638: 'Adapter angeschlossen',
+  637: 'Ziehen Sie den Adapter ab, um diesen Port zu entfernen',
 } satisfies i18n

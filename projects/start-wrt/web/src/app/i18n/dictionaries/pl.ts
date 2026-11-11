@@ -598,6 +598,5 @@ export default {
   634: 'Usunięcie portu {port} na chwilę restartuje sieć. Port pojawi się ponownie, w profilu Admin, gdy następnym razem zostanie do niego podłączony adapter USB–Ethernet.',
   635: 'Port USB usunięty',
   636: 'Nie udało się usunąć portu USB',
-  637: 'Odłącz adapter od portu {port}, a następnie usuń port.',
-  638: 'Adapter podłączony',
+  637: 'Odłącz adapter, aby usunąć ten port',
 } satisfies i18n

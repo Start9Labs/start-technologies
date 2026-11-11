@@ -8,6 +8,7 @@ import {
   TuiButton,
   TuiDataList,
   TuiDropdown,
+  TuiHint,
   TuiLink,
 } from '@taiga-ui/core'
 import {
@@ -84,13 +85,19 @@ import { EthernetPortView, EthernetService } from './service'
             }
           </td>
           <td tuiTd>
-            @if (item.usb) {
+            @if (item.usb; as usb) {
               <button
                 tuiIconButton
                 type="button"
                 size="xs"
                 appearance="icon"
                 iconStart="@tui.trash"
+                [disabled]="usb.present"
+                [tuiHint]="
+                  usb.present
+                    ? ('Unplug the adapter to remove this port' | i18n)
+                    : null
+                "
                 (click)="onRemove(item)"
               >
                 {{ 'Remove' | i18n }}
@@ -136,6 +143,7 @@ import { EthernetPortView, EthernetService } from './service'
     FormsModule,
     TuiDataList,
     TuiDropdown,
+    TuiHint,
     TuiChevron,
     TuiBadge,
     RouterLink,
@@ -152,24 +160,6 @@ export class EthernetTable {
   readonly ethernetTable = input<EthernetPortView[]>([])
 
   async onRemove(item: EthernetPortView) {
-    if (await this.service.usbPortInUse(item.name)) {
-      this.dialogs
-        .open(
-          fill(
-            this.i18n.transform(
-              'Unplug the adapter from {port}, then remove the port.',
-            ),
-            { port: item.name },
-          ),
-          {
-            label: this.i18n.transform('Adapter plugged in'),
-            data: this.i18n.transform('Got it'),
-          },
-        )
-        .subscribe()
-      return
-    }
-
     const confirmed = await firstValueFrom(
       this.dialogs.open<boolean>(TUI_CONFIRM, {
         label: this.i18n.transform('Remove USB port?'),

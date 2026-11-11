@@ -53,12 +53,6 @@ export class EthernetService extends FormService<EthernetPortView[]> {
     await this.api.ethernetSet(this.buildConfig(items, false))
   }
 
-  /** Read fresh: the polled state trails a plug or unplug. */
-  async usbPortInUse(port: string): Promise<boolean> {
-    const { usb_ports } = await this.api.ethernetGet()
-    return usb_ports[port]?.present ?? false
-  }
-
   async removeUsbPort(port: string): Promise<void> {
     const removed = await this.actions.run(
       () => this.api.ethernetRemoveUsbPort({ port }),

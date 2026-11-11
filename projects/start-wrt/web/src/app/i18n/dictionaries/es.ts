@@ -598,6 +598,5 @@ export default {
   634: 'Quitar {port} reinicia la red brevemente. El puerto vuelve a aparecer, en el perfil Admin, la próxima vez que se conecte a él un adaptador Ethernet USB.',
   635: 'Puerto USB quitado',
   636: 'No se pudo quitar el puerto USB',
-  637: 'Desconecte el adaptador de {port} y luego quite el puerto.',
-  638: 'Adaptador conectado',
+  637: 'Desconecte el adaptador para quitar este puerto',
 } satisfies i18n
