@@ -11,7 +11,7 @@ use librqbit::{
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt};
-use tokio::sync::{OnceCell, RwLock};
+use tokio::sync::OnceCell;
 use tokio::time::{Instant, timeout};
 use tokio_util::sync::{CancellationToken, DropGuard};
 use url::Url;
@@ -25,7 +25,7 @@ use crate::sign::commitment::Commitment;
 use crate::sign::commitment::blake3::Blake3Commitment;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::util::io::{TmpDir, open_file};
-use crate::util::sync::SyncMutex;
+use crate::util::sync::{SyncMutex, SyncRwLock};
 
 mod preferences;
 mod seeds;
@@ -292,7 +292,8 @@ pub struct TorrentClient {
     disable_upload: bool,
     seed: Option<TorrentSeedConfig>,
     catalog: OnceCell<Arc<seeds::SeedCatalog>>,
-    seeds: RwLock<Option<Arc<seeds::SeedService>>>,
+    seeds: SyncRwLock<Option<Arc<seeds::SeedService>>>,
+    closed: CancellationToken,
 }
 
 impl std::fmt::Debug for TorrentClient {
@@ -308,33 +309,37 @@ impl std::fmt::Debug for TorrentClient {
 impl TorrentClient {
     /// Never uploads asset data or retains completed torrents.
     pub fn download_only(config: TorrentDownloadConfig, proxy: bool) -> Self {
+        let closed = CancellationToken::new();
         Self {
             available: config
                 .bittorrent
                 .unwrap_or(TorrentPreferences::default().downloads)
                 && !proxy,
-            downloads: SyncMutex::new(Some(CancellationToken::new())),
+            downloads: SyncMutex::new(Some(closed.child_token())),
             disable_upload: true,
             seed: None,
             catalog: OnceCell::new(),
-            seeds: RwLock::new(None),
+            seeds: SyncRwLock::new(None),
+            closed,
         }
     }
 
     /// Keeps preference controls available unless administratively disabled; peer transfers require opt-in.
     pub fn for_server(config: TorrentDownloadConfig, seed: Option<TorrentSeedConfig>) -> Self {
         let available = config.bittorrent.unwrap_or(true);
+        let closed = CancellationToken::new();
         Self {
             available,
             downloads: SyncMutex::new(
                 TorrentPreferences::default()
                     .downloads
-                    .then(CancellationToken::new),
+                    .then(|| closed.child_token()),
             ),
             disable_upload: false,
             seed: available.then(|| seed.unwrap_or_default()),
             catalog: OnceCell::new(),
-            seeds: RwLock::new(None),
+            seeds: SyncRwLock::new(None),
+            closed,
         }
     }
 
@@ -348,17 +353,17 @@ impl TorrentClient {
     }
 
     pub(crate) fn available(&self) -> bool {
-        self.available
+        self.available && !self.closed.is_cancelled()
     }
 
     pub(crate) fn downloads_enabled(&self) -> bool {
-        self.available && self.downloads.peek(Option::is_some)
+        self.available() && self.downloads.peek(Option::is_some)
     }
 
     pub(crate) fn set_downloads_enabled(&self, enabled: bool) {
         self.downloads.mutate(|current| {
-            if enabled {
-                current.get_or_insert_with(CancellationToken::new);
+            if enabled && self.available() {
+                current.get_or_insert_with(|| self.closed.child_token());
             } else if let Some(token) = current.take() {
                 token.cancel();
             }
@@ -366,7 +371,7 @@ impl TorrentClient {
     }
 
     fn download_token(&self) -> Option<CancellationToken> {
-        self.available
+        self.available()
             .then(|| {
                 self.downloads
                     .peek(|current| current.as_ref().map(CancellationToken::child_token))
@@ -389,12 +394,16 @@ impl TorrentClient {
             std::future::Future<Output = Result<Option<librqbit::ListenerOptions>, Error>> + Send,
     {
         loop {
+            if self.closed.is_cancelled() {
+                return Ok(());
+            }
             let current: TorrentPreferences =
                 from_value(preferences.as_mut().peek_and_mark_seen()?)?;
             self.set_downloads_enabled(current.downloads);
-            let should_seed = self.available && current.seeding;
+            let should_seed = self.available() && current.seeding;
             let changed = tokio::select! {
                 biased;
+                _ = self.closed.cancelled() => return Ok(()),
                 result = preferences.changed() => result.map_err(Error::from),
                 result = async {
                     let maintenance = async {
@@ -403,7 +412,7 @@ impl TorrentClient {
                                 bindings.peek_and_mark_seen()?;
                                 let listener = configure_incoming().await?;
                                 if should_seed {
-                                    let service = self.seeds.read().await.clone();
+                                    let service = self.seeds.peek(Clone::clone);
                                     match service {
                                         Some(service) if service.matches_listener(listener.as_ref()) => {
                                             service.refresh().await?;
@@ -452,17 +461,18 @@ impl TorrentClient {
     }
 
     async fn catalog(&self) -> Result<Option<&Arc<seeds::SeedCatalog>>, Error> {
-        let Some(config) = &self.seed else {
+        let Some(config) = self.seed.as_ref().filter(|_| self.available()) else {
             return Ok(None);
         };
-        self.catalog
-            .get_or_try_init(|| async {
+        tokio::select! {
+            biased;
+            _ = self.closed.cancelled() => Ok(None),
+            catalog = self.catalog.get_or_try_init(|| async {
                 seeds::SeedCatalog::open(config.directory.clone())
                     .await
                     .map(Arc::new)
-            })
-            .await
-            .map(Some)
+            }) => catalog.map(Some),
+        }
     }
 
     pub(crate) async fn register_stored(
@@ -481,21 +491,36 @@ impl TorrentClient {
         listener: Option<librqbit::ListenerOptions>,
     ) -> Result<(), Error> {
         if let Some(catalog) = self.catalog().await? {
-            let service = Arc::new(seeds::SeedService::start(catalog.clone(), listener).await?);
-            *self.seeds.write().await = Some(service.clone());
-            service.refresh().await?;
+            let service = tokio::select! {
+                biased;
+                _ = self.closed.cancelled() => return Ok(()),
+                service = seeds::SeedService::start(
+                    catalog.clone(), listener, self.closed.child_token(),
+                ) => Arc::new(service?),
+            };
+            let published = self.seeds.mutate(|current| {
+                if self.closed.is_cancelled() {
+                    return false;
+                }
+                *current = Some(service.clone());
+                true
+            });
+            if published {
+                service.refresh().await?;
+            }
         }
         Ok(())
     }
 
-    /// Stops peer transfers without deleting stored artifacts or their metadata.
-    pub async fn shutdown(&self) {
+    /// Cancels peer work permanently; preference updates cannot reopen this client.
+    pub fn shutdown(&self) {
+        self.closed.cancel();
         self.set_downloads_enabled(false);
-        self.stop_seeding().await;
+        self.seeds.replace(None);
     }
 
     async fn stop_seeding(&self) {
-        let service = self.seeds.write().await.take();
+        let service = self.seeds.replace(None);
         if let Some(service) = service {
             service.stop().await;
         }
@@ -618,7 +643,9 @@ impl TorrentClient {
             output.clone(),
             SessionOptions {
                 disable_upload: self.disable_upload,
-                cancellation_token,
+                cancellation_token: Some(
+                    cancellation_token.unwrap_or_else(|| self.closed.child_token()),
+                ),
                 ..session_options()
             },
         )

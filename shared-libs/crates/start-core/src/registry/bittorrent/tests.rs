@@ -524,7 +524,7 @@ async fn default_clients_use_http_without_resolving_advertised_magnets() -> Resu
                 .is_none()
         );
         assert!(client.catalog.get().is_none());
-        assert!(client.seeds.read().await.is_none());
+        assert!(client.seeds.peek(Option::is_none));
     }
     assert!(swarm.http_hits.load(Ordering::SeqCst) > 0);
     Ok(())
@@ -544,7 +544,7 @@ async fn torrent_metadata_download_is_preferred_to_http() -> Result<(), Error> {
     assert!(client.disable_upload);
     client.resume_seeding(None).await?;
     assert!(client.catalog.get().is_none());
-    assert!(client.seeds.read().await.is_none());
+    assert!(client.seeds.peek(Option::is_none));
     Ok(())
 }
 
@@ -665,7 +665,7 @@ async fn existing_artifact_metadata_lookup_does_not_download_a_payload() -> Resu
     assert_eq!(metadata.torrent.0, swarm.torrent);
     assert_eq!(swarm.http_hits.load(Ordering::SeqCst), 0);
     assert!(client.catalog.get().is_none());
-    assert!(client.seeds.read().await.is_none());
+    assert!(client.seeds.peek(Option::is_none));
     Ok(())
 }
 
@@ -921,7 +921,7 @@ async fn stored_hybrid_registration_keeps_metadata_only_and_waits_for_opt_in() -
     client
         .register_stored(&path, outcome.sharing.as_ref().unwrap())
         .await?;
-    assert!(client.seeds.read().await.is_none());
+    assert!(client.seeds.peek(Option::is_none));
     let meta = validate_metadata(&swarm.torrent, &asset.commitment.into())?;
     assert!(
         catalog
@@ -932,9 +932,9 @@ async fn stored_hybrid_registration_keeps_metadata_only_and_waits_for_opt_in() -
     assert!(!catalog.join(meta.info_hash.as_string()).exists());
     for _ in 0..2 {
         client.resume_seeding(None).await?;
-        assert!(client.seeds.read().await.is_some());
-        client.shutdown().await;
-        assert!(client.seeds.read().await.is_none());
+        assert!(client.seeds.peek(Option::is_some));
+        client.stop_seeding().await;
+        assert!(client.seeds.peek(Option::is_none));
     }
     assert_eq!(tokio::fs::read(path).await?, swarm.content);
     Ok(())
@@ -989,7 +989,7 @@ async fn native_address_changes_reconcile_without_waiting_for_periodic_refresh()
     .await
     .expect("address selections did not wake the existing maintenance task");
     drop(task);
-    client.shutdown().await;
+    client.shutdown();
     Ok(())
 }
 
@@ -1002,7 +1002,7 @@ fn sharing_preferences(seeding: bool) -> TorrentPreferences {
 
 async fn wait_for_seeding(client: &TorrentClient, enabled: bool) {
     timeout(Duration::from_secs(10), async {
-        while client.seeds.read().await.is_some() != enabled {
+        while client.seeds.peek(Option::is_some) != enabled {
             tokio::task::yield_now().await;
         }
     })
@@ -1034,7 +1034,7 @@ async fn seeding_follows_persisted_intent_and_can_restart_with_an_old_service_re
     .into();
     db.put(&ptr, &sharing_preferences(true)).await?;
     wait_for_seeding(&client, true).await;
-    let old = client.seeds.read().await.clone().unwrap();
+    let old = client.seeds.peek(Clone::clone).unwrap();
     let lease = client.catalog.get().unwrap().clone();
     db.put(&ptr, &sharing_preferences(false)).await?;
     wait_for_seeding(&client, false).await;
@@ -1043,7 +1043,7 @@ async fn seeding_follows_persisted_intent_and_can_restart_with_an_old_service_re
     assert!(Arc::ptr_eq(&lease, client.catalog.get().unwrap()));
     assert!(!Arc::ptr_eq(
         &old,
-        client.seeds.read().await.as_ref().unwrap()
+        &client.seeds.peek(Clone::clone).unwrap()
     ));
     db.put(&ptr, &sharing_preferences(false)).await?;
     wait_for_seeding(&client, false).await;
@@ -1062,8 +1062,8 @@ async fn registration_while_disabled_does_not_revive_a_stopped_service() -> Resu
         }),
     );
     client.resume_seeding(None).await?;
-    let old = client.seeds.read().await.clone().unwrap();
-    client.shutdown().await;
+    let old = client.seeds.peek(Clone::clone).unwrap();
+    client.stop_seeding().await;
     let metadata = SharingMetadata {
         torrent: Base64(swarm.torrent.to_vec()),
         commitment: swarm.asset(swarm.magnet.clone()).commitment.into(),
@@ -1072,18 +1072,18 @@ async fn registration_while_disabled_does_not_revive_a_stopped_service() -> Resu
         .register_stored(&swarm._tmp.join("payload.bin"), &metadata)
         .await?;
     old.refresh().await?;
-    assert!(client.seeds.read().await.is_none());
+    assert!(client.seeds.peek(Option::is_none));
     client.resume_seeding(None).await?;
     assert!(!Arc::ptr_eq(
         &old,
-        client.seeds.read().await.as_ref().unwrap()
+        &client.seeds.peek(Clone::clone).unwrap()
     ));
-    client.shutdown().await;
+    client.shutdown();
     Ok(())
 }
 
 #[tokio::test]
-async fn cancelling_the_seeding_worker_prevents_late_service_publication() -> Result<(), Error> {
+async fn shutdown_ends_the_preference_watcher_without_reopening_sharing() -> Result<(), Error> {
     let cache = TmpDir::new().await?;
     let client = Arc::new(TorrentClient::for_server(
         TorrentDownloadConfig::default(),
@@ -1099,18 +1099,70 @@ async fn cancelling_the_seeding_worker_prevents_late_service_publication() -> Re
         .await
         .typed::<TorrentPreferences>();
     let bindings = db.watch("/bindings".parse().unwrap()).await;
-    let publication = client.seeds.write().await;
-    let mut worker = Box::pin(client.maintain_preferences(
-        watch,
-        bindings,
-        || async { Ok(None) },
-        || async { Ok(()) },
-    ));
-    assert!(futures::poll!(&mut worker).is_pending());
-    drop(worker);
-    drop(publication);
-    client.shutdown().await;
-    assert!(client.seeds.read().await.is_none());
+    let owner = client.clone();
+    let worker = tokio::spawn(async move {
+        owner
+            .maintain_preferences(watch, bindings, || async { Ok(None) }, || async { Ok(()) })
+            .await
+    });
+    wait_for_seeding(&client, true).await;
+    let service = client.seeds.peek(Clone::clone).unwrap();
+    client.shutdown();
+    timeout(Duration::from_secs(2), worker)
+        .await
+        .expect("shutdown left the preference watcher running")
+        .unwrap()?;
+    db.put(&patch_db::json_ptr::ROOT, &sharing_preferences(false))
+        .await?;
+    db.put(&patch_db::json_ptr::ROOT, &sharing_preferences(true))
+        .await?;
+    client.resume_seeding(None).await?;
+    service.refresh().await?;
+    assert!(client.seeds.peek(Option::is_none));
+    assert!(!client.downloads_enabled());
+    Ok(())
+}
+
+#[tokio::test]
+async fn shutdown_cancels_pending_seed_initialization_without_publishing() -> Result<(), Error> {
+    let cache = TmpDir::new().await?;
+    let client = TorrentClient::for_server(
+        TorrentDownloadConfig::default(),
+        Some(TorrentSeedConfig {
+            directory: cache.to_path_buf(),
+        }),
+    );
+    let mut initialization = Box::pin(client.catalog.get_or_init(std::future::pending));
+    assert!(futures::poll!(&mut initialization).is_pending());
+    let mut pending = Box::pin(client.resume_seeding(None));
+    assert!(futures::poll!(&mut pending).is_pending());
+    client.shutdown();
+    timeout(Duration::from_secs(2), pending)
+        .await
+        .expect("shutdown waited for catalog initialization")?;
+    assert!(client.seeds.peek(Option::is_none));
+    assert!(client.catalog.get().is_none());
+    drop(initialization);
+    Ok(())
+}
+
+#[tokio::test]
+async fn shutdown_is_terminal_and_cancels_payload_and_metadata_work() -> Result<(), Error> {
+    let client = cli_client();
+    let payload = client.download_token().unwrap();
+    let metadata = client.workspace(None).await?;
+    client.shutdown();
+    assert!(payload.is_cancelled());
+    assert!(metadata.session.0.cancellation_token().is_cancelled());
+    client.set_downloads_enabled(true);
+    assert!(!client.downloads_enabled());
+    assert!(client.download_token().is_none());
+    assert!(
+        client
+            .for_source(&"https://registry.example/".parse()?)
+            .is_none()
+    );
+    assert!(client.seeds.peek(Option::is_none));
     Ok(())
 }
 
@@ -1124,7 +1176,7 @@ async fn http_only_server_cannot_start_retained_seeding() -> Result<(), Error> {
     );
     client.resume_seeding(None).await?;
     assert!(!client.downloads_enabled());
-    assert!(client.seeds.read().await.is_none());
+    assert!(client.seeds.peek(Option::is_none));
     assert!(client.catalog.get().is_none());
     Ok(())
 }

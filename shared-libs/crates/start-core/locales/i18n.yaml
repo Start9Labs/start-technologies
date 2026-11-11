@@ -2782,6 +2782,27 @@ registry.bittorrent.stalled:
   fr_FR: "Le téléchargement BitTorrent ne progresse plus"
   pl_PL: "Pobieranie BitTorrent przestało postępować"
 
+registry.bittorrent.stored-artifact-changed:
+  en_US: "Stored artifact changed"
+  de_DE: "Gespeichertes Artefakt wurde geändert"
+  es_ES: "El archivo almacenado ha cambiado"
+  fr_FR: "Le fichier stocké a changé"
+  pl_PL: "Zapisany plik został zmieniony"
+
+registry.bittorrent.stored-artifact-differs:
+  en_US: "Stored artifact differs from torrent"
+  de_DE: "Gespeichertes Artefakt weicht vom Torrent ab"
+  es_ES: "El archivo almacenado no coincide con el torrent"
+  fr_FR: "Le fichier stocké diffère du torrent"
+  pl_PL: "Zapisany plik różni się od torrenta"
+
+registry.bittorrent.stored-artifact-length-differs:
+  en_US: "Stored artifact length differs"
+  de_DE: "Die Länge des gespeicherten Artefakts weicht ab"
+  es_ES: "La longitud del archivo almacenado no coincide"
+  fr_FR: "La taille du fichier stocké diffère"
+  pl_PL: "Rozmiar zapisanego pliku jest inny"
+
 # registry/context.rs
 registry.context.missing-hostname:
   en_US: "Missing required configuration: registry-hostname"

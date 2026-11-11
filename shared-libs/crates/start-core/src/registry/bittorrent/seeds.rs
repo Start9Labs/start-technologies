@@ -7,6 +7,7 @@ use librqbit::{AddTorrent, AddTorrentOptions, ListenerOptions};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use super::stored_file::StoredFile;
 use super::{SharingMetadata, TorrentSession, session_options, torrent_error, validate_metadata};
@@ -103,11 +104,13 @@ impl SeedService {
     pub(super) async fn start(
         catalog: Arc<SeedCatalog>,
         listen: Option<ListenerOptions>,
+        cancellation: CancellationToken,
     ) -> Result<Self, Error> {
         let session = TorrentSession::new(
             catalog.directory.clone(),
             librqbit::SessionOptions {
                 listen,
+                cancellation_token: Some(cancellation),
                 ..session_options()
             },
         )
@@ -177,7 +180,7 @@ impl SeedService {
                     }
                 };
             let key = meta.info_hash;
-            let source = match StoredFile::open(&record.source) {
+            let source = match StoredFile::open(&record.source).await {
                 Ok(source) => source,
                 Err(error) => {
                     if error
@@ -193,7 +196,9 @@ impl SeedService {
             };
             let candidate = CheckedArtifact {
                 source: source.clone(),
-                metadata: StoredFile::open(&entry.path()).map_err(torrent_error)?,
+                metadata: StoredFile::open(&entry.path())
+                    .await
+                    .map_err(torrent_error)?,
             };
             drop(record_lock);
             present.insert(key);
@@ -256,7 +261,7 @@ impl SeedService {
                 .map_err(torrent_error)?;
             initialized.map_err(torrent_error)?;
             return Err(Error::new(
-                eyre!("Stored artifact differs from torrent"),
+                eyre!("{}", t!("registry.bittorrent.stored-artifact-differs")),
                 ErrorKind::InvalidRequest,
             ));
         }
@@ -298,6 +303,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancellation_stops_sharing_while_service_references_survive() -> Result<(), Error> {
+        let directory = TmpDir::new().await?;
+        let catalog = Arc::new(SeedCatalog::open(directory.to_path_buf()).await?);
+        let owner = CancellationToken::new();
+        let service = Arc::new(SeedService::start(catalog, None, owner.child_token()).await?);
+        let observer = service.clone();
+        owner.cancel();
+        drop(service);
+        assert!(observer.session.0.cancellation_token().is_cancelled());
+        observer.refresh().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn listener_matching_tracks_the_assigned_announce_port() -> Result<(), Error> {
         let directory = TmpDir::new().await?;
         let catalog = Arc::new(SeedCatalog::open(directory.to_path_buf()).await?);
@@ -306,14 +325,19 @@ mod tests {
             announce_port: Some(45678),
             ..Default::default()
         };
-        let incoming = SeedService::start(catalog.clone(), Some(listener.clone())).await?;
+        let incoming = SeedService::start(
+            catalog.clone(),
+            Some(listener.clone()),
+            CancellationToken::new(),
+        )
+        .await?;
         listener.listen_addr = incoming.session.0.listen_addr().unwrap();
         assert!(incoming.matches_listener(Some(&listener)));
         assert!(!incoming.matches_listener(None));
         listener.announce_port = Some(45679);
         assert!(!incoming.matches_listener(Some(&listener)));
         incoming.stop().await;
-        let outgoing = SeedService::start(catalog, None).await?;
+        let outgoing = SeedService::start(catalog, None, CancellationToken::new()).await?;
         assert!(outgoing.matches_listener(None));
         assert!(!outgoing.matches_listener(Some(&listener)));
         outgoing.stop().await;
@@ -342,6 +366,7 @@ mod tests {
                     listen_addr,
                     ..Default::default()
                 }),
+                CancellationToken::new(),
             )
             .await?;
             listen = service.session.0.listen_addr();
@@ -374,6 +399,7 @@ mod tests {
                 listen_addr,
                 ..Default::default()
             }),
+            CancellationToken::new(),
         )
         .await?;
         service.refresh().await?;
@@ -443,7 +469,7 @@ mod tests {
         let meta = validate_metadata(&metadata.torrent.0, &metadata.commitment)?;
         let catalog = Arc::new(SeedCatalog::open(catalog_dir.to_path_buf()).await?);
         catalog.register(&path, &metadata).await?;
-        let service = SeedService::start(catalog, None).await?;
+        let service = SeedService::start(catalog, None, CancellationToken::new()).await?;
         service.refresh().await?;
         assert!(service.session.0.get(meta.info_hash.into()).is_some());
         tokio::fs::write(&path, b"other bytes").await?;
@@ -492,7 +518,7 @@ mod tests {
         let meta = validate_metadata(&metadata.torrent.0, &metadata.commitment)?;
         let catalog = Arc::new(SeedCatalog::open(catalog_dir.to_path_buf()).await?);
         catalog.register(&stored, &metadata).await?;
-        let service = SeedService::start(catalog, None).await?;
+        let service = SeedService::start(catalog, None, CancellationToken::new()).await?;
         service.refresh().await?;
         assert!(service.session.0.get(meta.info_hash.into()).is_none());
         assert_eq!(tokio::fs::read(&stored).await?, installed_bytes);
@@ -514,7 +540,7 @@ mod tests {
         let meta = validate_metadata(&metadata.torrent.0, &metadata.commitment)?;
         let catalog = Arc::new(SeedCatalog::open(catalog_dir.to_path_buf()).await?);
         catalog.register(&path, &metadata).await?;
-        let service = SeedService::start(catalog, None).await?;
+        let service = SeedService::start(catalog, None, CancellationToken::new()).await?;
         service.refresh().await?;
         assert!(service.session.0.get(meta.info_hash.into()).is_none());
         assert_eq!(tokio::fs::read(&path).await?, b"other bytes");

@@ -38,7 +38,9 @@ pub(crate) async fn register_existing(ctx: &RpcContext) -> Result<(), Error> {
         }
         let manifest = entry.state_info.as_manifest(ManifestPreference::Old);
         let discovered = async {
-            let source = StoredFile::open(&entry.s9pk).map_err(super::torrent_error)?;
+            let source = StoredFile::open(&entry.s9pk)
+                .await
+                .map_err(super::torrent_error)?;
             let package = S9pk::deserialize_local(&source, None).await?;
             if package.as_manifest().id != id || package.as_manifest().version != manifest.version {
                 return Ok::<_, Error>(());
@@ -148,7 +150,9 @@ async fn discover_images(ctx: &RpcContext, registry: url::Url) -> Result<(), Err
             let asset = match image_for_name(&index, &path) {
                 Some(asset) => Some(asset),
                 None if path.file_name().is_some_and(|name| name == "next.squashfs") => {
-                    let source = StoredFile::open(&path).map_err(super::torrent_error)?;
+                    let source = StoredFile::open(&path)
+                        .await
+                        .map_err(super::torrent_error)?;
                     let commitment = Blake3Commitment::create(&source).await?;
                     advertised_images(&index).find(|asset| asset.commitment == commitment)
                 }

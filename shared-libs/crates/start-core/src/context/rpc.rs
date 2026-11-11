@@ -563,9 +563,8 @@ impl RpcContext {
 
     #[instrument(skip_all)]
     pub async fn shutdown(self) -> Result<(), Error> {
-        let crons = self.crons.mutate(std::mem::take);
-        futures::future::join_all(crons.into_values().map(|cron| cron.wait_for_abort())).await;
-        self.torrents.shutdown().await;
+        self.torrents.shutdown();
+        self.crons.mutate(BTreeMap::clear);
         self.services.shutdown_all().await?;
         self.is_closed.store(true, Ordering::SeqCst);
         self.closed.send_replace(true);

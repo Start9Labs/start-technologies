@@ -8,7 +8,9 @@ use librqbit::storage::{BoxStorageFactory, StorageFactory, StorageFactoryExt, To
 use librqbit::{ManagedTorrentShared, TorrentMetadata};
 use tokio::io::AsyncRead;
 
+use crate::prelude::t;
 use crate::s9pk::merkle_archive::source::{ArchiveSource, checked_end};
+use crate::util::io::maybe_open_file;
 
 const VERIFY_CHUNK_SIZE: u64 = 256 * 1024;
 
@@ -38,10 +40,14 @@ pub(super) struct StoredFile {
 }
 
 impl StoredFile {
-    pub(super) fn open(path: &Path) -> Result<Self> {
+    pub(super) async fn open(path: &Path) -> Result<Self> {
+        let file = maybe_open_file(path)
+            .await
+            .map_err(|error| anyhow::anyhow!("{error:#}"))?
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))?;
         Ok(Self {
             path: path.to_owned(),
-            identity: FileIdentity::read(File::open(path)?.metadata()?)?,
+            identity: FileIdentity::read(file.metadata().await?)?,
         })
     }
 
@@ -49,7 +55,8 @@ impl StoredFile {
         let file = File::open(&self.path)?;
         ensure!(
             FileIdentity::read(file.metadata()?)? == self.identity,
-            "Stored artifact changed"
+            "{}",
+            t!("registry.bittorrent.stored-artifact-changed")
         );
         Ok(file)
     }
@@ -117,6 +124,7 @@ fn read_only() -> anyhow::Error {
     std::io::Error::from(std::io::ErrorKind::PermissionDenied).into()
 }
 
+// Callers must run storage callbacks in a blocking context.
 impl TorrentStorage for StoredFile {
     fn init(&mut self, _: &ManagedTorrentShared, _: &TorrentMetadata) -> Result<()> {
         Ok(())
@@ -142,7 +150,8 @@ impl TorrentStorage for StoredFile {
     fn ensure_file_length(&self, _: usize, length: u64) -> Result<()> {
         ensure!(
             self.reader()?.metadata()?.len() == length,
-            "Stored artifact length differs"
+            "{}",
+            t!("registry.bittorrent.stored-artifact-length-differs")
         );
         Ok(())
     }
@@ -163,7 +172,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("image.rootfs");
         std::fs::write(&path, vec![7; VERIFY_CHUNK_SIZE as usize * 2]).unwrap();
-        let source = StoredFile::open(&path).unwrap();
+        let source = StoredFile::open(&path).await.unwrap();
         let mut reader = source.fetch_all().await.unwrap();
         let mut first = vec![0; VERIFY_CHUNK_SIZE as usize];
         reader.read_exact(&mut first).await.unwrap();
@@ -189,7 +198,7 @@ mod tests {
         let commitment =
             ContentCommitment::from(Blake3Commitment::create(&expected).await.unwrap());
         std::fs::write(&path, &bytes).unwrap();
-        let source = StoredFile::open(&path).unwrap();
+        let source = StoredFile::open(&path).await.unwrap();
         commitment.verify_source(&source).await.unwrap();
         let mut range = source.fetch(VERIFY_CHUNK_SIZE - 5, 19).await.unwrap();
         let mut result = Vec::new();
@@ -201,12 +210,12 @@ mod tests {
         assert!(source.fetch(bytes.len() as u64, 1).await.is_err());
     }
 
-    #[test]
-    fn reads_existing_bytes_and_rejects_every_mutation() {
+    #[tokio::test]
+    async fn reads_existing_bytes_and_rejects_every_mutation() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("installed.s9pk");
         std::fs::write(&path, b"retained package").unwrap();
-        let source = StoredFile::open(&path).unwrap();
+        let source = StoredFile::open(&path).await.unwrap();
         let mut bytes = [0; 7];
         source.pread_exact(0, 9, &mut bytes).unwrap();
         assert_eq!(&bytes, b"package");
@@ -218,24 +227,24 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), b"retained package");
     }
 
-    #[test]
-    fn deletion_and_same_path_replacement_invalidate_the_source() {
+    #[tokio::test]
+    async fn deletion_and_same_path_replacement_invalidate_the_source() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("installed.s9pk");
         std::fs::write(&path, b"original").unwrap();
-        let source = StoredFile::open(&path).unwrap();
+        let source = StoredFile::open(&path).await.unwrap();
         std::fs::remove_file(&path).unwrap();
         assert!(source.pread_exact(0, 0, &mut [0; 1]).is_err());
         std::fs::write(&path, b"replacement").unwrap();
         assert!(source.pread_exact(0, 0, &mut [0; 1]).is_err());
     }
 
-    #[test]
-    fn changing_the_existing_inode_invalidates_the_source() {
+    #[tokio::test]
+    async fn changing_the_existing_inode_invalidates_the_source() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("image.rootfs");
         std::fs::write(&path, b"original").unwrap();
-        let source = StoredFile::open(&path).unwrap();
+        let source = StoredFile::open(&path).await.unwrap();
         std::fs::write(&path, b"changed contents").unwrap();
         assert!(source.pread_exact(0, 0, &mut [0; 1]).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"changed contents");
