@@ -14,6 +14,7 @@ import { asError, deepEqual } from '@start9labs/start-core/util'
 import { MappedWatchable } from '@start9labs/start-core/util/Watchable'
 import { PathBase } from './Volume'
 import {
+  copyFileBackup,
   filePath,
   replaceFile,
   withFileLock,
@@ -215,7 +216,8 @@ export interface FileHelper<A> {
   /**
    * Deep-merges partial data under the writer lock; arrays are replaced.
    * Invalid file syntax falls back to schema defaults, after the file is copied
-   * to `<path>.unparseable-<timestamp>`. Transformer errors reject.
+   * durably to `<path>.unparseable-<timestamp>`.
+   * Backup or transformer errors reject.
    */
   merge(
     effects: T.Effects,
@@ -261,6 +263,7 @@ class FileHelperImpl<A> implements FileHelper<A> {
   private async readMergeData(
     raw: string | null,
     path: string,
+    signal: AbortSignal,
   ): Promise<unknown> {
     if (raw === null) return null
     let parsed: unknown
@@ -268,9 +271,9 @@ class FileHelperImpl<A> implements FileHelper<A> {
       parsed = this.parseData(raw)
     } catch (e) {
       const backup = `${path}.unparseable-${new Date().toISOString()}`
-      await fs.copyFile(path, backup, fs.constants.COPYFILE_EXCL)
+      await copyFileBackup(path, backup, signal)
       console.warn(
-        `${this.path} could not be parsed; copied it to ${backup} and rebuilt it from the schema defaults: ${asError(e).message}`,
+        `${this.path} could not be parsed; copied it to ${backup}; rebuilding it from the schema defaults: ${asError(e).message}`,
       )
       return null
     }
@@ -472,8 +475,8 @@ class FileHelperImpl<A> implements FileHelper<A> {
   ) {
     return this.modify(
       effects,
-      async (raw, path) => {
-        let fileData: any = await this.readMergeData(raw, path)
+      async (raw, path, signal) => {
+        let fileData: any = await this.readMergeData(raw, path, signal)
         try {
           fileData = this.validate(fileData)
         } catch (_) {}

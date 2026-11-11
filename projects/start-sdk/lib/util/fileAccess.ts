@@ -260,6 +260,33 @@ async function sweepTemps(
   swept.add(path)
 }
 
+async function syncDirectory(path: string): Promise<void> {
+  const directory = await fs.open(path, 'r')
+  try {
+    await directory.sync()
+  } finally {
+    await directory.close()
+  }
+}
+
+/** Persists an exclusive backup before callers may replace the source. */
+export async function copyFileBackup(
+  source: string,
+  backup: string,
+  signal: AbortSignal,
+): Promise<void> {
+  signal.throwIfAborted()
+  await fs.copyFile(source, backup, fs.constants.COPYFILE_EXCL)
+  const file = await fs.open(backup, 'r')
+  try {
+    await file.sync()
+  } finally {
+    await file.close()
+  }
+  signal.throwIfAborted()
+  await syncDirectory(dirname(backup))
+}
+
 export async function replaceFile(
   path: string,
   data: string,
@@ -324,12 +351,7 @@ export async function replaceFile(
         await target.close()
       }
     })
-    const directory = await fs.open(dirname(path), 'r')
-    try {
-      await directory.sync()
-    } finally {
-      await directory.close()
-    }
+    await syncDirectory(dirname(path))
   } finally {
     if (created) await fs.rm(temp, { force: true })
     if (metadataTemp) await fs.rm(metadataTemp, { force: true })
