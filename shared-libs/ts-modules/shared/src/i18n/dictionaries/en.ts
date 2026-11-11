@@ -972,4 +972,5 @@ export const ENGLISH: Record<string, number> = {
   'Previous fingerprint': 1120,
   'Current fingerprint': 1121,
   'View in Marketplace': 1122,
+  'This alternative implementation meets the requirement': 1123,
 }

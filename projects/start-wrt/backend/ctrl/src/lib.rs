@@ -36,6 +36,7 @@ pub mod port_control;
 pub mod profiles;
 pub mod progress;
 pub mod published_ports;
+pub mod recent;
 pub mod registry;
 pub mod reservations;
 pub mod rpc;

@@ -971,4 +971,5 @@ export default {
   1120: 'Poprzedni odcisk',
   1121: 'Obecny odcisk',
   1122: 'Zobacz w sklepie',
+  1123: 'Ta alternatywna implementacja spełnia wymaganie',
 } satisfies i18n

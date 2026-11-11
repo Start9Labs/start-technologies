@@ -971,4 +971,5 @@ export default {
   1120: 'Empreinte précédente',
   1121: 'Empreinte actuelle',
   1122: 'Voir dans la bibliothèque de services',
+  1123: 'Cette implémentation alternative remplit la condition requise',
 } satisfies i18n

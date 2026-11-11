@@ -23,10 +23,14 @@ import { DataModel } from './patch-db/data-model'
 export class OSService {
   private readonly api = inject(ApiService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
+  private loadSequence = 0
+  private readonly registry$ = this.patch
+    .watch$('ui', 'startosRegistry')
+    .pipe(distinctUntilChanged())
 
   private readonly catalog$ = combineLatest([
     this.patch.watch$('osUpdateCache'),
-    this.patch.watch$('ui', 'startosRegistry'),
+    this.registry$,
   ]).pipe(
     map(([cache, registry]) =>
       cache && sameUrl(cache.registry, registry) ? cache : null,
@@ -112,14 +116,24 @@ export class OSService {
     return Object.keys(versions).length > 0
   }
 
-  async loadOS(): Promise<void> {
+  /** Registry changes supersede pending loads; catalog data comes from the matching cache. */
+  async loadOS(registry?: string): Promise<void> {
+    const sequence = ++this.loadSequence
+    const target = registry ?? (await firstValueFrom(this.registry$))
     const gitHash = await this.api.rpc.gitInfo({})
+    if (sequence !== this.loadSequence) return
     this.gitHash$.next(gitHash.trim())
-    const cache = await firstValueFrom(
-      this.catalog$.pipe(
-        filter(cache => !!cache && registryStatus(cache) !== 'connecting'),
+    const [cache, selected] = await firstValueFrom(
+      combineLatest([this.catalog$, this.registry$]).pipe(
+        filter(
+          ([cache, selected]) =>
+            sequence !== this.loadSequence ||
+            !sameUrl(selected, target) ||
+            (!!cache && registryStatus(cache) !== 'connecting'),
+        ),
       ),
     )
+    if (sequence !== this.loadSequence || !sameUrl(selected, target)) return
     if (registryStatus(cache) === 'error')
       throw new Error('registry unavailable')
   }

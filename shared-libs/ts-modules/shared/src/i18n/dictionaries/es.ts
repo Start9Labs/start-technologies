@@ -971,4 +971,5 @@ export default {
   1120: 'Huella anterior',
   1121: 'Huella actual',
   1122: 'Ver en el Mercado',
+  1123: 'Esta implementación alternativa cumple el requisito',
 } satisfies i18n

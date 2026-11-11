@@ -971,4 +971,5 @@ export default {
   1120: 'Vorheriger Fingerabdruck',
   1121: 'Aktueller Fingerabdruck',
   1122: 'Im Marktplatz anzeigen',
+  1123: 'Diese alternative Implementierung erfüllt die Anforderung',
 } satisfies i18n
