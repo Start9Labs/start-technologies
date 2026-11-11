@@ -105,6 +105,63 @@ async fn refreshing_a_registry_cancels_its_group_without_cancelling_other_regist
 }
 
 #[tokio::test]
+async fn registry_settings_watch_ignores_unrelated_writes_and_reads_coherent_settings() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = TypedPatchDb::<Database>::load_unchecked(
+        patch_db::PatchDb::open(temp.path().join("db"))
+            .await
+            .unwrap(),
+    );
+    db.put(&ROOT, database().as_value()).await.unwrap();
+    let mut watch = RegistrySettingsWatch::new(&db).await;
+    watch.read(&db).await.unwrap();
+    db.mutate(|db| {
+        db.as_public_mut().as_server_info_mut().mutate(|info| {
+            info.unread_notification_count += 1;
+            info.registry_keys
+                .insert(url().as_str().into(), BTreeSet::new());
+            Ok::<_, Error>(())
+        })
+    })
+    .await
+    .result
+    .unwrap();
+    assert!(futures::poll!(std::pin::pin!(watch.changed())).is_pending());
+    db.mutate(|db| {
+        db.as_public_mut().as_server_info_mut().mutate(|info| {
+            info.registries
+                .insert(url().as_str().into(), Some("Renamed".into()));
+            Ok::<_, Error>(())
+        })
+    })
+    .await
+    .result
+    .unwrap();
+    watch.changed().await.unwrap();
+    assert_eq!(
+        watch.read(&db).await.unwrap().registries[url().as_str()].as_deref(),
+        Some("Renamed")
+    );
+    let other: Url = "https://other.test/".parse().unwrap();
+    db.mutate(|db| {
+        db.as_public_mut().as_server_info_mut().mutate(|info| {
+            info.registries
+                .insert(other.as_str().into(), Some("Other".into()));
+            info.os_registry = other.clone();
+            Ok::<_, Error>(())
+        })
+    })
+    .await
+    .result
+    .unwrap();
+    watch.changed().await.unwrap();
+    let observed = watch.read(&db).await.unwrap();
+    assert_eq!(observed.os_registry, other);
+    assert!(observed.registries.contains_key(other.as_str()));
+    assert!(futures::poll!(std::pin::pin!(watch.changed())).is_pending());
+}
+
+#[tokio::test]
 async fn registry_manager_follows_server_info_and_ignores_opaque_ui_settings() {
     let temp = tempfile::tempdir().unwrap();
     let db = TypedPatchDb::<Database>::load_unchecked(
@@ -123,10 +180,17 @@ async fn registry_manager_follows_server_info_and_ignores_opaque_ui_settings() {
         .unwrap();
     db.put(&ROOT, model.as_value()).await.unwrap();
     let mut cache = db.watch("/public/registryCache".parse().unwrap()).await;
-    let (_refresh, refreshes) = tokio::sync::mpsc::channel(1);
+    let (refresh, refreshes) = tokio::sync::mpsc::channel(1);
+    let (started, mut starts) = tokio::sync::mpsc::unbounded_channel();
     let observed = db.clone();
-    let _manager: NonDetachingJoinHandle<()> =
-        tokio::spawn(async move { watch_registries(observed, refreshes, || None).await }).into();
+    let _manager: NonDetachingJoinHandle<()> = tokio::spawn(async move {
+        watch_registries(observed, refreshes, move || {
+            let _ = started.send(());
+            None
+        })
+        .await
+    })
+    .into();
     tokio::time::timeout(Duration::from_secs(2), async {
         while cache
             .peek_and_mark_seen()
@@ -148,6 +212,15 @@ async fn registry_manager_follows_server_info_and_ignores_opaque_ui_settings() {
             .len(),
         1
     );
+    tokio::time::timeout(Duration::from_secs(2), starts.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    refresh.send(url()).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), starts.recv())
+        .await
+        .unwrap()
+        .unwrap();
     db.mutate(|db| {
         db.as_public_mut()
             .as_server_info_mut()

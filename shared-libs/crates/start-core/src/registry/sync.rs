@@ -148,19 +148,52 @@ async fn cancel_registry_connection(tasks: &mut RegistryTasks, registry: &Url) {
     stop_registry_connections(tasks, groups).await;
 }
 
+/// Unrelated server-info writes do not wake catalog reconciliation.
+struct RegistrySettingsWatch {
+    registries: patch_db::DbWatch,
+    os_registry: patch_db::DbWatch,
+}
+
+impl RegistrySettingsWatch {
+    async fn new(db: &TypedPatchDb<Database>) -> Self {
+        Self {
+            registries: db
+                .watch("/public/serverInfo/registries".parse().unwrap())
+                .await,
+            os_registry: db
+                .watch("/public/serverInfo/osRegistry".parse().unwrap())
+                .await,
+        }
+    }
+
+    async fn read(&mut self, db: &TypedPatchDb<Database>) -> Result<ServerInfo, Error> {
+        self.registries
+            .peek_and_mark_seen()
+            .with_kind(ErrorKind::Database)?;
+        self.os_registry
+            .peek_and_mark_seen()
+            .with_kind(ErrorKind::Database)?;
+        db.peek().await.as_public().as_server_info().de()
+    }
+
+    async fn changed(&mut self) -> Result<(), patch_db::Error> {
+        tokio::select! {
+            changed = self.registries.changed() => changed,
+            changed = self.os_registry.changed() => changed,
+        }
+    }
+}
+
 pub async fn watch_registries(
     db: TypedPatchDb<Database>,
     mut refreshes: tokio::sync::mpsc::Receiver<Url>,
     context: impl Fn() -> Option<RpcContext> + Send + Sync + 'static,
 ) {
     let context: ContextProvider = Arc::new(context);
-    let mut watch = db.watch("/public/serverInfo".parse().unwrap()).await;
+    let mut watch = RegistrySettingsWatch::new(&db).await;
     let mut tasks = RegistryTasks::new();
     loop {
-        let desired = watch
-            .peek_and_mark_seen()
-            .with_kind(ErrorKind::Database)
-            .and_then(|value| from_value::<ServerInfo>(value).map(|info| subscriptions(&info)));
+        let desired = watch.read(&db).await.map(|info| subscriptions(&info));
         match desired {
             Ok(desired) => {
                 let connections = connections(&desired);
