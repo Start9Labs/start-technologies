@@ -594,7 +594,7 @@ export default {
   630: 'ligne {line}',
   631: 'Vérifier à nouveau',
   632: 'Cette section contient aussi {option} {value}, défini en dehors de StartWRT. StartWRT affiche la première valeur et laisse celle-ci telle quelle.',
-  633: 'WAN sans fil',
+  633: 'Cet appareil a demandé d’ouvrir les ports {ports} vers Internet. Le routeur a refusé, car la redirection automatique de ports est désactivée.',
   634: 'Connectez le routeur à un autre réseau Wi-Fi pour accéder à Internet, en secours du port WAN ou à sa place.',
   635: 'Une liaison montante Wi-Fi a été configurée dans LuCI. Gérez-la là-bas, ou supprimez-la là-bas pour la gérer ici.',
   636: 'Nom du réseau',
@@ -649,4 +649,5 @@ export default {
   689: 'Rejoignez-le depuis un appareil filaire.',
   690: 'Ouvert (sans mot de passe)',
   691: 'Ce réseau utilise la même plage d’adresses que l’un de vos propres réseaux ; vos appareils ne peuvent donc pas accéder à Internet par son intermédiaire. Modifiez votre plage dans Paramètres LAN ou Profils de sécurité.',
+  692: 'WAN sans fil',
 } satisfies i18n

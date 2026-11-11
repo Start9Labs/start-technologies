@@ -599,7 +599,7 @@ export const ENGLISH: Record<string, number> = {
   'line {line}': 630,
   'Check again': 631,
   'This section also has {option} {value}, set outside StartWRT. StartWRT shows the first value and leaves this one as it is.': 632,
-  'Wireless WAN': 633,
+  'This device asked to open port(s) {ports} to the internet. The router refused because automatic port forwarding is off.': 633,
   'Connect the router to another Wi-Fi network for Internet access, as a backup to the WAN port or in its place.': 634,
   'A Wi-Fi uplink was set up in LuCI. Manage it there, or delete it there to manage the uplink here.': 635,
   'Network name': 636,
@@ -654,4 +654,5 @@ export const ENGLISH: Record<string, number> = {
   'Join from a wired device.': 689,
   'Open (no password)': 690,
   'This network uses the same address range as one of your own networks, so your devices cannot reach the Internet through it. Change your range under LAN Settings or Security Profiles.': 691,
+  'Wireless WAN': 692,
 }

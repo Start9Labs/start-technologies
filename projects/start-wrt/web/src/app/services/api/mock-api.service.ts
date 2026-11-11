@@ -1295,6 +1295,9 @@ export class MockApiService extends ApiService {
         })),
         profile_network: profile ? `${profile.gateway_ip}/24` : null,
         allow_auto_port_forward: this.autoForwardAllowed.has(mac),
+        auto_port_forward_requests: this.autoForwardAllowed.has(mac)
+          ? []
+          : (this.autoForwardRequested.get(mac) ?? []),
         allow_dns_injection: this.dnsInjectionAllowed.has(mac),
         dns_injection_requested:
           !this.dnsInjectionAllowed.has(mac) &&
@@ -1358,6 +1361,10 @@ export class MockApiService extends ApiService {
 
   /** MACs allowed to auto-create port forwards via PCP/UPnP. */
   private autoForwardAllowed = new Set<string>(['00:1A:2B:3C:4D:5E'])
+  /** Ports the router recently refused to open, by MAC. */
+  private readonly autoForwardRequested = new Map<string, string[]>([
+    ['00:1A:2B:3C:4D:5F', ['3074', '27015-27030']],
+  ])
 
   async devicesSetAutoForward(params: {
     mac: string
@@ -1367,6 +1374,7 @@ export class MockApiService extends ApiService {
     const macUpper = params.mac.toUpperCase()
     if (params.allow) {
       this.autoForwardAllowed.add(macUpper)
+      this.autoForwardRequested.delete(macUpper)
     } else {
       this.autoForwardAllowed.delete(macUpper)
     }

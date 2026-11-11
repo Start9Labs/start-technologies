@@ -2,12 +2,21 @@ import { computed, inject, Service, signal } from '@angular/core'
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop'
 import { SwUpdate } from '@angular/service-worker'
 import { WA_WINDOW } from '@ng-web-apis/common'
-import { Version } from '@start9labs/start-core'
-import { PatchDB } from 'patch-db-client'
-import { distinctUntilChanged, filter, map, merge, shareReplay } from 'rxjs'
+import {
+  catchError,
+  distinctUntilChanged,
+  EMPTY,
+  filter,
+  from,
+  map,
+  merge,
+  shareReplay,
+  switchMap,
+} from 'rxjs'
 
+import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { ConfigService } from 'src/app/services/config.service'
-import { DataModel } from 'src/app/services/patch-db/data-model'
+import { StateService } from 'src/app/services/state.service'
 
 type UiUpdateState =
   | {
@@ -25,14 +34,17 @@ type UiUpdateState =
 export class UiUpdateService {
   private readonly updates = inject(SwUpdate)
   private readonly win = inject(WA_WINDOW)
-  private readonly version = Version.parse(inject(ConfigService).version)
-  private readonly outdated$ = inject<PatchDB<DataModel>>(PatchDB)
-    .watch$('serverInfo', 'version')
-    .pipe(
-      distinctUntilChanged(),
-      map(version => this.version.compare(Version.parse(version)) !== 'equal'),
-      shareReplay({ bufferSize: 1, refCount: true }),
-    )
+  private readonly api = inject(ApiService)
+  private readonly gitHash = inject(ConfigService).gitHash
+  private readonly outdated$ = inject(StateService).pipe(
+    filter(state => state === 'running'),
+    switchMap(() =>
+      from(this.api.rpc.gitInfo({})).pipe(catchError(() => EMPTY)),
+    ),
+    map(hash => hash.trim() !== this.gitHash),
+    distinctUntilChanged(),
+    shareReplay({ bufferSize: 1, refCount: true }),
+  )
   private readonly current = signal<UiUpdateState>({ status: 'idle' })
 
   readonly state = this.current.asReadonly()

@@ -594,7 +594,7 @@ export default {
   630: 'línea {line}',
   631: 'Comprobar de nuevo',
   632: 'Esta sección también tiene {option} {value}, establecido fuera de StartWRT. StartWRT muestra el primer valor y deja este tal como está.',
-  633: 'WAN inalámbrica',
+  633: 'Este dispositivo pidió abrir los puertos {ports} a Internet. El router lo rechazó porque el reenvío automático de puertos está desactivado.',
   634: 'Conecte el router a otra red Wi-Fi para acceder a Internet, como respaldo del puerto WAN o en su lugar.',
   635: 'Se configuró un enlace Wi-Fi en LuCI. Adminístrelo allí, o elimínelo allí para administrar el enlace aquí.',
   636: 'Nombre de la red',
@@ -649,4 +649,5 @@ export default {
   689: 'Únase desde un dispositivo con cable.',
   690: 'Abierta (sin contraseña)',
   691: 'Esta red usa el mismo rango de direcciones que una de sus propias redes, por lo que sus dispositivos no pueden acceder a Internet a través de ella. Cambie su rango en Configuración de LAN o Perfiles de seguridad.',
+  692: 'WAN inalámbrica',
 } satisfies i18n

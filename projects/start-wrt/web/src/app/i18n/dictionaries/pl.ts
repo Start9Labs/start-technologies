@@ -594,7 +594,7 @@ export default {
   630: 'wiersz {line}',
   631: 'Sprawdź ponownie',
   632: 'Ta sekcja ma także {option} {value}, ustawione poza StartWRT. StartWRT wyświetla pierwszą wartość, a tę pozostawia bez zmian.',
-  633: 'Bezprzewodowy WAN',
+  633: 'To urządzenie poprosiło o otwarcie portów {ports} do internetu. Router odmówił, ponieważ automatyczne przekierowanie portów jest wyłączone.',
   634: 'Połącz router z inną siecią Wi-Fi, aby uzyskać dostęp do Internetu, jako zapas dla portu WAN lub zamiast niego.',
   635: 'Łącze Wi-Fi zostało skonfigurowane w LuCI. Zarządzaj nim tam albo usuń je tam, aby zarządzać łączem tutaj.',
   636: 'Nazwa sieci',
@@ -649,4 +649,5 @@ export default {
   689: 'Dołącz z urządzenia przewodowego.',
   690: 'Otwarta (bez hasła)',
   691: 'Ta sieć używa tego samego zakresu adresów co jedna z Twoich sieci, więc Twoje urządzenia nie mogą przez nią łączyć się z Internetem. Zmień swój zakres w Ustawieniach LAN lub Profilach bezpieczeństwa.',
+  692: 'Bezprzewodowy WAN',
 } satisfies i18n

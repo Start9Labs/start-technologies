@@ -594,7 +594,7 @@ export default {
   630: 'Zeile {line}',
   631: 'Erneut prüfen',
   632: 'Dieser Abschnitt hat außerdem {option} {value}, gesetzt außerhalb von StartWRT. StartWRT zeigt den ersten Wert an und lässt diesen unverändert.',
-  633: 'Drahtloses WAN',
+  633: 'Dieses Gerät hat angefragt, die Ports {ports} zum Internet zu öffnen. Der Router hat abgelehnt, weil die automatische Portweiterleitung ausgeschaltet ist.',
   634: 'Verbinden Sie den Router mit einem anderen WLAN, um auf das Internet zuzugreifen, als Reserve für den WAN-Anschluss oder an seiner Stelle.',
   635: 'In LuCI wurde ein WLAN-Uplink eingerichtet. Verwalten Sie ihn dort, oder löschen Sie ihn dort, um den Uplink hier zu verwalten.',
   636: 'Netzwerkname',
@@ -649,4 +649,5 @@ export default {
   689: 'Treten Sie von einem kabelgebundenen Gerät bei.',
   690: 'Offen (kein Passwort)',
   691: 'Dieses Netzwerk verwendet denselben Adressbereich wie eines Ihrer eigenen Netzwerke, sodass Ihre Geräte darüber das Internet nicht erreichen. Ändern Sie Ihren Bereich unter LAN-Einstellungen oder Sicherheitsprofile.',
+  692: 'Drahtloses WAN',
 } satisfies i18n
