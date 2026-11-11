@@ -1470,20 +1470,16 @@ pub async fn add_forward(
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct RemovePortForwardParams {
-    #[arg(
-        long,
-        value_enum,
-        default_value = "tcp",
-        help = "help.arg.tunnel-forward-protocol"
-    )]
+    /// Omitted selects both transports for whole-forward removal, otherwise TCP.
+    #[arg(long, value_enum, help = "help.arg.tunnel-forward-remove-protocol")]
     #[serde(default)]
-    protocol: TransportProtocol,
+    protocol: Option<TransportProtocol>,
     #[arg(long, help = "help.arg.tunnel-forward-fallback")]
     #[serde(default)]
     fallback: bool,
 
     source: SocketAddrV4,
-    /// Selects a hostname; omitted removes this transport’s routes and fallback.
+    /// Selects a hostname; omitted removes the selected routes and fallback.
     #[arg(long)]
     #[serde(default)]
     hostname: Option<String>,
@@ -1492,15 +1488,29 @@ pub struct RemovePortForwardParams {
 rpc_toolkit::reflect_ts!(RemovePortForwardParams);
 rpc_toolkit::ts_export!(RemovePortForwardParams, namespaces = ["tunnel"]);
 
+impl RemovePortForwardParams {
+    fn protocols(&self) -> &'static [TransportProtocol] {
+        match self.protocol {
+            Some(TransportProtocol::Tcp) => &[TransportProtocol::Tcp],
+            Some(TransportProtocol::Udp) => &[TransportProtocol::Udp],
+            None if self.hostname.is_none() && !self.fallback => &TransportProtocol::ALL,
+            None => &[TransportProtocol::Tcp],
+        }
+    }
+}
+
 pub async fn remove_forward(
     ctx: TunnelContext,
-    RemovePortForwardParams {
+    params: RemovePortForwardParams,
+) -> Result<(), Error> {
+    let protocols = params.protocols();
+    let RemovePortForwardParams {
         source,
         hostname,
-        protocol,
         fallback,
-    }: RemovePortForwardParams,
-) -> Result<(), Error> {
+        ..
+    } = params;
+    let hostname = hostname.as_deref().map(str::to_ascii_lowercase);
     let _guard = ctx.forward_write_lock.lock().await;
     let entry = ctx
         .db
@@ -1513,27 +1523,25 @@ pub async fn remove_forward(
         .cloned();
     match entry {
         Some(entry @ PortForward::Sni { .. }) => {
-            let bindings = entry.bindings(protocol).unwrap();
-            if !fallback {
-                let to_remove: Vec<_> = bindings
-                    .routes
-                    .iter()
-                    .filter(|(h, _)| {
-                        hostname
-                            .as_ref()
-                            .is_none_or(|name| h.eq_ignore_ascii_case(name))
-                    })
-                    .map(|(h, r)| (h.clone(), r.target))
-                    .collect();
-                for (h, target) in to_remove {
-                    ctx.remove_sni_routes_locked(source, target, &[h], protocol, false)
-                        .await;
+            for &protocol in protocols {
+                let bindings = entry.bindings(protocol).unwrap();
+                if !fallback {
+                    let to_remove: Vec<_> = bindings
+                        .routes
+                        .iter()
+                        .filter(|(h, _)| hostname.as_ref().is_none_or(|name| *h == name))
+                        .map(|(h, r)| (h.clone(), r.target))
+                        .collect();
+                    for (h, target) in to_remove {
+                        ctx.remove_sni_routes_locked(source, target, &[h], protocol, false)
+                            .await;
+                    }
                 }
-            }
-            if fallback || hostname.is_none() {
-                if let Some(f) = &bindings.fallback {
-                    ctx.remove_sni_fallback_locked(source, f.target, protocol)
-                        .await;
+                if fallback || hostname.is_none() {
+                    if let Some(f) = &bindings.fallback {
+                        ctx.remove_sni_fallback_locked(source, f.target, protocol)
+                            .await;
+                    }
                 }
             }
             Ok(())
@@ -2378,6 +2386,41 @@ mod tests {
         assert!(parse_dns_server("1.1.1.1:99999").is_err());
         assert!(parse_dns_server("").is_err());
     }
+    #[test]
+    fn legacy_whole_forward_removal_selects_both_transports() {
+        let legacy: RemovePortForwardParams =
+            serde_json::from_value(serde_json::json!({"source": "203.0.113.1:443"})).unwrap();
+        assert_eq!(legacy.protocols(), &TransportProtocol::ALL);
+        let cli = RemovePortForwardParams::try_parse_from(["remove", "203.0.113.1:443"]).unwrap();
+        assert_eq!(cli.protocols(), &TransportProtocol::ALL);
+        for (extra, expected) in [
+            (
+                serde_json::json!({"protocol": "udp"}),
+                &[TransportProtocol::Udp][..],
+            ),
+            (
+                serde_json::json!({"protocol": "tcp"}),
+                &[TransportProtocol::Tcp][..],
+            ),
+            (
+                serde_json::json!({"hostname": "Cloud.Example.com"}),
+                &[TransportProtocol::Tcp][..],
+            ),
+            (
+                serde_json::json!({"fallback": true}),
+                &[TransportProtocol::Tcp][..],
+            ),
+        ] {
+            let mut request = serde_json::json!({"source": "203.0.113.1:443"});
+            request
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let params: RemovePortForwardParams = serde_json::from_value(request).unwrap();
+            assert_eq!(params.protocols(), expected);
+        }
+    }
+
     #[test]
     fn manual_hostname_api_defaults_to_tcp() {
         let params: AddPortForwardParams = serde_json::from_value(serde_json::json!({

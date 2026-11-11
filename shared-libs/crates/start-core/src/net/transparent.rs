@@ -97,7 +97,11 @@ fn divert_mark_rule_transport(
 fn missing_divert_mark_rules(family: &str, chain: &str) -> String {
     crate::net::port_map::TransportProtocol::ALL
         .into_iter()
-        .filter(|protocol| !chain.contains(&format!("\"sni-divert-{}\"", protocol.as_str())))
+        .filter(|protocol| {
+            !chain.contains(&format!("\"sni-divert-{}\"", protocol.as_str()))
+                && !(*protocol == crate::net::port_map::TransportProtocol::Tcp
+                    && chain.contains("\"sni-divert\""))
+        })
         .map(|protocol| divert_mark_rule_transport(family, protocol))
         .collect()
 }
@@ -341,6 +345,17 @@ mod tests {
                 "comment \"sni-divert-tcp\" comment \"sni-divert-udp\""
             )
             .is_empty()
+        );
+    }
+
+    #[test]
+    fn legacy_tcp_marker_does_not_duplicate_tcp_or_cover_udp() {
+        let missing = missing_divert_mark_rules("ip", "comment \"sni-divert\"");
+        assert!(missing.contains("meta l4proto udp"));
+        assert!(!missing.contains("meta l4proto tcp"));
+        assert!(
+            missing_divert_mark_rules("ip", "comment \"sni-divert\" comment \"sni-divert-udp\"")
+                .is_empty()
         );
     }
 

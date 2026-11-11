@@ -186,6 +186,7 @@ pub struct SniBindings {
 rpc_toolkit::reflect_ts!(SniBindings);
 
 impl SniBindings {
+    /// Accepts canonical lowercase SNI names; `None` selects the fallback.
     pub fn route(&self, hostname: Option<&str>) -> Option<&SniRoute> {
         match hostname {
             Some(h) => self.routes.get(h),
@@ -193,6 +194,7 @@ impl SniBindings {
         }
     }
 
+    /// Mutable form of [`Self::route`], with the same hostname contract.
     pub fn route_mut(&mut self, hostname: Option<&str>) -> Option<&mut SniRoute> {
         match hostname {
             Some(h) => self.routes.get_mut(h),

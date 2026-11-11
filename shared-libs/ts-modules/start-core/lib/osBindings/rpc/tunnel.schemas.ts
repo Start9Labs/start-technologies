@@ -757,29 +757,41 @@ export const RemoveKeyParams: z.ZodObject<{ key: typeof AnyVerifyingKey }> =
     id: 'RemoveKeyParams',
   })
 export const RemovePortForwardParams: z.ZodObject<{
+  /**
+   * Omitted selects both transports for whole-forward removal, otherwise TCP.
+   */
   protocol: z.ZodCodec<
-    z.ZodOptional<typeof TransportProtocol>,
-    typeof TransportProtocol
+    z.ZodOptional<z.ZodNullable<typeof TransportProtocol>>,
+    z.ZodNullable<typeof TransportProtocol>
   >
   fallback: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   source: z.ZodString
   /**
-   * Selects a hostname; omitted removes this transport’s routes and fallback.
+   * Selects a hostname; omitted removes the selected routes and fallback.
    */
   hostname: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
 }> = /* @__PURE__ */ object({
-  protocol: wire(TransportProtocol.optional(), TransportProtocol),
+  /**
+   * Omitted selects both transports for whole-forward removal, otherwise TCP.
+   */
+  protocol: wire(
+    TransportProtocol.nullable().optional(),
+    TransportProtocol.nullable(),
+  ).meta({
+    description:
+      'Omitted selects both transports for whole-forward removal, otherwise TCP.',
+  }),
   fallback: wire(z.boolean().optional(), z.boolean()),
   source: z.string(),
   /**
-   * Selects a hostname; omitted removes this transport’s routes and fallback.
+   * Selects a hostname; omitted removes the selected routes and fallback.
    */
   hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
     description:
-      'Selects a hostname; omitted removes this transport’s routes and fallback.',
+      'Selects a hostname; omitted removes the selected routes and fallback.',
   }),
 }).meta({
   id: 'RemovePortForwardParams',

@@ -329,28 +329,31 @@ mod tests {
 
     #[tokio::test]
     async fn a_renewal_before_expiry_lock_preserves_the_mapping() {
-        let lock = tokio::sync::Mutex::new(());
-        let key = LeaseKey::sni(
-            "203.0.113.1:443".parse().unwrap(),
-            Some("quic.example.com"),
-            TransportProtocol::Udp,
-        );
-        let now = Instant::now();
-        let leases = crate::util::sync::SyncMutex::new(Leases::from([(key.clone(), now)]));
-        let renewal = lock.lock().await;
-        let reap = lock_expired(&lock, &leases, &key, now);
-        tokio::pin!(reap);
-        assert!(futures::poll!(&mut reap).is_pending());
-        leases.mutate(|leases| {
-            leases.insert(key.clone(), now + Duration::from_secs(60));
-        });
-        drop(renewal);
-        assert!(reap.await.is_none());
-        assert!(
-            lock_expired(&lock, &leases, &key, now + Duration::from_secs(60))
-                .await
-                .is_some()
-        );
+        let source = "203.0.113.1:443".parse().unwrap();
+        for key in [
+            LeaseKey::Dnat(source),
+            LeaseKey::sni(source, Some("quic.example.com"), TransportProtocol::Udp),
+            LeaseKey::sni(source, None, TransportProtocol::Tcp),
+            LeaseKey::Pinhole("[2001:db8::1]:443".parse().unwrap()),
+        ] {
+            let lock = tokio::sync::Mutex::new(());
+            let now = Instant::now();
+            let leases = crate::util::sync::SyncMutex::new(Leases::from([(key.clone(), now)]));
+            let renewal = lock.lock().await;
+            let reap = lock_expired(&lock, &leases, &key, now);
+            tokio::pin!(reap);
+            assert!(futures::poll!(&mut reap).is_pending());
+            leases.mutate(|leases| {
+                leases.insert(key.clone(), now + Duration::from_secs(60));
+            });
+            drop(renewal);
+            assert!(reap.await.is_none());
+            assert!(
+                lock_expired(&lock, &leases, &key, now + Duration::from_secs(60))
+                    .await
+                    .is_some()
+            );
+        }
     }
 
     #[test]

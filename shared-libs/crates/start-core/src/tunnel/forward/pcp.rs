@@ -177,7 +177,8 @@ impl GatewayBackend for TunnelContext {
         count: u16,
         lifetime: Option<u32>,
     ) -> Result<(), u16> {
-        crate::tunnel::forward::pinhole::add_pinhole(
+        let _guard = self.forward_write_lock.lock().await;
+        crate::tunnel::forward::pinhole::add_pinhole_locked(
             self,
             gua,
             external_port,
@@ -202,7 +203,9 @@ impl GatewayBackend for TunnelContext {
     }
 
     async fn remove_pinhole(&self, gua: Ipv6Addr, external_port: u16) {
-        crate::tunnel::forward::pinhole::remove_pinhole(self, gua, external_port, true).await;
+        let _guard = self.forward_write_lock.lock().await;
+        crate::tunnel::forward::pinhole::remove_pinhole_locked(self, gua, external_port, true)
+            .await;
         lease::forget(
             self,
             &LeaseKey::Pinhole(SocketAddrV6::new(gua, external_port, 0, 0)),

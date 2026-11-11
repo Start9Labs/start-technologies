@@ -146,6 +146,18 @@ pub async fn add_pinhole(
     auto: bool,
 ) -> Result<(), Error> {
     let _guard = ctx.forward_write_lock.lock().await;
+    add_pinhole_locked(ctx, gua, external_port, internal_port, count, label, auto).await
+}
+
+pub(super) async fn add_pinhole_locked(
+    ctx: &TunnelContext,
+    gua: Ipv6Addr,
+    external_port: u16,
+    internal_port: u16,
+    count: u16,
+    label: Option<String>,
+    auto: bool,
+) -> Result<(), Error> {
     let key = SocketAddrV6::new(gua, external_port, 0, 0);
     let enabled = ctx
         .db

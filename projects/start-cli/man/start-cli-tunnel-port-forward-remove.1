@@ -9,8 +9,8 @@ start\-cli\-tunnel\-port\-forward\-remove \- Remove port forward
 Remove port forward
 .SH OPTIONS
 .TP
-\fB\-\-protocol\fR \fI<PROTOCOL>\fR [default: tcp]
-Transport for hostname routes and fallbacks; plain DNAT forwards use both transports
+\fB\-\-protocol\fR \fI<PROTOCOL>\fR
+Limit removal to TCP or UDP. Omit to remove the whole forward; hostname or fallback selection defaults to TCP
 .br
 
 .br
@@ -26,7 +26,7 @@ udp
 Remove only the selected transport\*(Aqs hostname\-less fallback
 .TP
 \fB\-\-hostname\fR \fI<HOSTNAME>\fR
-Selects a hostname; omitted removes this transport’s routes and fallback
+Selects a hostname; omitted removes the selected routes and fallback
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

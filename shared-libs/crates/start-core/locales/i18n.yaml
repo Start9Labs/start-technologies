@@ -5036,6 +5036,13 @@ help.arg.tunnel-forward-protocol:
   fr_FR: "Protocole des routes par nom et des destinations de repli ; les redirections DNAT simples utilisent les deux protocoles"
   pl_PL: "Protokół tras według nazwy hosta i celów domyślnych; zwykłe przekierowania DNAT używają obu protokołów"
 
+help.arg.tunnel-forward-remove-protocol:
+  en_US: "Limit removal to TCP or UDP. Omit to remove the whole forward; hostname or fallback selection defaults to TCP"
+  de_DE: "Entfernen auf TCP oder UDP begrenzen. Ohne Angabe die gesamte Weiterleitung entfernen; für Hostnamen oder Fallbacks gilt standardmäßig TCP"
+  es_ES: "Limitar la eliminación a TCP o UDP. Omitir para eliminar todo el reenvío; al seleccionar un nombre o destino predeterminado se usa TCP por defecto"
+  fr_FR: "Limiter la suppression à TCP ou UDP. Omettre pour supprimer toute la redirection ; la sélection d’un nom ou d’un repli utilise TCP par défaut"
+  pl_PL: "Ogranicz usuwanie do TCP lub UDP. Pomiń, aby usunąć całe przekierowanie; wybór nazwy hosta lub celu domyślnego domyślnie używa TCP"
+
 help.arg.tunnel-listen-address:
   en_US: "Address for tunnel to listen on"
   de_DE: "Adresse, auf der der Tunnel lauscht"

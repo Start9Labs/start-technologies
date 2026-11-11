@@ -394,13 +394,20 @@ export class MockApiService extends ApiService {
       if (!entry) return null
 
       if (entry.kind === 'sni') {
-        const bindings = params.protocol === 'udp' ? entry.udp : entry
-        if (params.fallback) bindings.fallback = null
-        else if (params.hostname)
-          delete bindings.routes[params.hostname.toLowerCase()]
-        else {
-          bindings.routes = {}
-          bindings.fallback = null
+        const protocols = params.protocol
+          ? [params.protocol]
+          : params.hostname == null && !params.fallback
+            ? (['tcp', 'udp'] as const)
+            : (['tcp'] as const)
+        for (const protocol of protocols) {
+          const bindings = protocol === 'udp' ? entry.udp : entry
+          if (params.fallback) bindings.fallback = null
+          else if (params.hostname != null)
+            delete bindings.routes[params.hostname.toLowerCase()]
+          else {
+            bindings.routes = {}
+            bindings.fallback = null
+          }
         }
         if (
           [entry, entry.udp].some(
