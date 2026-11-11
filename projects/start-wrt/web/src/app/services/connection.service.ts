@@ -351,5 +351,3 @@ export class ConnectionService {
       .subscribe()
   }
 }
-
-/** A network-level failure (no HTTP response): HttpError.status / code 0. */
