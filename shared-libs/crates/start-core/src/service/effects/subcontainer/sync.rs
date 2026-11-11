@@ -110,7 +110,7 @@ fn kill_on_parent_death() -> std::io::Result<()> {
         .map_err(|e| std::io::Error::from_raw_os_error(e as i32))
 }
 
-// Commandless init dies with its launcher, even before signal handlers exist.
+// Namespace init dies with its launcher, even before signal handlers exist.
 fn kill_with_launcher(parent: BorrowedFd<'_>) -> std::io::Result<()> {
     kill_on_parent_death()?;
     let mut fd = libc::pollfd {
