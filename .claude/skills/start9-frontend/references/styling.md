@@ -35,6 +35,12 @@ flat-grayscale | outline-grayscale | action-grayscale | …"` on buttons/badges/
    `@include taiga.transition(...)`. A state class nests under its element
    (`.search { …; &._open { … } }`).
 
+**Floating cards in the light theme pool their shadows.** Large cards close together
+(`appearance="floating"`, `--tui-shadow-medium`) blur into a grey wash between them. Where cards
+sit on `--tui-background-base-alt`, drop the shadow on cards,
+`[tuiCardLarge] { --tui-shadow-medium: none }`, and let a darker light `base-alt` carry the
+contrast (start-equity).
+
 **Space with margins, not a flex column.** A page is block flow. The element that needs room
 takes a margin (`header { margin-block-end: 1.25rem }`, `form { margin-block-start: 2rem }`).
 `:host { display: flex; flex-direction: column; gap }` is for a stack of like rows, never just to
