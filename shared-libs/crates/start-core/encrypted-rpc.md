@@ -158,8 +158,15 @@ delivery of replacement JavaScript remains outside this protection.
 
 Browser adapters use native-generated profiles and hello types, with `auth.RequestSigner`
 and `auth.verifyRequestProof` owning proof creation/verification outside the transport.
-The handshake module loads lazily and requires WebCrypto Ed25519, X25519, HKDF and AES-GCM
-in a secure context. Identity private keys remain nonextractable. A key/provider lease may persist; each
+The handshake module loads lazily and uses the maintained Noble implementations of X25519,
+HKDF-SHA256 and AES-256-GCM on both HTTP and HTTPS. Browser randomness comes from
+`crypto.getRandomValues`; the existing UUID library supplies correlation IDs without requiring
+secure-context `crypto.randomUUID`. Persisted enrollment keys remain nonextractable WebCrypto
+keys. Missing-key startup admission uses an opaque, unpersisted Ed25519 `RequestSigner`, sharing
+the existing commitment/proof owner rather than an enrolled-key shape. Setup/state/init/diagnostic
+browser calls and GUIDs use that admission lease; their peers never enter normal-product advisory
+history. Normal product API owners attach verified-open observers, including on healthy reuse
+and authorization rejection. A key/provider lease may persist; each
 connection needs fresh DH/nonce/proof data. Existing RxJS refcounts, key-rotation/logout
 cancellation, metadata fences and product reconnect/recovery owners remain authoritative.
 A stale local-closing socket's error cannot reset its replacement. Frontend stream success

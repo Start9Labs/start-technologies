@@ -40,6 +40,7 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       'AuthService',
       'ConfigService',
       'RpcSocketService',
+      'ServerIdentityService',
       'i18nPipe',
       'StaleUiService',
       'PATCH_CACHE',
@@ -54,6 +55,9 @@ function harness(moduleOverrides = new Map(), globals = {}) {
     },
   })
   dependencies.set(tokens.RpcSocketService, {})
+  dependencies.set(tokens.ServerIdentityService, {
+    openObserver: { next() {} },
+  })
   dependencies.set(tokens.ConfigService, { gitHash: 'fixture-running-build' })
   dependencies.set(tokens.StaleUiService, { checkHash() {} })
   dependencies.set(tokens.i18nPipe, { transform: value => value })
@@ -229,7 +233,10 @@ test('resource headers retain legacy signing and caller headers without mutation
     'x-start-auth-sig': 'caller',
   })
   const headers = await deviceSigner().signHeader.call(
-    { get: async () => key, host: 'server.test' },
+    {
+      lease: async () => ({ key, signal: new AbortController().signal }),
+      host: 'server.test',
+    },
     '',
     original,
   )
@@ -242,7 +249,7 @@ test('resource headers retain legacy signing and caller headers without mutation
   )
   assert.equal(original.get(auth.AUTH_SIG_HEADER), 'caller')
   const withoutKey = await deviceSigner().signHeader.call(
-    { get: async () => null },
+    { lease: async () => null },
     '',
     original,
   )
@@ -436,16 +443,19 @@ test('Setup converts the actual JWK response and forwards the installation timeo
     x: 'yHTDYSfjU809fkSv9MmN4wuojf5c3cnD7ZDN13n-jz4',
     y: '8Mpkn744A5KDag0DmX2YivB63srjbugYZzWc3JOpQXI',
   }
-  dependencies.set(tokens.HttpService, {
-    rpcRequest: async options => {
-      calls.push(options)
+  const lease = { key: {}, signal: new AbortController().signal }
+  dependencies.set(tokens.AuthKeyService, { admissionLease: async () => lease })
+  dependencies.set(tokens.HttpService, {})
+  dependencies.set(tokens.RpcSocketService, {
+    message: async (body, options, identity) => {
+      assert.equal(identity, lease)
+      const request = JSON.parse(body)
+      calls.push({ ...request, ...options })
       return {
-        body: {
-          result:
-            options.method === 'setup.get-pubkey'
-              ? key
-              : { guid: null, osDrive: null, attach: false, mokEnrolled: true },
-        },
+        result:
+          request.method === 'setup.get-pubkey'
+            ? key
+            : { guid: null, osDrive: null, attach: false, mokEnrolled: true },
       }
     },
   })
@@ -467,7 +477,7 @@ test('Setup converts the actual JWK response and forwards the installation timeo
     null,
   )
   assert.equal(calls[1].method, 'setup.install-os')
-  assert.equal(calls[1].params, params)
+  assert.deepEqual(calls[1].params, params)
   assert.equal(calls[1].timeout, 5 * 60 * 1000)
 })
 

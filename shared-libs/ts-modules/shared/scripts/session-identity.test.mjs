@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { auth } from '@start9labs/start-core'
+import { x25519 } from '@noble/curves/ed25519'
 import { decodeFirst, encode } from '@start9labs/start-core/auth/cbor'
 import './typescript-loader.mjs'
 
@@ -24,27 +25,7 @@ const concatenate = (...parts) => new Uint8Array(Buffer.concat(parts))
 
 async function frozenClient(context) {
   const secret = Uint8Array.from(Buffer.from(fixture.clientPrivate, 'hex'))
-  const privateKey = await crypto.subtle.importKey(
-    'pkcs8',
-    new Uint8Array([
-      ...Buffer.from('302e020100300506032b656e04220420', 'hex'),
-      ...secret,
-    ]),
-    'X25519',
-    false,
-    ['deriveBits'],
-  )
-  const publicKey = await crypto.subtle.importKey(
-    'raw',
-    bytes(fixture.clientPublic),
-    'X25519',
-    true,
-    [],
-  )
-  context.mock.method(crypto.subtle, 'generateKey', async () => ({
-    privateKey,
-    publicKey,
-  }))
+  context.mock.method(x25519.utils, 'randomPrivateKey', () => secret.slice())
   return prepareSession(
     {
       sign: async (name, body) => {
@@ -122,6 +103,35 @@ test('independent WebCrypto golden matches both directional records and full cap
     fixture.serverRecord.plaintext,
   )
   await assert.rejects(prepared.finish(server), /already consumed/)
+})
+
+test('ordinary HTTP without crypto.subtle retains the independent handshake and both directional records', async context => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto')
+  const random = crypto.getRandomValues.bind(crypto)
+  Object.defineProperty(globalThis, 'crypto', {
+    value: { getRandomValues: random },
+    configurable: true,
+  })
+  context.after(() => Object.defineProperty(globalThis, 'crypto', descriptor))
+  const prepared = await frozenClient(context)
+  const admitted = await prepared.finish(server)
+  assert.equal(admitted.peer, fixture.serverIdentity)
+  assert.deepEqual(
+    await admitted.cipher.write(encoder.encode(fixture.clientRecord.plaintext)),
+    bytes(fixture.clientRecord.ciphertext),
+  )
+  assert.equal(
+    new TextDecoder().decode(
+      await admitted.cipher.read(bytes(fixture.serverRecord.ciphertext)),
+    ),
+    fixture.serverRecord.plaintext,
+  )
+  const signer = await auth.generateEphemeralRequestSigner()
+  const proof = await signer.sign('startup.local', payload)
+  assert.match(
+    await auth.verifyRequestProof(proof, 'startup.local', payload),
+    /^MCow/,
+  )
 })
 
 test('admission rejects unknown signed fields and invalid binary shapes', async context => {

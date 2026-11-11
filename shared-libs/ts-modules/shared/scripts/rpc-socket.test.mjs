@@ -4,6 +4,7 @@ import '@angular/compiler'
 import { DOCUMENT, Injector } from '@angular/core'
 import { auth } from '@start9labs/start-core'
 import { SESSION_PROFILE } from '@start9labs/start-core/osBindings/session-profile'
+import { ReplaySubject } from 'rxjs'
 import { webSocket } from 'rxjs/webSocket'
 import './typescript-loader.mjs'
 const { RpcSocketService } =
@@ -48,10 +49,13 @@ async function fixture(context) {
     globalThis.WebSocket = original
   })
   Socket.created = Promise.withResolvers()
+  const key = await auth.generateAuthKey()
   const lease = {
-    key: await auth.generateAuthKey(),
+    key,
+    signer: auth.requestSigner(key),
     signal: new AbortController().signal,
   }
+  let historyInjections = 0
   const injector = Injector.create({
     providers: [
       RpcSocketService,
@@ -64,8 +68,20 @@ async function fixture(context) {
       },
       { provide: RELATIVE_URL, useValue: '/rpc/v1' },
       { provide: AUTH_SIGNING_HOST, useValue: 'server.test' },
-      { provide: AuthKeyService, useValue: { lease: async () => lease } },
-      { provide: ServerIdentityService, useValue: { observe: async () => {} } },
+      {
+        provide: AuthKeyService,
+        useValue: {
+          lease: async () => lease,
+          admissionLease: async () => lease,
+        },
+      },
+      {
+        provide: ServerIdentityService,
+        useFactory: () => {
+          historyInjections++
+          return { observe: async () => {} }
+        },
+      },
     ],
   })
   const service = injector.get(RpcSocketService)
@@ -73,7 +89,7 @@ async function fixture(context) {
     service.disconnect()
     injector.destroy()
   })
-  return { service, lease }
+  return { service, lease, historyInjections: () => historyInjections }
 }
 const body = '{"method":"echo","params":{}}'
 const network = error => assert.equal(error.code, 0)
@@ -87,7 +103,12 @@ class LogicalSocket {
     LogicalSocket.instances.push(this)
     queueMicrotask(() => {
       this.readyState = 1
-      this.onopen?.(new Event('open'))
+      const event = new Event('open')
+      Object.defineProperties(event, {
+        peer: { value: `peer-${LogicalSocket.instances.indexOf(this)}` },
+        target: { value: this },
+      })
+      this.onopen?.(event)
     })
   }
   send(body) {
@@ -109,8 +130,10 @@ class LogicalSocket {
 async function streamFixture(context) {
   const result = await fixture(context)
   LogicalSocket.instances = []
+  const opened = new ReplaySubject(1)
   const subject = webSocket({
     url: 'ws://fixture',
+    openObserver: { next: event => opened.next(event) },
     WebSocketCtor: LogicalSocket,
     serializer: value =>
       typeof value === 'string' ? value : JSON.stringify(value),
@@ -123,6 +146,7 @@ async function streamFixture(context) {
     signal: result.lease.signal,
     abort: new AbortController(),
     socket: subject,
+    opened,
   }
   context.after(() => subject.unsubscribe())
   return result
@@ -130,6 +154,56 @@ async function streamFixture(context) {
 
 const version = SESSION_PROFILE.transport.rpcStreamVersion
 const tick = () => new Promise(setImmediate)
+
+test('verified peer observation belongs to each operation, including reuse and authorization rejection, not startup transport', async context => {
+  const { service, lease, historyInjections } = await streamFixture(context)
+  const startup = service.message(body, {}, lease)
+  await tick()
+  const observed = []
+  const normal = service.message(
+    body,
+    { openObserver: { next: event => observed.push(event.peer) } },
+    lease,
+  )
+  assert.deepEqual(observed, ['peer-0'])
+  assert.equal(historyInjections(), 0)
+  const socket = LogicalSocket.instances[0]
+  socket.receive({ jsonrpc: '2.0', id: socket.writes[0].id, result: 'startup' })
+  socket.receive({
+    jsonrpc: '2.0',
+    id: socket.writes[1].id,
+    error: { code: 34, message: 'not enrolled' },
+  })
+  await startup
+  assert.equal((await normal).error.code, 34)
+  assert.equal(socket.closed, 1)
+  const fresh = service.message(
+    body,
+    { openObserver: { next: event => observed.push(event.peer) } },
+    lease,
+  )
+  assert.deepEqual(observed, ['peer-0'])
+  await tick()
+  assert.deepEqual(observed, ['peer-0', 'peer-1'])
+  const next = LogicalSocket.instances[1]
+  next.receive({ jsonrpc: '2.0', id: next.writes[0].id, result: 'fresh' })
+  await fresh
+})
+
+test('canceling an operation before admission never observes its later peer', async context => {
+  const { service, lease } = await streamFixture(context)
+  const abort = new AbortController()
+  const observed = []
+  const operation = service.stream(body, lease, {
+    signal: abort.signal,
+    openObserver: { next: event => observed.push(event.peer) },
+  })
+  const rejected = assert.rejects(operation, { name: 'AbortError' })
+  abort.abort()
+  await rejected
+  await tick()
+  assert.deepEqual(observed, [])
+})
 
 test('typed initial/item/final values and metadata survive without canceling a sibling', async context => {
   const { service, lease } = await streamFixture(context)

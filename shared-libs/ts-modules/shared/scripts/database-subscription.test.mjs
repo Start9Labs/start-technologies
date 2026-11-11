@@ -22,6 +22,7 @@ test('disposing while a key lease is pending never starts a database stream', as
       },
     },
     { lease: () => lease.promise },
+    { openObserver: { next() {} } },
   ).subscribe()
   subscription.unsubscribe()
   lease.resolve({ key: {}, signal: new AbortController().signal })

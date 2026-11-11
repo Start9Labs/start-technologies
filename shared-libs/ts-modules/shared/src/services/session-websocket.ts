@@ -11,8 +11,8 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 
 export interface SessionSocketIdentity {
-  signer: auth.RequestSigner
-  signal: AbortSignal
+  readonly signer: auth.RequestSigner
+  readonly signal: AbortSignal
 }
 
 export class SessionOpenEvent extends Event {

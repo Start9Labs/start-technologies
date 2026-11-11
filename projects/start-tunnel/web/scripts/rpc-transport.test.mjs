@@ -20,6 +20,7 @@ const boundaries = new Map([
     export { AuthKeyService } from '${new URL('services/auth-key.service.ts', shared)}';
     export { HttpService } from '${new URL('services/http.service.ts', shared)}';
     export { RpcSocketService } from '${new URL('services/rpc-socket.service.ts', shared)}';
+    export { ServerIdentityService } from '${new URL('services/server-identity.service.ts', shared)}';
     export { RpcError } from '${new URL('classes/rpc-error.ts', shared)}';
     export { isRpcError } from '${new URL('types/rpc.types.ts', shared)}';
     export { rpcRequestBody } from '${new URL('services/rpc-request.ts', shared)}';
@@ -47,6 +48,7 @@ function api() {
   const lease = { key: {}, signal: new AbortController().signal }
   const instance = {
     authKeys: { lease: async () => lease },
+    identity: { openObserver: { next() {} } },
     sockets: { message: async () => ({ result: 'encrypted' }) },
     http: {
       rpcMessage: () => {

@@ -5,6 +5,7 @@ import { auth } from '@start9labs/start-core'
 
 import type { HttpOptions } from '../types/http.types'
 import { identityStore } from './identity-store'
+import type { SessionSocketIdentity } from './session-websocket'
 
 /** IndexedDB record key for the device key. Override per app so two apps
  *  served from one origin (dev servers, a re-pointed forward) can't clobber
@@ -21,9 +22,8 @@ export const AUTH_SIGNING_HOST = new InjectionToken<string>(
 )
 
 /** The active device identity and its cancellation lifetime. */
-export interface AuthKeyLease {
+export interface AuthKeyLease extends SessionSocketIdentity {
   readonly key: auth.AuthKey
-  readonly signal: AbortSignal
 }
 
 /**
@@ -31,7 +31,8 @@ export interface AuthKeyLease {
  * WebCrypto Ed25519 key persisted in IndexedDB, so a script can sign with it
  * while the page lives but can never read it out. Cleared by the app on
  * logout or server rejection; the server-side enrollment is revoked
- * separately.
+ * separately. Key acquisition and enrollment cannot adopt a replacement identity
+ * after their cancellation lifetime ends.
  */
 @Service()
 export class AuthKeyService {
@@ -40,6 +41,7 @@ export class AuthKeyService {
   private readonly host = inject(AUTH_SIGNING_HOST)
   private cached: auth.AuthKey | null | undefined
   private lifetime = new AbortController()
+  private admissionKey?: Promise<auth.RequestSigner>
   /** Preserves another tab's displaced key across a failed login. */
   private displaced: auth.AuthKey | null = null
 
@@ -57,15 +59,42 @@ export class AuthKeyService {
 
   /** Invalidated when the active device identity changes. */
   async lease(): Promise<AuthKeyLease | null> {
+    const lifetime = this.lifetime
     await this.get()
+    lifetime.signal.throwIfAborted()
     return this.cached
-      ? { key: this.cached, signal: this.lifetime.signal }
+      ? {
+          key: this.cached,
+          signer: auth.requestSigner(this.cached),
+          signal: lifetime.signal,
+        }
       : null
   }
 
+  /** Uses an unpersisted signer without WebCrypto when no device key exists. */
+  async admissionLease(): Promise<SessionSocketIdentity> {
+    const lifetime = this.lifetime
+    const stored = await this.get()
+    lifetime.signal.throwIfAborted()
+    const signer = stored
+      ? auth.requestSigner(stored)
+      : await (this.admissionKey ??= auth
+          .generateEphemeralRequestSigner()
+          .catch(error => {
+            if (this.lifetime === lifetime) this.admissionKey = undefined
+            throw error
+          }))
+    lifetime.signal.throwIfAborted()
+    return { signer, signal: lifetime.signal }
+  }
+
   async create(): Promise<auth.AuthKey> {
+    const lifetime = this.lifetime
     const key = await auth.generateAuthKey()
-    this.displaced = await this.get()
+    lifetime.signal.throwIfAborted()
+    const displaced = await this.get()
+    lifetime.signal.throwIfAborted()
+    this.displaced = displaced
     await this.put(key)
     return key
   }
@@ -93,27 +122,33 @@ export class AuthKeyService {
   ): Promise<HttpHeaders> {
     const result =
       headers instanceof HttpHeaders ? headers : new HttpHeaders(headers)
-    const key = await this.get()
-    if (!key) return result
+    const lease = await this.lease()
+    if (!lease) return result
     const bytes =
       typeof body === 'string' ? new TextEncoder().encode(body) : body
-    return result.set(
-      auth.AUTH_SIG_HEADER,
-      await auth.signRequest(key, this.host, bytes),
-    )
+    const proof = await auth.signRequest(lease.key, this.host, bytes)
+    lease.signal.throwIfAborted()
+    return result.set(auth.AUTH_SIG_HEADER, proof)
   }
 
   private async put(key: auth.AuthKey): Promise<void> {
-    this.lifetime.abort()
-    this.lifetime = new AbortController()
+    const lifetime = this.replaceLifetime()
     this.cached = key
     await this.idb('readwrite', s => s.put(key, this.storageKey))
+    lifetime.signal.throwIfAborted()
   }
 
   private async delete(): Promise<void> {
-    this.lifetime.abort()
+    this.replaceLifetime()
     this.cached = null
     await this.idb('readwrite', s => s.delete(this.storageKey))
+  }
+
+  private replaceLifetime(): AbortController {
+    this.lifetime.abort()
+    this.lifetime = new AbortController()
+    this.admissionKey = undefined
+    return this.lifetime
   }
 
   private idb<T>(

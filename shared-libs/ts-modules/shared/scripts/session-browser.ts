@@ -73,7 +73,11 @@ async function call(method: string, params: object = {}) {
   const lease = await keys.lease()
   if (!lease) throw Error('No key')
   try {
-    return await rpc.message(body(method, params), {}, lease)
+    return await rpc.message(
+      body(method, params),
+      { openObserver: identities.openObserver },
+      lease,
+    )
   } catch (error) {
     const cause = (error as Error).cause as ErrorEvent | undefined
     console.error('RPC cause', cause?.error?.stack ?? cause)
@@ -113,6 +117,9 @@ const probe = {
     if (!('secret' in result.dump.value.package.packages))
       throw Error('Reader enrollment was not live')
     continuation = rpc.openSocket(result.guid)
+    continuation.addEventListener('open', identities.openObserver.next, {
+      once: true,
+    })
     await new Promise((resolve, reject) => {
       continuation!.onopen = resolve
       continuation!.onerror = reject

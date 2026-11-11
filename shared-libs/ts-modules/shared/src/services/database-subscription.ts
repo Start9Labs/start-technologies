@@ -14,6 +14,7 @@ import {
 import type { Observable, OperatorFunction } from 'rxjs'
 import type { AuthKeyService } from './auth-key.service'
 import type { RpcSocketService } from './rpc-socket.service'
+import type { ServerIdentityService } from './server-identity.service'
 import { rpcRequestBody } from './rpc-request'
 
 type LegacySubscription = { dump: Dump<unknown>; guid: string }
@@ -22,6 +23,7 @@ type LegacySubscription = { dump: Dump<unknown>; guid: string }
 export function databaseSubscription<T>(
   sockets: RpcSocketService,
   authKeys: AuthKeyService,
+  identity: ServerIdentityService,
 ): Observable<Update<T>> {
   return defer(() => {
     const abort = new AbortController()
@@ -35,7 +37,10 @@ export function databaseSubscription<T>(
         options?.signal?.throwIfAborted()
         if (!lease)
           throw new Error('Database subscriptions require an authenticated key')
-        return sockets.stream(body, lease, options)
+        return sockets.stream(body, lease, {
+          ...options,
+          openObserver: identity.openObserver,
+        })
       },
     })
     return from(
@@ -44,7 +49,6 @@ export function databaseSubscription<T>(
           {},
           { signal: abort.signal },
         )
-        // Opted-in subscriptions yield a dump and database-generated patches.
         yield initial as Dump<T>
         for await (const revision of items) yield revision as Revision
       })(),

@@ -8,6 +8,7 @@ import {
   RPCOptions,
   RPCResponse,
   RpcSocketService,
+  ServerIdentityService,
   rpcRequestBody,
   waitForPatchSequence,
 } from '@start9labs/shared'
@@ -24,6 +25,7 @@ import { ApiClient, ApiService } from './api.service'
 export class LiveApiService extends ApiService {
   private readonly http = inject(HttpService)
   private readonly sockets = inject(RpcSocketService)
+  private readonly identity = inject(ServerIdentityService)
   private readonly auth = inject(AuthService)
   private readonly authKeys = inject(AuthKeyService)
   private readonly cache$ = inject(PATCH_CACHE)
@@ -41,13 +43,17 @@ export class LiveApiService extends ApiService {
   }
 
   openWebsocket$<T>(guid: string): Observable<T> {
-    return this.sockets.open<T>(guid)
+    return this.sockets.open<T>(guid, {
+      openObserver: this.identity.openObserver,
+    })
   }
 
   override watchDb$(): Observable<Update<TunnelData>> {
-    return databaseSubscription<TunnelData>(this.sockets, this.authKeys).pipe(
-      catchError(error => this.raiseError(error)),
-    )
+    return databaseSubscription<TunnelData>(
+      this.sockets,
+      this.authKeys,
+      this.identity,
+    ).pipe(catchError(error => this.raiseError(error)))
   }
 
   private async rpcRequest<T>(
@@ -57,7 +63,11 @@ export class LiveApiService extends ApiService {
     const request = rpcRequestBody(options)
     const lease = urlOverride ? null : await this.authKeys.lease()
     const body = lease
-      ? await this.sockets.message<T>(request, options, lease)
+      ? await this.sockets.message<T>(
+          request,
+          { ...options, openObserver: this.identity.openObserver },
+          lease,
+        )
       : (await this.http.rpcMessage<T>(request, options, urlOverride)).body
 
     const result = this.responseResult(body)

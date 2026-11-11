@@ -18,6 +18,7 @@ loadTypeScript(
     export { AuthKeyService } from '${new URL('services/auth-key.service.ts', shared)}';
     export { HttpService } from '${new URL('services/http.service.ts', shared)}';
     export { RpcSocketService } from '${new URL('services/rpc-socket.service.ts', shared)}';
+    export { ServerIdentityService } from '${new URL('services/server-identity.service.ts', shared)}';
     export { RELATIVE_URL } from '${new URL('tokens/relative-url.ts', shared)}';
     export { RpcError } from '${new URL('classes/rpc-error.ts', shared)}';
     export { isRpcError } from '${new URL('types/rpc.types.ts', shared)}';
@@ -40,9 +41,13 @@ loadTypeScript(
     ],
   ]),
 )
-const { AuthKeyService, HttpService, RpcSocketService, RELATIVE_URL } =
-  await import('@start9labs/shared')
-const { opened } = await import('rxjs/webSocket')
+const {
+  AuthKeyService,
+  HttpService,
+  RpcSocketService,
+  RELATIVE_URL,
+  ServerIdentityService,
+} = await import('@start9labs/shared')
 const { AuthService } = await import('../auth.service')
 const { PATCH_CACHE } =
   await import('src/app/services/patch-db/patch-db-source')
@@ -75,7 +80,11 @@ function fixture(context) {
   const sockets = {
     message: async (body, options, identity) => {
       calls.push({ transport: 'encrypted', body, options, identity })
-      return { result: 'encrypted' }
+      options.openObserver?.next({ peer: 'verified peer' })
+      return {
+        result:
+          JSON.parse(body).method === 'state' ? 'initializing' : 'encrypted',
+      }
     },
     open: (guid, config) => {
       const socket = new Subject()
@@ -84,6 +93,10 @@ function fixture(context) {
     },
   }
   const keys = {
+    admissionLease: async () => {
+      calls.push({ transport: 'admission' })
+      return lease
+    },
     lease: async () => {
       calls.push({ transport: 'key' })
       return lease
@@ -96,6 +109,10 @@ function fixture(context) {
       })
     },
   }
+  const observed = []
+  const identity = {
+    openObserver: { next: event => observed.push(event.peer) },
+  }
   const injector = Injector.create({
     providers: [
       { provide: ApiService, useClass: LiveApiService },
@@ -107,6 +124,7 @@ function fixture(context) {
       { provide: RELATIVE_URL, useValue: '/rpc/v1' },
       { provide: HttpService, useValue: http },
       { provide: RpcSocketService, useValue: sockets },
+      { provide: ServerIdentityService, useValue: identity },
       { provide: AuthKeyService, useValue: keys },
       { provide: AuthService, useValue: { setUnverified: () => rejected++ } },
       { provide: PATCH_CACHE, useValue: cache },
@@ -123,11 +141,12 @@ function fixture(context) {
     cache,
     lease,
     rejected: () => rejected,
+    observed,
   }
 }
 const flush = () => new Promise(setImmediate)
 
-test('startup probes remain public HTTP even with a saved device key', async context => {
+test('startup probes use encrypted possession without enrolled authorization or advisory history', async context => {
   const f = fixture(context)
   f.keys.lease = () => {
     throw new Error('private identity accessed')
@@ -136,13 +155,13 @@ test('startup probes remain public HTTP even with a saved device key', async con
     await f.startup.rpc.state({}, { timeout: 10000 }),
     'initializing',
   )
-  assert.equal(f.calls.length, 1)
-  assert.equal(f.calls[0].transport, 'startup')
-  assert.deepEqual(f.calls[0].options, {
-    method: 'state',
-    params: {},
-    timeout: 10000,
-  })
+  assert.deepEqual(
+    f.calls.map(call => call.transport),
+    ['admission', 'encrypted'],
+  )
+  assert.deepEqual(JSON.parse(f.calls[1].body), { method: 'state', params: {} })
+  assert.equal(f.calls[1].options.timeout, 10000)
+  assert.deepEqual(f.observed, [])
 })
 
 test('an untrusted startup-mode reply cannot downgrade a private login', async context => {
@@ -152,7 +171,11 @@ test('an untrusted startup-mode reply cannot downgrade a private login', async c
     await f.api.rpc.auth.login({ password: 'fixture', pubkey: 'public' }),
     'encrypted',
   )
-  const message = f.calls.find(call => call.transport === 'encrypted')
+  const message = f.calls.find(
+    call =>
+      call.transport === 'encrypted' &&
+      JSON.parse(call.body).method === 'auth.login',
+  )
   assert.equal(message.identity, f.lease)
   assert.deepEqual(JSON.parse(message.body), {
     method: 'auth.login',
@@ -174,26 +197,29 @@ for (const method of ['init.subscribe', 'diagnostic.error', 'net.dns.status'])
     let call = f.startup.rpc[namespace]
     for (const segment of path) call = call[segment]
     await call({})
-    assert.equal(f.calls.length, 1)
-    assert.equal(f.calls[0].transport, 'startup')
-    assert.equal(f.calls[0].options.method, method)
+    assert.deepEqual(
+      f.calls.map(call => call.transport),
+      ['admission', 'encrypted'],
+    )
+    assert.equal(JSON.parse(f.calls[1].body).method, method)
+    assert.deepEqual(f.observed, [])
   })
 
-test('startup GUIDs keep raw WebSocket callbacks and binary options', context => {
+test('startup GUIDs use shared encrypted admission and preserve callbacks and binary options', context => {
   const f = fixture(context)
   const config = {
     binaryType: 'arraybuffer',
     deserializer: event => event.data,
     serializer: value => value,
   }
-  const before = opened.length
-  const socket = f.startup.openWebsocket$('legacy-guid', config)
-  assert.equal(opened.length, before + 1)
-  assert.equal(socket.config.url, 'ws://os.test/rpc/v2/legacy-guid')
-  assert.equal(socket.config.serializer, config.serializer)
-  assert.equal(socket.config.deserializer, config.deserializer)
-  assert.equal(socket.config.binaryType, 'arraybuffer')
-  assert.deepEqual(f.calls, [])
+  const socket = f.startup.openWebsocket$('startup-guid', config)
+  const call = f.calls.at(-1)
+  assert.equal(call.transport, 'encrypted-guid')
+  assert.equal(call.guid, 'startup-guid')
+  assert.equal(call.config, config)
+  assert.equal(socket, call.socket)
+  assert.equal(call.config.openObserver, undefined)
+  assert.deepEqual(f.observed, [])
 })
 
 test('normal GUIDs always use fresh encrypted admission regardless of startup state', async context => {
@@ -206,8 +232,11 @@ test('normal GUIDs always use fresh encrypted admission regardless of startup st
   const socket = f.api.openWebsocket$('secure-guid', config)
   const call = f.calls.at(-1)
   assert.equal(call.transport, 'encrypted-guid')
-  assert.equal(call.config, config)
+  assert.equal(call.config.deserializer, config.deserializer)
+  assert.equal(call.config.binaryType, config.binaryType)
   assert.equal(socket, call.socket)
+  call.config.openObserver.next({ peer: 'verified normal peer' })
+  assert.deepEqual(f.observed, ['verified normal peer'])
 })
 
 test('normal public calls without a device key retain anonymous HTTP', async context => {
@@ -255,6 +284,54 @@ test('foreign echoes stay unsigned and ignore the local cache sequence', async c
   )
   assert.deepEqual(f.calls, [])
   assert.equal(f.cache.observed, false)
+})
+
+test('startup captures request bytes before possession-key lookup and never records startup peers', async context => {
+  const f = fixture(context)
+  const ready = Promise.withResolvers()
+  f.keys.admissionLease = () => ready.promise
+  const params = { url: 'https://registry.test', version: '0.4.3' }
+  const pending = f.startup.rpc.diagnostic.update(params)
+  params.url = 'https://changed.test'
+  ready.resolve(f.lease)
+  await pending
+  assert.equal(
+    JSON.parse(f.calls.at(-1).body).params.url,
+    'https://registry.test',
+  )
+  assert.deepEqual(f.observed, [])
+})
+
+test('canceled key lookup never falls back to HTTP or starts a late startup operation', async context => {
+  const f = fixture(context)
+  const canceled = new DOMException('disposed', 'AbortError')
+  f.keys.admissionLease = async () => {
+    throw canceled
+  }
+  await assert.rejects(f.startup.rpc.state({}), error => error === canceled)
+  f.keys.lease = async () => {
+    throw canceled
+  }
+  await assert.rejects(
+    f.api.rpc.auth.login({ password: 'secret', pubkey: 'key' }),
+    error => error === canceled,
+  )
+  assert.deepEqual(f.calls, [])
+})
+
+test('failed startup admission never selects plaintext transport', async context => {
+  const f = fixture(context)
+  f.sockets.message = async () => {
+    throw Error('admission rejected')
+  }
+  await assert.rejects(f.startup.rpc.state({}), /admission rejected/)
+  assert.equal(
+    f.calls.some(
+      call => call.transport === 'http' || call.transport === 'startup',
+    ),
+    false,
+  )
+  assert.deepEqual(f.observed, [])
 })
 
 test('RPC bytes are captured before waiting for the device identity', async context => {
@@ -341,13 +418,11 @@ test('encrypted mutations still wait for the local committed sequence', async co
 
 test('startup errors preserve RPC details without discarding unrelated enrollment', async context => {
   const f = fixture(context)
-  f.http.rpcRequest = async () => ({
-    body: {
-      error: {
-        code: 34,
-        message: 'startup failure',
-        data: { details: 'details' },
-      },
+  f.sockets.message = async () => ({
+    error: {
+      code: 34,
+      message: 'startup failure',
+      data: { details: 'details' },
     },
   })
   await assert.rejects(

@@ -51,11 +51,15 @@ promise-based**; components call `await this.api.method(params)` and never touch
   (`@start9labs/shared`) for signed-DH admission and encrypted messages. Each connection signs fresh RPC/GUID intent before the network deadline.
   Capture serialization before asynchronous key lookup; retain the existing RxJS socket and
   source-service retry/cancellation owners. `AuthKeyService` leases cancel on replacement,
-  rollback and logout. Public calls without a key and explicit foreign overrides retain HTTP;
-  a failed exchange never retries as plaintext. StartOS's `StartupApiService` separately owns
-  unsigned HTTP and legacy WebSockets for initialization, diagnostics and the state/DNS probe.
-  Callers select that contract explicitly; an unauthenticated mode response cannot downgrade
-  a normal caller. Mock mode reuses the existing API fixture. RPC-level errors use
+  rollback and logout, including pending acquisition/enrollment. Public normal calls without a
+  key and explicit foreign overrides retain HTTP; a failed exchange never retries as plaintext.
+  StartOS's `StartupApiService` and setup-wizard use `AuthKeyService.admissionLease` and the same
+  socket owner for initialization, diagnostics and state/DNS probes. Missing device keys use
+  unpersisted possession without enrollment. Normal product APIs explicitly attach
+  `ServerIdentityService.openObserver`; startup callers never populate persistent normal-server
+  history. Per-operation open observation also covers healthy session reuse and authorization
+  rejection. Callers select that contract explicitly; an unauthenticated mode response cannot
+  downgrade a normal caller. Mock mode reuses the existing API fixture. RPC-level errors use
   `isRpcError(body)` → `RpcError`; normal code-34 rejection forces logout. Local replies wait
   for `meta.patchSequence` through the shared fence; foreign replies never wait on the local
   cache. HTTP compatibility projects older `x-patch-sequence` headers only when JSON metadata

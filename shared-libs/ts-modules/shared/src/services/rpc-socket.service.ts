@@ -1,5 +1,4 @@
 import { DOCUMENT, inject, Service } from '@angular/core'
-import { auth } from '@start9labs/start-core'
 import type { RpcStreamOptions } from '@start9labs/start-core'
 import { SESSION_PROFILE } from '@start9labs/start-core/osBindings/session-profile'
 import {
@@ -8,25 +7,32 @@ import {
   filter,
   firstValueFrom,
   map,
+  Observable,
+  ReplaySubject,
+  Subscription,
+  take,
   throwError,
 } from 'rxjs'
-import type { Observable } from 'rxjs'
 import { webSocket } from 'rxjs/webSocket'
+import { v4 as uuid } from 'uuid'
 import type { WebSocketSubject, WebSocketSubjectConfig } from 'rxjs/webSocket'
 
 import { RELATIVE_URL } from '../tokens/relative-url'
 import type { RPCOptions, RPCResponse } from '../types/rpc.types'
 import { AUTH_SIGNING_HOST, AuthKeyService } from './auth-key.service'
-import type { AuthKeyLease } from './auth-key.service'
+import type { SessionSocketIdentity } from './session-websocket'
 import { withTimeout } from './http.service'
 import {
   SessionOpenEvent,
   sessionWebSocketConstructor,
 } from './session-websocket'
-import { ServerIdentityService } from './server-identity.service'
 import { rpcWebSocketUrl } from './rpc-request'
 import { isRpcResponse, rpcResponseStream } from './rpc-stream'
 import type { RpcFrame, SocketResponseStream } from './rpc-stream'
+
+/** Observes verified admission for this operation, including healthy connection reuse. */
+export type RpcSocketOptions = Pick<RPCOptions, 'timeout'> &
+  Pick<WebSocketSubjectConfig<unknown>, 'openObserver'>
 
 @Service()
 export class RpcSocketService {
@@ -34,23 +40,20 @@ export class RpcSocketService {
   private readonly relativeUrl = inject(RELATIVE_URL)
   private readonly context = inject(AUTH_SIGNING_HOST)
   private readonly authKeys = inject(AuthKeyService)
-  private readonly serverIdentity = inject(ServerIdentityService)
-  private readonly opened = (event: Event) => {
-    void this.serverIdentity.observe((event as SessionOpenEvent).peer)
-  }
   private session?: {
     signal: AbortSignal
     abort: AbortController
     socket: WebSocketSubject<RpcFrame>
+    opened: ReplaySubject<SessionOpenEvent>
   }
 
   /** Adds a correlation ID to an ID-less serialized RPC object. */
   async message<T>(
     body: string,
-    options: Pick<RPCOptions, 'timeout'>,
-    lease: AuthKeyLease,
+    options: RpcSocketOptions,
+    lease: SessionSocketIdentity,
   ): Promise<RPCResponse<T>> {
-    let response = this.responses(body, lease).pipe(
+    let response = this.responses(body, lease, options.openObserver).pipe(
       map(frame => frame.value),
       filter(
         (value): value is RPCResponse<T> =>
@@ -68,11 +71,11 @@ export class RpcSocketService {
   /** Cancellation includes admission and initialization; terminal values belong to the iterator. */
   stream<R, I, F>(
     body: string,
-    lease: AuthKeyLease,
-    options: RpcStreamOptions = {},
+    lease: SessionSocketIdentity,
+    options: RpcStreamOptions & Pick<RpcSocketOptions, 'openObserver'> = {},
   ): Promise<SocketResponseStream<R, I, F>> {
     const request = `{"rpcstream":${JSON.stringify(SESSION_PROFILE.transport.rpcStreamVersion)},${body.slice(1)}`
-    let source = this.responses(request, lease)
+    let source = this.responses(request, lease, options.openObserver)
     if (options.timeout)
       source = withTimeout(source, options.timeout).pipe(
         catchError(cause => throwError(() => transportError(cause))),
@@ -80,12 +83,16 @@ export class RpcSocketService {
     return rpcResponseStream(source, options)
   }
 
-  private responses(body: string, lease: AuthKeyLease): Observable<RpcFrame> {
+  private responses(
+    body: string,
+    lease: SessionSocketIdentity,
+    observer?: RpcSocketOptions['openObserver'],
+  ): Observable<RpcFrame> {
     return defer(() => {
-      const socket = this.socket(lease)
-      const id = this.document.defaultView!.crypto.randomUUID()
+      const { socket, opened } = this.sessionFor(lease)
+      const id = uuid()
       const request = `{"jsonrpc":"2.0","id":${JSON.stringify(id)},${body.slice(1)}`
-      return socket.multiplex(
+      const responses = socket.multiplex(
         () => request,
         () => ({
           rpcstream: SESSION_PROFILE.transport.rpcStreamVersion,
@@ -97,20 +104,37 @@ export class RpcSocketService {
           'id' in frame.value &&
           frame.value.id === id,
       )
+      return new Observable<RpcFrame>(subscriber => {
+        const subscription = new Subscription()
+        if (observer)
+          subscription.add(
+            opened
+              .pipe(
+                filter(
+                  event =>
+                    (event.target as WebSocket).readyState === WebSocket.OPEN,
+                ),
+                take(1),
+              )
+              .subscribe(observer),
+          )
+        subscription.add(responses.subscribe(subscriber))
+        return subscription
+      })
     }).pipe(catchError(cause => throwError(() => transportError(cause))))
   }
 
-  private socket(lease: AuthKeyLease): WebSocketSubject<RpcFrame> {
-    const prepared = this.prepare(lease)
+  private sessionFor(lease: SessionSocketIdentity) {
     lease.signal.throwIfAborted()
     if (this.session?.signal !== lease.signal) {
       const abort = new AbortController()
-      const signal = AbortSignal.any([prepared.signal, abort.signal])
+      const signal = AbortSignal.any([lease.signal, abort.signal])
+      const opened = new ReplaySubject<SessionOpenEvent>(1)
       const socket = webSocket<RpcFrame>({
         url: this.url(),
-        openObserver: { next: this.opened },
+        openObserver: { next: event => opened.next(event as SessionOpenEvent) },
         WebSocketCtor: sessionWebSocketConstructor(
-          async () => ({ ...prepared, signal }),
+          async () => ({ signer: lease.signer, signal }),
           this.context,
           SESSION_PROFILE.identity.rpcTarget,
         ),
@@ -121,7 +145,7 @@ export class RpcSocketService {
           bytes: new TextEncoder().encode(event.data).byteLength,
         }),
       })
-      this.session = { signal: lease.signal, abort, socket }
+      this.session = { signal: lease.signal, abort, socket, opened }
       lease.signal.addEventListener(
         'abort',
         () => {
@@ -130,7 +154,7 @@ export class RpcSocketService {
         { once: true, signal: abort.signal },
       )
     }
-    return this.session.socket
+    return this.session
   }
 
   /** Aborts active RPC calls; the next call opens a fresh session. */
@@ -142,10 +166,8 @@ export class RpcSocketService {
 
   /** Opens an encrypted continuation with the DOM event/lifetime contract. */
   openSocket(guid: string): WebSocket {
-    const Constructor = this.constructorFor(guid, () => this.authKeys.lease())
-    const socket = new Constructor(this.url(guid))
-    socket.addEventListener('open', this.opened, { once: true })
-    return socket
+    const Constructor = this.constructorFor(guid)
+    return new Constructor(this.url(guid))
   }
 
   /** Redeems a continuation through encrypted admission. */
@@ -155,14 +177,8 @@ export class RpcSocketService {
   ): WebSocketSubject<T> {
     return webSocket<T>({
       ...config,
-      openObserver: {
-        next: event => {
-          this.opened(event)
-          config.openObserver?.next(event)
-        },
-      },
       url: this.url(guid),
-      WebSocketCtor: this.constructorFor(guid, () => this.authKeys.lease()),
+      WebSocketCtor: this.constructorFor(guid),
     })
   }
 
@@ -174,24 +190,12 @@ export class RpcSocketService {
     )
   }
 
-  private constructorFor(
-    guid: string,
-    lease: () => Promise<AuthKeyLease | null>,
-  ) {
+  private constructorFor(guid: string) {
     return sessionWebSocketConstructor(
-      async () => {
-        const current = await lease()
-        if (!current) throw new Error('No active device identity')
-        return this.prepare(current)
-      },
+      () => this.authKeys.admissionLease(),
       this.context,
       { continuation: guid },
     )
-  }
-
-  private prepare(current: AuthKeyLease) {
-    current.signal.throwIfAborted()
-    return { signer: auth.requestSigner(current.key), signal: current.signal }
   }
 }
 

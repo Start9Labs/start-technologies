@@ -1,5 +1,6 @@
 import { ed25519, ed25519ph } from '@noble/curves/ed25519'
 import { blake3 } from '@noble/hashes/blake3'
+import { sha256 } from '@noble/hashes/sha256'
 import { bytesToHex, concatBytes } from '@noble/hashes/utils'
 import type { BinaryRequestProof } from '../osBindings/session'
 import { SIGNATURE_PROFILE } from '../osBindings/signature-profile'
@@ -25,14 +26,44 @@ export interface RequestSigner {
   sign(context: string, body: Uint8Array): Promise<Uint8Array<ArrayBuffer>>
 }
 
-/** Uses the enrolled opaque WebCrypto identity for generic request commitments. */
-export function requestSigner(key: AuthKey): RequestSigner {
+interface SigningIdentity {
+  publicKey: Uint8Array
+  sign(message: Uint8Array<ArrayBuffer>): Promise<Uint8Array>
+}
+
+function webCryptoIdentity(key: AuthKey): SigningIdentity {
+  return {
+    publicKey: base64ToBytes(normalizeDer64(key.pubkeyPem)),
+    sign: async message =>
+      new Uint8Array(
+        await crypto.subtle.sign('Ed25519', key.privateKey, message),
+      ),
+  }
+}
+
+function commitmentSigner(identity: SigningIdentity): RequestSigner {
   return {
     sign: async (context, body) => {
       const { encode } = await import('./cbor')
-      return encode(await signTaggedRequest(key, context, body, COMMITMENT_TAG))
+      return encode(
+        await signTaggedRequest(identity, context, body, COMMITMENT_TAG),
+      )
     },
   }
+}
+
+/** Uses the enrolled opaque WebCrypto identity for generic request commitments. */
+export function requestSigner(key: AuthKey): RequestSigner {
+  return commitmentSigner(webCryptoIdentity(key))
+}
+
+/** Generates an opaque Ed25519 possession signer without WebCrypto or persistence. */
+export async function generateEphemeralRequestSigner(): Promise<RequestSigner> {
+  const secret = ed25519.utils.randomPrivateKey()
+  return commitmentSigner({
+    publicKey: concatBytes(ED25519_SPKI_PREFIX, ed25519.getPublicKey(secret)),
+    sign: async message => ed25519.sign(message, secret),
+  })
 }
 
 export async function generateAuthKey(): Promise<AuthKey> {
@@ -51,7 +82,12 @@ export async function signRequest(
   context: string,
   body: Uint8Array,
 ): Promise<string> {
-  const proof = await signTaggedRequest(key, context, body, REQUEST_AUTH_TAG)
+  const proof = await signTaggedRequest(
+    webCryptoIdentity(key),
+    context,
+    body,
+    REQUEST_AUTH_TAG,
+  )
   return new URLSearchParams({
     commitment: SIGNATURE_PROFILE.requestName,
     timestamp: proof.commitment.timestamp.toString(),
@@ -89,7 +125,7 @@ function requestCommitment(
 }
 
 async function signTaggedRequest(
-  key: AuthKey,
+  identity: SigningIdentity,
   context: string,
   body: Uint8Array,
   tag: Uint8Array,
@@ -104,12 +140,10 @@ async function signTaggedRequest(
     SIGNATURE_PROFILE.requestType,
     requestCommitment(timestamp, nonce, size, hash),
   )
-  const signature = new Uint8Array(
-    await crypto.subtle.sign('Ed25519', key.privateKey, message),
-  )
+  const signature = await identity.sign(message)
   return {
     commitment: { timestamp, nonce, size, blake3: new Uint8Array(hash) },
-    signer: new Uint8Array(base64ToBytes(normalizeDer64(key.pubkeyPem))),
+    signer: new Uint8Array(identity.publicKey),
     signature: new Uint8Array(concatBytes(SIGNATURE_PREFIX, signature)),
   }
 }
@@ -201,8 +235,7 @@ export async function verifyingKeyFingerprint(
 ): Promise<string> {
   const raw = parseEd25519PublicKey(serialized)
   const profile = SIGNATURE_PROFILE.fingerprint
-  const hash = await crypto.subtle.digest(profile.algorithm, raw.slice().buffer)
-  return profile.prefix + bytesToHex(new Uint8Array(hash))
+  return profile.prefix + bytesToHex(sha256(raw))
 }
 
 /** Encodes a signing context within the native one-byte length limit. */

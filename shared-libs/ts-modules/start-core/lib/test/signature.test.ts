@@ -12,6 +12,7 @@ import {
   verifyRequestProof,
   verifyingKeyFingerprint,
   generateAuthKey,
+  generateEphemeralRequestSigner,
 } from '../auth/signature'
 
 const der64 = 'MCowBQYDK2VwAyEAgTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q='
@@ -19,6 +20,27 @@ const pem = `-----BEGIN PUBLIC KEY-----\n${der64}\n-----END PUBLIC KEY-----\n`
 
 beforeAll(() => {
   Object.defineProperty(globalThis, 'crypto', { value: webcrypto })
+})
+
+test('ephemeral possession signs and verifies without crypto.subtle or exposing enrollment material', async () => {
+  Object.defineProperty(globalThis, 'crypto', {
+    value: { getRandomValues: webcrypto.getRandomValues.bind(webcrypto) },
+  })
+  try {
+    const signer = await generateEphemeralRequestSigner()
+    expect(Object.keys(signer)).toEqual(['sign'])
+    const body = new TextEncoder().encode('captured body')
+    const proof = await signer.sign('startup.local', body)
+    const peer = await verifyRequestProof(proof, 'startup.local', body)
+    expect(await verifyingKeyFingerprint(peer)).toMatch(/^SHA256:[0-9a-f]{64}$/)
+    const again = await signer.sign('startup.local', body)
+    expect(await verifyRequestProof(again, 'startup.local', body)).toBe(peer)
+    await expect(
+      verifyRequestProof(proof, 'other.local', body),
+    ).rejects.toThrow()
+  } finally {
+    Object.defineProperty(globalThis, 'crypto', { value: webcrypto })
+  }
 })
 
 test('DER64 normalization preserves standard Base64 and padding', () => {

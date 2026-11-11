@@ -5,6 +5,7 @@ import { TuiNotificationService } from '@taiga-ui/core'
 import { AUTH_KEY_STORAGE_KEY } from './auth-key.service'
 import { identityStore } from './identity-store'
 import { RELATIVE_URL } from '../tokens/relative-url'
+import type { SessionOpenEvent } from './session-websocket'
 
 @Service()
 export class ServerIdentityService {
@@ -12,6 +13,11 @@ export class ServerIdentityService {
   private readonly relativeUrl = inject(RELATIVE_URL)
   private readonly storageKey = inject(AUTH_KEY_STORAGE_KEY)
   private readonly alerts = inject(TuiNotificationService)
+  readonly openObserver = {
+    next: (event: Event) => {
+      void this.observe((event as SessionOpenEvent).peer)
+    },
+  }
 
   async observe(peer: string): Promise<void> {
     const endpoint = new URL(this.relativeUrl, this.win.location.origin)

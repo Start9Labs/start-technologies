@@ -8,6 +8,7 @@ import {
   rpcRequestHeaders,
   rpcRequestBody,
   RpcSocketService,
+  ServerIdentityService,
 } from '@start9labs/shared'
 import type {
   RPCOptions as SharedRPCOptions,
@@ -37,6 +38,7 @@ export class RpcService {
   private readonly authKeys = inject(AuthKeyService)
   private readonly injector = inject(Injector)
   private readonly sockets = inject(RpcSocketService)
+  private readonly identity = inject(ServerIdentityService)
   private readonly staleUi = inject(StaleUiService)
 
   async request<M extends RpcMethod<Api>>(
@@ -48,7 +50,7 @@ export class RpcService {
     const body = lease
       ? await this.sockets.message<RpcReturnType<Api, M>>(
           request,
-          options,
+          { ...options, openObserver: this.identity.openObserver },
           lease,
         )
       : (

@@ -11,6 +11,7 @@ import {
   RPCOptions,
   RPCResponse,
   RpcSocketService,
+  ServerIdentityService,
   rpcRequestBody,
   waitForPatchSequence,
 } from '@start9labs/shared'
@@ -29,6 +30,7 @@ export class LiveApiService extends ApiService {
   private readonly document = inject(DOCUMENT)
   private readonly http = inject(HttpService)
   private readonly sockets = inject(RpcSocketService)
+  private readonly identity = inject(ServerIdentityService)
   private readonly auth = inject(AuthService)
   private readonly authKeys = inject(AuthKeyService)
   private readonly cache$ = inject<Observable<Dump<DataModel>>>(PATCH_CACHE)
@@ -111,13 +113,23 @@ export class LiveApiService extends ApiService {
     guid: string,
     config: WebsocketConfig<T> = {},
   ): WebSocketSubject<T> {
-    return this.sockets.open<T>(guid, config)
+    return this.sockets.open<T>(guid, {
+      ...config,
+      openObserver: {
+        next: event => {
+          this.identity.openObserver.next(event)
+          config.openObserver?.next(event)
+        },
+      },
+    })
   }
 
   override watchDb$(): Observable<Update<DataModel>> {
-    return databaseSubscription<DataModel>(this.sockets, this.authKeys).pipe(
-      catchError(error => this.raiseError(error)),
-    )
+    return databaseSubscription<DataModel>(
+      this.sockets,
+      this.authKeys,
+      this.identity,
+    ).pipe(catchError(error => this.raiseError(error)))
   }
 
   async echo(params: Params<'echo'>, url: string): Promise<string> {
@@ -138,7 +150,11 @@ export class LiveApiService extends ApiService {
     const request = rpcRequestBody(options)
     const lease = urlOverride ? null : await this.authKeys.lease()
     const body = lease
-      ? await this.sockets.message<T>(request, options, lease)
+      ? await this.sockets.message<T>(
+          request,
+          { ...options, openObserver: this.identity.openObserver },
+          lease,
+        )
       : (await this.http.rpcMessage<T>(request, options, urlOverride)).body
 
     const result = this.responseResult(body)
