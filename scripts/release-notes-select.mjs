@@ -7,7 +7,8 @@ import { emitKeypressEvents } from 'node:readline'
 
 const USAGE =
   'usage: release-notes-select.mjs CANDIDATES SELECTION [TITLE]\n' +
-  'Reads changelog.mjs candidates JSON and writes the chosen { kind, body } items.'
+  'Reads changelog.mjs candidates JSON and writes the chosen { kind, body } items.\n' +
+  'Tab rewords an item in the $VISUAL command, which the caller must set.'
 
 const [input, output, title = 'release notes'] = process.argv.slice(2)
 if (!input || !output) {
@@ -77,9 +78,7 @@ function reword(item) {
   const file = join(directory, 'fragment.md')
   try {
     writeFileSync(file, `${item.body.trim()}\n`)
-    const editor = (process.env.VISUAL || process.env.EDITOR || 'vi').split(
-      /\s+/,
-    )
+    const editor = process.env.VISUAL.split(/\s+/)
     setRaw(false)
     input$.pause()
     out.write('\x1b[H\x1b[2J')

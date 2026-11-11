@@ -837,6 +837,29 @@ printf '%s %s' "\${DONE[create-gh-release]:-draft}" "\${DONE[publish-gh-release]
   }
 })
 
+test('the notes editor is VISUAL, EDITOR, then sensible-editor', t => {
+  const { root, env, run, nodeExecutable } = releaseFixture(t)
+  nodeExecutable('bin/sensible-editor', '')
+  const editor = vars => {
+    const result = run(
+      'bash',
+      [
+        '-c',
+        `source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh); notes_editor`,
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...env, PATH: `${join(root, 'bin')}:${env.PATH}`, ...vars },
+      },
+    )
+    assert.equal(result.status, 0, result.stderr)
+    return result.stdout.trim()
+  }
+  assert.equal(editor({ VISUAL: 'code --wait', EDITOR: 'nano' }), 'code --wait')
+  assert.equal(editor({ VISUAL: '', EDITOR: 'nano' }), 'nano')
+  assert.equal(editor({ VISUAL: '', EDITOR: '' }), 'sensible-editor')
+})
+
 test('untagged draft resume checks the commit after artifact adoption', t => {
   const { root, env, write, run, git, commit, nodeExecutable } =
     releaseFixture(t)

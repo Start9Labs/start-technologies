@@ -132,9 +132,19 @@ translation_locales() {
     jq -r '."release-notes.highlights-title" | keys[] | select(. != "en_US")' "$REPO_ROOT/$NOTE_LABELS"
 }
 
+notes_editor() {
+    if [ -n "${VISUAL:-${EDITOR:-}}" ]; then
+        echo "${VISUAL:-${EDITOR}}"
+    elif command -v sensible-editor >/dev/null; then
+        echo sensible-editor
+    else
+        echo vi
+    fi
+}
+
 launch_editor() {
     local editor
-    read -ra editor <<< "${VISUAL:-${EDITOR:-vi}}"
+    read -ra editor <<< "$(notes_editor)"
     "${editor[@]}" "$@"
 }
 
@@ -193,7 +203,7 @@ seed_notes() {
     fi
     (cd "$REPO_ROOT" && node scripts/changelog.mjs candidates "projects/$PROJECT" "$VERSION" \
         ${ref:+--ref "$ref"} ${since:+--since "$since"}) > "$work/candidates.json"
-    node "$REPO_ROOT/scripts/release-notes-select.mjs" "$work/candidates.json" "$work/selection.json" \
+    VISUAL=$(notes_editor) node "$REPO_ROOT/scripts/release-notes-select.mjs" "$work/candidates.json" "$work/selection.json" \
         "$(project_display_name "$PROJECT") ${TAG#"${PROJECT}/"} release notes"
     (cd "$REPO_ROOT" && node scripts/changelog.mjs compose-notes "projects/$PROJECT" "$VERSION" \
         --selection "$work/selection.json" ${ref:+--ref "$ref"} \
@@ -2022,7 +2032,8 @@ Subcommands:
                      (registry / apt repo / GitHub release / npm).
   create-gh-release  Pick the release's highlights (release-notes: true are
                      checked; tab rewords one; security fragments are always
-                     included), edit the compiled notes in $VISUAL/$EDITOR, translate them into every
+                     included), edit the compiled notes in $VISUAL/$EDITOR
+                     (default: sensible-editor), translate them into every
                      locale with the claude CLI and review those, then draft (or
                      update) the GitHub release at the commit being tagged with
                      the notes, an expandable changelog, the full-history
