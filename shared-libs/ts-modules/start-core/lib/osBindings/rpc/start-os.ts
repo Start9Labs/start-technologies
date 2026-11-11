@@ -266,6 +266,7 @@ export type ModifyNotificationParamsInput = z.input<
  * JSON Patch 'move' operation representation
  */
 export type MoveOperation = z.output<typeof schemas.MoveOperation>
+export type NamedProgress = z.output<typeof schemas.NamedProgress>
 export type NetInfo = z.output<typeof schemas.NetInfo>
 export type NetworkInterfaceType = z.output<typeof schemas.NetworkInterfaceType>
 export type NotificationLevel = z.output<typeof schemas.NotificationLevel>
@@ -283,6 +284,7 @@ export type PartitionTable = z.output<typeof schemas.PartitionTable>
 export type Percentage = z.output<typeof schemas.Percentage>
 export type PluginId = z.output<typeof schemas.PluginId>
 export type PreDownloadAlertWhen = z.output<typeof schemas.PreDownloadAlertWhen>
+export type ProgressUnits = z.output<typeof schemas.ProgressUnits>
 export type PushKeys = z.output<typeof schemas.PushKeys>
 export type PushKeysInput = z.input<typeof schemas.PushKeys>
 export type QueryDnsParamsInput = z.input<typeof schemas.QueryDnsParams>
@@ -487,6 +489,7 @@ export type ForgetGatewayParamsInput = z.input<
   typeof schemas.ForgetGatewayParams
 >
 export type ForwardTable = z.output<typeof schemas.ForwardTable>
+export type FullProgress = z.output<typeof schemas.FullProgress>
 
 /**
  * Whether the gateway reachable via this interface speaks each port-mapping
@@ -682,6 +685,7 @@ export type PartitionInfo = z.output<typeof schemas.PartitionInfo>
  * Representation of JSON Patch (list of patch operations)
  */
 export type Patch = z.output<typeof schemas.Patch>
+export type Progress = z.output<typeof schemas.Progress>
 export type ProxyOptions = z.output<typeof schemas.ProxyOptions>
 export type RegistryInfo = z.output<typeof schemas.RegistryInfo>
 export type ResetPasswordParamsInput = z.input<

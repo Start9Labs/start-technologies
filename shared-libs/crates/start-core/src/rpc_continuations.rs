@@ -321,6 +321,9 @@ impl RpcContinuations {
     }
 }
 
+#[cfg(test)]
+mod stream_tests;
+
 pub struct OpenAuthedContinuations<Key: Eq + Ord>(SyncMutex<BTreeMap<Key, broadcast::Sender<()>>>);
 impl<T> OpenAuthedContinuations<T>
 where

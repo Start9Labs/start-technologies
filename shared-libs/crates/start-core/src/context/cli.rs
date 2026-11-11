@@ -35,6 +35,8 @@ use crate::sign::gpg_agent::GpgAgentKey;
 use crate::sign::{AnySigningKey, Signer};
 
 mod continuation;
+#[cfg(test)]
+mod progress_tests;
 pub use continuation::CliWebSocketContext;
 
 /// A configured target whose `.local` host is resolved on first use, so an
@@ -286,6 +288,88 @@ impl CliContext {
         .await
     }
 
+    /// Observes an encrypted operation; independent local credentials retain precedence.
+    pub async fn call_remote_stream<
+        Item: serde::de::DeserializeOwned,
+        Final: serde::de::DeserializeOwned,
+    >(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<crate::util::rpc_client::RpcResponseStream<Value, Item, Final>, Error> {
+        let url = self.rpc_url()?;
+        let mut headers = HeaderMap::new();
+        if let Some(auth) = local_auth_header_for_url::<RpcContext>(&url).await {
+            headers.insert(AUTHORIZATION, auth);
+        }
+        let call = || self.stream_rpc(url.clone(), headers.clone(), method, params.clone());
+        let result = match call().await {
+            Err(error) if self.login_on_rejection(&error, method, &url).await? => call().await,
+            result => result,
+        };
+        result
+            .map_err(Error::from)
+            .with_ctx(|error| (error.kind, method))
+    }
+
+    pub(crate) async fn stream_rpc<
+        Item: serde::de::DeserializeOwned,
+        Final: serde::de::DeserializeOwned,
+    >(
+        &self,
+        url: Url,
+        headers: HeaderMap,
+        method: &str,
+        params: Value,
+    ) -> Result<crate::util::rpc_client::RpcResponseStream<Value, Item, Final>, RpcError> {
+        let signer = self.rpc_signer(&headers)?;
+        let signer = signer
+            .as_ref()
+            .unwrap_or_else(|| self.rpc_client.ephemeral_signer());
+        let address = self
+            .host_identity
+            .as_deref()
+            .or_else(|| url.host_str())
+            .or_not_found("server hostname")?;
+        self.rpc_client
+            .stream(
+                signer,
+                crate::middleware::auth::session::client::websocket_url(url.clone())?,
+                address,
+                headers,
+                method,
+                params,
+            )
+            .await
+    }
+
+    async fn login_on_rejection(
+        &self,
+        error: &RpcError,
+        method: &str,
+        url: &Url,
+    ) -> Result<bool, RpcError> {
+        if error.code != ErrorKind::Authorization as i32
+            || method == "auth.login"
+            || !std::io::stdin().is_terminal()
+        {
+            return Ok(false);
+        }
+        eprintln!(
+            "{}",
+            t!(
+                "context.cli.not-logged-in",
+                host = self
+                    .host_identity
+                    .as_deref()
+                    .or_else(|| url.host_str())
+                    .unwrap_or_default()
+            )
+        );
+        crate::auth::login::<RpcContext, _>(self, "auth.login").await?;
+        Ok(true)
+    }
+
     pub(crate) async fn call_startup_rpc(
         &self,
         method: &str,
@@ -397,25 +481,7 @@ impl CallRemote<RpcContext> for CliContext {
             )
         };
         match call().await {
-            Err(e)
-                if e.code == ErrorKind::Authorization as i32
-                    && method != "auth.login"
-                    && std::io::stdin().is_terminal() =>
-            {
-                eprintln!(
-                    "{}",
-                    t!(
-                        "context.cli.not-logged-in",
-                        host = self
-                            .host_identity
-                            .as_deref()
-                            .or_else(|| rpc_url.host_str())
-                            .unwrap_or_default()
-                    )
-                );
-                crate::auth::login::<RpcContext, _>(self, "auth.login").await?;
-                call().await
-            }
+            Err(error) if self.login_on_rejection(&error, method, &rpc_url).await? => call().await,
             res => res,
         }
     }

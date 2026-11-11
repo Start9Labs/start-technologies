@@ -4419,13 +4419,22 @@ export const UpdateSystemRes: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * Legacy progress continuation, absent for rpcstream observers.
+   */
   progress: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof Guid>>,
     z.ZodNullable<typeof Guid>
   >
 }> = /* @__PURE__ */ object({
   target: wire(z.string().nullable().optional(), z.string().nullable()),
-  progress: wire(Guid.nullable().optional(), Guid.nullable()),
+  /**
+   * Legacy progress continuation, absent for rpcstream observers.
+   */
+  progress: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Legacy progress continuation, absent for rpcstream observers.',
+  }),
 }).meta({
   id: 'UpdateSystemRes',
 })
@@ -5624,6 +5633,9 @@ export const UpdateSystemParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * Requests a legacy progress GUID; rpcstream observes completion independently.
+   */
   progress: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   registry: z.string(),
@@ -5645,7 +5657,13 @@ export const UpdateSystemParams: z.ZodObject<{
       'Accepts an untrusted signer without skipping signature or integrity verification.',
   }),
   targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
-  progress: wire(z.boolean().optional(), z.boolean()),
+  /**
+   * Requests a legacy progress GUID; rpcstream observes completion independently.
+   */
+  progress: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Requests a legacy progress GUID; rpcstream observes completion independently.',
+  }),
 }).meta({
   id: 'UpdateSystemParams',
 })

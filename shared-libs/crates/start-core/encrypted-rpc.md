@@ -79,9 +79,14 @@ selected hostname rather than a pinned dial address. RPC upgrades do not redirec
 `reqwest-websocket` 0.5.0 shares the Tungstenite 0.26 message conversion; HTTP/1 upgrade
 clients preserve ordinary HTTP client behavior separately.
 
-Native keyed OS, registry, Tunnel and WRT calls use this transport. Local/bearer access
-and missing-key public callers retain HTTP; malformed/read-permission/GPG failures fail
-closed. CLI state/setup/init/diagnostic calls deliberately retain unsigned HTTP and legacy
+Native keyed OS, registry, Tunnel and WRT calls use this transport. Ordinary local/bearer
+and missing-key public calls retain HTTP; malformed/read-permission/GPG failures fail
+closed. Typed StartOS CLI update progress uses encrypted sessions with the same independent
+local credential when present. A client-lifetime ephemeral proof identity admits that
+transport without reading or persisting a device key; it grants no credential roles.
+Initial authorization rejection retains the existing interactive login workflow; an item
+or terminal error never replays the operation. `--no-progress` retains ordinary asynchronous
+update initiation. CLI state/setup/init/diagnostic calls deliberately retain unsigned HTTP and legacy
 GUIDs independently of stored keys. `CliWebSocketContext` selects fresh same-peer,
 intended-GUID admission for normal keyed continuations. Existing consumers retain their
 streaming, output, cancellation and keepalive ownership. WRT log/update commands return
@@ -148,6 +153,13 @@ A stale local-closing socket's error cannot reset its replacement. Frontend stre
 and errors belong to `rpcstream` terminal events, not WebSocket close codes or reasons.
 Active transport closure follows reconnection policy; disposal must not create replacement
 sockets. Socket loss cancels every pending initialization and active subscription it owns.
+
+Start-core's `with_cli_progress` renders typed `FullProgress` items through the existing
+indicatif renderer and returns the real terminal value. The shared progress source observes
+the independently owned operation task, not percentage or socket closure. Dropping an
+update observer does not abort the accepted update. Legacy GUID consumers retain their
+wire format while sharing that completion owner. Authenticated observers retain the
+signer's revocation lifetime.
 
 Normal keyed browser RPC and secure-origin GUIDs cannot downgrade from unauthenticated
 state replies or failed admission. Startup/state/init/diagnostic callers deliberately use

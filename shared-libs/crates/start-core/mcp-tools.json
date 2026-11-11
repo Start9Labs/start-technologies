@@ -12350,7 +12350,10 @@
               "type": "boolean"
             },
             "targetVersion": { "type": ["string", "null"] },
-            "progress": { "type": "boolean" }
+            "progress": {
+              "description": "Requests a legacy progress GUID; rpcstream observes completion independently.",
+              "type": "boolean"
+            }
           },
           "required": ["registry"],
           "additionalProperties": true
@@ -12401,7 +12404,10 @@
           "type": "boolean"
         },
         "targetVersion": { "type": ["string", "null"] },
-        "progress": { "type": "boolean" }
+        "progress": {
+          "description": "Requests a legacy progress GUID; rpcstream observes completion independently.",
+          "type": "boolean"
+        }
       },
       "required": ["registry"],
       "additionalProperties": true
@@ -12414,6 +12420,7 @@
           "properties": {
             "target": { "type": ["string", "null"] },
             "progress": {
+              "description": "Legacy progress continuation, absent for rpcstream observers.",
               "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
             }
           },
@@ -12426,6 +12433,7 @@
       "properties": {
         "target": { "type": ["string", "null"] },
         "progress": {
+          "description": "Legacy progress continuation, absent for rpcstream observers.",
           "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
         }
       },

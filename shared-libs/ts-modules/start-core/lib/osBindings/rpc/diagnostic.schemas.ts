@@ -326,13 +326,22 @@ export const UpdateSystemRes: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * Legacy progress continuation, absent for rpcstream observers.
+   */
   progress: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof Guid>>,
     z.ZodNullable<typeof Guid>
   >
 }> = /* @__PURE__ */ object({
   target: wire(z.string().nullable().optional(), z.string().nullable()),
-  progress: wire(Guid.nullable().optional(), Guid.nullable()),
+  /**
+   * Legacy progress continuation, absent for rpcstream observers.
+   */
+  progress: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Legacy progress continuation, absent for rpcstream observers.',
+  }),
 }).meta({
   id: 'UpdateSystemRes',
 })

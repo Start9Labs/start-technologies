@@ -1,4 +1,5 @@
 import type * as RPC from '../osBindings/rpc'
+import type * as T from '../osBindings'
 import { createRpcStreamClient } from '../rpcClient'
 import type {
   RpcStreamClient,
@@ -54,6 +55,15 @@ describe('createRpcStreamClient', () => {
       const final: RPC.RpcStreamFinalType<RPC.StartOS, 'db.subscribe'> = null
       const streaming: RPC.RpcIsStreaming<RPC.StartOS, 'db.subscribe'> = true
       const ordinary: RPC.RpcIsStreaming<RPC.StartOS, 'echo'> = false
+      const updateStreaming: RPC.RpcIsStreaming<RPC.StartOS, 'server.update'> =
+        true
+      const updateItem: RPC.RpcStreamItemType<RPC.StartOS, 'server.update'> =
+        {} as T.FullProgress
+      const updateFinal: RPC.RpcStreamFinalType<RPC.StartOS, 'server.update'> =
+        null
+      // @ts-expect-error update progress uses the exported FullProgress DTO
+      const wrongUpdate: RPC.RpcStreamItemType<RPC.StartOS, 'server.update'> =
+        'progress'
       // @ts-expect-error a non-streaming endpoint is not callable on this client
       const call = client.echo({ message: 'not a stream' })
       // @ts-expect-error namespaces remain non-callable
@@ -64,7 +74,18 @@ describe('createRpcStreamClient', () => {
       // @ts-expect-error the terminal result is null, not a revision
       const wrongFinal: RPC.RpcStreamFinalType<RPC.StartOS, 'db.subscribe'> =
         item
-      return [streaming, ordinary, call, namespace, wrongItem, wrongFinal]
+      return [
+        streaming,
+        ordinary,
+        updateStreaming,
+        updateItem,
+        updateFinal,
+        wrongUpdate,
+        call,
+        namespace,
+        wrongItem,
+        wrongFinal,
+      ]
     }
     expect(typeof typeChecks).toBe('function')
   })

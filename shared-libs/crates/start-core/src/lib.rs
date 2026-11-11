@@ -444,6 +444,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
             "update",
             from_fn_async(update::update_system)
                 .with_metadata("sync_db", Value::Bool(true))
+                .with_metadata("get_signer", Value::Bool(true))
                 .no_cli(),
         )
         .subcommand(

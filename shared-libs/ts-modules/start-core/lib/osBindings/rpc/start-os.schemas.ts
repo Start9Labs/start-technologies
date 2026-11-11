@@ -935,6 +935,17 @@ export const MoveOperation: z.ZodObject<{
   id: 'MoveOperation',
   description: "JSON Patch 'move' operation representation",
 })
+export const NamedProgress: z.ZodObject<{
+  name: z.ZodString
+  progress: typeof Progress
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  get progress(): typeof Progress {
+    return Progress
+  },
+}).meta({
+  id: 'NamedProgress',
+})
 export const NetInfo: z.ZodObject<{
   assignedPort: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodInt>>,
@@ -1024,6 +1035,10 @@ export const PluginId: z.ZodEnum<{ 'url-v0': 'url-v0' }> = /* @__PURE__ */ z
 export const PreDownloadAlertWhen: z.ZodObject<{ sourceVersion: z.ZodString }> =
   /* @__PURE__ */ object({ sourceVersion: z.string() }).meta({
     id: 'PreDownloadAlertWhen',
+  })
+export const ProgressUnits: z.ZodEnum<{ bytes: 'bytes'; steps: 'steps' }> =
+  /* @__PURE__ */ z.enum(['bytes', 'steps']).meta({
+    id: 'ProgressUnits',
   })
 export const PushKeys: z.ZodObject<{
   /**
@@ -2525,6 +2540,17 @@ export const ForwardTable: z.ZodRecord<z.ZodString, typeof ForwardTarget> =
   /* @__PURE__ */ z.record(z.string(), ForwardTarget).meta({
     id: 'ForwardTable',
   })
+export const FullProgress: z.ZodObject<{
+  overall: typeof Progress
+  phases: z.ZodArray<typeof NamedProgress>
+}> = /* @__PURE__ */ object({
+  get overall(): typeof Progress {
+    return Progress
+  },
+  phases: z.array(NamedProgress),
+}).meta({
+  id: 'FullProgress',
+})
 
 /**
  * Whether the gateway reachable via this interface speaks each port-mapping
@@ -3898,13 +3924,22 @@ export const UpdateSystemRes: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * Legacy progress continuation, absent for rpcstream observers.
+   */
   progress: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof Guid>>,
     z.ZodNullable<typeof Guid>
   >
 }> = /* @__PURE__ */ object({
   target: wire(z.string().nullable().optional(), z.string().nullable()),
-  progress: wire(Guid.nullable().optional(), Guid.nullable()),
+  /**
+   * Legacy progress continuation, absent for rpcstream observers.
+   */
+  progress: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Legacy progress continuation, absent for rpcstream observers.',
+  }),
 }).meta({
   id: 'UpdateSystemRes',
 })
@@ -4519,6 +4554,43 @@ export const Patch: z.ZodArray<typeof PatchOperation> = /* @__PURE__ */ z
     id: 'Patch',
     description: 'Representation of JSON Patch (list of patch operations)',
   })
+export const Progress: z.ZodUnion<
+  readonly [
+    z.ZodNull,
+    z.ZodBoolean,
+    z.ZodObject<{
+      done: z.ZodInt
+      total: z.ZodCodec<
+        z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+        z.ZodNullable<z.ZodInt>
+      >
+      units: z.ZodCodec<
+        z.ZodOptional<z.ZodNullable<typeof ProgressUnits>>,
+        z.ZodNullable<typeof ProgressUnits>
+      >
+    }>,
+    typeof FullProgress,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.null(),
+    z.boolean(),
+    object({
+      done: z.int(),
+      total: wire(z.int().nullable().optional(), z.int().nullable()),
+      units: wire(
+        ProgressUnits.nullable().optional(),
+        ProgressUnits.nullable(),
+      ),
+    }),
+    FullProgress.meta({
+      description:
+        'A sub-tree of progress. Used by `NamedProgress.progress` so a phase\ncan carry its own `FullProgress` with sub-phases. Producers are\nexpected to keep `FullProgress.overall` scalar (not nested again).',
+    }),
+  ])
+  .meta({
+    id: 'Progress',
+  })
 export const ProxyOptions: z.ZodIntersection<
   z.ZodObject<{ type: z.ZodLiteral<'http'> }>,
   z.ZodObject<{
@@ -4824,6 +4896,9 @@ export const UpdateSystemParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * Requests a legacy progress GUID; rpcstream observes completion independently.
+   */
   progress: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   registry: z.string(),
@@ -4845,7 +4920,13 @@ export const UpdateSystemParams: z.ZodObject<{
       'Accepts an untrusted signer without skipping signature or integrity verification.',
   }),
   targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
-  progress: wire(z.boolean().optional(), z.boolean()),
+  /**
+   * Requests a legacy progress GUID; rpcstream observes completion independently.
+   */
+  progress: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Requests a legacy progress GUID; rpcstream observes completion independently.',
+  }),
 }).meta({
   id: 'UpdateSystemParams',
 })
@@ -7955,7 +8036,7 @@ export const Api = {
         update: {
           _PARAMS: /* @__PURE__ */ UpdateSystemParams,
           _RETURN: /* @__PURE__ */ UpdateSystemRes,
-          _ITEM: /* @__PURE__ */ z.never(),
+          _ITEM: /* @__PURE__ */ FullProgress,
           _FINAL: /* @__PURE__ */ z.null(),
         },
         'update-firmware': {

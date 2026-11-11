@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, OnceLock};
 
 use axum::extract::ws::Message;
 use futures::{SinkExt, StreamExt};
@@ -37,6 +37,7 @@ pub struct Client {
     network: reqwest::Client,
     ids: Arc<AtomicUsize>,
     connections: SyncMutex<BTreeMap<Endpoint, Entry>>,
+    ephemeral_signer: OnceLock<Signer>,
 }
 
 impl std::fmt::Debug for Client {
@@ -62,7 +63,14 @@ impl Client {
             network,
             ids: Arc::new(AtomicUsize::new(0)),
             connections: SyncMutex::new(BTreeMap::new()),
+            ephemeral_signer: OnceLock::new(),
         }
+    }
+
+    /// Client-lifetime proof identity for callers authorized by independent credentials.
+    pub fn ephemeral_signer(&self) -> &Signer {
+        self.ephemeral_signer
+            .get_or_init(|| crate::sign::AnySigningKey::generate().into())
     }
 
     pub(crate) fn capture(&self, method: &str, params: Value) -> Result<CapturedRequest, RpcError> {

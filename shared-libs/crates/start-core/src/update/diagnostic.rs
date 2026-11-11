@@ -5,7 +5,6 @@ use std::time::Duration;
 use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
 use exver::{Version, VersionRange};
-use futures::StreamExt;
 use http::HeaderMap;
 use imbl_value::json;
 use itertools::Itertools;
@@ -195,57 +194,17 @@ async fn run_update(
 }
 
 async fn stream_progress(
-    mut ws: crate::rpc_continuations::WebSocket,
+    ws: crate::rpc_continuations::WebSocket,
     tracker: FullProgressTracker,
-    mut done_rx: oneshot::Receiver<Result<(), Error>>,
+    done_rx: oneshot::Receiver<Result<(), Error>>,
 ) -> Result<(), Error> {
-    use axum::extract::ws::Message;
-
-    let mut stream = tracker.stream(Some(Duration::from_millis(300)));
-    let result: Result<(), Error> = loop {
-        tokio::select! {
-            snap = stream.next() => {
-                let Some(snap) = snap else { break Ok(()); };
-                ws.send(Message::Text(
-                    serde_json::to_string(&Some(&snap))
-                        .with_kind(ErrorKind::Serialization)?
-                        .into(),
-                ))
-                .await
-                .with_kind(ErrorKind::Network)?;
-            }
-            res = &mut done_rx => {
-                break res.unwrap_or_else(|_| Err(Error::new(eyre!("update task aborted"), ErrorKind::Cancelled)));
-            }
-        }
-    };
-    let mut final_snap = tracker.snapshot();
-    if result.is_ok() {
-        for phase in &mut final_snap.phases {
-            phase.progress.set_complete();
-        }
-        final_snap.overall.set_complete();
-    }
-    ws.send(Message::Text(
-        serde_json::to_string(&Some(&final_snap))
-            .with_kind(ErrorKind::Serialization)?
-            .into(),
-    ))
+    crate::progress::forward_progress(
+        ws,
+        crate::progress::progress_until_complete(tracker, async move {
+            done_rx.await.with_kind(ErrorKind::Cancelled)?
+        }),
+    )
     .await
-    .with_kind(ErrorKind::Network)?;
-    ws.send(Message::Text(
-        serde_json::to_string::<Option<&FullProgress>>(&None)
-            .with_kind(ErrorKind::Serialization)?
-            .into(),
-    ))
-    .await
-    .with_kind(ErrorKind::Network)?;
-    let close_msg: Result<&str, String> = match &result {
-        Ok(()) => Ok("complete"),
-        Err(e) => Err(e.to_string()),
-    };
-    ws.close_result(close_msg).await.log_err();
-    result
 }
 
 async fn get_versions(
@@ -309,10 +268,7 @@ pub async fn cli_update_system(
                 }
                 crate::util::net::tungstenite::receive_close_result(&mut ws).await?;
                 if let Some(mut prev) = prev {
-                    for phase in &mut prev.phases {
-                        phase.progress.set_complete();
-                    }
-                    prev.overall.set_complete();
+                    prev.set_complete();
                     bar.update(&prev);
                 }
                 println!("{}", t!("update.complete-restart-to-apply"))
