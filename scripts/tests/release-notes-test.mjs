@@ -695,6 +695,8 @@ process.stdout.write('Translated ' + locale + '.\\n\\n' + output + '\\n')
   contains(uploaded, 'Old change.')
   excludes(uploaded, 'Later change.')
 
+  git('-c', 'tag.gpgsign=false', 'tag', `start-sdk/v${VERSION}`, tagged)
+  delete env.COMMIT
   unlinkSync(calls)
   unlinkSync(translations)
   env.VISUAL = 'true'
@@ -706,6 +708,14 @@ process.stdout.write('Translated ' + locale + '.\\n\\n' + output + '\\n')
   )
   assert.equal(existsSync(translations), false)
   assert.deepEqual(JSON.parse(text(join(state, 'release-notes.json'))), bundle)
+  excludes(text(join(state, 'body.md')), 'Later warning.')
+  assert.equal(text(join(state, 'CHANGELOG.md')), uploaded)
+
+  env.COMMIT = git('rev-parse', 'HEAD').trim()
+  const conflicting = manage('create-gh-release', '', false)
+  contains(conflicting.stderr, `differs from the commit start-sdk/v${VERSION}`)
+  assert.equal(text(join(state, 'CHANGELOG.md')), uploaded)
+  delete env.COMMIT
 
   const commenter = write(
     'bin/comment-notes',
@@ -718,6 +728,17 @@ process.stdout.write('Translated ' + locale + '.\\n\\n' + output + '\\n')
   assert.deepEqual(JSON.parse(text(join(state, 'release-notes.json'))), bundle)
   delete env.DROP_COMMENTS
   env.VISUAL = 'true'
+
+  const translatedBeforeOptOut = text(translations)
+  env.NO_TRANSLATE = '1'
+  manage('create-gh-release', '')
+  assert.deepEqual(JSON.parse(text(join(state, 'release-notes.json'))), {
+    en_US: bundle.en_US,
+  })
+  assert.equal(text(translations), translatedBeforeOptOut)
+  delete env.NO_TRANSLATE
+  git('tag', '-d', `start-sdk/v${VERSION}`)
+  env.COMMIT = tagged
 
   for (const [draft, expected] of [
     ['true', ['view', 'edit']],
@@ -808,6 +829,53 @@ printf '%s %s' "\${DONE[create-gh-release]:-draft}" "\${DONE[publish-gh-release]
     const result = run('bash', ['-c', command], { encoding: 'utf8' })
     assert.equal(result.status, 0, result.stderr)
     assert.equal(result.stdout, expected)
+  }
+})
+
+test('untagged draft resume checks the commit after artifact adoption', t => {
+  const { root, env, write, run, git, commit, nodeExecutable } =
+    releaseFixture(t)
+  git('init', '-q')
+  commit()
+  const original = git('rev-parse', 'HEAD').trim()
+  write('projects/unrelated/file', 'Later build')
+  commit()
+  const newer = git('rev-parse', 'HEAD').trim()
+  nodeExecutable('bin/gh', 'console.log(process.env.DRAFT_SHA)')
+  env.PATH = `${join(root, 'bin')}:${env.PATH}`
+  env.DRAFT_SHA = original
+
+  for (const selected of [original, newer]) {
+    const result = run(
+      'bash',
+      [
+        '-c',
+        `
+source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
+REPO_ROOT="$PWD"
+PROJECT=start-tunnel; KIND=deb; VERSION=1.2.3; TAG=start-tunnel/v1.2.3
+COMMIT=${original}
+cmd_pre_check() { DONE[create-gh-release]=1; }
+cmd_pull_alpha() { COMMIT=${selected}; }
+cmd_tag() { echo tagged; }
+cmd_publish_gh_release() { echo published; }
+cmd_push() { :; }
+cmd_sign() { :; }
+cmd_release
+`,
+      ],
+      { encoding: 'utf8' },
+    )
+    if (selected === original) {
+      assert.equal(result.status, 0, result.stderr)
+      contains(result.stdout, 'tagged\npublished')
+    } else {
+      assert.notEqual(result.status, 0)
+      contains(result.stderr, `Draft start-tunnel/v1.2.3 targets ${original}`)
+      contains(result.stderr, `selected artifacts were built from ${newer}`)
+      excludes(result.stdout, 'tagged')
+      excludes(result.stdout, 'published')
+    }
   }
 })
 

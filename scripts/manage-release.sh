@@ -216,6 +216,7 @@ edit_notes_bundle() (
         exit 1
     fi
     for locale in $(translation_locales); do
+        if [ "${NO_TRANSLATE:-}" = 1 ]; then continue; fi
         if jq -e --arg l "$locale" 'has($l)' "$bundle" >/dev/null; then
             jq -j --arg l "$locale" '.[$l]' "$bundle" > "$dir/$locale.previous"
             if cmp -s "$dir/en_US.md" "$dir/source"; then
@@ -225,7 +226,6 @@ edit_notes_bundle() (
         else
             : > "$dir/$locale.previous"
         fi
-        if [ "${NO_TRANSLATE:-}" = 1 ]; then continue; fi
         if [ ! -s "$dir/en_US.md" ]; then
             : > "$dir/$locale.md"
             continue
@@ -1455,17 +1455,29 @@ cmd_tag() {
 
 cmd_create_gh_release() (
     require_kind os cli deb npm wrt
-    if [ "$KIND" = os ]; then
-        resolve_os_commit
-    elif [ -z "${COMMIT:-}" ] && [ -f "$(gha_commit_file)" ]; then
-        COMMIT=$(cat "$(gha_commit_file)")
+    local changelog_dir notes_ref prerelease_args=() title_version="$VERSION" sha
+    # An existing tag fixes the commit the notes describe; only FORCE moves it.
+    if sha=$(git -C "$REPO_ROOT" rev-parse --verify "${TAG}^{commit}" 2>/dev/null); then
+        if [ -n "${COMMIT:-}" ] && [ "$(tag_commit_sha)" != "$sha" ]; then
+            if [ -z "${FORCE:-}" ]; then
+                >&2 echo "  ✗ COMMIT=${COMMIT} differs from the commit ${TAG} already names (${sha})."
+                return 1
+            fi
+            sha=$(tag_commit_sha)
+        fi
+        COMMIT=$sha
+    else
+        if [ "$KIND" = os ]; then
+            resolve_os_commit
+        elif [ -z "${COMMIT:-}" ] && [ -f "$(gha_commit_file)" ]; then
+            COMMIT=$(cat "$(gha_commit_file)")
+        fi
+        sha=$(tag_commit_sha)
     fi
     if [ "$KIND" != npm ]; then
         enter_release_dir
         ensure_img_gz
     fi
-    local changelog_dir notes_ref prerelease_args=() title_version="$VERSION" sha
-    sha=$(tag_commit_sha)
     notes_ref=$sha
     if [ "${PRERELEASE:-}" = 1 ]; then
         prerelease_args+=(--prerelease --latest=false)
@@ -1938,9 +1950,18 @@ cmd_pre_release() {
 
 cmd_release() {
     if [ "$KIND" = os ]; then resolve_os_commit; fi
-    local step
+    local step draft_sha
     for step in $(release_steps); do
         if [ -n "${DONE[$step]:-}" ] && [ -z "${FORCE:-}" ]; then
+            # Untagged drafts pin the build when reusing release metadata.
+            if [ "$step" = create-gh-release ] && [ -z "${DONE[tag]:-}" ]; then
+                draft_sha=$(gh release view -R "$REPO" "$TAG" --json targetCommitish --jq .targetCommitish)
+                if [ "$draft_sha" != "$(tag_commit_sha)" ]; then
+                    >&2 echo "  ✗ Draft ${TAG} targets ${draft_sha}, but the selected artifacts were built from $(tag_commit_sha)."
+                    >&2 echo "Recreate the draft for the selected build or release its original build."
+                    return 1
+                fi
+            fi
             echo "Skipping ${step}: already published."
             continue
         fi
