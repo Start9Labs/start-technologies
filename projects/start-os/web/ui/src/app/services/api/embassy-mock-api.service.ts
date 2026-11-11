@@ -55,6 +55,7 @@ import {
   UIData,
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
+import { ConfigService } from 'src/app/services/config.service'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { toAuthorityUrl } from 'src/app/utils/acme'
 import { getCurrentManifest, getManifest } from 'src/app/utils/get-package-data'
@@ -139,6 +140,7 @@ export class MockApiService extends ApiService {
   readonly mockWsSource$ = new Subject<Revision>()
   private readonly storage = inject(WA_SESSION_STORAGE)
   private readonly cache = inject(PATCH_CACHE)
+  private readonly gitHash = inject(ConfigService).gitHash
   private readonly revertTime = 1800
   private readonly crypto = inject(WA_CRYPTO)
   private readonly retainedVolumes = new Map<string, string>()
@@ -179,7 +181,7 @@ export class MockApiService extends ApiService {
   >()
   sequence = 1
   private readonly handlers: RpcHandlers<Api> = {
-    'git-info': async () => 'mock-os-build',
+    'git-info': async () => this.gitHash,
     state: async () => {
       await pauseFor(1000)
 

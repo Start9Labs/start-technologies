@@ -924,7 +924,7 @@ export default {
   1109: 'Ungültige Antwort vom Server',
   1110: 'Maximale Dateigröße',
   1111: 'Im Marktplatz anzeigen',
-  1112: 'Lesen',
+  1112: 'Diese alternative Implementierung erfüllt die Anforderung',
   1113: 'Lesen/Schreiben',
   1114: 'Freigegebenes Volume hinzufügen',
   1115: 'Quelle',
@@ -1016,4 +1016,5 @@ export default {
   1206: 'Geben Sie zur Bestätigung den Namen ein',
   1207: 'Dauerhaft löschen',
   1208: 'Freigegebene Volumes',
+  1209: 'Lesen',
 } satisfies i18n

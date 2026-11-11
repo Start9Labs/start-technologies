@@ -924,7 +924,7 @@ export default {
   1109: 'Nieprawidłowa odpowiedź serwera',
   1110: 'Maksymalny rozmiar pliku',
   1111: 'Zobacz w sklepie',
-  1112: 'Odczyt',
+  1112: 'Ta alternatywna implementacja spełnia wymaganie',
   1113: 'Odczyt/zapis',
   1114: 'Dodaj wolumin współdzielony',
   1115: 'Źródło',
@@ -1016,4 +1016,5 @@ export default {
   1206: 'Aby potwierdzić, wpisz nazwę',
   1207: 'Usuń trwale',
   1208: 'Woluminy współdzielone',
+  1209: 'Odczyt',
 } satisfies i18n

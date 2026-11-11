@@ -924,7 +924,7 @@ export default {
   1109: 'Respuesta del servidor no válida',
   1110: 'Tamaño máximo del archivo',
   1111: 'Ver en el Mercado',
-  1112: 'Lectura',
+  1112: 'Esta implementación alternativa cumple el requisito',
   1113: 'Lectura/escritura',
   1114: 'Añadir volumen compartido',
   1115: 'Origen',
@@ -1016,4 +1016,5 @@ export default {
   1206: 'Para confirmar, escriba el nombre',
   1207: 'Eliminar permanentemente',
   1208: 'Volúmenes compartidos',
+  1209: 'Lectura',
 } satisfies i18n

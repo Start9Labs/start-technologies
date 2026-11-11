@@ -924,7 +924,7 @@ export default {
   1109: 'Réponse du serveur non valide',
   1110: 'Taille maximale du fichier',
   1111: 'Voir dans la bibliothèque de services',
-  1112: 'Lecture',
+  1112: 'Cette implémentation alternative remplit la condition requise',
   1113: 'Lecture/écriture',
   1114: 'Ajouter un volume partagé',
   1115: 'Source',
@@ -1016,4 +1016,5 @@ export default {
   1206: 'Pour confirmer, saisissez le nom',
   1207: 'Supprimer définitivement',
   1208: 'Volumes partagés',
+  1209: 'Lecture',
 } satisfies i18n

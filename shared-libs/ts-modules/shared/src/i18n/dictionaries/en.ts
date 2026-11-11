@@ -925,7 +925,7 @@ export const ENGLISH: Record<string, number> = {
   'Invalid response from server': 1109,
   'Maximum file size': 1110,
   'View in Marketplace': 1111,
-  'Read': 1112,
+  'This alternative implementation meets the requirement': 1112,
   'Read/write': 1113,
   'Add shared volume': 1114,
   'Source': 1115,
@@ -1017,4 +1017,5 @@ export const ENGLISH: Record<string, number> = {
   'To confirm, type the name': 1206,
   'Delete permanently': 1207,
   'Shared Volumes': 1208,
+  'Read': 1209,
 }

@@ -594,4 +594,5 @@ export default {
   630: 'línea {line}',
   631: 'Comprobar de nuevo',
   632: 'Esta sección también tiene {option} {value}, establecido fuera de StartWRT. StartWRT muestra el primer valor y deja este tal como está.',
+  633: 'Este dispositivo pidió abrir los puertos {ports} a Internet. El router lo rechazó porque el reenvío automático de puertos está desactivado.',
 } satisfies i18n

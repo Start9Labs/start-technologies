@@ -594,4 +594,5 @@ export default {
   630: 'wiersz {line}',
   631: 'Sprawdź ponownie',
   632: 'Ta sekcja ma także {option} {value}, ustawione poza StartWRT. StartWRT wyświetla pierwszą wartość, a tę pozostawia bez zmian.',
+  633: 'To urządzenie poprosiło o otwarcie portów {ports} do internetu. Router odmówił, ponieważ automatyczne przekierowanie portów jest wyłączone.',
 } satisfies i18n
