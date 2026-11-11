@@ -188,14 +188,14 @@ Ausgehende VPNs leiten Ihren Internetverkehr durch verschlüsselte Tunnel zu ent
 
 ### VPN-Verkettung
 
-Leiten Sie ein VPN durch ein anderes für zusätzliche Privatsphäre. Ihr Datenverkehr verlässt das Netz über mehrere Server, wodurch es schwieriger wird, ihn bis zu Ihnen zurückzuverfolgen. Beachten Sie, dass die Verkettung die Latenz erhöht.
+Leiten Sie ein VPN durch ein anderes für zusätzliche Privatsphäre. Ihr Datenverkehr läuft über mehrere Server, wodurch es schwieriger wird, ihn bis zu Ihnen zurückzuverfolgen. Beachten Sie, dass die Verkettung die Latenz erhöht.
 
 ### Erste Schritte
 
 Laden Sie eine WireGuard-Konfigurationsdatei von Ihrem VPN-Anbieter (Mullvad, ProtonVPN, IVPN usw.) hoch, um einen neuen VPN-Client zu erstellen.`,
   '/outbound/vpn': `## Ausgehende VPNs
 
-<details><summary>Bezeichnung</summary> Ein einprägsamer Name zur Identifizierung dieser VPN-Verbindung. Verwenden Sie etwas Aussagekräftiges wie „Mullvad Schweden“ oder „Arbeits-VPN“. </details> <details><summary>Verbindet sich mit</summary> Wohin der Datenverkehr von diesem VPN geleitet werden soll:<ul><li><b>Internet:</b> Der Datenverkehr gelangt über dieses VPN direkt ins Internet.</li><li><b>Ein weiteres VPN:</b> Zuerst durch ein weiteres VPN verketten für zusätzliche Privatsphäre. Ihr Datenverkehr wird mehrfach verschlüsselt und verlässt das Netz über mehrere Server.</li></ul><b>Hinweis:</b> Das Verketten von VPNs erhöht die Latenz und kann die Geschwindigkeit verringern. </details> <details><summary>DNS-Server</summary> Resolver, die über dieses VPN geroutete Profile ohne eigene DNS-Server durch den Tunnel erreichen. Leer lassen, um die benutzerdefinierten DNS-Server des Systems durch den Tunnel zu nutzen – oder, wenn das System das DNS Ihres Internetanbieters verwendet, dessen Server außerhalb des Tunnels. </details> <details><summary>Verbindungspfad</summary> Zeigt den vollständigen Weg, den Ihr Datenverkehr von diesem VPN ins Internet nimmt. Zum Beispiel: Mullvad → Proton → Internet bedeutet, dass der Datenverkehr von Mullvad verschlüsselt, durch Proton gesendet wird und dann ins Internet gelangt.</details>`,
+<details><summary>Bezeichnung</summary> Ein einprägsamer Name zur Identifizierung dieser VPN-Verbindung. Verwenden Sie etwas Aussagekräftiges wie „Mullvad Schweden“ oder „Arbeits-VPN“. </details> <details><summary>Verbindet sich über</summary> Wie dieses VPN seinen eigenen VPN-Server erreicht:<ul><li><b>Internet:</b> Direkt über das Internet.</li><li><b>Ein weiteres VPN:</b> Durch den Tunnel des anderen VPN, für zusätzliche Privatsphäre. Ihr Datenverkehr wird mehrfach verschlüsselt, läuft über mehrere Server und gelangt dann vom Server dieses VPN ins Internet.</li></ul><b>Hinweis:</b> Das Verketten von VPNs erhöht die Latenz und kann die Geschwindigkeit verringern. </details> <details><summary>DNS-Server</summary> Resolver, die über dieses VPN geroutete Profile ohne eigene DNS-Server durch den Tunnel erreichen. Leer lassen, um die benutzerdefinierten DNS-Server des Systems durch den Tunnel zu nutzen – oder, wenn das System das DNS Ihres Internetanbieters verwendet, dessen Server außerhalb des Tunnels. </details> <details><summary>Verbindungspfad</summary> Zeigt die verschlüsselten Tunnel, durch die Ihr Datenverkehr auf dem Weg ins Internet läuft. Jeder Tunnel beginnt am Router und endet an seinem VPN-Server. Wenn dieses VPN über ein anderes verbindet, verläuft sein Tunnel innerhalb des anderen: Der Server jenes VPN öffnet den äußeren Tunnel und leitet den inneren an den Server dieses VPN weiter, wo Ihr Datenverkehr ins Internet gelangt.</details>`,
   '/outbound/dialog': `## Ausgehende VPNs
 
 VPN-Clients stellen eine ausgehende Verbindung zu einem VPN-Server her und ermöglichen es Geräten, Daten so zu senden und zu empfangen, als wären sie direkt mit dem privaten Netzwerk verbunden. Verbirgt Ihre IP-Adresse, umgeht geografische Beschränkungen und schützt sensible Daten in öffentlichen Wi-Fi-Netzwerken.
@@ -208,9 +208,9 @@ Ein klarer und aussagekräftiger Name für die VPN-Verbindung, etwa „Mullvad S
 
 Laden Sie eine WireGuard- **.conf** -Datei von Ihrem VPN-Anbieter hoch. Diese Datei enthält die Serveradresse, die Schlüssel und die Verbindungseinstellungen, die zum Aufbau des Tunnels erforderlich sind. Die meisten Anbieter (Mullvad, ProtonVPN, IVPN usw.) bieten WireGuard-Konfigurationsdateien zum Download auf ihrer Website oder in ihrer App an.
 
-### Ziel
+### Verbindet sich über
 
-Der nächste Knoten im Pfad einer mehrschichtigen VPN-Verbindung.
+Wie dieses VPN seinen eigenen VPN-Server erreicht: direkt über das Internet oder durch den Tunnel eines anderen VPN.
 
 ### DNS-Server
 

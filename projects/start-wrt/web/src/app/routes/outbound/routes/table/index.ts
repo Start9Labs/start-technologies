@@ -12,6 +12,7 @@ import { ADD_CLIENT } from 'src/app/routes/outbound/dialog'
 import { OutboundService } from 'src/app/routes/outbound/service'
 import { OutboundVpn } from 'src/app/services/api/api.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { fill } from 'src/app/i18n/validation-errors'
 
 @Component({
   template: `
@@ -32,7 +33,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
         <tr>
           <th tuiTh [sorter]="'label' | tuiSorter">{{ 'Label' | i18n }}</th>
           <th tuiTh [sorter]="'target' | tuiSorter">
-            {{ 'Connects to' | i18n }}
+            {{ 'Connects via' | i18n }}
           </th>
           <th tuiTh>{{ 'Used by' | i18n }}</th>
           <th tuiTh [sorter]="'enabled' | tuiSorter">{{ 'Enable' | i18n }}</th>
@@ -121,24 +122,14 @@ export default class OutboundTable {
     const dependents = allVpns
       .filter(v => v.target === item.label)
       .map(v => v.label)
-    if (!dependents.length) return null
-    return (
-      this.i18n.transform('Cannot disable:') +
-      ' ' +
-      dependents.join(', ') +
-      ' ' +
-      (dependents.length === 1
-        ? this.i18n.transform('uses')
-        : this.i18n.transform('use')) +
-      ' ' +
-      this.i18n.transform('this VPN as a target. Change') +
-      ' ' +
-      (dependents.length === 1
-        ? this.i18n.transform('its')
-        : this.i18n.transform('their')) +
-      ' ' +
-      this.i18n.transform('target first.')
-    )
+    return dependents.length
+      ? fill(
+          this.i18n.transform(
+            'To disable this VPN, first change {vpns} to connect via something else.',
+          ),
+          { vpns: dependents.join(', ') },
+        )
+      : null
   }
 
   protected onToggle(item: OutboundVpn) {
