@@ -125,8 +125,6 @@ export const ENGLISH: Record<string, number> = {
   'View Config': 112,
   'WAN IP': 113,
   'WAN IPv4': 114,
-  // Referenced via maps / ternaries / provider values (invisible to the
-  // literal-only check-i18n scanner) — registered so they can be translated
   'This field is required': 115,
   'Password must be at least 8 characters': 116,
   'Password cannot exceed 64 characters': 117,
@@ -144,6 +142,7 @@ export const ENGLISH: Record<string, number> = {
   'Generate config': 129,
   'TCP': 130,
   'UDP': 131,
+  'Select at least one protocol': 132,
 }
 
 export default ENGLISH

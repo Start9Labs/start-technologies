@@ -12,6 +12,8 @@ import { TaskService } from '@start9labs/shared'
 import { TuiContext, tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
 import {
   TuiButton,
+  TuiCell,
+  TuiCheckbox,
   TuiDialogContext,
   TuiError,
   TuiIcon,
@@ -36,13 +38,11 @@ import { ApiService } from 'src/app/services/api/api.service'
 
 import {
   FORWARD_PROTOCOL_LABELS,
-  ForwardProtocol,
+  FORWARD_PROTOCOLS,
   MappedDevice,
   PublishedPortsData,
 } from './utils'
 
-// A range counts up from both the external and internal port, so neither side
-// may run past the u16 port space. Mirrors the server-side guard in add_forward.
 function portRangeOverflow(group: AbstractControl): ValidationErrors | null {
   const ext = group.get('externalport')?.value
   const int = group.get('internalport')?.value
@@ -55,12 +55,25 @@ function portRangeOverflow(group: AbstractControl): ValidationErrors | null {
     : null
 }
 
-// IPv6 needs the selected server to have a GUA (its subnet needs a v6 prefix).
 function ipVersionRequiresGua(group: AbstractControl): ValidationErrors | null {
   const ipVersion = group.get('ipVersion')?.value
   const device = group.get('device')?.value as MappedDevice | null
   const needsV6 = ipVersion === 'ipv6' || ipVersion === 'both'
   return needsV6 && device && !device.ipv6 ? { noGua: true } : null
+}
+
+function forwardHostname(group: AbstractControl): string {
+  const { sni, count, ipVersion } = group.getRawValue()
+  return count > 1 || ipVersion === 'ipv6' ? '' : sni.trim()
+}
+
+function hostnameProtocolRequired(
+  group: AbstractControl,
+): ValidationErrors | null {
+  return forwardHostname(group) &&
+    !Object.values(group.get('protocols')!.value).some(Boolean)
+    ? { hostnameProtocolRequired: true }
+    : null
 }
 
 const IP_VERSION: Record<string, i18nKey> = {
@@ -71,7 +84,7 @@ const IP_VERSION: Record<string, i18nKey> = {
 
 @Component({
   template: `
-    <form tuiForm="m" [formGroup]="form">
+    <form tuiForm="m" [formGroup]="form" (submit.prevent)="onSave()">
       <tui-textfield>
         <label tuiLabel>{{ 'Label' | i18n }}</label>
         <input tuiInput formControlName="label" />
@@ -177,19 +190,27 @@ const IP_VERSION: Record<string, i18nKey> = {
           <tui-icon [tuiTooltip]="hostnameHint | i18n" />
         </tui-textfield>
       }
-      @if (form.value.ipVersion !== 'ipv6' && !isRange && form.value.sni) {
-        <fieldset>
+      @if (hostname) {
+        <fieldset formGroupName="protocols">
           <legend>{{ 'Protocol' | i18n }}</legend>
-          <tui-radio-list
-            size="s"
-            formControlName="protocol"
-            [items]="protocols"
-            [itemContent]="protocolLabel"
-          />
+          @for (protocol of protocols; track protocol) {
+            <label tuiCell="s">
+              <input
+                tuiCheckbox
+                type="checkbox"
+                size="s"
+                [formControlName]="protocol"
+              />
+              {{ protocolLabels[protocol] | i18n }}
+            </label>
+          }
         </fieldset>
+        @if (form.errors?.['hostnameProtocolRequired']) {
+          <tui-error [error]="'Select at least one protocol' | i18n" />
+        }
       }
       <footer>
-        <button tuiButton [disabled]="form.invalid" (click)="onSave()">
+        <button tuiButton type="submit">
           {{ 'Save' | i18n }}
         </button>
       </footer>
@@ -203,6 +224,8 @@ const IP_VERSION: Record<string, i18nKey> = {
   imports: [
     ReactiveFormsModule,
     TuiButton,
+    TuiCell,
+    TuiCheckbox,
     TuiChevron,
     TuiDataListWrapper,
     TuiError,
@@ -234,9 +257,8 @@ export class PublishedPortsAdd {
   protected readonly context =
     injectContext<TuiDialogContext<void, PublishedPortsData>>()
 
-  protected readonly protocols: readonly ForwardProtocol[] = ['tcp', 'udp']
-  protected readonly protocolLabel = (ctx: TuiContext<ForwardProtocol>) =>
-    this.i18n.transform(FORWARD_PROTOCOL_LABELS[ctx.$implicit])
+  protected readonly protocols = FORWARD_PROTOCOLS
+  protected readonly protocolLabels = FORWARD_PROTOCOL_LABELS
 
   protected readonly ipVersionValues = ['ipv4', 'ipv6', 'both'] as const
   protected readonly ipVersionLabel = (ctx: TuiContext<string>) =>
@@ -250,13 +272,22 @@ export class PublishedPortsAdd {
       internalport: [null as number | null, Validators.required],
       ipVersion: ['ipv4' as 'ipv4' | 'ipv6' | 'both'],
       sni: [''],
-      protocol: ['tcp' as ForwardProtocol],
+      protocols: inject(NonNullableFormBuilder).group({
+        tcp: [true],
+        udp: [false],
+      }),
       count: [
         1,
         [Validators.required, Validators.min(1), Validators.max(65535)],
       ],
     },
-    { validators: [portRangeOverflow, ipVersionRequiresGua] },
+    {
+      validators: [
+        portRangeOverflow,
+        ipVersionRequiresGua,
+        hostnameProtocolRequired,
+      ],
+    },
   )
 
   private readonly selectedDevice = toSignal(
@@ -268,12 +299,15 @@ export class PublishedPortsAdd {
     { initialValue: 'ipv4' as const },
   )
 
-  // The v6-requires-GUA error, shown proactively (mirrors the form validator).
   protected readonly guaError = computed(() => {
     const v = this.selectedVersion()
     const device = this.selectedDevice()
     return (v === 'ipv6' || v === 'both') && !!device && !device.ipv6
   })
+
+  protected get hostname(): string {
+    return forwardHostname(this.form)
+  }
 
   protected get isRange(): boolean {
     return this.form.controls.count.value > 1
@@ -294,31 +328,29 @@ export class PublishedPortsAdd {
       externalport,
       device,
       internalport,
-      sni,
       count,
       ipVersion,
-      protocol,
+      protocols,
     } = this.form.getRawValue()
 
-    const isRange = count > 1
-    // SNI demux is IPv4-only and per-port; it applies to the v4 side even in
-    // "both" mode (the v6 side is always a plain pinhole). Ignored for v6-only
-    // and for ranges.
-    const hostname = isRange || ipVersion === 'ipv6' ? '' : sni.trim()
+    const hostname = this.hostname
     const v4 = ipVersion === 'ipv4' || ipVersion === 'both'
     const v6 = ipVersion === 'ipv6' || ipVersion === 'both'
 
     this.tasks.run(async () => {
       if (v4) {
-        // The external IP is fixed server-side to the target device's WAN.
-        await this.api.rpc.portForward.add({
-          externalPort: externalport!,
-          target: `${device!.ip}:${internalport}`,
-          label,
-          sni: hostname ? [hostname] : [],
-          protocol: hostname ? protocol : 'tcp',
-          count,
-        })
+        for (const protocol of hostname
+          ? this.protocols.filter(protocol => protocols[protocol])
+          : (['tcp'] as const)) {
+          await this.api.rpc.portForward.add({
+            externalPort: externalport!,
+            target: `${device!.ip}:${internalport}`,
+            label,
+            sni: hostname ? [hostname] : [],
+            protocol,
+            count,
+          })
+        }
       }
       if (v6 && device!.ipv6) {
         await this.api.rpc.pinhole.add({

@@ -134,6 +134,7 @@ const pl: Record<number, string> = {
   129: 'Wygeneruj konfigurację',
   130: 'TCP',
   131: 'UDP',
+  132: 'Wybierz co najmniej jeden protokół',
 }
 
 export default pl

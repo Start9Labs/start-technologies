@@ -163,7 +163,7 @@ Accede al servicio por IPv4, IPv6 o ambos. IPv6 requiere que la subred del servi
 
 ### Nombre de host (opcional)
 
-Un dominio (SNI) para TLS por TCP o QUIC por UDP, para que varios nombres de host compartan un mismo puerto externo. Elige el protocolo debajo del nombre: las rutas TCP y UDP son independientes, incluso con el mismo nombre y puerto. Solo IPv4, y no disponible para rangos.
+Un dominio (SNI) para TLS por TCP o QUIC por UDP, para que varios nombres de host compartan un mismo puerto externo. Selecciona TCP, UDP o ambos debajo del nombre. TCP está seleccionado inicialmente; elegir ambos crea dos rutas independientes, incluso con el mismo nombre y puerto. Solo IPv4, y no disponible para rangos.
 
 <a href="https://docs.start9.com/start-tunnel/published-ports.html#add-a-port-manually" target="_blank" rel="noreferrer">Más información →</a>`,
 

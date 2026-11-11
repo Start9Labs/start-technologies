@@ -175,7 +175,7 @@ Reach the service over IPv4, IPv6, or both. IPv6 requires the server's subnet to
 
 ### Hostname (optional)
 
-A domain (SNI) for TLS over TCP or QUIC over UDP, so several hostnames can share one external port. Choose the protocol below the hostname: TCP and UDP routes are independent, even with the same hostname and port. IPv4 only, and not available for ranges.
+A domain (SNI) for TLS over TCP or QUIC over UDP, so several hostnames can share one external port. Select TCP, UDP, or both below the hostname. TCP starts selected; selecting both creates two independent routes, even with the same hostname and port. IPv4 only, and not available for ranges.
 
 <a href="https://docs.start9.com/start-tunnel/published-ports.html#add-a-port-manually" target="_blank" rel="noreferrer">Learn more →</a>`,
 

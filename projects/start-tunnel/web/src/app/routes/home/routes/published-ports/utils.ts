@@ -13,7 +13,13 @@ export type ForwardProtocol = NonNullable<
   T.Tunnel.AddPortForwardParams['protocol']
 >
 
-export const FORWARD_PROTOCOL_LABELS = { tcp: 'TCP', udp: 'UDP' } as const
+export const FORWARD_PROTOCOL_LABELS = {
+  tcp: 'TCP',
+  udp: 'UDP',
+} as const satisfies Record<ForwardProtocol, string>
+export const FORWARD_PROTOCOLS = Object.keys(
+  FORWARD_PROTOCOL_LABELS,
+) as readonly ForwardProtocol[]
 
 export interface MappedForward {
   readonly protocol: ForwardProtocol | null
@@ -45,7 +51,7 @@ export function mapForwards(
 ): MappedForward[] {
   return Object.entries(portForwards).flatMap(([source, forward]) =>
     forward.kind === 'sni'
-      ? (['tcp', 'udp'] as const).flatMap(protocol => {
+      ? FORWARD_PROTOCOLS.flatMap(protocol => {
           const bindings = protocol === 'tcp' ? forward : forward.udp
           return [
             ...Object.entries(bindings.routes).map(([hostname, route]) =>
