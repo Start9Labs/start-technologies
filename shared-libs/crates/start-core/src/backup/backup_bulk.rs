@@ -554,7 +554,7 @@ mod volume_tests {
 
     #[test]
     fn volume_selection_wire_distinguishes_omitted_and_empty() {
-        let wire = serde_json::json!({ "targetId": "disk-/dev/test", "password": "test", "packageIds": [] });
+        let wire = serde_json::json!({ "targetId": BackupTargetId::new(), "password": "test", "packageIds": [] });
         let omitted: BackupParams = serde_json::from_value(wire.clone()).unwrap();
         assert!(omitted.shared_volume_ids.is_none());
         let mut wire = wire;
