@@ -589,8 +589,9 @@ export const ENGLISH: Record<string, number> = {
   'line {line}': 630,
   'Check again': 631,
   'This section also has {option} {value}, set outside StartWRT. StartWRT shows the first value and leaves this one as it is.': 632,
-  '{vpn} tunnel': 633,
-  'Your traffic': 634,
-  "To delete this VPN, first change {vpns} to connect via something else.": 635,
-  "To disable this VPN, first change {vpns} to connect via something else.": 636,
+  'This device asked to open port(s) {ports} to the internet. The router refused because automatic port forwarding is off.': 633,
+  '{vpn} tunnel': 634,
+  'Your traffic': 635,
+  "To delete this VPN, first change {vpns} to connect via something else.": 636,
+  "To disable this VPN, first change {vpns} to connect via something else.": 637,
 }

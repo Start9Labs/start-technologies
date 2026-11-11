@@ -584,8 +584,9 @@ export default {
   630: 'wiersz {line}',
   631: 'Sprawdź ponownie',
   632: 'Ta sekcja ma także {option} {value}, ustawione poza StartWRT. StartWRT wyświetla pierwszą wartość, a tę pozostawia bez zmian.',
-  633: 'Tunel {vpn}',
-  634: 'Twój ruch',
-  635: 'Aby usunąć ten VPN, najpierw zmień {vpns} tak, aby łączyły się przez coś innego.',
-  636: 'Aby wyłączyć ten VPN, najpierw zmień {vpns} tak, aby łączyły się przez coś innego.',
+  633: 'To urządzenie poprosiło o otwarcie portów {ports} do internetu. Router odmówił, ponieważ automatyczne przekierowanie portów jest wyłączone.',
+  634: 'Tunel {vpn}',
+  635: 'Twój ruch',
+  636: 'Aby usunąć ten VPN, najpierw zmień {vpns} tak, aby łączyły się przez coś innego.',
+  637: 'Aby wyłączyć ten VPN, najpierw zmień {vpns} tak, aby łączyły się przez coś innego.',
 } satisfies i18n

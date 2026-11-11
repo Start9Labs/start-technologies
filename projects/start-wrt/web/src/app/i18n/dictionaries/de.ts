@@ -584,8 +584,9 @@ export default {
   630: 'Zeile {line}',
   631: 'Erneut prüfen',
   632: 'Dieser Abschnitt hat außerdem {option} {value}, gesetzt außerhalb von StartWRT. StartWRT zeigt den ersten Wert an und lässt diesen unverändert.',
-  633: '{vpn}-Tunnel',
-  634: 'Ihr Datenverkehr',
-  635: 'Um dieses VPN zu löschen, stellen Sie zuerst {vpns} so um, dass sie sich über etwas anderes verbinden.',
-  636: 'Um dieses VPN zu deaktivieren, stellen Sie zuerst {vpns} so um, dass sie sich über etwas anderes verbinden.',
+  633: 'Dieses Gerät hat angefragt, die Ports {ports} zum Internet zu öffnen. Der Router hat abgelehnt, weil die automatische Portweiterleitung ausgeschaltet ist.',
+  634: '{vpn}-Tunnel',
+  635: 'Ihr Datenverkehr',
+  636: 'Um dieses VPN zu löschen, stellen Sie zuerst {vpns} so um, dass sie sich über etwas anderes verbinden.',
+  637: 'Um dieses VPN zu deaktivieren, stellen Sie zuerst {vpns} so um, dass sie sich über etwas anderes verbinden.',
 } satisfies i18n

@@ -960,4 +960,5 @@ export default {
   1109: 'Ungültige Antwort vom Server',
   1110: 'Maximale Dateigröße',
   1111: 'Im Marktplatz anzeigen',
+  1112: 'Diese alternative Implementierung erfüllt die Anforderung',
 } satisfies i18n

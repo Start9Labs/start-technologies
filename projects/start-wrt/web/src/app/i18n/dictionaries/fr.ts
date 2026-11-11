@@ -584,8 +584,9 @@ export default {
   630: 'ligne {line}',
   631: 'Vérifier à nouveau',
   632: 'Cette section contient aussi {option} {value}, défini en dehors de StartWRT. StartWRT affiche la première valeur et laisse celle-ci telle quelle.',
-  633: 'Tunnel {vpn}',
-  634: 'Votre trafic',
-  635: 'Pour supprimer ce VPN, modifiez d’abord {vpns} pour qu’ils se connectent via autre chose.',
-  636: 'Pour désactiver ce VPN, modifiez d’abord {vpns} pour qu’ils se connectent via autre chose.',
+  633: 'Cet appareil a demandé d’ouvrir les ports {ports} vers Internet. Le routeur a refusé, car la redirection automatique de ports est désactivée.',
+  634: 'Tunnel {vpn}',
+  635: 'Votre trafic',
+  636: 'Pour supprimer ce VPN, modifiez d’abord {vpns} pour qu’ils se connectent via autre chose.',
+  637: 'Pour désactiver ce VPN, modifiez d’abord {vpns} pour qu’ils se connectent via autre chose.',
 } satisfies i18n
