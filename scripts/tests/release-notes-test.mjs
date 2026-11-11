@@ -717,6 +717,11 @@ process.stdout.write('Translated ' + locale + '.\\n\\n' + output + '\\n')
   assert.equal(text(join(state, 'CHANGELOG.md')), uploaded)
   delete env.COMMIT
 
+  env.FORCE = '1'
+  manage('create-gh-release', '')
+  contains(text(join(state, 'CHANGELOG.md')), 'Later change.')
+  delete env.FORCE
+
   const commenter = write(
     'bin/comment-notes',
     `#!/bin/sh\nfor file; do case "$file" in */en_US.md) printf '\\n<!-- keep -->\\n' >> "$file" ;; esac; done\n`,

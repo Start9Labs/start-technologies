@@ -1456,14 +1456,11 @@ cmd_tag() {
 cmd_create_gh_release() (
     require_kind os cli deb npm wrt
     local changelog_dir notes_ref prerelease_args=() title_version="$VERSION" sha
-    # An existing tag fixes the commit the notes describe; only FORCE moves it.
-    if sha=$(git -C "$REPO_ROOT" rev-parse --verify "${TAG}^{commit}" 2>/dev/null); then
+    # Notes describe the tagged build, or the build FORCE will tag.
+    if [ -z "${FORCE:-}" ] && sha=$(git -C "$REPO_ROOT" rev-parse --verify "${TAG}^{commit}" 2>/dev/null); then
         if [ -n "${COMMIT:-}" ] && [ "$(tag_commit_sha)" != "$sha" ]; then
-            if [ -z "${FORCE:-}" ]; then
-                >&2 echo "  ✗ COMMIT=${COMMIT} differs from the commit ${TAG} already names (${sha})."
-                return 1
-            fi
-            sha=$(tag_commit_sha)
+            >&2 echo "  ✗ COMMIT=${COMMIT} differs from the commit ${TAG} already names (${sha})."
+            return 1
         fi
         COMMIT=$sha
     else
