@@ -1,0 +1,26 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-trusted-keys 1  "trusted-keys "
+.SH NAME
+start\-cli\-server\-trusted\-keys \- Manage the keys this server trusts for packages and StartOS updates
+.SH SYNOPSIS
+\fBstart\-cli server trusted\-keys\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Manage the keys this server trusts for packages and StartOS updates
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+start\-cli\-server\-trusted\-keys\-add(1)
+Import public keys; newly added keys are trusted for packages
+.TP
+start\-cli\-server\-trusted\-keys\-list(1)
+List trusted keys and what each is trusted for
+.TP
+start\-cli\-server\-trusted\-keys\-remove(1)
+Remove a trusted key
+.TP
+start\-cli\-server\-trusted\-keys\-update(1)
+Rename a trusted key and set what it is trusted for

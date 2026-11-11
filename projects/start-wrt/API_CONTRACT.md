@@ -775,7 +775,30 @@ struct Ethernet {
     /// Map of physical port name → port config
     ports: BTreeMap<String, Port>,
 }
-// Response: Ethernet
+
+#[derive(Serialize)]
+struct UsbPortStatus {
+    /// A network device is plugged into the port
+    present: bool,
+    /// A network device in the port has link
+    active: bool,
+}
+
+#[derive(Serialize)]
+struct EthernetInfo {
+    #[serde(flatten)]
+    ethernet: Ethernet,
+    /// The USB ports among `ports`
+    usb_ports: BTreeMap<String, UsbPortStatus>,
+}
+// Response: EthernetInfo
+// Backend: a USB port is a `usb_eth<N>` veth on the LAN bridge, recorded in
+// `startwrt.usb_eth<N>` (`config usb_port`, `option path`) the first time an
+// Ethernet-type USB network device is plugged into that physical USB port. A
+// hub's ports are physical ports of their own. The daemon follows
+// `ip monitor link` and joins the device to the port's own `br-usb_eth<N>`
+// bridge, whose other member is the veth's peer. A new port takes the lowest
+// unused number.
 ```
 
 ### `ethernet.set`
@@ -812,9 +835,26 @@ struct EthernetSetResult {
 // reservation or published port for a port's old profile. A change keeps both:
 // they apply again when the device returns to that profile. Otherwise it
 // applies the bridge-VLAN/WAN update, then reloads network + firewall.
+// A recorded USB port the request omits keeps its profile; a USB port as
+// `wan_port` fails with InvalidValue.
 ```
 
 Note: `ProfileId` and `ProfileIdOpt` are shared types defined at the top of the contract.
+
+### `ethernet.remove-usb-port`
+
+```rust
+#[derive(Deserialize)]
+struct RemoveUsbPortRequest {
+    /// The port's name among `usb_ports`
+    port: String,
+}
+// Response: null
+// Backend: fails with InvalidValue while a network device is plugged into the
+// port, NotFound for an unrecorded port. Otherwise takes the port off the LAN
+// bridge and its VLAN, deletes `startwrt.usb_eth<N>` and the port's veth and
+// bridge, then reloads network + firewall.
+```
 
 ### `ethernet.edit`
 
@@ -874,6 +914,11 @@ struct Device {
     /// (default off; toggled via `devices.set-auto-forward`). Always false for
     /// VPN peers (no MAC to authorize).
     allow_auto_port_forward: bool,
+    /// External ports or ranges (`443`, `5000-5009`) the router refused to
+    /// open for this device for lack of that permission in the last half hour.
+    /// A PCP request counts only when it arrived on the device's own LAN
+    /// segment. Empty while the permission is on, and for VPN peers.
+    auto_port_forward_requests: Vec<String>,
     /// Whether this device may publish DNS records into the router's resolver
     /// (`devices.set-dns-injection`; `vpn-server.peer-set-dns-injection` for a
     /// VPN peer).
@@ -977,7 +1022,8 @@ struct SetAutoForwardRequest {
 // Response: null
 // Backend: stores the flag on the device's DHCP host section (`_allow_pcp`),
 // creating one if needed, and invalidates the port-control authorization cache
-// so the change applies immediately. Default is off: a device with no flag can
+// so the change applies immediately; allowing also clears the device's
+// `auto_port_forward_requests`. Default is off: a device with no flag can
 // never create forwards via PCP/UPnP. Setting `allow: false` also closes the
 // forwards the device already holds, rather than leaving them open until their
 // leases lapse (up to a week).
@@ -2460,6 +2506,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `lan.ipv6-set`                      | LAN             |                             |
 | `ethernet.get`                      | Ethernet        |                             |
 | `ethernet.set`                      | Ethernet        |                             |
+| `ethernet.remove-usb-port`          | Ethernet        |                             |
 | `ethernet.edit`                     | Ethernet        | CLI editor                  |
 | `devices.list`                      | Devices         |                             |
 | `devices.update`                    | Devices         |                             |

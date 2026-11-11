@@ -444,6 +444,8 @@ A file model must **preserve** unknown keys, not strip them: upstream config fil
 > **Never use `z.object` in a file model. Use `z.looseObject`, at every nesting level.** A `z.object` shape deletes every key it doesn't declare the next time the file is written — by `merge()`, `write()`, or `update()` — with no error and no warning.
 >
 > The one exception is a file you have **fully** modeled — every key it can ever hold — and will **always** keep fully modeled, so that a key added later by an upstream release, a plugin, or a user's edit lands in your shape before it lands in the file. That is the only case in which deleting unknown keys is what you want. If you are not certain, it is `z.looseObject`.
+>
+> A `FileHelper.env` model is written differently, because its validator must output `Record<string, string>` and `z.looseObject` types undeclared keys as `unknown`. Use `z.object({ … }).catchall(z.string())`, which keeps every undeclared line just as `z.looseObject` would.
 
 Preserving unknown keys has two consequences:
 

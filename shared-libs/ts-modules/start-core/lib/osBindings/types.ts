@@ -854,12 +854,6 @@ export type MountTarget = z.output<typeof schemas.MountTarget>
 export type MountTargetInput = z.input<typeof schemas.MountTarget>
 export type Notification = z.output<typeof schemas.Notification>
 export type NotificationInput = z.input<typeof schemas.Notification>
-export type OsUpdateSignerKeyParams = z.output<
-  typeof schemas.OsUpdateSignerKeyParams
->
-export type OsUpdateSignerKeyParamsInput = z.input<
-  typeof schemas.OsUpdateSignerKeyParams
->
 export type OsVersionInfo = z.output<typeof schemas.OsVersionInfo>
 export type OsVersionInfoInput = z.input<typeof schemas.OsVersionInfo>
 export type PackageBackupInfo = z.output<typeof schemas.PackageBackupInfo>
@@ -1020,12 +1014,6 @@ export type SetIconParams = z.output<typeof schemas.SetIconParams>
 export type SetIconParamsInput = z.input<typeof schemas.SetIconParams>
 export type SetMainStatus = z.output<typeof schemas.SetMainStatus>
 export type SetMainStatusInput = z.input<typeof schemas.SetMainStatus>
-export type SetOsUpdateSignerParams = z.output<
-  typeof schemas.SetOsUpdateSignerParams
->
-export type SetOsUpdateSignerParamsInput = z.input<
-  typeof schemas.SetOsUpdateSignerParams
->
 export type SetOutboundGatewayParams = z.output<
   typeof schemas.SetOutboundGatewayParams
 >
