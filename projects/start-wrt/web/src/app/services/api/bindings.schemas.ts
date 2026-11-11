@@ -563,6 +563,12 @@ export const FileType: z.ZodEnum<{
   .meta({
     id: 'FileType',
   })
+export const FlashMode: z.ZodEnum<{
+  update: 'update'
+  'fresh-start': 'fresh-start'
+}> = /* @__PURE__ */ z.enum(['update', 'fresh-start']).meta({
+  id: 'FlashMode',
+})
 export const FollowLogsParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'FollowLogsParams',
 })
@@ -1296,6 +1302,61 @@ export const SetTimezoneParams: z.ZodObject<{
 }).meta({
   id: 'SetTimezoneParams',
 })
+
+/**
+ * Legacy NDJSON adds Complete/Error; typed RPC carries completion in its terminal.
+ */
+export const SetupEvent: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{ phase: z.ZodLiteral<'copying'> }>,
+      z.ZodObject<{
+        copied: z.ZodInt
+        total: z.ZodInt
+        step: z.ZodInt
+        totalSteps: z.ZodInt
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ phase: z.ZodLiteral<'status'> }>,
+      z.ZodObject<{
+        message: z.ZodString
+        step: z.ZodInt
+        totalSteps: z.ZodInt
+      }>
+    >,
+    z.ZodObject<{ phase: z.ZodLiteral<'complete'> }>,
+    z.ZodIntersection<
+      z.ZodObject<{ phase: z.ZodLiteral<'error'> }>,
+      z.ZodObject<{ message: z.ZodString }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.intersection(
+      object({ phase: z.literal('copying') }),
+      object({
+        copied: z.int(),
+        total: z.int(),
+        step: z.int(),
+        totalSteps: z.int(),
+      }),
+    ),
+    z.intersection(
+      object({ phase: z.literal('status') }),
+      object({ message: z.string(), step: z.int(), totalSteps: z.int() }),
+    ),
+    object({ phase: z.literal('complete') }),
+    z.intersection(
+      object({ phase: z.literal('error') }),
+      object({ message: z.string() }),
+    ),
+  ])
+  .meta({
+    id: 'SetupEvent',
+    description:
+      'Legacy NDJSON adds Complete/Error; typed RPC carries completion in its terminal.',
+  })
 export const SniPortUse: z.ZodObject<{
   ports: z.ZodString
   hostnames: z.ZodArray<z.ZodString>
@@ -3105,6 +3166,29 @@ export const ConfigCheck: z.ZodObject<{
 }> = /* @__PURE__ */ object({ findings: z.array(ConfigFinding) }).meta({
   id: 'ConfigCheck',
 })
+export const FlashParams: z.ZodObject<{
+  mode: typeof FlashMode
+  password: typeof PasswordType
+  /**
+   * IANA timezone name. An unknown name leaves the default unchanged.
+   */
+  timezone: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  mode: FlashMode,
+  password: PasswordType,
+  /**
+   * IANA timezone name. An unknown name leaves the default unchanged.
+   */
+  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'IANA timezone name. An unknown name leaves the default unchanged.',
+  }),
+}).meta({
+  id: 'FlashParams',
+})
 export const PublishedPortsSetRequest: z.ZodObject<{
   ports: z.ZodArray<typeof PublishedPortInput>
 }> = /* @__PURE__ */ object({ ports: z.array(PublishedPortInput) }).meta({
@@ -3945,6 +4029,12 @@ export const Api = {
     setup: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
+        flash: {
+          _PARAMS: /* @__PURE__ */ FlashParams,
+          _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ SetupEvent,
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
         'get-pubkey': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.record(z.string(), z.unknown()),

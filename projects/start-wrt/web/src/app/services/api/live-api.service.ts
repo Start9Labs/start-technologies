@@ -39,6 +39,8 @@ import {
   CheckInitializedRes,
   SetInitialPasswordReq,
   SetupStatusRes,
+  SetupFlashReq,
+  SetupFlashStream,
   LogsResponse,
   DeviceFromApi,
   DeviceUpdateReq,
@@ -83,6 +85,7 @@ import {
   BackupRestoreRes,
   DiagnosticsCreateRes,
 } from './api.service'
+import type { RpcStreamOptions } from '@start9labs/start-core'
 import { RpcService } from '../rpc.service'
 import { RpcSocketService, ServerIdentityService } from '@start9labs/shared'
 import type { Api, RpcParamType, RpcReturnType } from './bindings'
@@ -288,8 +291,11 @@ export class LiveApiService extends ApiService {
     })
   }
 
-  async getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>> {
-    return this.rpc.request({ method: 'setup.get-pubkey', params: {} })
+  async setupFlash(
+    params: SetupFlashReq,
+    options?: RpcStreamOptions,
+  ): Promise<SetupFlashStream> {
+    return this.rpc.streams.setup.flash(params, options)
   }
 
   async systemFactoryReset(): Promise<null> {

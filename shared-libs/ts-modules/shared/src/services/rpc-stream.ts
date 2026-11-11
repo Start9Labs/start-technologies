@@ -101,7 +101,7 @@ export async function rpcResponseStream<R, I, F>(
             return
           }
           if (isRpcError(value)) {
-            fail(new RpcError(value.error))
+            fail(new RpcError(value.error, value.meta))
             return
           }
           initializing = false

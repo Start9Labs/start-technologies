@@ -2207,10 +2207,16 @@ struct DiskState {
 }
 ```
 
+### `setup.flash`
+
+Public setup command requiring a typed response stream. `FlashParams` carries `mode`, `password: PasswordType` and optional `timezone`; unwrapped passwords require completed encrypted admission. Initial success is null, items are `SetupEvent` progress, and the final null confirms the actual provisioning result. Progress counters are not completion.
+
+The daemon's exclusion gate is shared with legacy `POST /api/setup/flash`. Accepted work retains that gate through worker completion; observation cancellation or transport loss never aborts firmware writes. No observer retries the command automatically. The non-Send operation reuses start-core's `make_send` runtime owner. Legacy NDJSON adapts the same operation result into Complete/Error events; typed RPC carries its outcome in the terminal instead. Legacy HTTP still requires JWE for passwords and retains the public-key endpoint. Unwrapped HTTP inputs return an NDJSON error before work starts.
+
 ### `setup.get-pubkey`
 
 No auth required. Returns the public half of an ephemeral P-256 key the daemon
-generates each time it starts. `/api/setup/flash` and legacy HTTP first-password clients encrypt the admin password to it. New first-password clients send a string inside admitted RPC; the shared password decoder rejects unwrapped input without a completed encrypted session.
+generates each time it starts. `/api/setup/flash` and legacy HTTP first-password clients encrypt the admin password to it. New first-password and flash clients send a string inside admitted RPC; the shared password decoder rejects unwrapped input without a completed encrypted session.
 
 ```rust
 // Request: {}
@@ -2490,6 +2496,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `system.logs`                       | System          |                             |
 | `system.logs-follow`                | System          |                             |
 | `setup.status`                      | Setup           | No auth                     |
+| `setup.flash`                       | Setup           | Public typed stream         |
 | `setup.get-pubkey`                  | Setup           | No auth                     |
 | `wan.ipv4-get`                      | WAN             |                             |
 | `wan.ipv4-set`                      | WAN             |                             |

@@ -1,4 +1,5 @@
 import { Injectable } from '@angular/core'
+import type { RpcStreamClient, RpcStreamOptions } from '@start9labs/start-core'
 import type * as Bindings from './bindings'
 import type * as Events from './events'
 import type { Api, RpcParamType, RpcReturnType } from './bindings'
@@ -70,7 +71,11 @@ export abstract class ApiService {
     params: SetInitialPasswordReq,
   ): Promise<RpcReturnType<Api, 'auth.set-initial-password'>>
   abstract setupStatus(): Promise<SetupStatusRes>
-  abstract getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>>
+  /** Cancels observation, never accepted flashing. Successful termination confirms provisioning. */
+  abstract setupFlash(
+    params: SetupFlashReq,
+    options?: RpcStreamOptions,
+  ): Promise<SetupFlashStream>
   abstract systemFactoryReset(): Promise<null>
   abstract systemLogs(): Promise<LogsResponse>
   abstract followLogs(): Promise<RpcReturnType<Api, 'system.logs-follow'>>
@@ -139,15 +144,6 @@ export abstract class ApiService {
     params: RpcParamType<Api, 'backup.restore'>,
   ): Promise<BackupRestoreRes>
   abstract diagnosticsCreate(): Promise<DiagnosticsCreateRes>
-
-  async encrypt(password: string): Promise<EncryptedWire> {
-    // A dynamic import of node-jose itself has only a default export.
-    const [{ encrypt }, pubkey] = await Promise.all([
-      import('./encrypt'),
-      this.getPubkey(),
-    ])
-    return encrypt(pubkey, password)
-  }
 }
 
 export type BackupCreateRes = RpcReturnType<Api, 'backup.create'>
@@ -321,9 +317,10 @@ export type SetInitialPasswordReq = RpcParamType<
 
 export type SetupStatusRes = RpcReturnType<Api, 'setup.status'>
 
-export type EncryptedWire = Bindings.EncryptedWireInput
-
-export type SetupFlashReq = Events.FlashParamsInput
+export type SetupFlashReq = RpcParamType<Api, 'setup.flash'>
+export type SetupFlashStream = Awaited<
+  ReturnType<RpcStreamClient<Api>['setup']['flash']>
+>
 
 export type SetupFlashEvent = Events.SetupEvent
 

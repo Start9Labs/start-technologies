@@ -44,6 +44,8 @@ import {
   CheckInitializedRes,
   SetInitialPasswordReq,
   SetupStatusRes,
+  SetupFlashReq,
+  SetupFlashStream,
   LogEntry,
   LogsResponse,
   DeviceFromApi,
@@ -1185,13 +1187,28 @@ export class MockApiService extends ApiService {
     return { setupMode: false, disk: { emmcFound: true, hasFirmware: true } }
   }
 
-  async getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>> {
+  async setupFlash(
+    params: SetupFlashReq,
+    options?: import('@start9labs/start-core').RpcStreamOptions,
+  ): Promise<SetupFlashStream> {
+    options?.signal?.throwIfAborted()
     await pauseFor(250)
+    options?.signal?.throwIfAborted()
     return {
-      kty: 'EC',
-      crv: 'P-256',
-      x: 'yHTDYSfjU809fkSv9MmN4wuojf5c3cnD7ZDN13n-jz4',
-      y: '8Mpkn744A5KDag0DmX2YivB63srjbugYZzWc3JOpQXI',
+      initial: null,
+      items: (async function* () {
+        for (let step = 1; step <= 3; step++) {
+          await pauseFor(250)
+          options?.signal?.throwIfAborted()
+          yield {
+            phase: 'status' as const,
+            message: 'Configuring system...',
+            step,
+            totalSteps: 3,
+          }
+        }
+        return null
+      })(),
     }
   }
 

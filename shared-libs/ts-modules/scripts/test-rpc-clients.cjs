@@ -33,6 +33,7 @@ function harness(moduleOverrides = new Map(), globals = {}) {
   const tokens = Object.fromEntries(
     [
       'DOCUMENT',
+      'DestroyRef',
       'Injector',
       'HttpClient',
       'HttpService',
@@ -65,6 +66,7 @@ function harness(moduleOverrides = new Map(), globals = {}) {
   const modules = new Map()
   const angular = {
     DOCUMENT: tokens.DOCUMENT,
+    DestroyRef: tokens.DestroyRef,
     Injector: tokens.Injector,
     Injectable: () => value => value,
     Service: () => value => value,
@@ -1789,6 +1791,101 @@ test('WRT encrypted calls capture bytes, inspect firmware metadata and never dow
   await assert.rejects(failed, error => error.code === 0)
 })
 
+test('WRT typed flash captures bytes, keeps metadata and cancellation, and never falls back', async () => {
+  const { dependencies, tokens, load } = harness()
+  const lease = { signer: {}, signal: new AbortController().signal }
+  let resolveLease
+  dependencies.set(tokens.AuthKeyService, {
+    admissionLease: () => new Promise(resolve => (resolveLease = resolve)),
+  })
+  dependencies.set(tokens.HttpService, {
+    request: () => assert.fail('no HTTP downgrade'),
+  })
+  const hashes = []
+  const calls = []
+  let revoked = 0
+  dependencies.set(tokens.StaleUiService, {
+    checkHash: hash => hashes.push(hash),
+  })
+  dependencies.set(tokens.Injector, {
+    get: () => ({ setUnverified: () => revoked++ }),
+  })
+  const items = (async function* () {
+    return null
+  })()
+  dependencies.set(tokens.RpcSocketService, {
+    stream: async (body, identity, options) => {
+      calls.push({ body, identity, options })
+      return { initial: null, meta: { gitHash: 'firmware' }, items }
+    },
+  })
+  const rpc = new (load(
+    'projects/start-wrt/web/src/app/services/rpc.service.ts',
+  ).RpcService)()
+  const params = { mode: 'fresh-start', password: 'original' }
+  const pending = rpc.streams.setup.flash(params, { timeout: 20 })
+  params.password = 'changed'
+  resolveLease(lease)
+  const result = await pending
+  assert.equal(result.items, items)
+  assert.equal(JSON.parse(calls[0].body).method, 'setup.flash')
+  assert.equal(JSON.parse(calls[0].body).params.password, 'original')
+  assert.equal(calls[0].identity, lease)
+  assert.equal(calls[0].options.timeout, 20)
+  assert.equal(calls[0].options.openObserver, undefined)
+  assert.deepEqual(hashes, ['firmware'])
+  const abort = new AbortController()
+  const canceled = rpc.streams.setup.flash(params, { signal: abort.signal })
+  abort.abort()
+  resolveLease(lease)
+  await assert.rejects(canceled, { name: 'AbortError' })
+  assert.equal(calls.length, 1)
+  const { RpcError } = load(
+    'shared-libs/ts-modules/shared/src/classes/rpc-error.ts',
+  )
+  dependencies.get(tokens.RpcSocketService).stream = async () => {
+    throw new RpcError(
+      { code: 34, message: 'denied' },
+      { gitHash: 'replacement' },
+    )
+  }
+  const denied = rpc.streams.setup.flash(params)
+  resolveLease(lease)
+  await assert.rejects(denied, error => error.code === 34)
+  assert.deepEqual(hashes, ['firmware', 'replacement'])
+  assert.equal(revoked, 1)
+})
+
+test('WRT mock flash uses local typed progress and its own terminal without networking', async () => {
+  const { load } = harness(wrtMockOverrides())
+  const mock = Object.create(
+    load('projects/start-wrt/web/src/app/services/api/mock-api.service.ts')
+      .MockApiService.prototype,
+  )
+  const response = await mock.setupFlash({
+    mode: 'fresh-start',
+    password: 'fixture password',
+  })
+  assert.equal(response.initial, null)
+  const steps = []
+  let result
+  do {
+    result = await response.items.next()
+    if (!result.done) steps.push(result.value.step)
+  } while (!result.done)
+  assert.deepEqual(steps, [1, 2, 3])
+  assert.equal(result.value, null)
+  const abort = new AbortController()
+  abort.abort()
+  await assert.rejects(
+    mock.setupFlash(
+      { mode: 'update', password: 'fixture password' },
+      { signal: abort.signal },
+    ),
+    { name: 'AbortError' },
+  )
+})
+
 test('WRT mock continuations emit local events and close asynchronously without networking', async () => {
   const { load } = harness(new Map(), {
     queueMicrotask,
@@ -1825,34 +1922,155 @@ test('WRT mock continuations emit local events and close asynchronously without 
 })
 
 function wrtFlowHarness(globals = {}) {
-  return harness(
-    new Map([
-      [
-        '@taiga-ui/core',
-        {
-          TuiLoader: class {},
-          TuiTitle: class {},
-          TuiNotificationService: class {},
-        },
-      ],
-      ['@taiga-ui/polymorpheus', { PolymorpheusComponent: class {} }],
-      ['src/app/i18n/i18n.pipe', { i18nPipe: class {} }],
-      [
-        'src/app/i18n/validation-errors',
-        {
-          fill: () =>
-            assert.fail('an unconfirmed update cannot report success'),
-        },
-      ],
-      ['src/app/services/network.service', { NetworkService: class {} }],
-      [
-        'src/app/utils/workspace-config',
-        { IS_MOCK: Symbol(), GIT_HASH: Symbol() },
-      ],
-    ]),
-    globals,
-  )
+  const overrides = new Map([
+    [
+      '@taiga-ui/core',
+      {
+        TuiLoader: class {},
+        TuiTitle: class {},
+        TuiNotificationService: class {},
+      },
+    ],
+    ['@taiga-ui/polymorpheus', { PolymorpheusComponent: class {} }],
+    ['src/app/i18n/i18n.pipe', { i18nPipe: class {} }],
+    [
+      'src/app/i18n/validation-errors',
+      {
+        fill: () => assert.fail('an unconfirmed update cannot report success'),
+      },
+    ],
+    ['src/app/services/network.service', { NetworkService: class {} }],
+    [
+      'src/app/utils/workspace-config',
+      { IS_MOCK: Symbol(), GIT_HASH: Symbol() },
+    ],
+  ])
+  return { ...harness(overrides, globals), overrides }
 }
+
+function wrtFlashHarness(setupFlash) {
+  const { load, dependencies, tokens, overrides } = wrtFlowHarness({
+    AbortController,
+    Error,
+  })
+  const destroy = []
+  let disconnected = 0
+  dependencies.set(tokens.DestroyRef, {
+    onDestroy: callback => destroy.push(callback),
+  })
+  dependencies.set(overrides.get('src/app/i18n/i18n.pipe').i18nPipe, {
+    transform: value => value,
+  })
+  dependencies.set(
+    load('projects/start-wrt/web/src/app/services/api/api.service.ts')
+      .ApiService,
+    { setupFlash },
+  )
+  dependencies.set(
+    load('projects/start-wrt/web/src/app/services/connection.service.ts')
+      .ConnectionService,
+    { reportUnreachable: () => disconnected++ },
+  )
+  const service = new (load(
+    'projects/start-wrt/web/src/app/routes/setup-wizard/service.ts',
+  ).SetupFlash)()
+  return {
+    service,
+    destroy: () => destroy.forEach(callback => callback()),
+    disconnected: () => disconnected,
+  }
+}
+
+for (const failure of [false, true]) {
+  test(`WRT flash waits for the actual terminal after copied bytes reach total: ${failure ? 'failure' : 'success'}`, async () => {
+    const copied = Promise.withResolvers()
+    const terminal = Promise.withResolvers()
+    let request
+    const fixture = wrtFlashHarness(async (params, options) => {
+      request = { params, options }
+      return {
+        initial: null,
+        items: (async function* () {
+          yield {
+            phase: 'copying',
+            copied: 100,
+            total: 100,
+            step: 2,
+            totalSteps: 3,
+          }
+          copied.resolve()
+          await terminal.promise
+          return null
+        })(),
+      }
+    })
+    let finished = false
+    const operation = fixture.service
+      .run({
+        mode: 'fresh-start',
+        password: 'unwrapped secret',
+        timezone: 'UTC',
+      })
+      .then(result => {
+        finished = true
+        return result
+      })
+    await copied.promise
+    assert.equal(fixture.service.copied(), 100)
+    assert.equal(fixture.service.running(), true)
+    assert.equal(finished, false)
+    assert.equal(request.params.password, 'unwrapped secret')
+    assert.equal(request.options.signal.aborted, false)
+    if (failure) terminal.reject(new Error('late provisioning failure'))
+    else terminal.resolve()
+    assert.equal(await operation, !failure)
+    assert.equal(fixture.service.running(), false)
+    assert.equal(
+      fixture.service.error(),
+      failure ? 'late provisioning failure' : null,
+    )
+    assert.equal(fixture.disconnected(), 0)
+  })
+}
+
+test('WRT flash disposal cancels pending observation without retry or late success', async () => {
+  let calls = 0
+  let signal
+  const fixture = wrtFlashHarness((params, options) => {
+    calls++
+    signal = options.signal
+    return new Promise((resolve, reject) =>
+      signal.addEventListener('abort', () => reject(signal.reason), {
+        once: true,
+      }),
+    )
+  })
+  const running = fixture.service.run({
+    mode: 'fresh-start',
+    password: 'fixture password',
+  })
+  fixture.destroy()
+  assert.equal(await running, false)
+  assert.equal(calls, 1)
+  assert.equal(signal.aborted, true)
+  assert.equal(fixture.service.error(), null)
+  assert.equal(fixture.disconnected(), 0)
+})
+
+test('WRT flash transport loss reuses the existing reconnect owner without replay', async () => {
+  let calls = 0
+  const fixture = wrtFlashHarness(async () => {
+    calls++
+    throw Object.assign(new Error('lost transport'), { code: 0 })
+  })
+  assert.equal(
+    await fixture.service.run({ mode: 'update', password: 'fixture password' }),
+    false,
+  )
+  assert.equal(calls, 1)
+  assert.equal(fixture.disconnected(), 1)
+  assert.equal(fixture.service.error(), 'lost transport')
+})
 
 test('WRT outage ownership aborts a stalled RPC session only on the first declaration', () => {
   const { load } = wrtFlowHarness({ setInterval: () => 1 })

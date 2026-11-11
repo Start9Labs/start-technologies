@@ -78,7 +78,7 @@ promise-based**; components call `await this.api.method(params)` and never touch
   surface `{code: 0}`; `ConnectionService` and update recovery call the shared session-abort
   primitive before probing again. A timed-out multiplexed probe alone cannot release siblings
   holding a dead socket. Authenticated generated firmware metadata feeds the
-  existing stale-UI detector; the HTTP compatibility header remains for legacy clients. DOM-style encrypted continuations preserve log/update event,
+  existing stale-UI detector, including metadata retained on initiating stream errors; the HTTP compatibility header remains for legacy clients. The wizard's component-scoped service consumes generated typed flash progress and requires successful termination before reporting completion. Its destruction cancels observation, never accepted flashing; network loss reuses ConnectionService without replay. DOM-style encrypted continuations preserve log/update event,
   close and retry ownership. Physical close starts recovery, not an update-success claim.
 - **start9-store = REST + Zod through a BFF**: frontend calls `/api/*` only (SSR server proxies
   it — same relative URLs in dev/prod/SSR); domain types + Zod schemas live in `shared/`;

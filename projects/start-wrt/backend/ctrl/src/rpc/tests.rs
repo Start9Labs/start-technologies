@@ -268,6 +268,85 @@ async fn startup_passwords_use_actual_admission_and_retain_http_jwe_without_enro
     );
 }
 
+#[tokio::test]
+async fn flash_uses_typed_terminals_and_the_same_gate_as_legacy_ndjson() {
+    use startos::middleware::auth::session::client::SessionClient;
+    use startos::util::crypto::EncryptedWire;
+    let (url, ctx, _task, _, _) = server_with_router(|ctx| {
+        super::router(ctx.clone())
+            .route(
+                "/api/setup/flash",
+                axum::routing::post(crate::bins::daemon::setup_flash_handler),
+            )
+            .layer(axum::Extension(ctx))
+    })
+    .await;
+    let network = reqwest::Client::new();
+    let client = SessionClient::new(network.clone());
+    let signer = client.ephemeral_signer();
+    let parameters = imbl_value::json!({"mode":"fresh-start","password":"short"});
+    let start = || {
+        client.stream::<crate::setup::SetupEvent, ()>(
+            signer,
+            url.join(RpcSessionUpgrader::PATH).unwrap(),
+            "router.lan",
+            Default::default(),
+            "setup.flash",
+            parameters.clone(),
+        )
+    };
+    let mut operation = start().await.unwrap();
+    assert!(operation.initial.is_null());
+    assert!(matches!(
+        operation.items.next().await.unwrap(),
+        Some(crate::setup::SetupEvent::Status { step: 1, .. })
+    ));
+    assert_eq!(
+        operation.items.finish().await.unwrap_err().code,
+        crate::error::ErrorKind::InvalidRequest as i32
+    );
+
+    let key = <crate::ServerContext as AsRef<josekit::jwk::Jwk>>::as_ref(&ctx)
+        .to_public_key()
+        .unwrap();
+    let wire = EncryptedWire::encrypt("short", &key).unwrap();
+    let legacy = || {
+        network
+            .post(url.join("api/setup/flash").unwrap())
+            .json(&json!({"mode":"fresh-start","password":wire}))
+    };
+    let guard = ctx.setup_flash.clone().lock_owned().await;
+    let rejected = start().await.err().unwrap();
+    assert!(rejected.to_string().contains("flash already in progress"));
+    let busy = legacy().send().await.unwrap().text().await.unwrap();
+    assert!(busy.contains("flash already in progress"));
+    drop(guard);
+    let response = legacy().send().await.unwrap();
+    assert_eq!(response.headers()["content-type"], "application/x-ndjson");
+    let events = response
+        .text()
+        .await
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["phase"], "status");
+    assert_eq!(events[1]["phase"], "error");
+    assert!(events[1]["message"].as_str().unwrap().contains("12"));
+    let rejected = network
+        .post(url.join("api/setup/flash").unwrap())
+        .json(&json!({"mode":"fresh-start","password":"short"}))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let error: Value = serde_json::from_str(&rejected).unwrap();
+    assert_eq!(error["phase"], "error");
+}
+
 async fn call(socket: &mut EncryptedSocket) -> Value {
     socket
         .send(Message::Text(

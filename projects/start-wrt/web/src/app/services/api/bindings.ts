@@ -173,6 +173,7 @@ export type ExecReqInput = z.input<typeof schemas.ExecReq>
 export type ExecRes = z.output<typeof schemas.ExecRes>
 export type FileContents = z.output<typeof schemas.FileContents>
 export type FileType = z.output<typeof schemas.FileType>
+export type FlashModeInput = z.input<typeof schemas.FlashMode>
 export type FollowLogsParamsInput = z.input<typeof schemas.FollowLogsParams>
 export type GetArgsInput = z.input<typeof schemas.GetArgs>
 export type GetFileArgsInput = z.input<typeof schemas.GetFileArgs>
@@ -250,6 +251,11 @@ export type SetRouterAdvertisementsReqInput = z.input<
   typeof schemas.SetRouterAdvertisementsReq
 >
 export type SetTimezoneParamsInput = z.input<typeof schemas.SetTimezoneParams>
+
+/**
+ * Legacy NDJSON adds Complete/Error; typed RPC carries completion in its terminal.
+ */
+export type SetupEvent = z.output<typeof schemas.SetupEvent>
 export type SniPortUse = z.output<typeof schemas.SniPortUse>
 export type SpeedData = z.output<typeof schemas.SpeedData>
 export type SshKeyAddParamsInput = z.input<typeof schemas.SshKeyAddParams>
@@ -376,6 +382,7 @@ export type WifiSetResult = z.output<typeof schemas.WifiSetResult>
  */
 export type BlackoutSetRequestInput = z.input<typeof schemas.BlackoutSetRequest>
 export type ConfigCheck = z.output<typeof schemas.ConfigCheck>
+export type FlashParamsInput = z.input<typeof schemas.FlashParams>
 export type PublishedPortsSetRequestInput = z.input<
   typeof schemas.PublishedPortsSetRequest
 >

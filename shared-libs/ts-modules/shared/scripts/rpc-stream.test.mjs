@@ -88,10 +88,14 @@ test('abort wakes a pending next and discards accepted items even after the wire
   await assert.rejects(response.items.next(), { name: 'AbortError' })
 })
 
-test('initial application denial releases the operation and preserves its code', async () => {
+test('initial application denial releases the operation and preserves code and metadata', async () => {
   const f = fixture()
-  const rejected = assert.rejects(f.pending, error => error.code === 34)
-  f.push({ jsonrpc: '2.0', error: { code: 34, message: 'denied' } })
+  const meta = { gitHash: 'firmware' }
+  const rejected = assert.rejects(
+    f.pending,
+    error => error.code === 34 && error.meta === meta,
+  )
+  f.push({ jsonrpc: '2.0', error: { code: 34, message: 'denied' }, meta })
   await rejected
   assert.equal(f.source.observers.length, 0)
 })

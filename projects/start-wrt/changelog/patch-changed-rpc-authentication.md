@@ -3,7 +3,8 @@ release-notes: false
 ---
 
 - Encrypt browser and CLI RPC, including anonymous setup and loopback local-token access, after signed ephemeral-DH admission, with same-peer, intended-GUID admission for secure-origin continuations, while preserving HTTP/header compatibility and reconnect behavior.
-- Send first-time passwords inside encrypted RPC without an extra password envelope; retain legacy HTTP/JWE setup compatibility.
+- Send first-time and flash passwords inside encrypted RPC without an extra password envelope; retain legacy HTTP/JWE and NDJSON setup compatibility.
+- Report interrupted flash observations as errors rather than leaving the wizard stalled, without aborting accepted firmware writes.
 - Establish CLI connections on the first call and reuse them for subsequent calls without silently repeating a possibly executed request.
 - Detect firmware changes through authenticated reply metadata and verify the requested version before reporting recovery from an interrupted update.
 - Remember the browser's verified server identity and warn on changes without blocking the connection, with fingerprint details for verification.

@@ -414,6 +414,7 @@ impl CallRemote<ServerContext> for CliContext {
 
 #[derive(Clone)]
 pub struct ServerContext {
+    pub(crate) setup_flash: Arc<tokio::sync::Mutex<()>>,
     pub continuations: Arc<continuations::RpcContinuations>,
     pub auth: Arc<auth::AuthState>,
     pub server_identity: startos::sign::Signer,
@@ -428,11 +429,13 @@ impl ServerContext {
     pub(crate) fn replay_check(&self) -> startos::middleware::auth::signature::RequestReplayCheck {
         let continuations = Arc::downgrade(&self.continuations);
         let server_identity = self.server_identity.clone();
+        let setup_flash = self.setup_flash.clone();
         startos::middleware::auth::signature::RequestReplayCheck::new(&self.auth, move |auth| {
             Some(Self {
                 continuations: continuations.upgrade()?,
                 auth,
                 server_identity: server_identity.clone(),
+                setup_flash: setup_flash.clone(),
                 secure_session: None,
             })
         })
@@ -451,6 +454,7 @@ impl ServerContext {
 impl Default for ServerContext {
     fn default() -> Self {
         Self {
+            setup_flash: Arc::new(tokio::sync::Mutex::new(())),
             continuations: Arc::new(continuations::RpcContinuations::new()),
             auth: Arc::new(auth::AuthState::in_memory()),
             server_identity: startos::sign::AnySigningKey::generate().into(),

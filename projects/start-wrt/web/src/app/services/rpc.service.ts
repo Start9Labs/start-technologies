@@ -1,5 +1,7 @@
 import { Service, Injector, inject } from '@angular/core'
 import { AuthService } from './auth.service'
+import { createRpcStreamClient } from '@start9labs/start-core'
+import type { RpcStreamClient } from '@start9labs/start-core'
 import {
   AuthKeyService,
   isRpcError,
@@ -35,6 +37,27 @@ export class RpcService {
   private readonly identity = inject(ServerIdentityService)
   private readonly staleUi = inject(StaleUiService)
 
+  readonly streams = createRpcStreamClient<RpcStreamClient<Api>>({
+    stream: async (method, params, options) => {
+      const body = rpcRequestBody({
+        method,
+        params: params as Record<string, unknown>,
+      })
+      try {
+        const lease = await this.authKeys.admissionLease()
+        options?.signal?.throwIfAborted()
+        const result = await this.sockets.stream(body, lease, {
+          ...options,
+          openObserver: 'key' in lease ? this.identity.openObserver : undefined,
+        })
+        this.checkFirmware(result.meta)
+        return result
+      } catch (error) {
+        return this.raiseError(error)
+      }
+    },
+  })
+
   async request<M extends RpcMethod<Api>>(
     options: RPCOptions<M>,
   ): Promise<RpcReturnType<Api, M>> {
@@ -48,19 +71,29 @@ export class RpcService {
       },
       lease,
     )
-    const metadata = body?.meta as Partial<FirmwareMetadata> | undefined
-    this.staleUi.checkHash(metadata?.gitHash)
+    this.checkFirmware(body?.meta)
     if (body === null) throw new Error('Empty RPC response')
 
-    if (isRpcError(body)) {
-      if (body.error.code === 34) {
+    if (isRpcError(body)) this.raiseError(new RpcError(body.error))
+
+    return body.result
+  }
+
+  private checkFirmware(meta: unknown): void {
+    this.staleUi.checkHash(
+      (meta as Partial<FirmwareMetadata> | undefined)?.gitHash,
+    )
+  }
+
+  private raiseError(error: unknown): never {
+    if (error instanceof RpcError) {
+      if (error.meta) this.checkFirmware(error.meta)
+      if (error.code === 34) {
         console.error('Unauthenticated, logging out')
         this.injector.get(AuthService).setUnverified()
       }
-      throw new RpcError(body.error)
     }
-
-    return body.result
+    throw error
   }
 }
 
