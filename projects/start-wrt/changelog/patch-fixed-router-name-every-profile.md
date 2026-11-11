@@ -1,5 +1,5 @@
 ---
-release-notes: true
+release-notes: false
 ---
 
 - The web interface's certificate names whatever you opened it by — `router.lan`, `router.local`, the gateway address of any profile, the WAN address, or the DDNS hostname — so a device that trusts your Root CA no longer sees a name warning on any of them.

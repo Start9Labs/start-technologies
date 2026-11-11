@@ -1,5 +1,5 @@
 ---
-release-notes: true
+release-notes: false
 ---
 
 - A factory reset no longer stops short of rebooting after erasing the router's settings.
