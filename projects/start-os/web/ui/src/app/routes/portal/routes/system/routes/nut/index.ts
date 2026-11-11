@@ -449,6 +449,7 @@ export default class Nut {
       .pipe(map(config => config ?? DEFAULT_NUT_CONFIG)),
     { initialValue: DEFAULT_NUT_CONFIG },
   )
+  // Settings and Disconnect remain available when UPS readings fail.
   protected readonly connected = computed(
     () => this.data().enabled && !!this.data().settings,
   )

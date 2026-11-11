@@ -11507,6 +11507,11 @@
             "vendorId": { "type": ["string", "null"] },
             "productId": { "type": ["string", "null"] },
             "serial": { "type": ["string", "null"] },
+            "bus": { "type": ["string", "null"] },
+            "busPort": {
+              "description": "Pins devices without a serial number to the selected USB port.",
+              "type": ["string", "null"]
+            },
             "vendor": { "type": ["string", "null"] },
             "product": { "type": ["string", "null"] }
           },

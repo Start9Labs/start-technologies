@@ -1106,6 +1106,17 @@ export const NutDevice: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  bus: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * Pins devices without a serial number to the selected USB port.
+   */
+  busPort: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
   vendor: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
@@ -1120,6 +1131,14 @@ export const NutDevice: z.ZodObject<{
   vendorId: wire(z.string().nullable().optional(), z.string().nullable()),
   productId: wire(z.string().nullable().optional(), z.string().nullable()),
   serial: wire(z.string().nullable().optional(), z.string().nullable()),
+  bus: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * Pins devices without a serial number to the selected USB port.
+   */
+  busPort: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'Pins devices without a serial number to the selected USB port.',
+  }),
   vendor: wire(z.string().nullable().optional(), z.string().nullable()),
   product: wire(z.string().nullable().optional(), z.string().nullable()),
 }).meta({
