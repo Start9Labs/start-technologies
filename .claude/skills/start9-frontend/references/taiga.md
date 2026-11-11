@@ -52,9 +52,10 @@ nothing may import it. When in doubt: the official MCP
   hover/active), `tuiAppearanceFocus`, `tuiAppearanceMode`. Bundled names: `primary`,
   `secondary`, `flat`, `outline`, `action`, `accent`, `icon`, `floating`, `textfield`,
   `neutral`/`positive`/`negative`/`warning`/`info` (+ `-grayscale` variants used fleet-wide).
-- `tuiAppearanceMode="checked"` draws an appearance's selected state on anything carrying
-  one — a picked `tuiBadge` or chip, the highlighted card of a set — not a `._on` class with its
-  own border and shadow.
+- `tuiAppearanceMode="checked"` draws a picked badge, chip or card in its appearance's checked
+  styling, not a `._on` class with its own border and shadow. Only `outline*`, `secondary*` and
+  the status appearances define one, and `floating` has none:
+  `<span tuiBadge appearance="outline-grayscale" tuiAppearanceMode="checked">Selected</span>`.
 - **Custom appearance = CSS, not TS**, in the theme sheet with the state mixins:
 
 ```scss
