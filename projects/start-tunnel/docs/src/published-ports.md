@@ -51,7 +51,7 @@ A device can access its own service through its published SNI hostname or the sh
 
 Connected devices can also create SNI hostname routes **automatically**, the same way they open automatic ports. A device asks over PCP (preferred) or, when PCP can't get through, over a UPnP vendor action the tunnel advertises (`X_START9_AddHostnameMapping`). Either way the route appears in the **Automatic** table, carries a lease, and expires on its own if the device stops renewing it — and, like every automatic mapping, it can only point at the requesting device's own address.
 
-UDP hostname management requires StartTunnel 1.6.0 or newer. When using the separate `start-cli tunnel` client, use start-cli 2.9.0 or newer with that server.
+UDP hostname management requires StartTunnel 1.6.0 or newer. When using the separate `start-cli tunnel` client, use start-cli 3.0.0 or newer with that server.
 
 For example, publish a QUIC service independently of a TCP route on the same port:
 
