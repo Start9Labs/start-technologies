@@ -761,8 +761,8 @@ export const Api = {
           ),
           _CHILDREN: {},
         },
+        registries: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         'trusted-keys': { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
-        'update-signers': { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
       },
     },
     setup: {

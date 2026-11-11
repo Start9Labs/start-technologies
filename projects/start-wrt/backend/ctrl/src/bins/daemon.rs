@@ -351,6 +351,18 @@ async fn inner_main() -> Result<(), Error> {
         {
             tracing::error!("Failed to start IPv6 tracker: {e}");
         }
+        if let Err(e) = std::thread::Builder::new()
+            .name("usb-ports".into())
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("usb-ports runtime")
+                    .block_on(crate::usb_ports::run());
+            })
+        {
+            tracing::error!("Failed to start USB port watcher: {e}");
+        }
 
         app_state = AppState {
             flash_in_progress: Arc::new(AtomicBool::new(false)),

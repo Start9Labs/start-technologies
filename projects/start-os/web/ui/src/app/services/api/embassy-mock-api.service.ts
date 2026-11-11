@@ -54,6 +54,7 @@ import {
   UIData,
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
+import { ConfigService } from 'src/app/services/config.service'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { toAuthorityUrl } from 'src/app/utils/acme'
 import { parsePemPublicKey, parsePublicKeys } from 'src/app/utils/public-keys'
@@ -128,6 +129,7 @@ export class MockApiService extends ApiService {
   readonly mockWsSource$ = new Subject<Revision>()
   private readonly storage = inject(WA_SESSION_STORAGE)
   private readonly cache = inject(PATCH_CACHE)
+  private readonly gitHash = inject(ConfigService).gitHash
   private readonly revertTime = 1800
   private readonly conversionJobs: T.ServerStatus['backupConversions'] = {}
   private readonly pushSubscriptions = new Map<
@@ -136,7 +138,7 @@ export class MockApiService extends ApiService {
   >()
   sequence = 1
   private readonly handlers: RpcHandlers<Api> = {
-    'git-info': async () => 'mock-os-build',
+    'git-info': async () => this.gitHash,
     state: async () => {
       await pauseFor(1000)
 
@@ -289,30 +291,31 @@ export class MockApiService extends ApiService {
       },
       hardware: null,
     }),
-    'server.trusted-keys.connect-registry': async ({ url, name }) => {
+    'server.registries.add': async ({ url, name }) => {
       await pauseFor(2000)
       const normalized = registryUrl(url)
       const info = this.mockRegistryInfo(normalized)
       const { added } = this.importRegistryKeys(normalized, info)
       for (const id of added)
         mockPatchData.serverInfo.trustedKeys[id]!.marketplace = true
-      for (const saved of Object.keys(mockPatchData.ui.registries)) {
+      for (const saved of Object.keys(mockPatchData.serverInfo.registries)) {
         if (sameUrl(saved, normalized))
-          delete mockPatchData.ui.registries[saved]
+          delete mockPatchData.serverInfo.registries[saved]
       }
-      mockPatchData.ui.registries[normalized] = name ?? info.name
+      mockPatchData.serverInfo.registries[normalized] = name ?? info.name
       await this.publishTrust()
       return added
     },
-    'server.trusted-keys.remove-registry': async ({ url }) => {
+    'server.registries.remove': async ({ url }) => {
       await pauseFor(2000)
-      if (sameUrl(url, mockPatchData.ui.startosRegistry))
+      if (sameUrl(url, mockPatchData.serverInfo.osRegistry))
         throw new Error(
           'This registry provides StartOS updates. Choose another registry for StartOS updates before removing it.',
         )
       const offered = this.offeredKeys(url)
-      for (const saved of Object.keys(mockPatchData.ui.registries)) {
-        if (sameUrl(saved, url)) delete mockPatchData.ui.registries[saved]
+      for (const saved of Object.keys(mockPatchData.serverInfo.registries)) {
+        if (sameUrl(saved, url))
+          delete mockPatchData.serverInfo.registries[saved]
       }
       for (const saved of Object.keys(mockPatchData.serverInfo.registryKeys)) {
         if (sameUrl(saved, url))
@@ -324,10 +327,10 @@ export class MockApiService extends ApiService {
         return key?.removable && key.origin !== 'manual'
       })
     },
-    'server.trusted-keys.set-os-registry': async ({ url }) => {
+    'server.registries.set-os': async ({ url }) => {
       await pauseFor(2000)
       if (
-        !Object.keys(mockPatchData.ui.registries).some(saved =>
+        !Object.keys(mockPatchData.serverInfo.registries).some(saved =>
           sameUrl(saved, url),
         )
       )
@@ -337,7 +340,7 @@ export class MockApiService extends ApiService {
       )
       for (const id of enabled)
         mockPatchData.serverInfo.trustedKeys[id]!.os = true
-      mockPatchData.ui.startosRegistry = registryUrl(url)
+      mockPatchData.serverInfo.osRegistry = registryUrl(url)
       await this.publishTrust()
       return enabled
     },
@@ -2548,7 +2551,7 @@ export class MockApiService extends ApiService {
     return {
       ...Mock.RegistryInfo,
       name:
-        Object.entries(mockPatchData.ui.registries).find(([saved]) =>
+        Object.entries(mockPatchData.serverInfo.registries).find(([saved]) =>
           sameUrl(saved, url),
         )?.[1] || 'Example Registry',
     }
@@ -2558,7 +2561,7 @@ export class MockApiService extends ApiService {
     const listed = new Set(
       Object.entries(mockPatchData.serverInfo.registryKeys)
         .filter(([url]) =>
-          Object.keys(mockPatchData.ui.registries).some(saved =>
+          Object.keys(mockPatchData.serverInfo.registries).some(saved =>
             sameUrl(saved, url),
           ),
         )
@@ -2584,13 +2587,13 @@ export class MockApiService extends ApiService {
       },
       {
         op: PatchOp.REPLACE,
-        path: '/ui/registries',
-        value: structuredClone(mockPatchData.ui.registries),
+        path: '/serverInfo/registries',
+        value: structuredClone(mockPatchData.serverInfo.registries),
       },
       {
         op: PatchOp.REPLACE,
-        path: '/ui/startosRegistry',
-        value: mockPatchData.ui.startosRegistry,
+        path: '/serverInfo/osRegistry',
+        value: mockPatchData.serverInfo.osRegistry,
       },
     ])
   }

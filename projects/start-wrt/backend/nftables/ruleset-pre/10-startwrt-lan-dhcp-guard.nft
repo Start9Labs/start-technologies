@@ -3,6 +3,9 @@
 # leave through the output hook. startwrt fills @ra_allow from
 # 11-startwrt-lan-ra-allow.nft.
 #
+# USB bridge uplinks carry router-originated or already-guarded frames.
+# USB adapter traffic remains guarded on br-lan after VLAN decapsulation.
+#
 # Needs kmod-nft-bridge: without it this include fails and fw4 loads no ruleset.
 table bridge startwrt_lan_guard
 delete table bridge startwrt_lan_guard
@@ -12,6 +15,7 @@ table bridge startwrt_lan_guard {
 	}
 	chain forward {
 		type filter hook forward priority filter; policy accept;
+		meta ibrname "br-usb_eth*" iifname "usb_eth*" accept
 		ether type ip meta l4proto udp udp sport 67 udp dport 68 counter drop
 		ether type ip6 meta l4proto udp udp sport 547 udp dport 546 counter drop
 		ether type ip6 meta l4proto ipv6-icmp icmpv6 type nd-router-advert ether saddr != @ra_allow counter drop

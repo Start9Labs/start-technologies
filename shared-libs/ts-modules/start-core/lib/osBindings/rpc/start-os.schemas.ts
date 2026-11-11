@@ -1244,10 +1244,6 @@ export const TrustedCa: z.ZodObject<{
 }).meta({
   id: 'TrustedCa',
 })
-export const TrustedOsUpdateSigner: z.ZodObject<{ label: z.ZodString }> =
-  /* @__PURE__ */ object({ label: z.string() }).meta({
-    id: 'TrustedOsUpdateSigner',
-  })
 export const TrustedRegistryParams: z.ZodObject<{ url: z.ZodString }> =
   /* @__PURE__ */ object({ url: z.string() }).meta({
     id: 'TrustedRegistryParams',
@@ -2858,11 +2854,6 @@ export const OsInfo: z.ZodObject<{
 }).meta({
   id: 'OsInfo',
 })
-export const OsUpdateSignerKeyParams: z.ZodObject<{
-  key: typeof AnyVerifyingKey
-}> = /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
-  id: 'OsUpdateSignerKeyParams',
-})
 export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: typeof LocaleString
@@ -3078,6 +3069,21 @@ export const RebuildParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'RebuildParams',
   })
+export const RegistryIdentity: z.ZodObject<{
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  icon: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof DataUrl>>,
+    z.ZodNullable<typeof DataUrl>
+  >
+}> = /* @__PURE__ */ object({
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
+}).meta({
+  id: 'RegistryIdentity',
+})
 export const RemoveAcmeParams: z.ZodObject<{ provider: typeof AcmeProvider }> =
   /* @__PURE__ */ object({ provider: AcmeProvider }).meta({
     id: 'RemoveAcmeParams',
@@ -3255,12 +3261,6 @@ export const SetLogLevelParams: z.ZodObject<{
 }).meta({
   id: 'SetLogLevelParams',
   description: 'Sets verbosity for StartOS backend code in the running daemon.',
-})
-export const SetOsUpdateSignerParams: z.ZodObject<{
-  key: typeof AnyVerifyingKey
-  label: z.ZodString
-}> = /* @__PURE__ */ object({ key: AnyVerifyingKey, label: z.string() }).meta({
-  id: 'SetOsUpdateSignerParams',
 })
 export const SetOutboundGatewayParams: z.ZodObject<{
   package: typeof PackageId
@@ -4290,6 +4290,94 @@ export const SideloadParams: z.ZodObject<{
   }),
 }).meta({
   id: 'SideloadParams',
+})
+
+/**
+ * Signing-key material and independent package and OS-update trust.
+ */
+export const TrustedKey: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * `manual`, or the base URL of the registry that first offered the key.
+   */
+  origin: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+  /**
+   * Registry identity recorded when this key was first imported.
+   */
+  originRegistry: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof RegistryIdentity>>,
+    z.ZodNullable<typeof RegistryIdentity>
+  >
+  publicKey: typeof AnyVerifyingKey
+  /**
+   * Original GPG exports; signing trust is determined by `public_key`.
+   */
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
+  /**
+   * Contact details registries publish for the key's signer.
+   */
+  contact: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof ContactInfo>>,
+    z.ZodArray<typeof ContactInfo>
+  >
+  addedAt: z.ZodString
+  /**
+   * False while a connected registry offers the key.
+   */
+  removable: z.ZodBoolean
+  marketplace: z.ZodBoolean
+  os: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * `manual`, or the base URL of the registry that first offered the key.
+   */
+  origin: wire(z.string().optional(), z.string()).meta({
+    description:
+      '`manual`, or the base URL of the registry that first offered the key.',
+  }),
+  /**
+   * Registry identity recorded when this key was first imported.
+   */
+  originRegistry: wire(
+    RegistryIdentity.nullable().optional(),
+    RegistryIdentity.nullable(),
+  ).meta({
+    description: 'Registry identity recorded when this key was first imported.',
+  }),
+  publicKey: AnyVerifyingKey,
+  /**
+   * Original GPG exports; signing trust is determined by `public_key`.
+   */
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ).meta({
+    description:
+      'Original GPG exports; signing trust is determined by `public_key`.',
+  }),
+  /**
+   * Contact details registries publish for the key's signer.
+   */
+  contact: wire(z.array(ContactInfo).optional(), z.array(ContactInfo)).meta({
+    description: "Contact details registries publish for the key's signer.",
+  }),
+  addedAt: z.string(),
+  /**
+   * False while a connected registry offers the key.
+   */
+  removable: z.boolean().meta({
+    description: 'False while a connected registry offers the key.',
+  }),
+  marketplace: z.boolean(),
+  os: z.boolean(),
+}).meta({
+  id: 'TrustedKey',
+  description:
+    'Signing-key material and independent package and OS-update trust.',
 })
 export const UpdateSystemParams: z.ZodObject<{
   registry: z.ZodString
@@ -6803,6 +6891,74 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
         },
+        registries: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            add: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                ConnectRegistryParams,
+              ),
+              _RETURN: /* @__PURE__ */ z.array(z.string()),
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
+              _RETURN: /* @__PURE__ */ z.record(
+                z.string(),
+                z.string().nullable(),
+              ),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                TrustedRegistryParams,
+              ),
+              _RETURN: /* @__PURE__ */ z.array(z.string()),
+            },
+            'set-os': {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                TrustedRegistryParams,
+              ),
+              _RETURN: /* @__PURE__ */ z.array(z.string()),
+            },
+          },
+        },
         restart: {
           _PARAMS: /* @__PURE__ */ ShutdownParams,
           _RETURN: /* @__PURE__ */ z.null(),
@@ -6873,51 +7029,6 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {
             add: {
-              _PARAMS: /* @__PURE__ */ AddTrustedKeyParams,
-              _RETURN: /* @__PURE__ */ AddTrustedKeyRes,
-            },
-            'connect-registry': {
-              _PARAMS: /* @__PURE__ */ ConnectRegistryParams,
-              _RETURN: /* @__PURE__ */ z.array(z.string()),
-            },
-            remove: {
-              _PARAMS: /* @__PURE__ */ RemoveTrustedKeyParams,
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'remove-many': {
-              _PARAMS: /* @__PURE__ */ RemoveTrustedKeysParams,
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'remove-registry': {
-              _PARAMS: /* @__PURE__ */ TrustedRegistryParams,
-              _RETURN: /* @__PURE__ */ z.array(z.string()),
-            },
-            'set-os-registry': {
-              _PARAMS: /* @__PURE__ */ TrustedRegistryParams,
-              _RETURN: /* @__PURE__ */ z.array(z.string()),
-            },
-            update: {
-              _PARAMS: /* @__PURE__ */ UpdateTrustedKeyParams,
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-          },
-        },
-        update: {
-          _PARAMS: /* @__PURE__ */ UpdateSystemParams,
-          _RETURN: /* @__PURE__ */ UpdateSystemRes,
-        },
-        'update-firmware': {
-          _PARAMS: /* @__PURE__ */ empty,
-          _RETURN: /* @__PURE__ */ RequiresReboot,
-        },
-        'update-signers': {
-          _PARAMS: /* @__PURE__ */ empty,
-          _CHILDREN: {
-            add: {
-              _PARAMS: /* @__PURE__ */ SetOsUpdateSignerParams,
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            get: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
                   object({
@@ -6928,9 +7039,9 @@ export const Api = {
                   }),
                   empty,
                 ),
-                OsUpdateSignerKeyParams,
+                AddTrustedKeyParams,
               ),
-              _RETURN: /* @__PURE__ */ TrustedOsUpdateSigner,
+              _RETURN: /* @__PURE__ */ AddTrustedKeyRes,
             },
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -6945,20 +7056,29 @@ export const Api = {
                 ),
                 empty,
               ),
-              _RETURN: /* @__PURE__ */ z.record(
-                z.string(),
-                TrustedOsUpdateSigner,
-              ),
+              _RETURN: /* @__PURE__ */ z.record(z.string(), TrustedKey),
             },
             remove: {
-              _PARAMS: /* @__PURE__ */ OsUpdateSignerKeyParams,
+              _PARAMS: /* @__PURE__ */ RemoveTrustedKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            'remove-many': {
+              _PARAMS: /* @__PURE__ */ RemoveTrustedKeysParams,
               _RETURN: /* @__PURE__ */ z.null(),
             },
             update: {
-              _PARAMS: /* @__PURE__ */ SetOsUpdateSignerParams,
+              _PARAMS: /* @__PURE__ */ UpdateTrustedKeyParams,
               _RETURN: /* @__PURE__ */ z.null(),
             },
           },
+        },
+        update: {
+          _PARAMS: /* @__PURE__ */ UpdateSystemParams,
+          _RETURN: /* @__PURE__ */ UpdateSystemRes,
+        },
+        'update-firmware': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _RETURN: /* @__PURE__ */ RequiresReboot,
         },
       },
     },

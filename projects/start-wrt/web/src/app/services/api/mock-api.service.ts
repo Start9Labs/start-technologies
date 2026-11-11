@@ -1276,6 +1276,9 @@ export class MockApiService extends ApiService {
         })),
         profile_network: profile ? `${profile.gateway_ip}/24` : null,
         allow_auto_port_forward: this.autoForwardAllowed.has(mac),
+        auto_port_forward_requests: this.autoForwardAllowed.has(mac)
+          ? []
+          : (this.autoForwardRequested.get(mac) ?? []),
         allow_dns_injection: this.dnsInjectionAllowed.has(mac),
         dns_injection_requested:
           !this.dnsInjectionAllowed.has(mac) &&
@@ -1339,6 +1342,10 @@ export class MockApiService extends ApiService {
 
   /** MACs allowed to auto-create port forwards via PCP/UPnP. */
   private autoForwardAllowed = new Set<string>(['00:1A:2B:3C:4D:5E'])
+  /** Ports the router recently refused to open, by MAC. */
+  private readonly autoForwardRequested = new Map<string, string[]>([
+    ['00:1A:2B:3C:4D:5F', ['3074', '27015-27030']],
+  ])
 
   async devicesSetAutoForward(params: {
     mac: string
@@ -1348,6 +1355,7 @@ export class MockApiService extends ApiService {
     const macUpper = params.mac.toUpperCase()
     if (params.allow) {
       this.autoForwardAllowed.add(macUpper)
+      this.autoForwardRequested.delete(macUpper)
     } else {
       this.autoForwardAllowed.delete(macUpper)
     }
@@ -2140,12 +2148,36 @@ export class MockApiService extends ApiService {
       eth3: {
         profile: { fullname: 'Guest', interface: 'guest', vlan_tag: 100 },
       },
+      usb_eth0: {
+        profile: { fullname: 'Guest', interface: 'guest', vlan_tag: 100 },
+      },
+      usb_eth1: { profile: null },
+    },
+    usb_ports: {
+      usb_eth0: { present: true, active: true },
+      usb_eth1: { present: false, active: false },
     },
   }
 
   async ethernetGet(): Promise<EthernetConfig> {
     await pauseFor(250)
     return structuredClone(this.mockEthernet)
+  }
+
+  async ethernetRemoveUsbPort(
+    params: RpcParamType<Api, 'ethernet.remove-usb-port'>,
+  ): Promise<null> {
+    await pauseFor(250)
+    const without = <T>(ports: Record<string, T>) =>
+      Object.fromEntries(
+        Object.entries(ports).filter(([name]) => name !== params.port),
+      )
+    this.mockEthernet = {
+      ...this.mockEthernet,
+      ports: without(this.mockEthernet.ports),
+      usb_ports: without(this.mockEthernet.usb_ports),
+    }
+    return null
   }
 
   async ethernetSet(params: EthernetSetConfig): Promise<EthernetSetResult> {
@@ -2172,6 +2204,7 @@ export class MockApiService extends ApiService {
           },
         ]),
       ),
+      usb_ports: this.mockEthernet.usb_ports,
     }
     const changedPorts = Object.keys(params.ports).join(', ')
     this.logActivity(

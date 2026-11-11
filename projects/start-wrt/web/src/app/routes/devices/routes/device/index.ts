@@ -17,7 +17,10 @@ import {
   TuiNotification,
   TuiTitle,
 } from '@taiga-ui/core'
-import { provideTranslatedValidationErrors } from 'src/app/i18n/validation-errors'
+import {
+  fill,
+  provideTranslatedValidationErrors,
+} from 'src/app/i18n/validation-errors'
 import { TUI_CONFIRM, TuiSkeleton, TuiSwitch } from '@taiga-ui/kit'
 import { TuiHeader } from '@taiga-ui/layout'
 import { catchError, EMPTY, filter, from, startWith, switchMap } from 'rxjs'
@@ -159,6 +162,9 @@ import { i18nKey } from 'src/app/i18n/i18n.providers'
           />
           {{ 'Allow automatic port forwarding' | i18n }}
         </label>
+        @if (portRequestNote(); as note) {
+          <div tuiNotification size="s" appearance="info">{{ note }}</div>
+        }
         <label tuiLabel>
           <input
             tuiSwitch
@@ -260,6 +266,17 @@ export default class DeviceDetail {
   readonly data = computed(
     () => this.service.data()?.find(d => d.mac === this.mac) ?? null,
   )
+  readonly portRequestNote = computed(() => {
+    const ports = this.data()?.autoPortForwardRequests ?? []
+    return ports.length
+      ? fill(
+          this.i18n.transform(
+            'This device asked to open port(s) {ports} to the internet. The router refused because automatic port forwarding is off.',
+          ),
+          { ports: ports.join(', ') },
+        )
+      : ''
+  })
 
   /** Addresses this device's enabled IPv4 published ports forward to. */
   readonly portTargets = signal<string[]>([])
