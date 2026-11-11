@@ -10,6 +10,8 @@ The measured execution chain must authenticate the kernel, initramfs, effective 
 
 `start_core::fde::bootstrap` authenticates and encrypts the bootstrap payload. `start_core::fde::tpm` seals its random encryption key to a P-256-authorized policy over SHA-256 PCRs 7, 11 and 15, restricted to `Unseal`. PCR 11 belongs to the UKI measurement chain; PCR 15 binds the verified rootfs and overlay. The policy-signing private key belongs on the encrypted data drive. The TPM policy authorization and the overlay manifest signature are distinct messages.
 
+`start_core::fde::credentials` carries encrypted leaf TLS identities and NetworkManager profiles without a data-unlock password. Leaf identities share the certificate-chain type and TLS configuration builder used by the normal server. NetworkManager keyfile discovery is shared with the existing saved-profile owner. Bootstrap keyfiles are materialized with private permissions beneath `/run`, then removed individually during handoff; saved data-drive profiles remain authoritative.
+
 These primitives alone do not establish the measured boot chain or enable FDE on a server.
 
 ## Persistent overlay

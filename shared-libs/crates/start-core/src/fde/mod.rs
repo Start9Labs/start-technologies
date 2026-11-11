@@ -5,4 +5,5 @@
 //! never the data key. See `projects/start-os/FDE.md` for the boot contract.
 
 pub mod bootstrap;
+pub mod credentials;
 pub mod tpm;

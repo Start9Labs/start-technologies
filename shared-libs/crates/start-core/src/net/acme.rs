@@ -10,8 +10,6 @@ use futures::{FutureExt, StreamExt};
 use imbl_value::InternedString;
 use instant_acme::{Error as AcmeError, LetsEncrypt};
 use itertools::Itertools;
-use openssl::pkey::{PKey, Private};
-use openssl::x509::X509;
 use regex::Regex;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
@@ -37,7 +35,7 @@ use crate::net::vhost::ACME_CHALLENGE_PORT;
 use crate::net::web_server::Accept;
 use crate::prelude::*;
 use crate::util::FromStrParser;
-use crate::util::serde::{Der64, HandlerExtSerde, Pem};
+use crate::util::serde::{Der64, HandlerExtSerde};
 use crate::util::sync::{SyncMutex, Watch};
 
 mod order;
@@ -404,11 +402,7 @@ impl DbAccessMut<AcmeCertStore> for Database {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct AcmeCert {
-    pub key: Der64<PKey<Private>>,
-    pub fullchain: Vec<Pem<X509>>,
-}
+pub type AcmeCert = crate::net::ssl::CertificateIdentity;
 
 pub struct AcmeCertCache<'a, M: HasModel>(pub &'a TypedPatchDb<M>);
 impl<'a, M> AcmeCertCache<'a, M>

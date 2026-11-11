@@ -5,6 +5,12 @@ fde.bootstrap.invalid-envelope:
   es_ES: 'Configuración de arranque cifrada no válida'
   fr_FR: 'Configuration de démarrage chiffrée invalide'
   pl_PL: 'Nieprawidłowa zaszyfrowana konfiguracja rozruchowa'
+fde.bootstrap.invalid-profile-name:
+  en_US: 'Invalid NetworkManager profile filename'
+  de_DE: 'Ungültiger Dateiname für ein NetworkManager-Profil'
+  es_ES: 'Nombre de archivo de perfil de NetworkManager no válido'
+  fr_FR: 'Nom de fichier de profil NetworkManager invalide'
+  pl_PL: 'Nieprawidłowa nazwa pliku profilu NetworkManager'
 fde.tpm.invalid-authorization:
   en_US: 'Invalid boot policy authorization'
   de_DE: 'Ungültige Autorisierung der Startrichtlinie'

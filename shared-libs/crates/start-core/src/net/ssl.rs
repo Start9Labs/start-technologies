@@ -215,6 +215,29 @@ impl DbAccessMut<CertStore> for Database {
     }
 }
 
+/// A leaf private key and its public certificate chain.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CertificateIdentity {
+    pub key: Der64<PKey<Private>>,
+    pub fullchain: Vec<Pem<X509>>,
+}
+
+impl CertificateIdentity {
+    pub fn server_config(
+        &self,
+        crypto_provider: Arc<CryptoProvider>,
+    ) -> Result<ServerConfig, Error> {
+        crate::net::tls::server_config(
+            crypto_provider,
+            self.fullchain
+                .iter()
+                .map(|certificate| Ok(CertificateDer::from(certificate.0.to_der()?)))
+                .collect::<Result<Vec<_>, Error>>()?,
+            PrivateKeyDer::from(PrivatePkcs8KeyDer::from(self.key.0.private_key_to_pkcs8()?)),
+        )
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CertData {
     pub keys: PKeyPair,
@@ -251,7 +274,7 @@ impl FullchainCertData {
     }
 }
 
-static CERTIFICATE_VERSION: i32 = 2; // X509 version 3 is actually encoded as '2' in the cert because fuck you.
+static CERTIFICATE_VERSION: i32 = 2; // X.509 encodes version 3 as 2.
 
 fn unix_time(time: SystemTime) -> time_t {
     time.duration_since(UNIX_EPOCH)
@@ -901,12 +924,7 @@ where
     let key = PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
         key.private_key_to_pkcs8().log_err()?,
     ));
-    ServerConfig::builder_with_provider(crypto_provider.clone())
-        .with_safe_default_protocol_versions()
-        .log_err()?
-        .with_no_client_auth()
-        .with_single_cert(chain, key)
-        .log_err()
+    crate::net::tls::server_config(crypto_provider.clone(), chain, key).log_err()
 }
 
 #[cfg(test)]
