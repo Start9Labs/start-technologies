@@ -54,6 +54,7 @@ import {
   UIData,
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
+import { ConfigService } from 'src/app/services/config.service'
 import {
   PATCH_CACHE,
   waitForPatchSequence,
@@ -131,6 +132,7 @@ export class MockApiService extends ApiService {
   readonly mockWsSource$ = new Subject<Revision>()
   private readonly storage = inject(WA_SESSION_STORAGE)
   private readonly cache = inject(PATCH_CACHE)
+  private readonly gitHash = inject(ConfigService).gitHash
   private backingUp = false
   private deferredPowerAction: T.PowerAction | null = null
   private readonly revertTime = 1800
@@ -141,7 +143,7 @@ export class MockApiService extends ApiService {
   >()
   sequence = 1
   private readonly handlers: RpcHandlers<Api> = {
-    'git-info': async () => 'mock-os-build',
+    'git-info': async () => this.gitHash,
     state: async () => {
       await pauseFor(1000)
 
