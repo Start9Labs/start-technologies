@@ -896,7 +896,7 @@ mod tests {
             ("0.4.0.4", "0.4.0.5", 3),
             ("0.4.1.2", "0.4.1.3", 0),
             ("0.4.1.3", "0.4.2", 0),
-            ("0.4.2", "0.4.2.1", 0),
+            ("0.4.2", "0.4.2.1", 1),
             ("0.4.2.1", "0.4.3", 0),
         ] {
             let previous = from_value::<Version>(json!(from))
@@ -913,7 +913,7 @@ mod tests {
                 "packageVersionCompat": ">=0.3.0 <0.5.0",
                 "postInitMigrationTodos": {},
                 "latestMigrationRevision": 0,
-            }, "packageData": { "service": { "setting": "preserved", "outboundDns": null } } } });
+            }, "ui": {}, "packageData": { "service": { "setting": "preserved", "outboundDns": null } } } });
             let packages = db["public"]["packageData"].clone();
             let pre_ups = PreUps::load(&previous, &current).await.unwrap();
             migrate_from_unchecked(&previous, &current, pre_ups, &mut db).unwrap();
@@ -938,6 +938,93 @@ mod tests {
             rollback_to_unchecked(&current, &previous, &mut db).unwrap();
             assert_eq!(db["public"]["serverInfo"]["version"], json!(from));
             assert_eq!(db["public"]["packageData"], packages);
+        }
+    }
+
+    #[tokio::test]
+    async fn registry_repair_runs_on_an_existing_alpha_version_once() {
+        let version = Version::from_exver_version(v0_4_2_1::Version.semver())
+            .as_version_t()
+            .unwrap();
+        let mut db = json!({ "public": {
+            "serverInfo": {
+                "version": "0.4.2.1",
+                "packageVersionCompat": ">=0.3.0 <0.5.0",
+                "postInitMigrationTodos": {},
+                "latestMigrationRevision": 0,
+            },
+            "ui": { "registries": {}, "snakeHighScore": 42 },
+        } });
+        let upgrade = Upgrade::load(
+            &version,
+            &version,
+            applied_migration_revision(&mut db).unwrap(),
+        )
+        .await
+        .unwrap();
+        upgrade.apply(&version, &version, &mut db).unwrap();
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 1);
+        assert_eq!(
+            db["public"]["ui"]["registries"],
+            json!({
+                "https://registry.start9.com/": "Start9 Registry",
+                "https://community-registry.start9.com/": "Community Registry",
+            })
+        );
+        assert_eq!(db["public"]["ui"]["snakeHighScore"], json!(42));
+        let repaired = db.clone();
+        let upgrade = Upgrade::load(
+            &version,
+            &version,
+            applied_migration_revision(&mut db).unwrap(),
+        )
+        .await
+        .unwrap();
+        upgrade.apply(&version, &version, &mut db).unwrap();
+        assert_eq!(db, repaired);
+    }
+
+    #[tokio::test]
+    async fn registry_repair_precedes_later_upgrades_and_preserves_subsequent_removals() {
+        let previous = v0_4_2_1::Version;
+        let current = v0_4_3::Version;
+        for (revision, registries) in [
+            (
+                0,
+                json!({
+                    "https://registry.example/": "Custom",
+                    "https://registry.start9.com/": "Start9 Registry",
+                    "https://community-registry.start9.com/": "Community Registry",
+                }),
+            ),
+            (1, json!({ "https://registry.example/": "Custom" })),
+        ] {
+            let mut db = json!({ "public": {
+                "serverInfo": {
+                    "version": "0.4.2.1",
+                    "packageVersionCompat": ">=0.3.0 <0.5.0",
+                    "postInitMigrationTodos": {},
+                    "latestMigrationRevision": revision,
+                },
+                "ui": {
+                    "registries": { "https://registry.example/": "Custom" },
+                    "startosRegistry": "https://registry.example/",
+                    "snakeHighScore": 42,
+                },
+            } });
+            let upgrade = Upgrade::load(&previous, &current, revision).await.unwrap();
+            upgrade.apply(&previous, &current, &mut db).unwrap();
+            assert_eq!(db["public"]["ui"]["registries"], registries);
+            assert_eq!(db["public"]["ui"]["snakeHighScore"], json!(42));
+            assert_eq!(
+                db["public"]["ui"]["startosRegistry"],
+                json!("https://registry.example/")
+            );
+            assert_eq!(
+                db["public"]["serverInfo"]["version"],
+                to_value(&current.semver()).unwrap()
+            );
+            assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
         }
     }
 
