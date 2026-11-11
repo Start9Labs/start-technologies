@@ -236,8 +236,9 @@ const state = version => ({
     version,
     statusInfo: {},
     trustedKeys: trustedSigners,
+    osRegistry: 'https://registry.test',
   },
-  ui: { startosRegistry: 'https://registry.test', snakeHighScore: 0 },
+  ui: { snakeHighScore: 0 },
 })
 const tick = () => new Promise(resolve => setImmediate(resolve))
 function fixture(t, cachedVersion, providers = []) {

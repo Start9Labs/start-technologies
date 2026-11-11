@@ -892,7 +892,7 @@ mod tests {
             ("0.4.0.4", "0.4.0.5", 3),
             ("0.4.1.2", "0.4.1.3", 0),
             ("0.4.1.3", "0.4.2", 0),
-            ("0.4.2", "0.4.2.1", 1),
+            ("0.4.2", "0.4.2.1", 2),
         ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
@@ -958,9 +958,9 @@ mod tests {
         .await
         .unwrap();
         upgrade.apply(&version, &version, &mut db).unwrap();
-        assert_eq!(applied_migration_revision(&mut db).unwrap(), 1);
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 2);
         assert_eq!(
-            db["public"]["ui"]["registries"],
+            db["public"]["serverInfo"]["registries"],
             json!({
                 "https://registry.start9.com/": "Start9 Registry",
                 "https://community-registry.start9.com/": "Community Registry",

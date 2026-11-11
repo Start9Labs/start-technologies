@@ -298,23 +298,24 @@ export class MockApiService extends ApiService {
       const { added } = this.importRegistryKeys(normalized, info)
       for (const id of added)
         mockPatchData.serverInfo.trustedKeys[id]!.marketplace = true
-      for (const saved of Object.keys(mockPatchData.ui.registries)) {
+      for (const saved of Object.keys(mockPatchData.serverInfo.registries)) {
         if (sameUrl(saved, normalized))
-          delete mockPatchData.ui.registries[saved]
+          delete mockPatchData.serverInfo.registries[saved]
       }
-      mockPatchData.ui.registries[normalized] = name ?? info.name
+      mockPatchData.serverInfo.registries[normalized] = name ?? info.name
       await this.publishTrust()
       return added
     },
     'server.registries.remove': async ({ url }) => {
       await pauseFor(2000)
-      if (sameUrl(url, mockPatchData.ui.startosRegistry))
+      if (sameUrl(url, mockPatchData.serverInfo.osRegistry))
         throw new Error(
           'This registry provides StartOS updates. Choose another registry for StartOS updates before removing it.',
         )
       const offered = this.offeredKeys(url)
-      for (const saved of Object.keys(mockPatchData.ui.registries)) {
-        if (sameUrl(saved, url)) delete mockPatchData.ui.registries[saved]
+      for (const saved of Object.keys(mockPatchData.serverInfo.registries)) {
+        if (sameUrl(saved, url))
+          delete mockPatchData.serverInfo.registries[saved]
       }
       for (const saved of Object.keys(mockPatchData.serverInfo.registryKeys)) {
         if (sameUrl(saved, url))
@@ -329,7 +330,7 @@ export class MockApiService extends ApiService {
     'server.registries.set-os': async ({ url }) => {
       await pauseFor(2000)
       if (
-        !Object.keys(mockPatchData.ui.registries).some(saved =>
+        !Object.keys(mockPatchData.serverInfo.registries).some(saved =>
           sameUrl(saved, url),
         )
       )
@@ -339,7 +340,7 @@ export class MockApiService extends ApiService {
       )
       for (const id of enabled)
         mockPatchData.serverInfo.trustedKeys[id]!.os = true
-      mockPatchData.ui.startosRegistry = registryUrl(url)
+      mockPatchData.serverInfo.osRegistry = registryUrl(url)
       await this.publishTrust()
       return enabled
     },
@@ -2461,8 +2462,7 @@ export class MockApiService extends ApiService {
 
   private mockGatewayDns(id: string, servers: string[] | null): T.DnsSettings {
     const gateway = this.mockData('/serverInfo/network/gateways/' + id) as
-      | T.NetworkInterfaceInfo
-      | undefined
+      T.NetworkInterfaceInfo | undefined
     if (!gateway) throw new Error('Unknown gateway')
     const staticServers = this.mockDnsServers(servers)
     const provided = gateway.ipInfo?.dnsServers ?? []
@@ -2550,7 +2550,7 @@ export class MockApiService extends ApiService {
     return {
       ...Mock.RegistryInfo,
       name:
-        Object.entries(mockPatchData.ui.registries).find(([saved]) =>
+        Object.entries(mockPatchData.serverInfo.registries).find(([saved]) =>
           sameUrl(saved, url),
         )?.[1] || 'Example Registry',
     }
@@ -2560,7 +2560,7 @@ export class MockApiService extends ApiService {
     const listed = new Set(
       Object.entries(mockPatchData.serverInfo.registryKeys)
         .filter(([url]) =>
-          Object.keys(mockPatchData.ui.registries).some(saved =>
+          Object.keys(mockPatchData.serverInfo.registries).some(saved =>
             sameUrl(saved, url),
           ),
         )
@@ -2586,13 +2586,13 @@ export class MockApiService extends ApiService {
       },
       {
         op: PatchOp.REPLACE,
-        path: '/ui/registries',
-        value: structuredClone(mockPatchData.ui.registries),
+        path: '/serverInfo/registries',
+        value: structuredClone(mockPatchData.serverInfo.registries),
       },
       {
         op: PatchOp.REPLACE,
-        path: '/ui/startosRegistry',
-        value: mockPatchData.ui.startosRegistry,
+        path: '/serverInfo/osRegistry',
+        value: mockPatchData.serverInfo.osRegistry,
       },
     ])
   }

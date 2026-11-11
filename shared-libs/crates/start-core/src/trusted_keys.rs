@@ -12,11 +12,13 @@ use crate::sign::gpg::{GpgPublicKeyExport, ImportedPublicKeys, parse_public_keys
 use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners};
 use crate::util::serde::HandlerExtSerde;
 pub(crate) mod connection;
-pub use connection::check_registry;
-pub(crate) use connection::ensure_builtin_registries;
+pub use connection::{check_registry, initial_os_registry, initial_registries};
+pub(crate) use connection::{ensure_builtin_registries, ui_registries};
 pub(crate) mod legacy;
 
 pub type TrustedKeys = BTreeMap<InternedString, TrustedKey>;
+/// Connected registry URLs and their display names.
+pub type Registries = BTreeMap<InternedString, Option<String>>;
 pub const START9: &str = "start9";
 pub const START9_REGISTRY: &str = "https://registry.start9.com";
 const MANUAL: &str = "manual";
@@ -171,7 +173,7 @@ pub fn initial_signers() -> TrustedOsUpdateSigners {
 
 pub fn initial_trusted_keys() -> TrustedKeys {
     let mut keys = legacy::individual_keys(&legacy::initial_keyrings(), Utc::now()).unwrap();
-    protect_registry_keys(&mut keys, &BTreeMap::new(), &Value::Null);
+    protect_registry_keys(&mut keys, &BTreeMap::new(), &Registries::new());
     keys
 }
 
@@ -302,25 +304,33 @@ pub(crate) fn mutate_public_keys<T>(
             ErrorKind::InvalidRequest,
         ));
     }
-    protect_registry_keys(&mut keys, &public.server_info.registry_keys, &public.ui);
+    protect_registry_keys(
+        &mut keys,
+        &public.server_info.registry_keys,
+        &public.server_info.registries,
+    );
     public.server_info.trusted_keys = keys;
     Ok(res)
 }
 
 fn protected_keys(public: &crate::db::model::public::Public) -> TrustedKeys {
     let mut keys = public.server_info.trusted_keys.clone();
-    protect_registry_keys(&mut keys, &public.server_info.registry_keys, &public.ui);
+    protect_registry_keys(
+        &mut keys,
+        &public.server_info.registry_keys,
+        &public.server_info.registries,
+    );
     keys
 }
 
 pub(crate) fn protect_registry_keys(
     keys: &mut TrustedKeys,
-    registries: &BTreeMap<InternedString, BTreeSet<AnyVerifyingKey>>,
-    ui: &Value,
+    snapshots: &BTreeMap<InternedString, BTreeSet<AnyVerifyingKey>>,
+    registries: &Registries,
 ) {
-    let listed = registries
+    let listed = snapshots
         .iter()
-        .filter(|(url, _)| connection::is_connected(ui, url))
+        .filter(|(url, _)| connection::is_connected(registries, url))
         .flat_map(|(_, keys)| keys.iter().cloned())
         .collect::<BTreeSet<_>>();
     for entry in keys.values_mut() {

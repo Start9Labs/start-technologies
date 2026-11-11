@@ -48,7 +48,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly storage = inject(StorageService)
 
   readonly registries$: Observable<StoreIdentity[]> = this.patch
-    .watch$('ui', 'registries')
+    .watch$('serverInfo', 'registries')
     .pipe(
       map(registries =>
         Object.entries(registries).map(([url, name]) =>
