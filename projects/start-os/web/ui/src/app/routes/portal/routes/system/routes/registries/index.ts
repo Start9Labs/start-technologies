@@ -189,7 +189,7 @@ export default class Registries {
   private readonly router = inject(Router)
   private readonly registries = toSignal(this.marketplace.registries$)
   private readonly osRegistry = toSignal(
-    inject<PatchDB<DataModel>>(PatchDB).watch$('ui', 'startosRegistry'),
+    inject<PatchDB<DataModel>>(PatchDB).watch$('serverInfo', 'osRegistry'),
   )
 
   protected readonly saving = signal(false)

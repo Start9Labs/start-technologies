@@ -85,12 +85,15 @@ pub async fn update_system(
         ));
     };
 
-    #[cfg(not(feature = "beta"))]
-    let registry = "https://registry.start9.com".parse()?;
-    #[cfg(feature = "beta")]
-    let registry = "https://beta-registry.start9.com".parse()?;
-
-    run_update(ctx, target, registry, report_progress, guard, trust).await
+    run_update(
+        ctx,
+        target,
+        crate::trusted_keys::initial_os_registry(),
+        report_progress,
+        guard,
+        trust,
+    )
+    .await
 }
 
 async fn run_update(

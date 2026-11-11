@@ -14,18 +14,10 @@ fn main() {
             "$CARGO_MANIFEST_DIR/web/dist/static/setup-wizard"
         ))
         .ok();
-    #[cfg(not(feature = "beta"))]
     start_core::db::model::public::DB_UI_SEED_CELL
         .set(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/web/patchdb-ui-seed.json"
-        )))
-        .ok();
-    #[cfg(feature = "beta")]
-    start_core::db::model::public::DB_UI_SEED_CELL
-        .set(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/web/patchdb-ui-seed.beta.json"
         )))
         .ok();
     MultiExecutable::default()
