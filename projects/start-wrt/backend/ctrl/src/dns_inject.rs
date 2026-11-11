@@ -47,6 +47,7 @@ use crate::error::ErrorKind;
 use crate::invoke::Invoke;
 use crate::port_control::{supervise, uci_task};
 use crate::prelude::*;
+use crate::recent::Recent;
 use crate::utils::{DeserializeStdin, HandlerExtSerde};
 use crate::{CliContext, CtrlContext, Error, ServerContext};
 
@@ -65,9 +66,6 @@ const TCP_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
 const TCP_MAX_CLIENTS: usize = 16;
 /// Refusal log lines per second, box-wide.
 const REFUSAL_LOG_RATE: u32 = 20;
-/// How long a source refused for lacking the permission counts as asking.
-const REQUEST_MEMORY: Duration = Duration::from_secs(30 * 60);
-const MAX_REFUSED_SOURCES: usize = 256;
 const INJECT_FILE_PREFIX: &str = "startwrt-dns-inject.dns_";
 /// The domain every profile instance serves its devices under.
 const LAN_DOMAIN: &str = "lan";
@@ -695,41 +693,28 @@ impl std::fmt::Display for Refusal {
 
 /// The latest refusal of each source since it was last admitted.
 #[derive(Default)]
-struct Refusals(HashMap<IpAddr, (Refusal, Instant)>);
+struct Refusals(Recent<IpAddr, Option<Refusal>>);
 
 impl Refusals {
-    /// Whether the reason is new for the source. Past the cap, the stalest
-    /// source is forgotten.
+    /// Whether the reason is new for the source.
     fn record(&mut self, src: IpAddr, why: &Refusal, now: Instant) -> bool {
-        if let Some((reason, last)) = self.0.get_mut(&src) {
-            *last = now;
-            if reason == why {
-                return false;
-            }
-            *reason = why.clone();
-            return true;
+        let reason = self.0.touch(src, now);
+        if reason.as_ref() == Some(why) {
+            return false;
         }
-        if self.0.len() >= MAX_REFUSED_SOURCES {
-            if let Some(stalest) = self.0.iter().min_by_key(|(_, (_, last))| *last) {
-                let stalest = *stalest.0;
-                self.0.remove(&stalest);
-            }
-        }
-        self.0.insert(src, (why.clone(), now));
+        *reason = Some(why.clone());
         true
     }
 
     fn admit(&mut self, src: IpAddr) {
-        self.0.remove(&src);
+        self.0.forget(&src);
     }
 
-    /// Sources refused for lacking the permission within [`REQUEST_MEMORY`].
+    /// Sources recently refused for lacking the permission.
     fn asking(&self, now: Instant) -> HashSet<IpAddr> {
         self.0
-            .iter()
-            .filter(|(_, (reason, last))| {
-                *reason == Refusal::NotPermitted && now.duration_since(*last) < REQUEST_MEMORY
-            })
+            .recent(now)
+            .filter(|(_, reason)| **reason == Some(Refusal::NotPermitted))
             .map(|(src, _)| *src)
             .collect()
     }
@@ -1370,6 +1355,7 @@ mod tests {
     use hickory_server::proto::rr::rdata::{A, CNAME};
 
     use super::*;
+    use crate::recent::REQUEST_MEMORY;
 
     fn fqdn(s: &str) -> Name {
         let mut n = Name::from_utf8(s).unwrap();
@@ -1513,21 +1499,6 @@ mod tests {
 
         let later = now + REQUEST_MEMORY;
         assert!(refusals.asking(later).is_empty(), "forgotten after a while");
-    }
-
-    #[test]
-    fn refusals_forget_the_stalest_source_past_the_cap() {
-        let mut refusals = Refusals::default();
-        let start = Instant::now();
-        for n in 0..=MAX_REFUSED_SOURCES {
-            let src = IpAddr::V6(std::net::Ipv6Addr::from(n as u128 + 1));
-            let at = start + Duration::from_millis(n as u64);
-            refusals.record(src, &Refusal::NotPermitted, at);
-        }
-        assert_eq!(refusals.0.len(), MAX_REFUSED_SOURCES);
-        assert!(!refusals
-            .0
-            .contains_key(&IpAddr::V6(std::net::Ipv6Addr::from(1))));
     }
 
     async fn publish_public_name_offline(signed: bool) {
