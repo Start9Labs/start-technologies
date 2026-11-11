@@ -71,8 +71,8 @@ export class AuthKeyService {
       : null
   }
 
-  /** Uses an unpersisted signer without WebCrypto when no device key exists. */
-  async admissionLease(): Promise<SessionSocketIdentity> {
+  /** Carries a device key when present; otherwise uses an unpersisted signer. */
+  async admissionLease(): Promise<AuthKeyLease | SessionSocketIdentity> {
     const lifetime = this.lifetime
     const stored = await this.get()
     lifetime.signal.throwIfAborted()
@@ -85,7 +85,11 @@ export class AuthKeyService {
             throw error
           }))
     lifetime.signal.throwIfAborted()
-    return { signer, signal: lifetime.signal }
+    return {
+      signer,
+      signal: lifetime.signal,
+      ...(stored ? { key: stored } : {}),
+    }
   }
 
   async create(): Promise<auth.AuthKey> {

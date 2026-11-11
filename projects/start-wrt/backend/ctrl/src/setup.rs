@@ -1205,8 +1205,6 @@ Conffiles:
         assert_eq!(restored, "content");
     }
 
-    // ── get_pubkey ───────────────────────────────────────────────────
-
     #[tokio::test]
     async fn published_key_decrypts_setup_passwords() {
         let ctx = ServerContext::default();
@@ -1216,12 +1214,11 @@ Conffiles:
         let wire = startos::util::crypto::EncryptedWire::encrypt("initial-admin-password", &pubkey)
             .unwrap();
         assert_eq!(
-            crate::auth::decrypt_password(&ctx, wire).unwrap(),
+            crate::auth::decrypt_password(&ctx, startos::auth::PasswordType::EncryptedWire(wire))
+                .unwrap(),
             "initial-admin-password"
         );
     }
-
-    // ── write_admin_password ─────────────────────────────────────────
 
     #[tokio::test]
     async fn write_password_replaces_root_hash() {

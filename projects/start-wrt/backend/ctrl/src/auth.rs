@@ -14,7 +14,7 @@ use patch_db::{HasModel, ModelExt, PatchDb};
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{from_fn_async, CallRemote, Empty, HandlerArgs, HandlerExt, ParentHandler};
 use serde::{Deserialize, Serialize};
-use startos::auth::{AuthKeys, LoginAttempt, LoginContext, Session};
+use startos::auth::{AuthKeys, LoginAttempt, LoginContext, PasswordType, Session};
 use startos::context::setup::CURRENT_SECRET;
 use startos::middleware::auth::local::LocalAuthContext;
 use startos::middleware::auth::signature::{
@@ -25,7 +25,6 @@ use startos::middleware::auth::DbContext;
 use startos::prelude::{Model, TypedPatchDb};
 use startos::rpc_continuations::OpenAuthedContinuations;
 use startos::sign::AnyVerifyingKey;
-use startos::util::crypto::EncryptedWire;
 use startos::util::sync::SyncMutex;
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
@@ -164,17 +163,13 @@ impl AsRef<Jwk> for ServerContext {
     }
 }
 
-/// Decrypts a password encrypted to the key from `setup.get-pubkey`.
 pub(crate) fn decrypt_password(
     ctx: &ServerContext,
-    password: EncryptedWire,
+    password: PasswordType,
 ) -> Result<String, Error> {
-    password.decrypt(ctx).ok_or_else(|| {
-        Error::new(
-            eyre!("could not decrypt the password; reload the page and try again"),
-            ErrorKind::InvalidRequest,
-        )
-    })
+    password
+        .decrypt_in_session(ctx, ctx)
+        .map_err(|error| Error::new(error.source, ErrorKind::InvalidRequest))
 }
 
 impl AsRef<OpenAuthedContinuations<Option<InternedString>>> for ServerContext {
@@ -674,8 +669,7 @@ pub async fn check_initialized_impl(_ctx: ServerContext) -> Result<CheckInitiali
 #[derive(Debug, Clone, Deserialize, Serialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SetInitialPasswordParams {
-    /// Encrypted to the key from `setup.get-pubkey`.
-    pub password: EncryptedWire,
+    pub password: PasswordType,
     /// IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
     #[serde(default)]
     pub timezone: Option<String>,
@@ -798,18 +792,24 @@ mod tests {
     }
 
     #[test]
-    fn initial_password_must_be_encrypted() {
+    fn initial_password_requires_admission_for_unwrapped_input() {
         let plaintext = json!({ "password": "initial-admin-password" });
-        assert!(imbl_value::from_value::<SetInitialPasswordParams>(plaintext).is_err());
+        let params = imbl_value::from_value::<SetInitialPasswordParams>(plaintext).unwrap();
+        let error = decrypt_password(&ServerContext::default(), params.password).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
     }
 
     #[tokio::test]
     async fn passwords_encrypted_to_another_key_are_rejected() {
         let other = Jwk::generate_ec_key(josekit::jwk::alg::ec::EcCurve::P256).unwrap();
-        let wire =
-            EncryptedWire::encrypt("initial-admin-password", &other.to_public_key().unwrap())
-                .unwrap();
-        assert!(decrypt_password(&ServerContext::default(), wire).is_err());
+        let wire = startos::util::crypto::EncryptedWire::encrypt(
+            "initial-admin-password",
+            &other.to_public_key().unwrap(),
+        )
+        .unwrap();
+        let error = decrypt_password(&ServerContext::default(), PasswordType::EncryptedWire(wire))
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
     }
 
     #[test]

@@ -13,13 +13,21 @@ use startos::util::net::secure::EncryptedSocket;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use url::Url;
 
-pub(crate) async fn server() -> (
+type TestServer = (
     Url,
     crate::ServerContext,
     NonDetachingJoinHandle<()>,
     std::sync::Arc<std::sync::atomic::AtomicUsize>,
     std::sync::Arc<std::sync::atomic::AtomicUsize>,
-) {
+);
+
+pub(crate) async fn server() -> TestServer {
+    server_with_router(super::router).await
+}
+
+async fn server_with_router(
+    router: impl FnOnce(crate::ServerContext) -> axum::Router,
+) -> TestServer {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/", listener.local_addr().unwrap())
         .parse()
@@ -39,7 +47,7 @@ pub(crate) async fn server() -> (
     let upgrades = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let upgraded = upgrades.clone();
     let local_addr = listener.local_addr().unwrap();
-    let app = super::router(served).layer(axum::middleware::from_fn(
+    let app = router(served).layer(axum::middleware::from_fn(
         move |mut request: axum::extract::Request, next: axum::middleware::Next| {
             let observed = observed.clone();
             let upgraded = upgraded.clone();
@@ -157,6 +165,107 @@ async fn encrypted_rpc_uses_live_auth_and_authenticated_firmware_metadata() {
     assert_eq!(reply["meta"]["gitHash"], super::GIT_HASH);
     ctx.unenroll([key]).await.unwrap();
     check(&call(&mut socket).await);
+}
+
+#[tokio::test]
+async fn startup_passwords_use_actual_admission_and_retain_http_jwe_without_enrollment() {
+    use rpc_toolkit::{from_fn_async, HandlerExt, Server};
+    use startos::middleware::auth::session::client::SessionClient;
+    use startos::middleware::auth::Auth;
+    use startos::util::crypto::EncryptedWire;
+
+    let (url, ctx, _task, _, upgrades) = server_with_router(|ctx| {
+        let api =
+                crate::main_api::<crate::ServerContext>().subcommand(
+                    "decode",
+                    from_fn_async(
+                        |ctx: crate::ServerContext,
+                         params: crate::auth::SetInitialPasswordParams| async move {
+                            crate::auth::decrypt_password(&ctx, params.password)
+                        },
+                    )
+                    .with_metadata("authenticated", imbl_value::Value::Bool(false))
+                    .no_cli()
+                    .no_ts(),
+                );
+        let server = Server::new(move || std::future::ready(Ok(ctx.clone())), api)
+            .middleware(Auth::new().with_local_auth().with_signature_auth());
+        axum::Router::new()
+            .route("/rpc/v1", axum::routing::post(server.clone()))
+            .route(RpcSessionUpgrader::PATH, RpcSessionUpgrader::route(server))
+    })
+    .await;
+    let network = reqwest::Client::new();
+    let client = SessionClient::new(network.clone());
+    let signer = client.ephemeral_signer();
+    let password = "  fixture password\n";
+    let response = client
+        .call(
+            signer,
+            url.join(RpcSessionUpgrader::PATH).unwrap(),
+            "router.lan",
+            Default::default(),
+            "decode",
+            imbl_value::json!({"password":password}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.as_str(), Some(password));
+    let rejected = client
+        .call(
+            signer,
+            url.join(RpcSessionUpgrader::PATH).unwrap(),
+            "router.lan",
+            Default::default(),
+            "auth.session.list",
+            imbl_value::json!({}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(rejected.code, 34);
+    assert_eq!(upgrades.load(std::sync::atomic::Ordering::Relaxed), 1);
+
+    let http = |password: serde_json::Value| {
+        network
+            .post(url.join("rpc/v1").unwrap())
+            .json(&json!({"jsonrpc":"2.0","id":1,"method":"decode","params":{"password":password}}))
+    };
+    let rejected: Value = http(json!(password))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        rejected["error"]["code"],
+        startos::ErrorKind::InvalidRequest as i32
+    );
+    let key = <crate::ServerContext as AsRef<josekit::jwk::Jwk>>::as_ref(&ctx)
+        .to_public_key()
+        .unwrap();
+    let wire = EncryptedWire::encrypt(password, &key).unwrap();
+    let response: Value = http(serde_json::to_value(wire).unwrap())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(response["result"], password);
+    let other = josekit::jwk::Jwk::generate_ec_key(josekit::jwk::alg::ec::EcCurve::P256).unwrap();
+    let bad = EncryptedWire::encrypt(password, &other.to_public_key().unwrap()).unwrap();
+    let rejected: Value = http(serde_json::to_value(bad).unwrap())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        rejected["error"]["code"],
+        startos::ErrorKind::InvalidRequest as i32
+    );
 }
 
 async fn call(socket: &mut EncryptedSocket) -> Value {

@@ -41,7 +41,7 @@ then rebuild core and SDK before checking consumers.
 
 StartWRT uses its own generated `Api` in `services/api/bindings.ts` and streaming
 schemas in `events.ts`; run `make start-wrt-rpc-bindings`. It composes shared signed-DH
-RPC/DOM continuations while retaining anonymous HTTP cancellation and its own reconnect owners. Shared `HttpService` remains a JSON-RPC transport boundary; product
+RPC/DOM continuations, including unpersisted bootstrap admission, while retaining deadlines and its own reconnect owners. Shared `HttpService` remains a JSON-RPC transport boundary; product
 wrappers infer results rather than accepting caller-selected return types.
 
 Library authoring (when you add to `shared`/`marketplace`): configurability layers in order —

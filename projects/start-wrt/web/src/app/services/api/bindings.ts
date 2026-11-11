@@ -181,7 +181,7 @@ export type Guid = z.output<typeof schemas.Guid>
 /**
  * Proof that a set of auth keys was unenrolled — removed from the persisted
  * and ephemeral signer stores with any continuations they opened killed.
- * Obtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]
+ * Obtained via [`SignatureAuthorizationContext::unenroll`], or [`Self::unenroll`]
  * from inside a db transaction.
  */
 export type HasUnenrolledKeys = z.output<typeof schemas.HasUnenrolledKeys>
@@ -316,6 +316,7 @@ export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 export type LogsResponse = z.output<typeof schemas.LogsResponse>
 export type OutboundVpn = z.output<typeof schemas.OutboundVpn>
+export type PasswordTypeInput = z.input<typeof schemas.PasswordType>
 export type PeerAddArgsInput = z.input<typeof schemas.PeerAddArgs>
 
 /**
@@ -334,9 +335,6 @@ export type PublishedPort = z.output<typeof schemas.PublishedPort>
 export type PublishedPortInputInput = z.input<typeof schemas.PublishedPortInput>
 export type ScheduleWindowsInput = z.input<typeof schemas.ScheduleWindows>
 export type SetArgsInput = z.input<typeof schemas.SetArgs>
-export type SetInitialPasswordParamsInput = z.input<
-  typeof schemas.SetInitialPasswordParams
->
 export type SetupStatusRes = z.output<typeof schemas.SetupStatusRes>
 export type UciFile = z.output<typeof schemas.UciFile>
 export type UciFileInput = z.input<typeof schemas.UciFile>
@@ -394,6 +392,9 @@ export type PublishedPortsSetResult = z.output<
  * The server's sessions, by credential type.
  */
 export type Sessions = z.output<typeof schemas.Sessions>
+export type SetInitialPasswordParamsInput = z.input<
+  typeof schemas.SetInitialPasswordParams
+>
 
 /**
  * Response containing all VPN servers

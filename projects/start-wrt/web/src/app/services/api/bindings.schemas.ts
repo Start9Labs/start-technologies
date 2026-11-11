@@ -581,13 +581,13 @@ export const Guid: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 /**
  * Proof that a set of auth keys was unenrolled — removed from the persisted
  * and ephemeral signer stores with any continuations they opened killed.
- * Obtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]
+ * Obtained via [`SignatureAuthorizationContext::unenroll`], or [`Self::unenroll`]
  * from inside a db transaction.
  */
 export const HasUnenrolledKeys: z.ZodNull = /* @__PURE__ */ z.null().meta({
   id: 'HasUnenrolledKeys',
   description:
-    'Proof that a set of auth keys was unenrolled — removed from the persisted\nand ephemeral signer stores with any continuations they opened killed.\nObtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]\nfrom inside a db transaction.',
+    'Proof that a set of auth keys was unenrolled — removed from the persisted\nand ephemeral signer stores with any continuations they opened killed.\nObtained via [`SignatureAuthorizationContext::unenroll`], or [`Self::unenroll`]\nfrom inside a db transaction.',
 })
 export const InjectedDnsRecord: z.ZodObject<{
   name: z.ZodString
@@ -2286,6 +2286,11 @@ export const OutboundVpn: z.ZodObject<{
 }).meta({
   id: 'OutboundVpn',
 })
+export const PasswordType: z.ZodUnion<
+  readonly [typeof EncryptedWire, z.ZodString]
+> = /* @__PURE__ */ z.union([EncryptedWire, z.string()]).meta({
+  id: 'PasswordType',
+})
 export const PeerAddArgs: z.ZodObject<{
   /**
    * Profile interface name (e.g., "lan", "guest")
@@ -2529,35 +2534,6 @@ export const SetArgs: z.ZodObject<{
   }),
 }).meta({
   id: 'SetArgs',
-})
-export const SetInitialPasswordParams: z.ZodObject<{
-  /**
-   * Encrypted to the key from `setup.get-pubkey`.
-   */
-  password: typeof EncryptedWire
-  /**
-   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
-   */
-  timezone: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  /**
-   * Encrypted to the key from `setup.get-pubkey`.
-   */
-  password: EncryptedWire.meta({
-    description: 'Encrypted to the key from `setup.get-pubkey`.',
-  }),
-  /**
-   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
-   */
-  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'IANA timezone name, e.g. "America/New_York". An unknown name is skipped.',
-  }),
-}).meta({
-  id: 'SetInitialPasswordParams',
 })
 export const SetupStatusRes: z.ZodObject<{
   setupMode: z.ZodBoolean
@@ -3161,6 +3137,27 @@ export const Sessions: z.ZodObject<{
 }).meta({
   id: 'Sessions',
   description: "The server's sessions, by credential type.",
+})
+export const SetInitialPasswordParams: z.ZodObject<{
+  password: typeof PasswordType
+  /**
+   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
+   */
+  timezone: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  password: PasswordType,
+  /**
+   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
+   */
+  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'IANA timezone name, e.g. "America/New_York". An unknown name is skipped.',
+  }),
+}).meta({
+  id: 'SetInitialPasswordParams',
 })
 
 /**

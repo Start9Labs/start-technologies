@@ -147,9 +147,9 @@ async fn keyed_cli_uses_production_encrypted_admission_and_live_authorization() 
 }
 
 #[tokio::test]
-async fn absent_identity_keeps_http_but_malformed_identity_never_downgrades() {
+async fn absent_identity_uses_unenrolled_admission_but_malformed_identity_never_downgrades() {
     let temp = tempfile::tempdir().unwrap();
-    let (url, _, _task, http_calls, _) = crate::rpc::tests::server().await;
+    let (url, server, _task, http_calls, upgrades) = crate::rpc::tests::server().await;
     let path = temp.path().join("identity.pem");
     let ctx = client(url.join("rpc/v1").unwrap(), path.clone());
     assert_eq!(
@@ -163,13 +163,26 @@ async fn absent_identity_keeps_http_but_malformed_identity_never_downgrades() {
             .code,
         34
     );
-    assert_eq!(http_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(http_calls.load(Ordering::Relaxed), 0);
+    assert_eq!(upgrades.load(Ordering::Relaxed), 1);
+    assert!(!path.exists());
+    use startos::middleware::auth::DbContext;
+    assert!(server
+        .db()
+        .peek()
+        .await
+        .de()
+        .unwrap()
+        .session_pubkeys
+        .0
+        .is_empty());
     std::fs::write(path, "not a private key").unwrap();
     assert!(ctx
         .call("auth.session.list", imbl_value::json!({}))
         .await
         .is_err());
-    assert_eq!(http_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(http_calls.load(Ordering::Relaxed), 0);
+    assert_eq!(upgrades.load(Ordering::Relaxed), 1);
     let mut headers = HeaderMap::new();
     headers.insert(AUTHORIZATION, "Bearer local-fixture".parse().unwrap());
     assert!(ctx.rpc_signer(&headers).unwrap().is_none());

@@ -1653,74 +1653,26 @@ for (const method of ['lanIpv4Set', 'profileUpdate']) {
   })
 }
 
-test('WRT timeout unsubscribes from HTTP and retains code-zero reconnect errors', async () => {
-  const { dependencies, tokens, load } = harness()
-  let aborted = 0
-  let url
-  dependencies.set(tokens.StaleUiService, {
-    checkHash() {
-      assert.fail('Timed-out request must not check firmware hash')
-    },
-  })
-  dependencies.set(tokens.HttpClient, {
-    post: target => {
-      url = target
-      return new Observable(() => () => aborted++)
-    },
-  })
-  const client = new (load(
-    'projects/start-wrt/web/src/app/services/http.service.ts',
-  ).HttpService)()
-  await assert.rejects(
-    client.request({ body: { method: 'auth.login', params: {} }, timeout: 10 }),
-    error => error.code === 0 && error.message === 'Network timeout',
-  )
-  assert.equal(aborted, 1)
-  assert.equal(url, 'https://router.test/rpc/v1')
-})
-
-test('WRT checks firmware hashes and preserves HTTP error details', async () => {
-  const { dependencies, tokens, load } = harness()
-  const hashes = []
-  let fail = false
-  dependencies.set(tokens.StaleUiService, {
-    checkHash: hash => hashes.push(hash),
-  })
-  const response = {
-    body: { result: null },
-    headers: { get: () => 'firmware' },
-  }
-  dependencies.set(tokens.HttpClient, {
-    post: () =>
-      fail
-        ? throwError(() => ({ status: 503, statusText: 'Unavailable' }))
-        : of(response),
-  })
-  const client = new (load(
-    'projects/start-wrt/web/src/app/services/http.service.ts',
-  ).HttpService)()
-  assert.equal(await client.request({ body: {} }), response)
-  assert.deepEqual(hashes, ['firmware'])
-  fail = true
-  await assert.rejects(
-    client.request({ body: {} }),
-    error => error.code === 503 && error.message === 'Unavailable',
-  )
-})
-
-test('WRT lazily invalidates authentication and preserves host errors and nullable results', async () => {
+test('WRT anonymous admission preserves deadlines and auth errors without recording startup history', async () => {
   const { dependencies, tokens, load } = harness()
   let invalidated = 0
   let lookups = 0
   let response = { result: null }
   const requests = []
+  const admission = {
+    signer: { sign() {} },
+    signal: new AbortController().signal,
+  }
   dependencies.set(tokens.AuthKeyService, {
-    lease: async () => null,
+    admissionLease: async () => admission,
   })
   dependencies.set(tokens.HttpService, {
-    request: async options => {
-      requests.push(options)
-      return { body: response }
+    request: () => assert.fail('anonymous calls cannot use HTTP'),
+  })
+  dependencies.set(tokens.RpcSocketService, {
+    message: async (body, options, lease) => {
+      requests.push({ body, options, lease })
+      return response
     },
   })
   dependencies.set(tokens.Injector, {
@@ -1743,9 +1695,10 @@ test('WRT lazily invalidates authentication and preserves host errors and nullab
     null,
   )
   assert.equal(requests[0].body, '{"method":"auth.logout","params":{}}')
-  assert.equal(requests[0].headers.get('Content-Type'), 'application/json')
-  assert.equal(requests[0].headers.get('trace'), 'keep')
-  assert.equal(requests[0].timeout, 450)
+  assert.equal(requests[0].options.headers.trace, 'keep')
+  assert.equal(requests[0].options.timeout, 450)
+  assert.equal(requests[0].lease, admission)
+  assert.equal(requests[0].options.openObserver, undefined)
   assert.equal(lookups, 0)
   response = { error: { code: 34, message: 'unauthorized', data: 'expired' } }
   await assert.rejects(
@@ -1766,6 +1719,13 @@ test('WRT lazily invalidates authentication and preserves host errors and nullab
     client.request({ method: 'auth.logout', params: {} }),
     /Empty RPC response/,
   )
+  dependencies.get(tokens.RpcSocketService).message = async () => {
+    throw Object.assign(new Error('Network timeout'), { code: 0 })
+  }
+  await assert.rejects(
+    client.request({ method: 'system.info', params: {}, timeout: 5 }),
+    error => error.code === 0,
+  )
 })
 
 test('WRT encrypted calls capture bytes, inspect firmware metadata and never downgrade', async () => {
@@ -1773,7 +1733,7 @@ test('WRT encrypted calls capture bytes, inspect firmware metadata and never dow
   const lease = { key: {}, signal: new AbortController().signal }
   let resolveLease
   dependencies.set(tokens.AuthKeyService, {
-    lease: () =>
+    admissionLease: () =>
       new Promise(resolve => {
         resolveLease = resolve
       }),
@@ -1807,6 +1767,10 @@ test('WRT encrypted calls capture bytes, inspect firmware metadata and never dow
   await pending
   assert.equal(JSON.parse(calls[0].body).params.password, 'original')
   assert.equal(calls[0].key, lease)
+  assert.equal(
+    calls[0].options.openObserver,
+    dependencies.get(tokens.ServerIdentityService).openObserver,
+  )
   assert.deepEqual(hashes, ['firmware'])
   response = {
     error: { code: 34, message: 'revoked' },

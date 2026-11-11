@@ -9,7 +9,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 - **Router OS:** OpenWrt (SpacemiT K1 / BananaPi F3 target)
 - **Config storage:** UCI files (`/etc/config/`) — no separate database
 - **API:** JSON-RPC 2.0 over encrypted WebSocket sessions at `/rpc/v2`, with HTTP compatibility at `/rpc/v1`
-- **Auth:** Password login enrolls an Ed25519 key used for signed ephemeral-DH admission and live per-call authorization; keyed CLI calls use the same encrypted transport, while local-token and absent-key calls retain HTTP compatibility
+- **Auth:** Password login enrolls an Ed25519 key used for signed ephemeral-DH admission and live per-call authorization; CLI calls use the same encrypted transport, with unpersisted proof identities for local-token and absent-key callers
 
 ## Project Structure
 
@@ -47,7 +47,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 
 - **`backend/`** — Rust daemon and CLI. Produces a single binary `startwrt` that is symlinked as `startwrt-ctrld` (daemon) and `startwrt-cli` (CLI). Handles all backend logic: RPC API, security profiles, WiFi, Ethernet, VPN, authentication, and UCI config management. See [backend/ARCHITECTURE.md](backend/ARCHITECTURE.md).
 
-- **`web/`** — Angular SPA using Taiga UI. Signal-based state, zoneless change detection, standalone components. Communicates with the backend over JSON-RPC 2.0 at `/rpc/v1`, plus the streaming and continuation routes listed under Data Flow. Embeds contextual help on every page. See [web/ARCHITECTURE.md](web/ARCHITECTURE.md).
+- **`web/`** — Angular SPA using Taiga UI. Signal-based state, zoneless change detection, standalone components. Communicates with the backend over encrypted JSON-RPC 2.0 at `/rpc/v2`, plus the streaming and continuation routes listed under Data Flow. Embeds contextual help on every page. See [web/ARCHITECTURE.md](web/ARCHITECTURE.md).
 
 - **`openwrt/`** — Disposable build workspace (plain directory, no git repo) rebuilt by `build/openwrt-setup.sh` from the sha256-pinned upstream OpenWrt release tarball (`build/openwrt-version`) plus the Start9 delta: `openwrt-patches/` modifies a handful of upstream files (build infrastructure and a few runtime scripts), `openwrt-overlay/` adds the SpacemiT K1 target (`target/linux/spacemit/`) and boot packages (`opensbi-spacemit`, `uboot-spacemit`). The build system compiles the Rust backend + Angular frontend, stages them into `openwrt/files/`, and produces a flashable image.
 
@@ -55,7 +55,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 
 ```
 Browser (Angular SPA)
-  → encrypted WebSocket /rpc/v2 (keyed JSON-RPC); anonymous HTTP /rpc/v1
+  → encrypted WebSocket /rpc/v2 (device-key or anonymous possession)
   → Axum router on port 80/443
   → start-core Auth middleware (checks verified peer or compatibility credentials, rate-limits login)
   → rpc-toolkit handler dispatch

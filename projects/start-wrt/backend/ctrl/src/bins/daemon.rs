@@ -82,7 +82,10 @@ async fn setup_flash_handler(
     Extension(ctx): Extension<ServerContext>,
     Json(params): Json<FlashParams>,
 ) -> Response<Body> {
-    let password = match crate::auth::decrypt_password(&ctx, params.password) {
+    let password = match crate::auth::decrypt_password(
+        &ctx,
+        startos::auth::PasswordType::EncryptedWire(params.password),
+    ) {
         Ok(password) => password,
         Err(e) => return ndjson_error(&e.to_string()),
     };

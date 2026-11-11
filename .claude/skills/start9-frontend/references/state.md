@@ -71,12 +71,14 @@ promise-based**; components call `await this.api.method(params)` and never touch
   slow consumers cancel only their own request. Terminal outcomes drain accepted items;
   physical loss discards them. Remaining GUID streams (logs/metrics) retain their existing
   source-owned buffering/retry until their operation contracts are migrated.
-- **start-wrt retains its RPC/reconnect workflow owners**: keyed calls compose shared encrypted
-  transport; anonymous bootstrap keeps its aborting `HttpService` (`withFetch()`). Deadlines
+- **start-wrt retains its RPC/reconnect workflow owners**: all browser RPC composes shared encrypted
+  transport, with unpersisted anonymous admission before device enrollment. The caller omits
+  normal-product peer-history observation for missing-key bootstrap. `admissionLease` carries
+  the existing device key when present; avoid a second asynchronous lookup. Deadlines
   surface `{code: 0}`; `ConnectionService` and update recovery call the shared session-abort
   primitive before probing again. A timed-out multiplexed probe alone cannot release siblings
-  holding a dead socket. Generated firmware metadata and the retained HTTP header feed the
-  existing stale-UI detector. DOM-style encrypted continuations preserve log/update event,
+  holding a dead socket. Authenticated generated firmware metadata feeds the
+  existing stale-UI detector; the HTTP compatibility header remains for legacy clients. DOM-style encrypted continuations preserve log/update event,
   close and retry ownership. Physical close starts recovery, not an update-success claim.
 - **start9-store = REST + Zod through a BFF**: frontend calls `/api/*` only (SSR server proxies
   it — same relative URLs in dev/prod/SSR); domain types + Zod schemas live in `shared/`;

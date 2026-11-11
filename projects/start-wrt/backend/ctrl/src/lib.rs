@@ -253,27 +253,19 @@ impl CliContext {
                 headers.insert(AUTHORIZATION, auth);
             }
         }
-        if let Some(signer) = self.rpc_signer(&headers)? {
-            return self
-                .rpc_client
-                .call(
-                    &signer,
-                    startos::middleware::auth::session::client::websocket_url(self.host.clone())?,
-                    self.host.host_str().unwrap_or_default(),
-                    headers,
-                    method,
-                    params,
-                )
-                .await;
-        }
-        startos::middleware::auth::signature::call_http(
-            self.client.clone(),
-            self.host.clone(),
-            headers,
-            method,
-            params,
-        )
-        .await
+        let signer = self
+            .rpc_signer(&headers)?
+            .unwrap_or_else(|| self.rpc_client.ephemeral_signer().clone());
+        self.rpc_client
+            .call(
+                &signer,
+                startos::middleware::auth::session::client::websocket_url(self.host.clone())?,
+                self.host.host_str().unwrap_or_default(),
+                headers,
+                method,
+                params,
+            )
+            .await
     }
 
     /// Build URL for a continuation endpoint.

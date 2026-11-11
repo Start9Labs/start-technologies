@@ -65,6 +65,7 @@ test('enrollment and rollback invalidate their displaced possession leases', asy
   assert.equal(before.signal.aborted, true)
   assert.equal(await peer(active), auth.normalizeDer64(replacement.pubkeyPem))
   assert.equal(active.signal, (await service.lease()).signal)
+  assert.equal(active.key, replacement)
   await service.rollback()
   assert.equal(active.signal.aborted, true)
   assert.equal(await service.lease(), null)
