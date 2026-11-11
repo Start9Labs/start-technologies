@@ -961,4 +961,5 @@ export const ENGLISH: Record<string, number> = {
   'Invalid response from server': 1109,
   'Maximum file size': 1110,
   'View in Marketplace': 1111,
+  'This alternative implementation meets the requirement': 1112,
 }

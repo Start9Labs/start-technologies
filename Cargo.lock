@@ -8502,7 +8502,7 @@ dependencies = [
 
 [[package]]
 name = "start-tunnel"
-version = "1.5.1"
+version = "1.5.2"
 dependencies = [
  "include_dir",
  "start-core",
@@ -8582,6 +8582,7 @@ dependencies = [
  "patch-db",
  "pwhash",
  "rand 0.9.5",
+ "regex",
  "reqwest",
  "rpassword",
  "rpc-toolkit",

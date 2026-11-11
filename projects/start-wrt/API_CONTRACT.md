@@ -914,6 +914,11 @@ struct Device {
     /// (default off; toggled via `devices.set-auto-forward`). Always false for
     /// VPN peers (no MAC to authorize).
     allow_auto_port_forward: bool,
+    /// External ports or ranges (`443`, `5000-5009`) the router refused to
+    /// open for this device for lack of that permission in the last half hour.
+    /// A PCP request counts only when it arrived on the device's own LAN
+    /// segment. Empty while the permission is on, and for VPN peers.
+    auto_port_forward_requests: Vec<String>,
     /// Whether this device may publish DNS records into the router's resolver
     /// (`devices.set-dns-injection`; `vpn-server.peer-set-dns-injection` for a
     /// VPN peer).
@@ -1017,7 +1022,8 @@ struct SetAutoForwardRequest {
 // Response: null
 // Backend: stores the flag on the device's DHCP host section (`_allow_pcp`),
 // creating one if needed, and invalidates the port-control authorization cache
-// so the change applies immediately. Default is off: a device with no flag can
+// so the change applies immediately; allowing also clears the device's
+// `auto_port_forward_requests`. Default is off: a device with no flag can
 // never create forwards via PCP/UPnP. Setting `allow: false` also closes the
 // forwards the device already holds, rather than leaving them open until their
 // leases lapse (up to a week).
