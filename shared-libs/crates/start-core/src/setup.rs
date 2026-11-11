@@ -389,7 +389,7 @@ pub async fn status(ctx: SetupContext) -> Result<SetupStatusRes, Error> {
             Err(e) => Err(e.clone_output()),
         }
     } else {
-        if ctx.task.initialized() {
+        if ctx.setup_started() {
             Ok(SetupStatusRes::Running(ctx.progress().await))
         } else {
             let path = Path::new("/media/startos/config/setup.json");
@@ -692,10 +692,10 @@ async fn cli_execute(
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use super::*;
 
-    fn context() -> (
+    pub(crate) fn context() -> (
         SetupContext,
         crate::net::web_server::WebServer<crate::net::gateway::WildcardListener>,
     ) {
@@ -729,7 +729,7 @@ mod test {
         .await
         .unwrap_err();
         assert_eq!(error.kind, ErrorKind::InvalidRequest);
-        assert!(context.task.get().is_none());
+        assert!(!context.setup_started());
         let error = execute(
             context.clone(),
             SetupExecuteParams {
@@ -752,7 +752,7 @@ mod test {
         .await
         .unwrap_err();
         assert_eq!(error.kind, ErrorKind::InvalidRequest);
-        assert!(context.task.get().is_none());
+        assert!(!context.setup_started());
     }
 
     #[tokio::test]

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::{BoxFuture, Shared};
-use futures::{Future, StreamExt};
+use futures::{Future, FutureExt};
 use imbl_value::InternedString;
 use josekit::jwk::Jwk;
 use openssl::x509::X509;
@@ -54,6 +54,8 @@ pub struct SetupResult {
 rpc_toolkit::reflect_ts!(SetupResult);
 rpc_toolkit::ts_export!(SetupResult, namespaces = [""]);
 
+type SetupTask = Shared<BoxFuture<'static, Result<(), Arc<tokio::task::JoinError>>>>;
+
 pub struct SetupContextSeed {
     pub(crate) startup_rpc: StartupRpc,
     pub(crate) dns: Arc<crate::net::dns::DnsController>,
@@ -61,7 +63,7 @@ pub struct SetupContextSeed {
     pub config: SyncMutex<ServerConfig>,
     pub disable_encryption: bool,
     pub progress: FullProgressTracker,
-    pub task: OnceCell<NonDetachingJoinHandle<()>>,
+    task: SyncMutex<Option<SetupTask>>,
     pub result: OnceCell<Result<(SetupResult, RpcContext), Error>>,
     pub disk_guid: OnceCell<InternedString>,
     pub shutdown: Sender<Option<Shutdown>>,
@@ -122,7 +124,7 @@ impl SetupContext {
                 disable_encryption: config.disable_encryption.unwrap_or(false),
                 config: SyncMutex::new(config),
                 progress,
-                task: OnceCell::new(),
+                task: SyncMutex::new(None),
                 result: OnceCell::new(),
                 disk_guid: OnceCell::new(),
                 shutdown,
@@ -144,40 +146,19 @@ impl SetupContext {
         Ok(db)
     }
 
+    pub(crate) fn setup_started(&self) -> bool {
+        self.task.peek(Option::is_some)
+    }
+
+    /// Reserves execution before starting work; observation never owns the task.
     pub fn run_setup<F, Fut>(&self, f: F) -> Result<(), Error>
     where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Result<(SetupResult, RpcContext), Error>> + Send,
     {
-        let local_ctx = self.clone();
-        self.task
-            .set(
-                tokio::spawn(async move {
-                    local_ctx
-                        .result
-                        .get_or_init(|| async {
-                            match f().await {
-                                Ok(res) => {
-                                    tracing::info!("{}", t!("context.setup.setup-complete"));
-                                    Ok(res)
-                                }
-                                Err(e) => {
-                                    tracing::error!(
-                                        "{}",
-                                        t!("context.setup.setup-failed", error = e)
-                                    );
-                                    tracing::debug!("{e:?}");
-                                    Err(e)
-                                }
-                            }
-                        })
-                        .await;
-                    local_ctx.progress.complete();
-                })
-                .into(),
-            )
-            .map_err(|_| {
-                if self.result.initialized() {
+        self.task.mutate(|slot| {
+            if slot.is_some() {
+                return Err(if self.result.initialized() {
                     Error::new(
                         eyre!("{}", t!("context.setup.setup-already-complete")),
                         ErrorKind::InvalidRequest,
@@ -187,57 +168,78 @@ impl SetupContext {
                         eyre!("{}", t!("context.setup.setup-already-in-progress")),
                         ErrorKind::InvalidRequest,
                     )
+                });
+            }
+            let local_ctx = self.clone();
+            let task: NonDetachingJoinHandle<()> = tokio::spawn(async move {
+                let result = local_ctx
+                    .result
+                    .get_or_init(|| async {
+                        match f().await {
+                            Ok(res) => {
+                                tracing::info!("{}", t!("context.setup.setup-complete"));
+                                Ok(res)
+                            }
+                            Err(e) => {
+                                tracing::error!("{}", t!("context.setup.setup-failed", error = e));
+                                tracing::debug!("{e:?}");
+                                Err(e)
+                            }
+                        }
+                    })
+                    .await;
+                if result.is_ok() {
+                    local_ctx.progress.complete();
                 }
-            })?;
-        Ok(())
+            })
+            .into();
+            *slot = Some(task.map(|result| result.map_err(Arc::new)).boxed().shared());
+            Ok(())
+        })
     }
 
-    pub async fn progress(&self) -> SetupProgress {
-        use axum::extract::ws;
+    pub(crate) fn progress_stream(
+        &self,
+    ) -> impl futures::Stream<Item = Result<crate::progress::FullProgress, Error>> + Send + 'static
+    {
+        let task = self.task.peek(|task| task.as_ref().unwrap().clone());
+        let owner = Arc::downgrade(&self.0);
+        crate::progress::progress_until_complete(self.progress.clone(), async move {
+            task.await.with_kind(ErrorKind::Unknown)?;
+            let owner = owner.upgrade().ok_or_else(|| {
+                Error::new(eyre!("{}", t!("error.cancelled")), ErrorKind::Cancelled)
+            })?;
+            owner
+                .result
+                .get()
+                .unwrap()
+                .as_ref()
+                .map(|_| ())
+                .map_err(Error::clone_output)
+        })
+    }
 
+    /// Requires accepted setup work; continuation closure reports its outcome.
+    pub async fn progress(&self) -> SetupProgress {
         let guid = Guid::new();
-        let progress_tracker = self.progress.clone();
-        let progress = progress_tracker.snapshot();
+        let progress = self.progress.snapshot();
+        let source = self.progress_stream();
         self.rpc_continuations
             .add(
                 guid.clone(),
                 RpcContinuation::ws(
                     WebSocketPolicy::Public,
                     self.secure_session().cloned(),
-                    |mut ws| async move {
-                        if let Err(e) = async {
-                            let mut stream =
-                                progress_tracker.stream(Some(Duration::from_millis(100)));
-                            loop {
-                                tokio::select! {
-                                    progress = stream.next() => {
-                                        if let Some(progress) = progress {
-                                            ws.send(ws::Message::Text(
-                                                serde_json::to_string(&progress)
-                                                    .with_kind(ErrorKind::Serialization)?
-                                                    .into(),
-                                            ))
-                                            .await
-                                            .with_kind(ErrorKind::Network)?;
-                                            if progress.overall.is_complete() {
-                                                return ws.normal_close("complete").await;
-                                            }
-                                        } else {
-                                            return ws.normal_close("complete").await;
-                                        }
-                                    }
-                                    msg = ws.recv() => {
-                                        if msg.transpose().with_kind(ErrorKind::Network)?.is_none() {
-                                            return Ok(())
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        .await
-                        {
+                    |ws| async move {
+                        if let Err(e) = crate::progress::forward_progress(ws, source).await {
                             if !crate::util::net::is_ws_reset_without_close(&e) {
-                                tracing::error!("{}", t!("context.setup.error-in-setup-progress-websocket", error = e));
+                                tracing::error!(
+                                    "{}",
+                                    t!(
+                                        "context.setup.error-in-setup-progress-websocket",
+                                        error = e
+                                    )
+                                );
                                 tracing::debug!("{e:?}");
                             }
                         }
@@ -270,3 +272,6 @@ impl Deref for SetupContext {
         &*self.0
     }
 }
+
+#[cfg(test)]
+mod tests;

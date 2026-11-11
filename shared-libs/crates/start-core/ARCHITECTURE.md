@@ -86,6 +86,12 @@ forwards progress until that result through typed same-ID events or the ordinary
 continuation. Dropped result ownership is cancellation, not completion. State probes still
 establish the running daemon's availability after router replacement.
 
+`SetupContext` reserves its worker before execution and retains the application outcome in
+its existing result cell. Its synchronous task slot owns a shared non-detaching join;
+observers await that task without owning or restarting it. Progress completion requires
+success. GUID observers reuse the shared progress/result forwarding and retain a weak
+context reference while waiting, including unconsumed continuations.
+
 ## Action file transfers
 
 `ServiceSeed.action_files` owns transient prepared descriptors and completed upload receipts; `RpcContinuations` owns their single-use HTTP endpoints. The store scopes IDs to the service and procedure event, with expiry independent of SDK form caching. Successful uploads remain service-owned. Returning a File result arms its requested download cleanup after action/task processing succeeds. Service teardown cancels active transfers.
