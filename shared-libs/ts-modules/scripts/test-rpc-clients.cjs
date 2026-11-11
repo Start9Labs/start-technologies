@@ -421,11 +421,10 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
     'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
   ]
   const data = {
-    ui: {
-      registries: { 'https://registry.test/': 'Registry' },
-      startosRegistry: 'https://registry.test/',
-    },
+    ui: {},
     serverInfo: {
+      registries: { 'https://registry.test/': 'Registry' },
+      osRegistry: 'https://registry.test/',
       registryKeys: { 'https://registry.test/': [ids[1]] },
       trustedKeys: Object.fromEntries(
         ids.map((id, index) => [
@@ -508,8 +507,13 @@ test('StartOS DNS mock updates the selected gateway using live gateway state', a
         './mock-patch',
         {
           mockPatchData: {
-            ui: { registries: {} },
-            serverInfo: { trustedKeys: {}, registryKeys: {} },
+            ui: {},
+            serverInfo: {
+              registries: {},
+              osRegistry: 'https://registry.test/',
+              trustedKeys: {},
+              registryKeys: {},
+            },
           },
         },
       ],
