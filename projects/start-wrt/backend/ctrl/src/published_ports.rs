@@ -1858,8 +1858,12 @@ pub(crate) fn zone_for_ipv4(cfgs: &uciedit::Configs, ip: Ipv4Addr) -> Option<Str
         if iface.proto != InterfaceProto::STATIC {
             continue;
         }
-        let Some(addr) = iface.ipaddr else { continue };
-        let mask = u32::from(iface.netmask.unwrap_or(Ipv4Addr::new(255, 255, 255, 0)));
+        let Some(addr) = iface.ipv4() else { continue };
+        let mask = u32::from(
+            iface
+                .ipv4_netmask()
+                .unwrap_or(Ipv4Addr::new(255, 255, 255, 0)),
+        );
         if u32::from(ip) & mask != u32::from(addr) & mask {
             continue;
         }
@@ -2707,6 +2711,7 @@ config rule 'pp_a_v6'
             ipv4_reservations: Vec::new(),
             profile_network: None,
             allow_auto_port_forward: false,
+            auto_port_forward_requests: Vec::new(),
             allow_dns_injection: false,
             dns_injection_requested: false,
             allow_router_advertisements: false,

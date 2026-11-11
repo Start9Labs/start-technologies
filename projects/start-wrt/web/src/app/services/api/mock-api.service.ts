@@ -4,6 +4,7 @@ import { pauseFor, RPCErrorDetails, RpcError } from '@start9labs/shared'
 import { GIT_HASH } from 'src/app/utils/workspace-config'
 import {
   ApiService,
+  ConfigCheck,
   ExecReq,
   ExecRes,
   GetFileReq,
@@ -289,6 +290,11 @@ export class MockApiService extends ApiService {
   async systemInfo(_timeout?: number): Promise<SystemInfoRes> {
     await pauseFor(250)
     return { ...this.mockSystemInfo, date: new Date().toISOString() }
+  }
+
+  async configCheck(): Promise<ConfigCheck> {
+    await pauseFor(100)
+    return { findings: [] }
   }
 
   async systemNewerVersions(): Promise<VersionInfo[]> {
@@ -1168,6 +1174,16 @@ export class MockApiService extends ApiService {
     return { setupMode: false, disk: { emmcFound: true, hasFirmware: true } }
   }
 
+  async getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>> {
+    await pauseFor(250)
+    return {
+      kty: 'EC',
+      crv: 'P-256',
+      x: 'yHTDYSfjU809fkSv9MmN4wuojf5c3cnD7ZDN13n-jz4',
+      y: '8Mpkn744A5KDag0DmX2YivB63srjbugYZzWc3JOpQXI',
+    }
+  }
+
   async systemFactoryReset(): Promise<null> {
     await pauseFor(2000)
     return null
@@ -1260,6 +1276,9 @@ export class MockApiService extends ApiService {
         })),
         profile_network: profile ? `${profile.gateway_ip}/24` : null,
         allow_auto_port_forward: this.autoForwardAllowed.has(mac),
+        auto_port_forward_requests: this.autoForwardAllowed.has(mac)
+          ? []
+          : (this.autoForwardRequested.get(mac) ?? []),
         allow_dns_injection: this.dnsInjectionAllowed.has(mac),
         dns_injection_requested:
           !this.dnsInjectionAllowed.has(mac) &&
@@ -1323,6 +1342,10 @@ export class MockApiService extends ApiService {
 
   /** MACs allowed to auto-create port forwards via PCP/UPnP. */
   private autoForwardAllowed = new Set<string>(['00:1A:2B:3C:4D:5E'])
+  /** Ports the router recently refused to open, by MAC. */
+  private readonly autoForwardRequested = new Map<string, string[]>([
+    ['00:1A:2B:3C:4D:5F', ['3074', '27015-27030']],
+  ])
 
   async devicesSetAutoForward(params: {
     mac: string
@@ -1332,6 +1355,7 @@ export class MockApiService extends ApiService {
     const macUpper = params.mac.toUpperCase()
     if (params.allow) {
       this.autoForwardAllowed.add(macUpper)
+      this.autoForwardRequested.delete(macUpper)
     } else {
       this.autoForwardAllowed.delete(macUpper)
     }

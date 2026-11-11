@@ -233,6 +233,61 @@ export const CheckInitializedRes: z.ZodObject<{ initialized: z.ZodBoolean }> =
   /* @__PURE__ */ object({ initialized: z.boolean() }).meta({
     id: 'CheckInitializedRes',
   })
+export const ConfigProblem: z.ZodEnum<{
+  syntax: 'syntax'
+  value: 'value'
+  missing: 'missing'
+  unsupported: 'unsupported'
+  unnamed: 'unnamed'
+  absent: 'absent'
+  extra: 'extra'
+  unmanaged: 'unmanaged'
+}> = /* @__PURE__ */ z
+  .enum([
+    'syntax',
+    'value',
+    'missing',
+    'unsupported',
+    'unnamed',
+    'absent',
+    'extra',
+    'unmanaged',
+  ])
+  .meta({
+    id: 'ConfigProblem',
+  })
+
+/**
+ * A page of the StartWRT UI, named by its route. Settings, which holds the recovery tools,
+ * is never one.
+ */
+export const ConfigView: z.ZodEnum<{
+  wan: 'wan'
+  'published-ports': 'published-ports'
+  outbound: 'outbound'
+  lan: 'lan'
+  devices: 'devices'
+  profiles: 'profiles'
+  ethernet: 'ethernet'
+  wifi: 'wifi'
+  inbound: 'inbound'
+}> = /* @__PURE__ */ z
+  .enum([
+    'wan',
+    'published-ports',
+    'outbound',
+    'lan',
+    'devices',
+    'profiles',
+    'ethernet',
+    'wifi',
+    'inbound',
+  ])
+  .meta({
+    id: 'ConfigView',
+    description:
+      'A page of the StartWRT UI, named by its route. Settings, which holds the recovery tools,\nis never one.',
+  })
 export const DataUsagePeriod: z.ZodEnum<{
   week: 'week'
   month: 'month'
@@ -444,6 +499,10 @@ export const DnsServer: z.ZodObject<{
   description:
     'A single DNS server entry with protocol info.\n`ssl: false` = plain UDP on port 53.\n`ssl: true`  = DNS-over-HTTPS via SmartDNS (`server-https`).',
 })
+export const EncryptedWire: z.ZodObject<{ encrypted: z.ZodUnknown }> =
+  /* @__PURE__ */ object({ encrypted: z.unknown() }).meta({
+    id: 'EncryptedWire',
+  })
 export const ExecReq: z.ZodObject<{
   command: z.ZodString
   args: z.ZodArray<z.ZodString>
@@ -1181,27 +1240,6 @@ export const SetFileArgs: z.ZodObject<{
 }).meta({
   id: 'SetFileArgs',
 })
-export const SetInitialPasswordParams: z.ZodObject<{
-  password: z.ZodString
-  /**
-   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
-   */
-  timezone: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  password: z.string(),
-  /**
-   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
-   */
-  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'IANA timezone name, e.g. "America/New_York". An unknown name is skipped.',
-  }),
-}).meta({
-  id: 'SetInitialPasswordParams',
-})
 export const SetPreferencesReq: z.ZodObject<{
   language: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1594,6 +1632,89 @@ export const BlackoutWindows: z.ZodObject<{
 }> = /* @__PURE__ */ object({ windows: z.array(BlackoutWindow) }).meta({
   id: 'BlackoutWindows',
 })
+export const ConfigFinding: z.ZodObject<{
+  /**
+   * Pages that cannot represent it.
+   */
+  views: z.ZodArray<typeof ConfigView>
+  /**
+   * The file's name under `/etc/config`.
+   */
+  config: z.ZodString
+  /**
+   * One-based.
+   */
+  line: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  section: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  sectionType: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  option: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  found: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  problem: typeof ConfigProblem
+  /**
+   * Shown beside the page's settings rather than in their place.
+   */
+  notice: z.ZodBoolean
+  /**
+   * The parser's explanation, in English.
+   */
+  detail: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Pages that cannot represent it.
+   */
+  views: z.array(ConfigView).meta({
+    description: 'Pages that cannot represent it.',
+  }),
+  /**
+   * The file's name under `/etc/config`.
+   */
+  config: z.string().meta({
+    description: "The file's name under `/etc/config`.",
+  }),
+  /**
+   * One-based.
+   */
+  line: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description: 'One-based.',
+  }),
+  section: wire(z.string().nullable().optional(), z.string().nullable()),
+  sectionType: wire(z.string().nullable().optional(), z.string().nullable()),
+  option: wire(z.string().nullable().optional(), z.string().nullable()),
+  found: wire(z.string().nullable().optional(), z.string().nullable()),
+  problem: ConfigProblem,
+  /**
+   * Shown beside the page's settings rather than in their place.
+   */
+  notice: z.boolean().meta({
+    description: "Shown beside the page's settings rather than in their place.",
+  }),
+  /**
+   * The parser's explanation, in English.
+   */
+  detail: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description: "The parser's explanation, in English.",
+  }),
+}).meta({
+  id: 'ConfigFinding',
+})
 export const DataUsageReq: z.ZodObject<{
   mac: z.ZodString
   period: typeof DataUsagePeriod
@@ -1661,6 +1782,11 @@ export const Device: z.ZodObject<{
    * (default off; set via `devices set-auto-forward`).
    */
   allow_auto_port_forward: z.ZodBoolean
+  /**
+   * External ports or ranges (`443`, `5000-5009`) the router refused to
+   * open for this device for lack of that permission in the last half hour.
+   */
+  auto_port_forward_requests: z.ZodArray<z.ZodString>
   /**
    * Whether this device may publish DNS records into the router's resolver
    * (`devices set-dns-injection`; `vpn-server peer-set-dns-injection` for a
@@ -1757,6 +1883,14 @@ export const Device: z.ZodObject<{
   allow_auto_port_forward: z.boolean().meta({
     description:
       'Whether this device may auto-create port forwards via PCP/UPnP\n(default off; set via `devices set-auto-forward`).',
+  }),
+  /**
+   * External ports or ranges (`443`, `5000-5009`) the router refused to
+   * open for this device for lack of that permission in the last half hour.
+   */
+  auto_port_forward_requests: z.array(z.string()).meta({
+    description:
+      'External ports or ranges (`443`, `5000-5009`) the router refused to\nopen for this device for lack of that permission in the last half hour.',
   }),
   /**
    * Whether this device may publish DNS records into the router's resolver
@@ -2308,6 +2442,35 @@ export const SetArgs: z.ZodObject<{
   }),
 }).meta({
   id: 'SetArgs',
+})
+export const SetInitialPasswordParams: z.ZodObject<{
+  /**
+   * Encrypted to the key from `setup.get-pubkey`.
+   */
+  password: typeof EncryptedWire
+  /**
+   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
+   */
+  timezone: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Encrypted to the key from `setup.get-pubkey`.
+   */
+  password: EncryptedWire.meta({
+    description: 'Encrypted to the key from `setup.get-pubkey`.',
+  }),
+  /**
+   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
+   */
+  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'IANA timezone name, e.g. "America/New_York". An unknown name is skipped.',
+  }),
+}).meta({
+  id: 'SetInitialPasswordParams',
 })
 export const SetupStatusRes: z.ZodObject<{
   setupMode: z.ZodBoolean
@@ -2874,6 +3037,11 @@ export const BlackoutSetRequest: z.ZodIntersection<
     description:
       "`wifi.blackout-set` request: the blackout windows plus a confirmation flag.\nA window covering the router's current time turns Wi-Fi off as soon as it is\nsaved, for every device on it. When the flag is false, `blackout-set` applies\nnothing and reports that in `BlackoutSetResult` for a confirmation dialog;\nwith the flag true it saves the windows and applies them at once.",
   })
+export const ConfigCheck: z.ZodObject<{
+  findings: z.ZodArray<typeof ConfigFinding>
+}> = /* @__PURE__ */ object({ findings: z.array(ConfigFinding) }).meta({
+  id: 'ConfigCheck',
+})
 export const PublishedPortsSetRequest: z.ZodObject<{
   ports: z.ZodArray<typeof PublishedPortInput>
 }> = /* @__PURE__ */ object({ ports: z.array(PublishedPortInput) }).meta({
@@ -3049,6 +3217,26 @@ export const Api = {
         restore: {
           _PARAMS: /* @__PURE__ */ BackupRestoreParams,
           _RETURN: /* @__PURE__ */ BackupRestoreRes,
+        },
+      },
+    },
+    config: {
+      _PARAMS: /* @__PURE__ */ empty,
+      _CHILDREN: {
+        check: {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            empty,
+          ),
+          _RETURN: /* @__PURE__ */ ConfigCheck,
         },
       },
     },
@@ -3583,6 +3771,10 @@ export const Api = {
     setup: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
+        'get-pubkey': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _RETURN: /* @__PURE__ */ z.record(z.string(), z.unknown()),
+        },
         status: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ SetupStatusRes,

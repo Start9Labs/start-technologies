@@ -55,7 +55,7 @@ mod tests {
         for key in trust.values_mut() {
             key.os = false;
         }
-        for from in ["0.4.1", "0.4.1.1", "0.4.1.2", "0.4.1.3"] {
+        for from in ["0.4.1", "0.4.1.1", "0.4.1.2", "0.4.1.3", "0.4.2", "0.4.2.1"] {
             for enabled in [false, true] {
                 let mut fixture =
                     to_value(&Database::init(&account, false, None, None).unwrap()).unwrap();
@@ -64,10 +64,10 @@ mod tests {
                 fixture["public"]["serverInfo"]["nut"] =
                     json!({ "enabled": enabled, "settings": settings.clone() });
                 fixture["public"]["serverInfo"]["trustedKeys"] =
-                    if from == "0.4.1.2" || from == "0.4.1.3" {
-                        to_value(&trust).unwrap()
-                    } else {
+                    if matches!(from, "0.4.1" | "0.4.1.1") {
                         to_value(&legacy::grouped_keys(trust.clone())).unwrap()
+                    } else {
+                        to_value(&trust).unwrap()
                     };
                 fixture["private"]["sessions"]["tokens"] =
                     json!({ "a".repeat(64): crate::auth::Session::default() });
@@ -78,13 +78,17 @@ mod tests {
                 db.put(&ROOT, &fixture).await.unwrap();
                 Current::default().pre_init(&db).await.unwrap();
                 let mut migrated = db.dump(&ROOT).await.value;
-                assert_eq!(migrated["public"]["serverInfo"]["version"], json!("0.4.2"));
+                assert_eq!(
+                    migrated["public"]["serverInfo"]["version"],
+                    to_value(&Current::default().semver()).unwrap()
+                );
                 assert_eq!(migrated["public"]["serverInfo"]["nut"], saved_nut);
                 assert_eq!(migrated["public"]["serverInfo"]["trustedKeys"], saved_trust);
                 assert_eq!(migrated["private"]["sessions"], saved_sessions);
                 Current::default().pre_init(&db).await.unwrap();
                 assert_eq!(db.dump(&ROOT).await.value, migrated);
-                rollback_to_unchecked(&Version, &v0_4_1_1::Version, &mut migrated).unwrap();
+                rollback_to_unchecked(&Current::default(), &v0_4_1_1::Version, &mut migrated)
+                    .unwrap();
                 assert_eq!(
                     migrated["public"]["serverInfo"]["version"],
                     json!("0.4.1.1")

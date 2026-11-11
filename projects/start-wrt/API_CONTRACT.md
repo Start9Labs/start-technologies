@@ -183,14 +183,15 @@ sign, so the user logs in afterwards over HTTPS.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SetInitialPasswordParams {
-    /// Minimum 12 characters (same rule as auth.set-password)
-    password: String,
+    /// Encrypted to the `setup.get-pubkey` key; minimum 12 characters
+    /// (same rule as auth.set-password)
+    password: EncryptedWire,
     /// IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
     timezone: Option<String>,
 }
 // Response: null
-// Backend: writes the root hash to /etc/shadow, revokes every enrolled key,
-// applies the timezone, disables the captive portal
+// Backend: decrypts the password, writes the root hash to /etc/shadow, revokes
+// every enrolled key, applies the timezone, disables the captive portal
 ```
 
 ---
@@ -873,6 +874,11 @@ struct Device {
     /// (default off; toggled via `devices.set-auto-forward`). Always false for
     /// VPN peers (no MAC to authorize).
     allow_auto_port_forward: bool,
+    /// External ports or ranges (`443`, `5000-5009`) the router refused to
+    /// open for this device for lack of that permission in the last half hour.
+    /// A PCP request counts only when it arrived on the device's own LAN
+    /// segment. Empty while the permission is on, and for VPN peers.
+    auto_port_forward_requests: Vec<String>,
     /// Whether this device may publish DNS records into the router's resolver
     /// (`devices.set-dns-injection`; `vpn-server.peer-set-dns-injection` for a
     /// VPN peer).
@@ -976,7 +982,8 @@ struct SetAutoForwardRequest {
 // Response: null
 // Backend: stores the flag on the device's DHCP host section (`_allow_pcp`),
 // creating one if needed, and invalidates the port-control authorization cache
-// so the change applies immediately. Default is off: a device with no flag can
+// so the change applies immediately; allowing also clears the device's
+// `auto_port_forward_requests`. Default is off: a device with no flag can
 // never create forwards via PCP/UPnP. Setting `allow: false` also closes the
 // forwards the device already holds, rather than leaving them open until their
 // leases lapse (up to a week).
@@ -2158,6 +2165,24 @@ struct DiskState {
 }
 ```
 
+### `setup.get-pubkey`
+
+No auth required. Returns the public half of an ephemeral P-256 key the daemon
+generates each time it starts. `auth.set-initial-password` and
+`/api/setup/flash` take the admin password encrypted to it, since both run over
+plain HTTP before the router's CA is trusted.
+
+```rust
+// Request: {}
+// Response: public JWK, e.g. { "kty": "EC", "crv": "P-256", "x": "…", "y": "…" }
+
+/// start-core's `EncryptedWire`, as StartOS setup sends it
+struct EncryptedWire {
+    /// JWE JSON serialization: alg ECDH-ES, enc A128CBC-HS256
+    encrypted: Value,
+}
+```
+
 ---
 
 ## 14. Activity
@@ -2327,6 +2352,59 @@ struct InjectedDnsRecord {
 // devices re-assert.
 ```
 
+## 18. Configuration Check
+
+### `config.check`
+
+Finds configuration, typically written by hand or in LuCI, that a page of the UI cannot
+represent. The UI shows a page with findings in place of its form, with a link to LuCI. A
+finding marked `notice` is shown above the form instead.
+
+```rust
+// Request: {}
+
+#[derive(Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ConfigView {
+    // Settings, which holds the recovery tools, is never one.
+    Wan, PublishedPorts, Outbound, Lan, Devices, Profiles, Ethernet, Wifi, Inbound,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ConfigProblem {
+    Syntax,       // the file does not parse
+    Value,        // a value that does not parse as the option's type
+    Missing,      // a required option is absent
+    Unsupported,  // a value that parses but that the page cannot show or keep
+    Unnamed,      // a section without a name where the page needs one
+    Absent,       // a section the page requires is absent
+    Extra,        // a section beyond the one the page shows in its place
+    Unmanaged,    // a value beyond the one the page manages, left as written
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigFinding {
+    views: Vec<ConfigView>,
+    config: String,                // file name under /etc/config
+    line: Option<u32>,             // one-based
+    section: Option<String>,
+    section_type: Option<String>,
+    option: Option<String>,
+    found: Option<String>,
+    problem: ConfigProblem,
+    notice: bool,                  // shown beside the page's settings rather than in their place
+    detail: Option<String>,        // the parser's explanation, in English
+}
+
+struct ConfigCheck {
+    findings: Vec<ConfigFinding>,
+}
+// Response: ConfigCheck
+// Backend: ctrl/src/config_check.rs; reads ddns, dhcp, firewall, network, startwrt, wireless.
+```
+
 ---
 
 ## HTTP Routes
@@ -2342,7 +2420,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `/api/setup/flash`                                 | POST      | None (setup wizard)                        | Streams NDJSON `SetupEvent` progress while flashing the eMMC; one flash at a time             |
 | `/static/local-root-ca.crt`                        | GET       | None                                       | Root CA certificate download                                                                  |
 | `/static/local-root-ca.mobileconfig`               | GET       | None                                       | Root CA as an Apple configuration profile                                                     |
-| `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any       | LuCI's own                                 | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`        |
+| `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any       | LuCI's own; HTTPS only                     | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`        |
 | everything else                                    | any       | None                                       | Embedded web UI                                                                               |
 
 ---
@@ -2371,6 +2449,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `system.logs`                       | System          |                             |
 | `system.logs-follow`                | System          |                             |
 | `setup.status`                      | Setup           | No auth                     |
+| `setup.get-pubkey`                  | Setup           | No auth                     |
 | `wan.ipv4-get`                      | WAN             |                             |
 | `wan.ipv4-set`                      | WAN             |                             |
 | `wan.ipv6-get`                      | WAN             |                             |
@@ -2439,8 +2518,9 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `backup.restore`                    | Backup          |                             |
 | `diagnostics.create`                | Diagnostics     |                             |
 | `dns.injected-list`                 | DNS Injection   |                             |
+| `config.check`                      | Config Check    |                             |
 
-**Totals:** 84 RPC methods across 17 categories, plus the HTTP/WebSocket routes
+**Totals:** 85 RPC methods across 18 categories, plus the HTTP/WebSocket routes
 table above and the deprecated generic endpoints below.
 
 ---
