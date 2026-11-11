@@ -2462,7 +2462,8 @@ export class MockApiService extends ApiService {
 
   private mockGatewayDns(id: string, servers: string[] | null): T.DnsSettings {
     const gateway = this.mockData('/serverInfo/network/gateways/' + id) as
-      T.NetworkInterfaceInfo | undefined
+      | T.NetworkInterfaceInfo
+      | undefined
     if (!gateway) throw new Error('Unknown gateway')
     const staticServers = this.mockDnsServers(servers)
     const provided = gateway.ipInfo?.dnsServers ?? []
