@@ -1,9 +1,4 @@
 {
-  "registries": {
-    "https://registry.start9.com/": "Start9 Registry",
-    "https://community-registry.start9.com/": "Community Registry"
-  },
-  "startosRegistry": "https://registry.start9.com/",
   "snakeHighScore": 0,
   "hiddenUpdates": {},
   "servicesView": {

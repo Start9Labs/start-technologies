@@ -2148,12 +2148,36 @@ export class MockApiService extends ApiService {
       eth3: {
         profile: { fullname: 'Guest', interface: 'guest', vlan_tag: 100 },
       },
+      usb_eth0: {
+        profile: { fullname: 'Guest', interface: 'guest', vlan_tag: 100 },
+      },
+      usb_eth1: { profile: null },
+    },
+    usb_ports: {
+      usb_eth0: { present: true, active: true },
+      usb_eth1: { present: false, active: false },
     },
   }
 
   async ethernetGet(): Promise<EthernetConfig> {
     await pauseFor(250)
     return structuredClone(this.mockEthernet)
+  }
+
+  async ethernetRemoveUsbPort(
+    params: RpcParamType<Api, 'ethernet.remove-usb-port'>,
+  ): Promise<null> {
+    await pauseFor(250)
+    const without = <T>(ports: Record<string, T>) =>
+      Object.fromEntries(
+        Object.entries(ports).filter(([name]) => name !== params.port),
+      )
+    this.mockEthernet = {
+      ...this.mockEthernet,
+      ports: without(this.mockEthernet.ports),
+      usb_ports: without(this.mockEthernet.usb_ports),
+    }
+    return null
   }
 
   async ethernetSet(params: EthernetSetConfig): Promise<EthernetSetResult> {
@@ -2180,6 +2204,7 @@ export class MockApiService extends ApiService {
           },
         ]),
       ),
+      usb_ports: this.mockEthernet.usb_ports,
     }
     const changedPorts = Object.keys(params.ports).join(', ')
     this.logActivity(

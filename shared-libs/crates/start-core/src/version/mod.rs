@@ -990,6 +990,12 @@ mod tests {
             (
                 "0.4.2.1",
                 1,
+                json!({ "0.4.2.1": null, "0.4.3": null }),
+                to_value(&crate::trusted_keys::initial_trusted_keys()).unwrap(),
+            ),
+            (
+                "0.4.2.1",
+                2,
                 json!({ "0.4.3": null }),
                 to_value(&crate::trusted_keys::initial_trusted_keys()).unwrap(),
             ),
@@ -1037,7 +1043,7 @@ mod tests {
             ("0.4.0.4", "0.4.0.5", 3),
             ("0.4.1.2", "0.4.1.3", 0),
             ("0.4.1.3", "0.4.2", 0),
-            ("0.4.2", "0.4.2.1", 1),
+            ("0.4.2", "0.4.2.1", 2),
             ("0.4.2.1", "0.4.3", 0),
         ] {
             let previous = from_value::<Version>(json!(from))
@@ -1104,9 +1110,9 @@ mod tests {
         .await
         .unwrap();
         upgrade.apply(&version, &version, &mut db).unwrap();
-        assert_eq!(applied_migration_revision(&mut db).unwrap(), 1);
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 2);
         assert_eq!(
-            db["public"]["ui"]["registries"],
+            db["public"]["serverInfo"]["registries"],
             json!({
                 "https://registry.start9.com/": "Start9 Registry",
                 "https://community-registry.start9.com/": "Community Registry",
@@ -1142,6 +1148,7 @@ mod tests {
             },
             "ui": {
                 "registries": { "https://registry.example/": "Custom" },
+                "startosRegistry": "https://registry.example/",
                 "snakeHighScore": 42,
             },
         } });
@@ -1154,16 +1161,18 @@ mod tests {
             json!({ "0.4.2.1": null, "0.4.3": null })
         );
         assert_eq!(
-            db["public"]["ui"],
+            db["public"]["serverInfo"]["registries"],
             json!({
-                "registries": {
-                    "https://registry.example/": "Custom",
-                    "https://registry.start9.com/": "Start9 Registry",
-                    "https://community-registry.start9.com/": "Community Registry",
-                },
-                "snakeHighScore": 42,
+                "https://registry.example/": "Custom",
+                "https://registry.start9.com/": "Start9 Registry",
+                "https://community-registry.start9.com/": "Community Registry",
             })
         );
+        assert_eq!(
+            db["public"]["serverInfo"]["osRegistry"],
+            json!("https://registry.example/")
+        );
+        assert_eq!(db["public"]["ui"], json!({ "snakeHighScore": 42 }));
         assert_eq!(db["private"], json!({ "preserved": true }));
         let upgraded = db.clone();
         let upgrade = Upgrade::load(&current, &current, 0).await.unwrap();

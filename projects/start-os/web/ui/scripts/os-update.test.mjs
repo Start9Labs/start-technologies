@@ -237,8 +237,9 @@ const state = version => ({
     version,
     statusInfo: {},
     trustedKeys: trustedSigners,
+    osRegistry: 'https://registry.test',
   },
-  ui: { startosRegistry: 'https://registry.test', snakeHighScore: 0 },
+  ui: { snakeHighScore: 0 },
 })
 const tick = () => new Promise(resolve => setImmediate(resolve))
 function fixture(t, cachedVersion, providers = []) {
@@ -2306,8 +2307,8 @@ test('connecting a registry asks for no approvals and resolves to the keys it tr
     api: {
       rpc: {
         server: {
-          trustedKeys: {
-            connectRegistry: async params => {
+          registries: {
+            add: async params => {
               calls.push(params)
               return ['added']
             },
@@ -2352,7 +2353,7 @@ test('a late registry metadata response cannot restore a removed registry', asyn
               package: { get: async () => ({}) },
             },
             server: {
-              trustedKeys: { removeRegistry: async () => registries.next({}) },
+              registries: { remove: async () => registries.next({}) },
             },
             db: {
               put: {
@@ -2388,8 +2389,8 @@ test('registry removal uses the authoritative endpoint, clears a matching select
     api: {
       rpc: {
         server: {
-          trustedKeys: {
-            removeRegistry: async params => {
+          registries: {
+            remove: async params => {
               calls.push(params)
               return ['orphaned']
             },
