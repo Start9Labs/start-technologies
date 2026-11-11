@@ -11174,6 +11174,49 @@
     }
   },
   {
+    "name": "server.nut-list-ups",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "ListNutUpsParams": {
+          "type": "object",
+          "properties": {
+            "host": { "type": "string" },
+            "port": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["host"],
+          "additionalProperties": true,
+          "description": "Address of the NUT server to list UPS devices from."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "host": { "type": "string" },
+        "port": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["host"],
+      "additionalProperties": true,
+      "description": "Address of the NUT server to list UPS devices from."
+    }
+  },
+  {
+    "name": "server.nut-scan",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "server.nut-status",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -11420,28 +11463,12 @@
                   "const": "server",
                   "description": "Serve and monitor a UPS connected directly to this StartOS host."
                 },
-                "upsName": { "type": "string" },
-                "driver": { "type": "string" },
-                "port": { "type": "string" },
-                "monitorUsername": { "type": "string" },
-                "monitorPassword": { "type": "string" },
+                "device": { "$ref": "#/$defs/NutDevice" },
                 "listenAll": { "type": "boolean" },
                 "remoteUsername": { "type": ["string", "null"] },
-                "remotePassword": { "type": ["string", "null"] },
-                "shutdownDelay": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                }
+                "remotePassword": { "type": ["string", "null"] }
               },
-              "required": [
-                "mode",
-                "upsName",
-                "driver",
-                "port",
-                "monitorUsername",
-                "monitorPassword"
-              ]
+              "required": ["mode", "device"]
             },
             {
               "type": "object",
@@ -11459,12 +11486,7 @@
                   "maximum": 9007199254740991
                 },
                 "monitorUsername": { "type": "string" },
-                "monitorPassword": { "type": "string" },
-                "shutdownDelay": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                }
+                "monitorPassword": { "type": "string" }
               },
               "required": [
                 "mode",
@@ -11476,6 +11498,21 @@
             }
           ],
           "description": "Directly connected UPS server settings or remote NUT client settings."
+        },
+        "NutDevice": {
+          "type": "object",
+          "properties": {
+            "driver": { "type": "string" },
+            "port": { "type": "string" },
+            "vendorId": { "type": ["string", "null"] },
+            "productId": { "type": ["string", "null"] },
+            "serial": { "type": ["string", "null"] },
+            "vendor": { "type": ["string", "null"] },
+            "product": { "type": ["string", "null"] }
+          },
+          "required": ["driver", "port"],
+          "additionalProperties": true,
+          "description": "A UPS detected on USB, with the driver settings that address it."
         }
       },
       "type": "object",

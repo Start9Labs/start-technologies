@@ -192,6 +192,11 @@ export type KeyboardOptionsInput = z.input<typeof schemas.KeyboardOptions>
 export type ListNotificationParamsInput = z.input<
   typeof schemas.ListNotificationParams
 >
+
+/**
+ * Address of the NUT server to list UPS devices from.
+ */
+export type ListNutUpsParamsInput = z.input<typeof schemas.ListNutUpsParams>
 export type ListParamsInput = z.input<typeof schemas.ListParams>
 export type ListVersionSignersParamsInput = z.input<
   typeof schemas.ListVersionSignersParams
@@ -231,9 +236,19 @@ export type NotificationLevel = z.output<typeof schemas.NotificationLevel>
 export type NotificationLevelInput = z.input<typeof schemas.NotificationLevel>
 
 /**
- * Directly connected UPS server settings or remote NUT client settings.
+ * A UPS detected on USB, with the driver settings that address it.
  */
-export type NutSettingsInput = z.input<typeof schemas.NutSettings>
+export type NutDevice = z.output<typeof schemas.NutDevice>
+
+/**
+ * A UPS detected on USB, with the driver settings that address it.
+ */
+export type NutDeviceInput = z.input<typeof schemas.NutDevice>
+
+/**
+ * A UPS served by a NUT server, as `LIST UPS` reports it.
+ */
+export type NutRemoteUps = z.output<typeof schemas.NutRemoteUps>
 
 /**
  * Current variables reported by the configured UPS.
@@ -487,9 +502,9 @@ export type MountParamsInput = z.input<typeof schemas.MountParams>
 export type Notification = z.output<typeof schemas.Notification>
 
 /**
- * Stored NUT configuration and its independent enabled state.
+ * Directly connected UPS server settings or remote NUT client settings.
  */
-export type NutConfigInput = z.input<typeof schemas.NutConfig>
+export type NutSettingsInput = z.input<typeof schemas.NutSettings>
 export type OsInfo = z.output<typeof schemas.OsInfo>
 export type OsUpdateSignerKeyParamsInput = z.input<
   typeof schemas.OsUpdateSignerKeyParams
@@ -621,6 +636,11 @@ export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type Metrics = z.output<typeof schemas.Metrics>
 export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
 export type NotificationWithId = z.output<typeof schemas.NotificationWithId>
+
+/**
+ * Stored NUT configuration and its independent enabled state.
+ */
+export type NutConfigInput = z.input<typeof schemas.NutConfig>
 export type OsVersionInfoMap = z.output<typeof schemas.OsVersionInfoMap>
 export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
 export type PartitionInfo = z.output<typeof schemas.PartitionInfo>
@@ -635,11 +655,6 @@ export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
  * The server's sessions, by credential type.
  */
 export type Sessions = z.output<typeof schemas.Sessions>
-
-/**
- * Parameters for replacing the stored NUT configuration.
- */
-export type SetNutParamsInput = z.input<typeof schemas.SetNutParams>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type WifiListInfo = z.output<typeof schemas.WifiListInfo>
@@ -662,6 +677,11 @@ export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type OsIndex = z.output<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 export type SessionList = z.output<typeof schemas.SessionList>
+
+/**
+ * Parameters for replacing the stored NUT configuration.
+ */
+export type SetNutParamsInput = z.input<typeof schemas.SetNutParams>
 
 /**
  * Active DNS authority and its bootstrap gateway.

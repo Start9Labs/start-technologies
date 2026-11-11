@@ -820,6 +820,20 @@ export const ListNotificationParams: z.ZodObject<{
 }).meta({
   id: 'ListNotificationParams',
 })
+
+/**
+ * Address of the NUT server to list UPS devices from.
+ */
+export const ListNutUpsParams: z.ZodObject<{
+  host: z.ZodString
+  port: z.ZodCodec<z.ZodOptional<z.ZodInt>, z.ZodInt>
+}> = /* @__PURE__ */ object({
+  host: z.string(),
+  port: wire(z.int().optional(), z.int()),
+}).meta({
+  id: 'ListNutUpsParams',
+  description: 'Address of the NUT server to list UPS devices from.',
+})
 export const ListVersionSignersParams: z.ZodObject<{ version: z.ZodString }> =
   /* @__PURE__ */ object({ version: z.string() }).meta({
     id: 'ListVersionSignersParams',
@@ -1075,106 +1089,57 @@ export const NotificationLevel: z.ZodEnum<{
 })
 
 /**
- * Directly connected UPS server settings or remote NUT client settings.
+ * A UPS detected on USB, with the driver settings that address it.
  */
-export const NutSettings: z.ZodUnion<
-  readonly [
-    z.ZodIntersection<
-      z.ZodObject<{
-        /**
-         * Serve and monitor a UPS connected directly to this StartOS host.
-         */
-        mode: z.ZodLiteral<'server'>
-      }>,
-      z.ZodObject<{
-        upsName: z.ZodString
-        driver: z.ZodString
-        port: z.ZodString
-        monitorUsername: z.ZodString
-        monitorPassword: z.ZodString
-        listenAll: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-        remoteUsername: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodString>>,
-          z.ZodNullable<z.ZodString>
-        >
-        remotePassword: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodString>>,
-          z.ZodNullable<z.ZodString>
-        >
-        shutdownDelay: z.ZodCodec<z.ZodOptional<z.ZodInt>, z.ZodInt>
-      }>
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{
-        /**
-         * Monitor a UPS exposed by another NUT server.
-         */
-        mode: z.ZodLiteral<'client'>
-      }>,
-      z.ZodObject<{
-        upsName: z.ZodString
-        host: z.ZodString
-        port: z.ZodCodec<z.ZodOptional<z.ZodInt>, z.ZodInt>
-        monitorUsername: z.ZodString
-        monitorPassword: z.ZodString
-        shutdownDelay: z.ZodCodec<z.ZodOptional<z.ZodInt>, z.ZodInt>
-      }>
-    >,
-  ]
-> = /* @__PURE__ */ z
-  .union([
-    z.intersection(
-      object({
-        /**
-         * Serve and monitor a UPS connected directly to this StartOS host.
-         */
-        mode: z.literal('server').meta({
-          description:
-            'Serve and monitor a UPS connected directly to this StartOS host.',
-        }),
-      }),
-      object({
-        upsName: z.string(),
-        driver: z.string(),
-        port: z.string(),
-        monitorUsername: z.string(),
-        monitorPassword: z.string(),
-        listenAll: wire(z.boolean().optional(), z.boolean()),
-        remoteUsername: wire(
-          z.string().nullable().optional(),
-          z.string().nullable(),
-        ),
-        remotePassword: wire(
-          z.string().nullable().optional(),
-          z.string().nullable(),
-        ),
-        shutdownDelay: wire(z.int().optional(), z.int()),
-      }),
-    ),
-    z.intersection(
-      object({
-        /**
-         * Monitor a UPS exposed by another NUT server.
-         */
-        mode: z.literal('client').meta({
-          description: 'Monitor a UPS exposed by another NUT server.',
-        }),
-      }),
-      object({
-        upsName: z.string(),
-        host: z.string(),
-        port: wire(z.int().optional(), z.int()),
-        monitorUsername: z.string(),
-        monitorPassword: z.string(),
-        shutdownDelay: wire(z.int().optional(), z.int()),
-      }),
-    ),
-  ])
-  .meta({
-    id: 'NutSettings',
-    description:
-      'Directly connected UPS server settings or remote NUT client settings.',
-  })
+export const NutDevice: z.ZodObject<{
+  driver: z.ZodString
+  port: z.ZodString
+  vendorId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  productId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  serial: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  vendor: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  product: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  driver: z.string(),
+  port: z.string(),
+  vendorId: wire(z.string().nullable().optional(), z.string().nullable()),
+  productId: wire(z.string().nullable().optional(), z.string().nullable()),
+  serial: wire(z.string().nullable().optional(), z.string().nullable()),
+  vendor: wire(z.string().nullable().optional(), z.string().nullable()),
+  product: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'NutDevice',
+  description:
+    'A UPS detected on USB, with the driver settings that address it.',
+})
+
+/**
+ * A UPS served by a NUT server, as `LIST UPS` reports it.
+ */
+export const NutRemoteUps: z.ZodObject<{
+  name: z.ZodString
+  description: z.ZodString
+}> = /* @__PURE__ */ object({ name: z.string(), description: z.string() }).meta(
+  {
+    id: 'NutRemoteUps',
+    description: 'A UPS served by a NUT server, as `LIST UPS` reports it.',
+  },
+)
 
 /**
  * Current variables reported by the configured UPS.
@@ -3680,41 +3645,94 @@ export const Notification: z.ZodObject<{
 })
 
 /**
- * Stored NUT configuration and its independent enabled state.
+ * Directly connected UPS server settings or remote NUT client settings.
  */
-export const NutConfig: z.ZodObject<{
-  /**
-   * Whether StartOS should run NUT monitoring.
-   */
-  enabled: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  /**
-   * Retained server or client settings, including while monitoring is disabled.
-   */
-  settings: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof NutSettings>>,
-    z.ZodNullable<typeof NutSettings>
-  >
-}> = /* @__PURE__ */ object({
-  /**
-   * Whether StartOS should run NUT monitoring.
-   */
-  enabled: wire(z.boolean().optional(), z.boolean()).meta({
-    description: 'Whether StartOS should run NUT monitoring.',
-  }),
-  /**
-   * Retained server or client settings, including while monitoring is disabled.
-   */
-  settings: wire(
-    NutSettings.nullable().optional(),
-    NutSettings.nullable(),
-  ).meta({
+export const NutSettings: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * Serve and monitor a UPS connected directly to this StartOS host.
+         */
+        mode: z.ZodLiteral<'server'>
+      }>,
+      z.ZodObject<{
+        device: typeof NutDevice
+        listenAll: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+        remoteUsername: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodString>>,
+          z.ZodNullable<z.ZodString>
+        >
+        remotePassword: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodString>>,
+          z.ZodNullable<z.ZodString>
+        >
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * Monitor a UPS exposed by another NUT server.
+         */
+        mode: z.ZodLiteral<'client'>
+      }>,
+      z.ZodObject<{
+        upsName: z.ZodString
+        host: z.ZodString
+        port: z.ZodCodec<z.ZodOptional<z.ZodInt>, z.ZodInt>
+        monitorUsername: z.ZodString
+        monitorPassword: z.ZodString
+      }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.intersection(
+      object({
+        /**
+         * Serve and monitor a UPS connected directly to this StartOS host.
+         */
+        mode: z.literal('server').meta({
+          description:
+            'Serve and monitor a UPS connected directly to this StartOS host.',
+        }),
+      }),
+      object({
+        device: NutDevice,
+        listenAll: wire(z.boolean().optional(), z.boolean()),
+        remoteUsername: wire(
+          z.string().nullable().optional(),
+          z.string().nullable(),
+        ),
+        remotePassword: wire(
+          z.string().nullable().optional(),
+          z.string().nullable(),
+        ),
+      }),
+    ),
+    z.intersection(
+      object({
+        /**
+         * Monitor a UPS exposed by another NUT server.
+         */
+        mode: z.literal('client').meta({
+          description: 'Monitor a UPS exposed by another NUT server.',
+        }),
+      }),
+      object({
+        upsName: z.string(),
+        host: z.string(),
+        port: wire(z.int().optional(), z.int()),
+        monitorUsername: z.string(),
+        monitorPassword: z.string(),
+      }),
+    ),
+  ])
+  .meta({
+    id: 'NutSettings',
     description:
-      'Retained server or client settings, including while monitoring is disabled.',
-  }),
-}).meta({
-  id: 'NutConfig',
-  description: 'Stored NUT configuration and its independent enabled state.',
-})
+      'Directly connected UPS server settings or remote NUT client settings.',
+  })
 export const OsUpdateSignerKeyParams: z.ZodObject<{
   key: typeof AnyVerifyingKey
 }> = /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
@@ -5183,6 +5201,43 @@ export const NotificationWithId: z.ZodIntersection<
 > = /* @__PURE__ */ z.intersection(object({ id: z.int() }), Notification).meta({
   id: 'NotificationWithId',
 })
+
+/**
+ * Stored NUT configuration and its independent enabled state.
+ */
+export const NutConfig: z.ZodObject<{
+  /**
+   * Whether StartOS should run NUT monitoring.
+   */
+  enabled: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  /**
+   * Retained server or client settings, including while monitoring is disabled.
+   */
+  settings: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof NutSettings>>,
+    z.ZodNullable<typeof NutSettings>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Whether StartOS should run NUT monitoring.
+   */
+  enabled: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Whether StartOS should run NUT monitoring.',
+  }),
+  /**
+   * Retained server or client settings, including while monitoring is disabled.
+   */
+  settings: wire(
+    NutSettings.nullable().optional(),
+    NutSettings.nullable(),
+  ).meta({
+    description:
+      'Retained server or client settings, including while monitoring is disabled.',
+  }),
+}).meta({
+  id: 'NutConfig',
+  description: 'Stored NUT configuration and its independent enabled state.',
+})
 export const OsVersionInfoMap: z.ZodRecord<z.ZodString, typeof OsVersionInfo> =
   /* @__PURE__ */ z.record(z.string(), OsVersionInfo).meta({
     id: 'OsVersionInfoMap',
@@ -5517,15 +5572,6 @@ export const SetDependenciesParams: z.ZodObject<{
 }).meta({
   id: 'SetDependenciesParams',
 })
-
-/**
- * Parameters for replacing the stored NUT configuration.
- */
-export const SetNutParams: z.ZodObject<{ config: typeof NutConfig }> =
-  /* @__PURE__ */ object({ config: NutConfig }).meta({
-    id: 'SetNutParams',
-    description: 'Parameters for replacing the stored NUT configuration.',
-  })
 export const SetupProgress: z.ZodObject<{
   progress: typeof FullProgress
   guid: typeof Guid
@@ -6190,6 +6236,15 @@ export const SetHealth: z.ZodIntersection<
 export const SetInitProgress: z.ZodObject<{ progress: typeof Progress }> =
   /* @__PURE__ */ object({ progress: Progress }).meta({
     id: 'SetInitProgress',
+  })
+
+/**
+ * Parameters for replacing the stored NUT configuration.
+ */
+export const SetNutParams: z.ZodObject<{ config: typeof NutConfig }> =
+  /* @__PURE__ */ object({ config: NutConfig }).meta({
+    id: 'SetNutParams',
+    description: 'Parameters for replacing the stored NUT configuration.',
   })
 export const SetupStatusRes: z.ZodUnion<
   readonly [
