@@ -1,0 +1,113 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+export LC_ALL=C
+
+usage() {
+    cat <<'EOF'
+Usage: fde-build-uki --linux PATH --initrd PATH --cmdline PATH --os-release PATH --key PATH --cert PATH --output PATH
+
+Builds a signed native-architecture UKI and PATH.pcr11 (64 lowercase hex digits
+plus LF), predicting SHA256 PCR11 before any systemd-pcrphase events.
+Cmdline is the complete effective command line; input files must remain stable.
+Key is an unencrypted PEM RSA Secure Boot key; cert is its PEM X.509 certificate.
+The caller keeps the key on encrypted data, distinct from the TPM policy key.
+
+Outputs are create-only. The caller exclusively owns a private generation
+folder and publishes the complete UKI/policy/overlay generation separately.
+Staging requires a hard-link-capable filesystem (not the FAT ESP). Files are
+synced before atomic no-replace hard-link publication, then the filesystem is
+synced again before success.
+The two files are NOT an atomic pair across power loss: discard an interrupted
+generation, never consume it. Existing outputs are never replaced.
+EOF
+}
+
+fail() {
+    echo "fde-build-uki: $*" >&2
+    exit 1
+}
+
+declare -A paths=()
+while (( $# )); do
+    case "$1" in
+        --help) usage; exit 0 ;;
+        --linux|--initrd|--cmdline|--os-release|--key|--cert|--output)
+            (( $# >= 2 )) && [[ -n $2 ]] || fail "missing path for $1"
+            [[ ! ${paths[$1]+present} ]] || fail "duplicate option: $1"
+            paths[$1]=$2
+            shift 2
+            ;;
+        *) fail "unknown option: $1" ;;
+    esac
+done
+for option in --linux --initrd --cmdline --os-release --key --cert --output; do
+    [[ ${paths[$option]+present} ]] || fail "missing option: $option"
+    if [[ $option != --output ]]; then
+        [[ -f ${paths[$option]} && -r ${paths[$option]} && -s ${paths[$option]} ]] \
+            || fail "not a readable nonempty file: ${paths[$option]}"
+        paths[$option]=$(realpath -e -- "${paths[$option]}")
+    fi
+done
+
+output=${paths[--output]}
+parent=$(dirname -- "$output")
+[[ -d $parent ]] || fail "output directory does not exist: $parent"
+parent=$(realpath -e -- "$parent")
+output="$parent/$(basename -- "$output")"
+prediction="$output.pcr11"
+for path in "$output" "$prediction"; do
+    [[ ! -e $path && ! -L $path ]] || fail "output already exists: $path"
+done
+
+work=$(mktemp -d "$parent/.fde-uki.XXXXXXXX")
+image_published=false
+prediction_published=false
+complete=false
+cleanup() {
+    if [[ $complete != true ]]; then
+        if [[ $image_published == true ]]; then rm -f -- "$output"; fi
+        if [[ $prediction_published == true ]]; then rm -f -- "$prediction"; fi
+    fi
+    rm -rf -- "$work"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+export TMPDIR="$work"
+
+openssl rsa -in "${paths[--key]}" -passin pass: -check -noout >&2
+/usr/lib/systemd/ukify build --config=/dev/null \
+    --linux="${paths[--linux]}" --initrd="${paths[--initrd]}" \
+    --cmdline="@${paths[--cmdline]}" --os-release="@${paths[--os-release]}" \
+    --uname= --no-sign-kernel --signtool=sbsign \
+    --secureboot-private-key="${paths[--key]}" \
+    --secureboot-certificate="${paths[--cert]}" --output="$work/image.efi" >&2
+sbverify --cert "${paths[--cert]}" "$work/image.efi" >&2
+
+# Extract virtual section contents; objcopy --dump-section includes PE alignment padding.
+sections=()
+for section in linux initrd cmdline osrel sbat; do
+    sections+=("--section=.$section:binary@$work/$section")
+done
+/usr/lib/systemd/ukify inspect "$work/image.efi" --config=/dev/null "${sections[@]}" >&2
+
+# ':' is the empty phase path in systemd-measure, before enter-initrd.
+/usr/lib/systemd/systemd-measure calculate --bank=sha256 --phase=: --json=short \
+    --linux="$work/linux" --initrd="$work/initrd" --cmdline="$work/cmdline" \
+    --osrel="$work/osrel" --sbat="$work/sbat" > "$work/pcr.json"
+jq -er '
+    if (keys == ["sha256"] and (.sha256 | length) == 1
+        and .sha256[0].pcr == 11
+        and (.sha256[0].hash | type) == "string"
+        and (.sha256[0].hash | length) == 64
+        and (.sha256[0].hash | test("^[0-9a-f]{64}$")))
+    then .sha256[0].hash else error("invalid PCR11 prediction") end
+' "$work/pcr.json" > "$work/pcr11"
+
+sync -f "$work/image.efi" "$work/pcr11"
+ln -T -- "$work/pcr11" "$prediction"
+prediction_published=true
+ln -T -- "$work/image.efi" "$output"
+image_published=true
+sync -f "$parent"
+complete=true

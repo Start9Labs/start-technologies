@@ -13,7 +13,7 @@ use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::{TmpDir, write_file_private_atomic};
 
-const PCR_SELECTION: &str = "sha256:7,11,15";
+const PCR_SELECTION: &str = "sha256:0,2,7,11,15";
 const POLICY_REF: &[u8] = b"StartOS FDE bootstrap policy v1";
 const PRIMARY_TEMPLATE: &str = "ecc256:null:aes128cfb";
 const PRIMARY_ATTRIBUTES: &str =
@@ -34,9 +34,11 @@ pub struct Authorization {
     pub signature: Vec<u8>,
 }
 
-/// PCRs 7, 11 and 15 in the SHA-256 bank, in TPM selection order.
+/// Firmware, option ROMs, Secure Boot policy, UKI and verified filesystems.
 #[derive(Clone, Debug)]
 pub struct BootMeasurements {
+    pub firmware: [u8; 32],
+    pub option_roms: [u8; 32],
     pub secure_boot: [u8; 32],
     pub uki: [u8; 32],
     pub files: [u8; 32],
@@ -44,7 +46,14 @@ pub struct BootMeasurements {
 
 impl BootMeasurements {
     fn bytes(&self) -> Vec<u8> {
-        [&self.secure_boot[..], &self.uki[..], &self.files[..]].concat()
+        [
+            &self.firmware[..],
+            &self.option_roms[..],
+            &self.secure_boot[..],
+            &self.uki[..],
+            &self.files[..],
+        ]
+        .concat()
     }
 }
 
@@ -423,16 +432,18 @@ pub async fn read_measurements() -> Result<BootMeasurements, Error> {
         .run("tpm2_pcrread", &["-o", "pcrs.bin", PCR_SELECTION])
         .await?;
     let bytes = workspace.read("pcrs.bin").await?;
-    if bytes.len() != 96 {
+    if bytes.len() != 160 {
         return Err(Error::new(
             eyre!("{}", t!("fde.tpm.invalid-policy")),
             ErrorKind::Bios,
         ));
     }
     Ok(BootMeasurements {
-        secure_boot: bytes[..32].try_into().unwrap(),
-        uki: bytes[32..64].try_into().unwrap(),
-        files: bytes[64..96].try_into().unwrap(),
+        firmware: bytes[..32].try_into().unwrap(),
+        option_roms: bytes[32..64].try_into().unwrap(),
+        secure_boot: bytes[64..96].try_into().unwrap(),
+        uki: bytes[96..128].try_into().unwrap(),
+        files: bytes[128..160].try_into().unwrap(),
     })
 }
 
@@ -490,7 +501,7 @@ mod tests {
         let authority = crate::net::ssl::gen_nistp256().unwrap();
         let key = super::super::bootstrap::generate_key().unwrap();
         let measurements = read_measurements().await.unwrap();
-        let authorization = authorize(&measurements, &authority).await.unwrap();
+        let mut authorization = authorize(&measurements, &authority).await.unwrap();
         let sealed = seal(&key, &authority).await.unwrap();
         let authority_public = public_key(&authority).unwrap();
         assert_eq!(
@@ -501,27 +512,69 @@ mod tests {
             key.as_slice(),
         );
         let workspace = Workspace::new().await.unwrap();
+        for register in [0, 2, 7, 11, 15] {
+            workspace
+                .run(
+                    "tpm2_pcrextend",
+                    &[&format!("{register}:sha256={}", "01".repeat(32))],
+                )
+                .await
+                .unwrap();
+            assert!(
+                unseal(&sealed, &authorization, &authority_public)
+                    .await
+                    .is_err(),
+                "changed PCR {register} released the bootstrap key",
+            );
+            authorization = authorize(&read_measurements().await.unwrap(), &authority)
+                .await
+                .unwrap();
+            assert_eq!(
+                unseal(&sealed, &authorization, &authority_public)
+                    .await
+                    .unwrap()
+                    .as_slice(),
+                key.as_slice(),
+            );
+        }
+        let other = crate::net::ssl::gen_nistp256().unwrap();
+        let other_authorization = authorize(&read_measurements().await.unwrap(), &other)
+            .await
+            .unwrap();
+        assert!(
+            unseal(&sealed, &other_authorization, &public_key(&other).unwrap())
+                .await
+                .is_err()
+        );
+        workspace.write("sealed.pub", &sealed.public).await.unwrap();
+        workspace
+            .write("sealed.priv", &sealed.private)
+            .await
+            .unwrap();
+        workspace.create_primary().await.unwrap();
         workspace
             .run(
-                "tpm2_pcrextend",
-                &[&format!("15:sha256={}", "01".repeat(32))],
+                "tpm2_load",
+                &[
+                    "-C",
+                    "primary.ctx",
+                    "-u",
+                    "sealed.pub",
+                    "-r",
+                    "sealed.priv",
+                    "-c",
+                    "sealed.ctx",
+                ],
             )
             .await
             .unwrap();
         assert!(
-            unseal(&sealed, &authorization, &authority_public)
+            workspace
+                .run("tpm2_unseal", &["-c", "sealed.ctx"])
                 .await
                 .is_err()
         );
-        let replacement = authorize(&read_measurements().await.unwrap(), &authority)
-            .await
-            .unwrap();
-        assert_eq!(
-            unseal(&sealed, &replacement, &authority_public)
-                .await
-                .unwrap()
-                .as_slice(),
-            key.as_slice(),
-        );
+        workspace.flush("sealed.ctx").await;
+        workspace.flush("primary.ctx").await;
     }
 }

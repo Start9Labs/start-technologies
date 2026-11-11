@@ -8,11 +8,17 @@ Boot attestation gates the private TLS identity used by the password-entry page 
 
 The measured execution chain must authenticate the kernel, initramfs, effective command line, rootfs and persistent overlay before bootstrap credentials are released. Filesystem contents must remain integrity-protected after verification. Merely authenticating a filename or measuring a mutable directory does not satisfy this contract.
 
-`start_core::fde::bootstrap` authenticates and encrypts the bootstrap payload. `start_core::fde::tpm` seals its random encryption key to a P-256-authorized policy over SHA-256 PCRs 7, 11 and 15, restricted to `Unseal`. PCR 11 belongs to the UKI measurement chain; PCR 15 binds the verified rootfs and overlay. The policy-signing private key belongs on the encrypted data drive. The TPM policy authorization and the overlay manifest signature are distinct messages.
+`start_core::fde::bootstrap` authenticates and encrypts the bootstrap payload. `start_core::fde::tpm` seals its random encryption key to a P-256-authorized policy over SHA-256 PCRs 0, 2, 7, 11 and 15, restricted to `Unseal`. Firmware and option ROM measurements are pinned alongside Secure Boot policy. PCR 11 belongs to the UKI measurement chain; PCR 15 binds the verified rootfs and overlay. Unexpected firmware or trust-policy changes require trusted re-enrollment, not automatic resealing. The policy-signing private key belongs on the encrypted data drive. The TPM policy authorization and the overlay manifest signature are distinct messages.
 
 `start_core::fde::credentials` carries encrypted leaf TLS identities and NetworkManager profiles without a data-unlock password. Leaf identities share the certificate-chain type and TLS configuration builder used by the normal server. NetworkManager keyfile discovery is shared with the existing saved-profile owner. Bootstrap keyfiles are materialized with private permissions beneath `/run`, then removed individually during handoff; saved data-drive profiles remain authoritative.
 
 These primitives alone do not establish the measured boot chain or enable FDE on a server.
+
+## UKI construction
+
+`build/lib/scripts/fde-build-uki` embeds the kernel, initramfs, effective command line and OS release in a native-architecture UKI, signed using the enrolled RSA Secure Boot identity. That private key belongs on the encrypted data drive and is distinct from the P-256 policy authority. PCR11 prediction uses the final image's actual virtual section contents through systemd tooling; Authenticode signing timestamps do not select boot state.
+
+The helper creates a UKI and a `.pcr11` companion in a private staging generation on a hard-link-capable filesystem. The companion contains 64 lowercase hexadecimal digits and a newline, describing SHA-256 PCR11 before any initrd phase events. The pair is not independently atomic: the enclosing complete generation owns publication. Existing output files are not replaced on errors.
 
 ## Persistent overlay
 

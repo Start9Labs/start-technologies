@@ -30,6 +30,11 @@ backup-fs-test: $(call ls-files, projects/start-os/backup-fs/src) projects/start
 container-runtime-test: projects/start-os/container-runtime/node_modules/.package-lock.json $(call ls-files, projects/start-os/container-runtime/src) projects/start-os/container-runtime/package.json projects/start-os/container-runtime/tsconfig.json
 	cd projects/start-os/container-runtime && npm test
 
+.PHONY: start-os-fde-uki-test
+start-os-fde-uki-test: projects/start-os/build/lib/scripts/fde-build-uki projects/start-os/build/tests/fde-uki-test.sh projects/start-os/build/tests/fde-uki.Dockerfile projects/start-os/build/tests/fde-deps-test.sh projects/start-os/build/dpkg-deps/generate.sh projects/start-os/build/dpkg-deps/uefi.depends
+	./projects/start-os/build/tests/fde-deps-test.sh
+	./projects/start-os/build/tests/fde-uki-test.sh
+
 .PHONY: start-os-grub-test
 start-os-grub-test: projects/start-os/build/tests/grub-overrides-test.sh projects/start-os/build/lib/grub-user.cfg projects/start-os/build/lib/scripts/nvme-isolation-test projects/start-os/debian/postinst projects/start-os/build/image-recipe/raspberrypi/squashfs/etc/default/grub.d/raspberrypi.cfg
 	./projects/start-os/build/tests/grub-overrides-test.sh
