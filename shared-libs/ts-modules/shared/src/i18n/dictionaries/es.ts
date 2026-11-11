@@ -960,4 +960,5 @@ export default {
   1109: 'Respuesta del servidor no válida',
   1110: 'Tamaño máximo del archivo',
   1111: 'Ver en el Mercado',
+  1112: 'Esta implementación alternativa cumple el requisito',
 } satisfies i18n

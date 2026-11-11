@@ -960,4 +960,5 @@ export default {
   1109: 'Réponse du serveur non valide',
   1110: 'Taille maximale du fichier',
   1111: 'Voir dans la bibliothèque de services',
+  1112: 'Cette implémentation alternative remplit la condition requise',
 } satisfies i18n

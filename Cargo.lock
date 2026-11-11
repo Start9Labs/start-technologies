@@ -8582,6 +8582,7 @@ dependencies = [
  "patch-db",
  "pwhash",
  "rand 0.9.5",
+ "regex",
  "reqwest",
  "rpassword",
  "rpc-toolkit",
