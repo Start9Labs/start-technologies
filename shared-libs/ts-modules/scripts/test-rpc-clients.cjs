@@ -35,6 +35,7 @@ function harness(moduleOverrides = new Map()) {
       'HttpService',
       'AuthKeyService',
       'AuthService',
+      'ConfigService',
       'StaleUiService',
       'PATCH_CACHE',
       'RELATIVE_URL',
@@ -92,6 +93,8 @@ function harness(moduleOverrides = new Map()) {
         return { HttpService: tokens.HttpService }
       if (request.endsWith('stale-ui.service'))
         return { StaleUiService: tokens.StaleUiService }
+      if (request === 'src/app/services/config.service')
+        return { ConfigService: tokens.ConfigService }
       if (request.endsWith('patch-db-source'))
         return {
           ...load(
@@ -140,6 +143,7 @@ function harness(moduleOverrides = new Map()) {
     defaultView: { location: { host: 'server.test', protocol: 'https:' } },
   })
   dependencies.set(tokens.RELATIVE_URL, '/rpc/v1')
+  dependencies.set(tokens.ConfigService, { gitHash: 'mock-ui-build' })
   return { dependencies, tokens, load }
 }
 
@@ -399,6 +403,10 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
   const client = new (load(
     'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
   ).MockApiService)()
+  assert.equal(
+    await client.rpc.gitInfo({}),
+    dependencies.get(tokens.ConfigService).gitHash,
+  )
   const params = {
     registry: 'https://registry.test/',
     id: null,
