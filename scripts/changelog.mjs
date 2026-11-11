@@ -625,7 +625,7 @@ function releaseFragments(product, version, ref) {
   return ownedFragments({ product, version, commit, fragments }, releases)
 }
 
-function noteCandidates(product, version, ref, since) {
+function changedFragments(product, version, ref, since) {
   const earlier = since ? sourceFragments(product, since) : new Map()
   return releaseFragments(product, version, ref)
     .filter(
@@ -634,6 +634,12 @@ function noteCandidates(product, version, ref, since) {
         !sameFragment(earlier.get(fragment.path), fragment),
     )
     .sort((a, b) => compareText(a.path, b.path))
+}
+
+// Security fragments are omitted: compose-notes always includes them.
+function noteCandidates(product, version, ref, since) {
+  return changedFragments(product, version, ref, since)
+    .filter(fragment => fragment.kind !== 'security')
     .map(fragment => ({
       path: fragment.path,
       kind: fragment.kind,
@@ -649,17 +655,27 @@ function parseSelection(data, source) {
     items.some(
       item =>
         !KINDS.includes(item?.kind) ||
+        item.kind === 'security' ||
         typeof item.body !== 'string' ||
         !item.body.trim(),
     )
   )
-    throw new Error(`${source}: expected an array of { kind, body }`)
+    throw new Error(
+      `${source}: expected an array of non-security { kind, body } highlights`,
+    )
   return items
 }
 
-function composeNotes(product, version, ref, selectionPath, basePath) {
+function composeNotes(product, version, ref, selectionPath, basePath, since) {
   parseVersion(basename(product), version)
-  const items = parseSelection(readFileSync(selectionPath), selectionPath)
+  const items = [
+    ...parseSelection(readFileSync(selectionPath), selectionPath),
+    ...noteItems(
+      changedFragments(product, version, ref, since).filter(
+        fragment => fragment.kind === 'security',
+      ),
+    ),
+  ]
   if (basePath === undefined) {
     const path = notesPath(product, version)
     return compileNotes(path, sourceFile(path, ref), items, ref)
@@ -979,7 +995,7 @@ function sync() {
 }
 
 const USAGE =
-  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | notes PRODUCT VERSION [--ref REF] | security PRODUCT VERSION [--ref REF] | candidates PRODUCT VERSION [--ref REF] [--since REF] | compose-notes PRODUCT VERSION --selection FILE [--ref REF] [--base FILE] | release-notes PRODUCT VERSION [--ref REF] [--notes FILE] | registry-notes PRODUCT VERSION [--ref REF] [--changelog-ref REF] [--notes FILE] | archives PRODUCT [--ref REF] | format-notes FILE | section VERSION | sync'
+  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | notes PRODUCT VERSION [--ref REF] | security PRODUCT VERSION [--ref REF] | candidates PRODUCT VERSION [--ref REF] [--since REF] | compose-notes PRODUCT VERSION --selection FILE [--ref REF] [--since REF] [--base FILE] | release-notes PRODUCT VERSION [--ref REF] [--notes FILE] | registry-notes PRODUCT VERSION [--ref REF] [--changelog-ref REF] [--notes FILE] | archives PRODUCT [--ref REF] | format-notes FILE | section VERSION | sync'
 
 try {
   const { values, positionals } = parseArgs({
@@ -1030,7 +1046,8 @@ try {
       (values['changelog-ref'] !== undefined && command !== 'registry-notes') ||
       (values.notes !== undefined &&
         !['release-notes', 'registry-notes'].includes(command)) ||
-      (values.since !== undefined && command !== 'candidates') ||
+      (values.since !== undefined &&
+        !['candidates', 'compose-notes'].includes(command)) ||
       (values.selection === undefined) !== (command !== 'compose-notes') ||
       (values.base !== undefined && command !== 'compose-notes'))
   ) {
@@ -1069,6 +1086,7 @@ try {
         values.ref,
         values.selection,
         values.base,
+        values.since,
       ),
     )
   else if (command === 'release-notes')

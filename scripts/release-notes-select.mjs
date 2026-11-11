@@ -56,7 +56,7 @@ function draw() {
   if (cursor < top) top = cursor
   if (cursor >= top + height) top = cursor - height + 1
   const lines = [
-    `Select the fragments for the ${title}`,
+    `Select highlights for the ${title}`,
     '↑/↓ move · space toggle · tab reword · enter confirm · q abort',
     '',
   ]

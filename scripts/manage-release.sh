@@ -196,7 +196,8 @@ seed_notes() {
     node "$REPO_ROOT/scripts/release-notes-select.mjs" "$work/candidates.json" "$work/selection.json" \
         "$(project_display_name "$PROJECT") ${TAG#"${PROJECT}/"} release notes"
     (cd "$REPO_ROOT" && node scripts/changelog.mjs compose-notes "projects/$PROJECT" "$VERSION" \
-        --selection "$work/selection.json" ${ref:+--ref "$ref"} "${base_args[@]}") > "$english"
+        --selection "$work/selection.json" ${ref:+--ref "$ref"} \
+        ${since:+--since "$since"} "${base_args[@]}") > "$english"
 }
 
 # Open the English notes in the editor, translate them into every catalog
@@ -2019,9 +2020,9 @@ Subcommands:
                      (os/cli/deb/wrt; set RUN_ID or you'll be prompted.)
   pull               Download the released assets from their official location
                      (registry / apt repo / GitHub release / npm).
-  create-gh-release  Pick the release's fragments for the notes (security and
-                     release-notes: true are checked; tab rewords one), edit the
-                     compiled notes in $VISUAL/$EDITOR, translate them into every
+  create-gh-release  Pick the release's highlights (release-notes: true are
+                     checked; tab rewords one; security fragments are always
+                     included), edit the compiled notes in $VISUAL/$EDITOR, translate them into every
                      locale with the claude CLI and review those, then draft (or
                      update) the GitHub release at the commit being tagged with
                      the notes, an expandable changelog, the full-history

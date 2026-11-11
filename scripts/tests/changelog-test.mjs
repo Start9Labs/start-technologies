@@ -1168,7 +1168,7 @@ test('authored Highlights and Security sections are rejected', t => {
   }
 })
 
-test('candidates check highlights and security, and skip fragments a prerelease carried', t => {
+test('candidates offer non-security highlights and skip fragments a prerelease carried', t => {
   const { root, fragment, cli, commit, tag } = compilerFixture(t)
   fragment('minor-added-a.md', '- Highlight.\n')
   fragment('patch-fixed-b.md', '- Routine.\n', false)
@@ -1192,7 +1192,6 @@ test('candidates check highlights and security, and skip fragments a prerelease 
   assert.deepEqual(candidates(), [
     ['minor-added-a.md', 'added', '- Highlight.', true],
     ['patch-fixed-b.md', 'fixed', '- Routine.', false],
-    ['patch-security-c.md', 'security', '- Security.', true],
   ])
   assert.deepEqual(candidates(rc), [])
   writeFileSync(edited, '---\nrelease-notes: false\n---\n\n- Revised.\n')
@@ -1200,22 +1199,19 @@ test('candidates check highlights and security, and skip fragments a prerelease 
   commit()
   assert.deepEqual(candidates(rc), [
     ['patch-fixed-d.md', 'fixed', '- Later.', true],
-    ['patch-security-c.md', 'security', '- Revised.', true],
   ])
   assert.ok(existsSync(join(root, PRODUCT, 'changelog/minor-added-a.md')))
 })
 
-test('compose-notes compiles a selection with framing and inserts into a base', t => {
-  const { root, write, cli } = compilerFixture(t)
+test('compose-notes compiles highlights and every security fragment with framing', t => {
+  const { root, write, cli, fragment, commit } = compilerFixture(t)
   const selection = items => write('selection.json', JSON.stringify(items))
+  fragment('patch-security-a.md', '- Security fix.\n', false)
   write(
     `${PRODUCT}/release-notes/0.4.0.1.md`,
     'Lede.\n\n## Important\n\nNotice.\n',
   )
-  selection([
-    { kind: 'security', body: '- Reworded security.' },
-    { kind: 'added', body: '- Picked.' },
-  ])
+  selection([{ kind: 'added', body: '- Picked.' }])
   const compose = (...extra) =>
     cli([
       'compose-notes',
@@ -1227,7 +1223,7 @@ test('compose-notes compiles a selection with framing and inserts into a base', 
     ]).stdout.toString()
   assert.equal(
     compose(),
-    'Lede.\n\n## Highlights\n\n- Picked.\n\n## Security\n\n- Reworded security.\n\n## Important\n\nNotice.\n',
+    'Lede.\n\n## Highlights\n\n- Picked.\n\n## Security\n\n- Security fix.\n\n## Important\n\nNotice.\n',
   )
   const base = write(
     'base.md',
@@ -1235,27 +1231,37 @@ test('compose-notes compiles a selection with framing and inserts into a base', 
   )
   assert.equal(
     compose('--base', base),
-    'Edited lede.\n\n## Highlights\n\n- Earlier.\n\n- Picked.\n\n## Security\n\n- Reworded security.\n\n## Important\n\nEdited notice.\n',
+    'Edited lede.\n\n## Highlights\n\n- Earlier.\n\n- Picked.\n\n## Security\n\n- Security fix.\n\n## Important\n\nEdited notice.\n',
   )
-  write('base.md', '## Security\n\n- Earlier fix.\n')
+  const rc = commit()
+  write('base.md', '## Security\n\n- Security fix.\n')
   selection([{ kind: 'fixed', body: '- New fix.' }])
   assert.equal(
-    compose('--base', base),
-    '## Highlights\n\n- New fix.\n\n## Security\n\n- Earlier fix.\n',
+    compose('--base', base, '--since', rc),
+    '## Highlights\n\n- New fix.\n\n## Security\n\n- Security fix.\n',
   )
+  fragment('patch-security-b.md', '- Later security fix.\n', false)
   selection([])
-  assert.equal(compose('--base', base), '## Security\n\n- Earlier fix.\n')
-  selection([{ kind: 'nonsense', body: '- Bad.' }])
-  cli(
-    [
-      'compose-notes',
-      PRODUCT,
-      '0.4.0.1',
-      '--selection',
-      join(root, 'selection.json'),
-    ],
-    false,
+  assert.equal(
+    compose('--base', base, '--since', rc),
+    '## Security\n\n- Security fix.\n\n- Later security fix.\n',
   )
+  for (const items of [
+    [{ kind: 'nonsense', body: '- Bad.' }],
+    [{ kind: 'security', body: '- Picked security.' }],
+  ]) {
+    selection(items)
+    cli(
+      [
+        'compose-notes',
+        PRODUCT,
+        '0.4.0.1',
+        '--selection',
+        join(root, 'selection.json'),
+      ],
+      false,
+    )
+  }
 })
 
 test('consumption does not follow replacement symlink', t => {
