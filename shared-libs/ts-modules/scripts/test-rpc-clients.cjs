@@ -35,11 +35,13 @@ function harness(moduleOverrides = new Map()) {
       'HttpService',
       'AuthKeyService',
       'AuthService',
+      'ConfigService',
       'StaleUiService',
       'PATCH_CACHE',
       'RELATIVE_URL',
     ].map(name => [name, Symbol(name)]),
   )
+  dependencies.set(tokens.ConfigService, { gitHash: '' })
   const modules = new Map()
   const angular = {
     DOCUMENT: tokens.DOCUMENT,
@@ -89,6 +91,8 @@ function harness(moduleOverrides = new Map()) {
         return { AuthService: tokens.AuthService }
       if (request.endsWith('http.service'))
         return { HttpService: tokens.HttpService }
+      if (request.endsWith('config.service'))
+        return { ConfigService: tokens.ConfigService }
       if (request.endsWith('stale-ui.service'))
         return { StaleUiService: tokens.StaleUiService }
       if (request.endsWith('patch-db-source'))
