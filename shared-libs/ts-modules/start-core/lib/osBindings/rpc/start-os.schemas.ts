@@ -5420,6 +5420,10 @@ export const Api = {
               _PARAMS: /* @__PURE__ */ DeleteLegacyParams,
               _RETURN: /* @__PURE__ */ z.null(),
             },
+            find: {
+              _PARAMS: /* @__PURE__ */ empty,
+              _RETURN: /* @__PURE__ */ z.array(BackupTargetId),
+            },
             info: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(

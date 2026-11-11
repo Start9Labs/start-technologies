@@ -17,7 +17,7 @@ import {
   TuiTablePaginationEvent,
 } from '@taiga-ui/addon-table'
 import { TuiMapperPipe } from '@taiga-ui/cdk'
-import { TuiButton, TuiCell, TuiIcon } from '@taiga-ui/core'
+import { TuiButton, TuiCell, TuiIcon, TuiLoader } from '@taiga-ui/core'
 import { TuiTooltip } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
 import {
@@ -126,10 +126,14 @@ const TARGET_SOURCES: SourcePickerData = {
         <button
           tuiButton
           size="xs"
-          iconStart="@tui.plus"
+          appearance="secondary-grayscale"
+          iconStart="@tui.search"
           class="end"
-          (click)="add()"
+          (click)="find()"
         >
+          {{ 'Find' | i18n }}
+        </button>
+        <button tuiButton size="xs" iconStart="@tui.plus" (click)="add()">
           {{ 'Add' | i18n }}
         </button>
       </header>
@@ -233,7 +237,7 @@ const TARGET_SOURCES: SourcePickerData = {
         </button>
       </header>
       <table [appTable]="['Started', 'Duration', 'Target', 'Result', null]">
-        @for (run of history().runs; track run.id) {
+        @for (run of history()?.runs ?? []; track run.id) {
           @let result = run | tuiMapper: toResult;
           <tr>
             <td>{{ run.startedAt | date: 'medium' }}</td>
@@ -259,12 +263,18 @@ const TARGET_SOURCES: SourcePickerData = {
           </tr>
         } @empty {
           <tr>
-            <td colspan="5">{{ 'No backups yet' | i18n }}</td>
+            <td colspan="5">
+              @if (history()) {
+                {{ 'No backups yet' | i18n }}
+              } @else {
+                <tui-loader size="s" />
+              }
+            </td>
           </tr>
         }
       </table>
       <tui-table-pagination
-        [total]="history().total"
+        [total]="history()?.total ?? 0"
         [page]="page().index"
         [size]="page().size"
         (paginationChange)="paginate($event)"
@@ -347,6 +357,7 @@ const TARGET_SOURCES: SourcePickerData = {
     TuiButton,
     TuiCell,
     TuiIcon,
+    TuiLoader,
     TuiMapperPipe,
     TuiTooltip,
     TableComponent,
@@ -395,7 +406,6 @@ export default class Backups {
           }),
       ),
     ),
-    { initialValue: EMPTY_HISTORY },
   )
   protected readonly types = VOLUME_TYPES
   protected readonly statuses = VOLUME_STATUSES
@@ -436,6 +446,19 @@ export default class Backups {
             .catch(error => this.errors.handleError(error as HttpError)),
         ),
     )
+  }
+
+  protected async find() {
+    let count = 0
+    const found = await this.tasks.run(async () => {
+      count = (await this.api.rpc.backup.target.find({})).length
+    }, 'Searching for backups')
+    if (found && !count)
+      this.dialogs
+        .openAlert('No unregistered backups were found on connected drives.', {
+          label: 'Backups',
+        })
+        .subscribe()
   }
 
   protected add() {

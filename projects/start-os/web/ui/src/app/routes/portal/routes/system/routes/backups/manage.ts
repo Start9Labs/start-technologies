@@ -1,8 +1,6 @@
 import { Component, computed, effect, inject } from '@angular/core'
-import { FormsModule } from '@angular/forms'
-import { CopyService, i18nPipe, TaskService } from '@start9labs/shared'
-import { managedStorage } from '@start9labs/start-core'
-import { TuiButton, TuiDialogContext, TuiIcon, TuiInput } from '@taiga-ui/core'
+import { i18nPipe, TaskService } from '@start9labs/shared'
+import { TuiButton, TuiDialogContext, TuiIcon } from '@taiga-ui/core'
 import { TuiConfirmService } from '@taiga-ui/kit'
 import { TuiForm } from '@taiga-ui/layout'
 import { injectContext } from '@taiga-ui/polymorpheus'
@@ -25,23 +23,7 @@ import { BackupService } from './backup.service'
         {{ target.name }}
       </div>
       <div tuiForm="l">
-        <source-fields [edit]="edit" [localPath]="localPath" />
-        <tui-textfield>
-          <label tuiLabel>{{ 'Target ID' | i18n }}</label>
-          <input tuiInput [readonly]="true" [ngModel]="context.data.id" />
-          <button
-            tuiIconButton
-            appearance="icon"
-            size="s"
-            type="button"
-            tabindex="-1"
-            iconStart="@tui.copy"
-            (pointerdown.stop)="(0)"
-            (click)="copy.copy(context.data.id)"
-          >
-            {{ 'Copy' | i18n }}
-          </button>
-        </tui-textfield>
+        <source-fields [edit]="edit" />
         <footer>
           <button
             tuiButton
@@ -74,15 +56,7 @@ import { BackupService } from './backup.service'
     }
   `,
   styles: SOURCE_MANAGE_STYLES,
-  imports: [
-    FormsModule,
-    SourceFields,
-    TuiButton,
-    TuiForm,
-    TuiIcon,
-    TuiInput,
-    i18nPipe,
-  ],
+  imports: [SourceFields, TuiButton, TuiForm, TuiIcon, i18nPipe],
 })
 export class BackupTargetManage {
   protected readonly types = VOLUME_TYPES
@@ -92,7 +66,6 @@ export class BackupTargetManage {
   private readonly confirm = inject(TuiConfirmService, { optional: true })
 
   protected readonly service = inject(BackupService)
-  protected readonly copy = inject(CopyService)
   protected readonly context =
     injectContext<TuiDialogContext<boolean, { id: string }>>()
 
@@ -100,7 +73,6 @@ export class BackupTargetManage {
     () => this.service.targets()[this.context.data.id],
   )
   protected readonly edit = sourceEdit(this.target)
-  protected readonly localPath = `${managedStorage.backupTargets}/${this.context.data.id}`
 
   constructor() {
     effect(() =>

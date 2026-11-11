@@ -38,6 +38,18 @@ pub struct BackupTarget {
 rpc_toolkit::reflect_ts!(BackupTarget);
 rpc_toolkit::ts_export!(BackupTarget, namespaces = [""]);
 
+impl BackupTarget {
+    fn new(name: String, source: SharedVolumeSource) -> Self {
+        Self {
+            name,
+            source,
+            inspection: Default::default(),
+            start_os: BTreeMap::new(),
+            legacy_backup: false,
+        }
+    }
+}
+
 pub(crate) type TargetMount = Arc<PreparedSource>;
 
 #[derive(Debug)]
@@ -146,16 +158,9 @@ pub async fn create(
                     .as_backup_target_credentials_mut()
                     .insert(&id, &credentials)?;
             }
-            db.as_public_mut().as_backup_targets_mut().insert(
-                &id,
-                &BackupTarget {
-                    name,
-                    source,
-                    inspection: Default::default(),
-                    start_os: BTreeMap::new(),
-                    legacy_backup: false,
-                },
-            )?;
+            db.as_public_mut()
+                .as_backup_targets_mut()
+                .insert(&id, &BackupTarget::new(name, source))?;
             Ok(())
         })
         .await
@@ -166,6 +171,64 @@ pub async fn create(
         publication?;
     }
     Ok(id)
+}
+
+/// Registers partition roots containing `StartOSBackupsV2` metadata on explicit request.
+/// Background inventory scans never register targets.
+pub async fn find(ctx: RpcContext) -> Result<Vec<BackupTargetId>, Error> {
+    let disks = crate::disk::discovery::scan(&ctx.db, &ctx.os_partitions).await?;
+    let mut found = Vec::new();
+    for partition in backup_partitions(&disks) {
+        let source = source::prepare_disk_source_from_inventory(
+            &ctx,
+            &disks,
+            partition.logicalname.clone(),
+            PathBuf::new(),
+        )
+        .await?;
+        let name = match &source {
+            SharedVolumeSource::Disk { label, .. } => label
+                .as_ref()
+                .filter(|name| !name.trim().is_empty())
+                .cloned()
+                .unwrap_or_else(|| partition.logicalname.display().to_string()),
+            _ => unreachable!(),
+        };
+        found.push((name, source));
+    }
+    ctx.db.mutate(|db| register_found(db, found)).await.result
+}
+
+fn backup_partitions(
+    disks: &[crate::disk::util::DiskInfo],
+) -> impl Iterator<Item = &crate::disk::util::PartitionInfo> {
+    disks
+        .iter()
+        .flat_map(|disk| &disk.partitions)
+        .filter(|partition| !partition.start_os.is_empty())
+}
+
+fn register_found(
+    db: &mut DatabaseModel,
+    found: Vec<(String, SharedVolumeSource)>,
+) -> Result<Vec<BackupTargetId>, Error> {
+    let mut targets = db.as_public().as_backup_targets().de()?;
+    let mut added = Vec::new();
+    for (name, source) in found {
+        if targets.values().any(|target| {
+            matches!((&target.source, &source), (
+            SharedVolumeSource::Disk { logicalname: existing, path: existing_path, .. },
+            SharedVolumeSource::Disk { logicalname, path, .. },
+        ) if existing == logicalname && existing_path == path)
+        }) {
+            continue;
+        }
+        let id = BackupTargetId::new();
+        targets.insert(id.clone(), BackupTarget::new(name, source));
+        added.push(id);
+    }
+    db.as_public_mut().as_backup_targets_mut().ser(&targets)?;
+    Ok(added)
 }
 
 #[derive(Deserialize, Serialize, VisitFields)]
@@ -453,7 +516,7 @@ pub(crate) fn write_inspection(
         })
 }
 
-/// Drive targets require explicit registration.
+/// Drive targets register through explicit discovery or source creation.
 /// Consumes legacy CIFS registrations; same-version pre-feature development rollback is unsupported.
 pub(crate) fn initialize(db: &mut DatabaseModel) -> Result<(), Error> {
     let mut targets = db.as_public().as_backup_targets().de()?;
@@ -467,16 +530,7 @@ pub(crate) fn initialize(db: &mut DatabaseModel) -> Result<(), Error> {
         let name = cifs_name(&cifs);
         let (source, password) = source::cifs_definition(cifs);
         credentials.insert(id.clone(), password);
-        targets.insert(
-            id,
-            BackupTarget {
-                name,
-                source,
-                inspection: Default::default(),
-                start_os: BTreeMap::new(),
-                legacy_backup: false,
-            },
-        );
+        targets.insert(id, BackupTarget::new(name, source));
     }
     for target in targets.values_mut() {
         target.inspection = Default::default();

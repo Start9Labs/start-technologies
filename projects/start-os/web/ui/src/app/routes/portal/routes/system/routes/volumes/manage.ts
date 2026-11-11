@@ -1,14 +1,11 @@
 import { Component, computed, effect, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { FormsModule } from '@angular/forms'
-import { CopyService, i18nPipe, TaskService } from '@start9labs/shared'
-import { managedStorage } from '@start9labs/start-core'
+import { i18nPipe, TaskService } from '@start9labs/shared'
 import {
   TuiButton,
   TuiCell,
   TuiDialogContext,
   TuiIcon,
-  TuiInput,
   TuiTitle,
 } from '@taiga-ui/core'
 import { TuiAvatar, TuiConfirmService } from '@taiga-ui/kit'
@@ -34,23 +31,7 @@ import { SOURCE_MANAGE_STYLES } from './manage.styles'
         {{ volume.name }}
       </div>
       <div tuiForm="l">
-        <source-fields [edit]="edit" [localPath]="localPath" />
-        <tui-textfield>
-          <label tuiLabel>{{ 'Volume ID' | i18n }}</label>
-          <input tuiInput [readonly]="true" [ngModel]="context.data.id" />
-          <button
-            tuiIconButton
-            appearance="icon"
-            size="s"
-            type="button"
-            tabindex="-1"
-            iconStart="@tui.copy"
-            (pointerdown.stop)="(0)"
-            (click)="copy.copy(context.data.id)"
-          >
-            {{ 'Copy' | i18n }}
-          </button>
-        </tui-textfield>
+        <source-fields [edit]="edit" />
         <h3 tuiTitle="m">{{ 'Service access' | i18n }}</h3>
         @if (packages().length) {
           <div class="access">
@@ -130,7 +111,6 @@ import { SOURCE_MANAGE_STYLES } from './manage.styles'
     `,
   ],
   imports: [
-    FormsModule,
     GrantChoice,
     SourceFields,
     TuiButton,
@@ -139,7 +119,6 @@ import { SOURCE_MANAGE_STYLES } from './manage.styles'
     PkgIconDirective,
     TuiForm,
     TuiIcon,
-    TuiInput,
     TuiTitle,
     i18nPipe,
   ],
@@ -152,7 +131,6 @@ export class VolumeManage {
   protected readonly formDialog = inject(FormDialogService)
   private readonly confirm = inject(TuiConfirmService, { optional: true })
 
-  protected readonly copy = inject(CopyService)
   protected readonly context =
     injectContext<TuiDialogContext<boolean, { id: string }>>()
 
@@ -169,7 +147,6 @@ export class VolumeManage {
       .map(getCurrentManifest)
       .filter(manifest => manifest.sharedVolumes),
   )
-  protected readonly localPath = `${managedStorage.sharedVolumes}/${this.context.data.id}`
   protected readonly changed = computed(
     () =>
       this.edit.changed() ||

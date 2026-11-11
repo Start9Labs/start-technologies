@@ -1017,4 +1017,7 @@ export default {
   1207: 'Usuń trwale',
   1208: 'Woluminy współdzielone',
   1209: 'Odczyt',
+  1210: 'Znajdź',
+  1211: 'Wyszukiwanie kopii zapasowych',
+  1212: 'Na podłączonych dyskach nie znaleziono niezarejestrowanych kopii zapasowych.',
 } satisfies i18n

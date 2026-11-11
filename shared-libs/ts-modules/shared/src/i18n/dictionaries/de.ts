@@ -1017,4 +1017,7 @@ export default {
   1207: 'Dauerhaft löschen',
   1208: 'Freigegebene Volumes',
   1209: 'Lesen',
+  1210: 'Suchen',
+  1211: 'Backups werden gesucht',
+  1212: 'Auf den angeschlossenen Laufwerken wurden keine unregistrierten Backups gefunden.',
 } satisfies i18n

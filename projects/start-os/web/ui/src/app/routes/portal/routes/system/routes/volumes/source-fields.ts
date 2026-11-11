@@ -93,24 +93,6 @@ export type SourceEdit = ReturnType<typeof sourceEdit>
         />
       </tui-textfield>
       @switch (entry.source.kind) {
-        @case ('local') {
-          <tui-textfield>
-            <label tuiLabel>{{ 'Path' | i18n }}</label>
-            <input tuiInput [readonly]="true" [ngModel]="localPath()" />
-            <button
-              tuiIconButton
-              appearance="icon"
-              size="s"
-              type="button"
-              tabindex="-1"
-              iconStart="@tui.copy"
-              (pointerdown.stop)="(0)"
-              (click)="copy.copy(localPath())"
-            >
-              {{ 'Copy' | i18n }}
-            </button>
-          </tui-textfield>
-        }
         @case ('disk') {
           @if (driveLabel(); as label) {
             <tui-textfield>
@@ -204,9 +186,10 @@ export type SourceEdit = ReturnType<typeof sourceEdit>
       </tui-textfield>
       @if (entry.error; as error) {
         <tui-textfield>
-          <label tuiLabel>{{ 'Error' | i18n }}</label>
+          <label tuiLabel class="g-negative">{{ 'Error' | i18n }}</label>
           <textarea
             tuiTextarea
+            class="g-negative"
             [readonly]="true"
             [min]="1"
             [max]="6"
@@ -248,8 +231,7 @@ export class SourceFields {
   protected readonly types = VOLUME_TYPES
   protected readonly statuses = VOLUME_STATUSES
 
-  readonly edit = input.required<SourceEdit>()
-  readonly localPath = input.required<string>()
+  public readonly edit = input.required<SourceEdit>()
 
   protected readonly driveLabel = computed(() => {
     const source = this.edit().entry()?.source

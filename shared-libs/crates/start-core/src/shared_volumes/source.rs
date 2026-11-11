@@ -333,8 +333,17 @@ pub(crate) async fn prepare_disk_source(
     path: PathBuf,
 ) -> Result<SharedVolumeSource, Error> {
     let disks = crate::disk::util::list(&ctx.os_partitions, None).await?;
+    prepare_disk_source_from_inventory(ctx, &disks, logicalname, path).await
+}
+
+pub(crate) async fn prepare_disk_source_from_inventory(
+    ctx: &RpcContext,
+    disks: &[crate::disk::util::DiskInfo],
+    logicalname: PathBuf,
+    path: PathBuf,
+) -> Result<SharedVolumeSource, Error> {
     let logicalname = tokio::fs::canonicalize(logicalname).await?;
-    let (partition, label) = external_partition(&disks, &logicalname)?;
+    let (partition, label) = external_partition(disks, &logicalname)?;
     crate::disk::format::refuse_system_drive(
         &ctx.os_partitions,
         &crate::disk::format::parent_drive(&partition).await?,

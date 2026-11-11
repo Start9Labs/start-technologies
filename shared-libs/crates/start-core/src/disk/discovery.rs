@@ -6,8 +6,8 @@ use crate::prelude::*;
 
 pub(crate) async fn refresh(db: TypedPatchDb<Database>, os: OsPartitionInfo) {
     loop {
-        match discover(&db, &os).await {
-            Ok(()) => break,
+        match scan(&db, &os).await {
+            Ok(_) => break,
             Err(error) => tracing::warn!(
                 "{}",
                 t!("shared-volumes.availability-watch-failed", error = error)
@@ -17,12 +17,16 @@ pub(crate) async fn refresh(db: TypedPatchDb<Database>, os: OsPartitionInfo) {
     }
 }
 
-async fn discover(db: &TypedPatchDb<Database>, os: &OsPartitionInfo) -> Result<(), Error> {
+pub(crate) async fn scan(
+    db: &TypedPatchDb<Database>,
+    os: &OsPartitionInfo,
+) -> Result<Vec<super::util::DiskInfo>, Error> {
     let server_id = db.peek().await.as_public().as_server_info().as_id().de()?;
     let disks = super::util::list(os, Some(server_id.as_str())).await?;
     db.mutate(|db| db.as_public_mut().as_disks_mut().ser(&disks))
         .await
-        .result
+        .result?;
+    Ok(disks)
 }
 
 pub(crate) async fn remove_missing(db: &TypedPatchDb<Database>) -> Result<(), Error> {

@@ -186,6 +186,7 @@ impl FileSystem for BackupTargetFS {
 pub fn target<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand("create", from_fn_async(catalog::create).no_cli())
+        .subcommand("find", from_fn_async(catalog::find).no_cli())
         .subcommand("rename", from_fn_async(catalog::rename).no_cli())
         .subcommand("update-cifs", from_fn_async(catalog::update_cifs).no_cli())
         .subcommand("remove", from_fn_async(catalog::remove).no_cli())

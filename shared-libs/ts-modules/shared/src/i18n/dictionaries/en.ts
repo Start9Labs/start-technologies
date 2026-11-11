@@ -1018,4 +1018,7 @@ export const ENGLISH: Record<string, number> = {
   'Delete permanently': 1207,
   'Shared Volumes': 1208,
   'Read': 1209,
+  'Find': 1210,
+  'Searching for backups': 1211,
+  'No unregistered backups were found on connected drives.': 1212,
 }

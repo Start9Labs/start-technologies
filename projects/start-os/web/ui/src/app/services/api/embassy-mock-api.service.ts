@@ -1058,6 +1058,36 @@ export class MockApiService extends ApiService {
       this.queueSourceCheck('backupTargets', id)
       return id
     },
+    'backup.target.find': async () => {
+      await this.publishDisks()
+      const added: string[] = []
+      for (const partition of Mock.Disks.flatMap(disk => disk.partitions)) {
+        if (!Object.keys(partition.startOs).length) continue
+        const logicalname = Mock.driveLink(partition.logicalname)
+        const targets: Record<string, T.BackupTarget> =
+          this.mockData('/backupTargets')
+        if (
+          Object.values(targets).some(
+            ({ source }) =>
+              source.kind === 'disk' &&
+              source.logicalname === logicalname &&
+              !source.path,
+          )
+        )
+          continue
+        added.push(
+          await this.rpc.backup.target.create({
+            name: partition.label || partition.logicalname,
+            source: {
+              kind: 'disk',
+              logicalname: partition.logicalname,
+              path: '',
+            },
+          }),
+        )
+      }
+      return added
+    },
     'backup.target.rename': async ({ id, name }) => {
       await this.mockRevision<unknown>([
         { op: PatchOp.REPLACE, path: `/backupTargets/${id}/name`, value: name },
@@ -3031,8 +3061,20 @@ export class MockApiService extends ApiService {
               error: null,
             }
     const inspection = { ...result, checkedAt: new Date().toISOString() }
+    const partition =
+      collection === 'backupTargets' && source.kind === 'disk' && !source.path
+        ? Mock.Disks.flatMap(disk => disk.partitions).find(
+            partition =>
+              Mock.driveLink(partition.logicalname) === source.logicalname,
+          )
+        : undefined
     await this.mockRevision<unknown>(
-      Object.entries(inspection).map(([key, value]) => ({
+      Object.entries({
+        ...inspection,
+        ...(partition && result.availability === 'available'
+          ? { startOs: partition.startOs, legacyBackup: partition.legacyBackup }
+          : {}),
+      }).map(([key, value]) => ({
         op: PatchOp.REPLACE,
         path: `/${collection}/${id}/${key}`,
         value,

@@ -230,12 +230,9 @@ async fn registered_filesystem_preserves_inline_backup_cifs_policy_identity() {
     }
 }
 
-#[test]
-fn attached_backup_drives_remain_unregistered_across_initialization() {
+fn backup_drive() -> crate::disk::util::DiskInfo {
     use crate::disk::util::{DiskInfo, PartitionInfo, PartitionTable};
-
-    let mut db = database();
-    let disks = vec![DiskInfo {
+    DiskInfo {
         logicalname: "/dev/sdb".into(),
         stable_path: "/dev/disk/by-path/backup-drive".into(),
         partition_table: Some(PartitionTable::Gpt),
@@ -253,10 +250,16 @@ fn attached_backup_drives_remain_unregistered_across_initialization() {
             available: None,
             start_os: BTreeMap::from([("server".to_owned(), StartOsRecoveryInfo::default())]),
             legacy_backup: true,
-            guid: Some("11111111-1111-1111-1111-111111111111".into()),
-            filesystem: Some("btrfs".into()),
+            guid: None,
+            filesystem: None,
         }],
-    }];
+    }
+}
+
+#[test]
+fn boot_keeps_attached_backups_unregistered_until_explicit_discovery() {
+    let mut db = database();
+    let disks = vec![backup_drive()];
     db.as_public_mut().as_disks_mut().ser(&disks).unwrap();
     for _ in 0..2 {
         initialize(&mut db).unwrap();
@@ -268,6 +271,107 @@ fn attached_backup_drives_remain_unregistered_across_initialization() {
             serde_json::to_value(&disks).unwrap()
         );
     }
+}
+
+#[test]
+fn find_selects_v2_backup_roots_but_not_empty_or_legacy_only_partitions() {
+    let mut drive = backup_drive();
+    drive.partitions[0].legacy_backup = false;
+    let mut legacy = drive.partitions[0].clone();
+    legacy.logicalname = "/dev/sdb2".into();
+    legacy.start_os.clear();
+    legacy.legacy_backup = true;
+    let mut empty = legacy.clone();
+    empty.logicalname = "/dev/sdb3".into();
+    empty.legacy_backup = false;
+    drive.partitions.extend([legacy, empty]);
+    let disks = [drive];
+    let found = backup_partitions(&disks)
+        .map(|partition| partition.logicalname.as_path())
+        .collect::<Vec<_>>();
+    assert_eq!(found, [Path::new("/dev/sdb1")]);
+}
+
+#[test]
+fn find_registration_preserves_existing_targets_and_can_rediscover_removed_backups() {
+    let mut db = database();
+    initialize(&mut db).unwrap();
+    let root = SharedVolumeSource::Disk {
+        logicalname: "/dev/disk/by-uuid/backup-filesystem".into(),
+        path: PathBuf::new(),
+        label: Some("Backup drive".into()),
+    };
+    let mut nested = root.clone();
+    if let SharedVolumeSource::Disk { path, .. } = &mut nested {
+        *path = "nested".into();
+    }
+    let nested_id = BackupTargetId::new();
+    db.as_public_mut()
+        .as_backup_targets_mut()
+        .insert(&nested_id, &BackupTarget::new("Nested".into(), nested))
+        .unwrap();
+    let found = register_found(
+        &mut db,
+        vec![
+            ("Found drive".into(), root.clone()),
+            ("Duplicate".into(), root.clone()),
+        ],
+    )
+    .unwrap();
+    assert_eq!(found.len(), 1);
+    let id = &found[0];
+    let target = db
+        .as_public()
+        .as_backup_targets()
+        .as_idx(id)
+        .unwrap()
+        .de()
+        .unwrap();
+    assert_eq!(target.name, "Found drive");
+    assert_eq!(target.inspection, SharedVolumeInspection::default());
+    assert!(target.start_os.is_empty());
+    assert!(!target.legacy_backup);
+    db.as_public_mut()
+        .as_backup_targets_mut()
+        .as_idx_mut(id)
+        .unwrap()
+        .as_name_mut()
+        .ser(&"Renamed".to_owned())
+        .unwrap();
+    let mut relabeled = root.clone();
+    if let SharedVolumeSource::Disk { label, .. } = &mut relabeled {
+        *label = Some("New label".into());
+    }
+    assert!(
+        register_found(&mut db, vec![("New label".into(), relabeled)])
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(BackupTargetSource::read(&db, id).unwrap().name, "Renamed");
+    assert_eq!(db.as_public().as_backup_targets().de().unwrap().len(), 3);
+    assert_eq!(
+        BackupTargetSource::read(&db, &"cifs-7".parse().unwrap())
+            .unwrap()
+            .definition
+            .cifs()
+            .unwrap()
+            .password
+            .as_deref(),
+        Some("private-password")
+    );
+    db.as_public_mut()
+        .as_backup_targets_mut()
+        .remove(id)
+        .unwrap();
+    let restored = register_found(&mut db, vec![("Found again".into(), root)]).unwrap();
+    assert_eq!(restored.len(), 1);
+    assert_ne!(restored[0], *id);
+    assert!(
+        db.as_public()
+            .as_backup_targets()
+            .as_idx(&nested_id)
+            .is_some()
+    );
 }
 
 #[test]

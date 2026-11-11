@@ -31,6 +31,8 @@ To add a target, select **Add** and choose a type:
 - **External drive**: a [drive connected to this server](#external-drive). Backups survive a failure of the server and are kept when you remove the target.
 - **CIFS share**: a [shared folder on a NAS or another computer](#cifs-share) on your network. Backups are kept when you remove the target.
 
+Stored CIFS targets and their credentials are carried forward automatically when upgrading.
+
 Select a target's settings button to open **Manage**, where you can see its details, rename it and remove it. For a CIFS share you can also update the hostname, path, username and password; leave the password blank to keep it. Changes apply when you **Save**.
 
 Removing an external drive or CIFS share target leaves its backups on the drive or share. A local folder target is deleted together with every backup in it, so its **Delete** button asks you to type the target's name to confirm.
@@ -44,7 +46,9 @@ Removing an external drive or CIFS share target leaves its backups on the drive 
 >
 > If you are using a Raspberry Pi, backup drive _must_ be self-powered, or be connected via a powered USB hub, to prevent possible data corruption.
 
-Add drives that already contain this server's backups in the same way. Re-add a removed target to access its preserved backups.
+To reconnect drives containing existing backups, plug them in and select **Find** in **System → Backups**. StartOS checks `StartOSBackupsV2` at each partition's root and adds partitions with recognized backups to the target list. Already registered targets keep their names and settings. Use **Find** again after removing a target to access its preserved backups.
+
+For a new drive or a new backup folder:
 
 1. Plug the drive into your server.
 

@@ -1017,4 +1017,7 @@ export default {
   1207: 'Eliminar permanentemente',
   1208: 'Volúmenes compartidos',
   1209: 'Lectura',
+  1210: 'Buscar',
+  1211: 'Buscando copias de seguridad',
+  1212: 'No se encontraron copias de seguridad sin registrar en las unidades conectadas.',
 } satisfies i18n

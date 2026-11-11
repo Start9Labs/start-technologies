@@ -24,6 +24,9 @@ use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::serde::IoFormat;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(rename_all = "camelCase")]
 pub enum PartitionTable {
@@ -358,6 +361,7 @@ pub async fn pvscan() -> Result<BTreeMap<PathBuf, Option<InternedString>>, Error
     Ok(parse_pvscan_output(pvscan_out_str))
 }
 
+/// Reads `StartOSBackupsV2` directly beneath the supplied root.
 pub async fn recovery_info(
     mountpoint: impl AsRef<Path>,
 ) -> Result<BTreeMap<String, StartOsRecoveryInfo>, Error> {

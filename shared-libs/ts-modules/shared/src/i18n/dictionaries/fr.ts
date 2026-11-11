@@ -1017,4 +1017,7 @@ export default {
   1207: 'Supprimer définitivement',
   1208: 'Volumes partagés',
   1209: 'Lecture',
+  1210: 'Rechercher',
+  1211: 'Recherche de sauvegardes',
+  1212: 'Aucune sauvegarde non enregistrée n’a été trouvée sur les disques connectés.',
 } satisfies i18n

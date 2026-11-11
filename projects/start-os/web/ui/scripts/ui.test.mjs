@@ -1610,6 +1610,7 @@ function volumeFixture(t, packageData = {}, disks = VolumeMock.Disks) {
     components = [],
     decisions = [],
     formattedNotices = [],
+    alerts = [],
     forms = [],
     formValues = []
   let completed = 0
@@ -1702,6 +1703,10 @@ function volumeFixture(t, packageData = {}, disks = VolumeMock.Disks) {
     {
       provide: DialogService,
       useValue: {
+        openAlert(message, options) {
+          alerts.push({ message, options })
+          return EMPTY
+        },
         openConfirm(options) {
           confirmations.push(options)
           return of(decisions.shift() ?? true)
@@ -1811,6 +1816,7 @@ function volumeFixture(t, packageData = {}, disks = VolumeMock.Disks) {
     components,
     decisions,
     formattedNotices,
+    alerts,
     forms,
     formValues,
     get completed() {
@@ -2236,10 +2242,42 @@ test('the backups page re-checks only targets whose last check is stale', async 
   )
 })
 
+test('Find discovers backup targets and reports an empty search without masking failures', async t => {
+  const f = volumeFixture(t)
+  const failure = new Error('discovery failed')
+  f.results.push([volumeA], [], failure)
+  f.api.rpc.backup.target.find = async params => {
+    f.requests.push({ kind: 'find', params })
+    const result = f.results.shift()
+    if (result instanceof Error) throw result
+    return result
+  }
+  const model = f.make(Backups)
+  await model.find()
+  assert.deepEqual(f.alerts, [])
+  await model.find()
+  assert.deepEqual(f.alerts, [
+    {
+      message: 'No unregistered backups were found on connected drives.',
+      options: { label: 'Backups' },
+    },
+  ])
+  await model.find()
+  assert.deepEqual(f.errors, [failure])
+  assert.equal(f.alerts.length, 1)
+  assert.deepEqual(f.taskCalls, Array(3).fill('Searching for backups'))
+  assert.deepEqual(
+    f.requests.filter(request => request.kind === 'find'),
+    Array(3).fill({ kind: 'find', params: {} }),
+  )
+})
+
 test('backup history loads its page and pagination writes only non-default query params', async t => {
   const f = volumeFixture(t)
   const model = f.make(Backups)
+  assert.equal(model.history(), undefined)
   await tick()
+  assert.deepEqual(model.history(), { runs: [], total: 0 })
   f.query.next({ page: '2', size: '25' })
   await tick()
   assert.deepEqual(
@@ -2588,6 +2626,18 @@ test('production mocks support inspection, independent failed backups and new-lo
   })
   t.mock.timers.enable({ apis: ['setTimeout'] })
   assert.equal(await api.rpc.gitInfo({}), runningGitHash)
+  assert.deepEqual(await api.rpc.backup.target.find({}), [])
+  await api.rpc.backup.target.remove({ id: 'MOCKBACKUPDRIVE234567ABCDEFGHIJK' })
+  const found = await api.rpc.backup.target.find({})
+  assert.equal(found.length, 1)
+  assert.match(found[0], /^[A-Z2-7]{32}$/)
+  await api.rpc.backup.target.inspect({ id: found[0] })
+  assert.equal(cache.value.value.backupTargets[found[0]].name, 'Old Backups')
+  assert.deepEqual(
+    cache.value.value.backupTargets[found[0]].startOs,
+    Mock.Disks[1].partitions[0].startOs,
+  )
+  assert.deepEqual(await api.rpc.backup.target.find({}), [])
   const targetId = await api.rpc.backup.target.create({
     name: 'Archive',
     source: { kind: 'local' },
