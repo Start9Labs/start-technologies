@@ -1192,13 +1192,13 @@ export class MockApiService extends ApiService {
     options?: import('@start9labs/start-core').RpcStreamOptions,
   ): Promise<SetupFlashStream> {
     options?.signal?.throwIfAborted()
-    await pauseFor(250)
+    await pauseFor(250, options?.signal)
     options?.signal?.throwIfAborted()
     return {
       initial: null,
       items: (async function* () {
         for (let step = 1; step <= 3; step++) {
-          await pauseFor(250)
+          await pauseFor(250, options?.signal)
           options?.signal?.throwIfAborted()
           yield {
             phase: 'status' as const,

@@ -34,6 +34,9 @@ function harness(moduleOverrides = new Map(), globals = {}) {
     [
       'DOCUMENT',
       'DestroyRef',
+      'DialogService',
+      'ErrorService',
+      'TaskService',
       'Injector',
       'HttpClient',
       'HttpService',
@@ -99,6 +102,7 @@ function harness(moduleOverrides = new Map(), globals = {}) {
     const shared = () => ({
       ...tokens,
       ...load('shared-libs/ts-modules/shared/src/util/misc.util.ts'),
+      ...load('shared-libs/ts-modules/shared/src/util/format-progress.ts'),
       pauseFor: async () => {},
       ...load('shared-libs/ts-modules/shared/src/types/rpc.types.ts'),
       ...load('shared-libs/ts-modules/shared/src/services/rpc-request.ts'),
@@ -2166,6 +2170,209 @@ test('WRT interrupted-update recovery cannot claim the requested version from an
   assert.equal(rebooting, false)
   assert.deepEqual(messages, ['Update failed — check device logs'])
 })
+
+test('diagnostic mock reuses its initiating result and progress producer for typed terminals', async () => {
+  const { load } = harness(
+    new Map([
+      ['./api.fixures', { Mock: {} }],
+      ['./mock-patch', mockPatchFixture({})],
+      ['./md-sample.md', ''],
+    ]),
+  )
+  const mock = Object.create(
+    load(
+      'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+    ).MockApiService.prototype,
+  )
+  const legacy = await mock.diagnosticUpdate()
+  assert.equal(legacy.progress, 'update-progress-guid')
+  const response = await mock.diagnosticUpdateStream()
+  assert.equal(response.initial.target, legacy.target)
+  assert.equal(response.initial.progress, null)
+  const initial = await response.items.next()
+  assert.equal(initial.done, false)
+  assert.equal(initial.value.overall.done, 0)
+  const progress = await response.items.next()
+  assert.equal(progress.done, false)
+  assert.equal(progress.value.overall.done, progress.value.overall.total)
+  const final = await response.items.next()
+  assert.equal(final.done, true)
+  assert.equal(final.value, null)
+  mock.diagnosticUpdate = async () => ({ target: null, progress: null })
+  mock.initProgress = () => assert.fail('no-target calls do no work')
+  const empty = await mock.diagnosticUpdateStream()
+  assert.equal((await empty.items.next()).done, true)
+  const abort = new AbortController()
+  abort.abort()
+  await assert.rejects(mock.diagnosticUpdateStream({ signal: abort.signal }), {
+    name: 'AbortError',
+  })
+})
+
+function diagnosticUpdateHarness(update) {
+  const { dependencies, tokens, load } = harness(new Map(), {
+    AbortController,
+    Error,
+  })
+  const errors = []
+  const alerts = []
+  const checks = []
+  const destroy = []
+  const { StartupApiService } = load(
+    'projects/start-os/web/ui/src/app/services/api/startup-api.service.ts',
+  )
+  dependencies.set(StartupApiService, { streams: { diagnostic: { update } } })
+  dependencies.set(tokens.DestroyRef, {
+    onDestroy: callback => destroy.push(callback),
+  })
+  dependencies.set(tokens.ErrorService, {
+    handleError: error => errors.push(error),
+  })
+  dependencies.set(tokens.DialogService, {
+    openAlert: message => {
+      alerts.push(message)
+      return of(null)
+    },
+  })
+  dependencies.set(tokens.TaskService, {
+    run: async (task, label) => {
+      checks.push(label)
+      try {
+        await task()
+        return true
+      } catch (error) {
+        errors.push(error)
+        return false
+      }
+    },
+  })
+  const service = new (load(
+    'projects/start-os/web/ui/src/app/routes/diagnostic/home/update.service.ts',
+  ).DiagnosticUpdate)()
+  return {
+    service,
+    errors,
+    alerts,
+    checks,
+    destroy: () => destroy.forEach(callback => callback()),
+  }
+}
+
+for (const failure of [false, true]) {
+  test(`diagnostic update requires the terminal after 100 percent: ${failure ? 'late failure' : 'success'}`, async () => {
+    const reached = Promise.withResolvers()
+    const terminal = Promise.withResolvers()
+    let calls = 0
+    const fixture = diagnosticUpdateHarness(async (params, options) => {
+      calls++
+      assert.equal(params.progress, true)
+      assert.equal(options.signal.aborted, false)
+      return {
+        initial: { target: '0.4.2.1', progress: null },
+        items: (async function* () {
+          yield { overall: true, phases: [] }
+          reached.resolve()
+          await terminal.promise
+          return null
+        })(),
+      }
+    })
+    let done = false
+    const pending = fixture.service.update().then(() => (done = true))
+    await reached.promise
+    assert.equal(fixture.service.progress().total, 1)
+    assert.equal(fixture.service.updated(), false)
+    assert.equal(done, false)
+    assert.deepEqual(fixture.checks, ['Checking for updates'])
+    if (failure) terminal.reject(new Error('late finalization error'))
+    else terminal.resolve()
+    await pending
+    assert.equal(fixture.service.updated(), !failure)
+    assert.equal(fixture.service.progress(), null)
+    assert.equal(fixture.service.target(), '0.4.2.1')
+    assert.equal(fixture.errors.length, failure ? 1 : 0)
+    assert.equal(fixture.alerts.length, 0)
+    assert.equal(calls, 1)
+  })
+}
+
+for (const loss of [false, true]) {
+  test(`diagnostic no-target waits for its terminal: ${loss ? 'loss' : 'success'}`, async () => {
+    const started = Promise.withResolvers()
+    const terminal = Promise.withResolvers()
+    const fixture = diagnosticUpdateHarness(async () => ({
+      initial: { target: null, progress: null },
+      items: (async function* () {
+        started.resolve()
+        await terminal.promise
+        return null
+      })(),
+    }))
+    const pending = fixture.service.update()
+    await started.promise
+    assert.equal(fixture.alerts.length, 0)
+    if (loss)
+      terminal.reject(Object.assign(new Error('transport lost'), { code: 0 }))
+    else terminal.resolve()
+    await pending
+    assert.equal(fixture.alerts.length, loss ? 0 : 1)
+    assert.equal(fixture.errors.length, loss ? 1 : 0)
+    assert.equal(fixture.service.updated(), false)
+  })
+}
+
+test('diagnostic initial errors are reported once without a false empty result or replay', async () => {
+  let calls = 0
+  const error = new Error('initial error')
+  const fixture = diagnosticUpdateHarness(async () => {
+    calls++
+    throw error
+  })
+  await fixture.service.update()
+  assert.equal(fixture.errors.length, 1)
+  assert.equal(fixture.errors[0], error)
+  assert.equal(fixture.alerts.length, 0)
+  assert.equal(fixture.service.updated(), false)
+  assert.equal(calls, 1)
+})
+
+for (const stage of ['initial', 'items']) {
+  test(`diagnostic disposal cancels ${stage} without late success or error UI`, async () => {
+    const started = Promise.withResolvers()
+    let calls = 0
+    let signal
+    const fixture = diagnosticUpdateHarness(async (params, options) => {
+      calls++
+      signal = options.signal
+      const wait = () =>
+        new Promise((resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), {
+            once: true,
+          })
+          started.resolve()
+        })
+      if (stage === 'initial') return wait()
+      return {
+        initial: { target: '0.4.2.1', progress: null },
+        items: (async function* () {
+          yield { overall: true, phases: [] }
+          await wait()
+          return null
+        })(),
+      }
+    })
+    const pending = fixture.service.update()
+    await started.promise
+    fixture.destroy()
+    await pending
+    assert.equal(signal.aborted, true)
+    assert.equal(fixture.service.updated(), false)
+    assert.equal(fixture.service.progress(), null)
+    assert.equal(fixture.errors.length, 0)
+    assert.equal(fixture.alerts.length, 0)
+    assert.equal(calls, 1)
+  })
+}
 
 function startupStateHarness() {
   const rxjs = require('rxjs')

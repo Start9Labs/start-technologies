@@ -19,6 +19,7 @@ import {
 import {
   auth,
   createRpcClient,
+  createRpcStreamClient,
   RpcHandlers,
   T,
   tableTransport,
@@ -83,6 +84,7 @@ import {
   WebsocketConfig,
 } from './api.types'
 import { ApiService, FileUploadOptions } from './embassy-api.service'
+import type { StartupApiService } from './startup-api.service'
 import {
   mockOsUpdateCache,
   mockPatchData,
@@ -129,7 +131,7 @@ const INIT_PROGRESS: T.FullProgress = {
 }
 
 @Injectable()
-export class MockApiService extends ApiService {
+export class MockApiService extends ApiService implements StartupApiService {
   readonly mockWsSource$ = new Subject<Revision>()
   private readonly i18n = inject(i18nPipe)
   private readonly storage = inject(WA_SESSION_STORAGE)
@@ -227,10 +229,7 @@ export class MockApiService extends ApiService {
       await pauseFor(1000)
       return null
     },
-    'diagnostic.update': async () => {
-      await pauseFor(1000)
-      return { target: '0.4.2', progress: 'update-progress-guid' }
-    },
+    'diagnostic.update': () => this.diagnosticUpdate(),
     'diagnostic.logs': async params => {
       return this.handlers['server.logs']!(params)
     },
@@ -1740,6 +1739,15 @@ export class MockApiService extends ApiService {
     'kiosk.disable': () => this.toggleKiosk(false),
   }
   readonly rpc = createRpcClient<ApiClient>(tableTransport<Api>(this.handlers))
+  readonly streams: StartupApiService['streams'] = createRpcStreamClient<
+    StartupApiService['streams']
+  >({
+    stream: async (method, params, options) => {
+      if (method !== 'diagnostic.update')
+        throw new Error(`No mock stream for ${method}`)
+      return this.diagnosticUpdateStream(options)
+    },
+  })
 
   async uploadFile(
     guid: string,
@@ -2016,9 +2024,36 @@ export class MockApiService extends ApiService {
       : `/packageData/${pkg}/hosts/${host}`
   }
 
-  private async initProgress(): Promise<T.FullProgress> {
-    // Cast to any: PhaseProgress now allows nested FullProgress, but the mock
-    // PROGRESS fixture only uses leaf shapes — we know it at the call site.
+  private async diagnosticUpdateStream(
+    options?: import('@start9labs/start-core').RpcStreamOptions,
+  ) {
+    options?.signal?.throwIfAborted()
+    const initial = await this.diagnosticUpdate(options?.signal)
+    options?.signal?.throwIfAborted()
+    const progress = () => this.initProgress(options?.signal)
+    return {
+      initial: { ...initial, progress: null },
+      items: (async function* () {
+        if (initial.target) {
+          options?.signal?.throwIfAborted()
+          yield PROGRESS
+          yield await progress()
+        }
+        options?.signal?.throwIfAborted()
+        return null
+      })(),
+    }
+  }
+
+  private async diagnosticUpdate(
+    signal?: AbortSignal,
+  ): Promise<Result<'diagnostic.update'>> {
+    await pauseFor(1000, signal)
+    return { target: '0.4.2', progress: 'update-progress-guid' }
+  }
+
+  private async initProgress(signal?: AbortSignal): Promise<T.FullProgress> {
+    // PROGRESS contains leaf phase shapes.
     const progress: any = JSON.parse(JSON.stringify(PROGRESS))
 
     for (let [i, phase] of progress.phases.entries() as [number, any][]) {
@@ -2027,7 +2062,7 @@ export class MockApiService extends ApiService {
         typeof phase.progress !== 'object' ||
         !phase.progress.total
       ) {
-        await pauseFor(2000)
+        await pauseFor(2000, signal)
 
         progress.phases[i]!.progress = true
 
@@ -2043,7 +2078,7 @@ export class MockApiService extends ApiService {
         const step = phase.progress.total / 4
 
         while (phase.progress.done < phase.progress.total) {
-          await pauseFor(200)
+          await pauseFor(200, signal)
 
           phase.progress.done += step
 
@@ -2058,7 +2093,7 @@ export class MockApiService extends ApiService {
           }
 
           if (phase.progress.done === phase.progress.total) {
-            await pauseFor(250)
+            await pauseFor(250, signal)
 
             progress.phases[i]!.progress = true
           }

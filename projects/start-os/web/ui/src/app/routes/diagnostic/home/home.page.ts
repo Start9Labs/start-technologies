@@ -1,52 +1,162 @@
-import { CommonModule } from '@angular/common'
-import { Component, computed, inject, OnInit, signal } from '@angular/core'
+import { Component, computed, inject, signal } from '@angular/core'
 import { RouterLink } from '@angular/router'
 import { WA_WINDOW } from '@ng-web-apis/common'
 import {
   DialogService,
-  ErrorService,
-  formatProgress,
   getRpcErrorDetails,
   i18nKey,
   i18nPipe,
   TaskService,
 } from '@start9labs/shared'
-import { T, Version } from '@start9labs/start-core'
-import { TuiButton } from '@taiga-ui/core'
+import { Version } from '@start9labs/start-core'
+import { TuiButton, TuiNotification, TuiTitle } from '@taiga-ui/core'
+import {
+  TuiCardLarge,
+  TuiHeader,
+  tuiCardOptionsProvider,
+} from '@taiga-ui/layout'
 import { TuiProgress } from '@taiga-ui/kit'
-import { filter, lastValueFrom, tap } from 'rxjs'
+import { filter } from 'rxjs'
 import { StartupApiService } from 'src/app/services/api/startup-api.service'
 import { ConfigService } from 'src/app/services/config.service'
+import { DiagnosticUpdate } from './update.service'
 
 @Component({
-  selector: 'diagnostic-home',
-  templateUrl: 'home.component.html',
-  styleUrls: ['home.page.scss'],
-  imports: [CommonModule, TuiButton, TuiProgress, i18nPipe, RouterLink],
+  template: `
+    @if (!restarted()) {
+      <header tuiHeader>
+        <h1 tuiTitle>StartOS - {{ 'Diagnostic Mode' | i18n }}</h1>
+      </header>
+      @if (error(); as error) {
+        <header tuiHeader>
+          <h2 tuiTitle>StartOS {{ 'launch error' | i18n }}:</h2>
+        </header>
+        <div tuiNotification appearance="warning">
+          <p>{{ error.problem | i18n }}</p>
+          @if (error.details) {
+            <pre>{{ error.details }}</pre>
+          }
+        </div>
+        <a tuiButton routerLink="logs">{{ 'View logs' | i18n }}</a>
+        <header tuiHeader>
+          <h2 tuiTitle>{{ 'Possible solutions' | i18n }}:</h2>
+        </header>
+        <div tuiNotification appearance="info">
+          {{
+            (error.solution | i18n)
+              .replace('{restartAction}', actions.restart | i18n)
+              .replace('{setupAction}', actions.setup | i18n)
+              .replace('{recoveryAction}', actions.recovery | i18n)
+          }}
+        </div>
+        <div class="g-buttons">
+          <button tuiButton (click)="restart()">
+            {{ actions.restart | i18n }}
+          </button>
+          @if (error.code === 15 || error.code === 25) {
+            <button tuiButton appearance="secondary" (click)="forgetDrive()">
+              {{
+                (error.code === 15 ? actions.setup : actions.recovery) | i18n
+              }}
+            </button>
+          }
+          <button
+            tuiButton
+            appearance="secondary"
+            [disabled]="!!updateState.progress() || updateState.updated()"
+            (click)="updateState.update()"
+          >
+            {{ 'Update server' | i18n }}
+          </button>
+          <button
+            tuiButton
+            appearance="secondary-destructive"
+            (click)="presentAlertRepairDisk()"
+          >
+            {{ 'Repair drive' | i18n }}
+          </button>
+        </div>
+        @if (updateState.progress(); as progress) {
+          <header tuiHeader>
+            <h2 tuiTitle>
+              {{ (reinstall() ? 'Reinstalling' : 'Updating') | i18n }} StartOS
+              {{ updateState.target() }}:
+              {{ (progress.total * 100).toFixed(0) }}%
+            </h2>
+          </header>
+          <progress
+            tuiProgressBar
+            [max]="1"
+            [value]="progress.total"
+          ></progress>
+          <p [innerHTML]="progress.message"></p>
+        } @else if (updateState.updated()) {
+          <div tuiNotification appearance="positive">
+            StartOS {{ updateState.target() }}:
+            {{ 'Download complete. Restart to apply.' | i18n }}
+          </div>
+        }
+      }
+    } @else {
+      <header tuiHeader>
+        <h1 tuiTitle>{{ 'Server is restarting' | i18n }}</h1>
+      </header>
+      <p>
+        {{ 'Wait for the server to restart, then refresh this page.' | i18n }}
+      </p>
+      <button tuiButton (click)="refreshPage()">{{ 'Refresh' | i18n }}</button>
+    }
+  `,
+  styles: `
+    pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .g-buttons {
+      flex-wrap: wrap;
+    }
+  `,
+  hostDirectives: [TuiCardLarge],
+  providers: [
+    DiagnosticUpdate,
+    tuiCardOptionsProvider({
+      space: 'compact',
+      appearance: 'outline-grayscale',
+    }),
+  ],
+  imports: [
+    TuiButton,
+    TuiProgress,
+    TuiNotification,
+    TuiTitle,
+    TuiHeader,
+    i18nPipe,
+    RouterLink,
+  ],
 })
-export default class HomePage implements OnInit {
+export default class HomePage {
   private readonly tasks = inject(TaskService)
   private readonly api = inject(StartupApiService)
   private readonly dialog = inject(DialogService)
-  private readonly errorService = inject(ErrorService)
   private readonly window = inject(WA_WINDOW)
 
-  readonly config = inject(ConfigService)
-  readonly restarted = signal(false)
-  readonly updateProgress = signal<{ total: number; message: string } | null>(
-    null,
-  )
-  readonly updated = signal(false)
-  readonly updateTarget = signal<string | null>(null)
-  readonly reinstall = computed(() => {
-    const target = this.updateTarget()
+  private readonly config = inject(ConfigService)
+  protected readonly updateState = inject(DiagnosticUpdate)
+  protected readonly actions = {
+    restart: 'Restart server',
+    setup: 'Setup current drive',
+    recovery: 'Enter recovery mode',
+  } as const satisfies Record<string, i18nKey>
+  protected readonly restarted = signal(false)
+  protected readonly reinstall = computed(() => {
+    const target = this.updateState.target()
     return (
       !!target &&
       Version.parse(target).compare(Version.parse(this.config.version)) ===
         'equal'
     )
   })
-  readonly error = signal<
+  protected readonly error = signal<
     | {
         code: number
         problem: i18nKey
@@ -56,38 +166,38 @@ export default class HomePage implements OnInit {
     | undefined
   >(undefined)
 
-  async ngOnInit() {
+  constructor() {
+    void this.loadError()
+  }
+
+  private async loadError() {
     try {
       const error = await this.api.rpc.diagnostic.error({})
-      // incorrect drive
       if (error.code === 15) {
         this.error.set({
           code: 15,
           problem: 'Unknown storage drive detected',
           solution:
-            'To use a different storage drive, replace the current one and click RESTART SERVER below. To use the current storage drive, click USE CURRENT DRIVE below, then follow instructions. No data will be erased during this process.',
+            'To use a different storage drive, replace the current one and click {restartAction} below. To use the current storage drive, click {setupAction} below, then follow instructions. No data will be erased during this process.',
           details: getRpcErrorDetails(error.data),
         })
-        // no drive
       } else if (error.code === 20) {
         this.error.set({
           code: 20,
           problem: 'Storage drive not found',
           solution:
-            'Insert your StartOS storage drive and click RESTART SERVER below.',
+            'Insert your StartOS storage drive and click {restartAction} below.',
           details: getRpcErrorDetails(error.data),
         })
-        // drive corrupted
       } else if (error.code === 25) {
         this.error.set({
           code: 25,
           problem:
             'Storage drive corrupted. This could be the result of data corruption or physical damage.',
           solution:
-            'It may or may not be possible to re-use this drive by reformatting and recovering from backup. To enter recovery mode, click ENTER RECOVERY MODE below, then follow instructions. No data will be erased during this step.',
+            'It may or may not be possible to re-use this drive by reformatting and recovering from backup. To enter recovery mode, click {recoveryAction} below, then follow instructions. No data will be erased during this step.',
           details: getRpcErrorDetails(error.data),
         })
-        // filesystem I/O error - disk needs repair
       } else if (error.code === 2) {
         this.error.set({
           code: 2,
@@ -96,7 +206,6 @@ export default class HomePage implements OnInit {
             'Repairing the disk could help resolve this issue. Please DO NOT unplug the drive or server during this time or the situation will become worse.',
           details: getRpcErrorDetails(error.data),
         })
-        // disk management error - disk needs repair
       } else if (error.code === 48) {
         this.error.set({
           code: 48,
@@ -125,21 +234,6 @@ export default class HomePage implements OnInit {
     }, 'Loading')
   }
 
-  update() {
-    this.tasks.run(async () => {
-      const { target, progress } = await this.api.rpc.diagnostic.update({
-        progress: true,
-      })
-
-      if (target && progress) {
-        this.updateTarget.set(target)
-        this.watchUpdate(progress)
-      } else {
-        this.dialog.openAlert('Up to date!').subscribe()
-      }
-    }, 'Checking for updates')
-  }
-
   forgetDrive() {
     this.tasks.run(async () => {
       await this.api.rpc.diagnostic.disk.forget({})
@@ -166,33 +260,6 @@ export default class HomePage implements OnInit {
 
   refreshPage(): void {
     this.window.location.reload()
-  }
-
-  private async watchUpdate(guid: string) {
-    let close: CloseEvent | undefined
-    this.updateProgress.set({ total: 0, message: '' })
-
-    try {
-      await lastValueFrom(
-        this.api
-          .openWebsocket$<T.FullProgress | null>(guid, {
-            closeObserver: { next: e => (close = e) },
-          })
-          .pipe(
-            filter(Boolean),
-            tap(p => this.updateProgress.set(formatProgress(p))),
-          ),
-        { defaultValue: null },
-      )
-
-      if (close?.code !== 1000) throw new Error(close?.reason)
-
-      this.updated.set(true)
-    } catch (e: any) {
-      this.errorService.handleError(e)
-    } finally {
-      this.updateProgress.set(null)
-    }
   }
 
   private repairDisk() {

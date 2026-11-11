@@ -132,13 +132,11 @@ export const APP_CONFIG: ApplicationConfig = {
     tuiInputDateOptionsProvider({ valueTransformer: DateTransformer }),
     tuiInputDateTimeOptionsProvider({ valueTransformer: DatetimeTransformer }),
     tuiHintOptionsProvider({ appearance: 'primary-grayscale' }),
-    {
-      provide: ApiService,
-      useClass: useMocks ? MockApiService : LiveApiService,
-    },
+    useMocks ? MockApiService : LiveApiService,
+    tuiProvide(ApiService, useMocks ? MockApiService : LiveApiService),
     tuiProvide(
       StartupApiService,
-      useMocks ? ApiService : StartupLiveApiService,
+      useMocks ? MockApiService : StartupLiveApiService,
     ),
     {
       provide: PatchDB,

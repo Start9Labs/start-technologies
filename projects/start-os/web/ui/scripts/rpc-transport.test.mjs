@@ -86,6 +86,15 @@ function fixture(context) {
           JSON.parse(body).method === 'state' ? 'initializing' : 'encrypted',
       }
     },
+    stream: async (body, identity, options) => {
+      calls.push({ transport: 'encrypted-stream', body, identity, options })
+      return {
+        initial: { target: null, progress: null },
+        items: (async function* () {
+          return null
+        })(),
+      }
+    },
     open: (guid, config) => {
       const socket = new Subject()
       calls.push({ transport: 'encrypted-guid', guid, config, socket })
@@ -145,6 +154,36 @@ function fixture(context) {
   }
 }
 const flush = () => new Promise(setImmediate)
+
+test('startup typed updates capture input and cancel pending acquisition without peer-history writes', async context => {
+  const f = fixture(context)
+  let acquire
+  f.keys.admissionLease = () => new Promise(resolve => (acquire = resolve))
+  const params = { progress: true, targetVersion: '0.4.2.1' }
+  const pending = f.startup.streams.diagnostic.update(params, { timeout: 1200 })
+  params.targetVersion = '0.4.2.2'
+  acquire(f.lease)
+  const response = await pending
+  assert.equal(response.initial.target, null)
+  const call = f.calls.find(call => call.transport === 'encrypted-stream')
+  assert.equal(JSON.parse(call.body).params.targetVersion, '0.4.2.1')
+  assert.equal(call.options.timeout, 1200)
+  assert.equal(call.options.openObserver, undefined)
+  assert.equal(call.identity, f.lease)
+  assert.deepEqual(f.observed, [])
+  const abort = new AbortController()
+  const canceled = f.startup.streams.diagnostic.update(
+    {},
+    { signal: abort.signal },
+  )
+  abort.abort()
+  acquire(f.lease)
+  await assert.rejects(canceled, { name: 'AbortError' })
+  assert.equal(
+    f.calls.filter(call => call.transport === 'encrypted-stream').length,
+    1,
+  )
+})
 
 test('startup probes use encrypted possession without enrolled authorization or advisory history', async context => {
   const f = fixture(context)
