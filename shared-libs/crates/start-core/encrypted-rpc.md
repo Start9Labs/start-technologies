@@ -57,6 +57,15 @@ reads to the selected epoch; router replacement ends pending admission and activ
 operations through the existing transport lifecycle. The standard `take_until` adapter
 carries this lifetime without a second socket manager or forwarding task.
 
+Setup/attach/CIFS/recovery password inputs use `PasswordType::decrypt_in_session`:
+unwrapped strings require completed encrypted admission; legacy JWE uses the existing
+P256 decoder on HTTP or encrypted RPC. Normal auth/login retains its independent legacy
+HTTP policy. Native and browser setup callers send strings inside the encrypted session,
+without fetching or adding a password envelope. Invalid envelopes reject before accepting
+setup work or mounting a backup; absent passwords and whitespace keep their existing
+meaning. `PasswordType` and CIFS diagnostic formatting redact passwords. Legacy HTTP restore targets still serialize their CIFS credential fields as strings;
+upgraded clients protect the whole RPC with encrypted admission.
+
 ## Native clients and registry compatibility
 
 `session::client::SessionClient` establishes connections lazily inside `call()` and

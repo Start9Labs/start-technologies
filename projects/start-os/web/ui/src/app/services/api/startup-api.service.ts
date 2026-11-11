@@ -25,7 +25,9 @@ export class StartupLiveApiService extends StartupApiService {
   private readonly sockets = inject(RpcSocketService)
   private readonly authKeys = inject(AuthKeyService)
 
-  readonly rpc = createRpcClient<RpcClient<RPC.Init & RPC.Diagnostic>>({
+  readonly rpc: StartupApiService['rpc'] = createRpcClient<
+    RpcClient<RPC.Init & RPC.Diagnostic>
+  >({
     call: async (method, params, options) => {
       const request = rpcRequestBody({
         method,

@@ -212,6 +212,21 @@ pub enum PasswordType {
 rpc_toolkit::reflect_ts!(PasswordType);
 rpc_toolkit::ts_export!(PasswordType, namespaces = [""]);
 impl PasswordType {
+    /// Unwrapped startup secrets require encrypted admission; legacy JWE remains valid.
+    pub fn decrypt_in_session(
+        self,
+        context: &impl crate::middleware::auth::session::SessionContext,
+        current_secret: impl AsRef<Jwk>,
+    ) -> Result<String, Error> {
+        if matches!(self, Self::String(_)) && context.secure_session().is_none() {
+            return Err(Error::new(
+                eyre!(t!("auth.encrypted-session-required")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        self.decrypt(current_secret)
+    }
+
     pub fn decrypt(self, current_secret: impl AsRef<Jwk>) -> Result<String, Error> {
         match self {
             PasswordType::String(x) => Ok(x),
@@ -229,10 +244,16 @@ impl Default for PasswordType {
         PasswordType::String(String::default())
     }
 }
+pub(crate) struct RedactedPassword;
+
+impl std::fmt::Debug for RedactedPassword {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<REDACTED_PASSWORD>")
+    }
+}
 impl std::fmt::Debug for PasswordType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<REDACTED_PASSWORD>")?;
-        Ok(())
+        std::fmt::Debug::fmt(&RedactedPassword, f)
     }
 }
 
@@ -246,6 +267,9 @@ impl std::str::FromStr for PasswordType {
         })
     }
 }
+#[cfg(test)]
+mod password_tests;
+
 /// A CLI whose identity key `auth login` enrolls.
 pub trait IdKeyContext: Context {
     fn id_key(&self) -> Result<&Signer, Error>;

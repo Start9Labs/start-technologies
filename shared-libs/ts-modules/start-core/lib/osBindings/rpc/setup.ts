@@ -143,7 +143,6 @@ export type RecoverySourceInput<Password> = z.input<
 export type ServerHostname = z.output<typeof schemas.ServerHostname>
 export type SetLanguageParamsInput = z.input<typeof schemas.SetLanguageParams>
 export type SetupInfo = z.output<typeof schemas.SetupInfo>
-export type AttachParamsInput = z.input<typeof schemas.AttachParams>
 export type BackupTargetFSInput = z.input<typeof schemas.BackupTargetFS>
 
 /**
@@ -168,9 +167,9 @@ export type InstallOsParamsInput = z.input<typeof schemas.InstallOsParams>
 export type IpInfo = z.output<typeof schemas.IpInfo>
 export type LogFollowResponse = z.output<typeof schemas.LogFollowResponse>
 export type LogResponse = z.output<typeof schemas.LogResponse>
+export type PasswordTypeInput = z.input<typeof schemas.PasswordType>
 export type RequiresHostIdInput = z.input<typeof schemas.RequiresHostId>
 export type RequiresPackageIdInput = z.input<typeof schemas.RequiresPackageId>
-export type SetupExecuteParamsInput = z.input<typeof schemas.SetupExecuteParams>
 export type SetupResult = z.output<typeof schemas.SetupResult>
 
 /**
@@ -178,11 +177,13 @@ export type SetupResult = z.output<typeof schemas.SetupResult>
  * [`BackupUnencryptedMetadata`]'s key material.
  */
 export type StartOsRecoveryInfo = z.output<typeof schemas.StartOsRecoveryInfo>
-export type VerifyCifsParamsInput = z.input<typeof schemas.VerifyCifsParams>
+export type AttachParamsInput = z.input<typeof schemas.AttachParams>
 export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
 export type PartitionInfo = z.output<typeof schemas.PartitionInfo>
 export type Progress = z.output<typeof schemas.Progress>
+export type SetupExecuteParamsInput = z.input<typeof schemas.SetupExecuteParams>
 export type SetupProgress = z.output<typeof schemas.SetupProgress>
+export type VerifyCifsParamsInput = z.input<typeof schemas.VerifyCifsParams>
 export type DiskInfo = z.output<typeof schemas.DiskInfo>
 export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type SetupStatusRes = z.output<typeof schemas.SetupStatusRes>

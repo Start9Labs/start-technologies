@@ -434,15 +434,9 @@ test('StartOS derives the method path and forwards results untouched', async () 
   assert.equal(requests[3].timeout, 10000)
 })
 
-test('Setup converts the actual JWK response and forwards the installation timeout', async () => {
+test('Setup sends unwrapped secrets through encrypted admission and preserves the installation timeout', async () => {
   const { dependencies, tokens, load } = harness()
   const calls = []
-  const key = {
-    kty: 'EC',
-    crv: 'P-256',
-    x: 'yHTDYSfjU809fkSv9MmN4wuojf5c3cnD7ZDN13n-jz4',
-    y: '8Mpkn744A5KDag0DmX2YivB63srjbugYZzWc3JOpQXI',
-  }
   const lease = { key: {}, signal: new AbortController().signal }
   dependencies.set(tokens.AuthKeyService, { admissionLease: async () => lease })
   dependencies.set(tokens.HttpService, {})
@@ -452,22 +446,13 @@ test('Setup converts the actual JWK response and forwards the installation timeo
       const request = JSON.parse(body)
       calls.push({ ...request, ...options })
       return {
-        result:
-          request.method === 'setup.get-pubkey'
-            ? key
-            : { guid: null, osDrive: null, attach: false, mokEnrolled: true },
+        result: { guid: null, osDrive: null, attach: false, mokEnrolled: true },
       }
     },
   })
   const client = new (load(
     'projects/start-os/web/setup-wizard/src/app/services/live-api.service.ts',
   ).LiveApiService)()
-  await client.loadPubKey()
-  assert.equal(calls[0].method, 'setup.get-pubkey')
-  assert.equal(client.pubkey.kty, 'EC')
-  const encrypted = await client.encrypt('secret')
-  assert.equal(typeof encrypted.encrypted, 'object')
-  assert.ok(encrypted.encrypted.ciphertext)
   const params = {
     osDrive: null,
     dataDrive: { stablePath: '/dev/example', wipe: true },
@@ -476,9 +461,106 @@ test('Setup converts the actual JWK response and forwards the installation timeo
     (await client.rpc.setup.installOs(params, { timeout: 5 * 60 * 1000 })).guid,
     null,
   )
-  assert.equal(calls[1].method, 'setup.install-os')
-  assert.deepEqual(calls[1].params, params)
-  assert.equal(calls[1].timeout, 5 * 60 * 1000)
+  assert.equal(calls[0].method, 'setup.install-os')
+  assert.deepEqual(calls[0].params, params)
+  assert.equal(calls[0].timeout, 5 * 60 * 1000)
+  await client.rpc.setup.execute({
+    guid: 'drive',
+    password: '  secret  ',
+    kiosk: false,
+  })
+  assert.equal(calls[1].method, 'setup.execute')
+  assert.equal(calls[1].params.password, '  secret  ')
+  assert.equal(calls.length, 2)
+})
+
+test('Setup state preserves nullable and whitespace passwords without layering JWE on recovery', async () => {
+  const router = Symbol('Router')
+  const { dependencies, load } = harness(
+    new Map([['@angular/router', { Router: router }]]),
+  )
+  const { ApiService } = load(
+    'projects/start-os/web/setup-wizard/src/app/services/api.service.ts',
+  )
+  const calls = []
+  dependencies.set(ApiService, {
+    rpc: {
+      setup: {
+        attach: async params => calls.push(params),
+        execute: async params => calls.push(params),
+      },
+    },
+  })
+  dependencies.set(router, {})
+  const state = new (load(
+    'projects/start-os/web/setup-wizard/src/app/services/state.service.ts',
+  ).StateService)()
+  state.dataDriveGuid = 'drive'
+  await state.attachDrive('  secret  ')
+  await state.attachDrive('')
+  await state.attachDrive(null)
+  assert.equal(calls[0].password, '  secret  ')
+  assert.equal(calls[1].password, null)
+  assert.equal(calls[2].password, null)
+  state.recoverySource = {
+    type: 'backup',
+    serverId: 'server',
+    password: '',
+    target: {
+      type: 'cifs',
+      hostname: 'nas',
+      username: 'user',
+      path: String.raw`share\nested`,
+      password: 'cifs secret',
+    },
+  }
+  await state.executeSetup('new password', 'hostname')
+  assert.equal(calls[3].password, 'new password')
+  assert.equal(calls[3].recoverySource.password, '')
+  assert.equal(calls[3].recoverySource.target.password, 'cifs secret')
+  assert.equal(calls[3].recoverySource.target.path, 'share/nested')
+})
+
+test('Setup bootstrap starts from its encrypted status call without a legacy public-key preflight', async () => {
+  const api = Symbol('SetupApi'),
+    stateToken = Symbol('SetupState'),
+    router = Symbol('Router'),
+    errors = Symbol('Errors')
+  const { dependencies, tokens, load } = harness(
+    new Map([
+      ['./services/api.service', { ApiService: api }],
+      ['./services/state.service', { StateService: stateToken }],
+      ['@angular/router', { Router: router, RouterOutlet: class {} }],
+      ['@start9labs/shared', { ErrorService: errors }],
+    ]),
+  )
+  const calls = [],
+    routes = [],
+    failed = []
+  const state = {}
+  dependencies.set(api, {
+    rpc: {
+      setup: {
+        status: async () => {
+          calls.push('status')
+          return { status: 'needs-install' }
+        },
+      },
+    },
+  })
+  dependencies.set(stateToken, state)
+  dependencies.set(router, { navigate: async route => routes.push(route) })
+  dependencies.set(errors, { handleError: error => failed.push(error) })
+  dependencies.set(tokens.DOCUMENT, { location: { hostname: 'localhost' } })
+  new (load(
+    'projects/start-os/web/setup-wizard/src/app/app.component.ts',
+  ).AppComponent)()
+  await new Promise(setImmediate)
+  assert.deepEqual(calls, ['status'])
+  assert.equal(state.kiosk, true)
+  assert.equal(routes.length, 1)
+  assert.equal(routes[0][0], '/language')
+  assert.deepEqual(failed, [])
 })
 
 test('Setup normalizes every CIFS path separator', () => {

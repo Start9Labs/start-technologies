@@ -578,8 +578,6 @@ export type AlpnInfo = z.output<typeof schemas.AlpnInfo>
  * The protocols a binding answers with, carried on the wire as the list itself.
  */
 export type AlpnInfoInput = z.input<typeof schemas.AlpnInfo>
-export type AttachParams = z.output<typeof schemas.AttachParams>
-export type AttachParamsInput = z.input<typeof schemas.AttachParams>
 
 /**
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
@@ -1056,8 +1054,6 @@ export type SetPackagePrivateParamsInput = z.input<
 >
 export type SetStaticDnsParams = z.output<typeof schemas.SetStaticDnsParams>
 export type SetStaticDnsParamsInput = z.input<typeof schemas.SetStaticDnsParams>
-export type SetupExecuteParams = z.output<typeof schemas.SetupExecuteParams>
-export type SetupExecuteParamsInput = z.input<typeof schemas.SetupExecuteParams>
 export type SetupResult = z.output<typeof schemas.SetupResult>
 export type SetupResultInput = z.input<typeof schemas.SetupResult>
 export type SideloadResponse = z.output<typeof schemas.SideloadResponse>
@@ -1120,8 +1116,6 @@ export type UrlPluginRegistration = z.output<
 export type UrlPluginRegistrationInput = z.input<
   typeof schemas.UrlPluginRegistration
 >
-export type VerifyCifsParams = z.output<typeof schemas.VerifyCifsParams>
-export type VerifyCifsParamsInput = z.input<typeof schemas.VerifyCifsParams>
 export type VersionSignerParams = z.output<typeof schemas.VersionSignerParams>
 export type VersionSignerParamsInput = z.input<
   typeof schemas.VersionSignerParams
@@ -1136,6 +1130,8 @@ export type ActionResultV1 = z.output<typeof schemas.ActionResultV1>
 export type ActionResultV1Input = z.input<typeof schemas.ActionResultV1>
 export type AddPublicDomainRes = z.output<typeof schemas.AddPublicDomainRes>
 export type AddPublicDomainResInput = z.input<typeof schemas.AddPublicDomainRes>
+export type AttachParams = z.output<typeof schemas.AttachParams>
+export type AttachParamsInput = z.input<typeof schemas.AttachParams>
 export type BackupInfo = z.output<typeof schemas.BackupInfo>
 export type BackupInfoInput = z.input<typeof schemas.BackupInfo>
 export type BackupParams = z.output<typeof schemas.BackupParams>
@@ -1248,6 +1244,8 @@ export type SetDependenciesParams = z.output<
 export type SetDependenciesParamsInput = z.input<
   typeof schemas.SetDependenciesParams
 >
+export type SetupExecuteParams = z.output<typeof schemas.SetupExecuteParams>
+export type SetupExecuteParamsInput = z.input<typeof schemas.SetupExecuteParams>
 export type SetupProgress = z.output<typeof schemas.SetupProgress>
 export type SetupProgressInput = z.input<typeof schemas.SetupProgress>
 export type SideloadParams = z.output<typeof schemas.SideloadParams>
@@ -1278,6 +1276,8 @@ export type UrlPluginExportUrlParams = z.output<
 export type UrlPluginExportUrlParamsInput = z.input<
   typeof schemas.UrlPluginExportUrlParams
 >
+export type VerifyCifsParams = z.output<typeof schemas.VerifyCifsParams>
+export type VerifyCifsParamsInput = z.input<typeof schemas.VerifyCifsParams>
 export type WifiListInfo = z.output<typeof schemas.WifiListInfo>
 export type WifiListInfoInput = z.input<typeof schemas.WifiListInfo>
 export type ActionResult = z.output<typeof schemas.ActionResult>

@@ -2333,20 +2333,6 @@ export const AlpnInfo: z.ZodArray<typeof MaybeUtf8String> = /* @__PURE__ */ z
     description:
       'The protocols a binding answers with, carried on the wire as the list itself.',
   })
-export const AttachParams: z.ZodObject<{
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof EncryptedWire>>,
-    z.ZodNullable<typeof EncryptedWire>
-  >
-  guid: z.ZodString
-  kiosk: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  password: wire(EncryptedWire.nullable().optional(), EncryptedWire.nullable()),
-  guid: z.string(),
-  kiosk: z.boolean(),
-}).meta({
-  id: 'AttachParams',
-})
 
 /**
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
@@ -4163,35 +4149,6 @@ export const SetStaticDnsParams: z.ZodObject<{
 }).meta({
   id: 'SetStaticDnsParams',
 })
-export const SetupExecuteParams: z.ZodObject<{
-  guid: z.ZodString
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof EncryptedWire>>,
-    z.ZodNullable<typeof EncryptedWire>
-  >
-  recoverySource: z.ZodCodec<
-    z.ZodOptional<
-      z.ZodNullable<ReturnType<typeof RecoverySource<typeof EncryptedWire>>>
-    >,
-    z.ZodNullable<ReturnType<typeof RecoverySource<typeof EncryptedWire>>>
-  >
-  kiosk: z.ZodBoolean
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  guid: z.string(),
-  password: wire(EncryptedWire.nullable().optional(), EncryptedWire.nullable()),
-  recoverySource: wire(
-    RecoverySource(EncryptedWire).nullable().optional(),
-    RecoverySource(EncryptedWire).nullable(),
-  ),
-  kiosk: z.boolean(),
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'SetupExecuteParams',
-})
 export const SetupResult: z.ZodObject<{
   hostname: typeof ServerHostname
   rootCa: typeof literal_0
@@ -4510,22 +4467,6 @@ export const UrlPluginRegistration: z.ZodObject<{
 }> = /* @__PURE__ */ object({ tableAction: ActionId }).meta({
   id: 'UrlPluginRegistration',
 })
-export const VerifyCifsParams: z.ZodObject<{
-  hostname: z.ZodString
-  path: z.ZodString
-  username: z.ZodString
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof EncryptedWire>>,
-    z.ZodNullable<typeof EncryptedWire>
-  >
-}> = /* @__PURE__ */ object({
-  hostname: z.string(),
-  path: z.string(),
-  username: z.string(),
-  password: wire(EncryptedWire.nullable().optional(), EncryptedWire.nullable()),
-}).meta({
-  id: 'VerifyCifsParams',
-})
 export const VersionSignerParams: z.ZodObject<{
   version: z.ZodString
   signer: typeof Guid
@@ -4684,6 +4625,20 @@ export const AddPublicDomainRes: z.ZodObject<{
   }),
 }).meta({
   id: 'AddPublicDomainRes',
+})
+export const AttachParams: z.ZodObject<{
+  password: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
+    z.ZodNullable<typeof PasswordType>
+  >
+  guid: z.ZodString
+  kiosk: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  password: wire(PasswordType.nullable().optional(), PasswordType.nullable()),
+  guid: z.string(),
+  kiosk: z.boolean(),
+}).meta({
+  id: 'AttachParams',
 })
 export const BackupInfo: z.ZodObject<{
   version: z.ZodString
@@ -5471,6 +5426,35 @@ export const SetDependenciesParams: z.ZodObject<{
 }).meta({
   id: 'SetDependenciesParams',
 })
+export const SetupExecuteParams: z.ZodObject<{
+  guid: z.ZodString
+  password: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
+    z.ZodNullable<typeof PasswordType>
+  >
+  recoverySource: z.ZodCodec<
+    z.ZodOptional<
+      z.ZodNullable<ReturnType<typeof RecoverySource<typeof PasswordType>>>
+    >,
+    z.ZodNullable<ReturnType<typeof RecoverySource<typeof PasswordType>>>
+  >
+  kiosk: z.ZodBoolean
+  hostname: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  guid: z.string(),
+  password: wire(PasswordType.nullable().optional(), PasswordType.nullable()),
+  recoverySource: wire(
+    RecoverySource(PasswordType).nullable().optional(),
+    RecoverySource(PasswordType).nullable(),
+  ),
+  kiosk: z.boolean(),
+  hostname: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'SetupExecuteParams',
+})
 export const SetupProgress: z.ZodObject<{
   progress: typeof FullProgress
   guid: typeof Guid
@@ -5700,6 +5684,22 @@ export const UrlPluginExportUrlParams: z.ZodObject<{
   overflowActions: z.array(ActionId),
 }).meta({
   id: 'UrlPluginExportUrlParams',
+})
+export const VerifyCifsParams: z.ZodObject<{
+  hostname: z.ZodString
+  path: z.ZodString
+  username: z.ZodString
+  password: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
+    z.ZodNullable<typeof PasswordType>
+  >
+}> = /* @__PURE__ */ object({
+  hostname: z.string(),
+  path: z.string(),
+  username: z.string(),
+  password: wire(PasswordType.nullable().optional(), PasswordType.nullable()),
+}).meta({
+  id: 'VerifyCifsParams',
 })
 export const WifiListInfo: z.ZodObject<{
   ssids: z.ZodRecord<z.ZodString, typeof SignalStrength>

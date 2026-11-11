@@ -17,7 +17,7 @@ use tokio::try_join;
 use tracing::instrument;
 
 use crate::account::AccountInfo;
-use crate::auth::write_shadow;
+use crate::auth::{PasswordType, write_shadow};
 use crate::backup::restore::recover_full_server;
 use crate::backup::target::BackupTargetFS;
 use crate::bins::set_locale;
@@ -41,7 +41,6 @@ use crate::rpc_continuations::Guid;
 use crate::shutdown::Shutdown;
 use crate::system::{KeyboardOptions, SetLanguageParams, save_language, sync_kiosk};
 use crate::util::Invoke;
-use crate::util::crypto::EncryptedWire;
 use crate::util::io::{
     Counter, create_file, dir_copy, dir_copy_excluding, dir_size, dir_size_excluding,
     read_file_to_string,
@@ -237,7 +236,7 @@ async fn setup_init(
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachParams {
-    pub password: Option<EncryptedWire>,
+    pub password: Option<PasswordType>,
     pub guid: InternedString,
     pub kiosk: bool,
 }
@@ -276,25 +275,15 @@ pub async fn attach(
         kiosk,
     }: AttachParams,
 ) -> Result<SetupProgress, Error> {
+    let password = password
+        .map(|password| password.decrypt_in_session(&ctx, &ctx))
+        .transpose()?;
     let setup_ctx = ctx.clone();
     ctx.run_setup(move || async move {
         let progress = &setup_ctx.progress;
         let mut disk_phase = progress.add_phase(t!("setup.opening-data-drive").into(), Some(10));
         let init_phases = InitPhases::new(&progress);
         let rpc_ctx_phases = InitRpcContextPhases::new(&progress);
-
-        let password: Option<String> = match password {
-            Some(a) => match a.decrypt(&setup_ctx) {
-                a @ Some(_) => a,
-                None => {
-                    return Err(Error::new(
-                        color_eyre::eyre::eyre!("{}", t!("setup.couldnt-decode-password")),
-                        crate::ErrorKind::Unknown,
-                    ));
-                }
-            },
-            None => None,
-        };
 
         disk_phase.start();
         let requires_reboot = crate::disk::main::import(
@@ -414,10 +403,7 @@ pub async fn status(ctx: SetupContext) -> Result<SetupStatusRes, Error> {
     }
 }
 
-/// We want to be able to get a secret, a shared private key with the frontend
-/// This way the frontend can send a secret, like the password for the setup/ recovory
-/// without knowing the password over clearnet. We use the public key shared across the network
-/// since it is fine to share the public, and encrypt against the public.
+/// Returns the public JWE key for legacy setup clients.
 pub async fn get_pubkey(ctx: SetupContext) -> Result<Jwk, RpcError> {
     let secret = AsRef::<Jwk>::as_ref(&ctx).clone();
     let pub_key = secret.to_public_key()?;
@@ -434,13 +420,12 @@ pub struct VerifyCifsParams {
     hostname: String,
     path: PathBuf,
     username: String,
-    password: Option<EncryptedWire>,
+    password: Option<PasswordType>,
 }
 
 rpc_toolkit::reflect_ts!(VerifyCifsParams);
 rpc_toolkit::ts_export!(VerifyCifsParams, namespaces = [""]);
 
-// #[command(rename = "verify", rpc_only)]
 pub async fn verify_cifs(
     ctx: SetupContext,
     VerifyCifsParams {
@@ -450,7 +435,9 @@ pub async fn verify_cifs(
         password,
     }: VerifyCifsParams,
 ) -> Result<BTreeMap<String, StartOsRecoveryInfo>, Error> {
-    let password: Option<String> = password.map(|x| x.decrypt(&ctx)).flatten();
+    let password = password
+        .map(|password| password.decrypt_in_session(&ctx, &ctx))
+        .transpose()?;
     let guard = TmpMountGuard::mount(
         &Cifs {
             hostname,
@@ -523,8 +510,8 @@ pub async fn setup_data_drive(
 #[serde(rename_all = "camelCase")]
 pub struct SetupExecuteParams {
     guid: InternedString,
-    password: Option<EncryptedWire>,
-    recovery_source: Option<RecoverySource<EncryptedWire>>,
+    password: Option<PasswordType>,
+    recovery_source: Option<RecoverySource<PasswordType>>,
     kiosk: bool,
     hostname: Option<InternedString>,
 }
@@ -624,22 +611,6 @@ fn read_new_password_env_or_prompt() -> Result<String, RpcError> {
     Ok(new_password)
 }
 
-/// Fetch the setup-mode public key via JSON-RPC and JWE-encrypt
-/// `plaintext` against it, producing the `EncryptedWire` blob the
-/// server expects on the wire (same shape the web UI sends).
-async fn encrypt_for_setup(ctx: &CliContext, plaintext: &str) -> Result<EncryptedWire, RpcError> {
-    let pubkey_value = ctx
-        .call_remote::<SetupContext>("setup.get-pubkey", imbl_value::json!({}))
-        .await?;
-    let pubkey: josekit::jwk::Jwk = imbl_value::from_value(pubkey_value).map_err(|e| {
-        crate::Error::new(
-            eyre!("setup get-pubkey: {e}"),
-            crate::ErrorKind::Deserialization,
-        )
-    })?;
-    EncryptedWire::encrypt(plaintext, &pubkey).map_err(RpcError::from)
-}
-
 fn print_remote_result(res: imbl_value::Value) -> Result<(), RpcError> {
     match serde_json::to_string_pretty(&res) {
         Ok(s) => {
@@ -672,7 +643,7 @@ async fn cli_attach(
         None
     } else {
         let plaintext = crate::util::tui::read_password("PASSWORD", "Data drive password: ")?;
-        Some(encrypt_for_setup(&ctx, &plaintext).await?)
+        Some(PasswordType::String(plaintext))
     };
 
     let res = ctx
@@ -704,7 +675,7 @@ async fn cli_execute(
     }: HandlerArgs<CliContext, SetupExecuteCliParams>,
 ) -> Result<(), RpcError> {
     let plaintext = read_new_password_env_or_prompt()?;
-    let password = encrypt_for_setup(&ctx, &plaintext).await?;
+    let password = PasswordType::String(plaintext);
 
     let res = ctx
         .call_remote::<SetupContext>(
@@ -723,6 +694,87 @@ async fn cli_execute(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    fn context() -> (
+        SetupContext,
+        crate::net::web_server::WebServer<crate::net::gateway::WildcardListener>,
+    ) {
+        use crate::net::web_server::{Acceptor, WebServer};
+        let mut listener = crate::net::gateway::WildcardListener::new(0).unwrap();
+        listener.set_ip_info(crate::util::sync::Watch::new(Default::default()));
+        let server = WebServer::new(Acceptor::new(listener), axum::Router::new());
+        let dns = std::sync::Arc::new(crate::net::dns::DnsController::new(
+            crate::util::sync::Watch::new(Default::default()),
+        ));
+        let context = SetupContext::init(
+            &server,
+            crate::context::config::ServerConfig::default(),
+            dns,
+        )
+        .unwrap();
+        (context, server)
+    }
+
+    #[tokio::test]
+    async fn unwrapped_attach_and_recovery_secrets_reject_before_accepting_setup_work() {
+        let (context, _server) = context();
+        let error = attach(
+            context.clone(),
+            AttachParams {
+                guid: "fixture".into(),
+                password: Some(PasswordType::String("secret".into())),
+                kiosk: false,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+        assert!(context.task.get().is_none());
+        let error = execute(
+            context.clone(),
+            SetupExecuteParams {
+                guid: "fixture".into(),
+                password: None,
+                kiosk: false,
+                hostname: None,
+                recovery_source: Some(RecoverySource::Backup {
+                    target: BackupTargetFS::Cifs(Cifs {
+                        hostname: "nas.invalid".into(),
+                        path: "backup".into(),
+                        username: "user".into(),
+                        password: None,
+                    }),
+                    password: PasswordType::String("backup secret".into()),
+                    server_id: "server".into(),
+                }),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+        assert!(context.task.get().is_none());
+    }
+
+    #[tokio::test]
+    async fn invalid_cifs_jwe_is_an_error_instead_of_an_anonymous_mount() {
+        let (context, _server) = context();
+        let other = Jwk::generate_ec_key(josekit::jwk::alg::ec::EcCurve::P256).unwrap();
+        let password =
+            crate::util::crypto::EncryptedWire::encrypt("secret", &other.to_public_key().unwrap())
+                .unwrap();
+        let error = verify_cifs(
+            context,
+            VerifyCifsParams {
+                hostname: "nas.invalid".into(),
+                path: "backup".into(),
+                username: "user".into(),
+                password: Some(PasswordType::EncryptedWire(password)),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Unknown);
+    }
 
     fn hostname(value: &str) -> ServerHostname {
         ServerHostname::new(InternedString::intern(value)).unwrap()
@@ -757,7 +809,6 @@ mod test {
     }
 }
 
-// #[command(rpc_only)]
 pub async fn execute(
     ctx: SetupContext,
     SetupExecuteParams {
@@ -778,14 +829,7 @@ pub async fn execute(
     }
 
     let password = password
-        .map(|p| {
-            p.decrypt(&ctx).ok_or_else(|| {
-                Error::new(
-                    color_eyre::eyre::eyre!("{}", t!("setup.couldnt-decode-startos-password")),
-                    crate::ErrorKind::Unknown,
-                )
-            })
-        })
+        .map(|password| password.decrypt_in_session(&ctx, &ctx))
         .transpose()?;
     let recovery = match recovery_source {
         Some(RecoverySource::Backup {
@@ -794,12 +838,7 @@ pub async fn execute(
             server_id,
         }) => Some(RecoverySource::Backup {
             target,
-            password: password.decrypt(&ctx).ok_or_else(|| {
-                Error::new(
-                    color_eyre::eyre::eyre!("{}", t!("setup.couldnt-decode-recovery-password")),
-                    crate::ErrorKind::Unknown,
-                )
-            })?,
+            password: password.decrypt_in_session(&ctx, &ctx)?,
             server_id,
         }),
         Some(RecoverySource::Migrate { guid }) => Some(RecoverySource::Migrate { guid }),
@@ -815,7 +854,6 @@ pub async fn execute(
 }
 
 #[instrument(skip_all)]
-// #[command(rpc_only)]
 pub async fn complete(ctx: SetupContext) -> Result<SetupResult, Error> {
     match ctx.result.get() {
         Some(Ok((res, ctx))) => {

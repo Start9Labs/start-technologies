@@ -3907,6 +3907,13 @@ auth.couldnt-decode-password:
   fr_FR: "Impossible de décoder le mot de passe"
   pl_PL: "Nie można zdekodować hasła"
 
+auth.encrypted-session-required:
+  en_US: "An encrypted session is required for this password"
+  de_DE: "Für dieses Passwort ist eine verschlüsselte Sitzung erforderlich"
+  es_ES: "Se requiere una sesión cifrada para esta contraseña"
+  fr_FR: "Une session chiffrée est requise pour ce mot de passe"
+  pl_PL: "To hasło wymaga szyfrowanej sesji"
+
 auth.password-incorrect:
   en_US: "Password Incorrect"
   de_DE: "Passwort falsch"

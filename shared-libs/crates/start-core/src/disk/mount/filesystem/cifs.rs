@@ -116,6 +116,23 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn filesystem_debug_redacts_credentials_without_changing_serialization() {
+        let cifs = Cifs {
+            hostname: "nas.invalid".into(),
+            path: "backup".into(),
+            username: "user".into(),
+            password: Some("sensitive password".into()),
+        };
+        let text = format!("{cifs:?}");
+        assert!(!text.contains("sensitive password"));
+        assert!(text.contains("<REDACTED_PASSWORD>"));
+        assert_eq!(
+            serde_json::to_value(&cifs).unwrap()["password"],
+            "sensitive password"
+        );
+    }
+
     #[tokio::test]
     async fn ip_literals_bypass_name_lookup() {
         for hostname in ["192.0.2.10", "2001:db8::10"] {
@@ -204,7 +221,7 @@ mod tests {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, visit_rs::VisitFields)]
+#[derive(Deserialize, Serialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct Cifs {
     pub hostname: String,
@@ -214,6 +231,22 @@ pub struct Cifs {
 }
 
 rpc_toolkit::reflect_ts!(Cifs);
+impl std::fmt::Debug for Cifs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cifs")
+            .field("hostname", &self.hostname)
+            .field("path", &self.path)
+            .field("username", &self.username)
+            .field(
+                "password",
+                &self
+                    .password
+                    .as_ref()
+                    .map(|_| crate::auth::RedactedPassword),
+            )
+            .finish()
+    }
+}
 impl Cifs {
     pub async fn mountable(&self) -> Result<(), Error> {
         let guard = TmpMountGuard::mount(self, ReadOnly).await?;
