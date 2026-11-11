@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::test_utils::{context, socks_client};
 use super::*;
+use crate::middleware::auth::session::RpcSessionUpgrader;
 use crate::sign::{AnySigningKey, Signer};
 use crate::util::future::NonDetachingJoinHandle;
 
@@ -30,7 +31,7 @@ async fn backend_registry_queries_keep_private_bulk_headers_and_live_auth_over_s
             let seen_upgrades = seen_upgrades.clone();
             let seen_http = seen_http.clone();
             async move {
-                if request.uri().path().ends_with("/ws/rpc") {
+                if request.uri().path().ends_with(RpcSessionUpgrader::PATH) {
                     assert_eq!(
                         request.headers()[crate::registry::device_info::DEVICE_INFO_HEADER],
                         "os.version=0.4.2&os.compat=0.4.0.5&os.platform=test"
@@ -117,7 +118,7 @@ async fn backend_registry_queries_never_follow_upgrade_redirects_or_retry_http()
     let seen_redirect = redirect_calls.clone();
     let app = axum::Router::new()
         .route(
-            "/catalog/ws/rpc",
+            "/catalog/rpc/v2",
             axum::routing::get(|| async { axum::response::Redirect::temporary("/redirected") }),
         )
         .route(

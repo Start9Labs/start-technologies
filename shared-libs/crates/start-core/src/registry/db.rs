@@ -15,7 +15,10 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use crate::context::CliContext;
-pub use crate::db::{ApplyWithPathParams as ApplyParams, DumpParams, SubscribeRes};
+pub use crate::db::{
+    ApplyWithPathParams as ApplyParams, DumpParams, SubscribeRes,
+    SubscribeResult as SubscribeIndexResult,
+};
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::context::RegistryContext;
@@ -167,16 +170,6 @@ async fn visible_subscription(
     let (dump, sub) = subscription(&mirror.db, Some(pointer)).await?;
     Ok((mirror, dump, sub))
 }
-
-/// Initial dump, with a continuation GUID when the request does not opt into `rpcstream`.
-#[derive(Deserialize, Serialize, VisitVariants)]
-#[serde(untagged)]
-pub enum SubscribeIndexResult {
-    Continuation(SubscribeRes),
-    Stream(Dump),
-}
-
-rpc_toolkit::reflect_ts!(SubscribeIndexResult);
 
 pub async fn subscribe(
     HandlerArgs {

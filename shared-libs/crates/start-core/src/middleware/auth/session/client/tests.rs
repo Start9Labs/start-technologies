@@ -9,6 +9,7 @@ use url::Url;
 
 use crate::context::CliContext;
 use crate::context::config::ClientConfig;
+use crate::middleware::auth::session::RpcSessionUpgrader;
 use crate::registry::context::RegistryContext;
 use crate::sign::Signer;
 use crate::util::future::NonDetachingJoinHandle;
@@ -42,7 +43,7 @@ async fn actual_cli_reuses_connections_after_application_errors_and_scopes_heade
     let observed = upgrades.clone();
     let app = crate::registry::registry_router(registry).layer(axum::middleware::from_fn(
         move |request: axum::extract::Request, next: axum::middleware::Next| {
-            if request.uri().path().ends_with("/ws/rpc") {
+            if request.uri().path().ends_with(RpcSessionUpgrader::PATH) {
                 observed.fetch_add(1, Ordering::SeqCst);
             }
             async move { next.run(request).await }
@@ -98,11 +99,11 @@ fn rpc_endpoint_replacement_retains_prefix_query_and_ipv6() {
     for (source, expected) in [
         (
             "https://registry.test/prefix/rpc/v0?keep=value",
-            "wss://registry.test/prefix/ws/rpc?keep=value",
+            "wss://registry.test/prefix/rpc/v2?keep=value",
         ),
         (
             "http://[2001:db8::1]:5959/rpc/v1",
-            "ws://[2001:db8::1]:5959/ws/rpc",
+            "ws://[2001:db8::1]:5959/rpc/v2",
         ),
     ] {
         assert_eq!(
@@ -138,7 +139,7 @@ fn http_rpc_urls_share_versioned_prefix_and_query_normalization() {
         );
         assert_eq!(
             super::RpcSessionUpgrader::url(url).unwrap().as_str(),
-            "wss://registry.test/prefix/ws/rpc?keep=value"
+            "wss://registry.test/prefix/rpc/v2?keep=value"
         );
     }
 }
@@ -150,7 +151,7 @@ async fn legacy_cli_continuations_and_resources_keep_prefixed_urls_and_bytes() {
     use futures::StreamExt;
     let app = Router::new()
         .route(
-            "/ws/rpc/{guid}",
+            "/rpc/v2/{guid}",
             get(|upgrade: WebSocketUpgrade| async move {
                 upgrade.on_upgrade(|mut socket| async move {
                     socket.send(Message::Text("legacy".into())).await.unwrap();
@@ -307,7 +308,7 @@ async fn all_startup_contexts_ignore_an_unavailable_stored_signer() {
             }),
         )
         .route(
-            "/ws/rpc/{guid}",
+            "/rpc/v2/{guid}",
             axum::routing::get(|upgrade: axum::extract::ws::WebSocketUpgrade| async move {
                 upgrade.on_upgrade(|mut socket| async move {
                     socket
@@ -437,7 +438,7 @@ async fn registry_cli_websocket_keeps_the_configured_http_proxy() {
     assert_eq!(response["private"].as_bool(), Some(true));
     let headers = request.await.unwrap();
     assert!(headers.starts_with("GET http://"), "{headers}");
-    assert!(headers.contains("/nested/ws/rpc "), "{headers}");
+    assert!(headers.contains("/nested/rpc/v2 "), "{headers}");
     assert!(!headers.to_lowercase().contains("x-start-auth-sig"));
 }
 
@@ -526,7 +527,7 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
             }),
         )
         .route(
-            "/legacy/ws/rpc/{guid}",
+            "/legacy/rpc/v2/{guid}",
             axum::routing::get(|upgrade: axum::extract::ws::WebSocketUpgrade| async move {
                 upgrade.on_upgrade(|mut socket| async move {
                     socket
@@ -540,7 +541,9 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
             move |request: axum::extract::Request, next: axum::middleware::Next| {
                 let refusing = refusing.clone();
                 async move {
-                    if request.uri().path() == "/ws/rpc" && refusing.load(Ordering::Relaxed) {
+                    if request.uri().path() == RpcSessionUpgrader::PATH
+                        && refusing.load(Ordering::Relaxed)
+                    {
                         http::StatusCode::BAD_REQUEST.into_response()
                     } else {
                         next.run(request).await

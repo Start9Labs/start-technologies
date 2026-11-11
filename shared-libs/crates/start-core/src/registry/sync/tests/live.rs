@@ -100,7 +100,7 @@ async fn one_socket_demultiplexes_large_dumps_and_interleaved_revisions() {
             stream,
             |request: &tokio_tungstenite::tungstenite::handshake::server::Request, response| {
                 assert!(!request.headers().contains_key(AUTH_SIG_HEADER));
-                assert_eq!(request.uri().path(), "/catalog/ws/rpc");
+                assert_eq!(request.uri().path(), "/catalog/rpc/v2");
                 let query: BTreeMap<String, String> =
                     serde_urlencoded::from_str(request.uri().query().unwrap_or_default()).unwrap();
                 assert!(query.is_empty());
@@ -230,10 +230,10 @@ fn rpc_endpoint_preserves_deployment_prefix_and_existing_query_without_negotiati
     .unwrap();
     assert_eq!(
         target.as_str(),
-        "wss://registry.test:8443/catalog/ws/rpc?keep=value"
+        "wss://registry.test:8443/catalog/rpc/v2?keep=value"
     );
     let target = RpcSessionUpgrader::url("http://[::1]:5959".parse().unwrap()).unwrap();
-    assert_eq!(target.as_str(), "ws://[::1]:5959/ws/rpc");
+    assert_eq!(target.as_str(), "ws://[::1]:5959/rpc/v2");
 }
 
 async fn wait_for(db: &TypedPatchDb<Database>, predicate: impl Fn(&DatabaseModel) -> bool) {

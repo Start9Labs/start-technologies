@@ -19,7 +19,10 @@ async fn admission_keeps_the_selected_identity_when_the_dial_host_is_pinned() {
         .nest("/nested", crate::registry::registry_router(registry))
         .layer(axum::middleware::from_fn(
             |request: axum::extract::Request, next: axum::middleware::Next| async move {
-                if request.uri().path().ends_with("/ws/rpc")
+                if request
+                    .uri()
+                    .path()
+                    .ends_with(crate::middleware::auth::session::RpcSessionUpgrader::PATH)
                     && request
                         .uri()
                         .query()

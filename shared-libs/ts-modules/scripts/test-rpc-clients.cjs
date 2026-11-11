@@ -94,6 +94,9 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       ...load('shared-libs/ts-modules/shared/src/types/rpc.types.ts'),
       ...load('shared-libs/ts-modules/shared/src/services/rpc-request.ts'),
       ...load('shared-libs/ts-modules/shared/src/services/rpc-response.ts'),
+      ...load(
+        'shared-libs/ts-modules/shared/src/services/database-subscription.ts',
+      ),
       ...load('shared-libs/ts-modules/shared/src/classes/rpc-error.ts'),
     })
     const requireSource = request => {

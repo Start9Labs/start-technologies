@@ -12,6 +12,7 @@ use axum::routing::{any, get, post};
 use axum::{Extension, Json};
 use serde::Deserialize;
 use startos::middleware::auth::local::LocalAuthContext;
+use startos::middleware::auth::session::RpcSessionUpgrader;
 use startos::net::tls::TlsListener;
 use startos::net::web_server::{Accept, Acceptor, DynAccept, MetadataVisitor, WebServer};
 use startos::util::crypto::EncryptedWire;
@@ -410,11 +411,15 @@ async fn inner_main() -> Result<(), Error> {
             any(continuations::continuation_handler)
                 .layer(DefaultBodyLimit::max(continuations::MAX_UPLOAD_BYTES)),
         )
-        // WebSocket continuation endpoint (update progress, live logs).
-        // Registered with `any` (not `get`) so HTTP/2 CONNECT requests (RFC
-        // 8441 extended CONNECT, used for WebSocket-over-h2) reach the
-        // upgrade extractor instead of being rejected with 405.
-        .route("/ws/rpc/{guid}", any(ws_continuation_handler))
+        // HTTP/2 WebSockets upgrade with CONNECT.
+        .route(
+            &format!("{}/{{guid}}", RpcSessionUpgrader::PATH),
+            any(ws_continuation_handler),
+        )
+        .route(
+            &format!("{}/{{guid}}", RpcContinuations::LEGACY_WS_PATH),
+            any(ws_continuation_handler),
+        )
         // Streaming flash endpoint for setup wizard
         .route("/api/setup/flash", post(setup_flash_handler))
         // Root CA download (no auth required)

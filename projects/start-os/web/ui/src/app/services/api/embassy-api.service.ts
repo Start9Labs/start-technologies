@@ -1,3 +1,6 @@
+import { legacyDatabaseSubscription } from '@start9labs/shared'
+import type { Revision, Update } from 'patch-db-client'
+import type { DataModel } from '../patch-db/data-model'
 import { Observable } from 'rxjs'
 import { ApiClient, Params, WebsocketConfig } from './api.types'
 
@@ -10,6 +13,13 @@ export type FileUploadOptions = {
 export abstract class ApiService {
   /** The server's RPC methods, as generated from its bindings. */
   abstract readonly rpc: ApiClient
+
+  watchDb$(): Observable<Update<DataModel>> {
+    return legacyDatabaseSubscription<DataModel>(
+      () => this.rpc.db.subscribe({}),
+      guid => this.openWebsocket$<Revision>(guid),
+    )
+  }
 
   abstract uploadFile(
     guid: string,

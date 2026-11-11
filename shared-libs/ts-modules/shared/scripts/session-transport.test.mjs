@@ -91,7 +91,7 @@ async function framedSocket(context) {
     'rpc',
     Open,
   )
-  const socket = new Constructor('ws://server.test/ws/rpc')
+  const socket = new Constructor('ws://server.test/rpc/v2')
   const opened = await new Promise(resolve =>
     socket.addEventListener('open', resolve, { once: true }),
   )
@@ -127,7 +127,7 @@ test('cancelling during signer preparation never constructs a WebSocket', async 
     'rpc',
     Socket,
   )
-  const socket = new Constructor('ws://server.test/ws/rpc')
+  const socket = new Constructor('ws://server.test/rpc/v2')
   socket.close()
   resolve(identity())
   await Promise.resolve()
@@ -153,7 +153,7 @@ test('plaintext downgrade never opens admission or exposes RPC data', async () =
     'rpc',
     Downgrade,
   )
-  const socket = new Constructor('ws://server.test/ws/rpc?existing=kept')
+  const socket = new Constructor('ws://server.test/rpc/v2?existing=kept')
   let opened = 0
   socket.addEventListener('open', () => opened++)
   const result = await closed(socket)
@@ -245,16 +245,36 @@ for (const [name, local, fail] of [
     assert.equal(event.wasClean, false)
   })
 
-test('verified close retains UTF-8 BOM despite subsequent transport failure', async context => {
-  const { socket, server } = await framedSocket(context)
-  const result = closed(socket)
-  server.send(Uint8Array.of(0, 0, 0, 8, 2, 3, 232, 239, 187, 191, 79, 75))
-  const event = await result
-  server.abort()
-  assert.equal(event.code, 1000)
-  assert.equal(event.reason, '\uFEFFOK')
-  assert.equal(event.wasClean, true)
-})
+for (const code of [1000, 1008, 1011]) {
+  test(`authenticated close ${code} is transport loss, not an application outcome`, async context => {
+    const { socket, server } = await framedSocket(context)
+    let errors = 0
+    socket.addEventListener('error', () => errors++)
+    const result = closed(socket)
+    server.send(
+      Uint8Array.of(
+        0,
+        0,
+        0,
+        8,
+        2,
+        code >> 8,
+        code & 255,
+        239,
+        187,
+        191,
+        79,
+        75,
+      ),
+    )
+    const event = await result
+    server.abort()
+    assert.equal(errors, 1)
+    assert.equal(event.code, 1006)
+    assert.equal(event.reason, '')
+    assert.equal(event.wasClean, false)
+  })
+}
 
 for (const [name, bytes] of [
   ['reserved close status', [0, 0, 0, 3, 2, 3, 237]],

@@ -266,6 +266,18 @@ pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
     ctx: C,
     rpc: MethodRouter,
 ) -> Router {
+    let continuation = any({
+        let ctx = ctx.clone();
+        move |x::Path(guid): x::Path<Guid>, ws: axum::extract::ws::WebSocketUpgrade| async move {
+            match AsRef::<RpcContinuations>::as_ref(&ctx)
+                .get_ws_handler(&guid)
+                .await
+            {
+                Some(cont) => cont.on_upgrade(ws, guid),
+                _ => not_found(),
+            }
+        }
+    });
     Router::new()
         .route("/rpc/{*path}", rpc)
         .route(
@@ -273,23 +285,21 @@ pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
                 "{}/{{guid}}",
                 crate::middleware::auth::session::RpcSessionUpgrader::PATH,
             ),
-            any({
-                let ctx = ctx.clone();
-                move |x::Path(guid): x::Path<Guid>,
-                      ws: axum::extract::ws::WebSocketUpgrade| async move {
-                    match AsRef::<RpcContinuations>::as_ref(&ctx).get_ws_handler(&guid).await {
-                        Some(cont) => cont.on_upgrade(ws, guid),
-                        _ => not_found(),
-                    }
-                }
-            }),
+            continuation.clone(),
+        )
+        .route(
+            &format!("{}/{{guid}}", RpcContinuations::LEGACY_WS_PATH),
+            continuation,
         )
         .route(
             "/rest/rpc/{guid}",
             any({
                 let ctx = ctx.clone();
                 move |x::Path(guid): x::Path<Guid>, request: x::Request| async move {
-                    match AsRef::<RpcContinuations>::as_ref(&ctx).get_rest_handler(&guid).await {
+                    match AsRef::<RpcContinuations>::as_ref(&ctx)
+                        .get_rest_handler(&guid)
+                        .await
+                    {
                         None => not_found(),
                         Some(cont) => cont(request).await.unwrap_or_else(rest_continuation_error),
                     }

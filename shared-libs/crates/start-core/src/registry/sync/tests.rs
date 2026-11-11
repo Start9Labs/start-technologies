@@ -148,11 +148,11 @@ fn websocket_urls_preserve_the_registry_prefix_and_tls() {
     for (registry, expected) in [
         (
             "https://registry.test/catalog/",
-            "wss://registry.test/catalog/ws/rpc".to_owned(),
+            "wss://registry.test/catalog/rpc/v2".to_owned(),
         ),
         (
             "http://registry.test:5959/",
-            "ws://registry.test:5959/ws/rpc".to_owned(),
+            "ws://registry.test:5959/rpc/v2".to_owned(),
         ),
     ] {
         assert_eq!(

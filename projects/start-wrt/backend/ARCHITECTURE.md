@@ -4,7 +4,7 @@ Rust crates powering the StartWRT router daemon and CLI. Three crates: `ctrl` (R
 
 ## Transport
 
-HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 uses optional signed-DH admission at `/ws/rpc`, with `POST /rpc/v1` compatibility, via [rpc-toolkit](../../../shared-libs/crates/rpc-toolkit). `rpc.rs` composes one dispatch/middleware stack, adds typed firmware metadata to replies and retains the CORS-exposed HTTP firmware header. Live authorization uses the verified connection peer; request-signature/local-token compatibility stays in `start-core` (see [auth.rs](#authrs--authentication)).
+HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 requires signed-DH admission at `/rpc/v2`, with `POST /rpc/v1` compatibility, via [rpc-toolkit](../../../shared-libs/crates/rpc-toolkit). `rpc.rs` composes one dispatch/middleware stack, adds typed firmware metadata to replies and retains the CORS-exposed HTTP firmware header. Live authorization uses the verified connection peer; request-signature/local-token compatibility stays in `start-core` (see [auth.rs](#authrs--authentication)).
 
 Additional routes:
 
@@ -12,7 +12,7 @@ Additional routes:
 | ----------------------------------------- | ------------------------------------------------------------------- |
 | `POST /api/setup/flash`                   | NDJSON streaming for setup wizard                                   |
 | `GET\|POST /rest/rpc/{guid}`              | Continuation endpoint for backup/restore/diagnostics (64 MiB limit) |
-| `GET /ws/rpc/{guid}`                      | WebSocket continuation endpoint (update progress, live logs)        |
+| `GET /rpc/v2/{guid}`                      | WebSocket continuation endpoint (update progress, live logs); `/ws/rpc/{guid}` is a compatibility alias |
 | `GET /luci`                               | Convenience redirect to `/cgi-bin/luci`                             |
 | `GET /static/local-root-ca.crt`           | Root CA certificate download (no auth)                              |
 | `GET /static/local-root-ca.mobileconfig`  | Root CA as an Apple configuration profile (no auth)                 |

@@ -78,7 +78,7 @@ pub struct RpcSessionUpgrader;
 
 impl RpcSessionUpgrader {
     /// The shared encrypted RPC endpoint.
-    pub const PATH: &'static str = "/ws/rpc";
+    pub const PATH: &'static str = "/rpc/v2";
 
     /// RPC WebSocket endpoint under an HTTP deployment base.
     pub fn url(mut base: Url) -> Result<Url, Error> {
@@ -103,7 +103,7 @@ impl RpcSessionUpgrader {
         Ok(base)
     }
 
-    /// WebSocket RPC admission with optional encrypted peer authentication.
+    /// Signed-DH admission before RPC parsing.
     pub fn route<C: SignatureAuthContext + Clone>(
         server: rpc_toolkit::HttpServer<C>,
     ) -> axum::routing::MethodRouter {

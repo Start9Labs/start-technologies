@@ -21,7 +21,7 @@ use crate::registry::device_info::DeviceInfoMiddleware;
 use crate::registry::os::index::OsIndex;
 use crate::registry::package::index::{PackageIndex, ReaderParams};
 use crate::registry::signer::SignerInfo;
-use crate::rpc_continuations::Guid;
+use crate::rpc_continuations::{Guid, RpcContinuations};
 use crate::s9pk::manifest::LocaleString;
 use crate::util::DataUrl;
 use crate::util::serde::HandlerExtSerde;
@@ -168,6 +168,21 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
     use axum::extract as x;
     use axum::routing::{any, get};
     let server = registry_server(ctx.clone());
+    let continuation = get({
+        let ctx = ctx.clone();
+        move |x::Path(path): x::Path<String>, ws: axum::extract::ws::WebSocketUpgrade| async move {
+            match Guid::from(&path) {
+                None => {
+                    tracing::debug!("No Guid Path");
+                    bad_request()
+                }
+                Some(guid) => match ctx.rpc_continuations.get_ws_handler(&guid).await {
+                    Some(cont) => cont.on_upgrade(ws, guid),
+                    _ => not_found(),
+                },
+            }
+        }
+    });
     Router::new()
         .route("/", get(marketplace_redirect))
         .route("/rpc/{*path}", any(server.clone()).layer(cors::layer()))
@@ -183,22 +198,11 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
         )
         .route(
             &format!("{}/{{*path}}", RpcSessionUpgrader::PATH),
-            get({
-                let ctx = ctx.clone();
-                move |x::Path(path): x::Path<String>,
-                      ws: axum::extract::ws::WebSocketUpgrade| async move {
-                    match Guid::from(&path) {
-                        None => {
-                            tracing::debug!("No Guid Path");
-                            bad_request()
-                        }
-                        Some(guid) => match ctx.rpc_continuations.get_ws_handler(&guid).await {
-                            Some(cont) => cont.on_upgrade(ws, guid),
-                            _ => not_found(),
-                        },
-                    }
-                }
-            }),
+            continuation.clone(),
+        )
+        .route(
+            &format!("{}/{{*path}}", RpcContinuations::LEGACY_WS_PATH),
+            continuation,
         )
         .route(
             "/rest/rpc/{*path}",

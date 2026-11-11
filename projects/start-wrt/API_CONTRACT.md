@@ -1,6 +1,6 @@
 # StartWRT API Contract
 
-Complete RPC API contract for the StartWRT backend. RPC uses **JSON-RPC 2.0** over signed ephemeral-DH WebSocket sessions at `/ws/rpc`; HTTP POST `/rpc/v1` remains for anonymous bootstrap and compatibility clients. Request and response types are defined in Rust.
+Complete RPC API contract for the StartWRT backend. RPC uses **JSON-RPC 2.0** over signed ephemeral-DH WebSocket sessions at `/rpc/v2`; HTTP POST `/rpc/v1` remains for anonymous bootstrap and compatibility clients. Request and response types are defined in Rust.
 
 **Goal:** The frontend should never touch UCI files, run shell commands, or read raw files. Every operation goes through a purpose-built RPC method. The backend handles all UCI manipulation, service restarts, and system queries internally.
 
@@ -264,11 +264,11 @@ struct UpdateSystemParams {
 #[serde(rename_all = "camelCase")]
 struct UpdateSystemRes {
     target: Option<String>,   // Version being installed
-    progress: Option<String>, // GUID for /ws/rpc/{guid}
+    progress: Option<String>, // GUID for /rpc/v2/{guid}
 }
 ```
 
-#### WebSocket progress: `/ws/rpc/{guid}`
+#### WebSocket progress: `/rpc/v2/{guid}`
 
 Connect via WebSocket to stream `FullProgress` JSON frames:
 
@@ -399,7 +399,7 @@ struct FollowLogsRes {
 // Response: FollowLogsRes
 ```
 
-1. Client opens a WebSocket to `/ws/rpc/{guid}` within 30 seconds; the GUID is single-use
+1. Client opens a WebSocket to `/rpc/v2/{guid}` within 30 seconds; the GUID is single-use
 2. Server spawns `logread -f` (dumps historical entries then follows new ones)
 3. Each line is parsed into `LogEntry` and sent as a JSON text frame
 4. Connection closes when either side disconnects, or when the key that requested it is revoked; child process is killed on drop
@@ -2407,15 +2407,15 @@ struct ConfigCheck {
 
 ## HTTP Routes
 
-Every RPC method above uses JSON-RPC 2.0 through **`/ws/rpc`** for keyed browser/CLI sessions, or **`POST /rpc/v1`** for anonymous and compatibility callers.
+Every RPC method above uses JSON-RPC 2.0 through **`/rpc/v2`** for keyed browser/CLI sessions, or **`POST /rpc/v1`** for anonymous and compatibility callers.
 The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 
 | Route                                              | Method                                  | Auth                                                                                   | Purpose                                                                                       |
 | -------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `/ws/rpc`                                          | WebSocket GET / HTTP/2 extended CONNECT | Signed-DH admission + live authorization (see § 1)                                     | Encrypted JSON-RPC for keyed browser and CLI calls                                            |
+| `/rpc/v2`                                          | WebSocket GET / HTTP/2 extended CONNECT | Signed-DH admission + live authorization (see § 1)                                     | Encrypted JSON-RPC for keyed browser and CLI calls                                            |
 | `/rpc/v1`                                          | POST                                    | Request signature or local token (see § 1)                                             | JSON-RPC 2.0 compatibility/anonymous endpoint                                                 |
 | `/rest/rpc/{guid}`                                 | GET/POST                                | GUID capability (one-shot)                                                             | RPC continuation: binary download (backup, diagnostics) / upload (restore); 64 MiB body limit |
-| `/ws/rpc/{guid}`                                   | WebSocket                               | GUID capability; secure origin requires fresh same-peer admission signed for that GUID | Streaming: update progress (`system.update`), live logs (`system.logs-follow`)                |
+| `/rpc/v2/{guid}` (legacy alias `/ws/rpc/{guid}`)       | WebSocket                               | GUID capability; secure origin requires fresh same-peer admission signed for that GUID | Streaming: update progress (`system.update`), live logs (`system.logs-follow`)                |
 | `/api/setup/flash`                                 | POST                                    | None (setup wizard)                                                                    | Streams NDJSON `SetupEvent` progress while flashing the eMMC; one flash at a time             |
 | `/static/local-root-ca.crt`                        | GET                                     | None                                                                                   | Root CA certificate download                                                                  |
 | `/static/local-root-ca.mobileconfig`               | GET                                     | None                                                                                   | Root CA as an Apple configuration profile                                                     |

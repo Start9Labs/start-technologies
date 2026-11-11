@@ -42,6 +42,7 @@ export const SESSION_PROFILE = {
     maxPlaintextBytes: 65519,
     maxHandshakeRecordBytes: 1024,
     maxHandshakeDepth: 16,
+    rpcStreamVersion: '1.0',
     handshakeTimeoutMs: 30000,
     writeTimeoutMs: 15000,
     maxIncomingBytes: 67108864,
@@ -64,5 +65,5 @@ export const SESSION_PROFILE = {
       close: 2,
     },
   },
-  rpcPath: '/ws/rpc',
+  rpcPath: '/rpc/v2',
 } as const

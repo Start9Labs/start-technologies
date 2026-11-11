@@ -37,8 +37,8 @@ Defined in `shared-libs/crates/start-core/src/registry/mod.rs`:
 
 - `GET /` — HTTP 307 to `https://marketplace.start9.com/?registry=<encoded-origin>`, using the request authority and `X-Forwarded-Proto` (plain HTTP by default).
 - `POST /rpc/{*path}` — JSON-RPC through outer CORS and shared `Auth` (local + signature auth) and `DeviceInfoMiddleware`.
-- `GET /ws/rpc` — encrypted multiplexed JSON-RPC and opt-in `rpcstream` responses. Signed ephemeral-DH admission uses two consecutive CBOR objects per hello, without URL selectors. Valid unknown keys can call public methods; per-method authorization observes current enrollment and permissions on the same open connection. Upgrade headers cannot replace its verified peer identity.
-- `GET /ws/rpc/{*path}` — WebSocket RPC continuations, keyed by a `Guid`.
+- `GET /rpc/v2` — encrypted multiplexed JSON-RPC and opt-in `rpcstream` responses. Signed ephemeral-DH admission uses two consecutive CBOR objects per hello, without URL selectors. Valid unknown keys can call public methods; per-method authorization observes current enrollment and permissions on the same open connection. Upgrade headers cannot replace its verified peer identity.
+- `GET /rpc/v2/{*path}` — WebSocket RPC continuations, keyed by a `Guid`; `/ws/rpc/{*path}` remains a compatibility alias.
 - `/rest/rpc/{*path}` — REST continuation channel (e.g. large asset streams), keyed by a `Guid`.
 - `GET /icons/{*path}` — a package or dependency icon from the content-addressed store. Access follows the visibility of packages referencing the bytes. Public references permit immutable public caching; private-only references require an authorized request signature and return `private, no-store`. Package versions refer to an icon by this path, `blake3/<hash>.<ext>`; `DeviceInfoMiddleware` inlines it as a data URL for StartOS before 0.4.0.3.
 
@@ -61,14 +61,14 @@ Subcommands (same module), each available over RPC and to the `start-registry` C
 The public `db.subscribe` RPC accepts optional `pointer` and `osVersion` parameters. The pointer
 may select `/index` or any descendant; omitting it or passing `null` selects `/index`. Without
 `rpcstream` opt-in, the response contains an initial `{ id, value }` dump and a continuation
-`guid`. Connecting to `/ws/rpc/<guid>` streams revisions relative to the selected subtree. This
+`guid`. Connecting to `/rpc/v2/<guid>` streams revisions relative to the selected subtree. This
 contract also applies to ordinary calls on the shared WebSocket.
 
-With `rpcstream: "1.0"` on `/ws/rpc`, the same method returns the dump directly as its initiating
+With `rpcstream: "1.0"` on `/rpc/v2`, the same method returns the dump directly as its initiating
 result and sends subsequent `Revision` events under that request ID. Closing a stream releases
 its subscription; ordinary calls and other subscriptions retain the connection.
 
-StartOS opens one `/ws/rpc` socket per registry, multiplexing `/index` and the selected OS source's
+StartOS opens one `/rpc/v2` socket per registry, multiplexing `/index` and the selected OS source's
 `/index/os` subscriptions. StartOS's account developer key authenticates its client identity during
 signed-DH admission; initiating messages include the client's OS version inside that encrypted channel.
 Responses permit 64 MiB logical payloads independently of request limits; wire allowances include

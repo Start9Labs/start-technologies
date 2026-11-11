@@ -2,6 +2,7 @@ use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use axum::extract::ws::Message;
+use axum::http::StatusCode;
 use futures::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message as WireMessage;
 use url::Url;
@@ -173,44 +174,56 @@ async fn session_router_admits_scoped_rpc_and_its_same_peer_continuation() {
 async fn session_router_keeps_legacy_http_and_plaintext_guid_routes() {
     let (_temp, ctx, _, _, _) = crate::registry::tests::fixture().await;
     let (url, _task) = server(ctx.clone()).await;
-    let reply: serde_json::Value = reqwest::Client::new()
-        .post(url.join("rpc/v1").unwrap())
-        .json(&serde_json::json!({"method":"db.subscribe", "params":{"pointer":"/index"}}))
-        .send()
+    assert_eq!(RpcSessionUpgrader::PATH, "/rpc/v2");
+    let mut unversioned = url.join("ws/rpc").unwrap();
+    unversioned.set_scheme("ws").unwrap();
+    let error = tokio_tungstenite::connect_async(unversioned.as_str())
         .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let guid = reply["result"]["guid"].as_str().unwrap();
-    let mut url = url
-        .join(&format!("{}/{guid}", RpcSessionUpgrader::PATH))
-        .unwrap();
-    url.set_scheme("ws").unwrap();
-    let (mut changes, _) = tokio_tungstenite::connect_async(url.as_str())
-        .await
-        .unwrap();
-    ctx.db
-        .mutate(|db| {
-            db.as_index_mut()
-                .as_name_mut()
-                .ser(&Some("legacy".to_owned()))
-        })
-        .await
-        .result
-        .unwrap();
-    let message = tokio::time::timeout(Duration::from_secs(3), changes.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    let WireMessage::Text(text) = message else {
-        panic!("expected plaintext revision")
-    };
+        .unwrap_err();
     assert!(
-        serde_json::from_str::<serde_json::Value>(&text)
-            .unwrap()
-            .get("patch")
-            .is_some()
+        matches!(error, tokio_tungstenite::tungstenite::Error::Http(response) if response.status() == StatusCode::NOT_FOUND)
     );
+    for path in [
+        RpcSessionUpgrader::PATH,
+        crate::rpc_continuations::RpcContinuations::LEGACY_WS_PATH,
+    ] {
+        let reply: serde_json::Value = reqwest::Client::new()
+            .post(url.join("rpc/v1").unwrap())
+            .json(&serde_json::json!({"method":"db.subscribe", "params":{"pointer":"/index"}}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let guid = reply["result"]["guid"].as_str().unwrap();
+        let mut url = url.join(&format!("{path}/{guid}")).unwrap();
+        url.set_scheme("ws").unwrap();
+        let (mut changes, _) = tokio_tungstenite::connect_async(url.as_str())
+            .await
+            .unwrap();
+        ctx.db
+            .mutate(|db| {
+                db.as_index_mut()
+                    .as_name_mut()
+                    .ser(&Some(format!("legacy{path}")))
+            })
+            .await
+            .result
+            .unwrap();
+        let message = tokio::time::timeout(Duration::from_secs(3), changes.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let WireMessage::Text(text) = message else {
+            panic!("expected plaintext revision")
+        };
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&text)
+                .unwrap()
+                .get("patch")
+                .is_some()
+        );
+    }
 }

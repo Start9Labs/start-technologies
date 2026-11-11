@@ -57,7 +57,7 @@ async fn server(
                 },
             )),
         )
-        .route("/catalog/ws/rpc", get(move || async move { status }));
+        .route("/catalog/rpc/v2", get(move || async move { status }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!(
         "http://registry.test:{}/catalog",
@@ -259,7 +259,7 @@ async fn accepted_websocket_with_failed_admission_never_retries_http() {
     let count = requests.clone();
     let router = Router::new()
         .route(
-            "/ws/rpc",
+            "/rpc/v2",
             get(|ws: axum::extract::WebSocketUpgrade| async move {
                 ws.on_upgrade(|mut socket| async move {
                     assert!(matches!(

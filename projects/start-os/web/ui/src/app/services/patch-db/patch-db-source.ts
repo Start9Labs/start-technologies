@@ -1,9 +1,10 @@
 import { inject, Injectable, InjectionToken } from '@angular/core'
-import { Dump, Revision, Update } from 'patch-db-client'
-import { BehaviorSubject, EMPTY, Observable, throwError, timer } from 'rxjs'
+import { bufferDatabaseRevisions } from '@start9labs/shared'
+import { Dump, Update } from 'patch-db-client'
+import { BehaviorSubject, EMPTY, Observable, throwError } from 'rxjs'
 import {
-  bufferTime,
   catchError,
+  concatWith,
   filter,
   skip,
   startWith,
@@ -33,24 +34,21 @@ export class PatchDbSource extends Observable<Update<DataModel>[]> {
   private readonly stream$ = inject(AuthService).isVerified$.pipe(
     switchMap(verified =>
       verified
-        ? this.api.rpc.db.subscribe({}).then(({ dump, guid }) => ({
-            guid,
-            dump: { ...dump, value: dump.value as DataModel },
-          }))
+        ? this.api
+            .watchDb$()
+            .pipe(
+              bufferDatabaseRevisions(),
+              concatWith(
+                throwError(() => new Error('Database subscription ended')),
+              ),
+            )
         : EMPTY,
-    ),
-    switchMap(({ dump, guid }) =>
-      this.api.openWebsocket$<Revision>(guid).pipe(
-        bufferTime(250),
-        filter(revisions => !!revisions.length),
-        startWith([dump]),
-      ),
     ),
     catchError((_, original$) => {
       this.state.retrigger(false, 2000)
 
       return this.state.pipe(
-        skip(1), // skipping previous value stored due to shareReplay
+        skip(1),
         filter(current => current === 'running'),
         take(1),
         switchMap(() => original$),

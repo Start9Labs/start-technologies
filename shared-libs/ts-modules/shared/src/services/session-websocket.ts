@@ -41,12 +41,8 @@ function closePayload(code?: number, reason = ''): Uint8Array {
   return payload
 }
 
-function closeEvent(payload: Uint8Array): CloseEvent {
-  if (payload.length === 0)
-    return new CloseEvent('close', {
-      code: profile.noStatusCloseCode,
-      wasClean: true,
-    })
+function validateClosePayload(payload: Uint8Array): void {
+  if (payload.length === 0) return
   if (
     payload.length < profile.closeStatusBytes ||
     payload.length > profile.maxClosePayloadBytes
@@ -57,9 +53,8 @@ function closeEvent(payload: Uint8Array): CloseEvent {
     payload.byteOffset,
     payload.byteLength,
   ).getUint16(0)
-  const reason = decoder.decode(payload.subarray(profile.closeStatusBytes))
+  decoder.decode(payload.subarray(profile.closeStatusBytes))
   validateCloseCode(code)
-  return new CloseEvent('close', { code, reason, wasClean: true })
 }
 
 export function sessionWebSocketConstructor(
@@ -173,13 +168,13 @@ export function sessionWebSocketConstructor(
         const kind = bytes[0]
         const payload = bytes.subarray(profile.messageKindBytes)
         if (kind === profile.kinds.close) {
-          const event = closeEvent(payload)
+          validateClosePayload(payload)
           if (
             this.offset !== this.plaintext.length ||
             raw.readBufferLength !== 0
           )
             throw new Error('Data follows encrypted close result')
-          this.finish(event)
+          this.fail(new Error('Encrypted WebSocket closed'))
           return
         }
         if (payload.length > profile.maxIncomingBytes)

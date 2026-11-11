@@ -85,7 +85,7 @@ Configuration is read from CLI flags and a config file (`-c <path>`; default sea
 | `-d, --datadir <path>`  | data directory (default `/var/lib/startos`)             |
 | `-c, --config <path>`   | config file                                             |
 
-Clients synchronize registry metadata through `db.subscribe`: `rpcstream` opt-in uses the shared `/ws/rpc` socket, while ordinary requests retain the GUID WebSocket continuation. StartOS authenticates and encrypts this shared connection through signed ephemeral DH. Streaming requires encrypted admission and `rpcstream`, with the client's selected URL host configured on the registry. An absent upgrade route (HTTP 404/405/501) selects signed HTTP polling every 15 minutes; each cycle retries upgrade support. Polls retrieve full package versions/revisions, registry info and the selected OS index through the same cache/trust owners. Authorization, transport and failed encrypted admission errors never downgrade. A subscription's optional `osVersion` selects a lazily shared backward-compatible index view; omitted versions retain the canonical format. StartOS maintains package, signer, and OS-update caches independently of open browser sessions. OS releases marked `security` generate notifications on compatible StartOS servers using that registry for updates.
+Clients synchronize registry metadata through `db.subscribe`: `rpcstream` opt-in uses the shared `/rpc/v2` socket, while ordinary requests retain the GUID WebSocket continuation. StartOS authenticates and encrypts this shared connection through signed ephemeral DH. Streaming requires encrypted admission and `rpcstream`, with the client's selected URL host configured on the registry. An absent upgrade route (HTTP 404/405/501) selects signed HTTP polling every 15 minutes; each cycle retries upgrade support. Polls retrieve full package versions/revisions, registry info and the selected OS index through the same cache/trust owners. Authorization, transport and failed encrypted admission errors never downgrade. A subscription's optional `osVersion` selects a lazily shared backward-compatible index view; omitted versions retain the canonical format. StartOS maintains package, signer, and OS-update caches independently of open browser sessions. OS releases marked `security` generate notifications on compatible StartOS servers using that registry for updates.
 
 Ordinary RPC requests have a 1 MiB encoded-body limit, including JSON and base64 overhead. This also bounds inline registry icons sent by `registry info set-icon`; use a smaller image when its encoded request exceeds that budget. Large index responses and asset downloads retain their separate limits.
 
@@ -93,7 +93,7 @@ Server state lives in `<datadir>/registry.db` (PatchDB) plus a SQLite metrics da
 
 > [!NOTE]
 > **Non-StartOS deployments only:** A separately managed reverse proxy must forward `/`, `/rpc/`,
-> `/ws/rpc`, `/ws/rpc/`, `/rest/rpc/`, and `/icons/`. Preserve the public `Host` header and set
+> `/rpc/v2`, `/rpc/v2/`, `/ws/rpc/` (legacy continuations), `/rest/rpc/`, and `/icons/`. Preserve the public `Host` header and set
 > `X-Forwarded-Proto` to the public scheme (`http` or `https`) for the root redirect. The WebSocket routes also need HTTP/1.1 upgrade forwarding and a
 > long-lived idle timeout. StartOS-hosted registries expose these routes through their exported
 > `protocol: 'http'` interface automatically.

@@ -21,7 +21,7 @@ requires extending that owner; transport code does not impose a signing scheme.
 ## Admission and authorization
 
 `middleware/auth/session.rs::RpcSessionUpgrader` requires encrypted admission on bare
-`/ws/rpc`. The signed CBOR body carries the protocol and version; URL selectors cannot
+`/rpc/v2`. The signed CBOR body carries the protocol and version; URL selectors cannot
 choose plaintext mode or a signing identity. `request_identities` supplies allowed ingress
 and loopback names, ranking the preserved Host authority first. Signature verification
 selects a matching permitted identity, preserving logical names through IP pinning.

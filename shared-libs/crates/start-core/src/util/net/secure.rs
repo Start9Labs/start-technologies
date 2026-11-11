@@ -58,6 +58,7 @@ pub(crate) fn browser_profile() -> serde_json::Value {
         "maxPlaintextBytes": MAX_PLAINTEXT,
         "maxHandshakeRecordBytes": MAX_HANDSHAKE_RECORD,
         "maxHandshakeDepth": crate::sign::session::MAX_HANDSHAKE_DEPTH,
+        "rpcStreamVersion": rpc_toolkit::RPCSTREAM_VERSION,
         "handshakeTimeoutMs": HANDSHAKE_TIMEOUT.as_millis(),
         "writeTimeoutMs": Duration::from_secs(15).as_millis(),
         "maxIncomingBytes": logical.get(),

@@ -141,7 +141,7 @@ const probe = {
       location.hostname,
       SESSION_PROFILE.identity.rpcTarget,
     )
-    const socket = new Constructor(`ws://${location.host}/ws/rpc`)
+    const socket = new Constructor(`ws://${location.host}/rpc/v2`)
     await new Promise((resolve, reject) => {
       socket.onopen = resolve
       socket.onerror = reject

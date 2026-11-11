@@ -58,7 +58,7 @@ rpc_toolkit::reflect_ts!(FollowLogsParams);
 
 #[derive(Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct FollowLogsRes {
-    /// Streams each new [`LogEntry`] as JSON from `/ws/rpc/{guid}`.
+    /// Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.
     pub guid: Guid,
 }
 rpc_toolkit::reflect_ts!(FollowLogsRes);

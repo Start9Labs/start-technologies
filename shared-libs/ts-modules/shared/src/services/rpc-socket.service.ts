@@ -1,12 +1,24 @@
 import { DOCUMENT, inject, Service } from '@angular/core'
 import { auth } from '@start9labs/start-core'
 import { SESSION_PROFILE } from '@start9labs/start-core/osBindings/session-profile'
-import { filter, firstValueFrom } from 'rxjs'
+import {
+  catchError,
+  defer,
+  filter,
+  firstValueFrom,
+  takeWhile,
+  throwError,
+} from 'rxjs'
+import type { Observable } from 'rxjs'
 import { webSocket } from 'rxjs/webSocket'
 import type { WebSocketSubject, WebSocketSubjectConfig } from 'rxjs/webSocket'
 
 import { RELATIVE_URL } from '../tokens/relative-url'
-import type { RPCOptions, RPCResponse } from '../types/rpc.types'
+import type {
+  RPCOptions,
+  RPCResponse,
+  RPCStreamResponse,
+} from '../types/rpc.types'
 import { AUTH_SIGNING_HOST, AuthKeyService } from './auth-key.service'
 import type { AuthKeyLease } from './auth-key.service'
 import { withTimeout } from './http.service'
@@ -39,6 +51,61 @@ export class RpcSocketService {
     options: Pick<RPCOptions, 'timeout'>,
     lease: AuthKeyLease,
   ): Promise<RPCResponse<T>> {
+    let response = this.responses(body, lease).pipe(
+      filter(
+        (value): value is RPCResponse<T> =>
+          isResponse(value) && 'jsonrpc' in value,
+      ),
+    )
+    if (options.timeout) response = withTimeout(response, options.timeout)
+    try {
+      return await firstValueFrom(response)
+    } catch (cause) {
+      throw transportError(cause)
+    }
+  }
+
+  /** Emits the initiating result and events; terminals end this stream, not sibling calls. */
+  stream<T>(
+    body: string,
+    lease: AuthKeyLease,
+  ): Observable<RPCResponse<T> | RPCStreamResponse<T>> {
+    const request = `{"rpcstream":${JSON.stringify(SESSION_PROFILE.transport.rpcStreamVersion)},${body.slice(1)}`
+    return this.responses(request, lease).pipe(
+      filter((value): value is RPCResponse<T> | RPCStreamResponse<T> =>
+        isResponse(value),
+      ),
+      takeWhile(
+        value =>
+          !('end' in value && value.end) &&
+          !('jsonrpc' in value && 'error' in value),
+        true,
+      ),
+      filter(value => 'error' in value || !('end' in value && value.end)),
+    )
+  }
+
+  private responses(body: string, lease: AuthKeyLease): Observable<unknown> {
+    return defer(() => {
+      const socket = this.socket(lease)
+      const id = this.document.defaultView!.crypto.randomUUID()
+      const request = `{"jsonrpc":"2.0","id":${JSON.stringify(id)},${body.slice(1)}`
+      return socket.multiplex(
+        () => request,
+        () => ({
+          rpcstream: SESSION_PROFILE.transport.rpcStreamVersion,
+          close: id,
+        }),
+        value =>
+          value !== null &&
+          typeof value === 'object' &&
+          'id' in value &&
+          value.id === id,
+      )
+    }).pipe(catchError(cause => throwError(() => transportError(cause))))
+  }
+
+  private socket(lease: AuthKeyLease): WebSocketSubject<unknown> {
     const prepared = this.prepare(lease)
     lease.signal.throwIfAborted()
     if (this.session?.signal !== lease.signal) {
@@ -64,35 +131,7 @@ export class RpcSocketService {
         { once: true, signal: abort.signal },
       )
     }
-    const id = this.document.defaultView!.crypto.randomUUID()
-    const request = `{"jsonrpc":"2.0","id":${JSON.stringify(id)},${body.slice(1)}`
-    let response = this.session.socket
-      .multiplex(
-        () => request,
-        () => ({ rpcstream: '1.0', close: id }),
-        value =>
-          value !== null &&
-          typeof value === 'object' &&
-          'id' in value &&
-          value.id === id,
-      )
-      .pipe(
-        filter(
-          (value): value is RPCResponse<T> =>
-            value !== null &&
-            typeof value === 'object' &&
-            ('result' in value || 'error' in value),
-        ),
-      )
-    if (options.timeout) response = withTimeout(response, options.timeout)
-    try {
-      return await firstValueFrom(response)
-    } catch (cause) {
-      throw Object.assign(
-        new Error('Encrypted RPC transport failed', { cause }),
-        { code: 0 },
-      )
-    }
+    return this.session.socket
   }
 
   /** Aborts active RPC calls; the next call opens a fresh session. */
@@ -155,4 +194,28 @@ export class RpcSocketService {
     current.signal.throwIfAborted()
     return { signer: auth.requestSigner(current.key), signal: current.signal }
   }
+}
+
+function isResponse(
+  value: unknown,
+): value is RPCResponse<unknown> | RPCStreamResponse<unknown> {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    !('result' in value || 'error' in value)
+  )
+    return false
+  if ('rpcstream' in value)
+    return (
+      value.rpcstream === SESSION_PROFILE.transport.rpcStreamVersion &&
+      'end' in value &&
+      typeof value.end === 'boolean'
+    )
+  return 'jsonrpc' in value && value.jsonrpc === '2.0'
+}
+
+function transportError(cause: unknown) {
+  return Object.assign(new Error('Encrypted RPC transport failed', { cause }), {
+    code: 0,
+  })
 }

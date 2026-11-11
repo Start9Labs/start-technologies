@@ -1,4 +1,5 @@
 import type { RPC, T } from '@start9labs/start-core'
+import type { SESSION_PROFILE } from '@start9labs/start-core/osBindings/session-profile'
 
 interface RPCBase {
   jsonrpc: '2.0'
@@ -28,6 +29,14 @@ export type RPCErrorDetails = RPC.RpcReturnType<
 >
 
 export type RPCResponse<T> = RPCSuccessRes<T> | RPCErrorRes
+
+export type RPCStreamResponse<T> = (
+  | Omit<RPCSuccessRes<T>, 'jsonrpc'>
+  | Omit<RPCErrorRes, 'jsonrpc'>
+) & {
+  rpcstream: typeof SESSION_PROFILE.transport.rpcStreamVersion
+  end: boolean
+}
 
 export interface RPCOptions<
   Params = Record<string, unknown>,

@@ -24,6 +24,7 @@ const boundaries = new Map([
     export { isRpcError } from '${new URL('types/rpc.types.ts', shared)}';
     export { rpcRequestBody } from '${new URL('services/rpc-request.ts', shared)}';
     export { waitForPatchSequence } from '${new URL('services/rpc-response.ts', shared)}';
+    export { databaseSubscription, legacyDatabaseSubscription, bufferDatabaseRevisions } from '${new URL('services/database-subscription.ts', shared)}';
   `,
   ],
   ['../auth.service', 'export class AuthService {}'],
@@ -60,6 +61,7 @@ function api() {
     },
     rejected: 0,
   }
+  Object.setPrototypeOf(instance, LiveApiService.prototype)
   return {
     instance,
     request: options =>
@@ -88,6 +90,34 @@ test('encrypted replies still wait for their PatchDB sequence before returning',
   instance.cache$.next({ id: 4, value: {} })
   assert.equal(await pending, 'updated')
   assert.equal(instance.rejected, 0)
+})
+
+test('database stream initialization establishes the cache fence and terminal authorization errors deauthenticate', async () => {
+  const { instance } = api()
+  const messages = new Subject()
+  const received = []
+  let failure
+  instance.sockets.stream = (body, lease) => {
+    assert.deepEqual(JSON.parse(body), { method: 'db.subscribe', params: {} })
+    assert.ok(lease.key)
+    return messages
+  }
+  const subscription = instance.watchDb$().subscribe({
+    next: value => received.push(value),
+    error: error => {
+      failure = error
+    },
+  })
+  await new Promise(setImmediate)
+  const dump = { id: 10, value: {} }
+  messages.next({ result: dump, meta: { patchSequence: 999 } })
+  assert.deepEqual(received, [dump])
+  assert.equal(instance.cache$.value.id, 0)
+  messages.next({ error: { code: 34, message: 'revoked' } })
+  assert.equal(failure.code, 34)
+  assert.equal(instance.rejected, 1)
+  assert.equal(subscription.closed, true)
+  assert.equal(messages.observers.length, 0)
 })
 
 test('live authorization rejection still deauthenticates and preserves the RPC error', async () => {

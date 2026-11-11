@@ -8,7 +8,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 - **Frontend:** Angular + TypeScript + Taiga UI
 - **Router OS:** OpenWrt (SpacemiT K1 / BananaPi F3 target)
 - **Config storage:** UCI files (`/etc/config/`) — no separate database
-- **API:** JSON-RPC 2.0 over encrypted WebSocket sessions at `/ws/rpc`, with HTTP compatibility at `/rpc/v1`
+- **API:** JSON-RPC 2.0 over encrypted WebSocket sessions at `/rpc/v2`, with HTTP compatibility at `/rpc/v1`
 - **Auth:** Password login enrolls an Ed25519 key used for signed ephemeral-DH admission and live per-call authorization; keyed CLI calls use the same encrypted transport, while local-token and absent-key calls retain HTTP compatibility
 
 ## Project Structure
@@ -55,7 +55,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 
 ```
 Browser (Angular SPA)
-  → encrypted WebSocket /ws/rpc (keyed JSON-RPC); anonymous HTTP /rpc/v1
+  → encrypted WebSocket /rpc/v2 (keyed JSON-RPC); anonymous HTTP /rpc/v1
   → Axum router on port 80/443
   → start-core Auth middleware (checks verified peer or compatibility credentials, rate-limits login)
   → rpc-toolkit handler dispatch
@@ -68,7 +68,7 @@ Additional HTTP routes:
 
 - `POST /api/setup/flash` — NDJSON streaming for setup wizard
 - `GET|POST /rest/rpc/{guid}` — Continuation endpoint for backup/restore/diagnostics
-- `GET /ws/rpc/{guid}` — WebSocket continuation for update progress and live logs
+- `GET /rpc/v2/{guid}` — WebSocket continuation for update progress and live logs; `/ws/rpc/{guid}` remains a compatibility alias
 - `GET /static/local-root-ca.crt`, `GET /static/local-root-ca.mobileconfig` — Root CA download, as a certificate or an Apple configuration profile (no auth)
 - `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` — LuCI reverse proxy (localhost:8080), HTTPS only (plain HTTP redirects); `/luci` redirects to `/cgi-bin/luci`
 - Fallback — Serves embedded web UI

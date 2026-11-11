@@ -7,6 +7,7 @@ use axum::extract::ws::WebSocketUpgrade;
 use axum::routing::get;
 
 use super::*;
+use crate::middleware::auth::session::RpcSessionUpgrader;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::net::secure::EncryptedSocket;
 
@@ -22,7 +23,7 @@ async fn transport_loss_never_replays_a_sent_call_and_the_next_call_reconnects_w
     let seen = requests.clone();
     let pong_seen = pong.clone();
     let drop_seen = dropped.clone();
-    let app = Router::new().route("/ws/rpc", get(move |upgrade: WebSocketUpgrade| {
+    let app = Router::new().route(RpcSessionUpgrader::PATH, get(move |upgrade: WebSocketUpgrade| {
         let key = server_key.clone();
         let index = observed.fetch_add(1, Ordering::SeqCst);
         let seen = seen.clone();
@@ -50,9 +51,13 @@ async fn transport_loss_never_replays_a_sent_call_and_the_next_call_reconnects_w
         }) }
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url: Url = format!("ws://{}/ws/rpc", listener.local_addr().unwrap())
-        .parse()
-        .unwrap();
+    let url: Url = format!(
+        "ws://{}{path}",
+        listener.local_addr().unwrap(),
+        path = RpcSessionUpgrader::PATH
+    )
+    .parse()
+    .unwrap();
     let _server: NonDetachingJoinHandle<()> =
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() }).into();
     let network = reqwest::Client::builder()

@@ -3,17 +3,21 @@ import { DOCUMENT, inject, Service } from '@angular/core'
 import { blake3 } from '@noble/hashes/blake3'
 import {
   AuthKeyService,
+  databaseSubscription,
   HttpOptions,
   HttpService,
   isRpcError,
   RpcError,
   RPCOptions,
+  RPCResponse,
+  RPCStreamResponse,
   RpcSocketService,
   rpcRequestBody,
   waitForPatchSequence,
 } from '@start9labs/shared'
 import { createRpcClient } from '@start9labs/start-core'
-import { Dump } from 'patch-db-client'
+import { Dump, Update } from 'patch-db-client'
+import { map } from 'rxjs'
 import type { Observable } from 'rxjs'
 import type { WebSocketSubject } from 'rxjs/webSocket'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
@@ -111,6 +115,12 @@ export class LiveApiService extends ApiService {
     return this.sockets.open<T>(guid, config)
   }
 
+  override watchDb$(): Observable<Update<DataModel>> {
+    return databaseSubscription<DataModel>(this.sockets, this.authKeys).pipe(
+      map(body => this.responseResult(body)),
+    )
+  }
+
   async echo(params: Params<'echo'>, url: string): Promise<string> {
     return this.rpcRequest<string>({ method: 'echo', params }, url)
   }
@@ -132,6 +142,12 @@ export class LiveApiService extends ApiService {
       ? await this.sockets.message<T>(request, options, lease)
       : (await this.http.rpcMessage<T>(request, options, urlOverride)).body
 
+    const result = this.responseResult(body)
+    if (!urlOverride) await waitForPatchSequence(this.cache$, body.meta)
+    return result
+  }
+
+  private responseResult<T>(body: RPCResponse<T> | RPCStreamResponse<T>): T {
     if (isRpcError(body)) {
       if (body.error.code === 34) {
         console.error('Unauthenticated, logging out')
@@ -139,8 +155,6 @@ export class LiveApiService extends ApiService {
       }
       throw new RpcError(body.error)
     }
-
-    if (!urlOverride) await waitForPatchSequence(this.cache$, body.meta)
 
     return body.result
   }

@@ -10,7 +10,7 @@ use axum::extract::ws::{WebSocket as AxumWebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use clap::builder::ValueParserFactory;
 use futures::future::BoxFuture;
-use futures::{Future, FutureExt};
+use futures::{Future, FutureExt, Stream, StreamExt};
 use imbl_value::InternedString;
 use tokio::sync::{Mutex as AsyncMutex, broadcast};
 
@@ -92,16 +92,17 @@ impl Future for RestFuture {
             .as_mut()
             .is_some_and(|kill| kill.poll_unpin(cx).is_ready())
         {
-            Poll::Ready(Err(Error::new(
-                eyre!("session killed"),
-                ErrorKind::Authorization,
-            )))
+            Poll::Ready(Err(session_killed()))
         } else {
             self.fut.poll_unpin(cx)
         }
     }
 }
 pub type RestHandler = Box<dyn FnOnce(Request) -> RestFuture + Send>;
+
+fn session_killed() -> Error {
+    Error::new(eyre!("session killed"), ErrorKind::Authorization)
+}
 
 pub struct WebSocketFuture {
     kill: Option<BoxFuture<'static, ()>>,
@@ -270,6 +271,8 @@ impl RpcContinuation {
 
 pub struct RpcContinuations(AsyncMutex<BTreeMap<Guid, RpcContinuation>>);
 impl RpcContinuations {
+    pub const LEGACY_WS_PATH: &'static str = "/ws/rpc";
+
     pub fn new() -> Self {
         RpcContinuations(AsyncMutex::new(BTreeMap::new()))
     }
@@ -326,11 +329,35 @@ where
     pub fn new() -> Self {
         Self(SyncMutex::new(BTreeMap::new()))
     }
+    /// Revocation cancels continuation sockets and rpcstream producers, including blocked writes.
     pub fn kill(&self, session: &T) {
         if let Some(channel) = self.0.lock().unwrap().remove(session) {
             channel.send(()).ok();
         }
     }
+    pub(crate) fn forward_stream<V: serde::Serialize + Send + 'static>(
+        &self,
+        session: T,
+        stream: rpc_toolkit::RpcStream,
+        source: impl Stream<Item = Result<V, Error>> + Send + 'static,
+    ) {
+        let kill = self.subscribe_to_kill(session);
+        tokio::spawn(async move {
+            let mut source = Box::pin(source);
+            let result: Result<(), Error> = tokio::select! {
+                _ = stream.closed() => return,
+                _ = kill => Err(session_killed()),
+                result = async {
+                    while let Some(value) = source.next().await {
+                        stream.send(value?).await?;
+                    }
+                    Ok(())
+                } => result,
+            };
+            let _ = stream.close(result);
+        });
+    }
+
     fn subscribe_to_kill(&self, session: T) -> BoxFuture<'static, ()> {
         let mut map = self.0.lock().unwrap();
         let mut recv = if let Some(send) = map.get(&session) {

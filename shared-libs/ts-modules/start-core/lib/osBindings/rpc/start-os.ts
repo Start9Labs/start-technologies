@@ -638,9 +638,9 @@ export type Sessions = z.output<typeof schemas.Sessions>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 
 /**
- * Initial dump, with a continuation GUID when the request does not opt into `rpcstream`.
+ * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
  */
-export type SubscribeIndexResult = z.output<typeof schemas.SubscribeIndexResult>
+export type SubscribeResult = z.output<typeof schemas.SubscribeResult>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type WifiListInfo = z.output<typeof schemas.WifiListInfo>
 export type ActionResult = z.output<typeof schemas.ActionResult>

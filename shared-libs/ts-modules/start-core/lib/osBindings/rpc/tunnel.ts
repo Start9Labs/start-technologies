@@ -205,6 +205,11 @@ export type WgConfig = z.output<typeof schemas.WgConfig>
  * The server's sessions, by credential type.
  */
 export type Sessions = z.output<typeof schemas.Sessions>
+
+/**
+ * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
+ */
+export type SubscribeResult = z.output<typeof schemas.SubscribeResult>
 export type WgSubnetClients = z.output<typeof schemas.WgSubnetClients>
 export type SessionList = z.output<typeof schemas.SessionList>
 export type WgSubnetConfig = z.output<typeof schemas.WgSubnetConfig>

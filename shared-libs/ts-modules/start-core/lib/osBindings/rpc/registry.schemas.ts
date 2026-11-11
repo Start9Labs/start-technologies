@@ -1235,14 +1235,14 @@ export const RegistryInfo: z.ZodObject<{
 })
 
 /**
- * Initial dump, with a continuation GUID when the request does not opt into `rpcstream`.
+ * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
  */
-export const SubscribeIndexResult: z.ZodUnion<
+export const SubscribeResult: z.ZodUnion<
   readonly [typeof SubscribeRes, typeof Dump]
 > = /* @__PURE__ */ z.union([SubscribeRes, Dump]).meta({
-  id: 'SubscribeIndexResult',
+  id: 'SubscribeResult',
   description:
-    'Initial dump, with a continuation GUID when the request does not opt into `rpcstream`.',
+    'Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.',
 })
 export const OsIndex: z.ZodObject<{ versions: typeof OsVersionInfoMap }> =
   /* @__PURE__ */ object({ versions: OsVersionInfoMap }).meta({
@@ -1464,7 +1464,7 @@ export const Api = {
         },
         subscribe: {
           _PARAMS: /* @__PURE__ */ SubscribeIndexParams,
-          _RETURN: /* @__PURE__ */ SubscribeIndexResult,
+          _RETURN: /* @__PURE__ */ SubscribeResult,
         },
       },
     },

@@ -1,16 +1,22 @@
 import { inject, Service } from '@angular/core'
 import {
   AuthKeyService,
+  databaseSubscription,
   HttpService,
   isRpcError,
   RpcError,
   RPCOptions,
+  RPCResponse,
+  RPCStreamResponse,
   RpcSocketService,
   rpcRequestBody,
   waitForPatchSequence,
 } from '@start9labs/shared'
 import { createRpcClient } from '@start9labs/start-core'
+import { map } from 'rxjs'
 import type { Observable } from 'rxjs'
+import type { Update } from 'patch-db-client'
+import type { TunnelData } from '../patch-db/data-model'
 import { AuthService } from '../auth.service'
 import { PATCH_CACHE } from '../patch-db/patch-db-source'
 import { ApiClient, ApiService } from './api.service'
@@ -39,6 +45,12 @@ export class LiveApiService extends ApiService {
     return this.sockets.open<T>(guid)
   }
 
+  override watchDb$(): Observable<Update<TunnelData>> {
+    return databaseSubscription<TunnelData>(this.sockets, this.authKeys).pipe(
+      map(body => this.responseResult(body)),
+    )
+  }
+
   private async rpcRequest<T>(
     options: RPCOptions<Record<string, unknown>, string>,
     urlOverride?: string,
@@ -49,6 +61,12 @@ export class LiveApiService extends ApiService {
       ? await this.sockets.message<T>(request, options, lease)
       : (await this.http.rpcMessage<T>(request, options, urlOverride)).body
 
+    const result = this.responseResult(body)
+    if (!urlOverride) await waitForPatchSequence(this.cache$, body.meta)
+    return result
+  }
+
+  private responseResult<T>(body: RPCResponse<T> | RPCStreamResponse<T>): T {
     if (isRpcError(body)) {
       if (body.error.code === 34) {
         console.error('Unauthenticated, logging out')
@@ -56,8 +74,6 @@ export class LiveApiService extends ApiService {
       }
       throw new RpcError(body.error)
     }
-
-    if (!urlOverride) await waitForPatchSequence(this.cache$, body.meta)
 
     return body.result
   }

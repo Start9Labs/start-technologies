@@ -58,7 +58,7 @@ pub(crate) async fn server() -> (
                 if request.uri().path() == "/rpc/v1" {
                     observed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
-                if request.uri().path() == "/ws/rpc" {
+                if request.uri().path() == RpcSessionUpgrader::PATH {
                     upgraded.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 next.run(request).await

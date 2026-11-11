@@ -23,6 +23,7 @@ loadTypeScript(
     export { isRpcError } from '${new URL('types/rpc.types.ts', shared)}';
     export { rpcRequestBody, rpcWebSocketUrl } from '${new URL('services/rpc-request.ts', shared)}';
     export { waitForPatchSequence } from '${new URL('services/rpc-response.ts', shared)}';
+    export { databaseSubscription, legacyDatabaseSubscription, bufferDatabaseRevisions } from '${new URL('services/database-subscription.ts', shared)}';
   `,
     ],
     [
@@ -188,7 +189,7 @@ test('startup GUIDs keep raw WebSocket callbacks and binary options', context =>
   const before = opened.length
   const socket = f.startup.openWebsocket$('legacy-guid', config)
   assert.equal(opened.length, before + 1)
-  assert.equal(socket.config.url, 'ws://os.test/ws/rpc/legacy-guid')
+  assert.equal(socket.config.url, 'ws://os.test/rpc/v2/legacy-guid')
   assert.equal(socket.config.serializer, config.serializer)
   assert.equal(socket.config.deserializer, config.deserializer)
   assert.equal(socket.config.binaryType, 'arraybuffer')
@@ -270,6 +271,38 @@ test('RPC bytes are captured before waiting for the device identity', async cont
   assert.equal(await pending, 'encrypted')
   const sent = f.calls.find(call => call.transport === 'encrypted')
   assert.equal(JSON.parse(sent.body).params.message, 'original')
+})
+
+test('database streams emit their initiating dump without awaiting its cache fence and preserve authorization errors', async context => {
+  const f = fixture(context)
+  const messages = new Subject()
+  const received = []
+  let failure
+  f.sockets.stream = (body, identity) => {
+    assert.deepEqual(JSON.parse(body), { method: 'db.subscribe', params: {} })
+    assert.equal(identity, f.lease)
+    return messages
+  }
+  const subscription = f.api.watchDb$().subscribe({
+    next: value => received.push(value),
+    error: error => {
+      failure = error
+    },
+  })
+  await flush()
+  const dump = { id: 10, value: {} }
+  messages.next({ result: dump, meta: { patchSequence: 999 } })
+  assert.deepEqual(received, [dump])
+  assert.equal(f.cache.value.id, 0)
+  messages.next({ error: { code: 34, message: 'revoked' } })
+  assert.equal(failure.code, 34)
+  assert.equal(f.rejected(), 1)
+  assert.equal(subscription.closed, true)
+  assert.equal(messages.observers.length, 0)
+  assert.equal(
+    f.calls.some(call => call.transport === 'http'),
+    false,
+  )
 })
 
 test('encrypted mutations still wait for the local committed sequence', async context => {

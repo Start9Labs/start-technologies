@@ -9,9 +9,10 @@ not the transport. WebAuthn enrollment, assertions and user-presence policy are 
 
 ## Admission
 
-The bare `/ws/rpc` endpoint always requires encrypted admission. Deployment prefixes
+The bare `/rpc/v2` endpoint always requires encrypted admission. Deployment prefixes
 remain supported. There is no plaintext bare-RPC mode or URL negotiation selector.
-Legacy-origin `/ws/rpc/<guid>` continuations retain plaintext compatibility;
+GUID continuations use `/rpc/v2/<guid>`; `/ws/rpc/<guid>` remains a compatibility alias.
+Legacy-origin continuations retain plaintext compatibility;
 secure-origin continuations require a fresh exchange from the initiating identity
 for that exact GUID. HTTP authentication remains independent.
 

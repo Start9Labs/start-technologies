@@ -947,6 +947,17 @@ export const Sessions: z.ZodObject<{
   id: 'Sessions',
   description: "The server's sessions, by credential type.",
 })
+
+/**
+ * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
+ */
+export const SubscribeResult: z.ZodUnion<
+  readonly [typeof SubscribeRes, typeof Dump]
+> = /* @__PURE__ */ z.union([SubscribeRes, Dump]).meta({
+  id: 'SubscribeResult',
+  description:
+    'Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.',
+})
 export const WgSubnetClients: z.ZodRecord<z.ZodString, typeof WgConfig> =
   /* @__PURE__ */ z.record(z.string(), WgConfig).meta({
     id: 'WgSubnetClients',
@@ -1093,7 +1104,7 @@ export const Api = {
         },
         subscribe: {
           _PARAMS: /* @__PURE__ */ SubscribeParams,
-          _RETURN: /* @__PURE__ */ SubscribeRes,
+          _RETURN: /* @__PURE__ */ SubscribeResult,
         },
       },
     },

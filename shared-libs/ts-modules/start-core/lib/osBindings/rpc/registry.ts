@@ -230,9 +230,9 @@ export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
 export type RegistryInfo = z.output<typeof schemas.RegistryInfo>
 
 /**
- * Initial dump, with a continuation GUID when the request does not opt into `rpcstream`.
+ * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
  */
-export type SubscribeIndexResult = z.output<typeof schemas.SubscribeIndexResult>
+export type SubscribeResult = z.output<typeof schemas.SubscribeResult>
 export type OsIndex = z.output<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 export type GetPackageResponse = z.output<typeof schemas.GetPackageResponse>

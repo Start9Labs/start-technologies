@@ -21,7 +21,7 @@ use crate::auth::AuthKeys;
 use crate::context::CliContext;
 use crate::db::model::public::NetworkInterfaceInfo;
 pub use crate::db::{
-    ApplyWithPathParams as ApplyParams, DumpParams, SubscribeParams, SubscribeRes,
+    ApplyWithPathParams as ApplyParams, DumpParams, SubscribeParams, SubscribeRes, SubscribeResult,
 };
 use crate::prelude::*;
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
@@ -530,13 +530,27 @@ pub async fn apply(
 }
 
 pub async fn subscribe(
-    ctx: TunnelContext,
-    SubscribeParams { pointer, signer }: SubscribeParams,
-) -> Result<SubscribeRes, Error> {
+    HandlerArgs {
+        context: ctx,
+        params: SubscribeParams { pointer, signer },
+        rpc_stream,
+        ..
+    }: HandlerArgs<TunnelContext, SubscribeParams>,
+) -> Result<SubscribeResult, Error> {
     let (dump, mut sub) = ctx
         .db
         .dump_and_sub(pointer.unwrap_or_else(|| ROOT.to_owned()))
         .await;
+    if let Some(stream) = rpc_stream {
+        ctx.open_authed_continuations.forward_stream(
+            signer,
+            stream,
+            futures::stream::unfold(sub, |mut sub| async move {
+                sub.recv().await.map(|revision| (Ok(revision), sub))
+            }),
+        );
+        return Ok(SubscribeResult::Stream(dump));
+    }
     let guid = Guid::new();
     ctx.rpc_continuations
         .add(
@@ -584,7 +598,7 @@ pub async fn subscribe(
         )
         .await;
 
-    Ok(SubscribeRes { dump, guid })
+    Ok(SubscribeResult::Continuation(SubscribeRes { dump, guid }))
 }
 
 #[test]
