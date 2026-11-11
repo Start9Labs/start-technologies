@@ -3554,11 +3554,6 @@ export const Notification: z.ZodObject<{
 }).meta({
   id: 'Notification',
 })
-export const OsUpdateSignerKeyParams: z.ZodObject<{
-  key: typeof AnyVerifyingKey
-}> = /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
-  id: 'OsUpdateSignerKeyParams',
-})
 export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: typeof LocaleString
@@ -4058,12 +4053,6 @@ export const SetMainStatus: z.ZodObject<{
   status: typeof SetMainStatusStatus
 }> = /* @__PURE__ */ object({ status: SetMainStatusStatus }).meta({
   id: 'SetMainStatus',
-})
-export const SetOsUpdateSignerParams: z.ZodObject<{
-  key: typeof AnyVerifyingKey
-  label: z.ZodString
-}> = /* @__PURE__ */ object({ key: AnyVerifyingKey, label: z.string() }).meta({
-  id: 'SetOsUpdateSignerParams',
 })
 export const SetOutboundGatewayParams: z.ZodObject<{
   package: typeof PackageId
