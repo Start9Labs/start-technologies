@@ -103,7 +103,7 @@ Upgrade registries to 1.6.0 before using start-cli 2.9.0 OS-asset publication or
 
 Create a single-file v1/v2 hybrid torrent with the exact bytes of the HTTP asset. Advertise both hashes in a hybrid magnet; StartOS and start-cli use its v1-compatible swarm. Existing v1 torrent sources remain compatible. Registry operators arrange seeding through an external BitTorrent client, with reachable seed peers and tracker or DHT discovery. The registry stores the source metadata; asset storage and seeding belong to those external hosts.
 
-StartOS and local `start-cli` downloads prefer BitTorrent and fall back to HTTP when it is unavailable or fails commitment verification. Existing signature requirements apply to either transport. Older clients ignore the optional metadata and continue using HTTP.
+BitTorrent downloads default off in StartOS and local `start-cli`. After opt-in, advertised torrents are preferred, with HTTP fallback when unavailable or commitment verification fails. Existing signature requirements apply to either transport. Older clients ignore the optional metadata and continue using HTTP.
 
 ## Where things are
 

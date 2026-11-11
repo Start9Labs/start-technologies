@@ -1246,7 +1246,7 @@ export const TimeInfo: z.ZodObject<{ now: z.ZodString; uptime: z.ZodInt }> =
   })
 
 /**
- * Downloads start enabled; sharing stored software starts disabled.
+ * Peer downloads and stored-software sharing require explicit opt-in.
  */
 export const TorrentPreferences: z.ZodObject<{
   downloads: z.ZodBoolean
@@ -1257,7 +1257,7 @@ export const TorrentPreferences: z.ZodObject<{
 }).meta({
   id: 'TorrentPreferences',
   description:
-    'Downloads start enabled; sharing stored software starts disabled.',
+    'Peer downloads and stored-software sharing require explicit opt-in.',
 })
 export const TrustCaParams: z.ZodObject<{ cert: typeof literal_0 }> =
   /* @__PURE__ */ object({ cert: literal_0 }).meta({

@@ -970,7 +970,7 @@ mod tests {
             assert_eq!(info["latestMigrationRevision"], json!(0));
             assert_eq!(
                 info["bittorrent"],
-                json!({"downloads": true, "seeding": false})
+                json!({"downloads": false, "seeding": false})
             );
             assert_eq!(
                 info["postInitMigrationTodos"]
@@ -1018,7 +1018,7 @@ mod tests {
         );
         assert_eq!(
             db["public"]["serverInfo"]["bittorrent"],
-            json!({"downloads": true, "seeding": false})
+            json!({"downloads": false, "seeding": false})
         );
         assert_eq!(
             db["public"]["ui"],

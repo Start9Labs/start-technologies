@@ -4174,18 +4174,18 @@ help.arg.binding-enabled:
   pl_PL: "Włącz lub wyłącz to powiązanie"
 
 help.arg.bittorrent:
-  en_US: "Prefer BitTorrent for registry downloads (peer IP addresses are public); HTTP remains available"
-  de_DE: "BitTorrent für Registry-Downloads bevorzugen (Peer-IP-Adressen sind öffentlich); HTTP bleibt verfügbar"
-  es_ES: "Preferir BitTorrent para las descargas del registro (las IP de los pares son públicas); HTTP sigue disponible"
-  fr_FR: "Préférer BitTorrent pour les téléchargements du registre (les IP des pairs sont publiques) ; HTTP reste disponible"
-  pl_PL: "Preferuj BitTorrent przy pobieraniu z rejestru (adresy IP peerów są publiczne); HTTP pozostaje dostępne"
+  en_US: "Prefer BitTorrent for registry downloads (local CLI default: false; peer IP addresses are public); HTTP remains available"
+  de_DE: "BitTorrent für Registry-Downloads bevorzugen (Standard der lokalen CLI: false; Peer-IP-Adressen sind öffentlich); HTTP bleibt verfügbar"
+  es_ES: "Preferir BitTorrent para las descargas del registro (valor predeterminado de la CLI local: false; las IP de los pares son públicas); HTTP sigue disponible"
+  fr_FR: "Préférer BitTorrent pour les téléchargements du registre (CLI locale : false par défaut ; les IP des pairs sont publiques) ; HTTP reste disponible"
+  pl_PL: "Preferuj BitTorrent przy pobieraniu z rejestru (domyślnie w lokalnym CLI: false; adresy IP peerów są publiczne); HTTP pozostaje dostępne"
 
 help.arg.bittorrent-downloads:
-  en_US: "Enable BitTorrent downloads; disabling also disables seeding and incoming connections"
-  de_DE: "BitTorrent-Downloads aktivieren; Deaktivieren schaltet auch Seeding und eingehende Verbindungen aus"
-  es_ES: "Habilitar descargas BitTorrent; al deshabilitar se desactivan también la siembra y las conexiones entrantes"
-  fr_FR: "Activer les téléchargements BitTorrent ; la désactivation coupe aussi le partage et les connexions entrantes"
-  pl_PL: "Włącz pobieranie BitTorrent; wyłączenie wyłącza również wysyłanie i połączenia przychodzące"
+  en_US: "Enable BitTorrent downloads (default: false); disabling also disables seeding and incoming connections"
+  de_DE: "BitTorrent-Downloads aktivieren (Standard: false); Deaktivieren schaltet auch Seeding und eingehende Verbindungen aus"
+  es_ES: "Habilitar descargas BitTorrent (valor predeterminado: false); al deshabilitar se desactivan también la siembra y las conexiones entrantes"
+  fr_FR: "Activer les téléchargements BitTorrent (false par défaut) ; la désactivation coupe aussi le partage et les connexions entrantes"
+  pl_PL: "Włącz pobieranie BitTorrent (domyślnie: false); wyłączenie wyłącza również wysyłanie i połączenia przychodzące"
 
 help.arg.ca-certificate:
   en_US: "PEM-encoded CA certificate"

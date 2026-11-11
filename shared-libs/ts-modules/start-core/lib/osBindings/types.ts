@@ -468,12 +468,12 @@ export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TimeInfoInput = z.input<typeof schemas.TimeInfo>
 
 /**
- * Downloads start enabled; sharing stored software starts disabled.
+ * Peer downloads and stored-software sharing require explicit opt-in.
  */
 export type TorrentPreferences = z.output<typeof schemas.TorrentPreferences>
 
 /**
- * Downloads start enabled; sharing stored software starts disabled.
+ * Peer downloads and stored-software sharing require explicit opt-in.
  */
 export type TorrentPreferencesInput = z.input<typeof schemas.TorrentPreferences>
 export type TrustContext = z.output<typeof schemas.TrustContext>

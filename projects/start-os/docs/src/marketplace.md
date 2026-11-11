@@ -22,14 +22,14 @@ Package details include a **Signed by** section listing every key that signed th
 
 ## Download Transports
 
-When a registry advertises a BitTorrent source, StartOS prefers it for package downloads and OS updates, with HTTP fallback if the torrent is unavailable, stalls, or fails verification. Both transports use the same signed content commitments. BitTorrent sources must contain a single asset file. V1/v2 hybrid torrents use their v1-compatible swarm. Recovery-mode OS updates stream over HTTP directly to the image partition.
+BitTorrent downloads are optional and disabled by default. When enabled and a registry advertises a BitTorrent source, StartOS prefers it for package downloads and OS updates, with HTTP fallback if the torrent is unavailable, stalls, or fails verification. Both transports use the same signed content commitments. BitTorrent sources must contain a single asset file. V1/v2 hybrid torrents use their v1-compatible swarm. Recovery-mode OS updates stream over HTTP directly to the image partition.
 
 BitTorrent downloads buffer a complete asset on the data disk before unpacking package files or applying an OS update. Install progress appears once signed package metadata is ready, and the remaining transfer can be cancelled. Metadata can come from advertised HTTP mirrors or BitTorrent peers. Temporary transfer files are cleaned up afterward.
 
 > [!WARNING]
 > HTTP downloads already expose an IP address to the server. BitTorrent widens that audience to trackers and other peers, which can also see the requested torrent. Outgoing BitTorrent connections use the default gateway for StartOS, shown on **System → Software sharing**. When StartTunnel provides that gateway, outgoing peers see its exit IP, not the underlying connection’s public IP. Incoming connections expose whichever addresses are enabled below the controls. Onion registries use HTTP through Tor instead of BitTorrent.
 
-BitTorrent downloads are enabled by default. Turn off **Download using BitTorrent** under **System → Software sharing** to use HTTP exclusively without restarting, or run `start-cli server bittorrent set-preferences --downloads false`. This stops active peer transfers and lets downloads fall back to HTTP.
+Enable **Download using BitTorrent** under **System → Software sharing** to opt in, or run `start-cli server bittorrent set-preferences --downloads true`. Disabling it applies without restarting, stops active peer transfers and lets downloads fall back to HTTP.
 
 ### Software Sharing
 
@@ -39,9 +39,9 @@ Sharing compatible installed S9PKs and OS images already stored by StartOS is di
 start-cli server bittorrent set-preferences --downloads true --seeding true
 ```
 
-Downloads start enabled and sharing stored software starts disabled. Changes apply live and persist across restarts. Active BitTorrent downloads can upload even when sharing stored software is off. Use `--seeding false` to stop sharing stored software, or `--downloads false` to stop all peer transfers.
+Downloads and sharing stored software both start disabled. Changes apply live and persist across restarts. Active BitTorrent downloads can upload even when sharing stored software is off. Use `--seeding false` to stop sharing stored software, or `--downloads false` to stop all peer transfers.
 
-StartOS discovers advertisements for installed packages from their recorded registry and for stored OS images from the selected update registry. It also remembers torrent metadata from new installations and updates, including downloads that fall back to HTTP. Files without an advertised source are not assigned a swarm.
+StartOS discovers advertisements for installed packages from their recorded registry and for stored OS images from the selected update registry. With BitTorrent downloads enabled, it also remembers torrent metadata from new installations and updates, including downloads that fall back to HTTP. Files without an advertised source are not assigned a swarm.
 
 Sharing requires an exact byte match with the advertised torrent. Installation can filter package architectures and remove supplemental signature trailers, leaving an installed S9PK that cannot join the original swarm. StartOS skips incompatible files without modifying them.
 

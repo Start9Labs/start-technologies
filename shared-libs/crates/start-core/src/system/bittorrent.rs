@@ -101,11 +101,22 @@ mod tests {
             }}}),
         )
         .await?;
+        assert_eq!(
+            update_preferences(
+                &db,
+                SetPreferencesParams {
+                    seeding: Some(true),
+                    ..Default::default()
+                }
+            )
+            .await?,
+            TorrentPreferences::default()
+        );
         let enabled = update_preferences(
             &db,
             SetPreferencesParams {
+                downloads: Some(true),
                 seeding: Some(true),
-                ..Default::default()
             },
         )
         .await?;
@@ -149,7 +160,10 @@ mod tests {
                 },
             )
             .await?,
-            TorrentPreferences::default()
+            TorrentPreferences {
+                downloads: true,
+                seeding: false
+            }
         );
         Ok(())
     }
@@ -210,8 +224,8 @@ mod tests {
             update_preferences(
                 &db,
                 SetPreferencesParams {
+                    downloads: Some(true),
                     seeding: Some(true),
-                    ..Default::default()
                 },
             )
             .await?;

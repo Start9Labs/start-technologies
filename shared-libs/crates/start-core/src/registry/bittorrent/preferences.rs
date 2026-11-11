@@ -2,22 +2,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::prelude::*;
 
-/// Downloads start enabled; sharing stored software starts disabled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, HasModel, VisitFields)]
+/// Peer downloads and stored-software sharing require explicit opt-in.
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, HasModel, VisitFields,
+)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct TorrentPreferences {
     pub downloads: bool,
     pub seeding: bool,
-}
-
-impl Default for TorrentPreferences {
-    fn default() -> Self {
-        Self {
-            downloads: true,
-            seeding: false,
-        }
-    }
 }
 
 impl TorrentPreferences {
@@ -36,10 +29,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_enable_only_downloads() {
+    fn defaults_disable_peer_transfers() {
         assert_eq!(
             serde_json::to_value(TorrentPreferences::default()).unwrap(),
-            serde_json::json!({"downloads": true, "seeding": false})
+            serde_json::json!({"downloads": false, "seeding": false})
         );
     }
 
@@ -58,7 +51,10 @@ mod tests {
         );
         assert_eq!(
             enabled.update(None, Some(false)),
-            TorrentPreferences::default()
+            TorrentPreferences {
+                downloads: true,
+                seeding: false
+            }
         );
     }
 
@@ -67,7 +63,10 @@ mod tests {
         let disabled = TorrentPreferences::default().update(Some(false), None);
         assert_eq!(
             disabled.update(Some(true), None),
-            TorrentPreferences::default()
+            TorrentPreferences {
+                downloads: true,
+                seeding: false
+            }
         );
         assert_eq!(disabled.update(None, Some(true)), disabled);
     }

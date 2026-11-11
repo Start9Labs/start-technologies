@@ -241,7 +241,12 @@ impl Swarm {
 }
 
 fn cli_client() -> TorrentClient {
-    TorrentClient::download_only(TorrentDownloadConfig::default(), false)
+    TorrentClient::download_only(
+        TorrentDownloadConfig {
+            bittorrent: Some(true),
+        },
+        false,
+    )
 }
 
 async fn package_asset(swarm: &Swarm) -> Result<RegistryAsset<MerkleArchiveCommitment>, Error> {
@@ -484,6 +489,47 @@ async fn install_unpolled_payload_drop_also_closes_metadata_readers() -> Result<
     Ok(())
 }
 
+#[test]
+fn server_download_opt_in_respects_the_administrative_cap() {
+    let source: Url = "https://registry.example/asset".parse().unwrap();
+    let server = TorrentClient::for_server(TorrentDownloadConfig::default(), None);
+    assert!(server.available());
+    assert!(server.for_source(&source).is_none());
+    server.set_downloads_enabled(true);
+    assert!(server.for_source(&source).is_some());
+    let capped = TorrentClient::for_server(
+        TorrentDownloadConfig {
+            bittorrent: Some(false),
+        },
+        None,
+    );
+    capped.set_downloads_enabled(true);
+    assert!(capped.for_source(&source).is_none());
+}
+
+#[tokio::test]
+async fn default_clients_use_http_without_resolving_advertised_magnets() -> Result<(), Error> {
+    let swarm = Swarm::new().await?;
+    let asset = swarm.asset(swarm.magnet.clone());
+    for client in [
+        TorrentClient::download_only(TorrentDownloadConfig::default(), false),
+        TorrentClient::for_server(TorrentDownloadConfig::default(), None),
+    ] {
+        assert!(!client.downloads_enabled());
+        assert_eq!(swarm.download(&asset, &client).await?, swarm.content);
+        assert!(
+            asset
+                .sharing_metadata(Client::new(), Some(&client))
+                .await?
+                .is_none()
+        );
+        assert!(client.catalog.get().is_none());
+        assert!(client.seeds.read().await.is_none());
+    }
+    assert!(swarm.http_hits.load(Ordering::SeqCst) > 0);
+    Ok(())
+}
+
 #[tokio::test]
 async fn torrent_metadata_download_is_preferred_to_http() -> Result<(), Error> {
     let swarm = Swarm::new().await?;
@@ -599,6 +645,7 @@ async fn a_torrent_without_available_peers_falls_back_to_http() -> Result<(), Er
 async fn existing_artifact_metadata_lookup_does_not_download_a_payload() -> Result<(), Error> {
     let swarm = Swarm::new().await?;
     let client = TorrentClient::for_server(TorrentDownloadConfig::default(), None);
+    client.set_downloads_enabled(true);
     let asset = swarm.asset(swarm.url.join("metadata.torrent")?);
     let resolved = client
         .resolve(
@@ -860,6 +907,7 @@ async fn stored_hybrid_registration_keeps_metadata_only_and_waits_for_opt_in() -
             directory: catalog.to_path_buf(),
         }),
     );
+    client.set_downloads_enabled(true);
     let asset = swarm.asset(swarm.url.join("metadata.torrent")?);
     let progress = FullProgressTracker::new().add_phase("download".into(), Some(1));
     let mut content = Vec::new();
@@ -947,8 +995,8 @@ async fn native_address_changes_reconcile_without_waiting_for_periodic_refresh()
 
 fn sharing_preferences(seeding: bool) -> TorrentPreferences {
     TorrentPreferences {
+        downloads: true,
         seeding,
-        ..Default::default()
     }
 }
 

@@ -30,9 +30,8 @@ impl VersionT for Version {
         let preferences: crate::registry::bittorrent::TorrentPreferences =
             match info.get("bittorrent") {
                 Some(preferences) => from_value(preferences.clone())?,
-                None => {
-                    crate::registry::bittorrent::TorrentPreferences::default().update(None, seeding)
-                }
+                None => crate::registry::bittorrent::TorrentPreferences::default()
+                    .update(seeding, seeding),
             };
         info.insert("bittorrent".into(), to_value(&preferences)?);
         Ok(Value::Null)
@@ -66,7 +65,7 @@ mod tests {
             Version.up(&mut db, ()).unwrap();
             assert_eq!(
                 db["public"]["serverInfo"]["bittorrent"],
-                imbl_value::json!({"downloads": true, "seeding": enabled})
+                imbl_value::json!({"downloads": enabled, "seeding": enabled})
             );
             assert!(db["public"]["serverInfo"].get("registrySeeding").is_none());
         }
@@ -74,12 +73,18 @@ mod tests {
 
     #[test]
     fn rerunning_migration_preserves_current_preferences() {
-        let mut db = imbl_value::json!({"public": {"serverInfo": {
-            "bittorrent": {"downloads": false, "seeding": false}
-        }}});
-        let original = db.clone();
-        Version.up(&mut db, ()).unwrap();
-        assert_eq!(db, original);
+        for preferences in [
+            imbl_value::json!({"downloads": false, "seeding": false}),
+            imbl_value::json!({"downloads": true, "seeding": false}),
+            imbl_value::json!({"downloads": true, "seeding": true}),
+        ] {
+            let mut db = imbl_value::json!({"public": {"serverInfo": {
+                "bittorrent": preferences
+            }}});
+            let original = db.clone();
+            Version.up(&mut db, ()).unwrap();
+            assert_eq!(db, original);
+        }
     }
 
     #[test]
@@ -95,13 +100,13 @@ mod tests {
     }
 
     #[test]
-    fn downloads_start_enabled_and_downgrade_removes_the_preferences() {
+    fn downloads_start_disabled_and_downgrade_removes_the_preferences() {
         let mut db = imbl_value::json!({"public": {"serverInfo": {"hostname": "server"}}});
         let original = db.clone();
         Version.up(&mut db, ()).unwrap();
         assert_eq!(
             db["public"]["serverInfo"]["bittorrent"],
-            imbl_value::json!({"downloads": true, "seeding": false})
+            imbl_value::json!({"downloads": false, "seeding": false})
         );
         Version.down(&mut db).unwrap();
         assert_eq!(db, original);

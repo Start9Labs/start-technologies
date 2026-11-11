@@ -41,7 +41,8 @@ const { GatewayService } = await import('src/app/services/gateway.service')
 const { InterfaceService } =
   await import('src/app/routes/portal/components/interfaces/interface.service')
 
-const defaults = { downloads: true, seeding: false }
+const defaults = { downloads: false, seeding: false }
+const downloadsEnabled = { downloads: true, seeding: false }
 const config = {
   available: true,
   interface: {
@@ -112,15 +113,22 @@ function fixture(t, initial, setPreferences, readConfig = async () => config) {
 
 for (const scenario of [
   {
-    name: 'disable downloads',
+    name: 'opt into downloads from disabled defaults',
     initial: defaults,
+    preference: 'downloads',
+    desired: true,
+    observed: downloadsEnabled,
+  },
+  {
+    name: 'disable downloads',
+    initial: downloadsEnabled,
     preference: 'downloads',
     desired: false,
     observed: { downloads: false, seeding: false },
   },
   {
     name: 'enable seeding',
-    initial: defaults,
+    initial: downloadsEnabled,
     preference: 'seeding',
     desired: true,
     observed: { downloads: true, seeding: true },
@@ -130,26 +138,26 @@ for (const scenario of [
     initial: { downloads: true, seeding: true },
     preference: 'seeding',
     desired: false,
-    observed: defaults,
+    observed: downloadsEnabled,
   },
   {
     name: 'normalized success after a concurrent parent disable',
-    initial: defaults,
+    initial: downloadsEnabled,
     preference: 'seeding',
     desired: true,
     observed: { downloads: false, seeding: false },
   },
   {
     name: 'restore after failure',
-    initial: defaults,
+    initial: downloadsEnabled,
     preference: 'seeding',
     desired: true,
-    observed: defaults,
+    observed: downloadsEnabled,
     failure: true,
   },
   {
     name: 'restore newer enabled intent',
-    initial: defaults,
+    initial: downloadsEnabled,
     preference: 'seeding',
     desired: true,
     observed: { downloads: true, seeding: true },
@@ -181,6 +189,9 @@ for (const scenario of [
     )
     await reading
     assert.deepEqual(page.preferences(), scenario.initial)
+    assert.equal(page.controls.downloads.value, scenario.initial.downloads)
+    assert.equal(page.controls.seeding.value, scenario.initial.seeding)
+    assert.equal(page.controls.seeding.disabled, !scenario.initial.downloads)
     const control = page.controls[scenario.preference]
     control.setValue(scenario.desired, { emitEvent: false })
     const pending = page.save(scenario.preference, scenario.desired)
@@ -200,7 +211,7 @@ for (const scenario of [
 }
 
 test('software sharing: delayed patches and later updates always reach the actual controls', async t => {
-  const { page, reading, observe } = fixture(t, defaults, async () => ({
+  const { page, reading, observe } = fixture(t, downloadsEnabled, async () => ({
     downloads: true,
     seeding: true,
   }))
@@ -217,14 +228,14 @@ test('software sharing: delayed patches and later updates always reach the actua
 test('software sharing: configured availability is separate from persisted intent', async t => {
   const { page, reading } = fixture(
     t,
-    defaults,
-    async () => defaults,
+    downloadsEnabled,
+    async () => downloadsEnabled,
     async () => ({ ...config, available: false }),
   )
   assert.equal(page.config(), 'loading')
   await reading
   assert.equal(page.config().available, false)
-  assert.deepEqual(page.preferences(), defaults)
+  assert.deepEqual(page.preferences(), downloadsEnabled)
   assert.ok(Object.values(page.controls).every(control => control.disabled))
 })
 

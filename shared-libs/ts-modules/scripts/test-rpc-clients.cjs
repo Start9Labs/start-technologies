@@ -35,11 +35,13 @@ function harness(moduleOverrides = new Map()) {
       'HttpService',
       'AuthKeyService',
       'AuthService',
+      'ConfigService',
       'StaleUiService',
       'PATCH_CACHE',
       'RELATIVE_URL',
     ].map(name => [name, Symbol(name)]),
   )
+  dependencies.set(tokens.ConfigService, { gitHash: 'test-ui-build' })
   const modules = new Map()
   const angular = {
     DOCUMENT: tokens.DOCUMENT,
@@ -87,6 +89,8 @@ function harness(moduleOverrides = new Map()) {
         return load('shared-libs/ts-modules/marketplace/src/types.ts')
       if (request.endsWith('auth.service'))
         return { AuthService: tokens.AuthService }
+      if (request.endsWith('config.service'))
+        return { ConfigService: tokens.ConfigService }
       if (request.endsWith('http.service'))
         return { HttpService: tokens.HttpService }
       if (request.endsWith('stale-ui.service'))
@@ -503,7 +507,7 @@ test('StartOS BitTorrent mock uses address opt-ins and clears them when either p
   const data = {
     ui: { registries: {} },
     serverInfo: {
-      bittorrent: { downloads: true, seeding: false },
+      bittorrent: { downloads: false, seeding: false },
       network: { host: { bindings: {} } },
       trustedKeys: {},
       registryKeys: {},
@@ -536,6 +540,16 @@ test('StartOS BitTorrent mock uses address opt-ins and clears them when either p
   const config = await client.rpc.server.bittorrent.config({})
   assert.equal(config.available, true)
   assert.equal(config.interface.type, 'p2p')
+  assert.deepEqual(data.serverInfo.bittorrent, {
+    downloads: false,
+    seeding: false,
+  })
+  assert.deepEqual(
+    {
+      ...(await client.rpc.server.bittorrent.setPreferences({ seeding: true })),
+    },
+    { downloads: false, seeding: false },
+  )
   assert.equal(binding().enabled, false)
   assert.equal(binding().addresses.enabled.length, 0)
   assert.ok(binding().addresses.available.every(address => address.public))

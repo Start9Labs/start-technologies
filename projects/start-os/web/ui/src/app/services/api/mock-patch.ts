@@ -459,7 +459,7 @@ export const mockPatchData: DataModel = {
     smtp: null,
     echoipUrls: ['https://ipconfig.me', 'https://ifconfig.co'],
     zram: false,
-    bittorrent: { downloads: true, seeding: false },
+    bittorrent: { downloads: false, seeding: false },
     governor: 'performance',
     epp: 'balance_power',
     ram: 8 * 1024 * 1024 * 1024,

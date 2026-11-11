@@ -50,16 +50,12 @@ fn torrent_error(error: impl std::fmt::Display) -> Error {
 #[group(skip)]
 #[serde(rename_all = "kebab-case")]
 pub struct TorrentDownloadConfig {
-    /// Enables peer downloads when unset.
+    /// Overrides local download opt-in or the server's administrative transport cap.
     #[arg(long, help = "help.arg.bittorrent", action = clap::ArgAction::Set)]
     pub bittorrent: Option<bool>,
 }
 
 impl TorrentDownloadConfig {
-    fn enabled(&self) -> bool {
-        self.bittorrent.unwrap_or(true)
-    }
-
     /// Keeps explicit settings ahead of lower-priority configuration.
     pub fn merge_with(&mut self, other: Self) {
         self.bittorrent = self.bittorrent.or(other.bittorrent);
@@ -313,7 +309,10 @@ impl TorrentClient {
     /// Never uploads asset data or retains completed torrents.
     pub fn download_only(config: TorrentDownloadConfig, proxy: bool) -> Self {
         Self {
-            available: config.enabled() && !proxy,
+            available: config
+                .bittorrent
+                .unwrap_or(TorrentPreferences::default().downloads)
+                && !proxy,
             downloads: SyncMutex::new(Some(CancellationToken::new())),
             disable_upload: true,
             seed: None,
@@ -322,9 +321,9 @@ impl TorrentClient {
         }
     }
 
-    /// Allows uploads during downloads; stored-artifact sharing starts disabled.
+    /// Keeps preference controls available unless administratively disabled; peer transfers require opt-in.
     pub fn for_server(config: TorrentDownloadConfig, seed: Option<TorrentSeedConfig>) -> Self {
-        let available = config.enabled();
+        let available = config.bittorrent.unwrap_or(true);
         Self {
             available,
             downloads: SyncMutex::new(

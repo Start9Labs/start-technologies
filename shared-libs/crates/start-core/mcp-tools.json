@@ -9535,7 +9535,7 @@
           },
           "required": ["downloads", "seeding"],
           "additionalProperties": true,
-          "description": "Downloads start enabled; sharing stored software starts disabled."
+          "description": "Peer downloads and stored-software sharing require explicit opt-in."
         }
       },
       "type": "object",
@@ -9545,7 +9545,7 @@
       },
       "required": ["downloads", "seeding"],
       "additionalProperties": true,
-      "description": "Downloads start enabled; sharing stored software starts disabled."
+      "description": "Peer downloads and stored-software sharing require explicit opt-in."
     }
   },
   {
