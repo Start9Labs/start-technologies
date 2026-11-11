@@ -960,7 +960,7 @@ export default {
   1109: 'Nieprawidłowa odpowiedź serwera',
   1110: 'Maksymalny rozmiar pliku',
   1111: 'Zobacz w sklepie',
-  1112: 'Udostępniaj pliki S9PK i obrazy systemu',
+  1112: 'Ta alternatywna implementacja spełnia wymaganie',
   1113: 'Udostępniaj zgodne z torrentem zainstalowane pliki S9PK i obrazy systemu przechowywane już na tym serwerze.',
   1114: 'Pobieranie HTTP ujawnia serwerowi adres IP. BitTorrent rozszerza grono odbiorców o trackery i inne peery.',
   1115: 'Udostępnianie zużywa pasmo wysyłania, nie tworząc dodatkowych kopii plików. O ich przechowywaniu decydują instalacja, odinstalowanie i czyszczenie obrazów systemu.',
@@ -977,4 +977,5 @@ export default {
   1128: 'Adresy dla połączeń przychodzących peerów',
   1129: 'Udostępnianie oprogramowania',
   1130: 'Połączenia przychodzące ujawniają adresy włączone poniżej.',
+  1131: 'Udostępniaj pliki S9PK i obrazy systemu',
 } satisfies i18n

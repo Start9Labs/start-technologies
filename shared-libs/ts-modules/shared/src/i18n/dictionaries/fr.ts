@@ -960,7 +960,7 @@ export default {
   1109: 'Réponse du serveur non valide',
   1110: 'Taille maximale du fichier',
   1111: 'Voir dans la bibliothèque de services',
-  1112: 'Partager les S9PK et les images système',
+  1112: 'Cette implémentation alternative remplit la condition requise',
   1113: 'Partager les S9PK installés et les images système compatibles déjà stockés sur ce serveur.',
   1114: 'Les téléchargements HTTP révèlent une adresse IP au serveur. BitTorrent élargit ce public aux trackers et aux autres pairs.',
   1115: 'Le partage utilise de la bande passante montante, sans créer de copies supplémentaires. L’installation, la désinstallation et le nettoyage des images déterminent la durée de conservation des fichiers.',
@@ -977,4 +977,5 @@ export default {
   1128: 'Adresses des pairs entrants',
   1129: 'Partage de logiciels',
   1130: 'Les connexions entrantes exposent les adresses activées ci-dessous.',
+  1131: 'Partager les S9PK et les images système',
 } satisfies i18n

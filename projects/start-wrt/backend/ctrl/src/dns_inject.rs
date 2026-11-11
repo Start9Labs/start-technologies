@@ -47,6 +47,7 @@ use crate::error::ErrorKind;
 use crate::invoke::Invoke;
 use crate::port_control::{supervise, uci_task};
 use crate::prelude::*;
+use crate::recent::Recent;
 use crate::utils::{DeserializeStdin, HandlerExtSerde};
 use crate::{CliContext, CtrlContext, Error, ServerContext};
 
@@ -65,9 +66,6 @@ const TCP_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
 const TCP_MAX_CLIENTS: usize = 16;
 /// Refusal log lines per second, box-wide.
 const REFUSAL_LOG_RATE: u32 = 20;
-/// How long a source refused for lacking the permission counts as asking.
-const REQUEST_MEMORY: Duration = Duration::from_secs(30 * 60);
-const MAX_REFUSED_SOURCES: usize = 256;
 const INJECT_FILE_PREFIX: &str = "startwrt-dns-inject.dns_";
 /// The domain every profile instance serves its devices under.
 const LAN_DOMAIN: &str = "lan";
@@ -201,9 +199,11 @@ struct NetSnapshot {
     reserved: HashMap<String, Vec<Ipv4Addr>>,
     /// Uppercase MAC → the name set on the device.
     named: BTreeMap<String, String>,
-    /// Permitted inbound-WG peer tunnel IP → (public key, derived TSIG key,
-    /// profile).
-    wg_peers: BTreeMap<Ipv4Addr, (String, [u8; 32], String)>,
+    /// Permitted inbound-WG peer tunnel IP → (public key, profile).
+    wg_peers: BTreeMap<Ipv4Addr, (String, String)>,
+    /// Every inbound-WG peer's tunnel IP → its derived TSIG key, permitted or
+    /// not.
+    wg_keys: BTreeMap<Ipv4Addr, [u8; 32]>,
 }
 
 pub struct DnsInject {
@@ -350,7 +350,7 @@ async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
     Ok(())
 }
 
-/// The addresses allowed to inject, and the TSIG keys of the peers among them.
+/// The addresses allowed to inject, and the TSIG keys of every peer.
 fn injectors(
     snapshot: &NetSnapshot,
     leases: &HashMap<String, String>,
@@ -358,7 +358,6 @@ fn injectors(
 ) -> (BTreeMap<IpAddr, Injector>, BTreeMap<IpAddr, [u8; 32]>) {
     // Candidate addresses per allowed MAC: reservation, lease, neighbor entry.
     let mut by_ip: BTreeMap<IpAddr, Injector> = BTreeMap::new();
-    let mut wg_keys = BTreeMap::new();
     for mac in &snapshot.allowed_macs {
         let mut addrs: BTreeSet<Ipv4Addr> = BTreeSet::new();
         addrs.extend(snapshot.reserved.get(mac).into_iter().flatten());
@@ -384,7 +383,7 @@ fn injectors(
             }
         }
     }
-    for (ip, (pubkey, key, profile)) in &snapshot.wg_peers {
+    for (ip, (pubkey, profile)) in &snapshot.wg_peers {
         by_ip.insert(
             IpAddr::V4(*ip),
             Injector {
@@ -392,8 +391,12 @@ fn injectors(
                 profile: profile.clone(),
             },
         );
-        wg_keys.insert(IpAddr::V4(*ip), *key);
     }
+    let wg_keys = snapshot
+        .wg_keys
+        .iter()
+        .map(|(ip, key)| (IpAddr::V4(*ip), *key))
+        .collect();
     (by_ip, wg_keys)
 }
 
@@ -430,7 +433,7 @@ fn sweep_owners(
                         IpAddr::V6(_) => true,
                     })
             }
-            Owner::WgPeer(pubkey) => snapshot.wg_peers.values().any(|(pk, _, _)| pk == pubkey),
+            Owner::WgPeer(pubkey) => snapshot.wg_peers.values().any(|(pk, _)| pk == pubkey),
         };
         if !live {
             stale.push((name.clone(), *rtype));
@@ -593,12 +596,12 @@ fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
         }
     })?;
 
-    // Permitted `wireguard_wg_<iface>` peer sections: public key, PSK, tunnel /32.
+    // `wireguard_wg_<iface>` peer sections: public key, PSK, tunnel /32.
     for p in &snapshot.profiles {
         let Some(wg) = &p.wg_device else { continue };
         let peer_ty = format!("wireguard_{wg}");
         for section in &cfgs["network"].sections {
-            if section.ty() != peer_ty || !peer_allows_dns_inject(section) {
+            if section.ty() != peer_ty {
                 continue;
             }
             let mut pubkey = None;
@@ -634,9 +637,10 @@ fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
             let Ok(psk) = <[u8; 32]>::try_from(bytes) else {
                 continue;
             };
-            snapshot
-                .wg_peers
-                .insert(ip, (pubkey, derive_tsig_key(&psk), p.interface.clone()));
+            snapshot.wg_keys.insert(ip, derive_tsig_key(&psk));
+            if peer_allows_dns_inject(section) {
+                snapshot.wg_peers.insert(ip, (pubkey, p.interface.clone()));
+            }
         }
     }
     Ok(snapshot)
@@ -695,41 +699,28 @@ impl std::fmt::Display for Refusal {
 
 /// The latest refusal of each source since it was last admitted.
 #[derive(Default)]
-struct Refusals(HashMap<IpAddr, (Refusal, Instant)>);
+struct Refusals(Recent<IpAddr, Option<Refusal>>);
 
 impl Refusals {
-    /// Whether the reason is new for the source. Past the cap, the stalest
-    /// source is forgotten.
+    /// Whether the reason is new for the source.
     fn record(&mut self, src: IpAddr, why: &Refusal, now: Instant) -> bool {
-        if let Some((reason, last)) = self.0.get_mut(&src) {
-            *last = now;
-            if reason == why {
-                return false;
-            }
-            *reason = why.clone();
-            return true;
+        let reason = self.0.touch(src, now);
+        if reason.as_ref() == Some(why) {
+            return false;
         }
-        if self.0.len() >= MAX_REFUSED_SOURCES {
-            if let Some(stalest) = self.0.iter().min_by_key(|(_, (_, last))| *last) {
-                let stalest = *stalest.0;
-                self.0.remove(&stalest);
-            }
-        }
-        self.0.insert(src, (why.clone(), now));
+        *reason = Some(why.clone());
         true
     }
 
     fn admit(&mut self, src: IpAddr) {
-        self.0.remove(&src);
+        self.0.forget(&src);
     }
 
-    /// Sources refused for lacking the permission within [`REQUEST_MEMORY`].
+    /// Sources recently refused for lacking the permission.
     fn asking(&self, now: Instant) -> HashSet<IpAddr> {
         self.0
-            .iter()
-            .filter(|(_, (reason, last))| {
-                *reason == Refusal::NotPermitted && now.duration_since(*last) < REQUEST_MEMORY
-            })
+            .recent(now)
+            .filter(|(_, reason)| **reason == Some(Refusal::NotPermitted))
             .map(|(src, _)| *src)
             .collect()
     }
@@ -742,14 +733,15 @@ fn check(
     updates: &[Record],
     auth: UpdateAuth,
 ) -> Result<Owner, Refusal> {
+    // An unproven source never reaches the permission check.
+    if !auth.tsig && !auth.tcp {
+        return Err(Refusal::NeedsTcp);
+    }
     let owner = d
         .by_ip
         .get(&src)
         .map(|i| i.owner.clone())
         .ok_or(Refusal::NotPermitted)?;
-    if !auth.tsig && !auth.tcp {
-        return Err(Refusal::NeedsTcp);
-    }
     let held_by_other = |name: &LowerName, rtype: RecordType| {
         d.owners
             .get(&(name.clone(), rtype))
@@ -1370,6 +1362,7 @@ mod tests {
     use hickory_server::proto::rr::rdata::{A, CNAME};
 
     use super::*;
+    use crate::recent::REQUEST_MEMORY;
 
     fn fqdn(s: &str) -> Name {
         let mut n = Name::from_utf8(s).unwrap();
@@ -1499,6 +1492,26 @@ mod tests {
         assert!(dir.peek(|d| d.refusals.asking(Instant::now()).is_empty()));
     }
 
+    #[tokio::test]
+    async fn an_unproven_source_is_not_asking() {
+        let dir = directory();
+        let forged = IpAddr::V4(lan_ip(77));
+        assert_eq!(
+            admit(
+                &dir,
+                forged,
+                &[a_record("nas.example.com", lan_ip(77))],
+                UpdateAuth::default()
+            )
+            .await,
+            ResponseCode::Refused
+        );
+        assert!(
+            dir.peek(|d| d.refusals.asking(Instant::now()).is_empty()),
+            "an unsigned UDP source address proves nothing"
+        );
+    }
+
     #[test]
     fn a_refusal_is_new_only_when_its_reason_changes() {
         let mut refusals = Refusals::default();
@@ -1513,21 +1526,6 @@ mod tests {
 
         let later = now + REQUEST_MEMORY;
         assert!(refusals.asking(later).is_empty(), "forgotten after a while");
-    }
-
-    #[test]
-    fn refusals_forget_the_stalest_source_past_the_cap() {
-        let mut refusals = Refusals::default();
-        let start = Instant::now();
-        for n in 0..=MAX_REFUSED_SOURCES {
-            let src = IpAddr::V6(std::net::Ipv6Addr::from(n as u128 + 1));
-            let at = start + Duration::from_millis(n as u64);
-            refusals.record(src, &Refusal::NotPermitted, at);
-        }
-        assert_eq!(refusals.0.len(), MAX_REFUSED_SOURCES);
-        assert!(!refusals
-            .0
-            .contains_key(&IpAddr::V6(std::net::Ipv6Addr::from(1))));
     }
 
     async fn publish_public_name_offline(signed: bool) {
@@ -1918,7 +1916,7 @@ mod tests {
         let mut with_peer = snapshot_with(&[]);
         with_peer
             .wg_peers
-            .insert(lan_ip(200), ("pk".into(), [0u8; 32], "lan".into()));
+            .insert(lan_ip(200), ("pk".into(), "lan".into()));
         let wg_records = vec![injected("nas.example.com", lan_ip(200), lan_ip(200))];
         assert!(sweep_owners(&mut d, &with_peer, &HashMap::new(), &[], &wg_records).is_empty());
         assert_eq!(
@@ -2009,8 +2007,8 @@ mod tests {
         }
     }
 
-    /// A permitted `wireguard_wg_<iface>` peer section yields a directory entry keyed
-    /// by its tunnel /32, carrying the TSIG key derived from its PSK.
+    /// A permitted `wireguard_wg_<iface>` peer section yields a directory entry
+    /// and a TSIG key derived from its PSK, both keyed by its tunnel /32.
     #[tokio::test]
     async fn snapshot_derives_wg_peer_tsig_keys() {
         use base64::Engine;
@@ -2058,22 +2056,32 @@ mod tests {
              own address, so the listener binds there, not the gateway"
         );
 
-        let (pubkey, key, profile) = snapshot
+        let (pubkey, profile) = snapshot
             .wg_peers
             .get(&Ipv4Addr::new(10, 59, 0, 2))
             .expect("peer keyed by its tunnel /32");
         assert_eq!(pubkey, "peer-pub");
         assert_eq!(profile, "lan");
         assert_eq!(
-            *key,
-            derive_tsig_key(&psk),
+            snapshot.wg_keys.get(&Ipv4Addr::new(10, 59, 0, 2)),
+            Some(&derive_tsig_key(&psk)),
             "the key the listener verifies against derives from the peer's PSK \
              exactly as the client derives its signing key"
         );
+        let broken = Ipv4Addr::new(10, 59, 0, 3);
         assert!(
-            !snapshot.wg_peers.contains_key(&Ipv4Addr::new(10, 59, 0, 3)),
+            !snapshot.wg_peers.contains_key(&broken) && !snapshot.wg_keys.contains_key(&broken),
             "a peer whose PSK cannot decode contributes no key"
         );
+    }
+
+    #[tokio::test]
+    async fn an_unpermitted_peer_has_a_key_but_no_entry() {
+        let snapshot = snapshot_with_two_peers(true).await;
+        let (by_ip, wg_keys) = injectors(&snapshot, &HashMap::new(), &[]);
+        let unpermitted = IpAddr::V4(lan_ip(201));
+        assert!(!by_ip.contains_key(&unpermitted));
+        assert_eq!(wg_keys.get(&unpermitted), Some(&derive_tsig_key(&[8; 32])));
     }
 
     /// One profile with an inbound VPN and two peers: `.201` never holds the
@@ -2172,11 +2180,19 @@ mod tests {
                 Message::from_vec(&response).unwrap().metadata.response_code
             }
         };
+        let asking = || di.asking_sources();
+        assert_eq!(
+            answer(201, 9).await,
+            ResponseCode::Refused,
+            "a wrong key proves nothing"
+        );
+        assert!(asking().is_empty());
         assert_eq!(
             answer(201, 8).await,
             ResponseCode::Refused,
             "an unpermitted peer is refused despite signing with its own PSK"
         );
+        assert_eq!(asking(), HashSet::from([IpAddr::V4(lan_ip(201))]));
         assert!(di.injector.list().is_empty());
         assert_eq!(answer(200, 7).await, ResponseCode::NoError);
         assert_eq!(di.injector.list().len(), 1);

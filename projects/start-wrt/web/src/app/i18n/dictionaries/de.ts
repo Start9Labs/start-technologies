@@ -594,4 +594,5 @@ export default {
   630: 'Zeile {line}',
   631: 'Erneut prüfen',
   632: 'Dieser Abschnitt hat außerdem {option} {value}, gesetzt außerhalb von StartWRT. StartWRT zeigt den ersten Wert an und lässt diesen unverändert.',
+  633: 'Dieses Gerät hat angefragt, die Ports {ports} zum Internet zu öffnen. Der Router hat abgelehnt, weil die automatische Portweiterleitung ausgeschaltet ist.',
 } satisfies i18n

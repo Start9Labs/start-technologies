@@ -960,7 +960,7 @@ export default {
   1109: 'Ungültige Antwort vom Server',
   1110: 'Maximale Dateigröße',
   1111: 'Im Marktplatz anzeigen',
-  1112: 'S9PKs und OS-Images teilen',
+  1112: 'Diese alternative Implementierung erfüllt die Anforderung',
   1113: 'Kompatible installierte S9PKs und OS-Images teilen, die bereits auf diesem Server gespeichert sind.',
   1114: 'HTTP-Downloads zeigen dem Server eine IP-Adresse. BitTorrent erweitert diesen Empfängerkreis auf Tracker und andere Peers.',
   1115: 'Beim Teilen wird Upload-Bandbreite genutzt; zusätzliche Kopien der Dateien werden nicht angelegt. Installation, Deinstallation und Image-Bereinigung bestimmen die Aufbewahrungsdauer.',
@@ -977,4 +977,5 @@ export default {
   1128: 'Adressen für eingehende Peers',
   1129: 'Software teilen',
   1130: 'Eingehende Verbindungen machen die unten aktivierten Adressen sichtbar.',
+  1131: 'S9PKs und OS-Images teilen',
 } satisfies i18n

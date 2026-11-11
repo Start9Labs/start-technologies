@@ -961,7 +961,7 @@ export const ENGLISH: Record<string, number> = {
   'Invalid response from server': 1109,
   'Maximum file size': 1110,
   'View in Marketplace': 1111,
-  'Share S9PKs and OS images': 1112,
+  'This alternative implementation meets the requirement': 1112,
   'Share compatible installed S9PKs and OS images already stored on this server.': 1113,
   'HTTP downloads reveal an IP address to the server. BitTorrent widens the audience to trackers and other peers.': 1114,
   'Sharing uses upload bandwidth, not extra payload copies. Installation, uninstall and image cleanup control file retention.': 1115,
@@ -978,4 +978,5 @@ export const ENGLISH: Record<string, number> = {
   'Incoming peer addresses': 1128,
   'Software sharing': 1129,
   'Incoming connections expose the enabled addresses below.': 1130,
+  'Share S9PKs and OS images': 1131,
 }
