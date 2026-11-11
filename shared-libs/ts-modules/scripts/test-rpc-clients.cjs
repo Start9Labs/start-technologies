@@ -93,8 +93,6 @@ function harness(moduleOverrides = new Map()) {
         return { ConfigService: tokens.ConfigService }
       if (request.endsWith('http.service'))
         return { HttpService: tokens.HttpService }
-      if (request.endsWith('config.service'))
-        return { ConfigService: tokens.ConfigService }
       if (request.endsWith('stale-ui.service'))
         return { StaleUiService: tokens.StaleUiService }
       if (request.endsWith('patch-db-source'))
@@ -432,6 +430,38 @@ test('StartOS mock routes preserve registry fixtures, configured build identity,
     }),
     version,
   )
+})
+
+test('StartOS generated UPS contracts preserve the selected USB location', () => {
+  const { load } = harness()
+  const device = {
+    driver: 'usbhid-ups',
+    port: 'auto',
+    vendorId: '051D',
+    productId: '0002',
+    serial: null,
+    bus: '001',
+    busPort: '003',
+    vendor: null,
+    product: null,
+  }
+  for (const file of ['types.schemas.ts', 'rpc/start-os.schemas.ts']) {
+    const { NutDevice, NutSettings } = load(
+      `shared-libs/ts-modules/start-core/lib/osBindings/${file}`,
+    )
+    const parsed = NutDevice.parse(device)
+    assert.equal(parsed.bus, '001')
+    assert.equal(parsed.busPort, '003')
+    const settings = NutSettings.encode({
+      mode: 'server',
+      device: parsed,
+      listenAll: false,
+      remoteUsername: null,
+      remotePassword: null,
+    })
+    assert.equal(settings.device.bus, '001')
+    assert.equal(settings.device.busPort, '003')
+  }
 })
 
 test('StartOS trust mock rejects whole batches and imports the requested trust atomically', async () => {
