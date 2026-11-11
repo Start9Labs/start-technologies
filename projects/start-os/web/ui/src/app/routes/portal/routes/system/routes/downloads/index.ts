@@ -51,6 +51,14 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
       </header>
       @let settings = preferences();
       @let configuration = config();
+      @if (watcherFailed()) {
+        <div tuiNotification appearance="negative">
+          {{
+            'The BitTorrent settings watcher stopped. Restart StartOS to restore downloads and sharing.'
+              | i18n
+          }}
+        </div>
+      }
       @if (configuration === 'error') {
         <div tuiNotification appearance="negative">
           {{ 'Sharing settings could not be loaded.' | i18n }}
@@ -61,35 +69,41 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
       } @else if (configuration === 'loading' || !settings) {
         <tui-loader />
       } @else {
-        @if (!configuration.available) {
+        @if (!configuration.available && !watcherFailed()) {
           <div tuiNotification appearance="info">
             {{ 'BitTorrent is disabled in the server configuration.' | i18n }}
           </div>
         }
-        <label tuiCell>
-          <span tuiTitle>
-            <b>{{ 'Download using BitTorrent' | i18n }}</b>
-            <span tuiSubtitle>
-              {{
-                'Prefer peers for software downloads, with HTTP fallback.'
-                  | i18n
-              }}
+        <fieldset [disabled]="watcherFailed()">
+          <label tuiCell>
+            <span tuiTitle>
+              <b>{{ 'Download using BitTorrent' | i18n }}</b>
+              <span tuiSubtitle>
+                {{
+                  'Prefer peers for software downloads, with HTTP fallback.'
+                    | i18n
+                }}
+              </span>
             </span>
-          </span>
-          <input tuiSwitch type="checkbox" [formControl]="controls.downloads" />
-        </label>
-        <label tuiCell>
-          <span tuiTitle>
-            <b>{{ 'Share S9PKs and OS images' | i18n }}</b>
-            <span tuiSubtitle>
-              {{
-                'Share compatible installed S9PKs and OS images already stored on this server.'
-                  | i18n
-              }}
+            <input
+              tuiSwitch
+              type="checkbox"
+              [formControl]="controls.downloads"
+            />
+          </label>
+          <label tuiCell>
+            <span tuiTitle>
+              <b>{{ 'Share S9PKs and OS images' | i18n }}</b>
+              <span tuiSubtitle>
+                {{
+                  'Share compatible installed S9PKs and OS images already stored on this server.'
+                    | i18n
+                }}
+              </span>
             </span>
-          </span>
-          <input tuiSwitch type="checkbox" [formControl]="controls.seeding" />
-        </label>
+            <input tuiSwitch type="checkbox" [formControl]="controls.seeding" />
+          </label>
+        </fieldset>
         <p class="g-secondary">
           {{
             'Active BitTorrent downloads can upload even when sharing stored software is off.'
@@ -174,7 +188,9 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
               | i18n
           }}
         </p>
-        <fieldset [disabled]="!editable() || !settings?.seeding">
+        <fieldset
+          [disabled]="!editable() || !settings?.seeding || watcherFailed()"
+        >
           <service-interface
             packageId="start-os"
             [value]="incomingInterface()"
@@ -190,6 +206,10 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
 
     p {
       margin: 0;
+    }
+
+    fieldset > label + label {
+      margin-block-start: 1rem;
     }
 
     fieldset {
@@ -234,6 +254,9 @@ export default class Downloads {
     'loading',
   )
   protected readonly saving = signal(false)
+  protected readonly watcherFailed = toSignal(
+    this.patch.watch$('serverInfo', 'statusInfo', 'bittorrentWatcherFailed'),
+  )
   protected readonly editable = computed(() => {
     const config = this.config()
     return (

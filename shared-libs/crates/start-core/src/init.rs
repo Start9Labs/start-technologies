@@ -425,14 +425,7 @@ pub async fn init(
     sync_kiosk(server_info.as_kiosk().de()?.unwrap_or(false)).await?;
     let ram = get_mem_info().await?.total.0 as u64 * 1024 * 1024;
     let devices = lshw().await?;
-    let status_info = ServerStatus {
-        update_progress: None,
-        backup_progress: None,
-        backup_conversions: Default::default(),
-        shutting_down: false,
-        restarting: false,
-        restart: None,
-    };
+    let status_info = ServerStatus::default();
     db.mutate(|v| {
         let server_info = v.as_public_mut().as_server_info_mut();
         server_info.as_ntp_synced_mut().ser(&ntp_synced)?;

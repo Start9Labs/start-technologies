@@ -639,7 +639,7 @@ export type BindingSetGuaWanParamsInput = z.input<
 >
 
 /**
- * Configured transport availability and the native incoming peer interface.
+ * Effective transport availability and the native incoming peer interface.
  */
 export type BitTorrentConfig = z.output<typeof schemas.BitTorrentConfig>
 export type DerivedAddressInfo = z.output<typeof schemas.DerivedAddressInfo>

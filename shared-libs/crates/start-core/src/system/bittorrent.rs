@@ -6,7 +6,7 @@ use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
 use crate::net::service_interface::ServiceInterface;
 use crate::prelude::*;
-use crate::registry::bittorrent::TorrentPreferences;
+use crate::registry::bittorrent::{TorrentClient, TorrentPreferences};
 use crate::util::serde::HandlerExtSerde;
 
 mod incoming;
@@ -31,7 +31,7 @@ pub(crate) fn api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-/// Configured transport availability and the native incoming peer interface.
+/// Effective transport availability and the native incoming peer interface.
 #[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 struct BitTorrentConfig {
@@ -66,6 +66,24 @@ async fn set_preferences(
     params: SetPreferencesParams,
 ) -> Result<TorrentPreferences, Error> {
     update_preferences(&ctx.db, params).await
+}
+
+/// Stops peer work on watcher failure without changing saved download or sharing intent.
+pub(crate) async fn watcher_failed(
+    db: &TypedPatchDb<Database>,
+    torrents: &TorrentClient,
+) -> Result<(), Error> {
+    torrents.shutdown();
+    db.mutate(|db| {
+        db.as_public_mut()
+            .as_server_info_mut()
+            .as_status_info_mut()
+            .as_bittorrent_watcher_failed_mut()
+            .ser(&true)?;
+        incoming::clear_selections(db)
+    })
+    .await
+    .result
 }
 
 async fn update_preferences(
@@ -310,6 +328,78 @@ mod tests {
                     .is_empty()
             );
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn watcher_failure_stops_peer_work_and_ingress_without_erasing_intent()
+    -> Result<(), Error> {
+        use std::sync::Arc;
+
+        use crate::db::model::public::{GatewayType, IpInfo, NetworkInterfaceInfo, ServerStatus};
+        use crate::net::forward::AvailablePorts;
+        use crate::net::host::Host;
+
+        let preferences = TorrentPreferences {
+            downloads: true,
+            seeding: true,
+        };
+        let gateway = NetworkInterfaceInfo {
+            gateway_type: GatewayType::InboundOutbound,
+            ip_info: Some(Arc::new(IpInfo {
+                subnets: ["192.168.1.2/24".parse::<ipnet::IpNet>()?]
+                    .into_iter()
+                    .collect(),
+                wan_ip: Some("203.0.113.45".parse()?),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        let db = TypedPatchDb::<Database>::load_unchecked(PatchDb::in_memory());
+        db.put(&patch_db::json_ptr::ROOT, &imbl_value::json!({
+            "public": {"serverInfo": {
+                "hostname": "server",
+                "statusInfo": to_value(&ServerStatus::default())?,
+                "bittorrent": to_value(&preferences)?,
+                "network": {"host": to_value(&Host::default())?, "gateways": {"eth0": to_value(&gateway)?}}
+            }},
+            "private": {"availablePorts": to_value(&AvailablePorts::new())?}
+        })).await?;
+        db.mutate(|db| {
+            incoming::configure_in(db, true)?;
+            db.as_public_mut()
+                .as_server_info_mut()
+                .as_network_mut()
+                .as_host_mut()
+                .as_bindings_mut()
+                .as_idx_mut(&6881)
+                .unwrap()
+                .mutate(|binding| {
+                    let address = binding.addresses.available.first().unwrap().clone();
+                    binding.set_address_enabled(&address, true)
+                })
+        })
+        .await
+        .result?;
+        let torrents = TorrentClient::for_server(Default::default(), None);
+        torrents.set_downloads_enabled(true);
+        assert!(torrents.downloads_enabled());
+        watcher_failed(&db, &torrents).await?;
+        torrents.set_downloads_enabled(true);
+        assert!(!torrents.downloads_enabled());
+        let peek = db.peek().await;
+        let info = peek.as_public().as_server_info();
+        assert!(info.as_status_info().as_bittorrent_watcher_failed().de()?);
+        assert_eq!(info.as_bittorrent().de()?, preferences);
+        let binding = info
+            .as_network()
+            .as_host()
+            .as_bindings()
+            .as_idx(&6881)
+            .unwrap()
+            .de()?;
+        assert!(!binding.enabled);
+        assert!(binding.addresses.enabled().is_empty());
         Ok(())
     }
 

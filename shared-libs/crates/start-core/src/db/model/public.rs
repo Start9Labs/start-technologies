@@ -129,14 +129,7 @@ impl Public {
                     outbound_dns: None,
                     passthroughs: Vec::new(),
                 },
-                status_info: ServerStatus {
-                    backup_progress: None,
-                    backup_conversions: Default::default(),
-                    update_progress: None,
-                    shutting_down: false,
-                    restarting: false,
-                    restart: None,
-                },
+                status_info: ServerStatus::default(),
                 trusted_keys: initial_trusted_keys(),
                 registry_keys: BTreeMap::new(),
                 registries: initial_registries(),
@@ -503,6 +496,9 @@ rpc_toolkit::ts_export!(DomainSettings, namespaces = [""]);
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct ServerStatus {
+    /// A fatal preference-watcher failure; reset at startup.
+    #[serde(default)]
+    pub bittorrent_watcher_failed: bool,
     pub backup_progress: Option<FullProgress>,
     #[serde(default)]
     pub backup_conversions: crate::backup::target::conversion::ConversionJobs,
@@ -556,6 +552,21 @@ mod test {
             })),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn startup_status_clears_watcher_failure_and_accepts_older_status() {
+        let mut status = to_value(&ServerStatus::default()).unwrap();
+        assert_eq!(status["bittorrentWatcherFailed"], Value::Bool(false));
+        status
+            .as_object_mut()
+            .unwrap()
+            .remove("bittorrentWatcherFailed");
+        assert!(
+            !from_value::<ServerStatus>(status)
+                .unwrap()
+                .bittorrent_watcher_failed
+        );
     }
 
     #[test]

@@ -1124,6 +1124,71 @@ async fn shutdown_ends_the_preference_watcher_without_reopening_sharing() -> Res
 }
 
 #[tokio::test]
+async fn maintenance_failure_stops_the_watcher_without_retrying() -> Result<(), Error> {
+    let client = TorrentClient::for_server(Default::default(), None);
+    let db = patch_db::PatchDb::in_memory();
+    db.put(&patch_db::json_ptr::ROOT, &sharing_preferences(true))
+        .await?;
+    let watch = db
+        .watch(patch_db::json_ptr::ROOT.to_owned())
+        .await
+        .typed::<TorrentPreferences>();
+    let bindings = db.watch("/bindings".parse().unwrap()).await;
+    let configured = AtomicUsize::new(0);
+    let result = timeout(
+        Duration::from_secs(2),
+        client.maintain_preferences(
+            watch,
+            bindings,
+            || {
+                configured.fetch_add(1, Ordering::SeqCst);
+                async { Err(Error::new(eyre!("binding failed"), ErrorKind::Network)) }
+            },
+            || async { Ok(()) },
+        ),
+    )
+    .await
+    .expect("maintenance failure kept the watcher alive");
+    assert!(result.is_err());
+    assert_eq!(configured.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn invalid_preferences_stop_the_watcher_without_retrying() -> Result<(), Error> {
+    let client = TorrentClient::for_server(Default::default(), None);
+    let db = patch_db::PatchDb::in_memory();
+    db.put(
+        &patch_db::json_ptr::ROOT,
+        &imbl_value::json!({"downloads": "invalid"}),
+    )
+    .await?;
+    let watch = db
+        .watch(patch_db::json_ptr::ROOT.to_owned())
+        .await
+        .typed::<TorrentPreferences>();
+    let bindings = db.watch("/bindings".parse().unwrap()).await;
+    let configured = AtomicUsize::new(0);
+    let result = timeout(
+        Duration::from_secs(2),
+        client.maintain_preferences(
+            watch,
+            bindings,
+            || {
+                configured.fetch_add(1, Ordering::SeqCst);
+                async { Ok(None) }
+            },
+            || async { Ok(()) },
+        ),
+    )
+    .await
+    .expect("invalid preferences kept the watcher alive");
+    assert!(result.is_err());
+    assert_eq!(configured.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
 async fn shutdown_cancels_pending_seed_initialization_without_publishing() -> Result<(), Error> {
     let cache = TmpDir::new().await?;
     let client = TorrentClient::for_server(

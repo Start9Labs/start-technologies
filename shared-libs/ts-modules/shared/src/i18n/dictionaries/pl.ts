@@ -978,4 +978,5 @@ export default {
   1129: 'Udostępnianie oprogramowania',
   1130: 'Połączenia przychodzące ujawniają adresy włączone poniżej.',
   1131: 'Udostępniaj pliki S9PK i obrazy systemu',
+  1132: 'Monitor ustawień BitTorrent zatrzymał się. Uruchom ponownie StartOS, aby przywrócić pobieranie i udostępnianie.',
 } satisfies i18n

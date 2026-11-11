@@ -60,6 +60,7 @@ function fixture(t, initial, setPreferences, readConfig = async () => config) {
       value: {
         serverInfo: {
           bittorrent: initial,
+          statusInfo: { bittorrentWatcherFailed: false },
           network: {
             defaultOutbound: 'eth0',
             gateways: {
@@ -237,6 +238,26 @@ test('software sharing: configured availability is separate from persisted inten
   assert.equal(page.config().available, false)
   assert.deepEqual(page.preferences(), downloadsEnabled)
   assert.ok(Object.values(page.controls).every(control => control.disabled))
+})
+
+test('software sharing: watcher failure is observed without reloading configuration or changing intent', async t => {
+  let reads = 0
+  const initial = { downloads: true, seeding: true }
+  const { page, reading, observe } = fixture(
+    t,
+    initial,
+    async () => initial,
+    async () => {
+      reads++
+      return config
+    },
+  )
+  await reading
+  assert.equal(page.watcherFailed(), false)
+  observe(true, '/serverInfo/statusInfo/bittorrentWatcherFailed')
+  assert.equal(page.watcherFailed(), true)
+  assert.deepEqual(page.preferences(), initial)
+  assert.equal(reads, 1)
 })
 
 test('software sharing: configuration failures remain retryable', async t => {

@@ -5819,7 +5819,7 @@ export const BindingSetGuaWanParams: z.ZodObject<{
 })
 
 /**
- * Configured transport availability and the native incoming peer interface.
+ * Effective transport availability and the native incoming peer interface.
  */
 export const BitTorrentConfig: z.ZodObject<{
   available: z.ZodBoolean
@@ -5830,7 +5830,7 @@ export const BitTorrentConfig: z.ZodObject<{
 }).meta({
   id: 'BitTorrentConfig',
   description:
-    'Configured transport availability and the native incoming peer interface.',
+    'Effective transport availability and the native incoming peer interface.',
 })
 export const CreateTaskParams: z.ZodIntersection<
   z.ZodObject<{ replayId: typeof ReplayId }>,
@@ -6035,6 +6035,10 @@ export const PackageVersionInfo: z.ZodIntersection<
     id: 'PackageVersionInfo',
   })
 export const ServerStatus: z.ZodObject<{
+  /**
+   * A fatal preference-watcher failure; reset at startup.
+   */
+  bittorrentWatcherFailed: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   backupProgress: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof FullProgress>>,
     z.ZodNullable<typeof FullProgress>
@@ -6056,6 +6060,12 @@ export const ServerStatus: z.ZodObject<{
     z.ZodNullable<typeof RestartReason>
   >
 }> = /* @__PURE__ */ object({
+  /**
+   * A fatal preference-watcher failure; reset at startup.
+   */
+  bittorrentWatcherFailed: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'A fatal preference-watcher failure; reset at startup.',
+  }),
   backupProgress: wire(
     FullProgress.nullable().optional(),
     FullProgress.nullable(),

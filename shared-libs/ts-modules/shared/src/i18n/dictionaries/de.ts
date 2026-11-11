@@ -978,4 +978,5 @@ export default {
   1129: 'Software teilen',
   1130: 'Eingehende Verbindungen machen die unten aktivierten Adressen sichtbar.',
   1131: 'S9PKs und OS-Images teilen',
+  1132: 'Die BitTorrent-Einstellungsüberwachung wurde beendet. Starte StartOS neu, um Downloads und das Teilen wiederherzustellen.',
 } satisfies i18n

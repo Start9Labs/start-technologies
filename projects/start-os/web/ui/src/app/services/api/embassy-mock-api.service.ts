@@ -2357,7 +2357,6 @@ export class MockApiService extends ApiService {
         },
       ]
       this.mockRevision(patch3)
-      // quickly revert server to "running" for continued testing
       await pauseFor(100)
       const patch4 = [
         {
@@ -2367,13 +2366,12 @@ export class MockApiService extends ApiService {
         },
       ]
       this.mockRevision(patch4)
-      // set patch indicating update is complete
       await pauseFor(100)
       const patch6 = [
         {
           op: PatchOp.REPLACE,
           path: '/serverInfo/statusInfo',
-          value: Mock.ServerUpdated,
+          value: structuredClone(Mock.ServerStatus),
         },
       ]
       this.mockRevision(patch6)

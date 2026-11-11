@@ -9423,7 +9423,7 @@
           },
           "required": ["available", "interface"],
           "additionalProperties": true,
-          "description": "Configured transport availability and the native incoming peer interface."
+          "description": "Effective transport availability and the native incoming peer interface."
         },
         "ServiceInterface": {
           "type": "object",
@@ -9488,7 +9488,7 @@
       },
       "required": ["available", "interface"],
       "additionalProperties": true,
-      "description": "Configured transport availability and the native incoming peer interface."
+      "description": "Effective transport availability and the native incoming peer interface."
     }
   },
   {

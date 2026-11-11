@@ -379,6 +379,7 @@ impl TorrentClient {
             .flatten()
     }
 
+    /// Watcher errors are terminal; per-artifact discovery failures remain local.
     pub(crate) async fn maintain_preferences<F, Fut, G, Incoming>(
         &self,
         mut preferences: patch_db::TypedDbWatch<TorrentPreferences>,
@@ -408,26 +409,19 @@ impl TorrentClient {
                 result = async {
                     let maintenance = async {
                         loop {
-                            let result = async {
-                                bindings.peek_and_mark_seen()?;
-                                let listener = configure_incoming().await?;
-                                if should_seed {
-                                    let service = self.seeds.peek(Clone::clone);
-                                    match service {
-                                        Some(service) if service.matches_listener(listener.as_ref()) => {
-                                            service.refresh().await?;
-                                        }
-                                        _ => {
-                                            self.stop_seeding().await;
-                                            self.resume_seeding(listener).await?;
-                                        }
+                            bindings.peek_and_mark_seen()?;
+                            let listener = configure_incoming().await?;
+                            if should_seed {
+                                let service = self.seeds.peek(Clone::clone);
+                                match service {
+                                    Some(service) if service.matches_listener(listener.as_ref()) => {
+                                        service.refresh().await?;
+                                    }
+                                    _ => {
+                                        self.stop_seeding().await;
+                                        self.resume_seeding(listener).await?;
                                     }
                                 }
-                                Ok::<_, Error>(())
-                            }.await;
-                            if let Err(error) = result {
-                                self.stop_seeding().await;
-                                tracing::warn!(%error, "Cannot refresh stored-artifact sharing");
                             }
                             let changed = tokio::select! {
                                 result = bindings.changed() => result,

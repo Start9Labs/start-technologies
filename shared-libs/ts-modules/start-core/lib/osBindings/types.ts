@@ -1264,12 +1264,12 @@ export type BindingSetGuaWanParamsInput = z.input<
 >
 
 /**
- * Configured transport availability and the native incoming peer interface.
+ * Effective transport availability and the native incoming peer interface.
  */
 export type BitTorrentConfig = z.output<typeof schemas.BitTorrentConfig>
 
 /**
- * Configured transport availability and the native incoming peer interface.
+ * Effective transport availability and the native incoming peer interface.
  */
 export type BitTorrentConfigInput = z.input<typeof schemas.BitTorrentConfig>
 export type CreateTaskParams = z.output<typeof schemas.CreateTaskParams>

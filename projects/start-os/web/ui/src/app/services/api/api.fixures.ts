@@ -28,7 +28,8 @@ const mockDescription = {
 export namespace Mock {
   export const ServerId = '1234-5678-9876-5432'
 
-  export const ServerUpdated: T.ServerStatus = {
+  export const ServerStatus: T.ServerStatus = {
+    bittorrentWatcherFailed: false,
     backupConversions: {},
     backupProgress: null,
     updateProgress: null,

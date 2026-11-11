@@ -978,4 +978,5 @@ export default {
   1129: 'Compartir software',
   1130: 'Las conexiones entrantes exponen las direcciones habilitadas abajo.',
   1131: 'Compartir S9PK e imágenes del sistema',
+  1132: 'El supervisor de la configuración de BitTorrent se ha detenido. Reinicia StartOS para restablecer las descargas y el uso compartido.',
 } satisfies i18n

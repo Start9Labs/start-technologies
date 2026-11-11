@@ -979,4 +979,5 @@ export const ENGLISH: Record<string, number> = {
   'Software sharing': 1129,
   'Incoming connections expose the enabled addresses below.': 1130,
   'Share S9PKs and OS images': 1131,
+  'The BitTorrent settings watcher stopped. Restart StartOS to restore downloads and sharing.': 1132,
 }

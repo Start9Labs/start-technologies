@@ -4678,7 +4678,7 @@ export const BindingSetGuaWanParams: z.ZodObject<{
 })
 
 /**
- * Configured transport availability and the native incoming peer interface.
+ * Effective transport availability and the native incoming peer interface.
  */
 export const BitTorrentConfig: z.ZodObject<{
   available: z.ZodBoolean
@@ -4689,7 +4689,7 @@ export const BitTorrentConfig: z.ZodObject<{
 }).meta({
   id: 'BitTorrentConfig',
   description:
-    'Configured transport availability and the native incoming peer interface.',
+    'Effective transport availability and the native incoming peer interface.',
 })
 export const DerivedAddressInfo: z.ZodObject<{
   /**

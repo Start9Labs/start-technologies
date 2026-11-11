@@ -978,4 +978,5 @@ export default {
   1129: 'Partage de logiciels',
   1130: 'Les connexions entrantes exposent les adresses activées ci-dessous.',
   1131: 'Partager les S9PK et les images système',
+  1132: 'La surveillance des paramètres BitTorrent s’est arrêtée. Redémarrez StartOS pour rétablir les téléchargements et le partage.',
 } satisfies i18n

@@ -499,6 +499,7 @@ impl RpcContext {
         let torrents = res.torrents.clone();
         let weak = Arc::downgrade(&seed);
         let incoming_context = weak.clone();
+        let watcher_db = res.db.clone();
         res.add_cron(async move {
             if let Err(error) = torrents
                 .maintain_preferences(
@@ -530,6 +531,11 @@ impl RpcContext {
                 .await
             {
                 tracing::warn!(%error, "Registry seeding watcher stopped");
+                if let Err(error) =
+                    crate::system::bittorrent::watcher_failed(&watcher_db, &torrents).await
+                {
+                    tracing::warn!(%error, "Cannot publish BitTorrent watcher failure");
+                }
             }
         });
         let weak = Arc::downgrade(&seed);
