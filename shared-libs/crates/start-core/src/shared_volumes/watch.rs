@@ -72,6 +72,13 @@ struct Observer {
 }
 
 impl Observer {
+    /// The caller has already observed a live mount.
+    fn observe_existing_source(&mut self, source: &registered::RegisteredSource) {
+        if source.inspection.availability == SharedVolumeAvailability::Unknown {
+            self.mounted.invalidate();
+        }
+    }
+
     fn cancel_inspection(&mut self, id: &registered::SourceId) {
         if let Some((_, mut job)) = self.running.remove(id) {
             job.cancel();
@@ -252,9 +259,7 @@ async fn watch(
                     .log_err()
                     .is_some_and(|mounts| !mounts.is_empty())
             {
-                if source.inspection.availability == SharedVolumeAvailability::Unknown {
-                    observer.mounted.invalidate();
-                }
+                observer.observe_existing_source(&source);
                 continue;
             }
             if trigger == InspectionEvent::Restart {
@@ -453,6 +458,57 @@ mod tests {
                 observer.cancel_inspection(unchanged);
                 remaining.cancel_and_wait().await;
                 assert!(observer.running.is_empty());
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unknown_existing_cifs_with_pending_probe_waits_between_health_scans() {
+        use crate::shared_volumes::{SharedVolumeId, SharedVolumeInspection};
+        let (jobs, mut runner) = BackgroundJobQueue::new();
+        let (send, _) = mpsc::channel(64);
+        let mut observer = Observer::new(send, jobs.clone());
+        let source = registered::RegisteredSource {
+            id: registered::SourceId::Volume(SharedVolumeId::new()),
+            definition: source::SourceDefinition::new(
+                SharedVolumeSource::Cifs {
+                    hostname: "nas".into(),
+                    path: "/share".into(),
+                    username: "user".into(),
+                },
+                None,
+            ),
+            inspection: SharedVolumeInspection::default(),
+            check_unmounted: true,
+        };
+        assert!(source.needs_inspection(false, false));
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let mut pending_probe = jobs.add_cancellable_job(async move {
+            started.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        runner
+            .run_while(async {
+                ready.await.unwrap();
+                let mut quiet = stream::pending();
+                for _ in 0..4 {
+                    assert!(observer.mounted.take_due_tick().is_some());
+                    let scanned = Instant::now();
+                    observer.observe_existing_source(&source);
+                    assert!(
+                        wait_for_change(&mut quiet, observer.mounted.deadline())
+                            .await
+                            .unwrap()
+                            .is_none()
+                    );
+                    assert!(Instant::now() - scanned >= Duration::from_secs(1));
+                    assert!(!pending_probe.is_finished());
+                    assert_eq!(
+                        source.inspection.availability,
+                        SharedVolumeAvailability::Unknown
+                    );
+                }
+                pending_probe.cancel_and_wait().await;
             })
             .await;
     }

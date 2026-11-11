@@ -18,6 +18,7 @@ use crate::util::future::CancellationHandle;
 
 const HEALTH_INTERVAL: Duration = Duration::from_secs(30);
 const CAPACITY_INTERVAL: Duration = Duration::from_secs(180);
+const MIN_TICK_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug)]
 enum Observation<T> {
@@ -160,6 +161,7 @@ impl Probe {
 pub(super) struct MountedChecks {
     next_health: Instant,
     next_capacity: Instant,
+    last_tick: Option<Instant>,
     probes: BTreeMap<usize, Probe>,
     send: mpsc::Sender<Event>,
     jobs: BackgroundJobQueue,
@@ -170,6 +172,7 @@ impl MountedChecks {
         Self {
             next_health: Instant::now(),
             next_capacity: Instant::now(),
+            last_tick: None,
             probes: BTreeMap::new(),
             send,
             jobs,
@@ -180,8 +183,27 @@ impl MountedChecks {
         self.next_health
     }
 
+    /// Preserves `MIN_TICK_INTERVAL` between health scans.
     pub(super) fn invalidate(&mut self) {
-        self.next_health = Instant::now();
+        let now = Instant::now();
+        self.next_health = self
+            .last_tick
+            .map_or(now, |last| (last + MIN_TICK_INTERVAL).max(now))
+            .min(self.next_health);
+    }
+
+    pub(super) fn take_due_tick(&mut self) -> Option<bool> {
+        let now = Instant::now();
+        if now < self.next_health {
+            return None;
+        }
+        self.last_tick = Some(now);
+        self.next_health = now + HEALTH_INTERVAL;
+        let capacity_due = now >= self.next_capacity;
+        if capacity_due {
+            self.next_capacity = now + CAPACITY_INTERVAL;
+        }
+        Some(capacity_due)
     }
 
     pub(super) async fn publish(&mut self, ctx: &RpcContext, update: ProbeUpdate) {
@@ -219,15 +241,9 @@ impl MountedChecks {
                     .is_some_and(|current| current.definition == mounted.source.definition)
             });
         }
-        let now = Instant::now();
-        if now < self.next_health {
+        let Some(capacity_due) = self.take_due_tick() else {
             return;
-        }
-        self.next_health = now + HEALTH_INTERVAL;
-        let capacity_due = now >= self.next_capacity;
-        if capacity_due {
-            self.next_capacity = now + CAPACITY_INTERVAL;
-        }
+        };
         let kernel = KernelState::read().await;
         let mut groups = BTreeMap::<usize, Group>::new();
         for registration in sources.values() {
@@ -492,6 +508,30 @@ mod tests {
                 dropped.wait().await;
             })
             .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn invalidation_limits_health_scans_without_delaying_the_initial_tick() {
+        let (send, _) = mpsc::channel(1);
+        let (jobs, _runner) = BackgroundJobQueue::new();
+        let mut checks = MountedChecks::new(send, jobs);
+        let start = Instant::now();
+        checks.invalidate();
+        assert_eq!(checks.deadline(), start);
+        assert_eq!(checks.take_due_tick(), Some(true));
+        for second in 1..=3 {
+            checks.invalidate();
+            checks.invalidate();
+            assert_eq!(checks.take_due_tick(), None);
+            assert_eq!(checks.deadline(), start + Duration::from_secs(second));
+            tokio::time::advance(Duration::from_millis(999)).await;
+            checks.invalidate();
+            assert_eq!(checks.take_due_tick(), None);
+            tokio::time::advance(Duration::from_millis(1)).await;
+            assert_eq!(checks.take_due_tick(), Some(false));
+            assert_eq!(checks.deadline(), Instant::now() + HEALTH_INTERVAL);
+            assert_eq!(checks.next_capacity, start + CAPACITY_INTERVAL);
+        }
     }
 
     #[test]
