@@ -159,6 +159,7 @@ async fn cli_state(
         .call_startup_rpc(
             &parent_method.into_iter().chain(method).join("."),
             raw_params,
+            http::HeaderMap::new(),
         )
         .await?;
     imbl_value::from_value(value).map_err(|error| Error::new(error, ErrorKind::Deserialization))

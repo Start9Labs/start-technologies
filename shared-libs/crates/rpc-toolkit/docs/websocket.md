@@ -71,6 +71,10 @@ not cloneable; clone context and parameter fields separately when needed.
 - `send(value).await` borrows the declared `Item`, serializes immediately and waits
   for bounded queue capacity. Borrowed or non-`Send` inputs need no `'static` bound. A serialization failure returns an internal
   error without enqueuing an event; the handle remains usable.
+- `forward(source).await` forwards fallible item streams with the same synchronous
+  serialization boundary. It stops when the source ends, fails, or the transport closes.
+  It does not consume the producer or choose its terminal value; the caller closes it
+  separately and may select on application revocation around forwarding.
 - `blocking_send(value)` performs the same operation from an
   ordinary thread. Tokio panics if it is used inside an async execution context.
 - `close<E: Into<RpcError>>(Result<Final, E>)` consumes the handle and queues

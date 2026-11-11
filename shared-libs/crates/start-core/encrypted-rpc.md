@@ -39,12 +39,23 @@ An unpolled check cannot keep the owner alive. WRT acquires both authentication 
 continuation owners weakly.
 
 The toolkit's connection-local context carries provenance into handlers.
-`SignatureAuthContext` owns admission capabilities and per-call authentication.
+`SignatureAuthContext` owns admission capabilities independently of database availability.
+`SignatureAuthorizationContext` owns database-backed enrollment, permissions and key lifecycle.
 A valid unknown key completes admission without roles. `SignatureAuth` checks current
 enrollment, roles, expiry, revocation and hooks on every RPC, including enrollment or
 revocation on an already-open connection. Request claims cannot replace the encrypted peer. Local/bearer credentials
-retain their separate precedence. Setup, initialization and diagnostic contexts have no
-session scope; HTTP resources retain their own authentication policy.
+retain their separate precedence. Setup, initialization and diagnostic seeds own ephemeral
+proof identities and the shared bounded replay policy, with immutable session provenance
+on context clones. These possession identities grant no enrollment roles. Their proof names
+come from the existing validated local-host ingress policy. HTTP resources retain their own
+authentication policy.
+
+Startup HTTP retains its JSON-body gate without permissive CORS. WebSocket upgrades require
+same-origin browser requests; Origin-less native callers remain valid. The dev proxy rewrites
+its trusted upstream Origin alongside Host. `WebServer`'s router watch scopes upgraded RPC
+reads to the selected epoch; router replacement ends pending admission and active/pending
+operations through the existing transport lifecycle. The standard `take_until` adapter
+carries this lifetime without a second socket manager or forwarding task.
 
 ## Native clients and registry compatibility
 
@@ -75,7 +86,8 @@ a second persistent manager. Handshake proofs emit pure Ed25519; verification re
 Ed25519ph compatibility. Each connection prepares its own signed hello before the 30-second network deadline,
 including opaque GPG signing. The standard signed timestamp freshness policy still
 applies. The upgrade retains device-info headers, proxy/TLS policy, remote DNS and the
-selected hostname rather than a pinned dial address. RPC upgrades do not redirect.
+selected hostname in both proof scope and HTTP authority rather than a pinned dial address.
+The endpoint port survives that authority selection. RPC upgrades do not redirect.
 `reqwest-websocket` 0.5.0 shares the Tungstenite 0.26 message conversion; HTTP/1 upgrade
 clients preserve ordinary HTTP client behavior separately.
 
@@ -86,9 +98,10 @@ local credential when present. A client-lifetime ephemeral proof identity admits
 transport without reading or persisting a device key; it grants no credential roles.
 Initial authorization rejection retains the existing interactive login workflow; an item
 or terminal error never replays the operation. `--no-progress` retains ordinary asynchronous
-update initiation. CLI state/setup/init/diagnostic calls deliberately retain unsigned HTTP and legacy
-GUIDs independently of stored keys. `CliWebSocketContext` selects fresh same-peer,
-intended-GUID admission for normal keyed continuations. Existing consumers retain their
+update initiation. CLI state/setup/init/diagnostic calls use a client-lifetime ephemeral proof
+identity independently of stored keys; diagnostic local credentials retain their own
+precedence. `CliWebSocketContext` selects fresh same-peer, intended-GUID admission for
+startup and normal keyed continuations. Existing consumers retain their
 streaming, output, cancellation and keepalive ownership. WRT log/update commands return
 GUIDs rather than adding native stream consumers; its HTTP RPC path remains `/rpc/v1`.
 
@@ -166,6 +179,7 @@ that completion owner. Authenticated observers retain the
 signer's revocation lifetime.
 
 Normal keyed browser RPC and secure-origin GUIDs cannot downgrade from unauthenticated
-state replies or failed admission. Startup/state/init/diagnostic callers deliberately use
-their explicit legacy contracts. Resource HTTP headers, MCP and firmware metadata retain
+state replies or failed admission. Startup/state/init/diagnostic callers use
+their explicitly selected transport contracts, with legacy HTTP callers still supported.
+Resource HTTP headers, MCP and firmware metadata retain
 their separate owners. Application encryption does not protect unrelated HTTP resources.

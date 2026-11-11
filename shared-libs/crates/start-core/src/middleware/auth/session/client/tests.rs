@@ -166,14 +166,16 @@ async fn legacy_cli_continuations_and_resources_keep_prefixed_urls_and_bytes() {
             }),
         );
     let (url, _task) = server(app).await;
+    let temp = tempfile::tempdir().unwrap();
     let ctx = CliContext::init(ClientConfig {
         host: Some(url.as_str().parse().unwrap()),
+        id_key_path: Some(temp.path().join("uninitialized-legacy-key")),
         ..Default::default()
     })
     .unwrap();
     let guid = crate::rpc_continuations::Guid::new();
     let mut socket = ctx
-        .ws_continuation::<crate::context::InitContext>(guid.clone())
+        .ws_continuation::<crate::context::RpcContext>(guid.clone())
         .await
         .unwrap();
     assert_eq!(
@@ -235,7 +237,33 @@ async fn normal_cli_rpc_and_guid_stay_encrypted_after_public_startup_reply() {
     let (_temp, registry, admin, _, _) = crate::registry::tests::fixture().await;
     let http_calls = Arc::new(AtomicUsize::new(0));
     let observed = http_calls.clone();
-    let app = crate::registry::registry_router(registry.clone()).route(
+    use rpc_toolkit::HandlerExt;
+    let api = crate::registry::registry_api::<RegistryContext>().subcommand(
+        "state",
+        rpc_toolkit::from_fn(|_: RegistryContext| Ok::<_, crate::Error>("initializing".to_owned()))
+            .with_metadata("authenticated", imbl_value::json!(false))
+            .no_cli(),
+    );
+    let factory = registry.clone();
+    let rpc = rpc_toolkit::Server::new(
+        move || {
+            let ctx = factory.clone();
+            async move { Ok(ctx) }
+        },
+        api,
+    )
+    .middleware(
+        crate::middleware::auth::Auth::new()
+            .with_local_auth()
+            .with_signature_auth(),
+    )
+    .middleware(crate::registry::device_info::DeviceInfoMiddleware::new());
+    let app = crate::net::static_server::session_rpc_router(
+        registry.clone(),
+        rpc.clone(),
+        axum::routing::any(rpc).layer(crate::middleware::cors::layer()),
+    )
+    .route(
         "/rpc/v1",
         post(move |axum::Json(body): axum::Json<serde_json::Value>| {
             let observed = observed.clone();
@@ -289,35 +317,19 @@ async fn normal_cli_rpc_and_guid_stay_encrypted_after_public_startup_reply() {
     .unwrap()
     .unwrap();
     assert!(message.contains("after-admission"));
-    assert_eq!(http_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(http_calls.load(Ordering::Relaxed), 0);
 }
 
 #[tokio::test]
 async fn all_startup_contexts_ignore_an_unavailable_stored_signer() {
     use crate::context::{DiagnosticContext, InitContext, SetupContext};
-    let app = Router::new()
-        .route(
-            "/rpc/v1",
-            post(|headers: HeaderMap| async move {
-                assert!(
-                    headers
-                        .get(crate::middleware::auth::signature::AUTH_SIG_HEADER)
-                        .is_none()
-                );
-                axum::Json(serde_json::json!({"jsonrpc":"2.0","id":0,"result":"initializing"}))
-            }),
-        )
-        .route(
-            "/rpc/v2/{guid}",
-            axum::routing::get(|upgrade: axum::extract::ws::WebSocketUpgrade| async move {
-                upgrade.on_upgrade(|mut socket| async move {
-                    socket
-                        .send(axum::extract::ws::Message::Text("legacy".into()))
-                        .await
-                        .unwrap();
-                })
-            }),
-        );
+    let dns = Arc::new(crate::net::dns::DnsController::new(
+        crate::util::sync::Watch::new(Default::default()),
+    ));
+    let startup = InitContext::init(&crate::context::config::ServerConfig::default(), dns)
+        .await
+        .unwrap();
+    let app = crate::net::static_server::ui_router(startup.clone());
     let (url, _server) = server(app).await;
     let ctx = CliContext::init(ClientConfig {
         host: Some(url.as_str().parse().unwrap()),
@@ -335,35 +347,25 @@ async fn all_startup_contexts_ignore_an_unavailable_stored_signer() {
     ] {
         assert_eq!(value.unwrap().as_str(), Some("initializing"));
     }
-    use futures::StreamExt;
-    let guid = crate::rpc_continuations::Guid::new();
-    let mut init = ctx
-        .ws_continuation::<InitContext>(guid.clone())
-        .await
+    async fn check<C: crate::context::cli::CliWebSocketContext>(ctx: &CliContext) {
+        let subscription: crate::init::InitProgressRes = imbl_value::from_value(
+            ctx.call_remote::<InitContext>("init.subscribe", imbl_value::json!({}))
+                .await
+                .unwrap(),
+        )
         .unwrap();
-    assert_eq!(
-        init.next().await.unwrap().unwrap().into_text().unwrap(),
-        "legacy"
-    );
-    let mut diagnostic = ctx
-        .ws_continuation::<DiagnosticContext>(guid.clone())
-        .await
-        .unwrap();
-    assert_eq!(
-        diagnostic
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_text()
-            .unwrap(),
-        "legacy"
-    );
-    let mut setup = ctx.ws_continuation::<SetupContext>(guid).await.unwrap();
-    assert_eq!(
-        setup.next().await.unwrap().unwrap().into_text().unwrap(),
-        "legacy"
-    );
+        let mut socket = ctx.ws_continuation::<C>(subscription.guid).await.unwrap();
+        let snapshot: crate::progress::FullProgress =
+            crate::util::net::tungstenite::next_json(&mut socket)
+                .await
+                .unwrap();
+        assert!(!snapshot.overall.is_complete());
+    }
+    check::<InitContext>(&ctx).await;
+    check::<DiagnosticContext>(&ctx).await;
+    check::<SetupContext>(&ctx).await;
+    startup.progress.complete();
+    assert!(ctx.id_key.get().is_none());
 }
 
 #[tokio::test]
@@ -678,12 +680,13 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
     let legacy_url = format!("https://localhost:{}/legacy/", url.port().unwrap());
     let legacy = CliContext::init(ClientConfig {
         host: Some(legacy_url.parse().unwrap()),
+        id_key_path: Some(_temp.path().join("uninitialized-legacy-key")),
         insecure: true,
         ..Default::default()
     })
     .unwrap();
     let mut socket = legacy
-        .ws_continuation::<crate::context::InitContext>(crate::rpc_continuations::Guid::new())
+        .ws_continuation::<crate::context::RpcContext>(crate::rpc_continuations::Guid::new())
         .await
         .unwrap();
     use futures::StreamExt;

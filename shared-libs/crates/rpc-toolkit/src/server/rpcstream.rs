@@ -159,12 +159,44 @@ impl<Item, Final> RpcStream<Item, Final> {
     where
         Item: Serialize,
     {
-        let value = serialize(value.borrow());
+        self.send_serialized(serialize(value.borrow()))
+    }
+
+    async fn send_serialized(&self, value: Result<Value, RpcError>) -> Result<(), RpcError> {
+        self.events
+            .send(value?)
+            .await
+            .map_err(|_| RPCSTREAM_CANCELLED_ERROR)
+    }
+
+    /// Forwards items until the source ends, fails, or the transport closes.
+    /// The caller owns the terminal value and must call `close` separately.
+    pub fn forward<'a, S, V, E>(
+        &'a self,
+        source: S,
+    ) -> impl Future<Output = Result<(), RpcError>> + 'a
+    where
+        S: futures::Stream<Item = Result<V, E>> + 'a,
+        V: Borrow<Item>,
+        E: Into<RpcError>,
+        Item: Serialize,
+    {
+        let source = source.map(|value| {
+            value
+                .map_err(Into::into)
+                .and_then(|value| serialize(value.borrow()))
+        });
         async move {
-            self.events
-                .send(value?)
-                .await
-                .map_err(|_| RPCSTREAM_CANCELLED_ERROR)
+            let mut source = Box::pin(source);
+            tokio::select! {
+                _ = self.closed() => Err(RPCSTREAM_CANCELLED_ERROR),
+                result = async {
+                    while let Some(value) = source.next().await {
+                        self.send_serialized(value).await?;
+                    }
+                    Ok(())
+                } => result,
+            }
         }
     }
 
@@ -295,6 +327,65 @@ mod tests {
         assert_eq!(result.unwrap_err().code, 456);
         assert!(end);
         assert!(events.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn forwarding_stops_on_transport_loss_while_the_source_is_idle() {
+        let (producer, events) = pair::<u64, ()>();
+        let forward = producer.forward(futures::stream::pending::<Result<u64, RpcError>>());
+        futures::pin_mut!(forward);
+        assert!(futures::poll!(forward.as_mut()).is_pending());
+        drop(events);
+        assert_cancelled(forward.await.unwrap_err());
+    }
+
+    #[tokio::test]
+    async fn forwarding_preserves_accepted_items_and_leaves_the_terminal_to_the_caller() {
+        let (producer, mut events) = pair::<u64, bool>();
+        let failure = RpcError {
+            code: 456,
+            message: "source failed".into(),
+            data: None,
+        };
+        let result = producer
+            .forward(futures::stream::iter([Ok(7u64), Err(failure)]))
+            .await;
+        assert_eq!(result.unwrap_err().code, 456);
+        producer.close(Ok::<_, RpcError>(true)).unwrap();
+        assert_eq!(
+            events.next().await.unwrap().0.unwrap(),
+            imbl_value::json!(7)
+        );
+        let (result, end) = events.next().await.unwrap();
+        assert_eq!(result.unwrap(), imbl_value::json!(true));
+        assert!(end);
+    }
+
+    #[tokio::test]
+    async fn forwarding_serializes_non_send_borrowed_items_before_suspending() {
+        fn is_send<T: Send>(value: T) -> T {
+            value
+        }
+        #[derive(Serialize)]
+        struct LocalValue<'a> {
+            text: &'a str,
+            #[serde(skip)]
+            _not_send: Rc<()>,
+        }
+        let text = "borrowed".to_owned();
+        let (producer, mut events) = pair::<LocalValue<'_>, ()>();
+        is_send(producer.forward(futures::stream::once(async {
+            Ok::<_, RpcError>(LocalValue {
+                text: &text,
+                _not_send: Rc::new(()),
+            })
+        })))
+        .await
+        .unwrap();
+        assert_eq!(
+            events.next().await.unwrap().0.unwrap(),
+            imbl_value::json!({"text":"borrowed"})
+        );
     }
 
     #[tokio::test]

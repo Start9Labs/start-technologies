@@ -206,18 +206,28 @@ pub async fn cli_update_system(
                 .call_remote::<RpcContext>(&method, raw_params)
                 .await?,
         )?;
-        match result.target {
-            None => println!("{}", t!("update.no-updates-available")),
-            Some(version) => println!(
-                "{}",
-                t!("update.updating-to-version", version = version.to_string())
-            ),
-        }
+        display_update_started(result);
         return Ok(());
     }
     let response = context
         .call_remote_stream::<FullProgress, ()>(&method, raw_params)
         .await?;
+    render_update_progress(response).await
+}
+
+fn display_update_started(result: UpdateSystemRes) {
+    match result.target {
+        None => println!("{}", t!("update.no-updates-available")),
+        Some(version) => println!(
+            "{}",
+            t!("update.updating-to-version", version = version.to_string())
+        ),
+    }
+}
+
+async fn render_update_progress(
+    response: crate::util::rpc_client::RpcResponseStream<Value, FullProgress, ()>,
+) -> Result<(), Error> {
     let result: UpdateSystemRes = from_value(response.initial)?;
     match result.target {
         None => {

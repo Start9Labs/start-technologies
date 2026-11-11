@@ -26,7 +26,8 @@ use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
 use crate::middleware::auth::local::{LocalAuthContext, dial_addr, is_loopback, local_auth_header};
 use crate::middleware::auth::signature::{
-    NonceCache, SignatureAuthContext, SignatureAuthMetadata, SigningContext,
+    NonceCache, SignatureAuthContext, SignatureAuthMetadata, SignatureAuthorizationContext,
+    SigningContext,
 };
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
@@ -519,8 +520,6 @@ impl SignatureAuthContext for RegistryContext {
     fn with_secure_session(self, session: crate::middleware::auth::session::SecureSession) -> Self {
         RegistryContext::with_secure_session(self, session)
     }
-    type AdditionalMetadata = RegistryAuthMetadata;
-    type CheckPubkeyRes = Option<(AnyVerifyingKey, SignerInfo)>;
     fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T {
         self.auth_sig_nonce_cache.mutate(f)
     }
@@ -528,6 +527,16 @@ impl SignatureAuthContext for RegistryContext {
     async fn clock_synced(&self) -> bool {
         true
     }
+    async fn sig_context(
+        &self,
+        _extensions: &http::Extensions,
+    ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send {
+        self.hostnames.iter().map(Ok)
+    }
+}
+impl SignatureAuthorizationContext for RegistryContext {
+    type AdditionalMetadata = RegistryAuthMetadata;
+    type CheckPubkeyRes = Option<(AnyVerifyingKey, SignerInfo)>;
     fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
         &self.open_authed_continuations
     }
@@ -542,12 +551,6 @@ impl SignatureAuthContext for RegistryContext {
             })?;
         }
         Ok(())
-    }
-    async fn sig_context(
-        &self,
-        _extensions: &http::Extensions,
-    ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send {
-        self.hostnames.iter().map(Ok)
     }
     fn check_pubkey(
         &self,

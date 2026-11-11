@@ -34,8 +34,8 @@ use crate::context::{DiagnosticContext, InitContext, RpcContext, SetupContext};
 use crate::hostname::ServerHostname;
 use crate::middleware::auth::Auth;
 use crate::middleware::auth::signature::{
-    AUTH_SIG_HEADER, LoginMetadata, SignatureAuthContext, SignatureHeader, SigningContext,
-    verify_request_signature,
+    AUTH_SIG_HEADER, LoginMetadata, SignatureAuthContext, SignatureAuthorizationContext,
+    SignatureHeader, SigningContext, verify_request_signature,
 };
 use crate::middleware::cors;
 use crate::middleware::db::{SyncDb, SyncDbHeaderCompat};
@@ -68,7 +68,7 @@ const IMMUTABLE_ASSETS_MANIFEST: &str = "immutable-assets.txt";
 
 pub const EMPTY_DIR: Dir<'_> = Dir::new("", &[]);
 
-pub trait UiContext: Context + AsRef<RpcContinuations> + Clone + Sized {
+pub trait UiContext: SignatureAuthContext + AsRef<RpcContinuations> + Clone + Sized {
     fn ui_dir() -> &'static Dir<'static>;
     fn api() -> ParentHandler<Self>;
     fn middleware(server: Server<Self>) -> HttpServer<Self>;
@@ -77,7 +77,7 @@ pub trait UiContext: Context + AsRef<RpcContinuations> + Clone + Sized {
     }
     /// RPC, continuation, and optional protocol routes, before UI resources.
     fn rpc_server_routes(self, server: HttpServer<Self>) -> Router {
-        rpc_router(self, any(server))
+        session_rpc_router(self, server.clone(), any(server))
     }
     /// Applies layers after the UI fallback is installed.
     fn apply_outer_layers(self, router: Router) -> Router {
@@ -113,7 +113,7 @@ impl UiContext for RpcContext {
                 Router::new()
             })
             .layer(cors::layer());
-        session_rpc_router(self, server).merge(mcp)
+        session_rpc_router(self, server.clone(), any(server).layer(cors::layer())).merge(mcp)
     }
     fn extend_router(self, router: Router) -> Router {
         router
@@ -227,12 +227,33 @@ impl UiContext for SetupContext {
     }
 }
 
+#[derive(Clone)]
+struct LocalUiHost(InternedString);
+
+/// The bootstrap proof name must match the validated request authority.
+pub(crate) fn local_ui_identity(extensions: &http::Extensions) -> Result<InternedString, Error> {
+    extensions
+        .get::<LocalUiHost>()
+        .map(|name| name.0.clone())
+        .ok_or_else(|| {
+            Error::new(
+                eyre!("{}", t!("net.static-server.unrecognized-host")),
+                ErrorKind::InvalidSignature,
+            )
+        })
+}
+
 /// Serves requests addressed to an IP address, `localhost`, or a `.local` name.
 fn local_hosts_only(router: Router) -> Router {
     router.layer(axum::middleware::from_fn(
-        |request: Request, next: axum::middleware::Next| async move {
-            if request_authority(&request).is_some_and(|authority| is_local_host(authority.host()))
-            {
+        |mut request: Request, next: axum::middleware::Next| async move {
+            let name = request_authority(&request)
+                .map(|authority| authority.host().to_owned())
+                .filter(|host| is_local_host(host));
+            if let Some(name) = name {
+                request
+                    .extensions_mut()
+                    .insert(LocalUiHost(InternedString::intern(&name)));
                 next.run(request).await
             } else {
                 (
@@ -260,14 +281,13 @@ fn is_local_host(host: &str) -> bool {
 }
 
 /// Encrypted RPC and legacy-compatible continuation routes.
-pub fn session_rpc_router<C>(ctx: C, server: HttpServer<C>) -> Router
+pub fn session_rpc_router<C>(ctx: C, server: HttpServer<C>, rpc: MethodRouter) -> Router
 where
     C: crate::middleware::auth::signature::SignatureAuthContext + Clone + AsRef<RpcContinuations>,
 {
     use crate::middleware::auth::session::RpcSessionUpgrader;
 
-    rpc_router(ctx, any(server.clone()).layer(cors::layer()))
-        .route(RpcSessionUpgrader::PATH, RpcSessionUpgrader::route(server))
+    rpc_router(ctx, rpc).route(RpcSessionUpgrader::PATH, RpcSessionUpgrader::route(server))
 }
 
 pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
@@ -606,7 +626,7 @@ async fn registry_icon_response(
 }
 
 async fn if_authorized<
-    C: SignatureAuthContext<AdditionalMetadata = LoginMetadata>,
+    C: SignatureAuthorizationContext<AdditionalMetadata = LoginMetadata>,
     F: FnOnce(Request) -> Fut,
     Fut: Future<Output = Result<Response, Error>> + Send,
 >(
@@ -1109,6 +1129,8 @@ mod icon_tests;
 
 #[cfg(test)]
 mod session_tests;
+#[cfg(test)]
+mod startup_tests;
 
 #[cfg(test)]
 mod tests {

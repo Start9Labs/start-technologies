@@ -53,10 +53,12 @@ over the network through the target context's transport. Normal keyed StartOS, r
 a signed ephemeral-DH exchange before sending encrypted RPC.
 The existing opaque signer supports both local keys and GPG-agent identities; fresh hello
 signing precedes transport deadlines. Signed intent distinguishes RPC from each GUID. Failed encrypted admission never falls back to HTTP.
-Local authcookies remain Bearer tokens over HTTP, as do public registry calls without an
-initialized identity. CLI `state`, setup, initialization and diagnostics explicitly use HTTP,
-independently of stored keys. GUID clients select transport from the originating context;
-normal keyed continuations complete fresh same-peer admission. Their existing stream
+Ordinary local-authcookie calls and public registry calls without an initialized identity
+retain HTTP. Typed progress can carry the same local credential over encrypted admission.
+CLI `state`, setup, initialization and diagnostics use a client-lifetime proof identity
+independently of stored keys; diagnostic local-cookie authorization retains its own namespace.
+GUID clients select transport from the originating context; startup and normal keyed
+continuations complete fresh same-peer admission. Their existing stream
 consumers retain lifecycle ownership and require application completion rather than EOF.
 Commands without a remote handler (`s9pk`, `init-key`, `pubkey`, `util`) execute locally. The `registry`
 and `tunnel` groups can target a separate registry/tunnel host via `--registry`/`--tunnel`.

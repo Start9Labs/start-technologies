@@ -133,7 +133,7 @@ async fn keyed_cli_uses_production_encrypted_admission_and_live_authorization() 
     .await
     .unwrap();
     assert_eq!(response["current"].as_str(), Some(&*key));
-    use startos::middleware::auth::signature::SignatureAuthContext;
+    use startos::middleware::auth::signature::SignatureAuthorizationContext;
     server.unenroll([key]).await.unwrap();
     assert_eq!(
         ctx.call("auth.session.list", imbl_value::json!({}))

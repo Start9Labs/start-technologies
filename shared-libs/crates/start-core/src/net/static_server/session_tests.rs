@@ -22,7 +22,12 @@ async fn server(ctx: RegistryContext) -> (Url, NonDetachingJoinHandle<()>) {
     let url = format!("http://{}/", listener.local_addr().unwrap())
         .parse()
         .unwrap();
-    let app = session_rpc_router(ctx.clone(), registry_server(ctx));
+    let rpc = registry_server(ctx.clone());
+    let app = session_rpc_router(
+        ctx,
+        rpc.clone(),
+        axum::routing::any(rpc).layer(crate::middleware::cors::layer()),
+    );
     let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() }).into();
     (url, task)
 }
@@ -37,7 +42,12 @@ async fn session_router_accepts_http2_extended_connect() {
     let (_temp, ctx, _, _, _) = crate::registry::tests::fixture().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let app = session_rpc_router(ctx.clone(), registry_server(ctx));
+    let rpc = registry_server(ctx.clone());
+    let app = session_rpc_router(
+        ctx,
+        rpc.clone(),
+        axum::routing::any(rpc).layer(crate::middleware::cors::layer()),
+    );
     let _server: NonDetachingJoinHandle<()> = tokio::spawn(async move {
         let (socket, _) = listener.accept().await.unwrap();
         let service =

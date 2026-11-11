@@ -374,15 +374,45 @@ impl CliContext {
         &self,
         method: &str,
         params: Value,
+        headers: HeaderMap,
     ) -> Result<Value, RpcError> {
-        crate::middleware::auth::signature::call_http(
-            self.client.clone(),
-            self.rpc_url()?,
-            HeaderMap::new(),
-            method,
-            params,
-        )
-        .await
+        self.rpc_client
+            .call(
+                self.rpc_client.ephemeral_signer(),
+                crate::middleware::auth::session::client::websocket_url(self.rpc_url()?)?,
+                self.host_identity.as_deref().unwrap_or_default(),
+                headers,
+                method,
+                params,
+            )
+            .await
+    }
+
+    pub(crate) async fn call_diagnostic_stream<
+        Item: serde::de::DeserializeOwned,
+        Final: serde::de::DeserializeOwned,
+    >(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<crate::util::rpc_client::RpcResponseStream<Value, Item, Final>, Error> {
+        let url = self.rpc_url()?;
+        let mut headers = HeaderMap::new();
+        if let Some(auth) = local_auth_header_for_url::<DiagnosticContext>(&url).await {
+            headers.insert(AUTHORIZATION, auth);
+        }
+        self.rpc_client
+            .stream(
+                self.rpc_client.ephemeral_signer(),
+                crate::middleware::auth::session::client::websocket_url(url)?,
+                self.host_identity.as_deref().unwrap_or_default(),
+                headers,
+                method,
+                params,
+            )
+            .await
+            .map_err(Error::from)
+            .with_ctx(|error| (error.kind, method))
     }
 
     pub async fn call_remote<RemoteContext>(
@@ -499,14 +529,7 @@ impl CallRemote<DiagnosticContext> for CliContext {
         if let Some(auth) = local_auth_header_for_url::<DiagnosticContext>(&rpc_url).await {
             headers.insert(AUTHORIZATION, auth);
         }
-        crate::middleware::auth::signature::call_http(
-            self.client.clone(),
-            rpc_url,
-            headers,
-            method,
-            params,
-        )
-        .await
+        self.call_startup_rpc(method, params, headers).await
     }
 }
 impl CallRemote<InitContext> for CliContext {
@@ -517,7 +540,8 @@ impl CallRemote<InitContext> for CliContext {
         params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
-        self.call_startup_rpc(method, params).await
+        self.call_startup_rpc(method, params, HeaderMap::new())
+            .await
     }
 }
 impl CallRemote<SetupContext> for CliContext {
@@ -528,6 +552,7 @@ impl CallRemote<SetupContext> for CliContext {
         params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
-        self.call_startup_rpc(method, params).await
+        self.call_startup_rpc(method, params, HeaderMap::new())
+            .await
     }
 }

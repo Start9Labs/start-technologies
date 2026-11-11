@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::response::IntoResponse;
 
 use super::*;
@@ -19,6 +21,12 @@ async fn admission_keeps_the_selected_identity_when_the_dial_host_is_pinned() {
         .nest("/nested", crate::registry::registry_router(registry))
         .layer(axum::middleware::from_fn(
             |request: axum::extract::Request, next: axum::middleware::Next| async move {
+                assert!(
+                    request.headers()[http::header::HOST]
+                        .to_str()
+                        .unwrap()
+                        .starts_with("selected.local:")
+                );
                 if request
                     .uri()
                     .path()
@@ -76,4 +84,62 @@ async fn admission_keeps_the_selected_identity_when_the_dial_host_is_pinned() {
         .unwrap();
     assert_eq!(admins.as_object().unwrap().len(), 1);
     assert_eq!(std::fs::read_dir(directory).unwrap().count(), 1);
+}
+
+#[tokio::test]
+async fn startup_rpc_and_guid_keep_logical_authority_after_dial_pinning() {
+    let dns = Arc::new(crate::net::dns::DnsController::new(
+        crate::util::sync::Watch::new(Default::default()),
+    ));
+    let startup = InitContext::init(&crate::context::config::ServerConfig::default(), dns)
+        .await
+        .unwrap();
+    let app = axum::Router::new().nest(
+        "/nested",
+        crate::net::static_server::ui_router(startup.clone()),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let dial: Url = format!("http://{}/nested/", listener.local_addr().unwrap())
+        .parse()
+        .unwrap();
+    let _server: NonDetachingJoinHandle<()> =
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() }).into();
+    let temp = tempfile::tempdir().unwrap();
+    for name in ["bootstrap.local", "[::1]"] {
+        let mut selected = dial.clone();
+        selected.set_host(Some(name)).unwrap();
+        let ctx = CliContext::init(ClientConfig {
+            host: Some(selected.as_str().parse().unwrap()),
+            id_key_path: Some(temp.path().join("unused-key")),
+            id_key_gpg: Some("unavailable-startup-fixture".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        ctx.base_url.pinned.set(dial.clone()).unwrap();
+        assert_eq!(
+            ctx.call_remote::<InitContext>("state", imbl_value::json!({}))
+                .await
+                .unwrap()
+                .as_str(),
+            Some("initializing")
+        );
+        let subscription: crate::init::InitProgressRes = imbl_value::from_value(
+            ctx.call_remote::<InitContext>("init.subscribe", imbl_value::json!({}))
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let mut socket = ctx
+            .ws_continuation::<InitContext>(subscription.guid)
+            .await
+            .unwrap();
+        let snapshot: crate::progress::FullProgress =
+            crate::util::net::tungstenite::next_json(&mut socket)
+                .await
+                .unwrap();
+        assert!(!snapshot.overall.is_complete());
+        assert!(ctx.id_key.get().is_none());
+        assert!(!temp.path().join("unused-key").exists());
+    }
+    startup.progress.complete();
 }

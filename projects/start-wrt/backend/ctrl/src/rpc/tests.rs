@@ -150,7 +150,7 @@ async fn encrypted_rpc_uses_live_auth_and_authenticated_firmware_metadata() {
     .await
     .unwrap();
     check(&call(&mut socket).await);
-    use startos::middleware::auth::signature::SignatureAuthContext;
+    use startos::middleware::auth::signature::SignatureAuthorizationContext;
     let key = enroll(&ctx, &signer).await;
     let reply = call(&mut socket).await;
     assert_eq!(reply["result"]["current"], key.to_string(), "{reply}");

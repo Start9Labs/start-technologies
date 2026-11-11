@@ -14,7 +14,7 @@ use http::{Extensions, HeaderMap, HeaderValue};
 use itertools::Itertools;
 use reqwest::Client;
 use rpc_toolkit::yajrc::RpcError;
-use rpc_toolkit::{Middleware, RpcRequest, RpcResponse};
+use rpc_toolkit::{Context, Middleware, RpcRequest, RpcResponse};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -83,24 +83,34 @@ pub fn check_enrolled(
     }
 }
 
-pub trait SignatureAuthContext: DbContext + SessionContext {
-    type AdditionalMetadata: DeserializeOwned + SignatureAuthMetadata + Send;
-    type CheckPubkeyRes: Send;
+/// Admission capabilities independent of enrolled authorization or database availability.
+pub trait SignatureAuthContext: Context + SessionContext {
     fn server_identity(&self) -> Result<Signer, Error>;
     /// Acquires admission replay policy without retaining the authentication owner.
     fn replay_check(&self) -> RequestReplayCheck;
     fn with_secure_session(self, session: crate::middleware::auth::session::SecureSession) -> Self
     where
         Self: Sized;
+    fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T;
+    /// Whether the clock can be trusted; untrusted clocks use nonce LRU eviction.
+    fn clock_synced(&self) -> impl Future<Output = bool> + Send;
+    /// Signing identities allowed for the request's ingress.
+    /// JSON message checks supply the connection's `RequestOrigin` extension.
+    fn sig_context(
+        &self,
+        extensions: &Extensions,
+    ) -> impl Future<Output = impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send>
+    + Send;
+}
+
+/// Live enrolled-key policy and lifecycle over the authoritative database.
+pub trait SignatureAuthorizationContext: SignatureAuthContext + DbContext {
+    type AdditionalMetadata: DeserializeOwned + SignatureAuthMetadata + Send;
+    type CheckPubkeyRes: Send;
     /// How far a key's persisted `last_active` may lag its latest request.
     /// Zero persists every request.
     const LAST_ACTIVE_RESOLUTION: TimeDelta = TimeDelta::zero();
-    fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T;
-    /// Whether the clock can be trusted - otherwise nonces are LRU evicted
-    fn clock_synced(&self) -> impl Future<Output = bool> + Send + Sync;
-    /// Live continuations (REST/WS) registered under the signer that opened
-    /// them, so revoking a signer kills anything it left open. Keyed by the
-    /// signer's PEM (`None` for continuations opened without one).
+    /// Revocation-scoped continuations keyed by the signer's DER64 identity.
     fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>>;
     /// In-memory enrolled keys that are never persisted (kiosk mode), if the
     /// context supports them.
@@ -115,13 +125,6 @@ pub trait SignatureAuthContext: DbContext + SessionContext {
         db: &mut Model<Self::Database>,
         keys: &BTreeSet<InternedString>,
     ) -> Result<(), Error>;
-    /// Signing identities allowed for the request's ingress.
-    /// JSON message checks supply the connection's `RequestOrigin` extension.
-    fn sig_context(
-        &self,
-        extensions: &Extensions,
-    ) -> impl Future<Output = impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send>
-    + Send;
     fn check_pubkey(
         &self,
         db: &Model<Self::Database>,
@@ -160,7 +163,7 @@ pub trait SignatureAuthContext: DbContext + SessionContext {
 
 /// Proof that a set of auth keys was unenrolled — removed from the persisted
 /// and ephemeral signer stores with any continuations they opened killed.
-/// Obtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]
+/// Obtained via [`SignatureAuthorizationContext::unenroll`], or [`Self::unenroll`]
 /// from inside a db transaction.
 #[derive(Serialize, Deserialize, VisitFields)]
 pub struct HasUnenrolledKeys(());
@@ -173,7 +176,7 @@ impl HasUnenrolledKeys {
     /// transactional: if the mutation is later discarded, the keys stay
     /// enrolled but their continuations are already dead — erring on the
     /// side of dropping a reconnectable session, never the reverse.
-    pub fn unenroll<C: SignatureAuthContext>(
+    pub fn unenroll<C: SignatureAuthorizationContext>(
         continuations: &OpenAuthedContinuations<Option<InternedString>>,
         ephemeral: Option<&SyncMutex<AuthKeys>>,
         db: &mut Model<C::Database>,
@@ -205,8 +208,6 @@ impl SignatureAuthContext for RpcContext {
     fn with_secure_session(self, session: crate::middleware::auth::session::SecureSession) -> Self {
         RpcContext::with_secure_session(self, session)
     }
-    type AdditionalMetadata = LoginMetadata;
-    type CheckPubkeyRes = Option<InternedString>;
     fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T {
         self.auth_sig_nonce_cache.mutate(f)
     }
@@ -219,22 +220,6 @@ impl SignatureAuthContext for RpcContext {
             .as_ntp_synced()
             .de()
             .unwrap_or(false)
-    }
-    fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
-        &self.open_authed_continuations
-    }
-    fn ephemeral_auth_keys(&self) -> Option<&SyncMutex<AuthKeys>> {
-        Some(&self.ephemeral_auth_keys)
-    }
-    fn remove_enrolled_keys(
-        db: &mut Model<Self::Database>,
-        keys: &BTreeSet<InternedString>,
-    ) -> Result<(), Error> {
-        let auth_keys = db.as_private_mut().as_sessions_mut().as_pubkeys_mut();
-        for key in keys {
-            auth_keys.remove(key)?;
-        }
-        Ok(())
     }
     async fn sig_context(
         &self,
@@ -257,6 +242,27 @@ impl SignatureAuthContext for RpcContext {
             binding.map(|binding| startos_signing_identities(binding.as_ref(), &origin)),
         )
         .flatten_ok()
+    }
+}
+
+impl SignatureAuthorizationContext for RpcContext {
+    type AdditionalMetadata = LoginMetadata;
+    type CheckPubkeyRes = Option<InternedString>;
+    fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
+        &self.open_authed_continuations
+    }
+    fn ephemeral_auth_keys(&self) -> Option<&SyncMutex<AuthKeys>> {
+        Some(&self.ephemeral_auth_keys)
+    }
+    fn remove_enrolled_keys(
+        db: &mut Model<Self::Database>,
+        keys: &BTreeSet<InternedString>,
+    ) -> Result<(), Error> {
+        let auth_keys = db.as_private_mut().as_sessions_mut().as_pubkeys_mut();
+        for key in keys {
+            auth_keys.remove(key)?;
+        }
+        Ok(())
     }
     fn check_pubkey(
         &self,
@@ -700,7 +706,7 @@ fn verify_auth_message(
     }
 }
 
-impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
+impl<C: SignatureAuthorizationContext> Middleware<C> for SignatureAuth {
     type Metadata = Metadata<C::AdditionalMetadata>;
     async fn process_http_request(
         &mut self,

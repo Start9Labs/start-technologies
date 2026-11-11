@@ -21,7 +21,7 @@ use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 
 use crate::context::{CliContext, RpcContext};
-use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthContext};
+use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthorizationContext};
 use crate::prelude::*;
 use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::{AnyVerifyingKey, Signer};
@@ -87,10 +87,10 @@ rpc_toolkit::ts_export!(Sessions, namespaces = [""]);
 
 /// Contexts where a password can enroll an auth key (login), plus access to
 /// the enrolled-key store that login writes and the session list reads.
-pub trait LoginContext: SignatureAuthContext {
+pub trait LoginContext: SignatureAuthorizationContext {
     /// The persisted enrolled-key store. Enrollment happens via login; never
     /// remove a key directly — unenrollment goes through
-    /// [`SignatureAuthContext::unenroll`] so a revoked key's open
+    /// [`SignatureAuthorizationContext::unenroll`] so a revoked key's open
     /// continuations die with it.
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys>;
     /// The bearer-token store, keyed by token hash. `None` where tokens are unsupported.
@@ -417,7 +417,7 @@ pub async fn reap_idle_keys<C: LoginContext>(ctx: &C) -> Result<(), Error> {
 }
 
 /// Records a request by an enrolled key, persisting the time at most once per
-/// [`SignatureAuthContext::LAST_ACTIVE_RESOLUTION`].
+/// [`SignatureAuthorizationContext::LAST_ACTIVE_RESOLUTION`].
 pub async fn touch_last_active<C: LoginContext>(
     ctx: &C,
     key: &InternedString,
@@ -438,7 +438,7 @@ pub async fn touch_last_active<C: LoginContext>(
 }
 
 /// Records a request by a bearer token, persisting the time at most once per
-/// [`SignatureAuthContext::LAST_ACTIVE_RESOLUTION`].
+/// [`SignatureAuthorizationContext::LAST_ACTIVE_RESOLUTION`].
 pub async fn touch_token<C: LoginContext>(ctx: &C, token: &InternedString) -> Result<(), Error> {
     persist_last_active(ctx, C::access_tokens, token, Utc::now()).await
 }

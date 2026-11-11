@@ -148,7 +148,7 @@ export type Guid = z.output<typeof schemas.Guid>
 /**
  * Proof that a set of auth keys was unenrolled — removed from the persisted
  * and ephemeral signer stores with any continuations they opened killed.
- * Obtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]
+ * Obtained via [`SignatureAuthorizationContext::unenroll`], or [`Self::unenroll`]
  * from inside a db transaction.
  */
 export type HasUnenrolledKeys = z.output<typeof schemas.HasUnenrolledKeys>

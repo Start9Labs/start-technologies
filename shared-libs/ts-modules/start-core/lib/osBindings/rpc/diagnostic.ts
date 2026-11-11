@@ -115,8 +115,10 @@ export type Guid = z.output<typeof schemas.Guid>
 export type HostIdInput = z.input<typeof schemas.HostId>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
 export type LogEntry = z.output<typeof schemas.LogEntry>
+export type NamedProgress = z.output<typeof schemas.NamedProgress>
 export type NetworkInterfaceType = z.output<typeof schemas.NetworkInterfaceType>
 export type PackageIdInput = z.input<typeof schemas.PackageId>
+export type ProgressUnits = z.output<typeof schemas.ProgressUnits>
 export type QueryDnsParamsInput = z.input<typeof schemas.QueryDnsParams>
 
 /**
@@ -132,6 +134,7 @@ export type QueryDnsRes = z.output<typeof schemas.QueryDnsRes>
  * Without an override or gateway-provided resolvers, the public fallback is used.
  */
 export type DnsSettings = z.output<typeof schemas.DnsSettings>
+export type FullProgress = z.output<typeof schemas.FullProgress>
 
 /**
  * Whether the gateway reachable via this interface speaks each port-mapping
@@ -150,6 +153,7 @@ export type RequiresHostIdInput = z.input<typeof schemas.RequiresHostId>
 export type RequiresPackageIdInput = z.input<typeof schemas.RequiresPackageId>
 export type UpdateSystemRes = z.output<typeof schemas.UpdateSystemRes>
 export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
+export type Progress = z.output<typeof schemas.Progress>
 export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 
 /**

@@ -61,6 +61,14 @@ describe('createRpcStreamClient', () => {
         {} as T.FullProgress
       const updateFinal: RPC.RpcStreamFinalType<RPC.StartOS, 'server.update'> =
         null
+      const diagnosticItem: RPC.RpcStreamItemType<
+        RPC.Diagnostic,
+        'diagnostic.update'
+      > = {} as T.FullProgress
+      const diagnosticFinal: RPC.RpcStreamFinalType<
+        RPC.Diagnostic,
+        'diagnostic.update'
+      > = null
       const sideload = client.package.sideload({})
       const sideloadItem: RPC.RpcStreamItemType<
         RPC.StartOS,
@@ -90,6 +98,8 @@ describe('createRpcStreamClient', () => {
         updateItem,
         updateFinal,
         wrongUpdate,
+        diagnosticItem,
+        diagnosticFinal,
         sideload,
         sideloadItem,
         sideloadFinal,

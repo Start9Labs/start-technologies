@@ -18,8 +18,11 @@ use tracing::instrument;
 use crate::MAIN_DATA;
 use crate::context::RpcContext;
 use crate::context::config::ServerConfig;
+use crate::context::startup::StartupRpc;
 use crate::disk::mount::guard::{MountGuard, TmpMountGuard};
 use crate::hostname::ServerHostname;
+use crate::middleware::auth::session::{SecureSession, SessionContext};
+use crate::middleware::auth::signature::{NonceCache, RequestReplayCheck, SignatureAuthContext};
 use crate::net::gateway::WildcardListener;
 use crate::net::web_server::{WebServer, WebServerAcceptorSetter};
 use crate::prelude::*;
@@ -52,6 +55,7 @@ rpc_toolkit::reflect_ts!(SetupResult);
 rpc_toolkit::ts_export!(SetupResult, namespaces = [""]);
 
 pub struct SetupContextSeed {
+    pub(crate) startup_rpc: StartupRpc,
     pub(crate) dns: Arc<crate::net::dns::DnsController>,
     pub webserver: WebServerAcceptorSetter<WildcardListener>,
     pub config: SyncMutex<ServerConfig>,
@@ -70,9 +74,36 @@ pub struct SetupContextSeed {
 }
 
 #[derive(Clone)]
-pub struct SetupContext(Arc<SetupContextSeed>);
+pub struct SetupContext(Arc<SetupContextSeed>, Option<SecureSession>);
 
-impl crate::middleware::auth::session::SessionContext for SetupContext {}
+impl SessionContext for SetupContext {
+    fn secure_session(&self) -> Option<&SecureSession> {
+        self.1.as_ref()
+    }
+}
+impl SignatureAuthContext for SetupContext {
+    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+        Ok(self.startup_rpc.identity.clone())
+    }
+    fn replay_check(&self) -> RequestReplayCheck {
+        RequestReplayCheck::new(&self.0, |seed| Some(Self(seed, None)))
+    }
+    fn with_secure_session(self, session: SecureSession) -> Self {
+        Self(self.0, Some(session))
+    }
+    fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T {
+        self.startup_rpc.nonces.mutate(f)
+    }
+    async fn clock_synced(&self) -> bool {
+        StartupRpc::clock_synced().await
+    }
+    async fn sig_context(
+        &self,
+        extensions: &http::Extensions,
+    ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send {
+        [crate::net::static_server::local_ui_identity(extensions)]
+    }
+}
 impl SetupContext {
     #[instrument(skip_all)]
     pub fn init(
@@ -83,22 +114,26 @@ impl SetupContext {
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
         let mut progress = FullProgressTracker::new();
         progress.enable_logging(true);
-        Ok(Self(Arc::new(SetupContextSeed {
-            dns,
-            webserver: webserver.acceptor_setter(),
-            disable_encryption: config.disable_encryption.unwrap_or(false),
-            config: SyncMutex::new(config),
-            progress,
-            task: OnceCell::new(),
-            result: OnceCell::new(),
-            disk_guid: OnceCell::new(),
-            shutdown,
-            rpc_continuations: RpcContinuations::new(),
-            install_rootfs: SyncMutex::new(None),
-            install_os_future: SyncMutex::new(None),
-            language: SyncMutex::new(None),
-            keyboard: SyncMutex::new(None),
-        })))
+        Ok(Self(
+            Arc::new(SetupContextSeed {
+                startup_rpc: StartupRpc::new(),
+                dns,
+                webserver: webserver.acceptor_setter(),
+                disable_encryption: config.disable_encryption.unwrap_or(false),
+                config: SyncMutex::new(config),
+                progress,
+                task: OnceCell::new(),
+                result: OnceCell::new(),
+                disk_guid: OnceCell::new(),
+                shutdown,
+                rpc_continuations: RpcContinuations::new(),
+                install_rootfs: SyncMutex::new(None),
+                install_os_future: SyncMutex::new(None),
+                language: SyncMutex::new(None),
+                keyboard: SyncMutex::new(None),
+            }),
+            None,
+        ))
     }
     #[instrument(skip_all)]
     pub async fn db(&self) -> Result<PatchDb, Error> {

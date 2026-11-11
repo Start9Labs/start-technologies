@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::Request;
-use futures::FutureExt;
 use futures::future::BoxFuture;
+use futures::{FutureExt, StreamExt};
 use rpc_toolkit::{UpgradedWebSocket, WebSocketOptions, WebSocketUpgrader};
 use url::Url;
 
@@ -133,6 +133,14 @@ impl<C: SignatureAuthContext + Clone> WebSocketUpgrader<C> for RpcSessionUpgrade
     ) -> BoxFuture<'static, Result<UpgradedWebSocket<C>, axum::Error>> {
         async move {
             let request = Request::from_parts(parts, Body::empty());
+            let socket: rpc_toolkit::BoxWebSocket = match request
+                .extensions()
+                .get::<crate::net::web_server::RouterEpoch>()
+                .cloned()
+            {
+                Some(epoch) => Box::new(socket.take_until(Box::pin(epoch.changed()))),
+                None => Box::new(socket),
+            };
             let allowed = request_identities(&*context, &request)
                 .await
                 .map_err(|error| axum::Error::new(error.source))?;
@@ -141,7 +149,7 @@ impl<C: SignatureAuthContext + Clone> WebSocketUpgrader<C> for RpcSessionUpgrade
                 .map_err(|error| axum::Error::new(error.source))?;
             let replay_check = context.replay_check();
             let (peer, address, socket) = EncryptedSocket::accept(
-                Box::new(socket),
+                socket,
                 &server_identity,
                 &allowed,
                 options.max_message_size,

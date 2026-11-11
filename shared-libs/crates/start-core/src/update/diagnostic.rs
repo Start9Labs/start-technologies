@@ -18,7 +18,7 @@ use crate::PLATFORM;
 use crate::context::{CliContext, DiagnosticContext};
 use crate::middleware::auth::signature;
 use crate::prelude::*;
-use crate::progress::{FullProgress, FullProgressTracker, PhasedProgressBar, ProgressUnits};
+use crate::progress::{FullProgress, FullProgressTracker, ProgressUnits};
 use crate::registry::os::index::OsVersionInfo;
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::update::{UpdateProgressHandles, UpdateSystemRes, do_update};
@@ -59,9 +59,19 @@ impl DiagnosticUpdateSystemParams {
 }
 
 #[instrument(skip_all)]
+/// Observation ends with the independently owned update task's actual result.
 pub async fn update_system(
-    ctx: DiagnosticContext,
-    params: DiagnosticUpdateSystemParams,
+    HandlerArgs {
+        context: ctx,
+        params,
+        rpc_stream,
+        ..
+    }: HandlerArgs<
+        DiagnosticContext,
+        DiagnosticUpdateSystemParams,
+        rpc_toolkit::Empty,
+        FullProgress,
+    >,
 ) -> Result<UpdateSystemRes, Error> {
     params.authorize()?;
     let DiagnosticUpdateSystemParams {
@@ -91,6 +101,7 @@ pub async fn update_system(
         report_progress,
         guard,
         trust,
+        rpc_stream,
     )
     .await
 }
@@ -102,6 +113,7 @@ async fn run_update(
     report_progress: bool,
     guard: Arc<()>,
     trust: bool,
+    rpc_stream: Option<rpc_toolkit::RpcStream<FullProgress>>,
 ) -> Result<UpdateSystemRes, Error> {
     let target_range = target.unwrap_or(VersionRange::Any);
     let client = Client::new();
@@ -112,6 +124,9 @@ async fn run_update(
         .pop_last()
         .and_then(|(v, mut info)| info.squashfs.remove(&**PLATFORM).map(|a| (v, a)))
     else {
+        if let Some(stream) = rpc_stream {
+            let _ = stream.close(Ok::<_, Error>(()));
+        }
         return Ok(UpdateSystemRes {
             target: None,
             progress: None,
@@ -161,7 +176,16 @@ async fn run_update(
         let _ = done_tx.send(res);
     });
 
-    let progress = if report_progress {
+    let progress = if let Some(stream) = rpc_stream {
+        let source = crate::progress::progress_until_complete(tracker, async move {
+            done_rx.await.with_kind(ErrorKind::Cancelled)?
+        });
+        tokio::spawn(async move {
+            let result = stream.forward(source).await;
+            let _ = stream.close(result);
+        });
+        None
+    } else if report_progress {
         let guid = Guid::new();
         let tracker = tracker.clone();
         ctx.rpc_continuations
@@ -236,52 +260,24 @@ pub async fn cli_update_system(
         context,
         parent_method,
         method,
+        params: DiagnosticUpdateSystemParams { progress, .. },
         raw_params,
         ..
     }: HandlerArgs<CliContext, DiagnosticUpdateSystemParams>,
 ) -> Result<(), Error> {
-    let res = from_value::<UpdateSystemRes>(
-        context
-            .call_remote::<DiagnosticContext>(
-                &parent_method.into_iter().chain(method).join("."),
-                raw_params,
-            )
-            .await?,
-    )?;
-    match res.target {
-        None => println!("{}", t!("update.no-updates-available")),
-        Some(v) => {
-            if let Some(progress) = res.progress {
-                let mut ws = context
-                    .ws_continuation::<DiagnosticContext>(progress)
-                    .await?;
-                let mut bar = PhasedProgressBar::new(&t!(
-                    "update.updating-to-version",
-                    version = v.to_string()
-                ));
-                let mut prev = None;
-                while let Some(snap) =
-                    crate::util::net::tungstenite::next_json::<Option<FullProgress>, _>(&mut ws)
-                        .await?
-                {
-                    bar.update(&snap);
-                    prev = Some(snap);
-                }
-                crate::util::net::tungstenite::receive_close_result(&mut ws).await?;
-                if let Some(mut prev) = prev {
-                    prev.set_complete();
-                    bar.update(&prev);
-                }
-                println!("{}", t!("update.complete-restart-to-apply"))
-            } else {
-                println!(
-                    "{}",
-                    t!("update.updating-to-version", version = v.to_string())
-                )
-            }
-        }
+    let method = parent_method.into_iter().chain(method).join(".");
+    if !progress {
+        super::display_update_started(from_value(
+            context
+                .call_remote::<DiagnosticContext>(&method, raw_params)
+                .await?,
+        )?);
+        return Ok(());
     }
-    Ok(())
+    let response = context
+        .call_diagnostic_stream::<FullProgress, ()>(&method, raw_params)
+        .await?;
+    super::render_update_progress(response).await
 }
 
 #[cfg(test)]

@@ -113,7 +113,7 @@ async fn revoke_private_reader(ctx: &RegistryContext) {
 
 #[tokio::test]
 async fn unknown_key_admission_observes_enrollment_and_revocation_on_the_same_connection() {
-    use crate::middleware::auth::signature::SignatureAuthContext;
+    use crate::middleware::auth::signature::SignatureAuthorizationContext;
     let (_temp, ctx, _admin, _reader, _) = fixture().await;
     let (url, _task) = session_server(ctx.clone()).await;
     let key: Signer = crate::sign::AnySigningKey::generate().into();

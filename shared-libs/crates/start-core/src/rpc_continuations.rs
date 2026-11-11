@@ -10,7 +10,7 @@ use axum::extract::ws::{WebSocket as AxumWebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use clap::builder::ValueParserFactory;
 use futures::future::BoxFuture;
-use futures::{Future, FutureExt, Stream, StreamExt};
+use futures::{Future, FutureExt, Stream};
 use imbl_value::InternedString;
 use tokio::sync::{Mutex as AsyncMutex, broadcast};
 
@@ -346,16 +346,9 @@ where
     ) {
         let kill = self.subscribe_to_kill(session);
         tokio::spawn(async move {
-            let mut source = Box::pin(source);
-            let result: Result<(), Error> = tokio::select! {
-                _ = stream.closed() => return,
-                _ = kill => Err(session_killed()),
-                result = async {
-                    while let Some(value) = source.next().await {
-                        stream.send(value?).await?;
-                    }
-                    Ok(())
-                } => result,
+            let result: Result<(), rpc_toolkit::yajrc::RpcError> = tokio::select! {
+                _ = kill => Err(session_killed().into()),
+                result = stream.forward(source) => result,
             };
             let _ = stream.close(result);
         });

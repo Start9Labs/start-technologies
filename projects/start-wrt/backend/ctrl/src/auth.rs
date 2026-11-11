@@ -19,7 +19,7 @@ use startos::context::setup::CURRENT_SECRET;
 use startos::middleware::auth::local::LocalAuthContext;
 use startos::middleware::auth::signature::{
     check_enrolled, url_host_str, HasUnenrolledKeys, LoginMetadata, NonceCache,
-    SignatureAuthContext,
+    SignatureAuthContext, SignatureAuthorizationContext,
 };
 use startos::middleware::auth::DbContext;
 use startos::prelude::{Model, TypedPatchDb};
@@ -203,16 +203,26 @@ impl SignatureAuthContext for ServerContext {
     ) -> Self {
         ServerContext::with_secure_session(self, session)
     }
-    type AdditionalMetadata = LoginMetadata;
-    type CheckPubkeyRes = Option<InternedString>;
-    /// Routine requests never write to flash.
-    const LAST_ACTIVE_RESOLUTION: TimeDelta = TimeDelta::hours(1);
     fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T {
         self.auth.nonce_cache.mutate(f)
     }
     async fn clock_synced(&self) -> bool {
         tokio::fs::metadata(TIME_VALID_PATH).await.is_ok()
     }
+    async fn sig_context(
+        &self,
+        _: &http::Extensions,
+    ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, startos::Error>> + Send {
+        signing_identities(interface_addresses(), self.ddns_identity().await)
+            .into_iter()
+            .map(Ok)
+    }
+}
+impl SignatureAuthorizationContext for ServerContext {
+    type AdditionalMetadata = LoginMetadata;
+    type CheckPubkeyRes = Option<InternedString>;
+    /// Routine requests never write to flash.
+    const LAST_ACTIVE_RESOLUTION: TimeDelta = TimeDelta::hours(1);
     fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
         &self.auth.open_authed_continuations
     }
@@ -225,14 +235,6 @@ impl SignatureAuthContext for ServerContext {
             auth_keys.remove(key)?;
         }
         Ok(())
-    }
-    async fn sig_context(
-        &self,
-        _: &http::Extensions,
-    ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, startos::Error>> + Send {
-        signing_identities(interface_addresses(), self.ddns_identity().await)
-            .into_iter()
-            .map(Ok)
     }
     fn check_pubkey(
         &self,
@@ -765,7 +767,7 @@ mod tests {
     use super::*;
 
     const LAST_ACTIVE_RESOLUTION: TimeDelta =
-        <ServerContext as SignatureAuthContext>::LAST_ACTIVE_RESOLUTION;
+        <ServerContext as SignatureAuthorizationContext>::LAST_ACTIVE_RESOLUTION;
 
     #[test]
     fn login_clients_are_named_by_user_agent() {

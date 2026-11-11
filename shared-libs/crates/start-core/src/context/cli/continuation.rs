@@ -79,7 +79,16 @@ impl CliContext {
     }
 
     async fn startup_continuation(&self, guid: Guid) -> Result<BoxWebSocket, Error> {
-        client::legacy(&self.websocket_client, self.continuation_url(&guid)?).await
+        let (_, socket) = client::connect(
+            &self.websocket_client,
+            self.rpc_client.ephemeral_signer(),
+            self.continuation_url(&guid)?,
+            self.host_identity.as_deref().unwrap_or_default(),
+            Target::Continuation(guid),
+            HeaderMap::new(),
+        )
+        .await?;
+        Ok(Box::new(socket))
     }
 
     /// Opens a fresh continuation using its originating context's transport contract.

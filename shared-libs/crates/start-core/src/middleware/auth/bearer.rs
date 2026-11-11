@@ -106,8 +106,8 @@ pub(crate) mod tests {
         revoke_tokens,
     };
     use crate::middleware::auth::signature::{
-        AUTH_SIG_HEADER, LoginMetadata, NonceCache, SignatureAuthContext, SignatureHeader,
-        check_enrolled,
+        AUTH_SIG_HEADER, LoginMetadata, NonceCache, SignatureAuthContext,
+        SignatureAuthorizationContext, SignatureHeader, check_enrolled,
     };
     use crate::middleware::auth::{Auth, DbContext};
     use crate::rpc_continuations::OpenAuthedContinuations;
@@ -148,14 +148,22 @@ pub(crate) mod tests {
         fn with_secure_session(self, _: crate::middleware::auth::session::SecureSession) -> Self {
             panic!("HTTP-only fixture")
         }
-        type AdditionalMetadata = LoginMetadata;
-        type CheckPubkeyRes = ();
         fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T {
             self.0.nonces.mutate(f)
         }
         async fn clock_synced(&self) -> bool {
             false
         }
+        async fn sig_context(
+            &self,
+            _: &http::Extensions,
+        ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send {
+            [Ok::<_, Error>("localhost")]
+        }
+    }
+    impl SignatureAuthorizationContext for TestCtx {
+        type AdditionalMetadata = LoginMetadata;
+        type CheckPubkeyRes = ();
         fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
             &self.0.continuations
         }
@@ -167,12 +175,6 @@ pub(crate) mod tests {
                 db.as_sessions_mut().as_pubkeys_mut().remove(key)?;
             }
             Ok(())
-        }
-        async fn sig_context(
-            &self,
-            _: &http::Extensions,
-        ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send {
-            [Ok::<_, Error>("localhost")]
         }
         fn check_pubkey(
             &self,

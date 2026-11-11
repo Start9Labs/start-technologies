@@ -8,7 +8,7 @@ use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async
 use serde::{Deserialize, Serialize};
 
 use crate::context::CliContext;
-use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthContext};
+use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthorizationContext};
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::context::RegistryContext;

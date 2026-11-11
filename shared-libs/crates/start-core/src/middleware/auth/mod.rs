@@ -8,7 +8,9 @@ use crate::context::RpcContext;
 use crate::db::model::Database;
 use crate::middleware::auth::bearer::BearerAuth;
 use crate::middleware::auth::local::{LocalAuth, LocalAuthContext};
-use crate::middleware::auth::signature::{LoginMetadata, SignatureAuth, SignatureAuthContext};
+use crate::middleware::auth::signature::{
+    LoginMetadata, SignatureAuth, SignatureAuthorizationContext,
+};
 use crate::prelude::*;
 use crate::util::serde::const_true;
 
@@ -76,7 +78,7 @@ impl<C: LocalAuthContext> Auth<C> {
         self
     }
 }
-impl<C: SignatureAuthContext> Auth<C> {
+impl<C: SignatureAuthorizationContext> Auth<C> {
     pub fn with_signature_auth(mut self) -> Self {
         self.signature = Some(DynMiddleware::new(SignatureAuth::new()));
         self

@@ -126,6 +126,17 @@ export const LogEntry: z.ZodObject<{
 }).meta({
   id: 'LogEntry',
 })
+export const NamedProgress: z.ZodObject<{
+  name: z.ZodString
+  progress: typeof Progress
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  get progress(): typeof Progress {
+    return Progress
+  },
+}).meta({
+  id: 'NamedProgress',
+})
 export const NetworkInterfaceType: z.ZodEnum<{
   ethernet: 'ethernet'
   wireless: 'wireless'
@@ -140,6 +151,10 @@ export const NetworkInterfaceType: z.ZodEnum<{
 export const PackageId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'PackageId',
 })
+export const ProgressUnits: z.ZodEnum<{ bytes: 'bytes'; steps: 'steps' }> =
+  /* @__PURE__ */ z.enum(['bytes', 'steps']).meta({
+    id: 'ProgressUnits',
+  })
 export const QueryDnsParams: z.ZodObject<{ fqdn: z.ZodString }> =
   /* @__PURE__ */ object({ fqdn: z.string() }).meta({
     id: 'QueryDnsParams',
@@ -191,6 +206,17 @@ export const DnsSettings: z.ZodObject<{
   id: 'DnsSettings',
   description:
     'Per-gateway DNS intent and effective upstreams. `static_servers` is the persisted\noverride; `servers` and `source` are derived from it and the link configuration.\nWithout an override or gateway-provided resolvers, the public fallback is used.',
+})
+export const FullProgress: z.ZodObject<{
+  overall: typeof Progress
+  phases: z.ZodArray<typeof NamedProgress>
+}> = /* @__PURE__ */ object({
+  get overall(): typeof Progress {
+    return Progress
+  },
+  phases: z.array(NamedProgress),
+}).meta({
+  id: 'FullProgress',
 })
 
 /**
@@ -438,6 +464,43 @@ export const NetworkInterfaceInfo: z.ZodCodec<
 ).meta({
   id: 'NetworkInterfaceInfo',
 })
+export const Progress: z.ZodUnion<
+  readonly [
+    z.ZodNull,
+    z.ZodBoolean,
+    z.ZodObject<{
+      done: z.ZodInt
+      total: z.ZodCodec<
+        z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+        z.ZodNullable<z.ZodInt>
+      >
+      units: z.ZodCodec<
+        z.ZodOptional<z.ZodNullable<typeof ProgressUnits>>,
+        z.ZodNullable<typeof ProgressUnits>
+      >
+    }>,
+    typeof FullProgress,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.null(),
+    z.boolean(),
+    object({
+      done: z.int(),
+      total: wire(z.int().nullable().optional(), z.int().nullable()),
+      units: wire(
+        ProgressUnits.nullable().optional(),
+        ProgressUnits.nullable(),
+      ),
+    }),
+    FullProgress.meta({
+      description:
+        'A sub-tree of progress. Used by `NamedProgress.progress` so a phase\ncan carry its own `FullProgress` with sub-phases. Producers are\nexpected to keep `FullProgress.overall` scalar (not nested again).',
+    }),
+  ])
+  .meta({
+    id: 'Progress',
+  })
 export const NetworkGatewayInfo: z.ZodObject<{
   id: typeof GatewayId
   info: typeof NetworkInterfaceInfo
@@ -642,7 +705,7 @@ export const Api = {
         update: {
           _PARAMS: /* @__PURE__ */ DiagnosticUpdateSystemParams,
           _RETURN: /* @__PURE__ */ UpdateSystemRes,
-          _ITEM: /* @__PURE__ */ z.never(),
+          _ITEM: /* @__PURE__ */ FullProgress,
           _FINAL: /* @__PURE__ */ z.null(),
         },
       },

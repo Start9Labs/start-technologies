@@ -59,7 +59,7 @@ npm run start:ui
 cp shared-libs/ts-modules/proxy.conf-sample.json proxy.conf.json
 ```
 
-3. Replace every instance of `<CHANGE_ME>` with the same hostname or IP
+3. Replace every instance of `<CHANGE_ME>` with the same hostname or IP. Keep `ws: true` and the trusted upstream `Origin` header for RPC and continuation upgrades; startup WebSockets require the Origin to match the upstream Host and scheme.
 
 4. Start the proxy dev server:
 

@@ -77,14 +77,25 @@ pub async fn legacy(client: &Client, url: Url) -> Result<BoxWebSocket, Error> {
 }
 
 /// Returns the verified peer and socket after completed encrypted admission.
+/// The selected hostname supplies HTTP authority; the URL selects the dial address.
 pub async fn connect(
     client: &Client,
     signer: &Signer,
     url: Url,
     address: &str,
     target: Target,
-    headers: HeaderMap,
+    mut headers: HeaderMap,
 ) -> Result<(AnyVerifyingKey, EncryptedSocket), Error> {
+    let mut logical = url.clone();
+    logical
+        .set_host(Some(address))
+        .with_kind(ErrorKind::ParseUrl)?;
+    headers.insert(
+        http::header::HOST,
+        logical[url::Position::BeforeHost..url::Position::AfterPort]
+            .parse::<http::HeaderValue>()
+            .with_kind(ErrorKind::ParseUrl)?,
+    );
     admit(
         signer,
         address,

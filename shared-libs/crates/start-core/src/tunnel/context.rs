@@ -937,7 +937,11 @@ impl UiContext for TunnelContext {
             .middleware(SyncDb::new())
     }
     fn rpc_server_routes(self, server: rpc_toolkit::HttpServer<Self>) -> axum::Router {
-        crate::net::static_server::session_rpc_router(self, server)
+        crate::net::static_server::session_rpc_router(
+            self,
+            server.clone(),
+            axum::routing::any(server).layer(crate::middleware::cors::layer()),
+        )
     }
 }
 

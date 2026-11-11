@@ -12,7 +12,8 @@ use crate::context::CliContext;
 use crate::middleware::auth::DbContext;
 use crate::middleware::auth::local::LocalAuthContext;
 use crate::middleware::auth::signature::{
-    LoginMetadata, SignatureAuthContext, check_enrolled, url_host_str,
+    LoginMetadata, SignatureAuthContext, SignatureAuthorizationContext, check_enrolled,
+    url_host_str,
 };
 use crate::prelude::*;
 use crate::rpc_continuations::OpenAuthedContinuations;
@@ -37,8 +38,6 @@ impl SignatureAuthContext for TunnelContext {
     fn with_secure_session(self, session: crate::middleware::auth::session::SecureSession) -> Self {
         TunnelContext::with_secure_session(self, session)
     }
-    type AdditionalMetadata = LoginMetadata;
-    type CheckPubkeyRes = Option<InternedString>;
     fn mutate_nonce_cache<
         F: FnOnce(&mut crate::middleware::auth::signature::NonceCache) -> T,
         T,
@@ -48,21 +47,9 @@ impl SignatureAuthContext for TunnelContext {
     ) -> T {
         self.auth_sig_nonce_cache.mutate(f)
     }
+    /// Trusts the Tunnel host clock.
     async fn clock_synced(&self) -> bool {
-        true // Assume. Validating VPS clock sync out of scope for now,
-    }
-    fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
-        &self.open_authed_continuations
-    }
-    fn remove_enrolled_keys(
-        db: &mut Model<Self::Database>,
-        keys: &BTreeSet<InternedString>,
-    ) -> Result<(), Error> {
-        let auth_keys = db.as_session_pubkeys_mut();
-        for key in keys {
-            auth_keys.remove(key)?;
-        }
-        Ok(())
+        true
     }
     async fn sig_context(
         &self,
@@ -107,6 +94,23 @@ impl SignatureAuthContext for TunnelContext {
                 })
                 .flatten(),
             )
+    }
+}
+impl SignatureAuthorizationContext for TunnelContext {
+    type AdditionalMetadata = LoginMetadata;
+    type CheckPubkeyRes = Option<InternedString>;
+    fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
+        &self.open_authed_continuations
+    }
+    fn remove_enrolled_keys(
+        db: &mut Model<Self::Database>,
+        keys: &BTreeSet<InternedString>,
+    ) -> Result<(), Error> {
+        let auth_keys = db.as_session_pubkeys_mut();
+        for key in keys {
+            auth_keys.remove(key)?;
+        }
+        Ok(())
     }
     fn check_pubkey(
         &self,
