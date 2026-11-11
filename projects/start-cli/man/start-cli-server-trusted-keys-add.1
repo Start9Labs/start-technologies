@@ -1,0 +1,35 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-trusted-keys-add 1  "add "
+.SH NAME
+start\-cli\-server\-trusted\-keys\-add \- Import public keys; newly added keys are trusted for packages
+.SH SYNOPSIS
+\fBstart\-cli server trusted\-keys add\fR [\fB\-\-name\fR] [\fB\-\-trust\-for\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIPUBLIC_KEYS\fR>
+.SH DESCRIPTION
+Import public keys; newly added keys are trusted for packages
+.SH OPTIONS
+.TP
+\fB\-\-name\fR \fI<NAME>\fR [default: ]
+Name for the key; blank names each GPG key after its identity
+.TP
+\fB\-\-trust\-for\fR \fI<TRUST_FOR>\fR
+Grant this trust to every imported key, including keys already present
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+marketplace
+.IP \(bu 2
+os
+.RE
+.TP
+\fB\-\-format\fR
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIPUBLIC_KEYS\fR>
+Ed25519 public keys in PEM or armored GPG format; put options before \-\- and keys after it

@@ -25,7 +25,7 @@ export class OSService {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private loadSequence = 0
   private readonly registry$ = this.patch
-    .watch$('ui', 'startosRegistry')
+    .watch$('serverInfo', 'osRegistry')
     .pipe(distinctUntilChanged())
 
   private readonly catalog$ = combineLatest([

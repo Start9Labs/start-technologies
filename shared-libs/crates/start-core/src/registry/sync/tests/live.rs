@@ -291,8 +291,12 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
     let mut model = database();
     model
         .as_public_mut()
-        .as_ui_mut()
-        .ser(&json!({"registries":{url.as_str():"Registry"},"startosRegistry":url}))
+        .as_server_info_mut()
+        .mutate(|info| {
+            info.registries = from_value(json!({url.as_str():"Registry"}))?;
+            info.os_registry = url.clone();
+            Ok::<_, Error>(())
+        })
         .unwrap();
     db.put(&ROOT, model.as_value()).await.unwrap();
     let subscribe = || -> NonDetachingJoinHandle<Result<(), Error>> {

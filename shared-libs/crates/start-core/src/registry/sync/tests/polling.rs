@@ -113,8 +113,12 @@ async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selec
     let mut initial = database();
     initial
         .as_public_mut()
-        .as_ui_mut()
-        .ser(&json!({"registries":{registry.as_str():"Legacy"},"startosRegistry":registry}))
+        .as_server_info_mut()
+        .mutate(|info| {
+            info.registries = from_value(json!({registry.as_str():"Legacy"}))?;
+            info.os_registry = registry.clone();
+            Ok::<_, Error>(())
+        })
         .unwrap();
     db.put(&ROOT, initial.as_value()).await.unwrap();
     let subscriptions = BTreeSet::from([

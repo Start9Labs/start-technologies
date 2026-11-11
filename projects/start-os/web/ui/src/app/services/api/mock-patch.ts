@@ -100,17 +100,17 @@ export const mockPatchData: DataModel = {
   },
   osUpdateCache: mockOsUpdateCache(defaultRegistries.start9),
   ui: {
-    registries: {
-      'https://registry.start9.com/': 'Start9 Registry',
-      'https://community-registry.start9.com/': 'Community Registry',
-    },
-    startosRegistry: 'https://registry.start9.com/',
     snakeHighScore: 0,
     hiddenUpdates: {},
     servicesView: { desktopLayout: 'list', asc: true },
   },
   serverInfo: {
     id: Mock.ServerId,
+    registries: {
+      'https://registry.start9.com/': 'Start9 Registry',
+      'https://community-registry.start9.com/': 'Community Registry',
+    },
+    osRegistry: 'https://registry.start9.com/',
     registryKeys: {
       'https://registry.start9.com': [
         'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=',

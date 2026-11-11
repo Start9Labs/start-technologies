@@ -35,7 +35,8 @@ fn device() -> DeviceInfo {
 fn database() -> DatabaseModel {
     let account = AccountInfo::new("password", std::time::SystemTime::now(), None).unwrap();
     let mut public = Public::init(&account, false, None, None).unwrap();
-    public.ui = json!({"registries": {url().as_str(): "Test"}, "startosRegistry": url()});
+    public.server_info.registries = from_value(json!({url().as_str(): "Test"})).unwrap();
+    public.server_info.os_registry = url();
     public.server_info.version = device().os.version;
     Model::from_value(json!({
         "public": public,
@@ -103,12 +104,92 @@ async fn refreshing_a_registry_cancels_its_group_without_cancelling_other_regist
     );
 }
 
+#[tokio::test]
+async fn registry_manager_follows_server_info_and_ignores_opaque_ui_settings() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = TypedPatchDb::<Database>::load_unchecked(
+        patch_db::PatchDb::open(temp.path().join("db"))
+            .await
+            .unwrap(),
+    );
+    let mut model = database();
+    model
+        .as_public_mut()
+        .as_ui_mut()
+        .ser(&json!({
+            "registries": {"https://obsolete.test": "Obsolete"},
+            "startosRegistry": "https://obsolete.test"
+        }))
+        .unwrap();
+    db.put(&ROOT, model.as_value()).await.unwrap();
+    let mut cache = db.watch("/public/registryCache".parse().unwrap()).await;
+    let (_refresh, refreshes) = tokio::sync::mpsc::channel(1);
+    let observed = db.clone();
+    let _manager: NonDetachingJoinHandle<()> =
+        tokio::spawn(async move { watch_registries(observed, refreshes, || None).await }).into();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while cache
+            .peek_and_mark_seen()
+            .unwrap()
+            .get(url().as_str())
+            .is_none()
+        {
+            cache.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        cache
+            .peek_and_mark_seen()
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .len(),
+        1
+    );
+    db.mutate(|db| {
+        db.as_public_mut()
+            .as_server_info_mut()
+            .as_registries_mut()
+            .ser(&crate::trusted_keys::Registries::new())
+    })
+    .await
+    .result
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !cache
+            .peek_and_mark_seen()
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .is_empty()
+        {
+            cache.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        db.peek()
+            .await
+            .as_public()
+            .as_os_update_cache()
+            .de()
+            .unwrap()
+            .unwrap()
+            .registry,
+        url()
+    );
+}
+
 #[test]
 fn invalid_saved_registry_does_not_block_the_others() {
-    let desired = subscriptions(&json!({
-        "registries": {"https://user@invalid.test":null, "https://registry.test/catalog":null},
-        "startosRegistry": url(),
-    }));
+    let mut info = database().as_public().as_server_info().de().unwrap();
+    info.registries =
+        from_value(json!({"https://user@invalid.test":null, "https://registry.test/catalog":null}))
+            .unwrap();
+    let desired = subscriptions(&info);
     assert_eq!(
         desired,
         BTreeSet::from([Subscription::Index(url()), Subscription::Os(url())])
@@ -117,19 +198,17 @@ fn invalid_saved_registry_does_not_block_the_others() {
 
 #[test]
 fn invalid_os_source_does_not_stop_package_subscriptions() {
-    let desired = subscriptions(&json!({
-        "registries": {url().as_str(): null},
-        "startosRegistry": "https://user@invalid.test",
-    }));
+    let mut info = database().as_public().as_server_info().de().unwrap();
+    info.os_registry = "https://user@invalid.test".parse().unwrap();
+    let desired = subscriptions(&info);
     assert_eq!(desired, BTreeSet::from([Subscription::Index(url())]));
 }
 
 #[test]
 fn canonical_configuration_has_one_subscription_per_registry_plus_the_os_source() {
-    let desired = subscriptions(&json!({
-        "registries": {"https://REGISTRY.test/catalog/":null,"https://registry.test/catalog":null,
-            "https://other.test":null}, "startosRegistry":"https://registry.test/catalog/"
-    }));
+    let mut info = database().as_public().as_server_info().de().unwrap();
+    info.registries = from_value(json!({"https://REGISTRY.test/catalog/":null,"https://registry.test/catalog":null,"https://other.test":null})).unwrap();
+    let desired = subscriptions(&info);
     assert_eq!(desired.len(), 3);
     let connections = connections(&desired);
     assert_eq!(connections.len(), 2);
@@ -333,12 +412,8 @@ fn first_connection_failure_publishes_availability_and_does_not_fetch_on_cache_q
         &device(),
     )
     .unwrap();
-    reconcile(
-        &mut db,
-        &subscriptions(&json!({"registries":{url().as_str():null},"startosRegistry":url()})),
-        true,
-    )
-    .unwrap();
+    let desired = subscriptions(&db.as_public().as_server_info().de().unwrap());
+    reconcile(&mut db, &desired, true).unwrap();
     let cache = db
         .as_public()
         .as_registry_cache()
@@ -463,8 +538,12 @@ fn removal_and_os_switch_reject_in_flight_snapshots_and_prune_old_caches() {
     )
     .unwrap();
     db.as_public_mut()
-        .as_ui_mut()
-        .ser(&json!({"registries":{},"startosRegistry":"https://other.test"}))
+        .as_server_info_mut()
+        .mutate(|info| {
+            info.registries.clear();
+            info.os_registry = "https://other.test".parse().unwrap();
+            Ok::<_, Error>(())
+        })
         .unwrap();
     let before = db.as_value().clone();
     publish_snapshot(
@@ -482,7 +561,7 @@ fn removal_and_os_switch_reject_in_flight_snapshots_and_prune_old_caches() {
     )
     .unwrap();
     assert_eq!(db.as_value(), &before);
-    let desired = subscriptions(&db.as_public().as_ui().de().unwrap());
+    let desired = subscriptions(&db.as_public().as_server_info().de().unwrap());
     reconcile(&mut db, &desired, false).unwrap();
     assert!(db.as_public().as_registry_cache().de().unwrap().is_empty());
     assert!(

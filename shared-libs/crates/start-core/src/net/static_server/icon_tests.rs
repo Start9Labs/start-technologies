@@ -23,9 +23,10 @@ fn registry_icon_credentials_follow_saved_origins_and_exact_content_addressed_pa
         &DataUrl::from_vec("image/png", b"icon".to_vec()),
     )
     .unwrap();
-    let ui = json!({"registries": {
+    let ui = from_value(json!({
         "https://REGISTRY.test/catalog/": "Registry", "not a URL": null
-    }, "startosRegistry": "https://os-only.test"});
+    }))
+    .unwrap();
     assert!(is_registry_icon(
         &ui,
         &format!("https://registry.test/catalog/icons/{path}")
@@ -49,7 +50,7 @@ fn registry_icon_credentials_follow_saved_origins_and_exact_content_addressed_pa
         assert!(!is_registry_icon(&ui, &target.parse().unwrap()), "{target}");
     }
     assert!(!is_registry_icon(
-        &json!({"registries":{}}),
+        &crate::trusted_keys::Registries::new(),
         &format!("https://registry.test/catalog/icons/{path}")
             .parse()
             .unwrap()
@@ -61,7 +62,7 @@ async fn signed_proxy_fetches_private_dependency_icons_and_observes_revocation()
     let (_temp, registry, _admin, reader, path) = crate::registry::tests::fixture().await;
     let (url, _server) = crate::registry::tests::server(registry.clone()).await;
     let target = url.join(&format!("icons/{path}")).unwrap();
-    let ui = json!({"registries":{url.as_str():"Registry"}});
+    let ui = from_value(json!({url.as_str():"Registry"})).unwrap();
     assert!(is_registry_icon(&ui, &target));
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -133,7 +134,7 @@ async fn signed_icon_redirects_are_not_forwarded_and_public_images_keep_redirect
         .parse()
         .unwrap();
     let public_url: Url = format!("{registry}public-image").parse().unwrap();
-    let ui = json!({"registries":{registry:"Registry"}});
+    let ui = from_value(json!({registry:"Registry"})).unwrap();
     assert!(is_registry_icon(&ui, &origin_url));
     assert!(!is_registry_icon(&ui, &public_url));
     let origin_server: NonDetachingJoinHandle<()> = tokio::spawn(async move {

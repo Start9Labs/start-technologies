@@ -439,44 +439,10 @@ mod subscription_tests;
 
 #[instrument(skip_all)]
 pub async fn ui(ctx: RpcContext, UiParams { pointer, value, .. }: UiParams) -> Result<(), Error> {
-    writable_ui_pointer(&pointer)?;
     let mut ptr = "/public/ui"
         .parse::<JsonPointer>()
         .with_kind(ErrorKind::Database)?;
     ptr.append(&pointer);
     ctx.db.put(&ptr, &value).await?;
     Ok(())
-}
-
-fn writable_ui_pointer(pointer: &JsonPointer) -> Result<(), Error> {
-    if pointer.is_empty() || pointer.get_segment(0) == Some("registries") {
-        return Err(Error::new(
-            eyre!("{}", t!("db.registries-not-writable")),
-            ErrorKind::InvalidRequest,
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ui_writes_never_reach_the_registries() {
-        for pointer in [
-            "",
-            "/registries",
-            "/registries/https:~1~1registry.start9.com~1",
-        ] {
-            assert!(writable_ui_pointer(&pointer.parse().unwrap()).is_err());
-        }
-        for pointer in [
-            "/hiddenUpdates/bitcoind",
-            "/snakeHighScore",
-            "/servicesView",
-        ] {
-            assert!(writable_ui_pointer(&pointer.parse().unwrap()).is_ok());
-        }
-    }
 }

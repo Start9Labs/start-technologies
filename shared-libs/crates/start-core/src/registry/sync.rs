@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::context::RpcContext;
+use crate::db::model::public::ServerInfo;
 use crate::db::model::{Database, DatabaseModel};
 use crate::middleware::auth::signature::SigningContext;
 use crate::prelude::*;
@@ -94,23 +95,17 @@ impl Subscription {
         }
     }
 
-    fn selected(&self, ui: &Value) -> bool {
+    fn selected(&self, info: &ServerInfo) -> bool {
         match self {
-            Self::Index(url) => is_connected(ui, url.as_str()),
-            Self::Os(url) => ui
-                .get("startosRegistry")
-                .and_then(Value::as_str)
-                .is_some_and(|selected| same_registry(selected, url.as_str())),
+            Self::Index(url) => is_connected(&info.registries, url.as_str()),
+            Self::Os(url) => same_registry(info.os_registry.as_str(), url.as_str()),
         }
     }
 }
 
-fn subscriptions(ui: &Value) -> BTreeSet<Subscription> {
-    let indexes = connected_registry_urls(ui).map(|url| url.map(Subscription::Index));
-    let os = ui
-        .get("startosRegistry")
-        .and_then(Value::as_str)
-        .map(|url| registry_url(url).map(Subscription::Os));
+fn subscriptions(info: &ServerInfo) -> BTreeSet<Subscription> {
+    let indexes = connected_registry_urls(&info.registries).map(|url| url.map(Subscription::Index));
+    let os = std::iter::once(registry_url(info.os_registry.as_str()).map(Subscription::Os));
     indexes
         .chain(os)
         .filter_map(|subscription| match subscription {
@@ -159,13 +154,13 @@ pub async fn watch_registries(
     context: impl Fn() -> Option<RpcContext> + Send + Sync + 'static,
 ) {
     let context: ContextProvider = Arc::new(context);
-    let mut watch = db.watch("/public/ui".parse().unwrap()).await;
+    let mut watch = db.watch("/public/serverInfo".parse().unwrap()).await;
     let mut tasks = RegistryTasks::new();
     loop {
         let desired = watch
             .peek_and_mark_seen()
             .with_kind(ErrorKind::Database)
-            .map(|ui| subscriptions(&ui));
+            .and_then(|value| from_value::<ServerInfo>(value).map(|info| subscriptions(&info)));
         match desired {
             Ok(desired) => {
                 let connections = connections(&desired);
@@ -329,7 +324,7 @@ fn set_status(
     subscription: &Subscription,
     status: RegistryStatus,
 ) -> Result<(), Error> {
-    if !subscription.selected(&db.as_public().as_ui().de()?) {
+    if !subscription.selected(&db.as_public().as_server_info().de()?) {
         return Ok(());
     }
     match subscription {
@@ -385,7 +380,7 @@ fn publish_snapshot(
     value: &Value,
     device: &DeviceInfo,
 ) -> Result<(), Error> {
-    if !subscription.selected(&db.as_public().as_ui().de()?) {
+    if !subscription.selected(&db.as_public().as_server_info().de()?) {
         return Ok(());
     }
     match subscription {
@@ -467,7 +462,10 @@ fn cached_response(
     params: &Value,
     device: Option<&DeviceInfo>,
 ) -> Result<Option<Value>, Error> {
-    if !is_connected(&snapshot.as_public().as_ui().de()?, url.as_str()) {
+    if !is_connected(
+        &snapshot.as_public().as_server_info().as_registries().de()?,
+        url.as_str(),
+    ) {
         return Ok(None);
     }
     match method {

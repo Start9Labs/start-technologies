@@ -25,7 +25,7 @@ export class PatchDataService extends Observable<void> {
     switchMap(() =>
       merge(
         this.patch.watch$().pipe(map(cache => this.bootstrapper.update(cache))),
-        this.patch.watch$('ui', 'startosRegistry').pipe(
+        this.patch.watch$('serverInfo', 'osRegistry').pipe(
           distinctUntilChanged(),
           map(registry => {
             this.os.loadOS(registry).catch(console.error)

@@ -74,9 +74,12 @@ monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product 
   `RpcContext`'s router replaces `name` and `short_name` with the server's
   hostname. Keep it out of `ngsw-config.json`: an asset group makes the service
   worker hash-check it against a body it never receives and drop out of service.
-- **The `beta` feature swaps the UI seed** (`patchdb-ui-seed.beta.json`) and
-  forwards to `start-core`'s `beta` feature — keep both seeds in sync when you
-  change seed shape.
+- **The `beta` feature forwards to `start-core`'s `beta` feature**, which
+  selects the beta registries a new server connects to and takes StartOS
+  updates from.
+- **`web/patchdb-ui-seed.json` seeds only UI-owned state.** The backend never
+  reads or writes `public.ui` outside migrations; state the backend needs
+  belongs in a typed `serverInfo` field.
 
 ## Contributor workflow
 

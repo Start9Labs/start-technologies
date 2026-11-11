@@ -261,8 +261,9 @@ const state = version => ({
     version,
     statusInfo: {},
     trustedKeys: trustedSigners,
+    osRegistry: 'https://registry.test',
   },
-  ui: { startosRegistry: 'https://registry.test', snakeHighScore: 0 },
+  ui: { snakeHighScore: 0 },
 })
 const tick = () => new Promise(resolve => setImmediate(resolve))
 function fixture(t, cachedVersion, providers = []) {
@@ -451,7 +452,7 @@ function fixture(t, cachedVersion, providers = []) {
         {
           id: ++revision,
           patch: [
-            { op: 'replace', path: '/ui/startosRegistry', value: registry },
+            { op: 'replace', path: '/serverInfo/osRegistry', value: registry },
           ],
         },
       ])
@@ -2373,8 +2374,8 @@ test('connecting a registry asks for no approvals and resolves to the keys it tr
     api: {
       rpc: {
         server: {
-          trustedKeys: {
-            connectRegistry: async params => {
+          registries: {
+            add: async params => {
               calls.push(params)
               return ['added']
             },
@@ -2393,14 +2394,85 @@ test('connecting a registry asks for no approvals and resolves to the keys it tr
   assert.deepEqual(calls, [{ url: 'https://registry.test', name: null }])
 })
 
+test('a late registry cache update cannot restore a removed registry', async t => {
+  const { Exver } = await import('@start9labs/shared')
+  const { StorageService } = await import('src/app/services/storage.service')
+  const { PackageIconService } =
+    await import('src/app/services/package-icon.service')
+  const metadata = new BehaviorSubject({})
+  const registries = new BehaviorSubject({
+    'https://registry.test': 'Old name',
+  })
+  const writes = []
+  const injector = createEnvironmentInjector(
+    [
+      {
+        provide: PatchDB,
+        useValue: {
+          watch$: (...path) =>
+            path[0] === 'registryCache' ? metadata : registries,
+        },
+      },
+      { provide: Exver, useValue: {} },
+      { provide: StorageService, useValue: { get: () => null } },
+      { provide: PackageIconService, useValue: {} },
+      { provide: ErrorService, useValue: { handleError: assert.fail } },
+      {
+        provide: ApiService,
+        useValue: {
+          rpc: {
+            registry: {
+              info: () =>
+                assert.fail(
+                  'Registry metadata must come from the shared cache',
+                ),
+              package: { get: async () => ({}) },
+            },
+            server: {
+              registries: { remove: async () => registries.next({}) },
+            },
+            db: {
+              put: {
+                ui: async params => {
+                  writes.push(params)
+                  registries.next({ 'https://registry.test': params.value })
+                },
+              },
+            },
+          },
+        },
+      },
+    ],
+    null,
+  )
+  t.after(() => injector.destroy())
+  const service = runInInjectionContext(
+    injector,
+    () => new MarketplaceService(),
+  )
+  const subscription = service.marketplace$.subscribe()
+  t.after(() => subscription.unsubscribe())
+  await service.delete('https://registry.test')
+  metadata.next({
+    'https://registry.test/': {
+      status: 'connected',
+      info: { name: 'New name' },
+      packages: {},
+    },
+  })
+  await new Promise(setImmediate)
+  assert.deepEqual(await firstValueFrom(service.registries$), [])
+  assert.deepEqual(writes, [])
+})
+
 test('registry removal uses the authoritative endpoint, clears a matching selected registry, and reports unoffered keys', async () => {
   const calls = []
   const instance = {
     api: {
       rpc: {
         server: {
-          trustedKeys: {
-            removeRegistry: async params => {
+          registries: {
+            remove: async params => {
               calls.push(params)
               return ['orphaned']
             },
@@ -2571,7 +2643,8 @@ function marketplaceFixture(t, entries = {}) {
   const cache = new BehaviorSubject({
     id: 1,
     value: {
-      ui: { registries: { 'https://registry.test': 'Saved name' } },
+      ui: {},
+      serverInfo: { registries: { 'https://registry.test': 'Saved name' } },
       registryCache: entries,
     },
   })
@@ -2628,11 +2701,11 @@ function marketplaceFixture(t, entries = {}) {
         },
         rpc: {
           server: {
-            trustedKeys: {
-              refreshRegistry: async params => {
+            registries: {
+              refresh: async params => {
                 refreshes.push(params)
               },
-              connectRegistry: async params => {
+              add: async params => {
                 connections.push(params)
                 return []
               },
@@ -2744,7 +2817,7 @@ test('malformed saved registries do not terminate valid registry listings or cac
   const page = f.makePage()
   const saved = f.watch(f.service.registries$)
   const stores = f.watch(f.service.currentRegistry$)
-  f.replace('/ui/registries', {
+  f.replace('/serverInfo/registries', {
     'https://user@invalid.test': 'Legacy URL',
     'ftp://invalid.test': 'Invalid scheme',
     'https://registry.test': 'Saved name',
@@ -2756,7 +2829,7 @@ test('malformed saved registries do not terminate valid registry listings or cac
   assert.equal(page.isRegistrySaved(), true)
   assert.equal(stores.at(-1).packages.length, 1)
 
-  f.replace('/ui/registries', { 'https://registry.test': 'Renamed' })
+  f.replace('/serverInfo/registries', { 'https://registry.test': 'Renamed' })
   f.replace('/registryCache', {
     'https://registry.test/': registryEntry('2.0.0:0'),
   })
@@ -2825,7 +2898,9 @@ test('unsaved registry navigation requires explicit connection and malformed URL
     f.storage.get('selectedRegistry'),
     'https://unsaved.test/catalog/',
   )
-  f.replace('/ui/registries', { 'https://unsaved.test/catalog/': 'Saved' })
+  f.replace('/serverInfo/registries', {
+    'https://unsaved.test/catalog/': 'Saved',
+  })
   assert.equal(page.isRegistrySaved(), true)
 
   for (const registry of [
@@ -2877,7 +2952,7 @@ test('marketplace lists and metadata stream from canonical cache keys without na
   f.replace('/registryCache/https:~1~1registry.test~1/status', 'connected')
   assert.deepEqual(errors.at(-1), [])
   await f.service.connect('https://registry.test')
-  f.replace('/ui/registries', {})
+  f.replace('/serverInfo/registries', {})
   assert.deepEqual(stores.at(-1), {})
   assert.deepEqual(f.queries, [])
 })

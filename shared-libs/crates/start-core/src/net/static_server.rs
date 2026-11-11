@@ -51,6 +51,7 @@ use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::sign::Signer;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
+use crate::trusted_keys::Registries;
 use crate::trusted_keys::connection::connected_registry_urls;
 use crate::util::io::{maybe_open_file, open_file};
 use crate::util::serde::BASE64;
@@ -121,8 +122,15 @@ impl UiContext for RpcContext {
                 let ctx = self.clone();
                 get(|x::Path(url): x::Path<Url>, request: Request| async move {
                     if_authorized(&ctx, request, |_| async {
-                        let ui = ctx.db.peek().await.as_public().as_ui().de()?;
-                        let (client, signer) = if is_registry_icon(&ui, &url) {
+                        let registries = ctx
+                            .db
+                            .peek()
+                            .await
+                            .as_public()
+                            .as_server_info()
+                            .as_registries()
+                            .de()?;
+                        let (client, signer) = if is_registry_icon(&registries, &url) {
                             (ctx.client.get_without_redirects(), Some(ctx.signing_key()?))
                         } else {
                             (ctx.client.get(), None)
@@ -561,8 +569,8 @@ fn installed_file_cache_control(installed: &Path, query: Option<&str>) -> &'stat
     }
 }
 
-fn is_registry_icon(ui: &Value, target: &Url) -> bool {
-    connected_registry_urls(ui)
+fn is_registry_icon(registries: &Registries, target: &Url) -> bool {
+    connected_registry_urls(registries)
         .filter_map(Result::ok)
         .any(|registry| is_icon_url(&registry, target))
 }

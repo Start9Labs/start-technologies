@@ -3604,11 +3604,6 @@ export const Notification: z.ZodObject<{
 }).meta({
   id: 'Notification',
 })
-export const OsUpdateSignerKeyParams: z.ZodObject<{
-  key: typeof AnyVerifyingKey
-}> = /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
-  id: 'OsUpdateSignerKeyParams',
-})
 export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: typeof LocaleString
@@ -4126,12 +4121,6 @@ export const SetMainStatus: z.ZodObject<{
   status: typeof SetMainStatusStatus
 }> = /* @__PURE__ */ object({ status: SetMainStatusStatus }).meta({
   id: 'SetMainStatus',
-})
-export const SetOsUpdateSignerParams: z.ZodObject<{
-  key: typeof AnyVerifyingKey
-  label: z.ZodString
-}> = /* @__PURE__ */ object({ key: AnyVerifyingKey, label: z.string() }).meta({
-  id: 'SetOsUpdateSignerParams',
 })
 export const SetOutboundGatewayParams: z.ZodObject<{
   package: typeof PackageId
@@ -6797,6 +6786,17 @@ export const ServerInfo: z.ZodObject<{
     z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<typeof AnyVerifyingKey>>>,
     z.ZodRecord<z.ZodString, z.ZodArray<typeof AnyVerifyingKey>>
   >
+  /**
+   * Connected registries; written only through `server.registries`.
+   */
+  registries: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodString>>
+  >
+  /**
+   * Registry that provides StartOS updates; always connected.
+   */
+  osRegistry: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
   pubkey: z.ZodString
   caFingerprint: z.ZodString
   ntpSynced: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
@@ -6855,6 +6855,22 @@ export const ServerInfo: z.ZodObject<{
   ).meta({
     description: 'Last observed trust proposals from connected registries.',
   }),
+  /**
+   * Connected registries; written only through `server.registries`.
+   */
+  registries: wire(
+    z.record(z.string(), z.string().nullable()).optional(),
+    z.record(z.string(), z.string().nullable()),
+  ).meta({
+    description:
+      'Connected registries; written only through `server.registries`.',
+  }),
+  /**
+   * Registry that provides StartOS updates; always connected.
+   */
+  osRegistry: wire(z.string().optional(), z.string()).meta({
+    description: 'Registry that provides StartOS updates; always connected.',
+  }),
   pubkey: z.string(),
   caFingerprint: z.string(),
   ntpSynced: wire(z.boolean().optional(), z.boolean()),
@@ -6889,6 +6905,9 @@ export const Public: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof OsUpdateCache>>,
     z.ZodNullable<typeof OsUpdateCache>
   >
+  /**
+   * UI-owned state; backend domain logic accesses its contents only during migrations.
+   */
   ui: z.ZodUnknown
 }> = /* @__PURE__ */ object({
   serverInfo: ServerInfo,
@@ -6901,7 +6920,13 @@ export const Public: z.ZodObject<{
     OsUpdateCache.nullable().optional(),
     OsUpdateCache.nullable(),
   ),
-  ui: z.unknown(),
+  /**
+   * UI-owned state; backend domain logic accesses its contents only during migrations.
+   */
+  ui: z.unknown().meta({
+    description:
+      'UI-owned state; backend domain logic accesses its contents only during migrations.',
+  }),
 }).meta({
   id: 'Public',
 })

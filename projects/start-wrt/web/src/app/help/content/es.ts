@@ -188,14 +188,14 @@ Las VPN salientes enrutan tu tráfico de internet a través de túneles cifrados
 
 ### Encadenamiento de VPN
 
-Enruta una VPN a través de otra para mayor privacidad. Tu tráfico sale a través de varios servidores, lo que dificulta rastrearlo hasta ti. Ten en cuenta que el encadenamiento aumenta la latencia.
+Enruta una VPN a través de otra para mayor privacidad. Tu tráfico pasa por varios servidores, lo que dificulta rastrearlo hasta ti. Ten en cuenta que el encadenamiento aumenta la latencia.
 
 ### Primeros pasos
 
 Sube un archivo de configuración de WireGuard de tu proveedor de VPN (Mullvad, ProtonVPN, IVPN, etc.) para crear un nuevo cliente VPN.`,
   '/outbound/vpn': `## VPN salientes
 
-<details><summary>Etiqueta</summary> Un nombre amigable para identificar esta conexión VPN. Usa algo descriptivo como «Mullvad Suecia» o «VPN del trabajo». </details> <details><summary>Se conecta a</summary> Hacia dónde debe enrutarse el tráfico de esta VPN:<ul><li><b>Internet:</b> El tráfico sale directamente a internet a través de esta VPN.</li><li><b>Otra VPN:</b> Encadena primero a través de otra VPN para mayor privacidad. Tu tráfico se cifrará varias veces y saldrá a través de varios servidores.</li></ul><b>Nota:</b> Encadenar VPN aumenta la latencia y puede reducir las velocidades. </details> <details><summary>Servidores DNS</summary> Resolutores a los que acceden a través del túnel los perfiles enrutados por esta VPN sin servidores DNS propios. Déjelo en blanco para usar los servidores DNS personalizados del sistema a través del túnel o, si el sistema usa el DNS de su proveedor de Internet, los servidores de este fuera del túnel. </details> <details><summary>Ruta de conexión</summary> Muestra la ruta completa que sigue tu tráfico desde esta VPN hasta internet. Por ejemplo: Mullvad → Proton → Internet significa que el tráfico es cifrado por Mullvad, enviado a través de Proton y luego sale a internet.</details>`,
+<details><summary>Etiqueta</summary> Un nombre amigable para identificar esta conexión VPN. Usa algo descriptivo como «Mullvad Suecia» o «VPN del trabajo». </details> <details><summary>Se conecta a través de</summary> Cómo llega esta VPN a su propio servidor VPN:<ul><li><b>Internet:</b> Directamente por internet.</li><li><b>Otra VPN:</b> A través del túnel de la otra VPN, para mayor privacidad. Tu tráfico se cifra varias veces y pasa por varios servidores; luego sale a internet desde el servidor de esta VPN.</li></ul><b>Nota:</b> Encadenar VPN aumenta la latencia y puede reducir las velocidades. </details> <details><summary>Servidores DNS</summary> Resolutores a los que acceden a través del túnel los perfiles enrutados por esta VPN sin servidores DNS propios. Déjelo en blanco para usar los servidores DNS personalizados del sistema a través del túnel o, si el sistema usa el DNS de su proveedor de Internet, los servidores de este fuera del túnel. </details> <details><summary>Ruta de conexión</summary> Muestra los túneles cifrados por los que viaja tu tráfico hasta internet. Cada túnel empieza en el router y termina en su servidor VPN. Cuando esta VPN se conecta a través de otra, su túnel va dentro del de la otra: el servidor de esa VPN abre el túnel exterior y pasa el interior al servidor de esta VPN, desde donde tu tráfico sale a internet.</details>`,
   '/outbound/dialog': `## VPN salientes
 
 Los clientes VPN crean una conexión saliente a un servidor VPN, permitiendo a los dispositivos enviar y recibir datos como si estuvieran conectados directamente a la red privada. Enmascara tu dirección IP, sortea restricciones geográficas y protege los datos sensibles en redes Wi-Fi públicas.
@@ -208,9 +208,9 @@ Un nombre claro y descriptivo para la conexión VPN, como «Mullvad Suecia» o �
 
 Sube un archivo **.conf** de WireGuard de tu proveedor de VPN. Este archivo contiene la dirección del servidor, las claves y los ajustes de conexión necesarios para establecer el túnel. La mayoría de los proveedores (Mullvad, ProtonVPN, IVPN, etc.) ofrecen descargas de archivos de configuración de WireGuard desde su sitio web o aplicación.
 
-### Destino
+### Se conecta a través de
 
-El siguiente salto en la ruta de una conexión VPN en capas.
+Cómo llega esta VPN a su propio servidor VPN: directamente por internet o a través del túnel de otra VPN.
 
 ### Servidores DNS
 
