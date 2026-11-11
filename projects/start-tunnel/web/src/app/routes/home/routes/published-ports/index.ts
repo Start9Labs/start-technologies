@@ -31,7 +31,13 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { ApiService } from 'src/app/services/api/api.service'
 import { TunnelData } from 'src/app/services/patch-db/data-model'
 
-import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
+import {
+  FORWARD_PROTOCOL_LABELS,
+  mapForwards,
+  mapPinholes,
+  MappedDevice,
+  MappedForward,
+} from './utils'
 
 @Component({
   template: `
@@ -64,7 +70,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
           </tr>
         </thead>
         <tbody>
-          @for (forward of manual() | tuiTableSort; track $index) {
+          @for (forward of manual() | tuiTableSort; track key(forward)) {
             <tr>
               <td tuiTd>
                 <tui-loader
@@ -88,7 +94,14 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
               <td tuiTd>{{ forward.sni || '—' }}</td>
               <td tuiTd>{{ span(forward.externalport, forward.count) }}</td>
               <td tuiTd>{{ span(forward.internalport, forward.count) }}</td>
-              <td tuiTd>{{ 'TCP/UDP' | i18n }}</td>
+              <td tuiTd>
+                {{
+                  (forward.protocol
+                    ? protocolLabels[forward.protocol]
+                    : 'TCP/UDP'
+                  ) | i18n
+                }}
+              </td>
               <td tuiTd>{{ forward.externalip }}</td>
               <td tuiTd [style.padding-inline-end.rem]="0.625">
                 <button
@@ -164,13 +177,20 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
           </tr>
         </thead>
         <tbody>
-          @for (forward of automatic() | tuiTableSort; track $index) {
+          @for (forward of automatic() | tuiTableSort; track key(forward)) {
             <tr>
               <td tuiTd>{{ forward.device.name }}</td>
               <td tuiTd>{{ forward.sni || '—' }}</td>
               <td tuiTd>{{ span(forward.externalport, forward.count) }}</td>
               <td tuiTd>{{ span(forward.internalport, forward.count) }}</td>
-              <td tuiTd>{{ 'TCP/UDP' | i18n }}</td>
+              <td tuiTd>
+                {{
+                  (forward.protocol
+                    ? protocolLabels[forward.protocol]
+                    : 'TCP/UDP'
+                  ) | i18n
+                }}
+              </td>
               <td tuiTd>{{ forward.externalip }}</td>
             </tr>
           } @empty {
@@ -295,8 +315,10 @@ export default class PublishedPorts {
   protected readonly byInternalPort: TuiComparator<MappedForward> = (a, b) =>
     Number(a.internalport) - Number(b.internalport)
 
+  protected readonly protocolLabels = FORWARD_PROTOCOL_LABELS
+
   protected key(forward: MappedForward): string {
-    return `${forward.ipVersion}:${forward.externalip}:${forward.externalport}:${forward.hostname ?? ''}`
+    return `${forward.ipVersion}:${forward.protocol ?? 'both'}:${forward.externalip}:${forward.externalport}:${forward.hostname ?? ''}`
   }
 
   // Renders a forwarded port span: a single port when count is 1, else `start-end`.
@@ -320,6 +342,7 @@ export default class PublishedPorts {
           source: `${forward.externalip}:${forward.externalport}`,
           enabled: !forward.enabled,
           hostname: forward.hostname,
+          protocol: forward.protocol ?? 'tcp',
         })
       }
     } catch (e: any) {
@@ -346,6 +369,7 @@ export default class PublishedPorts {
           source: `${forward.externalip}:${forward.externalport}`,
           label: forward.label,
           hostname: forward.hostname,
+          protocol: forward.protocol ?? 'tcp',
           pinhole:
             forward.ipVersion === 'ipv6'
               ? {
@@ -373,6 +397,8 @@ export default class PublishedPorts {
             await this.api.rpc.portForward.remove({
               source: `${forward.externalip}:${forward.externalport}`,
               hostname: forward.hostname,
+              protocol: forward.protocol ?? 'tcp',
+              fallback: forward.protocol !== null && forward.hostname === null,
             })
           }
         }),

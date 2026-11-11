@@ -90,6 +90,17 @@ export const mockTunnelData: TunnelData = {
   portForwards: {
     '203.0.113.42:443': {
       kind: 'sni',
+      udp: {
+        routes: {
+          'blog.example.com': {
+            target: '10.59.0.2:8443',
+            label: 'QUIC blog',
+            enabled: true,
+            auto: false,
+          },
+        },
+        fallback: null,
+      },
       routes: {
         'cloud.example.com': {
           target: '10.59.0.2:443',
@@ -110,8 +121,6 @@ export const mockTunnelData: TunnelData = {
           auto: false,
         },
       },
-      // Hostname-less fallback: catches bare-IP / non-matching-SNI traffic on
-      // this shared port.
       fallback: {
         target: '10.59.0.2:443',
         label: 'Server One (fallback)',

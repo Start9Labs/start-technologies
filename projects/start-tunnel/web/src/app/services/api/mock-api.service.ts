@@ -223,22 +223,47 @@ export class MockApiService extends ApiService {
       const existing = forwards[source]
 
       if (params.sni?.length) {
-        const routes: { [hostname: string]: T.Tunnel.SniRoute } =
-          existing?.kind === 'sni' ? { ...existing.routes } : {}
-
-        for (const hostname of params.sni ?? []) {
-          routes[hostname] = {
+        if (
+          existing?.kind === 'dnat' &&
+          (existing.count !== 1 ||
+            existing.target.split(':')[0] !== params.target.split(':')[0])
+        )
+          throw new Error('Port already mapped')
+        const fallback =
+          existing?.kind === 'dnat'
+            ? {
+                target: existing.target,
+                label: existing.label,
+                enabled: existing.enabled,
+                auto: existing.auto,
+              }
+            : null
+        const value: Extract<T.Tunnel.PortForward, { kind: 'sni' }> =
+          existing?.kind === 'sni'
+            ? structuredClone(existing)
+            : {
+                kind: 'sni',
+                routes: {},
+                fallback,
+                udp: { routes: {}, fallback: fallback && { ...fallback } },
+              }
+        const bindings = params.protocol === 'udp' ? value.udp : value
+        for (const hostname of params.sni) {
+          const name = hostname.toLowerCase()
+          const old = bindings.routes[name]
+          if (
+            old &&
+            old.target !== params.target &&
+            (old.auto ||
+              old.target.split(':')[0] !== params.target.split(':')[0])
+          )
+            throw new Error('Hostname already mapped')
+          bindings.routes[name] = {
             target: params.target,
-            label: params.label || null,
-            enabled: true,
-            auto: false,
+            label: old?.label ?? params.label ?? null,
+            enabled: old?.enabled ?? true,
+            auto: old?.auto ?? false,
           }
-        }
-
-        const value: T.Tunnel.PortForward = {
-          kind: 'sni',
-          routes,
-          fallback: null,
         }
         forwards[source] = value
         this.mockRevision([
@@ -248,7 +273,34 @@ export class MockApiService extends ApiService {
             value,
           },
         ])
+      } else if (existing?.kind === 'sni' && (params.count ?? 1) === 1) {
+        for (const bindings of [existing, existing.udp]) {
+          if (
+            bindings.fallback &&
+            bindings.fallback.target !== params.target &&
+            (bindings.fallback.auto ||
+              bindings.fallback.target.split(':')[0] !==
+                params.target.split(':')[0])
+          )
+            throw new Error('Port already mapped')
+        }
+        for (const bindings of [existing, existing.udp]) {
+          bindings.fallback = {
+            target: params.target,
+            label: bindings.fallback?.label ?? params.label ?? null,
+            enabled: bindings.fallback?.enabled ?? true,
+            auto: bindings.fallback?.auto ?? false,
+          }
+        }
+        this.mockRevision([
+          {
+            op: PatchOp.REPLACE,
+            path: '/portForwards/' + source,
+            value: existing,
+          },
+        ])
       } else {
+        if (existing) throw new Error('Port already mapped')
         const value: T.Tunnel.PortForward = {
           kind: 'dnat',
           target: params.target,
@@ -275,14 +327,18 @@ export class MockApiService extends ApiService {
       const entry = mockTunnelData.portForwards[params.source]
       if (!entry) return null
 
-      if (params.hostname && entry.kind === 'sni') {
-        const route = entry.routes[params.hostname]
-        if (route) route.label = params.label ?? null
+      if (entry.kind === 'sni') {
+        const bindings = params.protocol === 'udp' ? entry.udp : entry
+        const route = params.hostname
+          ? bindings.routes[params.hostname.toLowerCase()]
+          : bindings.fallback
+        if (!route) return null
+        route.label = params.label ?? null
         this.mockRevision([
           {
             op: PatchOp.REPLACE,
-            path: `/portForwards/${params.source}/routes/${params.hostname}/label`,
-            value: params.label,
+            path: '/portForwards/' + params.source,
+            value: entry,
           },
         ])
       } else if (entry.kind === 'dnat') {
@@ -304,14 +360,18 @@ export class MockApiService extends ApiService {
       const entry = mockTunnelData.portForwards[params.source]
       if (!entry) return null
 
-      if (params.hostname && entry.kind === 'sni') {
-        const route = entry.routes[params.hostname]
-        if (route) route.enabled = params.enabled
+      if (entry.kind === 'sni') {
+        const bindings = params.protocol === 'udp' ? entry.udp : entry
+        const route = params.hostname
+          ? bindings.routes[params.hostname.toLowerCase()]
+          : bindings.fallback
+        if (!route) return null
+        route.enabled = params.enabled
         this.mockRevision([
           {
             op: PatchOp.REPLACE,
-            path: `/portForwards/${params.source}/routes/${params.hostname}/enabled`,
-            value: params.enabled,
+            path: '/portForwards/' + params.source,
+            value: entry,
           },
         ])
       } else if (entry.kind === 'dnat') {
@@ -333,28 +393,34 @@ export class MockApiService extends ApiService {
       const entry = mockTunnelData.portForwards[params.source]
       if (!entry) return null
 
-      if (params.hostname && entry.kind === 'sni') {
-        delete entry.routes[params.hostname]
-
-        if (Object.keys(entry.routes).length) {
+      if (entry.kind === 'sni') {
+        const bindings = params.protocol === 'udp' ? entry.udp : entry
+        if (params.fallback) bindings.fallback = null
+        else if (params.hostname)
+          delete bindings.routes[params.hostname.toLowerCase()]
+        else {
+          bindings.routes = {}
+          bindings.fallback = null
+        }
+        if (
+          [entry, entry.udp].some(
+            b => Object.keys(b.routes).length || b.fallback,
+          )
+        ) {
           this.mockRevision([
             {
-              op: PatchOp.REMOVE,
-              path: `/portForwards/${params.source}/routes/${params.hostname}`,
+              op: PatchOp.REPLACE,
+              path: '/portForwards/' + params.source,
+              value: entry,
             },
           ])
-        } else {
-          delete mockTunnelData.portForwards[params.source]
-          this.mockRevision([
-            { op: PatchOp.REMOVE, path: `/portForwards/${params.source}` },
-          ])
+          return null
         }
-      } else {
-        delete mockTunnelData.portForwards[params.source]
-        this.mockRevision([
-          { op: PatchOp.REMOVE, path: `/portForwards/${params.source}` },
-        ])
       }
+      delete mockTunnelData.portForwards[params.source]
+      this.mockRevision([
+        { op: PatchOp.REMOVE, path: '/portForwards/' + params.source },
+      ])
 
       return null
     },

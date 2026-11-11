@@ -30,6 +30,7 @@ use crate::middleware::auth::signature::{NonceCache, url_host_str};
 use crate::middleware::cors::Cors;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord, UpdateAuth};
 use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6};
+use crate::net::port_map::TransportProtocol;
 use crate::net::static_server::{EMPTY_DIR, UiContext};
 use crate::prelude::*;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
@@ -368,27 +369,16 @@ impl TunnelContext {
                             .await?,
                     );
                 }
-                PortForward::Sni { routes, fallback } => {
-                    for (hostname, route) in routes {
-                        if !route.enabled {
-                            continue;
-                        }
-                        if let Err(code) = sni.register(
-                            *from.ip(),
-                            from.port(),
-                            &[hostname.clone()],
-                            route.target,
-                            None,
-                        ) {
-                            tracing::warn!(
-                                "failed to restore SNI route {hostname} on {from}: code {code}"
-                            );
-                        }
-                    }
-                    if let Some(f) = fallback.filter(|f| f.enabled) {
-                        if let Err(code) = sni.register_fallback(*from.ip(), from.port(), f.target)
+                PortForward::Sni { .. } => {
+                    for (protocol, hostname, route) in
+                        entry.sni_routes().filter(|(_, _, r)| r.enabled)
+                    {
+                        if let Err(code) =
+                            register_sni_route(&sni, protocol, from, hostname, route.target)
                         {
-                            tracing::warn!("failed to restore SNI fallback on {from}: code {code}");
+                            tracing::warn!(
+                                "failed to restore SNI route {hostname:?} on {from}: code {code}"
+                            );
                         }
                     }
                 }
@@ -440,30 +430,46 @@ impl TunnelContext {
     pub async fn gc_forwards(
         &self,
         keep: &BTreeSet<SocketAddrV4>,
-        dropped_sni: &[(SocketAddrV4, String, SocketAddrV4)],
-        dropped_fallbacks: &[(SocketAddrV4, SocketAddrV4)],
+        dropped_sni: &[(TransportProtocol, SocketAddrV4, String, SocketAddrV4)],
+        dropped_fallbacks: &[(TransportProtocol, SocketAddrV4, SocketAddrV4)],
     ) -> Result<(), Error> {
-        for (source, hostname, target) in dropped_sni {
-            self.sni.unregister(
+        for (protocol, source, hostname, target) in dropped_sni {
+            self.sni.unregister_transport(
+                *protocol,
                 *source.ip(),
                 source.port(),
                 std::slice::from_ref(hostname),
                 *target,
             );
         }
-        for (source, target) in dropped_fallbacks {
+        for (protocol, source, target) in dropped_fallbacks {
             self.sni
-                .unregister_fallback(*source.ip(), source.port(), *target);
+                .unregister_fallback_transport(*protocol, *source.ip(), source.port(), *target);
         }
+        use crate::tunnel::forward::lease::LeaseKey;
+        self.leases.mutate(|l| {
+            for (protocol, source, hostname, _) in dropped_sni {
+                l.remove(&LeaseKey::Sni {
+                    source: *source,
+                    hostname: hostname.clone(),
+                    protocol: *protocol,
+                });
+            }
+            for (protocol, source, _) in dropped_fallbacks {
+                l.remove(&LeaseKey::SniFallback {
+                    source: *source,
+                    protocol: *protocol,
+                });
+            }
+        });
         self.active_forwards
             .mutate(|pf| pf.retain(|k, _| keep.contains(k)));
         // Drop leases for forwards whose target is no longer a known client.
-        use crate::tunnel::forward::lease::LeaseKey;
         self.leases.mutate(|l| {
             l.retain(|k, _| match k {
-                LeaseKey::Dnat(s) | LeaseKey::Sni { source: s, .. } | LeaseKey::SniFallback(s) => {
-                    keep.contains(s)
-                }
+                LeaseKey::Dnat(s)
+                | LeaseKey::Sni { source: s, .. }
+                | LeaseKey::SniFallback { source: s, .. } => keep.contains(s),
                 LeaseKey::Pinhole(_) => true,
             })
         });
@@ -624,6 +630,9 @@ impl TunnelContext {
 
     /// Moves forwards to each target's active WAN address.
     pub async fn resync_forward_keys(&self) -> Result<(), Error> {
+        let _guard = self.forward_write_lock.lock().await;
+        use crate::tunnel::forward::lease::{self, LeaseKey};
+        let mut lease_moves = Vec::new();
         let old = self.db.peek().await.as_port_forwards().de()?.0;
 
         let mut want: BTreeMap<SocketAddrV4, PortForward> = BTreeMap::new();
@@ -639,8 +648,10 @@ impl TunnelContext {
                     let ip = crate::tunnel::forward::igd::external_ipv4(self, *target.ip())
                         .await
                         .unwrap_or(*src.ip());
+                    let key = SocketAddrV4::new(ip, src.port());
+                    lease_moves.push((LeaseKey::Dnat(*src), LeaseKey::Dnat(key)));
                     want.insert(
-                        SocketAddrV4::new(ip, src.port()),
+                        key,
                         PortForward::Dnat {
                             target: *target,
                             label: label.clone(),
@@ -650,44 +661,21 @@ impl TunnelContext {
                         },
                     );
                 }
-                PortForward::Sni { routes, fallback } => {
-                    for (host, route) in routes {
+                PortForward::Sni { .. } => {
+                    for (protocol, hostname, route) in entry.sni_routes() {
                         let ip =
                             crate::tunnel::forward::igd::external_ipv4(self, *route.target.ip())
                                 .await
                                 .unwrap_or(*src.ip());
                         let key = SocketAddrV4::new(ip, src.port());
-                        match want.entry(key).or_insert_with(|| PortForward::Sni {
-                            routes: BTreeMap::new(),
-                            fallback: None,
-                        }) {
-                            PortForward::Sni { routes, .. } => {
-                                routes.insert(host.clone(), route.clone());
-                            }
-                            PortForward::Dnat { .. } => {
-                                tracing::warn!(
-                                    "dropping SNI route {host} on {key}: external IP now collides with a DNAT forward"
-                                );
-                            }
-                        }
-                    }
-                    if let Some(f) = fallback {
-                        let ip = crate::tunnel::forward::igd::external_ipv4(self, *f.target.ip())
-                            .await
-                            .unwrap_or(*src.ip());
-                        let key = SocketAddrV4::new(ip, src.port());
-                        match want.entry(key).or_insert_with(|| PortForward::Sni {
-                            routes: BTreeMap::new(),
-                            fallback: None,
-                        }) {
-                            PortForward::Sni { fallback: fb, .. } => {
-                                *fb = Some(f.clone());
-                            }
-                            PortForward::Dnat { .. } => {
-                                tracing::warn!(
-                                    "dropping SNI fallback on {key}: external IP now collides with a DNAT forward"
-                                );
-                            }
+                        lease_moves.push((
+                            LeaseKey::sni(*src, hostname, protocol),
+                            LeaseKey::sni(key, hostname, protocol),
+                        ));
+                        if !insert_rekeyed_sni_route(&mut want, key, protocol, hostname, route) {
+                            tracing::warn!(
+                                "dropping SNI route {hostname:?} on {key}: external IP now collides with a DNAT forward"
+                            );
                         }
                     }
                 }
@@ -738,79 +726,102 @@ impl TunnelContext {
         self.forward.gc().await.log_err();
 
         self.db
-            .mutate(|db| db.as_port_forwards_mut().ser(&PortForwards(want)))
+            .mutate(|db| db.as_port_forwards_mut().ser(&PortForwards(want.clone())))
             .await
             .result?;
+        self.leases
+            .mutate(|l| lease::rekey(l, &lease_moves, &old, &want));
         Ok(())
     }
 }
+fn insert_rekeyed_sni_route(
+    forwards: &mut BTreeMap<SocketAddrV4, PortForward>,
+    source: SocketAddrV4,
+    protocol: TransportProtocol,
+    hostname: Option<&str>,
+    route: &crate::tunnel::db::SniRoute,
+) -> bool {
+    let entry = forwards
+        .entry(source)
+        .or_insert_with(PortForward::empty_sni);
+    let Some(bindings) = entry.bindings_mut(protocol) else {
+        return false;
+    };
+    match hostname {
+        Some(host) => {
+            bindings.routes.insert(host.to_owned(), route.clone());
+        }
+        None => {
+            bindings.fallback = Some(route.clone());
+        }
+    }
+    true
+}
+
+fn register_sni_route(
+    sni: &Arc<crate::tunnel::forward::sni::SniDemux>,
+    protocol: TransportProtocol,
+    source: SocketAddrV4,
+    hostname: Option<&str>,
+    target: SocketAddrV4,
+) -> Result<(), u8> {
+    match hostname {
+        Some(host) => sni.register_transport(
+            protocol,
+            *source.ip(),
+            source.port(),
+            &[host.to_owned()],
+            target,
+            None,
+        ),
+        None => sni.register_fallback_transport(protocol, *source.ip(), source.port(), target),
+    }
+}
+
 fn reconcile_sni_demux(
     sni: &Arc<crate::tunnel::forward::sni::SniDemux>,
     old: &BTreeMap<SocketAddrV4, PortForward>,
     want: &BTreeMap<SocketAddrV4, PortForward>,
 ) {
     let routes = |map: &BTreeMap<SocketAddrV4, PortForward>, enabled_only: bool| {
-        let mut out: BTreeMap<(SocketAddrV4, String), SocketAddrV4> = BTreeMap::new();
+        let mut out = BTreeMap::new();
         for (source, entry) in map {
-            if let PortForward::Sni { routes, .. } = entry {
-                for (hostname, route) in routes {
-                    if !enabled_only || route.enabled {
-                        out.insert((*source, hostname.clone()), route.target);
-                    }
+            for (protocol, hostname, route) in entry.sni_routes() {
+                if !enabled_only || route.enabled {
+                    out.insert(
+                        (protocol, *source, hostname.map(str::to_owned)),
+                        route.target,
+                    );
                 }
             }
         }
         out
     };
     let old_routes = routes(old, false);
-    let desired_routes = routes(want, true);
-    for ((source, hostname), target) in &old_routes {
-        if desired_routes.get(&(*source, hostname.clone())) != Some(target) {
-            sni.unregister(
-                *source.ip(),
-                source.port(),
-                std::slice::from_ref(hostname),
-                *target,
-            );
-        }
-    }
-    for ((source, hostname), target) in &desired_routes {
-        if let Err(code) = sni.register(
-            *source.ip(),
-            source.port(),
-            std::slice::from_ref(hostname),
-            *target,
-            None,
-        ) {
-            tracing::warn!("failed to register SNI route {hostname} on {source}: code {code}");
-        }
-    }
-
-    let fallbacks = |map: &BTreeMap<SocketAddrV4, PortForward>, enabled_only: bool| {
-        let mut out = BTreeMap::new();
-        for (source, entry) in map {
-            if let PortForward::Sni {
-                fallback: Some(fallback),
-                ..
-            } = entry
-            {
-                if !enabled_only || fallback.enabled {
-                    out.insert(*source, fallback.target);
-                }
+    let desired = routes(want, true);
+    for ((protocol, source, hostname), target) in &old_routes {
+        if desired.get(&(*protocol, *source, hostname.clone())) != Some(target) {
+            match hostname {
+                Some(host) => sni.unregister_transport(
+                    *protocol,
+                    *source.ip(),
+                    source.port(),
+                    std::slice::from_ref(host),
+                    *target,
+                ),
+                None => sni.unregister_fallback_transport(
+                    *protocol,
+                    *source.ip(),
+                    source.port(),
+                    *target,
+                ),
             }
         }
-        out
-    };
-    let old_fallbacks = fallbacks(old, false);
-    let desired_fallbacks = fallbacks(want, true);
-    for (source, target) in &old_fallbacks {
-        if desired_fallbacks.get(source) != Some(target) {
-            sni.unregister_fallback(*source.ip(), source.port(), *target);
-        }
     }
-    for (source, target) in &desired_fallbacks {
-        if let Err(code) = sni.register_fallback(*source.ip(), source.port(), *target) {
-            tracing::warn!("failed to register SNI fallback on {source}: code {code}");
+    for ((protocol, source, hostname), target) in &desired {
+        if let Err(code) = register_sni_route(sni, *protocol, *source, hostname.as_deref(), *target)
+        {
+            tracing::warn!("failed to register SNI route {hostname:?} on {source}: code {code}");
         }
     }
 }
@@ -1020,8 +1031,11 @@ mod tests {
         let forwards = BTreeMap::from([(
             source,
             PortForward::Sni {
-                routes,
-                fallback: None,
+                tcp: crate::tunnel::db::SniBindings {
+                    routes,
+                    fallback: None,
+                },
+                udp: Default::default(),
             },
         )]);
         let sni = crate::tunnel::forward::sni::SniDemux::new();
@@ -1033,5 +1047,109 @@ mod tests {
         reconcile_sni_demux(&sni, &forwards, &forwards);
         assert_eq!(sni.snapshot().len(), 1);
         assert_eq!(sni.snapshot()[0].hostname, hostname);
+    }
+    #[tokio::test]
+    async fn reconcile_removes_udp_route_without_touching_same_tcp_hostname() {
+        let socket = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let source = match socket.local_addr().unwrap() {
+            SocketAddr::V4(addr) => addr,
+            _ => unreachable!(),
+        };
+        drop(socket);
+        let hostname = "service.example.com";
+        let mut entry = PortForward::empty_sni();
+        for (protocol, target) in [
+            (TransportProtocol::Tcp, "10.59.0.2:443"),
+            (TransportProtocol::Udp, "10.59.0.3:8443"),
+        ] {
+            entry.bindings_mut(protocol).unwrap().routes.insert(
+                hostname.into(),
+                crate::tunnel::db::SniRoute {
+                    target: target.parse().unwrap(),
+                    label: None,
+                    enabled: true,
+                    auto: true,
+                },
+            );
+        }
+        let old = BTreeMap::from([(source, entry)]);
+        let sni = crate::tunnel::forward::sni::SniDemux::new();
+        reconcile_sni_demux(&sni, &BTreeMap::new(), &old);
+        assert_eq!(sni.snapshot().len(), 2);
+        let mut want = old.clone();
+        want.get_mut(&source)
+            .unwrap()
+            .bindings_mut(TransportProtocol::Udp)
+            .unwrap()
+            .routes
+            .clear();
+        reconcile_sni_demux(&sni, &old, &want);
+        let routes = sni.snapshot();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].protocol, TransportProtocol::Tcp);
+        assert_eq!(routes[0].hostname, hostname);
+        assert_eq!(routes[0].target, "10.59.0.2:443".parse().unwrap());
+    }
+    #[test]
+    fn wan_rekey_keeps_tcp_and_udp_owners_independent() {
+        let source = "203.0.113.1:443".parse().unwrap();
+        let tcp = crate::tunnel::db::SniRoute {
+            target: "10.59.0.2:443".parse().unwrap(),
+            label: Some("TLS".into()),
+            enabled: false,
+            auto: false,
+        };
+        let udp = crate::tunnel::db::SniRoute {
+            target: "10.59.0.3:8443".parse().unwrap(),
+            label: Some("QUIC".into()),
+            enabled: true,
+            auto: true,
+        };
+        let mut want = BTreeMap::new();
+        assert!(insert_rekeyed_sni_route(
+            &mut want,
+            source,
+            TransportProtocol::Tcp,
+            Some("service.example.com"),
+            &tcp,
+        ));
+        assert!(insert_rekeyed_sni_route(
+            &mut want,
+            source,
+            TransportProtocol::Udp,
+            Some("service.example.com"),
+            &udp,
+        ));
+        assert!(insert_rekeyed_sni_route(
+            &mut want,
+            source,
+            TransportProtocol::Udp,
+            None,
+            &udp
+        ));
+        assert_eq!(
+            want[&source]
+                .bindings(TransportProtocol::Udp)
+                .unwrap()
+                .routes["service.example.com"]
+                .target,
+            udp.target
+        );
+        assert_eq!(
+            want[&source]
+                .bindings(TransportProtocol::Tcp)
+                .unwrap()
+                .routes["service.example.com"]
+                .label
+                .as_deref(),
+            Some("TLS")
+        );
+        assert!(
+            want[&source]
+                .bindings(TransportProtocol::Udp)
+                .unwrap()
+                .fallback
+                .is_some()
+        );
     }
 }

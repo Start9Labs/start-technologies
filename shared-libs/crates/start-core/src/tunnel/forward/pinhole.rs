@@ -226,6 +226,15 @@ pub async fn remove_pinhole(
     auto_only: bool,
 ) -> bool {
     let _guard = ctx.forward_write_lock.lock().await;
+    remove_pinhole_locked(ctx, gua, external_port, auto_only).await
+}
+
+pub(super) async fn remove_pinhole_locked(
+    ctx: &TunnelContext,
+    gua: Ipv6Addr,
+    external_port: u16,
+    auto_only: bool,
+) -> bool {
     let key = SocketAddrV6::new(gua, external_port, 0, 0);
     let removed = ctx
         .db

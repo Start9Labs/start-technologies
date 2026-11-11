@@ -41,7 +41,8 @@
 //! # SNI hostname routes
 //!
 //! Hostname routes live in [`SniDemux`] memory and share one IPv4 WAN admission
-//! rule per port. The sweep reconciles those rules and re-keys routes when the
+//! rule per transport and port. TCP and UDP hostname ownership and leases are
+//! independent. The sweep reconciles those rules and re-keys routes when the
 //! WAN address changes. Protocol leases bound every device-created route.
 //!
 //! # LAN source-address spoofing: cross-segment closed, same-segment open
@@ -105,6 +106,7 @@ use startos::net::port_map::server::igd::{
     SCPD_PATH, SSDP_MULTICAST, SSDP_PORT,
 };
 use startos::net::port_map::server::{handle, GatewayBackend, MappingEntry, PCP_PORT};
+use startos::net::port_map::TransportProtocol;
 use startos::tunnel::forward::sni::{FallbackSource, SniDemux, SniRoute};
 use tokio::io::Interest;
 use tokio::net::UdpSocket;
@@ -199,9 +201,9 @@ impl PortControl {
                 requests: Mutex::new(Recent::default()),
                 // Reconcile all live ports because callbacks may arrive out of order.
                 sni: SniDemux::with_on_change(
-                    move |port, active| {
+                    move |port, protocol, active| {
                         if let Some(pc) = weak.upgrade() {
-                            tokio::spawn(on_sni_change(pc, port, active));
+                            tokio::spawn(on_sni_change(pc, port, protocol, active));
                         }
                     },
                     Some(Arc::new(move |ip| {
@@ -402,7 +404,8 @@ impl PortControl {
                 route.ext_port,
                 route.target
             );
-            self.sni.unregister(
+            self.sni.unregister_transport(
+                route.protocol,
                 route.ext_ip,
                 route.ext_port,
                 std::slice::from_ref(&route.hostname),
@@ -781,6 +784,7 @@ impl PortControl {
         source: SocketAddrV4,
         target: SocketAddrV4,
         hostnames: &[String],
+        protocol: TransportProtocol,
         lifetime: Option<u32>,
     ) -> Result<(), u8> {
         let _serial = self.write_serial.lock().await;
@@ -792,7 +796,7 @@ impl PortControl {
         let conflicts = uci_task(move || async move {
             let arena = Arena::new();
             let cfgs = parse_all(&uci_root, &arena, &["firewall"]).await?;
-            Ok(sni_port_conflicts(&cfgs["firewall"], port))
+            Ok(sni_port_conflicts(&cfgs["firewall"], port, protocol))
         })
         .await
         .map_err(|e| {
@@ -803,9 +807,14 @@ impl PortControl {
             return Err(RESULT_HOSTNAME_TAKEN);
         }
 
-        let registration =
-            self.sni
-                .register_transaction(*source.ip(), port, hostnames, target, lifetime)?;
+        let registration = self.sni.register_transaction_transport(
+            protocol,
+            *source.ip(),
+            port,
+            hostnames,
+            target,
+            lifetime,
+        )?;
 
         if let Err(e) = self.sync_sni_rules().await {
             self.sni.rollback(registration);
@@ -829,6 +838,7 @@ impl PortControl {
         source: SocketAddrV4,
         target: SocketAddrV4,
         hostnames: &[String],
+        protocol: TransportProtocol,
     ) {
         let _serial = self.write_serial.lock().await;
         let routes: Vec<_> = self
@@ -836,13 +846,15 @@ impl PortControl {
             .snapshot()
             .into_iter()
             .filter(|route| {
-                route.ext_port == source.port()
+                route.protocol == protocol
+                    && route.ext_port == source.port()
                     && route.target == target
                     && hostnames.contains(&route.hostname)
             })
             .collect();
         for route in routes {
-            self.sni.unregister(
+            self.sni.unregister_transport(
+                route.protocol,
                 route.ext_ip,
                 route.ext_port,
                 std::slice::from_ref(&route.hostname),
@@ -870,7 +882,8 @@ impl PortControl {
         }
         let _serial = self.write_serial.lock().await;
         for route in &routes {
-            self.sni.unregister(
+            self.sni.unregister_transport(
+                route.protocol,
                 route.ext_ip,
                 route.ext_port,
                 std::slice::from_ref(&route.hostname),
@@ -887,15 +900,16 @@ impl PortControl {
         }
     }
 
-    pub(crate) async fn displace_sni_routes(&self, ranges: &[(u16, u16)]) {
+    pub(crate) async fn displace_sni_routes(&self, ranges: &[(TransportProtocol, (u16, u16))]) {
         let routes: Vec<SniRoute> = self
             .sni
             .snapshot()
             .into_iter()
             .filter(|route| {
-                ranges
-                    .iter()
-                    .any(|range| ranges_overlap(*range, (route.ext_port, route.ext_port)))
+                ranges.iter().any(|(protocol, range)| {
+                    *protocol == route.protocol
+                        && ranges_overlap(*range, (route.ext_port, route.ext_port))
+                })
             })
             .collect();
         if routes.is_empty() {
@@ -903,7 +917,8 @@ impl PortControl {
         }
         let _serial = self.write_serial.lock().await;
         for route in &routes {
-            self.sni.unregister(
+            self.sni.unregister_transport(
+                route.protocol,
                 route.ext_ip,
                 route.ext_port,
                 std::slice::from_ref(&route.hostname),
@@ -922,11 +937,10 @@ impl PortControl {
 
     /// Mirrors Remote Access source policy for unknown SNI on port 443.
     pub(crate) async fn sync_sni_fallback(&self, wan: Ipv4Addr) {
-        let has_443 = self
-            .sni
-            .snapshot()
-            .iter()
-            .any(|r| r.ext_port == 443 && r.ext_ip == wan);
+        let has_443 =
+            self.sni.snapshot().iter().any(|r| {
+                r.protocol == TransportProtocol::Tcp && r.ext_port == 443 && r.ext_ip == wan
+            });
         let mode = {
             let uci_root = self.uci_root.clone();
             uci_task(move || async move {
@@ -962,8 +976,10 @@ impl PortControl {
     /// Assumes `write_serial` is held.
     async fn sync_sni_rules_inner(&self, reload: bool) -> Result<(), Error> {
         let routes = self.sni.snapshot();
-        let mut want: std::collections::BTreeSet<u16> =
-            routes.iter().map(|route| route.ext_port).collect();
+        let mut want: std::collections::BTreeSet<(u16, TransportProtocol)> = routes
+            .iter()
+            .map(|route| (route.ext_port, route.protocol))
+            .collect();
         let uci_root = self.uci_root.clone();
         let redirect = uci_task(move || async move {
             let arena = Arena::new();
@@ -981,7 +997,7 @@ impl PortControl {
             crate::http_redirect::set_admitted(true);
         }
         if scope.is_some() {
-            want.insert(crate::http_redirect::HTTP_PORT);
+            want.insert((crate::http_redirect::HTTP_PORT, TransportProtocol::Tcp));
         }
         self.sync_sni_rules_to(want, scope, reload).await?;
         // The gate shuts after the reload that removes the rule.
@@ -1001,7 +1017,7 @@ impl PortControl {
 
     async fn sync_sni_rules_to(
         &self,
-        want: std::collections::BTreeSet<u16>,
+        want: std::collections::BTreeSet<(u16, TransportProtocol)>,
         redirect: Option<Ipv4Addr>,
         reload: bool,
     ) -> Result<(), Error> {
@@ -1037,9 +1053,9 @@ impl PortControl {
 }
 
 /// Reconciles live ports so reordered callbacks remain idempotent.
-async fn on_sni_change(pc: Arc<PortControl>, port: u16, active: bool) {
+async fn on_sni_change(pc: Arc<PortControl>, port: u16, protocol: TransportProtocol, active: bool) {
     tracing::debug!(
-        "port-control: SNI listener on port {port} {}",
+        "port-control: SNI listener on {protocol:?} port {port} {}",
         if active { "started" } else { "stopped" }
     );
     let _serial = pc.write_serial.lock().await;
@@ -1170,10 +1186,11 @@ impl GatewayBackend for Via {
         source: SocketAddrV4,
         target: SocketAddrV4,
         hostnames: &[String],
+        protocol: TransportProtocol,
         lifetime: Option<u32>,
     ) -> Result<(), u8> {
         self.pc
-            .add_sni_route(source, target, hostnames, lifetime)
+            .add_sni_route(source, target, hostnames, protocol, lifetime)
             .await
     }
 
@@ -1182,8 +1199,11 @@ impl GatewayBackend for Via {
         source: SocketAddrV4,
         target: SocketAddrV4,
         hostnames: &[String],
+        protocol: TransportProtocol,
     ) {
-        self.pc.remove_sni_route(source, target, hostnames).await
+        self.pc
+            .remove_sni_route(source, target, hostnames, protocol)
+            .await
     }
 }
 
@@ -1296,6 +1316,7 @@ fn reserves_wan_port(firewall: &uciedit::Config<'_>, want: (u16, u16)) -> bool {
 pub(crate) struct ReservedOverlap {
     pub ports: String,
     pub held_by_sni: bool,
+    pub protocol: TransportProtocol,
 }
 
 /// Enabled IPv4 WAN-input rules overlapping the requested ports and transports.
@@ -1316,37 +1337,29 @@ pub(crate) fn wan_reserved_overlaps(
         if rule.src != "wan" || rule.dest.is_some() || rule.family.as_deref() == Some("ipv6") {
             continue;
         }
-        // fw4 treats an empty protocol list as TCP and UDP.
-        let (rule_tcp, rule_udp) = if rule.proto.is_empty() {
-            (true, true)
-        } else {
-            let any = rule
-                .proto
-                .iter()
-                .any(|p| p.eq_ignore_ascii_case("all") || p.eq_ignore_ascii_case("tcpudp"));
-            (
-                any || rule.proto.iter().any(|p| p.eq_ignore_ascii_case("tcp")),
-                any || rule.proto.iter().any(|p| p.eq_ignore_ascii_case("udp")),
-            )
-        };
-        if !((tcp && rule_tcp) || (udp && rule_udp)) {
-            continue;
-        }
         let Some(spec) = rule.dest_port.as_deref() else {
             continue;
         };
         // The redirect's rule shares the label but is a router service.
         let held_by_sni = rule._apf_label.as_deref() == Some(KIND_SNI)
             && rule.name != crate::http_redirect::RULE_NAME;
-        if parse_port_range(spec).is_some_and(|range| ranges_overlap(want, range))
-            && !overlaps
-                .iter()
-                .any(|p| p.ports == spec && p.held_by_sni == held_by_sni)
+        if !parse_port_range(spec).is_some_and(|range| ranges_overlap(want, range)) {
+            continue;
+        }
+        for (requested, protocol) in [(tcp, TransportProtocol::Tcp), (udp, TransportProtocol::Udp)]
         {
-            overlaps.push(ReservedOverlap {
-                ports: spec.to_string(),
-                held_by_sni,
-            });
+            if requested
+                && protocols_include(&rule.proto, protocol)
+                && !overlaps.iter().any(|p| {
+                    p.ports == spec && p.held_by_sni == held_by_sni && p.protocol == protocol
+                })
+            {
+                overlaps.push(ReservedOverlap {
+                    ports: spec.to_string(),
+                    held_by_sni,
+                    protocol,
+                });
+            }
         }
     }
     overlaps
@@ -1486,13 +1499,21 @@ async fn remove_auto_sections(uci_root: &Path, names: &[String]) -> Result<usize
     }
 }
 
-fn sni_section_name(port: u16) -> String {
-    format!("apf_sni_{port}")
+fn sni_section_name(port: u16, protocol: TransportProtocol) -> String {
+    match protocol {
+        TransportProtocol::Tcp => format!("apf_sni_{port}"),
+        TransportProtocol::Udp => format!("apf_sni_udp_{port}"),
+    }
 }
 
 /// The `SNI` label lets a build without the redirect purge its rule.
-fn desired_sni_rule(port: u16, redirect: Option<Ipv4Addr>) -> FirewallRule {
-    let redirect = redirect.filter(|_| port == crate::http_redirect::HTTP_PORT);
+fn desired_sni_rule(
+    port: u16,
+    protocol: TransportProtocol,
+    redirect: Option<Ipv4Addr>,
+) -> FirewallRule {
+    let redirect = redirect
+        .filter(|_| protocol == TransportProtocol::Tcp && port == crate::http_redirect::HTTP_PORT);
     FirewallRule {
         name: if redirect.is_some() {
             crate::http_redirect::RULE_NAME.into()
@@ -1500,7 +1521,7 @@ fn desired_sni_rule(port: u16, redirect: Option<Ipv4Addr>) -> FirewallRule {
             "SNI demux (hostname routes)".into()
         },
         src: "wan".into(),
-        proto: vec!["tcp".into()],
+        proto: vec![protocol.as_str().into()],
         dest_ip: redirect.map(|wan| wan.to_string()),
         dest_port: Some(port.to_string()),
         target: FirewallTarget::ACCEPT,
@@ -1520,17 +1541,21 @@ fn remote_access_fallback_source(mode: Result<&str, ()>, wan: Ipv4Addr) -> Optio
     }
 }
 
-fn protocols_include_tcp(protocols: &[String]) -> bool {
+pub(crate) fn protocols_include(protocols: &[String], transport: TransportProtocol) -> bool {
     protocols.is_empty()
         || protocols.iter().any(|protocol| {
-            protocol.eq_ignore_ascii_case("tcp")
+            protocol.eq_ignore_ascii_case(transport.as_str())
                 || protocol.eq_ignore_ascii_case("all")
                 || protocol.eq_ignore_ascii_case("tcpudp")
         })
 }
 
-/// An enabled WAN DNAT covering the external TCP port.
-pub(crate) fn wan_dnat_covers(firewall: &uciedit::Config<'_>, port: u16) -> bool {
+/// An enabled WAN DNAT covering the external transport and port.
+pub(crate) fn wan_dnat_covers(
+    firewall: &uciedit::Config<'_>,
+    port: u16,
+    protocol: TransportProtocol,
+) -> bool {
     let want = (port, port);
     firewall
         .sections
@@ -1540,7 +1565,7 @@ pub(crate) fn wan_dnat_covers(firewall: &uciedit::Config<'_>, port: u16) -> bool
             r.target == "DNAT"
                 && r.enabled.as_deref() != Some("0")
                 && r.src == "wan"
-                && protocols_include_tcp(&r.proto)
+                && protocols_include(&r.proto, protocol)
                 && r.src_dport
                     .as_deref()
                     .and_then(parse_port_range)
@@ -1548,13 +1573,19 @@ pub(crate) fn wan_dnat_covers(firewall: &uciedit::Config<'_>, port: u16) -> bool
         })
 }
 
-/// Whether the TCP port is held by a DNAT or incompatible router service.
-fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
-    if port == crate::http_redirect::HTTP_PORT && crate::http_redirect::admission_present(firewall)
+/// Whether the transport and port are held by a DNAT or incompatible router service.
+fn sni_port_conflicts(
+    firewall: &uciedit::Config<'_>,
+    port: u16,
+    protocol: TransportProtocol,
+) -> bool {
+    if protocol == TransportProtocol::Tcp
+        && port == crate::http_redirect::HTTP_PORT
+        && crate::http_redirect::admission_present(firewall)
     {
         return true;
     }
-    if wan_dnat_covers(firewall, port) {
+    if wan_dnat_covers(firewall, port, protocol) {
         return true;
     }
     let want = (port, port);
@@ -1569,7 +1600,8 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
             continue;
         }
         // Remote Access on 443 is served through the SNI fallback.
-        if port == 443
+        if protocol == TransportProtocol::Tcp
+            && port == 443
             && (rule.name.starts_with(crate::system::REMOTE_RULE_PREFIX)
                 || sec
                     .name()
@@ -1583,7 +1615,7 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
         if rule.src != "wan" || rule.dest.is_some() || rule.family.as_deref() == Some("ipv6") {
             continue;
         }
-        if !protocols_include_tcp(&rule.proto) {
+        if !protocols_include(&rule.proto, protocol) {
             continue;
         }
         if rule
@@ -1598,18 +1630,19 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
     false
 }
 
-/// Replaces SNI admission rules with one per requested port.
+/// Replaces SNI admission rules with one per requested transport and port.
 /// Returns whether UCI changed.
 async fn reconcile_sni_rules_uci(
     uci_root: &Path,
-    want: std::collections::BTreeSet<u16>,
+    want: std::collections::BTreeSet<(u16, TransportProtocol)>,
     redirect: Option<Ipv4Addr>,
 ) -> Result<bool, Error> {
     let mut retries = UCI_RETRIES;
     loop {
         let arena = Arena::new();
         let mut cfgs = parse_all(uci_root, &arena, &["firewall"]).await?;
-        let mut seen: std::collections::BTreeSet<u16> = std::collections::BTreeSet::new();
+        let mut seen: std::collections::BTreeSet<(u16, TransportProtocol)> =
+            std::collections::BTreeSet::new();
         let mut changed = false;
         cfgs["firewall"].sections.retain(|sec| {
             let Ok(rule) = sec.get::<FirewallRule>() else {
@@ -1624,21 +1657,26 @@ async fn reconcile_sni_rules_uci(
                 .and_then(parse_port_range)
                 .map(|r| r.0);
             let keep = port.is_some_and(|p| {
-                let desired = desired_sni_rule(p, redirect);
-                want.contains(&p)
+                let protocol = match rule.proto.as_slice() {
+                    [p] if p.eq_ignore_ascii_case("tcp") => TransportProtocol::Tcp,
+                    [p] if p.eq_ignore_ascii_case("udp") => TransportProtocol::Udp,
+                    _ => return false,
+                };
+                let desired = desired_sni_rule(p, protocol, redirect);
+                want.contains(&(p, protocol))
                     && rule.name == desired.name
                     && rule.dest_ip == desired.dest_ip
-                    && seen.insert(p)
+                    && seen.insert((p, protocol))
             });
             if !keep {
                 changed = true;
             }
             keep
         });
-        for port in want.iter().filter(|p| !seen.contains(p)) {
+        for (port, protocol) in want.iter().filter(|p| !seen.contains(p)) {
             cfgs["firewall"].append(
-                &desired_sni_rule(*port, redirect),
-                Some(&sni_section_name(*port)),
+                &desired_sni_rule(*port, *protocol, redirect),
+                Some(&sni_section_name(*port, *protocol)),
             )?;
             changed = true;
         }
@@ -2051,7 +2089,7 @@ async fn run_sweep(pc: Arc<PortControl>) {
 /// One automatic port use for the published-ports UI.
 #[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct AutomaticPortUse {
-    /// UCI section name (`apf_<mac>_<extport>`).
+    /// Stable identifier within the automatic-port snapshot.
     pub id: String,
     /// Which mechanism created it ("PCP", "UPnP", or "SNI").
     pub kind: String,
@@ -2063,6 +2101,7 @@ pub struct AutomaticPortUse {
     pub ports: String,
     /// External port (or range) on the WAN.
     pub public_ports: String,
+    pub protocol: crate::published_ports::Protocol,
     /// Seconds until the lease expires if not renewed (None when the daemon
     /// isn't tracking it yet, e.g. right after boot).
     pub expires_secs: Option<u64>,
@@ -2110,6 +2149,7 @@ pub(crate) async fn ip_to_mac_map(
 pub(crate) async fn sni_route_holders(
     dhcp: &uciedit::Config<'_>,
     want: (u16, u16),
+    protocol: TransportProtocol,
 ) -> (Vec<String>, Vec<String>) {
     let Some(pc) = PORT_CONTROL.get() else {
         return (Vec::new(), Vec::new());
@@ -2119,7 +2159,7 @@ pub(crate) async fn sni_route_holders(
     let mut hostnames = Vec::new();
     let mut devices = Vec::new();
     for route in pc.sni.snapshot() {
-        if !ranges_overlap(want, (route.ext_port, route.ext_port)) {
+        if route.protocol != protocol || !ranges_overlap(want, (route.ext_port, route.ext_port)) {
             continue;
         }
         if !hostnames.contains(&route.hostname) {
@@ -2164,6 +2204,14 @@ pub async fn auto_list(ctx: ServerContext) -> Result<Vec<AutomaticPortUse>, Erro
             internal_ip: r.dest_ip.clone(),
             ports: r.dest_port.clone().unwrap_or_default(),
             public_ports: r.src_dport.clone().unwrap_or_default(),
+            protocol: match (
+                protocols_include(&r.proto, TransportProtocol::Tcp),
+                protocols_include(&r.proto, TransportProtocol::Udp),
+            ) {
+                (true, false) => crate::published_ports::Protocol::Tcp,
+                (false, true) => crate::published_ports::Protocol::Udp,
+                _ => crate::published_ports::Protocol::TcpUdp,
+            },
             hostname: None,
         });
     }
@@ -2174,13 +2222,23 @@ pub async fn auto_list(ctx: ServerContext) -> Result<Vec<AutomaticPortUse>, Erro
             let target_ip = route.target.ip().to_string();
             let device_mac = ip_to_mac.get(&target_ip).cloned().unwrap_or_default();
             out.push(AutomaticPortUse {
-                id: format!("sni_{}_{}", route.ext_port, route.hostname),
+                id: format!(
+                    "sni_{}_{}_{}_{}",
+                    route.protocol.as_str(),
+                    route.ext_ip,
+                    route.ext_port,
+                    route.hostname
+                ),
                 kind: KIND_SNI.into(),
                 device_name: names.get(&device_mac).cloned(),
                 device_mac,
                 internal_ip: Some(target_ip),
                 ports: route.target.port().to_string(),
                 public_ports: route.ext_port.to_string(),
+                protocol: match route.protocol {
+                    TransportProtocol::Tcp => crate::published_ports::Protocol::Tcp,
+                    TransportProtocol::Udp => crate::published_ports::Protocol::Udp,
+                },
                 expires_secs: route.remaining_secs,
                 hostname: Some(route.hostname),
             });
@@ -2412,7 +2470,11 @@ mod tests {
         pc.sync_sni_rules().await.unwrap();
         let arena = Arena::new();
         let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
-        assert!(sni_port_conflicts(&cfgs["firewall"], 80));
+        assert!(sni_port_conflicts(
+            &cfgs["firewall"],
+            80,
+            TransportProtocol::Tcp
+        ));
         // Reported as a router service.
         assert!(
             wan_reserved_overlaps(&cfgs["firewall"], (80, 80), true, false)
@@ -2426,7 +2488,12 @@ mod tests {
         let dir = temp_root("");
         reconcile_sni_rules_uci(
             dir.path(),
-            [crate::http_redirect::HTTP_PORT, 443].into_iter().collect(),
+            [
+                (crate::http_redirect::HTTP_PORT, TransportProtocol::Tcp),
+                (443, TransportProtocol::Tcp),
+            ]
+            .into_iter()
+            .collect(),
             Some(WAN),
         )
         .await
@@ -2450,14 +2517,20 @@ mod tests {
         let dir = temp_root("");
         reconcile_sni_rules_uci(
             dir.path(),
-            [crate::http_redirect::HTTP_PORT].into_iter().collect(),
+            [(crate::http_redirect::HTTP_PORT, TransportProtocol::Tcp)]
+                .into_iter()
+                .collect(),
             None,
         )
         .await
         .unwrap();
         let arena = Arena::new();
         let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
-        assert!(!sni_port_conflicts(&cfgs["firewall"], 80));
+        assert!(!sni_port_conflicts(
+            &cfgs["firewall"],
+            80,
+            TransportProtocol::Tcp
+        ));
         assert!(
             wan_reserved_overlaps(&cfgs["firewall"], (80, 80), true, false)
                 .iter()
@@ -2468,8 +2541,10 @@ mod tests {
     #[tokio::test]
     async fn port_80_changing_hands_rewrites_its_rule() {
         let dir = temp_root("");
-        let want: std::collections::BTreeSet<u16> =
-            [crate::http_redirect::HTTP_PORT].into_iter().collect();
+        let want: std::collections::BTreeSet<(u16, TransportProtocol)> =
+            [(crate::http_redirect::HTTP_PORT, TransportProtocol::Tcp)]
+                .into_iter()
+                .collect();
         let firewall = || std::fs::read_to_string(dir.path().join("firewall")).unwrap();
 
         assert!(reconcile_sni_rules_uci(dir.path(), want.clone(), None)
@@ -3236,14 +3311,205 @@ config redirect 'dns_override_lan'
     }
 
     #[tokio::test]
+    async fn sni_transports_have_independent_owners_and_teardown() {
+        let dir = temp_root("");
+        let pc = PortControl::new(dir.path().to_path_buf());
+        let source = SocketAddrV4::new(WAN, 8443);
+        let tcp = "192.168.1.50:443".parse().unwrap();
+        let udp = "192.168.1.51:443".parse().unwrap();
+        let names = vec!["shared.example.com".to_string()];
+        pc.add_sni_route(source, tcp, &names, TransportProtocol::Tcp, Some(3600))
+            .await
+            .unwrap();
+        pc.add_sni_route(source, udp, &names, TransportProtocol::Udp, Some(3600))
+            .await
+            .unwrap();
+        assert_eq!(pc.sni.snapshot().len(), 2);
+        assert_eq!(
+            pc.add_sni_route(source, tcp, &names, TransportProtocol::Udp, Some(3600))
+                .await,
+            Err(RESULT_HOSTNAME_TAKEN)
+        );
+        pc.remove_sni_route(source, tcp, &names, TransportProtocol::Udp)
+            .await;
+        assert_eq!(pc.sni.snapshot().len(), 2);
+        pc.remove_sni_route(source, udp, &names, TransportProtocol::Udp)
+            .await;
+        let remaining = pc.sni.snapshot();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].protocol, TransportProtocol::Tcp);
+        assert_eq!(remaining[0].target, tcp);
+        let firewall = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(firewall.contains("config rule apf_sni_8443"));
+        assert!(!firewall.contains("apf_sni_udp_8443"));
+    }
+
+    #[tokio::test]
+    async fn manual_displacement_removes_only_the_selected_transport() {
+        for protocol in [TransportProtocol::Tcp, TransportProtocol::Udp] {
+            let dir = temp_root("");
+            let pc = PortControl::new(dir.path().to_path_buf());
+            let source = SocketAddrV4::new(WAN, 8443);
+            let target = "192.168.1.50:443".parse().unwrap();
+            let names = vec!["shared.example.com".to_string()];
+            for transport in [TransportProtocol::Tcp, TransportProtocol::Udp] {
+                pc.add_sni_route(source, target, &names, transport, Some(3600))
+                    .await
+                    .unwrap();
+            }
+            pc.displace_sni_routes(&[(protocol, (8443, 8443))]).await;
+            let remaining = pc.sni.snapshot();
+            assert_eq!(remaining.len(), 1);
+            assert_ne!(remaining[0].protocol, protocol);
+            let arena = Arena::new();
+            let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
+            assert!(wan_reserved_overlaps(
+                &cfgs["firewall"],
+                (8443, 8443),
+                protocol == TransportProtocol::Tcp,
+                protocol == TransportProtocol::Udp
+            )
+            .is_empty());
+            assert_eq!(
+                wan_reserved_overlaps(&cfgs["firewall"], (8443, 8443), true, true).len(),
+                1
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn forgotten_udp_owner_leaves_the_tcp_owner_reachable() {
+        let dir = temp_root("");
+        let pc = PortControl::new(dir.path().to_path_buf());
+        let source = SocketAddrV4::new(WAN, 8443);
+        let names = vec!["shared.example.com".to_string()];
+        pc.add_sni_route(
+            source,
+            "192.168.1.50:443".parse().unwrap(),
+            &names,
+            TransportProtocol::Tcp,
+            Some(3600),
+        )
+        .await
+        .unwrap();
+        pc.add_sni_route(
+            source,
+            "192.168.1.51:443".parse().unwrap(),
+            &names,
+            TransportProtocol::Udp,
+            Some(3600),
+        )
+        .await
+        .unwrap();
+        pc.remove_sni_routes_for_ips(&["192.168.1.51".into()]).await;
+        let remaining = pc.sni.snapshot();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].protocol, TransportProtocol::Tcp);
+        let firewall = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(firewall.contains("config rule apf_sni_8443"));
+        assert!(!firewall.contains("apf_sni_udp_8443"));
+    }
+
+    #[tokio::test]
+    async fn permission_revocation_removes_both_transports_for_that_device() {
+        let dir = temp_root("");
+        std::fs::write(dir.path().join("dhcp"), "config host\n\toption mac 'AA:AA:AA:AA:AA:AA'\n\toption ip '192.168.1.50'\n\toption _allow_pcp '1'\n").unwrap();
+        let pc = PortControl::new(dir.path().to_path_buf());
+        let source = SocketAddrV4::new(WAN, 8443);
+        let target = "192.168.1.50:443".parse().unwrap();
+        let names = vec!["shared.example.com".to_string()];
+        for protocol in [TransportProtocol::Tcp, TransportProtocol::Udp] {
+            pc.add_sni_route(source, target, &names, protocol, Some(3600))
+                .await
+                .unwrap();
+        }
+        pc.reap_unauthorized_sni_routes().await;
+        assert_eq!(pc.sni.snapshot().len(), 2);
+        std::fs::write(
+            dir.path().join("dhcp"),
+            "config host\n\toption mac 'AA:AA:AA:AA:AA:AA'\n\toption ip '192.168.1.50'\n",
+        )
+        .unwrap();
+        pc.reap_unauthorized_sni_routes().await;
+        assert!(pc.sni.snapshot().is_empty());
+        let firewall = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(!firewall.contains("apf_sni_"));
+    }
+
+    #[tokio::test]
+    async fn udp_expiry_and_reordered_callbacks_preserve_tcp_admission() {
+        let dir = temp_root("");
+        let pc = PortControl::new(dir.path().to_path_buf());
+        let source = SocketAddrV4::new(WAN, 8443);
+        let target = "192.168.1.50:443".parse().unwrap();
+        let names = vec!["shared.example.com".to_string()];
+        pc.add_sni_route(source, target, &names, TransportProtocol::Tcp, Some(3600))
+            .await
+            .unwrap();
+        pc.add_sni_route(source, target, &names, TransportProtocol::Udp, Some(1))
+            .await
+            .unwrap();
+        let firewall = || std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(firewall().contains("apf_sni_udp_8443"));
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        on_sni_change(pc.clone(), 8443, TransportProtocol::Udp, false).await;
+        on_sni_change(pc.clone(), 8443, TransportProtocol::Udp, true).await;
+        let remaining = pc.sni.snapshot();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].protocol, TransportProtocol::Tcp);
+        assert!(firewall().contains("config rule apf_sni_8443"));
+        assert!(!firewall().contains("apf_sni_udp_8443"));
+    }
+
+    #[tokio::test]
+    async fn sni_firewall_conflicts_are_transport_specific() {
+        let dir = temp_root(MANUAL_FW);
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
+        assert!(sni_port_conflicts(
+            &cfgs["firewall"],
+            443,
+            TransportProtocol::Tcp
+        ));
+        assert!(!sni_port_conflicts(
+            &cfgs["firewall"],
+            443,
+            TransportProtocol::Udp
+        ));
+        drop(cfgs);
+        std::fs::write(
+            dir.path().join("firewall"),
+            MANUAL_FW.replace("'tcp'", "'udp'"),
+        )
+        .unwrap();
+        let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
+        assert!(!sni_port_conflicts(
+            &cfgs["firewall"],
+            443,
+            TransportProtocol::Tcp
+        ));
+        assert!(sni_port_conflicts(
+            &cfgs["firewall"],
+            443,
+            TransportProtocol::Udp
+        ));
+    }
+
+    #[tokio::test]
     async fn sni_route_registers_and_admits_inline() {
         let dir = temp_root("");
         let pc = PortControl::new(dir.path().to_path_buf());
         let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443);
         let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 443);
-        pc.add_sni_route(source, target, &["nas.example.com".to_string()], Some(3600))
-            .await
-            .unwrap();
+        pc.add_sni_route(
+            source,
+            target,
+            &["nas.example.com".to_string()],
+            TransportProtocol::Tcp,
+            Some(3600),
+        )
+        .await
+        .unwrap();
 
         let snap = pc.sni.snapshot();
         assert_eq!(snap.len(), 1);
@@ -3263,6 +3529,7 @@ config redirect 'dns_override_lan'
             source,
             target2,
             &["cloud.example.com".to_string()],
+            TransportProtocol::Tcp,
             Some(3600),
         )
         .await
@@ -3300,9 +3567,15 @@ config host
             (b, "b.example.com"),
             (stray, "c.example.com"),
         ] {
-            pc.add_sni_route(source, target, &[host.to_string()], Some(3600))
-                .await
-                .unwrap();
+            pc.add_sni_route(
+                source,
+                target,
+                &[host.to_string()],
+                TransportProtocol::Tcp,
+                Some(3600),
+            )
+            .await
+            .unwrap();
         }
         assert_eq!(pc.sni.snapshot().len(), 3);
 
@@ -3347,6 +3620,7 @@ config host
     #[test]
     fn unauthorized_routes_need_a_resolved_owner() {
         let route = |ip: [u8; 4], host: &str| SniRoute {
+            protocol: TransportProtocol::Tcp,
             ext_ip: Ipv4Addr::new(203, 0, 113, 7),
             ext_port: 443,
             hostname: host.to_string(),
@@ -3379,7 +3653,13 @@ config host
         let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 443);
         let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 60), 443);
         let err = pc
-            .add_sni_route(source, target, &["a.example.com".to_string()], Some(3600))
+            .add_sni_route(
+                source,
+                target,
+                &["a.example.com".to_string()],
+                TransportProtocol::Tcp,
+                Some(3600),
+            )
             .await
             .unwrap_err();
         assert_eq!(err, RESULT_HOSTNAME_TAKEN);
@@ -3396,6 +3676,7 @@ config host
                 ssh,
                 SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 60), 22),
                 &["a.example.com".to_string()],
+                TransportProtocol::Tcp,
                 Some(3600),
             )
             .await
@@ -3407,6 +3688,7 @@ config host
             wg,
             SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 60), 51820),
             &["b.example.com".to_string()],
+            TransportProtocol::Tcp,
             Some(3600),
         )
         .await
@@ -3420,16 +3702,19 @@ config host
         let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
         let fw = &cfgs["firewall"];
         assert!(
-            !sni_port_conflicts(fw, 443),
+            !sni_port_conflicts(fw, 443, TransportProtocol::Tcp),
             "RA's 443 rides the UI fallback"
         );
-        assert!(sni_port_conflicts(fw, 22), "RA's SSH keeps its refusal");
+        assert!(
+            sni_port_conflicts(fw, 22, TransportProtocol::Tcp),
+            "RA's SSH keeps its refusal"
+        );
 
         let dir = temp_root(MANUAL_FW);
         let arena = Arena::new();
         let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
         assert!(
-            sni_port_conflicts(&cfgs["firewall"], 443),
+            sni_port_conflicts(&cfgs["firewall"], 443, TransportProtocol::Tcp),
             "a manual DNAT on 443 is not Remote Access"
         );
     }
@@ -3450,6 +3735,7 @@ config host
             SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443),
             SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 60), 8443),
             &["tcp.example.com".to_string()],
+            TransportProtocol::Tcp,
             Some(3600),
         )
         .await
@@ -3485,9 +3771,15 @@ config host
         let pc = PortControl::new(dir.path().to_path_buf());
         let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443);
         let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 443);
-        pc.add_sni_route(source, target, &["nas.example.com".to_string()], Some(3600))
-            .await
-            .unwrap();
+        pc.add_sni_route(
+            source,
+            target,
+            &["nas.example.com".to_string()],
+            TransportProtocol::Tcp,
+            Some(3600),
+        )
+        .await
+        .unwrap();
 
         let outcome = apply_forward_uci(
             dir.path(),
@@ -3511,16 +3803,23 @@ config host
         let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443);
         let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 443);
         let hostnames = vec!["nas.example.com".to_string()];
-        pc.add_sni_route(source, target, &hostnames, Some(3600))
-            .await
-            .unwrap();
+        pc.add_sni_route(
+            source,
+            target,
+            &hostnames,
+            TransportProtocol::Tcp,
+            Some(3600),
+        )
+        .await
+        .unwrap();
 
         let via = Via {
             pc: pc.clone(),
             kind: KIND_PCP,
             arrival: Arrival::Unchecked,
         };
-        via.remove_sni_forward(source, target, &hostnames).await;
+        via.remove_sni_forward(source, target, &hostnames, TransportProtocol::Tcp)
+            .await;
 
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
         assert!(!written.contains("apf_sni_8443"));
@@ -3533,14 +3832,26 @@ config host
         let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443);
         let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 443);
         let hostnames = vec!["nas.example.com".to_string()];
-        pc.add_sni_route(source, target, &hostnames, Some(3600))
-            .await
-            .unwrap();
+        pc.add_sni_route(
+            source,
+            target,
+            &hostnames,
+            TransportProtocol::Tcp,
+            Some(3600),
+        )
+        .await
+        .unwrap();
         std::fs::remove_file(dir.path().join("firewall")).unwrap();
         std::fs::create_dir(dir.path().join("firewall")).unwrap();
 
         assert!(pc
-            .add_sni_route(source, target, &hostnames, Some(3600))
+            .add_sni_route(
+                source,
+                target,
+                &hostnames,
+                TransportProtocol::Tcp,
+                Some(3600)
+            )
             .await
             .is_err());
         assert_eq!(pc.sni.snapshot().len(), 1);
@@ -3550,7 +3861,13 @@ config host
         std::fs::create_dir(missing.path().join("firewall")).unwrap();
         let fresh = PortControl::new(missing.path().to_path_buf());
         assert!(fresh
-            .add_sni_route(source, target, &hostnames, Some(3600))
+            .add_sni_route(
+                source,
+                target,
+                &hostnames,
+                TransportProtocol::Tcp,
+                Some(3600)
+            )
             .await
             .is_err());
         assert!(fresh.sni.snapshot().is_empty());
@@ -3562,11 +3879,18 @@ config host
         let pc = PortControl::new(dir.path().to_path_buf());
         let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443);
         let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 443);
-        pc.add_sni_route(source, target, &["nas.example.com".to_string()], Some(3600))
-            .await
-            .unwrap();
+        pc.add_sni_route(
+            source,
+            target,
+            &["nas.example.com".to_string()],
+            TransportProtocol::Tcp,
+            Some(3600),
+        )
+        .await
+        .unwrap();
 
-        pc.displace_sni_routes(&[(8443, 8443)]).await;
+        pc.displace_sni_routes(&[(TransportProtocol::Tcp, (8443, 8443))])
+            .await;
 
         assert!(pc.sni.snapshot().is_empty());
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
@@ -3579,9 +3903,15 @@ config host
         let pc = PortControl::new(dir.path().to_path_buf());
         let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443);
         let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 443);
-        pc.add_sni_route(source, target, &["nas.example.com".to_string()], Some(3600))
-            .await
-            .unwrap();
+        pc.add_sni_route(
+            source,
+            target,
+            &["nas.example.com".to_string()],
+            TransportProtocol::Tcp,
+            Some(3600),
+        )
+        .await
+        .unwrap();
 
         pc.remove_sni_routes_for_ips(&["192.168.1.50".to_string()])
             .await;
@@ -3625,9 +3955,15 @@ config host
 
         let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 8443);
         let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 443);
-        pc.add_sni_route(source, target, &["nas.example.com".to_string()], Some(3600))
-            .await
-            .unwrap();
+        pc.add_sni_route(
+            source,
+            target,
+            &["nas.example.com".to_string()],
+            TransportProtocol::Tcp,
+            Some(3600),
+        )
+        .await
+        .unwrap();
         std::fs::write(dir.path().join("firewall"), "").unwrap();
         pc.sni_maintain().await;
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();

@@ -34,7 +34,12 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { i18nKey } from 'src/app/i18n/i18n.providers'
 import { ApiService } from 'src/app/services/api/api.service'
 
-import { MappedDevice, PublishedPortsData } from './utils'
+import {
+  FORWARD_PROTOCOL_LABELS,
+  ForwardProtocol,
+  MappedDevice,
+  PublishedPortsData,
+} from './utils'
 
 // A range counts up from both the external and internal port, so neither side
 // may run past the u16 port space. Mirrors the server-side guard in add_forward.
@@ -172,6 +177,17 @@ const IP_VERSION: Record<string, i18nKey> = {
           <tui-icon [tuiTooltip]="hostnameHint | i18n" />
         </tui-textfield>
       }
+      @if (form.value.ipVersion !== 'ipv6' && !isRange && form.value.sni) {
+        <fieldset>
+          <legend>{{ 'Protocol' | i18n }}</legend>
+          <tui-radio-list
+            size="s"
+            formControlName="protocol"
+            [items]="protocols"
+            [itemContent]="protocolLabel"
+          />
+        </fieldset>
+      }
       <footer>
         <button tuiButton [disabled]="form.invalid" (click)="onSave()">
           {{ 'Save' | i18n }}
@@ -209,7 +225,7 @@ export class PublishedPortsAdd {
   private readonly i18n = inject(i18nPipe)
 
   protected readonly hostnameHint =
-    'Only supported for SSL/TLS services — the gateway routes by the TLS SNI, so several hostnames can share one external port. IPv4 only. Leave blank for a plain published port.'
+    'Routes TLS over TCP or QUIC over UDP by hostname. TCP and UDP mappings are independent. IPv4 only. Leave blank to publish both transports without hostname routing.'
 
   protected readonly countHint =
     'Publish this many consecutive ports, counting up from the external and internal ports above. Leave at 1 for a single port. SNI hostnames are not supported for ranges.'
@@ -217,6 +233,10 @@ export class PublishedPortsAdd {
   protected readonly mobile = inject(WA_IS_MOBILE)
   protected readonly context =
     injectContext<TuiDialogContext<void, PublishedPortsData>>()
+
+  protected readonly protocols: readonly ForwardProtocol[] = ['tcp', 'udp']
+  protected readonly protocolLabel = (ctx: TuiContext<ForwardProtocol>) =>
+    this.i18n.transform(FORWARD_PROTOCOL_LABELS[ctx.$implicit])
 
   protected readonly ipVersionValues = ['ipv4', 'ipv6', 'both'] as const
   protected readonly ipVersionLabel = (ctx: TuiContext<string>) =>
@@ -230,6 +250,7 @@ export class PublishedPortsAdd {
       internalport: [null as number | null, Validators.required],
       ipVersion: ['ipv4' as 'ipv4' | 'ipv6' | 'both'],
       sni: [''],
+      protocol: ['tcp' as ForwardProtocol],
       count: [
         1,
         [Validators.required, Validators.min(1), Validators.max(65535)],
@@ -268,8 +289,16 @@ export class PublishedPortsAdd {
       return
     }
 
-    const { label, externalport, device, internalport, sni, count, ipVersion } =
-      this.form.getRawValue()
+    const {
+      label,
+      externalport,
+      device,
+      internalport,
+      sni,
+      count,
+      ipVersion,
+      protocol,
+    } = this.form.getRawValue()
 
     const isRange = count > 1
     // SNI demux is IPv4-only and per-port; it applies to the v4 side even in
@@ -287,6 +316,7 @@ export class PublishedPortsAdd {
           target: `${device!.ip}:${internalport}`,
           label,
           sni: hostname ? [hostname] : [],
+          protocol: hostname ? protocol : 'tcp',
           count,
         })
       }

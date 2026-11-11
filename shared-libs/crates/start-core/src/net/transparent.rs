@@ -5,7 +5,7 @@
 
 use std::net::SocketAddr;
 
-use tokio::net::{TcpSocket, TcpStream};
+use tokio::net::{TcpSocket, TcpStream, UdpSocket};
 use tokio::process::Command;
 
 #[cfg(target_os = "linux")]
@@ -79,9 +79,27 @@ pub fn divert_mark_rule() -> String {
 }
 
 fn divert_mark_rule_family(family: &str) -> String {
+    crate::net::port_map::TransportProtocol::ALL
+        .map(|protocol| divert_mark_rule_transport(family, protocol))
+        .concat()
+}
+
+fn divert_mark_rule_transport(
+    family: &str,
+    protocol: crate::net::port_map::TransportProtocol,
+) -> String {
+    let protocol = protocol.as_str();
     format!(
-        "add rule {family} startos mangle_prerouting meta l4proto tcp socket transparent 1 meta mark set {DIVERT_MARK:#010x} comment \"sni-divert\"\n"
+        "add rule {family} startos mangle_prerouting meta l4proto {protocol} socket transparent 1 meta mark set {DIVERT_MARK:#010x} comment \"sni-divert-{protocol}\"\n"
     )
+}
+
+fn missing_divert_mark_rules(family: &str, chain: &str) -> String {
+    crate::net::port_map::TransportProtocol::ALL
+        .into_iter()
+        .filter(|protocol| !chain.contains(&format!("\"sni-divert-{}\"", protocol.as_str())))
+        .map(|protocol| divert_mark_rule_transport(family, protocol))
+        .collect()
 }
 
 /// Opens an unbound socket configured for source-preserving egress.
@@ -133,6 +151,66 @@ pub async fn transparent_connect(
     let sock = transparent_socket(client, target)?;
     sock.bind(client)?;
     sock.connect(target).await
+}
+
+#[cfg(target_os = "linux")]
+static UDP_TUPLES: std::sync::OnceLock<
+    crate::util::sync::SyncMutex<std::collections::BTreeSet<(SocketAddr, SocketAddr)>>,
+> = std::sync::OnceLock::new();
+
+/// Opens a connected UDP socket bound to the client's source address.
+/// The caller must retain the tuple reservation until it drops the socket.
+/// Identical upstream four-tuples cannot serve different external endpoints.
+#[cfg(target_os = "linux")]
+pub async fn transparent_udp_connect(
+    client: SocketAddr,
+    target: SocketAddr,
+) -> std::io::Result<(UdpSocket, crate::util::GeneralBoxedGuard)> {
+    let tuples = UDP_TUPLES.get_or_init(Default::default);
+    if !tuples.mutate(|tuples| tuples.insert((client, target))) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AddrInUse,
+            "transparent UDP upstream four-tuple already in use",
+        ));
+    }
+    let reservation = crate::util::GeneralBoxedGuard::new(move || {
+        tuples.mutate(|tuples| {
+            tuples.remove(&(client, target));
+        });
+    });
+    let domain = match (client, target) {
+        (SocketAddr::V4(_), SocketAddr::V4(_)) => socket2::Domain::IPV4,
+        (SocketAddr::V6(_), SocketAddr::V6(_)) => socket2::Domain::IPV6,
+        _ => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "transparent egress needs one IP family",
+            ));
+        }
+    };
+    let socket = socket2::Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))?;
+    if client.is_ipv4() {
+        socket.set_ip_transparent_v4(true)?;
+    } else {
+        socket.set_ip_transparent_v6(true)?;
+    }
+    socket.set_reuse_address(true)?;
+    socket.set_nonblocking(true)?;
+    socket.bind(&client.into())?;
+    let socket = UdpSocket::from_std(socket.into())?;
+    socket.connect(target).await?;
+    Ok((socket, reservation))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub async fn transparent_udp_connect(
+    _client: SocketAddr,
+    _target: SocketAddr,
+) -> std::io::Result<(UdpSocket, crate::util::GeneralBoxedGuard)> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "IP_TRANSPARENT transparent egress is Linux-only",
+    ))
 }
 
 /// Whether installed diversion covers IPv6. `None` until installed.
@@ -211,12 +289,11 @@ async fn divert_infra(ipv6: bool) -> Result<bool, Error> {
             .invoke(ErrorKind::Network)
             .await
             .unwrap_or_default();
-        if !String::from_utf8_lossy(&chain).contains("sni-divert") {
+        let missing = missing_divert_mark_rules(family, &String::from_utf8_lossy(&chain));
+        if !missing.is_empty() {
             Command::new("nft")
                 .args(["-f", "-"])
-                .input(Some(&mut std::io::Cursor::new(divert_mark_rule_family(
-                    family,
-                ))))
+                .input(Some(&mut std::io::Cursor::new(missing)))
                 .invoke(ErrorKind::Network)
                 .await?;
             repaired = true;
@@ -229,6 +306,43 @@ async fn divert_infra(ipv6: bool) -> Result<bool, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transparent_replies_cover_tcp_and_udp_in_both_families() {
+        let rules = divert_mark_rule();
+        for family in ["ip", "ip6"] {
+            for protocol in ["tcp", "udp"] {
+                assert!(rules.contains(&format!("add rule {family} startos mangle_prerouting meta l4proto {protocol} socket transparent 1")));
+            }
+        }
+    }
+
+    #[test]
+    fn diversion_repairs_each_transport_independently() {
+        assert_eq!(
+            missing_divert_mark_rules("ip", ""),
+            divert_mark_rule_family("ip")
+        );
+        assert!(
+            missing_divert_mark_rules("ip", "comment \"sni-divert-tcp\"")
+                .contains("meta l4proto udp")
+        );
+        assert!(
+            !missing_divert_mark_rules("ip", "comment \"sni-divert-tcp\"")
+                .contains("meta l4proto tcp")
+        );
+        assert!(
+            missing_divert_mark_rules("ip", "comment \"sni-divert-udp\"")
+                .contains("meta l4proto tcp")
+        );
+        assert!(
+            missing_divert_mark_rules(
+                "ip",
+                "comment \"sni-divert-tcp\" comment \"sni-divert-udp\""
+            )
+            .is_empty()
+        );
+    }
 
     #[test]
     fn default_config_matches_legacy_behavior() {

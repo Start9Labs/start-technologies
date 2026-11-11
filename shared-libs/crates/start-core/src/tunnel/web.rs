@@ -69,7 +69,12 @@ impl WebserverInfo {
         for (source, forward) in &forwards.0 {
             let enabled = match forward {
                 PortForward::Dnat { enabled, .. } => *enabled,
-                PortForward::Sni { fallback, .. } => fallback.as_ref().is_some_and(|f| f.enabled),
+                PortForward::Sni { .. } => forward
+                    .bindings(crate::net::port_map::TransportProtocol::Tcp)
+                    .unwrap()
+                    .fallback
+                    .as_ref()
+                    .is_some_and(|f| f.enabled),
             };
             if enabled && self.reserves_plain_forward(*source, forward.port_span()) {
                 return Err(Error::new(
@@ -145,16 +150,19 @@ mod tests {
             .ser(&PortForwards(BTreeMap::from([(
                 "203.0.113.4:443".parse().unwrap(),
                 PortForward::Sni {
-                    routes: BTreeMap::from([(
-                        "service.example.com".to_owned(),
-                        SniRoute {
-                            target,
-                            label: None,
-                            enabled: true,
-                            auto: false,
-                        },
-                    )]),
-                    fallback: None,
+                    tcp: crate::tunnel::db::SniBindings {
+                        routes: BTreeMap::from([(
+                            "service.example.com".to_owned(),
+                            SniRoute {
+                                target,
+                                label: None,
+                                enabled: true,
+                                auto: false,
+                            },
+                        )]),
+                        fallback: None,
+                    },
+                    udp: Default::default(),
                 },
             )])))
             .unwrap();
@@ -179,21 +187,24 @@ mod tests {
                     auto: true,
                 },
                 PortForward::Sni {
-                    routes: BTreeMap::from([(
-                        "service.example.com".to_owned(),
-                        SniRoute {
+                    tcp: crate::tunnel::db::SniBindings {
+                        routes: BTreeMap::from([(
+                            "service.example.com".to_owned(),
+                            SniRoute {
+                                target,
+                                label: None,
+                                enabled: true,
+                                auto: true,
+                            },
+                        )]),
+                        fallback: Some(SniRoute {
                             target,
                             label: None,
-                            enabled: true,
+                            enabled,
                             auto: true,
-                        },
-                    )]),
-                    fallback: Some(SniRoute {
-                        target,
-                        label: None,
-                        enabled,
-                        auto: true,
-                    }),
+                        }),
+                    },
+                    udp: Default::default(),
                 },
             ] {
                 let mut db = Model::new(&TunnelDatabase::default()).unwrap();
@@ -212,6 +223,29 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn udp_fallback_does_not_reserve_the_tcp_admin_listener() {
+        use crate::net::port_map::TransportProtocol;
+        use crate::tunnel::db::SniRoute;
+        let source = "203.0.113.1:443".parse().unwrap();
+        let mut entry = PortForward::empty_sni();
+        entry.bindings_mut(TransportProtocol::Udp).unwrap().fallback = Some(SniRoute {
+            target: "10.59.0.2:443".parse().unwrap(),
+            label: None,
+            enabled: true,
+            auto: true,
+        });
+        let mut db = Model::new(&TunnelDatabase::default()).unwrap();
+        db.as_port_forwards_mut()
+            .ser(&PortForwards(std::collections::BTreeMap::from([(
+                source, entry,
+            )])))
+            .unwrap();
+        update_listen_address(&mut db, "0.0.0.0:443".parse().unwrap()).unwrap();
+        activate_webserver(&mut db).unwrap();
+        assert!(db.as_webserver().as_enabled().de().unwrap());
     }
 
     #[test]

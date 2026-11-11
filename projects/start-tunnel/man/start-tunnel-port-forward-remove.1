@@ -4,13 +4,29 @@
 .SH NAME
 start\-tunnel\-port\-forward\-remove \- Remove port forward
 .SH SYNOPSIS
-\fBstart\-tunnel port\-forward remove\fR [\fB\-\-hostname\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR>
+\fBstart\-tunnel port\-forward remove\fR [\fB\-\-protocol\fR] [\fB\-\-fallback\fR] [\fB\-\-hostname\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR>
 .SH DESCRIPTION
 Remove port forward
 .SH OPTIONS
 .TP
+\fB\-\-protocol\fR \fI<PROTOCOL>\fR [default: tcp]
+Transport for hostname routes and fallbacks; plain DNAT forwards use both transports
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+tcp
+.IP \(bu 2
+udp
+.RE
+.TP
+\fB\-\-fallback\fR
+Remove only the selected transport\*(Aqs hostname\-less fallback
+.TP
 \fB\-\-hostname\fR \fI<HOSTNAME>\fR
-Remove a single SNI route on `source`; omit to remove the whole forward
+Selects a hostname; omitted removes this transport’s routes and fallback
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

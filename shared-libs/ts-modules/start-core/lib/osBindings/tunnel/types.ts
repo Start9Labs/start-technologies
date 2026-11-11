@@ -4,10 +4,6 @@ export type AddDnsRecordParams = z.output<typeof schemas.AddDnsRecordParams>
 export type AddDnsRecordParamsInput = z.input<typeof schemas.AddDnsRecordParams>
 export type AddPinholeParams = z.output<typeof schemas.AddPinholeParams>
 export type AddPinholeParamsInput = z.input<typeof schemas.AddPinholeParams>
-export type AddPortForwardParams = z.output<typeof schemas.AddPortForwardParams>
-export type AddPortForwardParamsInput = z.input<
-  typeof schemas.AddPortForwardParams
->
 export type AddSubnetParams = z.output<typeof schemas.AddSubnetParams>
 export type AddSubnetParamsInput = z.input<typeof schemas.AddSubnetParams>
 export type AnyVerifyingKey = z.output<typeof schemas.AnyVerifyingKey>
@@ -67,7 +63,7 @@ export type HttpRedirectStatusInput = z.input<typeof schemas.HttpRedirectStatus>
  * Per-IPv4 HTTP→HTTPS redirect state. The tunnel runs a redirect on port 80 of
  * every public IPv4 by default; this records the addresses where the user has
  * turned it off (absence = on). The redirect also yields to any port-forward
- * occupying port 80 on that IP, so the two never fight over the port.
+ * occupying TCP port 80 on that IP. UDP mappings remain independent.
  */
 export type HttpRedirects = z.output<typeof schemas.HttpRedirects>
 
@@ -75,7 +71,7 @@ export type HttpRedirects = z.output<typeof schemas.HttpRedirects>
  * Per-IPv4 HTTP→HTTPS redirect state. The tunnel runs a redirect on port 80 of
  * every public IPv4 by default; this records the addresses where the user has
  * turned it off (absence = on). The redirect also yields to any port-forward
- * occupying port 80 on that IP, so the two never fight over the port.
+ * occupying TCP port 80 on that IP. UDP mappings remain independent.
  */
 export type HttpRedirectsInput = z.input<typeof schemas.HttpRedirects>
 export type ListDevicesParams = z.output<typeof schemas.ListDevicesParams>
@@ -116,12 +112,6 @@ export type RemovePinholeParams = z.output<typeof schemas.RemovePinholeParams>
 export type RemovePinholeParamsInput = z.input<
   typeof schemas.RemovePinholeParams
 >
-export type RemovePortForwardParams = z.output<
-  typeof schemas.RemovePortForwardParams
->
-export type RemovePortForwardParamsInput = z.input<
-  typeof schemas.RemovePortForwardParams
->
 export type Session = z.output<typeof schemas.Session>
 export type SessionInput = z.input<typeof schemas.Session>
 export type SetAutoPortForwardParams = z.output<
@@ -152,12 +142,6 @@ export type SetPinholeEnabledParams = z.output<
 export type SetPinholeEnabledParamsInput = z.input<
   typeof schemas.SetPinholeEnabledParams
 >
-export type SetPortForwardEnabledParams = z.output<
-  typeof schemas.SetPortForwardEnabledParams
->
-export type SetPortForwardEnabledParamsInput = z.input<
-  typeof schemas.SetPortForwardEnabledParams
->
 export type SetSubnetIpv6Params = z.output<typeof schemas.SetSubnetIpv6Params>
 export type SetSubnetIpv6ParamsInput = z.input<
   typeof schemas.SetSubnetIpv6Params
@@ -178,6 +162,16 @@ export type SniRoute = z.output<typeof schemas.SniRoute>
 export type SniRouteInput = z.input<typeof schemas.SniRoute>
 export type SubnetParams = z.output<typeof schemas.SubnetParams>
 export type SubnetParamsInput = z.input<typeof schemas.SubnetParams>
+
+/**
+ * Transport identity for independently owned port mappings.
+ */
+export type TransportProtocol = z.output<typeof schemas.TransportProtocol>
+
+/**
+ * Transport identity for independently owned port mappings.
+ */
+export type TransportProtocolInput = z.input<typeof schemas.TransportProtocol>
 export type TunnelCertData = z.output<typeof schemas.TunnelCertData>
 export type TunnelCertDataInput = z.input<typeof schemas.TunnelCertData>
 export type TunnelUpdateResult = z.output<typeof schemas.TunnelUpdateResult>
@@ -187,12 +181,6 @@ export type UpdatePinholeLabelParams = z.output<
 >
 export type UpdatePinholeLabelParamsInput = z.input<
   typeof schemas.UpdatePinholeLabelParams
->
-export type UpdatePortForwardLabelParams = z.output<
-  typeof schemas.UpdatePortForwardLabelParams
->
-export type UpdatePortForwardLabelParamsInput = z.input<
-  typeof schemas.UpdatePortForwardLabelParams
 >
 
 /**
@@ -214,6 +202,10 @@ export type AddDeviceParams = z.output<typeof schemas.AddDeviceParams>
 export type AddDeviceParamsInput = z.input<typeof schemas.AddDeviceParams>
 export type AddKeyParams = z.output<typeof schemas.AddKeyParams>
 export type AddKeyParamsInput = z.input<typeof schemas.AddKeyParams>
+export type AddPortForwardParams = z.output<typeof schemas.AddPortForwardParams>
+export type AddPortForwardParamsInput = z.input<
+  typeof schemas.AddPortForwardParams
+>
 
 /**
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
@@ -266,6 +258,50 @@ export type IpInfo = z.output<typeof schemas.IpInfo>
 export type IpInfoInput = z.input<typeof schemas.IpInfo>
 export type Pinholes6 = z.output<typeof schemas.Pinholes6>
 export type Pinholes6Input = z.input<typeof schemas.Pinholes6>
+export type RemoveKeyParams = z.output<typeof schemas.RemoveKeyParams>
+export type RemoveKeyParamsInput = z.input<typeof schemas.RemoveKeyParams>
+export type RemovePortForwardParams = z.output<
+  typeof schemas.RemovePortForwardParams
+>
+export type RemovePortForwardParamsInput = z.input<
+  typeof schemas.RemovePortForwardParams
+>
+export type SetDeviceKindParams = z.output<typeof schemas.SetDeviceKindParams>
+export type SetDeviceKindParamsInput = z.input<
+  typeof schemas.SetDeviceKindParams
+>
+export type SetPortForwardEnabledParams = z.output<
+  typeof schemas.SetPortForwardEnabledParams
+>
+export type SetPortForwardEnabledParamsInput = z.input<
+  typeof schemas.SetPortForwardEnabledParams
+>
+export type SetSubnetDnsParams = z.output<typeof schemas.SetSubnetDnsParams>
+export type SetSubnetDnsParamsInput = z.input<typeof schemas.SetSubnetDnsParams>
+
+/**
+ * Independent hostname routes and catch-all for one transport on a shared port.
+ */
+export type SniBindings = z.output<typeof schemas.SniBindings>
+
+/**
+ * Independent hostname routes and catch-all for one transport on a shared port.
+ */
+export type SniBindingsInput = z.input<typeof schemas.SniBindings>
+export type UpdatePortForwardLabelParams = z.output<
+  typeof schemas.UpdatePortForwardLabelParams
+>
+export type UpdatePortForwardLabelParamsInput = z.input<
+  typeof schemas.UpdatePortForwardLabelParams
+>
+export type WebserverInfo = z.output<typeof schemas.WebserverInfo>
+export type WebserverInfoInput = z.input<typeof schemas.WebserverInfo>
+export type WgConfig = z.output<typeof schemas.WgConfig>
+export type WgConfigInput = z.input<typeof schemas.WgConfig>
+export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
+export type NetworkInterfaceInfoInput = z.input<
+  typeof schemas.NetworkInterfaceInfo
+>
 
 /**
  * One external-port forward: an nftables DNAT or an SNI-demultiplexed shared
@@ -278,26 +314,10 @@ export type PortForward = z.output<typeof schemas.PortForward>
  * port. Mutually exclusive for a given external address.
  */
 export type PortForwardInput = z.input<typeof schemas.PortForward>
-export type RemoveKeyParams = z.output<typeof schemas.RemoveKeyParams>
-export type RemoveKeyParamsInput = z.input<typeof schemas.RemoveKeyParams>
-export type SetDeviceKindParams = z.output<typeof schemas.SetDeviceKindParams>
-export type SetDeviceKindParamsInput = z.input<
-  typeof schemas.SetDeviceKindParams
->
-export type SetSubnetDnsParams = z.output<typeof schemas.SetSubnetDnsParams>
-export type SetSubnetDnsParamsInput = z.input<typeof schemas.SetSubnetDnsParams>
-export type WebserverInfo = z.output<typeof schemas.WebserverInfo>
-export type WebserverInfoInput = z.input<typeof schemas.WebserverInfo>
-export type WgConfig = z.output<typeof schemas.WgConfig>
-export type WgConfigInput = z.input<typeof schemas.WgConfig>
-export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
-export type NetworkInterfaceInfoInput = z.input<
-  typeof schemas.NetworkInterfaceInfo
->
-export type PortForwards = z.output<typeof schemas.PortForwards>
-export type PortForwardsInput = z.input<typeof schemas.PortForwards>
 export type WgSubnetClients = z.output<typeof schemas.WgSubnetClients>
 export type WgSubnetClientsInput = z.input<typeof schemas.WgSubnetClients>
+export type PortForwards = z.output<typeof schemas.PortForwards>
+export type PortForwardsInput = z.input<typeof schemas.PortForwards>
 export type WgSubnetConfig = z.output<typeof schemas.WgSubnetConfig>
 export type WgSubnetConfigInput = z.input<typeof schemas.WgSubnetConfig>
 export type WgSubnetMap = z.output<typeof schemas.WgSubnetMap>

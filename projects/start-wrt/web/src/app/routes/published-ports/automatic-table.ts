@@ -2,7 +2,7 @@ import { Component, inject, input } from '@angular/core'
 import { RouterLink } from '@angular/router'
 import { TuiTable, TuiTableDirective } from '@taiga-ui/addon-table'
 import { TuiLink } from '@taiga-ui/core'
-import { AutomaticPortUseDisplay } from './types'
+import { AutomaticPortUseDisplay, PROTOCOL_LABELS } from './types'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
 @Component({
@@ -26,6 +26,9 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
           [style.min-width.rem]="8"
         >
           {{ 'Public port' | i18n }}
+        </th>
+        <th tuiTh [sorter]="'protocol' | tuiSorter" [style.min-width.rem]="8">
+          {{ 'Protocol' | i18n }}
         </th>
         <th tuiTh [sorter]="'hostname' | tuiSorter" [style.min-width.rem]="10">
           {{ 'Hostname' | i18n }}
@@ -55,6 +58,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
           </td>
           <td tuiTd>{{ item.ports }}</td>
           <td tuiTd>{{ item.publicPorts }}</td>
+          <td tuiTd>{{ protocolLabels[item.protocol] | i18n }}</td>
           <td tuiTd>{{ item.hostname || '—' }}</td>
           <td tuiTd>{{ item.kind }}</td>
           <td tuiTd>{{ expiry(item) }}</td>
@@ -67,6 +71,8 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
   imports: [RouterLink, TuiTable, TuiLink, i18nPipe],
 })
 export class AutomaticPortUsesTable {
+  protected readonly protocolLabels = PROTOCOL_LABELS
+
   public readonly automaticPortUses = input<AutomaticPortUseDisplay[]>([])
 
   private readonly i18n = inject(i18nPipe)

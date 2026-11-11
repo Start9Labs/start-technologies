@@ -12,19 +12,13 @@ import {
 } from '@taiga-ui/core'
 import { Copy } from 'src/app/components/copy'
 import { Placeholder } from 'src/app/components/placeholder'
-import { PublishedPortDisplay } from './types'
+import { PROTOCOL_LABELS, PublishedPortDisplay } from './types'
 import { PublishedPortsService } from './service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import {
   confirmVpnExposedPort,
   VpnExposure,
 } from 'src/app/services/vpn-exposed-port'
-
-const PROTOCOL_LABELS = {
-  tcp: 'TCP',
-  udp: 'UDP',
-  'tcp+udp': 'TCP + UDP',
-} as const
 
 @Component({
   selector: '[publishedPorts]',

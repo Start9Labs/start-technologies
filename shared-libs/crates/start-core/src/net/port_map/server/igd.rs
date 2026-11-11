@@ -389,14 +389,10 @@ pub async fn handle_control<B: GatewayBackend + ?Sized>(
 
 /// `NewProtocol` from a SOAP body, normalized to the IGD spelling.
 fn soap_protocol(body: &str) -> Option<&'static str> {
-    match soap_arg::<String>(body, "NewProtocol")?
-        .to_ascii_uppercase()
-        .as_str()
-    {
-        "TCP" => Some("TCP"),
-        "UDP" => Some("UDP"),
-        _ => None,
-    }
+    super::TransportProtocol::from_igd(
+        &soap_arg::<String>(body, "NewProtocol")?.to_ascii_uppercase(),
+    )
+    .map(super::TransportProtocol::igd)
 }
 
 fn mapping_response(action: &str, entry: &MappingEntry) -> Response {
@@ -570,13 +566,12 @@ async fn add_hostname_mapping<B: GatewayBackend + ?Sized>(
     if !remote_host.is_empty() {
         return fault(801, upnp_error_text(801));
     }
-    if external_port == 0
-        || internal_port == 0
-        || soap_protocol(body) != Some("TCP")
-        || !matches!(enabled.as_str(), "1" | "true")
-    {
+    if external_port == 0 || internal_port == 0 || !matches!(enabled.as_str(), "1" | "true") {
         return fault(402, "Invalid Args");
     }
+    let Some(protocol) = soap_protocol(body).and_then(super::TransportProtocol::from_igd) else {
+        return fault(402, "Invalid Args");
+    };
     let Some(hostname) = soap_raw_text(body, "NewHostname")
         .filter(|h| validate_hostname(h))
         .map(|h| h.to_ascii_lowercase())
@@ -609,6 +604,7 @@ async fn add_hostname_mapping<B: GatewayBackend + ?Sized>(
             source,
             target,
             std::slice::from_ref(&hostname),
+            protocol,
             Some(lifetime),
         )
         .await
@@ -633,9 +629,12 @@ async fn delete_hostname_mapping<B: GatewayBackend + ?Sized>(
     if !remote_host.is_empty() {
         return fault(801, upnp_error_text(801));
     }
-    if external_port == 0 || internal_port == 0 || soap_protocol(body) != Some("TCP") {
+    if external_port == 0 || internal_port == 0 {
         return fault(402, "Invalid Args");
     }
+    let Some(protocol) = soap_protocol(body).and_then(super::TransportProtocol::from_igd) else {
+        return fault(402, "Invalid Args");
+    };
     let Some(hostname) = soap_raw_text(body, "NewHostname")
         .filter(|h| validate_hostname(h))
         .map(|h| h.to_ascii_lowercase())
@@ -654,7 +653,7 @@ async fn delete_hostname_mapping<B: GatewayBackend + ?Sized>(
     let source = SocketAddrV4::new(source_ip, external_port);
     let target = SocketAddrV4::new(peer, internal_port);
     backend
-        .remove_sni_forward(source, target, std::slice::from_ref(&hostname))
+        .remove_sni_forward(source, target, std::slice::from_ref(&hostname), protocol)
         .await;
     ok(DELETE_HOSTNAME_ACTION, "")
 }
@@ -1115,6 +1114,7 @@ mod tests {
     use std::future::Future;
     use std::sync::Mutex;
 
+    use crate::net::port_map::TransportProtocol;
     use crate::tunnel::forward::sni::SniDemux;
 
     const PEER: Ipv4Addr = Ipv4Addr::new(10, 59, 0, 2);
@@ -1188,15 +1188,21 @@ mod tests {
             source: SocketAddrV4,
             target: SocketAddrV4,
             hostnames: &[String],
+            protocol: TransportProtocol,
             lifetime: Option<u32>,
         ) -> impl Future<Output = Result<(), u8>> + Send {
             self.calls
                 .lock()
                 .unwrap()
                 .push((source, target, hostnames.to_vec(), lifetime));
-            let res = self
-                .sni
-                .register(*source.ip(), source.port(), hostnames, target, lifetime);
+            let res = self.sni.register_transport(
+                protocol,
+                *source.ip(),
+                source.port(),
+                hostnames,
+                target,
+                lifetime,
+            );
             async move { res }
         }
         fn remove_sni_forward(
@@ -1204,13 +1210,14 @@ mod tests {
             source: SocketAddrV4,
             target: SocketAddrV4,
             hostnames: &[String],
+            protocol: TransportProtocol,
         ) -> impl Future<Output = ()> + Send {
             self.remove_calls
                 .lock()
                 .unwrap()
                 .push((source, target, hostnames.to_vec()));
             self.sni
-                .unregister(*source.ip(), source.port(), hostnames, target);
+                .unregister_transport(protocol, *source.ip(), source.port(), hostnames, target);
             async {}
         }
     }
@@ -1358,6 +1365,7 @@ mod tests {
             Ipv4Addr::new(10, 59, 1, 5),
             8443,
             "git.example.com",
+            TransportProtocol::Tcp,
         );
         assert_eq!(
             soap_action(&HeaderMap::new(), &body).as_deref(),
@@ -1371,7 +1379,12 @@ mod tests {
             Some("git.example.com")
         );
 
-        let body = crate::net::port_map::upnp::delete_hostname_body(443, 8443, "git.example.com");
+        let body = crate::net::port_map::upnp::delete_hostname_body(
+            443,
+            8443,
+            "git.example.com",
+            TransportProtocol::Tcp,
+        );
         assert_eq!(
             soap_action(&HeaderMap::new(), &body).as_deref(),
             Some("X_START9_DeleteHostnameMapping")
@@ -1382,6 +1395,36 @@ mod tests {
             soap_arg::<String>(&body, "NewHostname").as_deref(),
             Some("git.example.com")
         );
+    }
+
+    #[tokio::test]
+    async fn hostname_actions_keep_tcp_and_udp_ownership_independent() {
+        let stub = HostnameStub::new(true);
+        let tcp = add_hostname_body("600", "git.example.com");
+        let udp = tcp.replace(
+            "<NewProtocol>TCP</NewProtocol>",
+            "<NewProtocol>UDP</NewProtocol>",
+        );
+        assert_eq!(control(&stub, PEER, &tcp).await.status(), StatusCode::OK);
+        assert_eq!(
+            control(&stub, OTHER_PEER, &udp).await.status(),
+            StatusCode::OK
+        );
+        assert_eq!(stub.sni.snapshot().len(), 2);
+        let delete = delete_hostname_body("git.example.com").replace(
+            "<NewProtocol>TCP</NewProtocol>",
+            "<NewProtocol>UDP</NewProtocol>",
+        );
+        assert_eq!(control(&stub, PEER, &delete).await.status(), StatusCode::OK);
+        assert_eq!(stub.sni.snapshot().len(), 2);
+        assert_eq!(
+            control(&stub, OTHER_PEER, &delete).await.status(),
+            StatusCode::OK
+        );
+        let remaining = stub.sni.snapshot();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].protocol, TransportProtocol::Tcp);
+        assert_eq!(*remaining[0].target.ip(), PEER);
     }
 
     #[tokio::test]
@@ -1413,7 +1456,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hostname_actions_require_tcp_without_backend_mutation() {
+    async fn hostname_actions_require_a_supported_transport_without_backend_mutation() {
         for valid_body in [
             add_hostname_body("0", "git.example.com"),
             delete_hostname_body("git.example.com"),
@@ -1422,7 +1465,7 @@ mod tests {
                 valid_body.replace("<NewProtocol>TCP</NewProtocol>", ""),
                 valid_body.replace(
                     "<NewProtocol>TCP</NewProtocol>",
-                    "<NewProtocol>UDP</NewProtocol>",
+                    "<NewProtocol>SCTP</NewProtocol>",
                 ),
             ] {
                 let stub = HostnameStub::new(true);
@@ -1628,6 +1671,7 @@ mod tests {
                 _: SocketAddrV4,
                 _: SocketAddrV4,
                 _: &[String],
+                _: TransportProtocol,
                 _: Option<u32>,
             ) -> impl Future<Output = Result<(), u8>> + Send {
                 async { panic!("add_sni_forward reached on a backend without an SNI dataplane") }

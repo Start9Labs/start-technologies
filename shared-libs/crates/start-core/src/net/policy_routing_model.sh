@@ -112,6 +112,8 @@ from_container_v6="from fd00:3::5 iif lxcbr0"
 every_state() {
   expect divert LOCAL 203.0.113.9 mark $DIVERT_MARK $from_container
   expect divert LOCAL 192.168.1.77 mark $DIVERT_MARK $from_container
+  expect divert LOCAL 203.0.113.9 mark $DIVERT_MARK $from_container ipproto udp sport 443 dport 50000
+  expect divert LOCAL 192.168.1.77 mark $DIVERT_MARK $from_container ipproto udp sport 443 dport 50000
   expect specific eth0 192.168.1.77
   expect specific eth0 192.168.1.77 $from_container
   expect specific lxcbr0 10.0.3.5 from 10.59.0.2

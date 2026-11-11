@@ -7,7 +7,8 @@ first; this file is scoped to `projects/start-tunnel/`. `CLAUDE.md` is a one-lin
 
 ## What this is
 
-A WireGuard virtual private router with kernel-level clearnet port forwarding.
+A WireGuard virtual private router with clearnet port forwarding and independent
+TCP TLS / UDP QUIC hostname routing.
 This directory is a **thin wrapper**: the binary entry point, the Angular UI, the
 systemd unit, and the docs. The real logic lives in
 `shared-libs/crates/start-core/src/tunnel/` (the `start_core::tunnel` module) and the
@@ -75,8 +76,9 @@ Notes:
 - **Runtime deps.** The daemon shells out to `wireguard-tools`, `iptables`,
   `nftables`, `conntrack`, `iproute2`, and `procps`; the `.deb` declares them. Adding a new external
   tool means updating the `DEPENDS=` list in the `build.mk` `start-tunnel-deb` target.
-- **Port forwarding is Layer 3/4.** It rewrites IP headers (DNAT) and does not
-  decrypt payloads — keep it that way; TLS terminates at the user's service.
+- **Application TLS terminates at the target service.** Plain forwards use
+  DNAT. Hostname routing inspects TCP TLS ClientHello or decrypts QUIC Initial
+  packets to read SNI; application traffic remains encrypted.
 - **CLI and UI share `tunnel_api()`.** Add a method once in `api.rs`; both
   surfaces get it.
 - **Version bump:** `Cargo.toml` `version` carries a `# VERSION_BUMP` marker —

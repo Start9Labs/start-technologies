@@ -9,8 +9,14 @@ export interface MappedDevice {
 }
 
 export type IpVersion = 'ipv4' | 'ipv6'
+export type ForwardProtocol = NonNullable<
+  T.Tunnel.AddPortForwardParams['protocol']
+>
+
+export const FORWARD_PROTOCOL_LABELS = { tcp: 'TCP', udp: 'UDP' } as const
 
 export interface MappedForward {
+  readonly protocol: ForwardProtocol | null
   // For a v4 forward this is the WAN IP; for a v6 pinhole it's the client's GUA.
   readonly externalip: string
   // Start port of the forward; `externalport`/`internalport` stay the raw start
@@ -39,34 +45,37 @@ export function mapForwards(
 ): MappedForward[] {
   return Object.entries(portForwards).flatMap(([source, forward]) =>
     forward.kind === 'sni'
-      ? [
-          ...Object.entries(forward.routes).map(([hostname, route]) =>
-            toRow(
-              source,
-              route.target,
-              route.label,
-              route.enabled,
-              route.auto,
-              hostname,
-              1,
+      ? (['tcp', 'udp'] as const).flatMap(protocol => {
+          const bindings = protocol === 'tcp' ? forward : forward.udp
+          return [
+            ...Object.entries(bindings.routes).map(([hostname, route]) =>
+              toRow(
+                source,
+                route.target,
+                route.label,
+                route.enabled,
+                route.auto,
+                hostname,
+                1,
+                protocol,
+              ),
             ),
-          ),
-          // The hostname-less fallback: a catch-all row on the shared port,
-          // reachable by a bare IP or any SNI that matches no named route.
-          ...(forward.fallback
-            ? [
-                toRow(
-                  source,
-                  forward.fallback.target,
-                  forward.fallback.label,
-                  forward.fallback.enabled,
-                  forward.fallback.auto,
-                  null,
-                  1,
-                ),
-              ]
-            : []),
-        ]
+            ...(bindings.fallback
+              ? [
+                  toRow(
+                    source,
+                    bindings.fallback.target,
+                    bindings.fallback.label,
+                    bindings.fallback.enabled,
+                    bindings.fallback.auto,
+                    null,
+                    1,
+                    protocol,
+                  ),
+                ]
+              : []),
+          ]
+        })
       : [
           toRow(
             source,
@@ -88,11 +97,13 @@ export function mapForwards(
     auto: boolean,
     hostname: string | null,
     count: number,
+    protocol: ForwardProtocol | null = null,
   ): MappedForward {
     const [externalip, externalport] = source.split(':')
     const [targetip, internalport] = target.split(':')
 
     return {
+      protocol,
       externalip: externalip!,
       externalport: externalport!,
       // Fall back to the raw target IP when it isn't a named device (e.g. a
@@ -129,6 +140,7 @@ export function mapPinholes(
       ph.internalPort != null ? String(ph.internalPort) : externalport
 
     return {
+      protocol: null,
       externalip: gua,
       externalport,
       device: devices.find(d => d.ipv6 === gua) ?? {

@@ -4,10 +4,23 @@
 .SH NAME
 start\-cli\-tunnel\-port\-forward\-add \- Add a new port forward
 .SH SYNOPSIS
-\fBstart\-cli tunnel port\-forward add\fR [\fB\-\-label\fR] [\fB\-\-sni\fR] [\fB\-\-count\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIEXTERNAL_PORT\fR> <\fITARGET\fR>
+\fBstart\-cli tunnel port\-forward add\fR [\fB\-\-protocol\fR] [\fB\-\-label\fR] [\fB\-\-sni\fR] [\fB\-\-count\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIEXTERNAL_PORT\fR> <\fITARGET\fR>
 .SH DESCRIPTION
 Add a new port forward
 .SH OPTIONS
+.TP
+\fB\-\-protocol\fR \fI<PROTOCOL>\fR [default: tcp]
+Transport for hostname routes and fallbacks; plain DNAT forwards use both transports
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+tcp
+.IP \(bu 2
+udp
+.RE
 .TP
 \fB\-\-label\fR \fI<LABEL>\fR
 

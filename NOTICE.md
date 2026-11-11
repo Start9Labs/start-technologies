@@ -53,6 +53,13 @@ generated alongside it as
 [`.github/actions/upload-each/dist/index.js.LICENSES.txt`](.github/actions/upload-each/dist/index.js.LICENSES.txt);
 regenerate both together with `npm run build` in that directory.
 
+### RFC client Initial test vectors in `shared-libs/crates/start-core/src/tunnel/forward/sni/quic.rs`
+
+The RFC 9001 Appendix A.2 and RFC 9369 Appendix A.2 vectors are extracted from
+those RFCs. Copyright (c) 2021, 2023 IETF Trust and the persons identified as
+the document authors, all rights reserved. Simplified BSD terms:
+[`quic-vectors.LICENSE.txt`](shared-libs/crates/start-core/src/tunnel/forward/sni/quic-vectors.LICENSE.txt).
+
 ## MIT, but not ours alone
 
 These are MIT — the repository's blanket claim holds — but they are derived from

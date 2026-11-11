@@ -11,6 +11,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Router;
 use ipnet::Ipv4Net;
 use startos::net::http::{https_redirect_uri, request_authority};
+use startos::net::port_map::TransportProtocol;
 use startos::net::web_server::TcpMetadata;
 use startos::tunnel::forward::sni::SniRoute;
 use uciedit::openwrt::FirewallRule;
@@ -19,7 +20,9 @@ use uciedit::{parse_all, Arena};
 use crate::bins::daemon::WebserverListener;
 use crate::error::ErrorKind;
 use crate::invoke::Invoke;
-use crate::port_control::{parse_port_range, uci_task, wan_dnat_covers, KIND_SNI};
+use crate::port_control::{
+    parse_port_range, protocols_include, uci_task, wan_dnat_covers, KIND_SNI,
+};
 
 pub const HTTP_PORT: u16 = 80;
 pub const HTTPS_PORT: u16 = 443;
@@ -147,6 +150,7 @@ fn sni_rules_on_http_port<'a>(
         .filter_map(|sec| sec.get::<FirewallRule>().ok())
         .filter(|rule| {
             rule._apf_label.as_deref() == Some(KIND_SNI)
+                && protocols_include(&rule.proto, TransportProtocol::Tcp)
                 && rule
                     .dest_port
                     .as_deref()
@@ -155,7 +159,7 @@ fn sni_rules_on_http_port<'a>(
         })
 }
 
-/// Any SNI-labelled rule on [`HTTP_PORT`], a hostname route's included.
+/// Any TCP SNI-labelled rule on [`HTTP_PORT`], a hostname route's included.
 fn port_admitted(firewall: &uciedit::Config<'_>) -> bool {
     sni_rules_on_http_port(firewall).next().is_some()
 }
@@ -166,10 +170,14 @@ pub(crate) fn admission_present(firewall: &uciedit::Config<'_>) -> bool {
 
 /// A DNAT or a hostname route forwards WAN tcp/443, and neither holds tcp/80.
 pub(crate) fn desired(firewall: &uciedit::Config<'_>, routes: &[SniRoute]) -> bool {
-    !wan_dnat_covers(firewall, HTTP_PORT)
-        && !routes.iter().any(|route| route.ext_port == HTTP_PORT)
-        && (wan_dnat_covers(firewall, HTTPS_PORT)
-            || routes.iter().any(|route| route.ext_port == HTTPS_PORT))
+    !wan_dnat_covers(firewall, HTTP_PORT, TransportProtocol::Tcp)
+        && !routes
+            .iter()
+            .any(|route| route.protocol == TransportProtocol::Tcp && route.ext_port == HTTP_PORT)
+        && (wan_dnat_covers(firewall, HTTPS_PORT, TransportProtocol::Tcp)
+            || routes.iter().any(|route| {
+                route.protocol == TransportProtocol::Tcp && route.ext_port == HTTPS_PORT
+            }))
 }
 
 /// An unreadable address redirects. IPv6 never does.
@@ -292,6 +300,7 @@ mod tests {
 
     fn route(ext_ip: Ipv4Addr, ext_port: u16) -> SniRoute {
         SniRoute {
+            protocol: TransportProtocol::Tcp,
             ext_ip,
             ext_port,
             hostname: "nas.example.com".into(),
@@ -342,6 +351,21 @@ mod tests {
         assert!(!desired_for("", &[route(WAN, 8443)]).await);
         // A route keyed to a stale WAN address still counts.
         assert!(desired_for("", &[route(Ipv4Addr::new(198, 51, 100, 9), 443)]).await);
+    }
+
+    #[tokio::test]
+    async fn udp_hostname_routes_neither_enable_nor_suppress_http_redirects() {
+        let mut udp443 = route(WAN, 443);
+        udp443.protocol = TransportProtocol::Udp;
+        let mut udp80 = route(WAN, 80);
+        udp80.protocol = TransportProtocol::Udp;
+        assert!(!desired_for("", &[udp443.clone()]).await);
+        assert!(desired_for("", &[route(WAN, 443), udp80.clone()]).await);
+        assert!(desired_for(&dnat("443", TCP, "1"), &[udp80]).await);
+        assert!(!desired_for("", &[udp443, route(WAN, 80)]).await);
+        let udp_rule = ADMISSION_80.replace("'tcp'", "'udp'");
+        assert!(!with_firewall(&udp_rule, port_admitted).await);
+        assert!(!with_firewall(&udp_rule, admission_present).await);
     }
 
     #[tokio::test]

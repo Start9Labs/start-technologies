@@ -4,13 +4,26 @@
 .SH NAME
 start\-tunnel\-port\-forward\-update\-label \- Update the label of a port forward
 .SH SYNOPSIS
-\fBstart\-tunnel port\-forward update\-label\fR [\fB\-\-hostname\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR> [\fILABEL\fR]
+\fBstart\-tunnel port\-forward update\-label\fR [\fB\-\-protocol\fR] [\fB\-\-hostname\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR> [\fILABEL\fR]
 .SH DESCRIPTION
 Update the label of a port forward
 .SH OPTIONS
 .TP
+\fB\-\-protocol\fR \fI<PROTOCOL>\fR [default: tcp]
+Transport for hostname routes and fallbacks; plain DNAT forwards use both transports
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+tcp
+.IP \(bu 2
+udp
+.RE
+.TP
 \fB\-\-hostname\fR \fI<HOSTNAME>\fR
-Label a single SNI route on `source`; omit to label the DNAT forward
+Selects a hostname; omitted labels this transport’s fallback or a plain forward
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

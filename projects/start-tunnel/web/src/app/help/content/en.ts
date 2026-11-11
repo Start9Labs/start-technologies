@@ -141,7 +141,7 @@ Ports a server publishes for itself automatically (PCP/UPnP). Read-only here; ma
 
 ### Columns
 
-Label, the target **Server**, an optional TLS **Hostname** (SNI), the External and Internal ports, the protocol (always TCP/UDP), and the public **IP** it's reachable on.
+Label, the target **Server**, an optional TLS **Hostname** (SNI), the External and Internal ports, the protocol (TCP or UDP for hostname routes; TCP/UDP for plain ports), and the public **IP** it's reachable on.
 
 <a href="https://docs.start9.com/start-tunnel/published-ports.html" target="_blank" rel="noreferrer">Learn more →</a>`,
 
@@ -175,7 +175,7 @@ Reach the service over IPv4, IPv6, or both. IPv6 requires the server's subnet to
 
 ### Hostname (optional)
 
-A TLS/SSL domain (SNI) so several hostnames can share one external port. IPv4 only, and not available for ranges.
+A domain (SNI) for TLS over TCP or QUIC over UDP, so several hostnames can share one external port. Choose the protocol below the hostname: TCP and UDP routes are independent, even with the same hostname and port. IPv4 only, and not available for ranges.
 
 <a href="https://docs.start9.com/start-tunnel/published-ports.html#add-a-port-manually" target="_blank" rel="noreferrer">Learn more →</a>`,
 

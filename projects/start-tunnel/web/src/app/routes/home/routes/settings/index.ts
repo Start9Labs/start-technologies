@@ -348,6 +348,8 @@ function portEightyForwarded(
     const idx = source.lastIndexOf(':')
     if (idx < 0 || source.slice(0, idx) !== ip) return false
     const start = Number(source.slice(idx + 1))
+    if (pf.kind === 'sni' && !Object.keys(pf.routes).length && !pf.fallback)
+      return false
     const span = pf.kind === 'dnat' ? (pf.count ?? 1) : 1
     return start <= 80 && 80 <= start + span - 1
   })
