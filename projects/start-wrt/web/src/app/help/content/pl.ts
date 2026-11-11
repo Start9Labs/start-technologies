@@ -59,7 +59,7 @@ Usuwa urządzenie offline z listy urządzeń. Wszelkie niestandardowe nazwy lub 
 
 ### Port
 
-Fizyczny identyfikator portu Ethernet (np. eth0, eth1).
+Fizyczny port: port Ethernet (np. eth0, eth1) lub port USB z adapterem USB–Ethernet (np. usb_eth0). Port USB pojawia się, gdy po raz pierwszy zostanie do niego podłączone urządzenie sieciowe, i zachowuje swój profil, gdy nic nie jest podłączone. Każdy port koncentratora USB jest osobnym portem USB. Port USB bez podłączonego adaptera można usunąć.
 
 ### Profil bezpieczeństwa
 
@@ -67,7 +67,7 @@ Domyślny profil bezpieczeństwa przypisany do urządzeń połączonych za pośr
 
 ### WAN
 
-Port sieci rozległej (WAN) łączy się z modemem ISP lub siecią nadrzędną. Tylko jeden port Ethernet może być w danym momencie wyznaczony jako WAN.
+Port sieci rozległej (WAN) łączy się z modemem ISP lub siecią nadrzędną. Tylko jeden port Ethernet może być w danym momencie wyznaczony jako WAN. Port WAN musi być portem Ethernet.
 
 ### Zmień port WAN
 

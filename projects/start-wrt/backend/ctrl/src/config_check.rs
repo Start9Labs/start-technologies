@@ -15,6 +15,7 @@ use uciedit::{read_all, Arena, Config, Line, Section, Token, TypedSection};
 use crate::lan::{LAN_INTERFACE, LAN_NETMASK};
 use crate::prelude::*;
 use crate::profiles::UciProfile;
+use crate::usb_ports::UciUsbPort;
 use crate::utils::HandlerExtSerde;
 use crate::wan::{WAN6_INTERFACE, WAN_INTERFACE};
 use crate::CtrlContext;
@@ -645,6 +646,9 @@ fn check_startwrt(cfg: &Config, out: &mut Findings) {
     for section in cfg.sections.iter().filter(|s| s.ty() == UciProfile::TY) {
         out.read::<UciProfile>("startwrt", section, &[Profiles]);
     }
+    for section in cfg.sections.iter().filter(|s| s.ty() == UciUsbPort::TY) {
+        out.read::<UciUsbPort>("startwrt", section, &[Ethernet]);
+    }
 }
 
 #[cfg(test)]
@@ -853,6 +857,19 @@ mod tests {
         assert_eq!(found[0].problem, ConfigProblem::Unmanaged);
         assert_eq!(found[0].found.as_deref(), Some("10.0.3.1/24"));
         assert_eq!(found[0].line, Some(9));
+    }
+
+    #[test]
+    fn usb_port_without_its_physical_port() {
+        let found = with(&[(
+            "startwrt",
+            "\nconfig usb_port 'usb_eth0'\n\toption path 'c:1.4'\n",
+        )]);
+        assert!(found.is_empty(), "{found:#?}");
+        let found = with(&[("startwrt", "\nconfig usb_port 'usb_eth0'\n")]);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert_eq!(found[0].views, vec![Ethernet]);
+        assert_eq!(found[0].option.as_deref(), Some("path"));
     }
 
     #[test]
