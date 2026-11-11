@@ -3661,6 +3661,14 @@ middleware.auth.unknown-content-type:
   fr_FR: "type de contenu inconnu"
   pl_PL: "nieznany typ zawartości"
 
+# db/mod.rs
+db.registries-not-writable:
+  en_US: "Saved registries are changed through the registry settings, not as UI data"
+  de_DE: "Gespeicherte Registrys werden über die Registry-Einstellungen geändert, nicht als UI-Daten"
+  es_ES: "Los registros guardados se cambian en la configuración de registros, no como datos de la interfaz"
+  fr_FR: "Les registres enregistrés se modifient dans les paramètres des registres, pas comme données de l'interface"
+  pl_PL: "Zapisane rejestry zmienia się w ustawieniach rejestrów, a nie jako dane interfejsu"
+
 # middleware/db.rs
 middleware.db.error-writing-patch-sequence-header:
   en_US: "error writing X-Patch-Sequence header: %{error}"

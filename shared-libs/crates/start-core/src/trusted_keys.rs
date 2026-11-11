@@ -12,7 +12,7 @@ use crate::sign::gpg::{GpgPublicKeyExport, ImportedPublicKeys, parse_public_keys
 use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners};
 mod connection;
 pub use connection::check_registry;
-pub(crate) use connection::selected_os_registry;
+pub(crate) use connection::{ensure_builtin_registries, selected_os_registry};
 pub(crate) mod legacy;
 
 pub type TrustedKeys = BTreeMap<InternedString, TrustedKey>;
