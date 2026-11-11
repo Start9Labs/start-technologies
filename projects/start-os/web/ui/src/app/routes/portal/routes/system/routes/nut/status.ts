@@ -66,11 +66,17 @@ export function toUpsView(vars: Record<string, string>): UpsView {
               icon: '@tui.battery-medium',
               appearance: 'warning',
             }
-          : {
-              label: 'On wall power',
-              icon: '@tui.plug-zap',
-              appearance: 'positive',
-            },
+          : flags.includes('OL')
+            ? {
+                label: 'On wall power',
+                icon: '@tui.plug-zap',
+                appearance: 'positive',
+              }
+            : {
+                label: 'Unknown',
+                icon: '@tui.circle-alert',
+                appearance: 'warning',
+              },
     charging: flags.includes('CHRG'),
     batteryAppearance:
       critical || (onBattery && lowCharge)

@@ -2472,6 +2472,13 @@ nut.scan-timeout:
   fr_FR: "La recherche d'onduleurs a expiré"
   pl_PL: "Przekroczono limit czasu wyszukiwania urządzeń UPS"
 
+nut.reserved-username:
+  en_US: "NUT username %{username} is reserved for local shutdown monitoring"
+  de_DE: "Der NUT-Benutzername %{username} ist für die lokale Abschaltüberwachung reserviert"
+  es_ES: "El nombre de usuario NUT %{username} está reservado para la monitorización local de apagado"
+  fr_FR: "Le nom d’utilisateur NUT %{username} est réservé à la surveillance locale de l’arrêt"
+  pl_PL: "Nazwa użytkownika NUT %{username} jest zarezerwowana do lokalnego monitorowania wyłączania"
+
 nut.status-command-failed:
   en_US: "NUT status command failed for %{target}: %{error}"
   de_DE: "NUT-Statusbefehl für %{target} fehlgeschlagen: %{error}"

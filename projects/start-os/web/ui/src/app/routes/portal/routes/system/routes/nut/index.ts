@@ -98,7 +98,9 @@ import { toUpsView } from './status'
         </div>
       }
 
-      @if (ups) {
+      @if (!state.status && !state.error) {
+        <tui-loader size="l" />
+      } @else {
         <div class="grid">
           <section class="g-card">
             <header>
@@ -131,15 +133,13 @@ import { toUpsView } from './status'
             }
             <div tuiCell="m">
               <span tuiTitle>{{ 'Shutdown protection' | i18n }}</span>
+              @let protection = !!state.status && !state.status.monitoringError;
               <span
                 tuiTitle
-                [class._active]="!state.status?.monitoringError"
-                [class._unavailable]="!!state.status?.monitoringError"
+                [class._active]="protection"
+                [class._unavailable]="!protection"
               >
-                {{
-                  (state.status?.monitoringError ? 'Unavailable' : 'Active')
-                    | i18n
-                }}
+                {{ (protection ? 'Active' : 'Unavailable') | i18n }}
               </span>
             </div>
             <div tuiCell="m">
@@ -258,8 +258,6 @@ import { toUpsView } from './status'
             </section>
           }
         </div>
-      } @else if (state.refreshing) {
-        <tui-loader size="l" />
       }
     }
   `,
@@ -454,9 +452,8 @@ export default class Nut {
   protected readonly connected = computed(
     () => this.data().enabled && !!this.data().settings,
   )
-  protected readonly view = computed(
-    (status = this.statusService.state().status) =>
-      status && toUpsView(status.variables),
+  protected readonly view = computed(() =>
+    toUpsView(this.statusService.state().status?.variables ?? {}),
   )
   protected readonly connection = computed(
     (settings = this.data().settings): { key: i18nKey; value: string }[] =>

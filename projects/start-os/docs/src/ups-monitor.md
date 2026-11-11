@@ -12,6 +12,8 @@ Choose **NUT server** when the UPS's USB or serial cable is connected to this se
 
 StartOS searches USB for a connected UPS and shows the one it finds. If it finds more than one, choose the UPS to monitor. If it finds none, check the cable and try again.
 
+StartOS recognizes the UPS by its serial number. If the UPS doesn't report one, StartOS recognizes it by the USB port it is plugged into instead, so keep it in that port or disconnect and connect again after moving it.
+
 - **Other clients can monitor** — Other devices plugged into the UPS can't see its battery level on their own. Turn this on so they can monitor it through StartOS and shut down safely when its battery runs low. Set them up as NUT clients that connect to `startos@<server address>:3493`.
 - **Username/Password** — Shown when other clients can monitor. The credentials the other devices use when they connect to this server as NUT clients. They are filled in with `upsclient` and a random password; change them if you like, or select the generate button for a new password.
 

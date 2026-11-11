@@ -85,6 +85,11 @@ pub struct NutDevice {
     #[serde(default)]
     pub serial: Option<String>,
     #[serde(default)]
+    pub bus: Option<String>,
+    /// Pins devices without a serial number to the selected USB port.
+    #[serde(default)]
+    pub bus_port: Option<String>,
+    #[serde(default)]
     pub vendor: Option<String>,
     #[serde(default)]
     pub product: Option<String>,
@@ -301,6 +306,8 @@ async fn apply_nut(settings: NutSettings) -> Result<(), Error> {
             for (field, value) in [
                 (t!("nut.field-vendor-id"), &device.vendor_id),
                 (t!("nut.field-product-id"), &device.product_id),
+                (t!("nut.field-device-or-address"), &device.bus),
+                (t!("nut.field-device-or-address"), &device.bus_port),
             ] {
                 if let Some(value) = value {
                     validate_identifier(&field, value)?;
@@ -310,10 +317,7 @@ async fn apply_nut(settings: NutSettings) -> Result<(), Error> {
                 validate_quoted(&t!("nut.field-serial"), serial)?;
             }
             if listen_all {
-                validate_required_identifier(
-                    &t!("nut.field-network-client-username"),
-                    remote_username.as_deref(),
-                )?;
+                validate_remote_username(remote_username.as_deref())?;
                 validate_required_token(
                     &t!("nut.field-network-client-password"),
                     remote_password.as_deref(),
@@ -741,6 +745,8 @@ fn parse_nut_scanner(stdout: &str) -> Vec<NutDevice> {
                 vendor_id: field("vendorid"),
                 product_id: field("productid"),
                 serial: field("serial").filter(|serial| !serial.is_empty()),
+                bus: field("bus"),
+                bus_port: field("busport").filter(|port| port != ".*"),
                 vendor: field("vendor"),
                 product: field("product"),
             })
@@ -759,7 +765,14 @@ fn ups_conf(device: &NutDevice) -> String {
         ("serial", &device.serial),
     ] {
         if let Some(value) = value {
-            conf.push_str(&format!("    {key} = \"{value}\"\n"));
+            conf.push_str(&format!("    {key} = \"{}\"\n", value.replace('#', "\\#")));
+        }
+    }
+    if device.serial.is_none() {
+        for (key, value) in [("bus", &device.bus), ("busport", &device.bus_port)] {
+            if let Some(value) = value {
+                conf.push_str(&format!("    {key} = \"{value}\"\n"));
+            }
         }
     }
     conf.push_str("    desc = \"StartOS UPS\"\n");
@@ -869,6 +882,20 @@ fn validate_identifier(field: &str, value: &str) -> Result<(), Error> {
 
 fn validate_required_identifier(field: &str, value: Option<&str>) -> Result<(), Error> {
     validate_identifier(field, value.unwrap_or_default())
+}
+
+fn validate_remote_username(value: Option<&str>) -> Result<(), Error> {
+    validate_required_identifier(&t!("nut.field-network-client-username"), value)?;
+    if value == Some(LOCAL_MONITOR_USERNAME) {
+        return Err(Error::new(
+            eyre!(
+                "{}",
+                t!("nut.reserved-username", username = LOCAL_MONITOR_USERNAME)
+            ),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    Ok(())
 }
 
 fn validate_token(field: &str, value: &str) -> Result<(), Error> {
@@ -1217,6 +1244,48 @@ mod tests {
             ]
         );
         server.await.unwrap();
+    }
+
+    #[test]
+    fn keeps_serialless_usb_devices_distinct() {
+        let devices = parse_nut_scanner(
+            "\
+[nutdev1]
+    driver = \"usbhid-ups\"
+    port = \"auto\"
+    vendorid = \"051D\"
+    productid = \"0002\"
+    bus = \"001\"
+    busport = \"002\"
+[nutdev2]
+    driver = \"usbhid-ups\"
+    port = \"auto\"
+    vendorid = \"051D\"
+    productid = \"0002\"
+    bus = \"001\"
+    busport = \"003\"
+",
+        );
+        assert_eq!(devices.len(), 2);
+        assert!(ups_conf(&devices[0]).contains("    bus = \"001\"\n    busport = \"002\"\n"));
+        assert!(ups_conf(&devices[1]).contains("    bus = \"001\"\n    busport = \"003\"\n"));
+    }
+
+    #[test]
+    fn escapes_hashes_in_discovered_serials() {
+        let devices = parse_nut_scanner(
+            "[nutdev1]\n    driver = \"usbhid-ups\"\n    port = \"auto\"\n    serial = \"UPS#1\"\n",
+        );
+        assert_eq!(devices.len(), 1);
+        assert!(validate_quoted("serial", devices[0].serial.as_deref().unwrap()).is_ok());
+        assert!(ups_conf(&devices[0]).contains("    serial = \"UPS\\#1\"\n"));
+    }
+
+    #[test]
+    fn sharing_username_cannot_reuse_the_local_monitor_account() {
+        assert!(validate_remote_username(Some(LOCAL_MONITOR_USERNAME)).is_err());
+        assert!(validate_remote_username(None).is_err());
+        assert!(validate_remote_username(Some("upsclient")).is_ok());
     }
 
     #[test]

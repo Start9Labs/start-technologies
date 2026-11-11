@@ -10,9 +10,17 @@ export const DEFAULT_NUT_CONFIG: T.NutConfig = {
   settings: null,
 }
 
-export function deviceName({ vendor, product, driver, serial }: T.NutDevice) {
+export function deviceName({
+  vendor,
+  product,
+  driver,
+  serial,
+  bus,
+  busPort,
+}: T.NutDevice) {
   const name = [vendor, product].filter(Boolean).join(' ') || driver
-  return serial ? `${name} (${serial})` : name
+  const identifier = serial || [bus, busPort].filter(Boolean).join(':')
+  return identifier ? `${name} (${identifier})` : name
 }
 
 function sharingField(i18n: i18nPipe) {
