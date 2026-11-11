@@ -1,5 +1,21 @@
 # Changelog
 
+## [4.1.0]
+
+### Added
+
+- Add `prepareUpload` with byte limits and file or directory destinations, File inputs with extension filters and authoritative upload metadata, `prepareDownload`, and File action results with optional cleanup. This SDK requires StartOS 0.4.2 or newer; File inputs require a prepared `uploadId`.
+
+### Fixed
+
+- Numeric action fields enforce their inclusive bounds and integer constraints during SDK validation, including CLI and direct API submissions.
+
+- Fixed services hanging when a daemon captures only stdout or stderr and fills the other stream. Rebuild packages with this SDK version to receive the fix.
+
+- A health check reporting `loading` while it starts shows its next status within seconds, and a daemon that `requires` it starts soon after it passes.
+
+- Build packages on the first attempt after removing an image build directory or local dependency input from the manifest.
+
 ## [4.0.0]
 
 ### Added

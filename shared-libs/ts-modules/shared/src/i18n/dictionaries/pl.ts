@@ -960,7 +960,8 @@ export default {
   1109: 'Nieprawidłowa odpowiedź serwera',
   1110: 'Maksymalny rozmiar pliku',
   1111: 'Zobacz w sklepie',
-  1112: 'Wymuś zatrzymanie',
-  1113: 'Wymuszanie zatrzymania',
-  1114: 'Wymuszenie zatrzymania może spowodować utratę danych lub pozostawić serwis w nieprawidłowym stanie. Czy na pewno chcesz wymusić zatrzymanie?',
+  1112: 'Ta alternatywna implementacja spełnia wymaganie',
+  1113: 'Wymuś zatrzymanie',
+  1114: 'Wymuszanie zatrzymania',
+  1115: 'Wymuszenie zatrzymania może spowodować utratę danych lub pozostawić serwis w nieprawidłowym stanie. Czy na pewno chcesz wymusić zatrzymanie?',
 } satisfies i18n

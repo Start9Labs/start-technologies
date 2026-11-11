@@ -18,7 +18,7 @@
 //! recreated. Records, ownership and the directory live in memory;
 //! clients re-assert within 180 s of a restart.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -47,6 +47,7 @@ use crate::error::ErrorKind;
 use crate::invoke::Invoke;
 use crate::port_control::{supervise, uci_task};
 use crate::prelude::*;
+use crate::recent::Recent;
 use crate::utils::{DeserializeStdin, HandlerExtSerde};
 use crate::{CliContext, CtrlContext, Error, ServerContext};
 
@@ -161,6 +162,7 @@ struct Directory {
     /// served only to zones that can reach its source.
     reach: BTreeSet<(String, String)>,
     hosts: HostNames,
+    refusals: Refusals,
 }
 
 /// A device's name under `lan.`, placed in the profile whose subnet holds its
@@ -193,13 +195,15 @@ struct NetSnapshot {
     reach: BTreeSet<(String, String)>,
     /// Uppercase MACs with `_allow_dns_inject '1'`.
     allowed_macs: BTreeSet<String>,
-    /// Uppercase MAC → static reservation IP.
-    reserved: HashMap<String, Ipv4Addr>,
+    /// Uppercase MAC → its static reservations, one per profile.
+    reserved: HashMap<String, Vec<Ipv4Addr>>,
     /// Uppercase MAC → the name set on the device.
     named: BTreeMap<String, String>,
-    /// Permitted inbound-WG peer tunnel IP → (public key, derived TSIG key,
-    /// profile).
-    wg_peers: BTreeMap<Ipv4Addr, (String, [u8; 32], String)>,
+    /// Permitted inbound-WG peer tunnel IP → (public key, profile).
+    wg_peers: BTreeMap<Ipv4Addr, (String, String)>,
+    /// Every inbound-WG peer's tunnel IP → its derived TSIG key, permitted or
+    /// not.
+    wg_keys: BTreeMap<Ipv4Addr, [u8; 32]>,
 }
 
 pub struct DnsInject {
@@ -261,6 +265,11 @@ impl DnsInject {
     /// this pass.
     pub fn invalidate(&self) {
         self.poke.notify_one();
+    }
+
+    /// Addresses recently refused for lacking the permission.
+    pub fn asking_sources(&self) -> HashSet<IpAddr> {
+        self.directory.peek(|d| d.refusals.asking(Instant::now()))
     }
 }
 
@@ -341,7 +350,7 @@ async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
     Ok(())
 }
 
-/// The addresses allowed to inject, and the TSIG keys of the peers among them.
+/// The addresses allowed to inject, and the TSIG keys of every peer.
 fn injectors(
     snapshot: &NetSnapshot,
     leases: &HashMap<String, String>,
@@ -349,12 +358,9 @@ fn injectors(
 ) -> (BTreeMap<IpAddr, Injector>, BTreeMap<IpAddr, [u8; 32]>) {
     // Candidate addresses per allowed MAC: reservation, lease, neighbor entry.
     let mut by_ip: BTreeMap<IpAddr, Injector> = BTreeMap::new();
-    let mut wg_keys = BTreeMap::new();
     for mac in &snapshot.allowed_macs {
         let mut addrs: BTreeSet<Ipv4Addr> = BTreeSet::new();
-        if let Some(ip) = snapshot.reserved.get(mac) {
-            addrs.insert(*ip);
-        }
+        addrs.extend(snapshot.reserved.get(mac).into_iter().flatten());
         if let Some(ip) = leases.get(mac).and_then(|ip| ip.parse().ok()) {
             addrs.insert(ip);
         }
@@ -377,7 +383,7 @@ fn injectors(
             }
         }
     }
-    for (ip, (pubkey, key, profile)) in &snapshot.wg_peers {
+    for (ip, (pubkey, profile)) in &snapshot.wg_peers {
         by_ip.insert(
             IpAddr::V4(*ip),
             Injector {
@@ -385,8 +391,12 @@ fn injectors(
                 profile: profile.clone(),
             },
         );
-        wg_keys.insert(IpAddr::V4(*ip), *key);
     }
+    let wg_keys = snapshot
+        .wg_keys
+        .iter()
+        .map(|(ip, key)| (IpAddr::V4(*ip), *key))
+        .collect();
     (by_ip, wg_keys)
 }
 
@@ -401,7 +411,10 @@ fn sweep_owners(
 ) -> Vec<(LowerName, RecordType)> {
     // The same three address sources the directory build admits.
     let mac_holds = |mac: &str, ip: Ipv4Addr| {
-        snapshot.reserved.get(mac) == Some(&ip)
+        snapshot
+            .reserved
+            .get(mac)
+            .is_some_and(|ips| ips.contains(&ip))
             || leases.get(mac).and_then(|l| l.parse().ok()) == Some(ip)
             || neighbors
                 .iter()
@@ -420,7 +433,7 @@ fn sweep_owners(
                         IpAddr::V6(_) => true,
                     })
             }
-            Owner::WgPeer(pubkey) => snapshot.wg_peers.values().any(|(pk, _, _)| pk == pubkey),
+            Owner::WgPeer(pubkey) => snapshot.wg_peers.values().any(|(pk, _)| pk == pubkey),
         };
         if !live {
             stale.push((name.clone(), *rtype));
@@ -448,7 +461,7 @@ fn servable_name(name: &str) -> bool {
 }
 
 /// Every device's name: the one set on the device, else its lease hostname, at
-/// its lease address, else its reservation.
+/// its lease address, else at each of its reservations.
 fn host_names(snapshot: &NetSnapshot, leases: &[crate::devices::DhcpLease]) -> HostNames {
     let expiry = |l: &crate::devices::DhcpLease| match l.expires {
         0 => u64::MAX,
@@ -492,21 +505,21 @@ fn host_names(snapshot: &NetSnapshot, leases: &[crate::devices::DhcpLease]) -> H
         else {
             continue;
         };
-        let Some(ip) = lease
-            .map(|(_, ip)| *ip)
-            .or_else(|| snapshot.reserved.get(mac).copied())
-        else {
-            continue;
+        let ips = match lease {
+            Some((_, ip)) => vec![*ip],
+            None => snapshot.reserved.get(mac).cloned().unwrap_or_default(),
         };
-        let Some(p) = profile_for(&snapshot.profiles, ip) else {
-            continue;
-        };
-        hosts.entries.push(HostName {
-            name: name.to_ascii_lowercase(),
-            ip,
-            profile: p.interface.clone(),
-            rank: (configured.is_some(), lease.map_or(0, |(l, _)| expiry(l))),
-        });
+        for ip in ips {
+            let Some(p) = profile_for(&snapshot.profiles, ip) else {
+                continue;
+            };
+            hosts.entries.push(HostName {
+                name: name.to_ascii_lowercase(),
+                ip,
+                profile: p.interface.clone(),
+                rank: (configured.is_some(), lease.map_or(0, |(l, _)| expiry(l))),
+            });
+        }
     }
     hosts
 }
@@ -536,7 +549,7 @@ fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
             if s.name().as_deref() != Some(iface.as_str()) {
                 return None;
             }
-            s.get::<NetworkInterface>().ok()?.ipaddr
+            s.get::<NetworkInterface>().ok()?.ipv4()
         }) else {
             return;
         };
@@ -572,19 +585,23 @@ fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
             snapshot.allowed_macs.insert(host.mac.to_uppercase());
         }
         if let Some(ip) = host.ip.as_deref().and_then(|ip| ip.parse().ok()) {
-            snapshot.reserved.insert(host.mac.to_uppercase(), ip);
+            snapshot
+                .reserved
+                .entry(host.mac.to_uppercase())
+                .or_default()
+                .push(ip);
         }
         if let Some(name) = host.name.filter(|n| !n.is_empty()) {
             snapshot.named.insert(host.mac.to_uppercase(), name);
         }
     })?;
 
-    // Permitted `wireguard_wg_<iface>` peer sections: public key, PSK, tunnel /32.
+    // `wireguard_wg_<iface>` peer sections: public key, PSK, tunnel /32.
     for p in &snapshot.profiles {
         let Some(wg) = &p.wg_device else { continue };
         let peer_ty = format!("wireguard_{wg}");
         for section in &cfgs["network"].sections {
-            if section.ty() != peer_ty || !peer_allows_dns_inject(section) {
+            if section.ty() != peer_ty {
                 continue;
             }
             let mut pubkey = None;
@@ -620,9 +637,10 @@ fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
             let Ok(psk) = <[u8; 32]>::try_from(bytes) else {
                 continue;
             };
-            snapshot
-                .wg_peers
-                .insert(ip, (pubkey, derive_tsig_key(&psk), p.interface.clone()));
+            snapshot.wg_keys.insert(ip, derive_tsig_key(&psk));
+            if peer_allows_dns_inject(section) {
+                snapshot.wg_peers.insert(ip, (pubkey, p.interface.clone()));
+            }
         }
     }
     Ok(snapshot)
@@ -637,17 +655,75 @@ fn policy(
     auth: UpdateAuth,
 ) -> ResponseCode {
     // The client sees only a generic failure.
-    let refuse = |why: String| {
-        log_refusal(src, &why);
-        ResponseCode::Refused
-    };
     directory.mutate(|d| match check(d, src, updates, auth) {
         Ok(owner) => {
             claim(d, &owner, updates);
+            d.refusals.admit(src);
             ResponseCode::NoError
         }
-        Err(why) => refuse(why),
+        Err(why) => {
+            if d.refusals.record(src, &why, Instant::now()) {
+                log_refusal(src, &why);
+            }
+            ResponseCode::Refused
+        }
     })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Refusal {
+    NotPermitted,
+    NeedsTcp,
+    LanZone(LowerName),
+    NotInjectable(RecordType),
+    NeedsSignature(RecordType),
+    OwnedByOther(LowerName),
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Refusal::NotPermitted => f.write_str(
+                "source holds no known address assignment with the DNS-injection permission",
+            ),
+            Refusal::NeedsTcp => f.write_str("an unsigned update must arrive over TCP"),
+            Refusal::LanZone(name) => write!(f, "{name} is inside the reserved `lan.` zone"),
+            Refusal::NotInjectable(rtype) => write!(f, "record type {rtype} is not injectable"),
+            Refusal::NeedsSignature(rtype) => {
+                write!(f, "record type {rtype} needs a signed update")
+            }
+            Refusal::OwnedByOther(name) => write!(f, "{name} is owned by another device"),
+        }
+    }
+}
+
+/// The latest refusal of each source since it was last admitted.
+#[derive(Default)]
+struct Refusals(Recent<IpAddr, Option<Refusal>>);
+
+impl Refusals {
+    /// Whether the reason is new for the source.
+    fn record(&mut self, src: IpAddr, why: &Refusal, now: Instant) -> bool {
+        let reason = self.0.touch(src, now);
+        if reason.as_ref() == Some(why) {
+            return false;
+        }
+        *reason = Some(why.clone());
+        true
+    }
+
+    fn admit(&mut self, src: IpAddr) {
+        self.0.forget(&src);
+    }
+
+    /// Sources recently refused for lacking the permission.
+    fn asking(&self, now: Instant) -> HashSet<IpAddr> {
+        self.0
+            .recent(now)
+            .filter(|(_, reason)| **reason == Some(Refusal::NotPermitted))
+            .map(|(src, _)| *src)
+            .collect()
+    }
 }
 
 /// The update's owner, when the directory admits every record.
@@ -656,13 +732,16 @@ fn check(
     src: IpAddr,
     updates: &[Record],
     auth: UpdateAuth,
-) -> Result<Owner, String> {
-    let owner = d.by_ip.get(&src).map(|i| i.owner.clone()).ok_or_else(|| {
-        "source holds no known address assignment with the DNS-injection permission".to_string()
-    })?;
+) -> Result<Owner, Refusal> {
+    // An unproven source never reaches the permission check.
     if !auth.tsig && !auth.tcp {
-        return Err("an unsigned update must arrive over TCP".into());
+        return Err(Refusal::NeedsTcp);
     }
+    let owner = d
+        .by_ip
+        .get(&src)
+        .map(|i| i.owner.clone())
+        .ok_or(Refusal::NotPermitted)?;
     let held_by_other = |name: &LowerName, rtype: RecordType| {
         d.owners
             .get(&(name.clone(), rtype))
@@ -672,7 +751,7 @@ fn check(
         let name = LowerName::from(&rec.name);
         // dnsmasq is authoritative for `lan.`.
         if lan_zone().zone_of(&name) {
-            return Err(format!("{name} is inside the reserved `lan.` zone"));
+            return Err(Refusal::LanZone(name));
         }
         let rtype = rec.record_type();
         let held = match rec.dns_class {
@@ -681,10 +760,10 @@ fn check(
                     rtype,
                     RecordType::A | RecordType::AAAA | RecordType::CNAME | RecordType::TXT
                 ) {
-                    return Err(format!("record type {rtype} is not injectable"));
+                    return Err(Refusal::NotInjectable(rtype));
                 }
                 if !auth.tsig && !matches!(rtype, RecordType::A | RecordType::AAAA) {
-                    return Err(format!("record type {rtype} needs a signed update"));
+                    return Err(Refusal::NeedsSignature(rtype));
                 }
                 held_by_other(&name, rtype)
             }
@@ -696,7 +775,7 @@ fn check(
             _ => false,
         };
         if held {
-            return Err(format!("{name} is owned by another device"));
+            return Err(Refusal::OwnedByOther(name));
         }
     }
     Ok(owner)
@@ -728,7 +807,7 @@ fn lan_zone() -> LowerName {
     LowerName::from(Name::from_ascii("lan.").expect("static valid name"))
 }
 
-fn log_refusal(src: IpAddr, why: &str) {
+fn log_refusal(src: IpAddr, why: &Refusal) {
     static WINDOW: Mutex<Option<(Instant, u32)>> = Mutex::new(None);
     let mut window = WINDOW.lock().unwrap_or_else(|e| e.into_inner());
     let now = Instant::now();
@@ -1283,6 +1362,7 @@ mod tests {
     use hickory_server::proto::rr::rdata::{A, CNAME};
 
     use super::*;
+    use crate::recent::REQUEST_MEMORY;
 
     fn fqdn(s: &str) -> Name {
         let mut n = Name::from_utf8(s).unwrap();
@@ -1376,6 +1456,76 @@ mod tests {
             },
         );
         SyncMutex::new(d)
+    }
+
+    #[tokio::test]
+    async fn an_unpermitted_source_is_asking_until_admitted() {
+        let dir = directory();
+        let stranger = IpAddr::V4(lan_ip(77));
+        let permitted = IpAddr::V4(lan_ip(50));
+        let update = |host| [a_record("nas.example.com", lan_ip(host))];
+        assert_eq!(
+            admit(&dir, stranger, &update(77), TCP).await,
+            ResponseCode::Refused
+        );
+        assert_eq!(
+            admit(&dir, permitted, &update(50), UpdateAuth::default()).await,
+            ResponseCode::Refused,
+            "refused for another reason"
+        );
+        let asking = dir.peek(|d| d.refusals.asking(Instant::now()));
+        assert_eq!(asking, HashSet::from([stranger]));
+
+        dir.mutate(|d| {
+            d.by_ip.insert(
+                stranger,
+                Injector {
+                    owner: Owner::Mac("AA:00:00:00:00:77".into()),
+                    profile: "lan".into(),
+                },
+            )
+        });
+        assert_eq!(
+            admit(&dir, stranger, &update(77), TCP).await,
+            ResponseCode::NoError
+        );
+        assert!(dir.peek(|d| d.refusals.asking(Instant::now()).is_empty()));
+    }
+
+    #[tokio::test]
+    async fn an_unproven_source_is_not_asking() {
+        let dir = directory();
+        let forged = IpAddr::V4(lan_ip(77));
+        assert_eq!(
+            admit(
+                &dir,
+                forged,
+                &[a_record("nas.example.com", lan_ip(77))],
+                UpdateAuth::default()
+            )
+            .await,
+            ResponseCode::Refused
+        );
+        assert!(
+            dir.peek(|d| d.refusals.asking(Instant::now()).is_empty()),
+            "an unsigned UDP source address proves nothing"
+        );
+    }
+
+    #[test]
+    fn a_refusal_is_new_only_when_its_reason_changes() {
+        let mut refusals = Refusals::default();
+        let src = IpAddr::V4(lan_ip(77));
+        let now = Instant::now();
+        assert!(refusals.record(src, &Refusal::NotPermitted, now));
+        assert!(!refusals.record(src, &Refusal::NotPermitted, now));
+        assert!(refusals.record(src, &Refusal::NeedsTcp, now));
+        assert!(refusals.record(src, &Refusal::NotPermitted, now));
+        refusals.admit(src);
+        assert!(refusals.record(src, &Refusal::NotPermitted, now));
+
+        let later = now + REQUEST_MEMORY;
+        assert!(refusals.asking(later).is_empty(), "forgotten after a while");
     }
 
     async fn publish_public_name_offline(signed: bool) {
@@ -1766,7 +1916,7 @@ mod tests {
         let mut with_peer = snapshot_with(&[]);
         with_peer
             .wg_peers
-            .insert(lan_ip(200), ("pk".into(), [0u8; 32], "lan".into()));
+            .insert(lan_ip(200), ("pk".into(), "lan".into()));
         let wg_records = vec![injected("nas.example.com", lan_ip(200), lan_ip(200))];
         assert!(sweep_owners(&mut d, &with_peer, &HashMap::new(), &[], &wg_records).is_empty());
         assert_eq!(
@@ -1857,8 +2007,8 @@ mod tests {
         }
     }
 
-    /// A permitted `wireguard_wg_<iface>` peer section yields a directory entry keyed
-    /// by its tunnel /32, carrying the TSIG key derived from its PSK.
+    /// A permitted `wireguard_wg_<iface>` peer section yields a directory entry
+    /// and a TSIG key derived from its PSK, both keyed by its tunnel /32.
     #[tokio::test]
     async fn snapshot_derives_wg_peer_tsig_keys() {
         use base64::Engine;
@@ -1906,22 +2056,32 @@ mod tests {
              own address, so the listener binds there, not the gateway"
         );
 
-        let (pubkey, key, profile) = snapshot
+        let (pubkey, profile) = snapshot
             .wg_peers
             .get(&Ipv4Addr::new(10, 59, 0, 2))
             .expect("peer keyed by its tunnel /32");
         assert_eq!(pubkey, "peer-pub");
         assert_eq!(profile, "lan");
         assert_eq!(
-            *key,
-            derive_tsig_key(&psk),
+            snapshot.wg_keys.get(&Ipv4Addr::new(10, 59, 0, 2)),
+            Some(&derive_tsig_key(&psk)),
             "the key the listener verifies against derives from the peer's PSK \
              exactly as the client derives its signing key"
         );
+        let broken = Ipv4Addr::new(10, 59, 0, 3);
         assert!(
-            !snapshot.wg_peers.contains_key(&Ipv4Addr::new(10, 59, 0, 3)),
+            !snapshot.wg_peers.contains_key(&broken) && !snapshot.wg_keys.contains_key(&broken),
             "a peer whose PSK cannot decode contributes no key"
         );
+    }
+
+    #[tokio::test]
+    async fn an_unpermitted_peer_has_a_key_but_no_entry() {
+        let snapshot = snapshot_with_two_peers(true).await;
+        let (by_ip, wg_keys) = injectors(&snapshot, &HashMap::new(), &[]);
+        let unpermitted = IpAddr::V4(lan_ip(201));
+        assert!(!by_ip.contains_key(&unpermitted));
+        assert_eq!(wg_keys.get(&unpermitted), Some(&derive_tsig_key(&[8; 32])));
     }
 
     /// One profile with an inbound VPN and two peers: `.201` never holds the
@@ -2020,11 +2180,19 @@ mod tests {
                 Message::from_vec(&response).unwrap().metadata.response_code
             }
         };
+        let asking = || di.asking_sources();
+        assert_eq!(
+            answer(201, 9).await,
+            ResponseCode::Refused,
+            "a wrong key proves nothing"
+        );
+        assert!(asking().is_empty());
         assert_eq!(
             answer(201, 8).await,
             ResponseCode::Refused,
             "an unpermitted peer is refused despite signing with its own PSK"
         );
+        assert_eq!(asking(), HashSet::from([IpAddr::V4(lan_ip(201))]));
         assert!(di.injector.list().is_empty());
         assert_eq!(answer(200, 7).await, ResponseCode::NoError);
         assert_eq!(di.injector.list().len(), 1);
@@ -2214,9 +2382,10 @@ mod tests {
     #[test]
     fn a_profiles_own_device_keeps_a_shared_name() {
         let (mut snapshot, reach) = name_fixture();
-        snapshot
-            .reserved
-            .insert("BB:00:00:00:00:02".into(), Ipv4Addr::new(192, 168, 101, 40));
+        snapshot.reserved.insert(
+            "BB:00:00:00:00:02".into(),
+            vec![Ipv4Addr::new(192, 168, 101, 40)],
+        );
         snapshot
             .named
             .insert("BB:00:00:00:00:02".into(), "nas".into());
@@ -2255,9 +2424,10 @@ mod tests {
     fn assigned_names_win_and_reach_their_own_profile() {
         let (mut snapshot, reach) = name_fixture();
         // Reserved and offline: no lease serves the name.
-        snapshot
-            .reserved
-            .insert("CC:00:00:00:00:01".into(), Ipv4Addr::new(192, 168, 1, 60));
+        snapshot.reserved.insert(
+            "CC:00:00:00:00:01".into(),
+            vec![Ipv4Addr::new(192, 168, 1, 60)],
+        );
         snapshot
             .named
             .insert("CC:00:00:00:00:01".into(), "printer".into());
@@ -2286,6 +2456,38 @@ mod tests {
         );
         assert_eq!(rendered[1], rendered[0]);
         assert_eq!(rendered[2], "");
+    }
+
+    #[test]
+    fn an_offline_device_resolves_to_its_reservation_on_each_profile() {
+        let (mut snapshot, reach) = name_fixture();
+        snapshot.reserved.insert(
+            "CC:00:00:00:00:01".into(),
+            vec![
+                Ipv4Addr::new(192, 168, 1, 60),
+                Ipv4Addr::new(192, 168, 101, 60),
+            ],
+        );
+        snapshot
+            .named
+            .insert("CC:00:00:00:00:01".into(), "nas".into());
+        let rendered = rendered_names(&snapshot, &reach, &[]);
+        assert_eq!(rendered[0], "192.168.1.60 nas.lan\n");
+        assert_eq!(rendered[1], "192.168.101.60 nas.lan\n");
+        assert_eq!(rendered[2], "");
+
+        let leases = [lease(
+            "dns_guest",
+            "CC:00:00:00:00:01",
+            Ipv4Addr::new(192, 168, 101, 60),
+            "nas",
+            0,
+        )];
+        let rendered = rendered_names(&snapshot, &reach, &leases);
+        assert_eq!(
+            rendered[0], "",
+            "lan cannot reach guest, where the device is"
+        );
     }
 
     #[test]

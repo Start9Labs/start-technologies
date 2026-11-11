@@ -960,7 +960,8 @@ export default {
   1109: 'Ungültige Antwort vom Server',
   1110: 'Maximale Dateigröße',
   1111: 'Im Marktplatz anzeigen',
-  1112: 'Stopp erzwingen',
-  1113: 'Stopp wird erzwungen',
-  1114: 'Ein erzwungener Stopp kann zu Datenverlust führen oder den Dienst in einem fehlerhaften Zustand hinterlassen. Möchten Sie den Stopp wirklich erzwingen?',
+  1112: 'Diese alternative Implementierung erfüllt die Anforderung',
+  1113: 'Stopp erzwingen',
+  1114: 'Stopp wird erzwungen',
+  1115: 'Ein erzwungener Stopp kann zu Datenverlust führen oder den Dienst in einem fehlerhaften Zustand hinterlassen. Möchten Sie den Stopp wirklich erzwingen?',
 } satisfies i18n

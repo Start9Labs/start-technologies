@@ -1,0 +1,153 @@
+#!/bin/bash
+
+set -euo pipefail
+
+usage() {
+    echo "Usage: $0 baseline | collect [CONTROLLER] | apst|hmb|aspm|portpm [...]"
+    echo '  baseline - Remove diagnostic overrides, preserving administrator configuration'
+    echo '  collect  - Report booted arguments and controller state (default: /dev/nvme0)'
+    echo '  apst     - Disable NVMe autonomous power-state transitions'
+    echo '  hmb      - Disable Host Memory Buffer allocation'
+    echo '  aspm     - Leave PCIe ASPM configuration to firmware'
+    echo '  portpm   - Disable PCIe port power management'
+}
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo 'Must be run as root.' >&2
+    exit 1
+fi
+
+if [ "${1:-}" = collect ] && [ "$#" -le 2 ]; then
+    controller=${2:-/dev/nvme0}
+    echo '=== Booted kernel arguments ==='
+    cat /proc/cmdline
+    uname -a
+    for parameter in /sys/module/nvme_core/parameters/default_ps_max_latency_us /sys/module/nvme/parameters/max_host_mem_size_mb; do
+        if [ -r "$parameter" ]; then
+            printf '%s=%s\n' "$parameter" "$(cat "$parameter")"
+        fi
+    done
+    echo '=== HMB request ==='
+    nvme id-ctrl "$controller" | grep -iE 'hmb|hmpre|hmmin' || echo 'Failed to get HMB information'
+    echo '=== APST configuration ==='
+    nvme get-feature "$controller" -f 0x0c -H || echo 'Failed to get APST configuration'
+    echo '=== Power-management state ==='
+    nvme get-feature "$controller" -f 0x02 -H || echo 'Failed to get power-management state'
+    echo '=== PCIe link configuration ==='
+    device=$(readlink -f "/sys/class/nvme/${controller##*/}/device") || device=
+    if [ -n "$device" ] && [ -d "$device" ]; then
+        lspci -vvv -s "${device##*/}" || echo 'Failed to get PCIe configuration'
+    else
+        echo 'Could not identify the controller PCIe device'
+    fi
+    echo '=== SMART log ==='
+    nvme smart-log "$controller" || echo 'Failed to get SMART log'
+    exit 0
+fi
+
+declare -A flags=(
+    [apst]=nvme_core.default_ps_max_latency_us=0
+    [hmb]=nvme.max_host_mem_size_mb=0
+    [aspm]=pcie_aspm=off
+    [portpm]=pcie_port_pm=off
+)
+selected=()
+if [ "$#" = 1 ] && [ "$1" = baseline ]; then
+    :
+else
+    if [ "$#" = 0 ]; then
+        usage >&2
+        exit 1
+    fi
+    for mode in "$@"; do
+        if [ -z "$mode" ] || [ -z "${flags[$mode]:-}" ]; then
+            usage >&2
+            exit 1
+        fi
+        flag=${flags[$mode]}
+        if [[ " ${selected[*]} " = *" $flag "* ]]; then
+            echo "Repeated isolation mode: $mode" >&2
+            exit 1
+        fi
+        selected+=("$flag")
+    done
+fi
+
+config_dir=/media/startos/config/grub.d
+config="$config_dir/90-nvme-isolation.cfg"
+grub_config=/boot/grub/grub.cfg
+if [ ! -r /etc/default/grub.d/zz-startos-user.cfg ] || [ ! -f "$grub_config" ] || [ ! -d /media/startos/config ]; then
+    echo 'Requires an installed StartOS system with persistent GRUB override support.' >&2
+    exit 1
+fi
+
+mkdir -p "$config_dir"
+work=$(mktemp -d /boot/grub/.nvme-isolation.XXXXXX)
+applied=0
+cleanup() {
+    if [ "$applied" = 0 ]; then
+        if [ -e "$work/previous.cfg" ] || [ -L "$work/previous.cfg" ]; then
+            mv -f "$work/previous.cfg" "$config"
+        else
+            rm -f "$config"
+        fi
+    fi
+    rm -rf "$work"
+}
+if [ -e "$config" ] || [ -L "$config" ]; then
+    cp -a "$config" "$work/previous.cfg" || { rm -rf "$work"; exit 1; }
+fi
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if [ "${#selected[@]}" = 0 ]; then
+    rm -f "$config"
+else
+    cat > "$work/override.cfg" <<EOF
+GRUB_CMDLINE_LINUX="\$GRUB_CMDLINE_LINUX ${selected[*]}"
+EOF
+    chmod 644 "$work/override.cfg"
+    mv -f "$work/override.cfg" "$config"
+fi
+
+grub-mkconfig -o "$work/grub.cfg"
+
+# Isolation must match every generated kernel entry, including recovery entries.
+awk -v owned="${flags[*]}" -v expected="${selected[*]}" '
+    BEGIN {
+        count = split(owned, values, " ")
+        for (i = 1; i <= count; i++) {
+            split(values[i], parts, "=")
+            managed[parts[1]] = 1
+        }
+        count = split(expected, values, " ")
+        for (i = 1; i <= count; i++) wanted[values[i]] = 1
+    }
+    $1 ~ /^linux(efi|16)?$/ {
+        entries++
+        delete found
+        for (i = 3; i <= NF; i++) {
+            value = $i
+            gsub(/^["\047]|["\047]$/, "", value)
+            split(value, parts, "=")
+            if (parts[1] in managed) found[value]++
+        }
+        for (value in wanted) {
+            if (found[value] != 1) bad = 1
+        }
+        for (value in found) {
+            if (!(value in wanted)) bad = 1
+        }
+    }
+    END { exit (entries == 0 || bad) }
+' "$work/grub.cfg" || {
+    echo 'Isolation conflicts with effective GRUB configuration; boot configuration left unchanged.' >&2
+    echo 'Remove independently configured NVMe/APST/HMB/ASPM/port-PM arguments before testing.' >&2
+    exit 1
+}
+
+mv -f "$work/grub.cfg" "$grub_config"
+applied=1
+printf 'Configured diagnostic arguments: %s\n' "${selected[*]:-(none)}"
+echo 'Reboot to apply, then use collect to check the actual booted arguments.'

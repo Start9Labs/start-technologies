@@ -960,7 +960,8 @@ export default {
   1109: 'Réponse du serveur non valide',
   1110: 'Taille maximale du fichier',
   1111: 'Voir dans la bibliothèque de services',
-  1112: 'Forcer l’arrêt',
-  1113: 'Arrêt forcé en cours',
-  1114: 'Forcer l’arrêt peut entraîner une perte de données ou laisser le service dans un état défectueux. Voulez-vous vraiment forcer l’arrêt ?',
+  1112: 'Cette implémentation alternative remplit la condition requise',
+  1113: 'Forcer l’arrêt',
+  1114: 'Arrêt forcé en cours',
+  1115: 'Forcer l’arrêt peut entraîner une perte de données ou laisser le service dans un état défectueux. Voulez-vous vraiment forcer l’arrêt ?',
 } satisfies i18n

@@ -960,7 +960,8 @@ export default {
   1109: 'Respuesta del servidor no válida',
   1110: 'Tamaño máximo del archivo',
   1111: 'Ver en el Mercado',
-  1112: 'Forzar detención',
-  1113: 'Forzando detención',
-  1114: 'Forzar la detención puede provocar pérdida de datos o dejar el servicio en mal estado. ¿Seguro que deseas forzar la detención?',
+  1112: 'Esta implementación alternativa cumple el requisito',
+  1113: 'Forzar detención',
+  1114: 'Forzando detención',
+  1115: 'Forzar la detención puede provocar pérdida de datos o dejar el servicio en mal estado. ¿Seguro que deseas forzar la detención?',
 } satisfies i18n

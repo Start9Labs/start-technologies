@@ -961,7 +961,8 @@ export const ENGLISH: Record<string, number> = {
   'Invalid response from server': 1109,
   'Maximum file size': 1110,
   'View in Marketplace': 1111,
-  'Force stop': 1112,
-  'Force stopping': 1113,
-  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 1114,
+  'This alternative implementation meets the requirement': 1112,
+  'Force stop': 1113,
+  'Force stopping': 1114,
+  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 1115,
 }
