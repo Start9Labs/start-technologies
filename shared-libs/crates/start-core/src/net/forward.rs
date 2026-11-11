@@ -43,17 +43,25 @@ fn may_claim(port: u16, privileged: bool) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ForwardRequirements {
     pub public_gateways: BTreeSet<GatewayId>,
+    /// Effective private exposure, including explicitly accepted insecure addresses.
     pub private_ips: BTreeSet<IpAddr>,
     pub secure: bool,
 }
 
 impl ForwardRequirements {
-    pub fn allows_gateway(&self, gateway: &NetworkInterfaceInfo) -> bool {
-        self.secure || gateway.secure()
-    }
-
     pub fn public_on(&self, gateway: &GatewayId) -> bool {
         self.secure && self.public_gateways.contains(gateway)
+    }
+
+    /// `None` rejects the destination; `Some(None)` admits public traffic.
+    fn source_filter(&self, gateway: &GatewayId, subnet: &IpNet) -> Option<Option<IpNet>> {
+        if self.public_on(gateway) {
+            Some(None)
+        } else if self.private_ips.contains(&subnet.addr()) {
+            Some(Some(subnet.trunc()))
+        } else {
+            None
+        }
     }
 }
 
@@ -767,14 +775,7 @@ impl InterfaceForwardEntry {
                             // The WAN is never secure: an insecure exposure is never public,
                             // so it still serves the LAN but never the public internet.
                             let public = reqs.public_on(gw_id);
-                            if !reqs.allows_gateway(info) {
-                                continue;
-                            }
-                            let src_filter = if public {
-                                None
-                            } else if reqs.private_ips.contains(&IpAddr::V4(ip)) {
-                                Some(subnet.trunc())
-                            } else {
+                            let Some(src_filter) = reqs.source_filter(gw_id, subnet) else {
                                 continue;
                             };
 
@@ -1249,6 +1250,26 @@ pub(crate) async fn unforward6(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepted_private_plaintext_stays_scoped_and_never_requests_public_forwarding() {
+        let gateway: GatewayId = "eth0".parse().unwrap();
+        let selected: IpNet = "192.0.2.10/24".parse().unwrap();
+        let other: IpNet = "192.0.2.11/24".parse().unwrap();
+        let mut requirements = ForwardRequirements {
+            public_gateways: BTreeSet::from([gateway.clone()]),
+            private_ips: BTreeSet::from([selected.addr()]),
+            secure: false,
+        };
+        assert_eq!(
+            requirements.source_filter(&gateway, &selected),
+            Some(Some("192.0.2.0/24".parse().unwrap()))
+        );
+        assert_eq!(requirements.source_filter(&gateway, &other), None);
+        assert!(!requirements.public_on(&gateway));
+        requirements.private_ips.clear();
+        assert_eq!(requirements.source_filter(&gateway, &selected), None);
+    }
 
     #[test]
     fn try_alloc_range_basic() {

@@ -229,8 +229,10 @@ export type Effects = {
    * Resolves `false` if nothing was bound at `internalPort`.
    */
   retireBinding(options: RetireBindingParams): Promise<boolean>
-  // host
-  /** Returns information about the specified host, if it exists */
+  /**
+   * Returns the host, with disabled insecure candidates hidden from service readers.
+   * Administrator binding-list APIs retain the complete candidate list.
+   */
   getHostInfo(options: {
     packageId?: PackageId
     hostId: HostId

@@ -51,6 +51,16 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
         watch: TypedDbWatch<T>,
         handler: CallbackHandler,
     ) {
+        self.add_projected(key, watch, handler, Ok);
+    }
+
+    pub fn add_projected<T: Send + 'static>(
+        self: &Arc<Self>,
+        key: K,
+        watch: TypedDbWatch<T>,
+        handler: CallbackHandler,
+        project: fn(Value) -> Result<Value, Error>,
+    ) {
         self.inner.mutate(|map| {
             map.entry(key.clone())
                 .or_insert_with(|| {
@@ -64,8 +74,14 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
                                 if let Some(cbs) = this.inner.mutate(|map| {
                                     map.remove(&k).and_then(CallbackHandlers::detach_watcher)
                                 }) {
-                                    let value = watch.peek_and_mark_seen().unwrap_or_default();
-                                    if let Err(e) = cbs.call(vector![value]).await {
+                                    if let Err(e) = async {
+                                        let value = project(
+                                            watch.peek_and_mark_seen().unwrap_or_default(),
+                                        )?;
+                                        cbs.call(vector![value]).await
+                                    }
+                                    .await
+                                    {
                                         tracing::error!("Error in {label} callback: {e}");
                                         tracing::debug!("{e:?}");
                                     }
@@ -184,8 +200,12 @@ impl ServiceCallbacks {
         watch: TypedDbWatch<Host>,
         handler: CallbackHandler,
     ) {
-        self.get_host_info
-            .add((package_id, host_id), watch, handler);
+        self.get_host_info.add_projected(
+            (package_id, host_id),
+            watch,
+            handler,
+            super::net::host::project_host_info,
+        );
     }
 
     pub(super) fn add_get_ssl_certificate(

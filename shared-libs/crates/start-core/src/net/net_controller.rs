@@ -466,10 +466,7 @@ fn plaintext_http_target(
             continue;
         }
         for gateway in address.metadata.gateways() {
-            let Some(info) = interfaces
-                .get(gateway)
-                .filter(|i| requirements.allows_gateway(i))
-            else {
+            let Some(info) = interfaces.get(gateway) else {
                 continue;
             };
             let public = address.public && requirements.public_on(gateway);
@@ -780,16 +777,6 @@ impl NetServiceData {
                         let src_filter = if a.public && secure_exposure {
                             None
                         } else {
-                            // LAN: insecure reaches it only over a secure gateway (IPv4 parity).
-                            if !secure_exposure
-                                && !a
-                                    .metadata
-                                    .gateways()
-                                    .filter_map(|gw| net_ifaces.get(gw))
-                                    .any(|info| requirements.allows_gateway(info))
-                            {
-                                continue;
-                            }
                             match a
                                 .metadata
                                 .gateways()
@@ -821,10 +808,7 @@ impl NetServiceData {
         // gateways never get range addresses synthesized, so they never appear
         // here. Private domains register their resolver entries like single-port.
         //
-        // `secure: true` is intentional: ranges carry no Security option (no
-        // SSL/vhost), so without it the forward.rs security gate
-        // (`!reqs.secure && !info.secure()`) would drop every range on a gateway
-        // the operator has not marked secure.
+        // Ranges are eligible for public exposure through their address opt-ins.
         for (&internal_start, range) in host.binding_ranges.iter() {
             if !range.enabled {
                 continue;
@@ -1756,6 +1740,53 @@ mod tests {
             secure: secure_ssl.map(|ssl| Security { ssl }),
             proxy: None,
         }
+    }
+
+    #[test]
+    fn plaintext_http_proxy_accepts_selected_insecure_private_addresses_only() {
+        let interfaces: OrdMap<GatewayId, NetworkInterfaceInfo> = OrdMap::from_iter([(
+            gw("eth0"),
+            NetworkInterfaceInfo {
+                ip_info: Some(Arc::new(IpInfo {
+                    subnets: ["192.0.2.10/24", "192.0.2.11/24", "2001:db8::10/64"]
+                        .into_iter()
+                        .map(|s| s.parse::<IpNet>().unwrap())
+                        .collect(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        )]);
+        assert!(!interfaces[&gw("eth0")].secure());
+        let selected = [
+            lan_ip("192.0.2.10", false, 8080, "eth0"),
+            lan_ip("2001:db8::10", false, 8080, "eth0"),
+        ];
+        let addresses = selected.iter().collect();
+        let requirements = ForwardRequirements {
+            public_gateways: BTreeSet::new(),
+            private_ips: forwarded_lan_ips(selected.iter(), &interfaces),
+            secure: false,
+        };
+        let target = || {
+            binding_proxy_target(
+                &bind_options(true, None, None),
+                "127.0.0.1:8096".parse().unwrap(),
+                None,
+                None,
+            )
+        };
+        let selected_target =
+            plaintext_http_target(target(), 8080, &addresses, &interfaces, &requirements);
+        assert_eq!(
+            selected_target.private,
+            BTreeSet::from([ip("192.0.2.10"), ip("2001:db8::10")])
+        );
+        assert!(selected_target.public_v4.is_empty());
+        assert!(selected_target.public_v6.is_empty());
+        let disabled_target =
+            plaintext_http_target(target(), 8080, &BTreeSet::new(), &interfaces, &requirements);
+        assert!(disabled_target.private.is_empty());
     }
 
     #[test]

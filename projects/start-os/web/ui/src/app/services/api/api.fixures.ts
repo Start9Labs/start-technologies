@@ -1,5 +1,5 @@
 import { GetPackagesRes } from '@start9labs/marketplace'
-import { ISB, IST, T } from '@start9labs/start-core'
+import { ISB, IST, T, utils } from '@start9labs/start-core'
 import {
   InstalledState,
   PackageDataEntry,
@@ -23,6 +23,20 @@ const unknownSigner =
 const mockDescription = {
   short: 'Lorem ipsum dolor sit amet',
   long: 'Lorem ipsum dolor sit amet, <p>consectetur adipiscing elit</p>, sed do eiusmod <i>tempor</i> incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.',
+}
+
+export function mockAddresses(
+  addresses: Omit<
+    T.DerivedAddressInfo,
+    'insecure' | 'insecureEnabled' | 'effective'
+  >,
+): T.DerivedAddressInfo {
+  return {
+    ...addresses,
+    insecure: [],
+    insecureEnabled: [],
+    effective: utils.getEnabledAddresses(addresses),
+  }
 }
 
 export namespace Mock {
@@ -2674,7 +2688,7 @@ PersistentKeepalive = 25`
               assignedPort: null,
               assignedSslPort: 443,
             },
-            addresses: {
+            addresses: mockAddresses({
               enabled: ['[2001:db8:abcd::a3b:2]:1234'],
               disabled: [],
               guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
@@ -2726,7 +2740,7 @@ PersistentKeepalive = 25`
                   metadata: { kind: 'ipv6', gateway: 'eth0', scopeId: 0 },
                 },
               ],
-            },
+            }),
             options: {
               addSsl: null,
               preferredExternalPort: 443,
@@ -2767,13 +2781,13 @@ PersistentKeepalive = 25`
               assignedPort: 8332,
               assignedSslPort: null,
             },
-            addresses: {
+            addresses: mockAddresses({
               enabled: [],
               disabled: [],
               guaWan: [],
               lanEnabled: [],
               available: [],
-            },
+            }),
             options: {
               addSsl: null,
               preferredExternalPort: 8332,
@@ -2814,13 +2828,13 @@ PersistentKeepalive = 25`
               assignedPort: 8333,
               assignedSslPort: null,
             },
-            addresses: {
+            addresses: mockAddresses({
               enabled: [],
               disabled: [],
               guaWan: [],
               lanEnabled: [],
               available: [],
-            },
+            }),
             options: {
               addSsl: null,
               preferredExternalPort: 8333,

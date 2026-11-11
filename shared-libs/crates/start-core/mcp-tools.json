@@ -3926,10 +3926,53 @@
                 "maxItems": 2
               }
             },
+            "insecure": {
+              "description": "Plaintext private addresses requiring consent, keyed by hostname, port and gateway.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "string" },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  { "$ref": "#/$defs/GatewayId" }
+                ],
+                "items": false,
+                "minItems": 3,
+                "maxItems": 3
+              }
+            },
+            "insecureEnabled": {
+              "description": "Persisted consent; ordinary address changes must not grant insecure access.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "string" },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  { "$ref": "#/$defs/GatewayId" }
+                ],
+                "items": false,
+                "minItems": 3,
+                "maxItems": 3
+              }
+            },
             "available": {
               "type": "array",
               "items": { "$ref": "#/$defs/HostnameInfo" },
               "description": "COMPUTED: NetServiceData::update — all possible addresses for this binding"
+            },
+            "effective": {
+              "description": "Effective address selections shared by network enforcement and clients.",
+              "type": "array",
+              "items": { "$ref": "#/$defs/HostnameInfo" }
             }
           },
           "required": [
@@ -3937,10 +3980,14 @@
             "disabled",
             "guaWan",
             "lanEnabled",
-            "available"
+            "insecure",
+            "insecureEnabled",
+            "available",
+            "effective"
           ],
           "additionalProperties": true
         },
+        "GatewayId": { "type": "string" },
         "HostnameInfo": {
           "type": "object",
           "properties": {
@@ -4039,7 +4086,6 @@
             }
           ]
         },
-        "GatewayId": { "type": "string" },
         "PackageId": { "type": "string" },
         "ActionId": { "type": "string" },
         "ServiceInterface": {
@@ -4136,7 +4182,11 @@
               "maximum": 9007199254740991
             },
             "address": { "$ref": "#/$defs/HostnameInfo" },
-            "enabled": { "type": ["boolean", "null"] }
+            "enabled": { "type": ["boolean", "null"] },
+            "allowInsecure": {
+              "description": "Accepts readable and alterable plaintext traffic, including passwords.",
+              "type": "boolean"
+            }
           },
           "required": ["internalPort", "address"],
           "additionalProperties": true
@@ -4408,7 +4458,11 @@
               "maximum": 9007199254740991
             },
             "address": { "$ref": "#/$defs/HostnameInfo" },
-            "enabled": { "type": ["boolean", "null"] }
+            "enabled": { "type": ["boolean", "null"] },
+            "allowInsecure": {
+              "description": "Accepts readable and alterable plaintext traffic, including passwords.",
+              "type": "boolean"
+            }
           },
           "required": ["internalPort", "address"],
           "additionalProperties": true
@@ -10095,10 +10149,53 @@
                 "maxItems": 2
               }
             },
+            "insecure": {
+              "description": "Plaintext private addresses requiring consent, keyed by hostname, port and gateway.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "string" },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  { "$ref": "#/$defs/GatewayId" }
+                ],
+                "items": false,
+                "minItems": 3,
+                "maxItems": 3
+              }
+            },
+            "insecureEnabled": {
+              "description": "Persisted consent; ordinary address changes must not grant insecure access.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "string" },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  { "$ref": "#/$defs/GatewayId" }
+                ],
+                "items": false,
+                "minItems": 3,
+                "maxItems": 3
+              }
+            },
             "available": {
               "type": "array",
               "items": { "$ref": "#/$defs/HostnameInfo" },
               "description": "COMPUTED: NetServiceData::update — all possible addresses for this binding"
+            },
+            "effective": {
+              "description": "Effective address selections shared by network enforcement and clients.",
+              "type": "array",
+              "items": { "$ref": "#/$defs/HostnameInfo" }
             }
           },
           "required": [
@@ -10106,10 +10203,14 @@
             "disabled",
             "guaWan",
             "lanEnabled",
-            "available"
+            "insecure",
+            "insecureEnabled",
+            "available",
+            "effective"
           ],
           "additionalProperties": true
         },
+        "GatewayId": { "type": "string" },
         "HostnameInfo": {
           "type": "object",
           "properties": {
@@ -10208,7 +10309,6 @@
             }
           ]
         },
-        "GatewayId": { "type": "string" },
         "PackageId": { "type": "string" },
         "ActionId": { "type": "string" },
         "ServiceInterface": {
@@ -10286,7 +10386,11 @@
               "maximum": 9007199254740991
             },
             "address": { "$ref": "#/$defs/HostnameInfo" },
-            "enabled": { "type": ["boolean", "null"] }
+            "enabled": { "type": ["boolean", "null"] },
+            "allowInsecure": {
+              "description": "Accepts readable and alterable plaintext traffic, including passwords.",
+              "type": "boolean"
+            }
           },
           "required": ["internalPort", "address"],
           "additionalProperties": true
@@ -10395,7 +10499,11 @@
           "maximum": 9007199254740991
         },
         "address": { "$ref": "#/$defs/HostnameInfo" },
-        "enabled": { "type": ["boolean", "null"] }
+        "enabled": { "type": ["boolean", "null"] },
+        "allowInsecure": {
+          "description": "Accepts readable and alterable plaintext traffic, including passwords.",
+          "type": "boolean"
+        }
       },
       "required": ["internalPort", "address"],
       "additionalProperties": true
@@ -10544,7 +10652,11 @@
               "maximum": 9007199254740991
             },
             "address": { "$ref": "#/$defs/HostnameInfo" },
-            "enabled": { "type": ["boolean", "null"] }
+            "enabled": { "type": ["boolean", "null"] },
+            "allowInsecure": {
+              "description": "Accepts readable and alterable plaintext traffic, including passwords.",
+              "type": "boolean"
+            }
           },
           "required": ["internalPort", "address"],
           "additionalProperties": true
@@ -10653,7 +10765,11 @@
           "maximum": 9007199254740991
         },
         "address": { "$ref": "#/$defs/HostnameInfo" },
-        "enabled": { "type": ["boolean", "null"] }
+        "enabled": { "type": ["boolean", "null"] },
+        "allowInsecure": {
+          "description": "Accepts readable and alterable plaintext traffic, including passwords.",
+          "type": "boolean"
+        }
       },
       "required": ["internalPort", "address"],
       "additionalProperties": true

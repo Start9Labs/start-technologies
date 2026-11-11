@@ -28,6 +28,8 @@ Open the **Interfaces** tab to see every interface the service exposes. Each int
 
 Each inbound gateway on your server has its own table. The rows in each table are the addresses available through that gateway. Addresses can be individually enabled or disabled. A LAN IP address you have not switched yourself follows the interface's `.local` address, so an address your server is assigned later starts out the way `.local` is set. On an interface served without TLS the two go together: switching on a LAN IP address switches `.local` on, and switching `.local` off switches its LAN IP addresses off. There, a `.local` address that is on while every IP address in its table is off shows a warning, since those are the addresses the name resolves to. The `.local` address stays in the table while the gateway is disconnected.
 
+For an interface whose SSL StartOS terminates, plain-HTTP addresses on an insecure gateway are hidden until explicitly enabled from the [command line](#plain-http-private-addresses). Disabling one in the table removes its row.
+
 Each table has the following columns:
 
 | Column                    | Description                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -66,7 +68,28 @@ Each table has the following columns:
 >
 > A **Public** GUA stays on when you switch `.local` off. On an interface served without TLS, `.local` resolves to that address, so it still reaches the service from your local network while its switch reads off.
 >
-> This only applies to IPv6 GUAs. IPv6 ULAs (private) are always local, and IPv4 keeps its separate LAN and WAN address rows.
+> This only applies to IPv6 GUAs on ports eligible for public exposure. A plain-HTTP leg whose SSL StartOS terminates stays private and has no Public option. IPv6 ULAs (private) are always local, and IPv4 keeps its separate LAN and WAN address rows.
+
+### Plain-HTTP Private Addresses
+
+Use HTTPS and [trust your server's Root CA](trust-ca.md) whenever the client supports it. If a client cannot trust the CA, you can enable one private plaintext address through the command line without marking the whole gateway secure.
+
+> [!WARNING]
+> Devices on that network — or on private networks routed to it over IPv4 — can read and alter this traffic, including passwords. The `--allow-insecure` flag accepts that risk for the selected address and any private IPs or domains inseparable from it on the same port.
+
+[SSH](ssh.md) into your server and list the host's bindings to find its internal port and available addresses:
+
+```bash
+start-cli package host <PACKAGE> binding <HOST> list --format json
+start-cli package host <PACKAGE> binding <HOST> set-address-enabled <INTERNAL_PORT> \
+  --address '<PRIVATE_ADDRESS>:<PORT>' --allow-insecure
+```
+
+Choose the intended gateway when the same name has several address rows. A JSON `HostnameInfo` from the binding's `addresses.available` also works as `--address`. The server's own host uses `start-cli server host binding <HOST>` instead of `start-cli package host <PACKAGE> binding <HOST>`.
+
+The ordinary RPC and MCP `setAddressEnabled` calls accept the same acknowledgement as `allowInsecure: true`. Without it, enabling an insecure address fails with the warning. Disabling needs no acknowledgement: use its UI toggle or repeat the command with `--enabled false`. Enabled private plaintext addresses stay visible in the UI; disabled ones remain discoverable through the CLI/RPC binding list.
+
+Plaintext addresses on a [secure gateway](gateways.md#secure-gateways) remain enabled by default. StartOS-served plaintext stays private, including IPv6 GUAs, while the interface's HTTPS addresses remain independently available.
 
 ### Adding Domains
 

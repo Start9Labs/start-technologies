@@ -2684,9 +2684,34 @@ export const DerivedAddressInfo: z.ZodObject<{
     z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt], null>>
   >
   /**
+   * Plaintext private addresses requiring consent, keyed by hostname, port and gateway.
+   */
+  insecure: z.ZodCodec<
+    z.ZodOptional<
+      z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
+    >,
+    z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
+  >
+  /**
+   * Persisted consent; ordinary address changes must not grant insecure access.
+   */
+  insecureEnabled: z.ZodCodec<
+    z.ZodOptional<
+      z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
+    >,
+    z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
+  >
+  /**
    * COMPUTED: NetServiceData::update — all possible addresses for this binding
    */
   available: z.ZodArray<typeof HostnameInfo>
+  /**
+   * Effective address selections shared by network enforcement and clients.
+   */
+  effective: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof HostnameInfo>>,
+    z.ZodArray<typeof HostnameInfo>
+  >
 }> = /* @__PURE__ */ object({
   /**
    * User override: enable these addresses (only for public IP & port)
@@ -2723,12 +2748,41 @@ export const DerivedAddressInfo: z.ZodObject<{
       'User override: enable these private IPs regardless of their mDNS address.',
   }),
   /**
+   * Plaintext private addresses requiring consent, keyed by hostname, port and gateway.
+   */
+  insecure: wire(
+    z.array(z.tuple([z.string(), z.int(), GatewayId])).optional(),
+    z.array(z.tuple([z.string(), z.int(), GatewayId])),
+  ).meta({
+    description:
+      'Plaintext private addresses requiring consent, keyed by hostname, port and gateway.',
+  }),
+  /**
+   * Persisted consent; ordinary address changes must not grant insecure access.
+   */
+  insecureEnabled: wire(
+    z.array(z.tuple([z.string(), z.int(), GatewayId])).optional(),
+    z.array(z.tuple([z.string(), z.int(), GatewayId])),
+  ).meta({
+    description:
+      'Persisted consent; ordinary address changes must not grant insecure access.',
+  }),
+  /**
    * COMPUTED: NetServiceData::update — all possible addresses for this binding
    */
   available: z.array(HostnameInfo).meta({
     description:
       'COMPUTED: NetServiceData::update — all possible addresses for this binding',
   }),
+  /**
+   * Effective address selections shared by network enforcement and clients.
+   */
+  effective: wire(z.array(HostnameInfo).optional(), z.array(HostnameInfo)).meta(
+    {
+      description:
+        'Effective address selections shared by network enforcement and clients.',
+    },
+  ),
 }).meta({
   id: 'DerivedAddressInfo',
 })
