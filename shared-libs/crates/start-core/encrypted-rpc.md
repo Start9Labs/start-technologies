@@ -157,8 +157,12 @@ sockets. Socket loss cancels every pending initialization and active subscriptio
 Start-core's `with_cli_progress` renders typed `FullProgress` items through the existing
 indicatif renderer and returns the real terminal value. The shared progress source observes
 the independently owned operation task, not percentage or socket closure. Dropping an
-update observer does not abort the accepted update. Legacy GUID consumers retain their
-wire format while sharing that completion owner. Authenticated observers retain the
+update or sideload observer does not abort accepted work. Sideload completion includes
+installation finalization and uploaded-archive cleanup. Its CLI uploads concurrently with
+observation; failure drops the other client-side future without replay. Typed sideload initiation
+returns the upload capability without allocating a redundant progress GUID. Ordinary calls
+retain that progress GUID. Legacy GUID consumers retain their wire format while sharing
+that completion owner. Authenticated observers retain the
 signer's revocation lifetime.
 
 Normal keyed browser RPC and secure-origin GUIDs cannot downgrade from unauthenticated

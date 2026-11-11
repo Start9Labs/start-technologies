@@ -48,6 +48,28 @@ async fn successful_completion_marks_the_final_snapshot_complete() {
 }
 
 #[tokio::test]
+async fn legacy_update_sentinel_precedes_success_and_failure() {
+    for success in [true, false] {
+        let outcome = if success {
+            Ok(())
+        } else {
+            Err(Error::new(eyre!("cleanup failed"), ErrorKind::Filesystem))
+        };
+        let source = progress_until_complete(FullProgressTracker::new(), async move { outcome });
+        let mut frames = Box::pin(crate::progress::progress_with_null(source));
+        assert!(frames.next().await.unwrap().unwrap().is_some());
+        assert!(frames.next().await.unwrap().unwrap().is_none());
+        if !success {
+            assert_eq!(
+                frames.next().await.unwrap().unwrap_err().kind,
+                ErrorKind::Filesystem
+            );
+        }
+        assert!(frames.next().await.is_none());
+    }
+}
+
+#[tokio::test]
 async fn dropping_the_observer_does_not_abort_the_accepted_operation() {
     let run = std::sync::Arc::new(tokio::sync::Notify::new());
     let resume = run.clone();

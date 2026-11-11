@@ -200,9 +200,10 @@ async fn stream_progress(
 ) -> Result<(), Error> {
     crate::progress::forward_progress(
         ws,
-        crate::progress::progress_until_complete(tracker, async move {
-            done_rx.await.with_kind(ErrorKind::Cancelled)?
-        }),
+        crate::progress::progress_with_null(crate::progress::progress_until_complete(
+            tracker,
+            async move { done_rx.await.with_kind(ErrorKind::Cancelled)? },
+        )),
     )
     .await
 }

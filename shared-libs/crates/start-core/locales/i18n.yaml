@@ -1502,6 +1502,20 @@ disk.mount.binding:
   fr_FR: "Liaison de %{src} à %{dst}"
   pl_PL: "Wiązanie %{src} do %{dst}"
 
+install.invalid-min-max:
+  en_US: 'Must be one of "min", "max".'
+  de_DE: 'Muss entweder "min" oder "max" sein.'
+  es_ES: 'Debe ser "min" o "max".'
+  fr_FR: 'Doit être "min" ou "max".'
+  pl_PL: 'Musi to być "min" lub "max".'
+
+install.select-version:
+  en_US: "Multiple flavors of %{id} found. Please select one of the following versions to install:"
+  de_DE: "Mehrere Varianten von %{id} gefunden. Bitte eine der folgenden Versionen zur Installation auswählen:"
+  es_ES: "Se encontraron varias variantes de %{id}. Seleccione una de las siguientes versiones para instalar:"
+  fr_FR: "Plusieurs variantes de %{id} ont été trouvées. Sélectionnez une des versions suivantes à installer :"
+  pl_PL: "Znaleziono kilka wariantów %{id}. Wybierz jedną z następujących wersji do zainstalowania:"
+
 install.sideloading:
   en_US: "Sideloading"
   de_DE: "Lokales Paket wird geladen"

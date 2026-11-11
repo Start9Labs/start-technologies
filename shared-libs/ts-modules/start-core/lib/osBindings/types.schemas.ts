@@ -4205,8 +4205,23 @@ export const SetupResult: z.ZodObject<{
 })
 export const SideloadResponse: z.ZodObject<{
   upload: typeof Guid
-  progress: typeof Guid
-}> = /* @__PURE__ */ object({ upload: Guid, progress: Guid }).meta({
+  /**
+   * Legacy progress continuation, absent for rpcstream observers.
+   */
+  progress: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
+}> = /* @__PURE__ */ object({
+  upload: Guid,
+  /**
+   * Legacy progress continuation, absent for rpcstream observers.
+   */
+  progress: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Legacy progress continuation, absent for rpcstream observers.',
+  }),
+}).meta({
   id: 'SideloadResponse',
 })
 export const SignAssetParams: z.ZodObject<{

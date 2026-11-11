@@ -61,6 +61,15 @@ describe('createRpcStreamClient', () => {
         {} as T.FullProgress
       const updateFinal: RPC.RpcStreamFinalType<RPC.StartOS, 'server.update'> =
         null
+      const sideload = client.package.sideload({})
+      const sideloadItem: RPC.RpcStreamItemType<
+        RPC.StartOS,
+        'package.sideload'
+      > = {} as T.FullProgress
+      const sideloadFinal: RPC.RpcStreamFinalType<
+        RPC.StartOS,
+        'package.sideload'
+      > = null
       // @ts-expect-error update progress uses the exported FullProgress DTO
       const wrongUpdate: RPC.RpcStreamItemType<RPC.StartOS, 'server.update'> =
         'progress'
@@ -81,6 +90,9 @@ describe('createRpcStreamClient', () => {
         updateItem,
         updateFinal,
         wrongUpdate,
+        sideload,
+        sideloadItem,
+        sideloadFinal,
         call,
         namespace,
         wrongItem,

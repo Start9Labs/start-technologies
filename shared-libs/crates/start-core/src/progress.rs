@@ -18,7 +18,7 @@ use crate::util::future::NonDetachingJoinHandle;
 
 mod rpc;
 pub use rpc::with_cli_progress;
-pub(crate) use rpc::{forward_progress, progress_until_complete};
+pub(crate) use rpc::{forward_progress, progress_until_complete, progress_with_null};
 
 lazy_static::lazy_static! {
     static ref SPINNER: ProgressStyle = ProgressStyle::with_template("{spinner} {msg}...").unwrap();

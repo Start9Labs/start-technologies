@@ -4929,7 +4929,10 @@
           "type": "object",
           "properties": {
             "upload": { "$ref": "#/$defs/Guid" },
-            "progress": { "$ref": "#/$defs/Guid" }
+            "progress": {
+              "description": "Legacy progress continuation, absent for rpcstream observers.",
+              "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+            }
           },
           "required": ["upload", "progress"],
           "additionalProperties": true
@@ -4939,7 +4942,10 @@
       "type": "object",
       "properties": {
         "upload": { "$ref": "#/$defs/Guid" },
-        "progress": { "$ref": "#/$defs/Guid" }
+        "progress": {
+          "description": "Legacy progress continuation, absent for rpcstream observers.",
+          "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+        }
       },
       "required": ["upload", "progress"],
       "additionalProperties": true

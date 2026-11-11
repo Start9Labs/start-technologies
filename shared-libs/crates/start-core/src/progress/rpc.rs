@@ -47,16 +47,33 @@ pub(crate) fn progress_until_complete(
     }
 }
 
-pub(crate) async fn forward_progress(
-    mut socket: crate::rpc_continuations::WebSocket,
+pub(crate) fn progress_with_null(
     source: impl Stream<Item = Result<FullProgress, Error>> + Send,
+) -> impl Stream<Item = Result<Option<FullProgress>, Error>> + Send {
+    async_stream::stream! {
+        let mut source = Box::pin(source);
+        let result = loop {
+            match source.next().await {
+                Some(Ok(snapshot)) => yield Ok(Some(snapshot)),
+                Some(Err(error)) => break Err(error),
+                None => break Ok(()),
+            }
+        };
+        yield Ok(None);
+        if let Err(error) = result { yield Err(error); }
+    }
+}
+
+pub(crate) async fn forward_progress<Data: serde::Serialize>(
+    mut socket: crate::rpc_continuations::WebSocket,
+    source: impl Stream<Item = Result<Data, Error>> + Send,
 ) -> Result<(), Error> {
     let mut source = Box::pin(source);
     let result: Result<(), Error> = loop {
         tokio::select! {
             snapshot = source.next() => match snapshot {
                 Some(Ok(snapshot)) => socket.send(axum::extract::ws::Message::Text(
-                    serde_json::to_string(&Some(snapshot)).with_kind(ErrorKind::Serialization)?.into()
+                    serde_json::to_string(&snapshot).with_kind(ErrorKind::Serialization)?.into()
                 )).await.with_kind(ErrorKind::Network)?,
                 Some(Err(error)) => break Err(error),
                 None => break Ok(()),
@@ -66,10 +83,6 @@ pub(crate) async fn forward_progress(
             }
         }
     };
-    socket
-        .send(axum::extract::ws::Message::Text("null".into()))
-        .await
-        .with_kind(ErrorKind::Network)?;
     socket
         .close_result(
             result

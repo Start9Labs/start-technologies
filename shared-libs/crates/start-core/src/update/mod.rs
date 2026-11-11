@@ -165,7 +165,10 @@ pub async fn update_system(
                     WebSocketPolicy::Authenticated,
                     ctx.secure_session().cloned(),
                     move |socket| async move {
-                        if let Err(error) = forward_progress(socket, source).await {
+                        if let Err(error) =
+                            forward_progress(socket, crate::progress::progress_with_null(source))
+                                .await
+                        {
                             tracing::error!(
                                 "{}",
                                 t!("update.error-returning-progress", error = error.to_string())
