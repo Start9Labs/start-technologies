@@ -863,8 +863,19 @@ export const LogsParams: z.ZodIntersection<
       limit: wire(z.int().nullable().optional(), z.int().nullable()),
       cursor: wire(z.string().nullable().optional(), z.string().nullable()),
       boot: wire(
-        z.union([z.number(), z.string()]).nullable().optional(),
-        z.union([z.number(), z.string()]).nullable(),
+        z
+          .union([
+            z.number().int().min(-2147483648).max(2147483647),
+            z.string(),
+          ])
+          .nullable()
+          .optional(),
+        z
+          .union([
+            z.number().int().min(-2147483648).max(2147483647),
+            z.string(),
+          ])
+          .nullable(),
       ),
       before: wire(z.boolean().optional(), z.boolean()),
     }),

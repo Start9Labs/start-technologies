@@ -35,12 +35,47 @@ use crate::rpc_continuations::{
 use crate::util::serde::Reversible;
 use crate::util::{FromStrParser, Invoke};
 
+#[cfg(test)]
+mod result_tests;
+
+/// Reports the followed process's failure after draining its output.
 #[pin_project::pin_project]
 pub struct LogStream {
-    _child: Option<Child>,
     #[pin]
     entries: BoxStream<'static, Result<JournalctlEntry, Error>>,
 }
+impl LogStream {
+    fn follow(mut child: Child, initial: Vec<JournalctlEntry>) -> Result<Self, Error> {
+        let out = BufReader::new(child.stdout.take().ok_or_else(|| {
+            Error::new(
+                eyre!("{}", t!("logs.no-stdout-available")),
+                crate::ErrorKind::Journald,
+            )
+        })?);
+        let completed = futures::stream::once(async move {
+            let output = child
+                .wait_with_output()
+                .await
+                .with_kind(ErrorKind::Journald)?;
+            crate::util::check_command_output(output, ErrorKind::Journald, "journalctl")?;
+            Ok::<Option<JournalctlEntry>, Error>(None)
+        })
+        .try_filter_map(|entry| futures::future::ready(Ok(entry)));
+        let entries = futures::stream::iter(initial)
+            .map(Ok)
+            .chain(
+                LinesStream::new(out.lines())
+                    .map_err(|e| Error::new(e, crate::ErrorKind::Journald))
+                    .try_filter_map(|s| {
+                        futures::future::ready(Ok(serde_json::from_str::<JournalctlEntry>(&s).ok()))
+                    }),
+            )
+            .chain(completed)
+            .boxed();
+        Ok(Self { entries })
+    }
+}
+
 impl Deref for LogStream {
     type Target = BoxStream<'static, Result<JournalctlEntry, Error>>;
     fn deref(&self) -> &Self::Target {
@@ -225,12 +260,6 @@ fn deserialize_log_message<'de, D: serde::de::Deserializer<'de>>(
     deserializer.deserialize_any(Visitor)
 }
 
-/// Defining how we are going to filter on a journalctl cli log.
-/// Kernal: (-k --dmesg                 Show kernel message log from the current boot)
-/// Unit: ( -u --unit=UNIT             Show logs from the specified unit
-///     --user-unit=UNIT        Show logs from the specified user unit))
-/// System: Unit is startd, but we also filter on the comm
-/// Container: Filtering containers, like podman/docker is done by filtering on the CONTAINER_NAME
 #[derive(Debug, Clone)]
 pub enum LogSource {
     Kernel,
@@ -256,7 +285,7 @@ pub enum BootIdentifier {
     Index(i32),
     Id(String),
 }
-rpc_toolkit::impl_ts!(BootIdentifier => "z.union([z.number(), z.string()])", "z.ZodUnion<readonly [z.ZodNumber, z.ZodString]>");
+rpc_toolkit::impl_ts!(BootIdentifier => &format!("z.union([z.number().int().min({}).max({}), z.string()])", i32::MIN, i32::MAX), "z.ZodUnion<readonly [z.ZodNumber, z.ZodString]>");
 impl FromStr for BootIdentifier {
     type Err = Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -310,19 +339,31 @@ impl<'de> Deserialize<'de> for BootIdentifier {
             where
                 E: de::Error,
             {
-                Ok(Self::Value::Index(v as i32))
+                i32::try_from(v)
+                    .map(Self::Value::Index)
+                    .map_err(|_| E::invalid_value(de::Unexpected::Signed(v), &self))
             }
             fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
             where
                 E: de::Error,
             {
-                Ok(Self::Value::Index(v as i32))
+                if v.is_finite()
+                    && v.fract() == 0.0
+                    && v >= f64::from(i32::MIN)
+                    && v <= f64::from(i32::MAX)
+                {
+                    Ok(Self::Value::Index(v as i32))
+                } else {
+                    Err(E::invalid_value(de::Unexpected::Float(v), &self))
+                }
             }
             fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
             where
                 E: de::Error,
             {
-                Ok(Self::Value::Index(v as i32))
+                i32::try_from(v)
+                    .map(Self::Value::Index)
+                    .map_err(|_| E::invalid_value(de::Unexpected::Unsigned(v), &self))
             }
         }
         deserializer.deserialize_any(Visitor)
@@ -591,37 +632,12 @@ pub async fn journalctl(
         } else {
             follow_cmd.arg("--lines=0");
         }
-        let mut child = follow_cmd.stdout(Stdio::piped()).spawn()?;
-        let out = BufReader::new(child.stdout.take().ok_or_else(|| {
-            Error::new(
-                eyre!("{}", t!("logs.no-stdout-available")),
-                crate::ErrorKind::Journald,
-            )
-        })?);
-
-        let journalctl_entries = LinesStream::new(out.lines());
-
-        let follow_deserialized_entries = journalctl_entries
-            .map_err(|e| Error::new(e, crate::ErrorKind::Journald))
-            .try_filter_map(|s| {
-                futures::future::ready(Ok(serde_json::from_str::<JournalctlEntry>(&s).ok()))
-            });
-
-        let entries = futures::stream::iter(deserialized_entries)
-            .map(Ok)
-            .chain(follow_deserialized_entries)
-            .boxed();
-        Ok(LogStream {
-            _child: Some(child),
-            entries,
-        })
+        let child = follow_cmd.stdout(Stdio::piped()).spawn()?;
+        LogStream::follow(child, deserialized_entries)
     } else {
         let entries = futures::stream::iter(deserialized_entries).map(Ok).boxed();
 
-        Ok(LogStream {
-            _child: None,
-            entries,
-        })
+        Ok(LogStream { entries })
     }
 }
 
@@ -694,7 +710,6 @@ pub async fn fetch_logs(
         )
         .await?;
     let mut entries = Reversible::<LogEntry>::new(entries);
-    // reverse again so output is always in increasing chronological order
     if cursor.is_some() && before {
         entries.reverse();
         std::mem::swap(&mut start_cursor, &mut end_cursor);
@@ -785,7 +800,7 @@ mod tests {
         let schema = visitor.into_bindings(None, "./schemas").unwrap().schemas;
         assert!(
             schema.contains(
-                "\"boot\": wire(z.union([z.number(), z.string()]).nullable().optional(), z.union([z.number(), z.string()]).nullable())"
+                "\"boot\": wire(z.union([z.number().int().min(-2147483648).max(2147483647), z.string()]).nullable().optional(), z.union([z.number().int().min(-2147483648).max(2147483647), z.string()]).nullable())"
             ),
             "{schema}"
         );

@@ -94,6 +94,10 @@ and retain a weak context reference while waiting, including unconsumed continua
 Ordinary replies retain GUIDs; opted-in running status returns progress with `guid: null`.
 Successful observation permits the wizard's separate `setup.complete` finalization call.
 
+## Log observation
+
+`logs.rs::LogStream` owns the followed journal process and drains its entries before checking its actual exit result through the shared `Invoke` output validator. Stdout EOF alone does not finish the observation; dropping it kills the owned child. Snapshot reads retain their checked finite invocation. `BootIdentifier` accepts string IDs or signed 32-bit integral indices; decoding and generated numeric constraints use that type's bounds.
+
 ## Action file transfers
 
 `ServiceSeed.action_files` owns transient prepared descriptors and completed upload receipts; `RpcContinuations` owns their single-use HTTP endpoints. The store scopes IDs to the service and procedure event, with expiry independent of SDK form caching. Successful uploads remain service-owned. Returning a File result arms its requested download cleanup after action/task processing succeeds. Service teardown cancels active transfers.
