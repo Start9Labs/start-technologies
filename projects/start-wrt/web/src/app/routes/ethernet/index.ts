@@ -54,7 +54,10 @@ export default class Ethernet {
 
   onChangeWan(data: EthernetPortView[]) {
     this.dialogs
-      .open<EthernetPortView | null>(CHANGE_WAN_DIALOG, { size: 's', data })
+      .open<EthernetPortView | null>(CHANGE_WAN_DIALOG, {
+        size: 's',
+        data: data.filter(port => !port.usb),
+      })
       .pipe(filter(Boolean))
       .subscribe(async ({ name }) => {
         const items = data.map(port => ({

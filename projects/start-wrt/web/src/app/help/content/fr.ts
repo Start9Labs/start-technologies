@@ -59,7 +59,7 @@ Retire un appareil hors ligne de votre liste d’appareils. Tout nom personnalis
 
 ### Port
 
-L’identifiant du port Ethernet physique (par ex. eth0, eth1).
+Le port physique : un port Ethernet (par ex. eth0, eth1) ou un port USB équipé d’un adaptateur Ethernet USB (par ex. usb_eth0). Un port USB apparaît la première fois qu’un appareil réseau y est branché et conserve son profil quand rien n’y est branché. Chaque port d’un hub USB est un port USB à part entière. Un port USB sans adaptateur branché peut être supprimé.
 
 ### Profil de sécurité
 
@@ -67,7 +67,7 @@ Le profil de sécurité par défaut attribué aux appareils connectés via le po
 
 ### WAN
 
-Le port WAN (Wide Area Network) se connecte au modem de votre ISP ou au réseau en amont. Un seul port Ethernet peut être désigné comme WAN à la fois.
+Le port WAN (Wide Area Network) se connecte au modem de votre ISP ou au réseau en amont. Un seul port Ethernet peut être désigné comme WAN à la fois. Le port WAN doit être un port Ethernet.
 
 ### Changer le port WAN
 
