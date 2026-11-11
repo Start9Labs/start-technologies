@@ -15,9 +15,9 @@ lazy_static::lazy_static! {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Version;
 
-/// Moves the connected registries and the OS registry from `public.ui` into
-/// `public.serverInfo`, then restores missing built-in registries.
+/// Moves registry intent to `serverInfo`, preserving removals after the revision-1 repair.
 fn up(db: &mut Value) -> Result<(), Error> {
+    let repair_missing_builtins = super::applied_migration_revision(&mut db.clone())? == 0;
     let Some(public) = db.get_mut("public").and_then(Value::as_object_mut) else {
         return Ok(());
     };
@@ -38,7 +38,9 @@ fn up(db: &mut Value) -> Result<(), Error> {
         Some(saved) if !saved.is_null() => from_value(saved.clone())?,
         _ => legacy_registries.unwrap_or_default(),
     };
-    ensure_builtin_registries(&mut registries);
+    if repair_missing_builtins {
+        ensure_builtin_registries(&mut registries);
+    }
     server_info.insert("registries".into(), to_value(&registries)?);
     if matches!(server_info.get("osRegistry"), None | Some(Value::Null)) {
         let os_registry = legacy_os_registry.unwrap_or_else(initial_os_registry);

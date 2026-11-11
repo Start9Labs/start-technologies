@@ -486,6 +486,7 @@ fn latest_migration_revision_accessor(db: &mut Value) -> Option<&mut Value> {
     server_info.get_mut("latestMigrationRevision")
 }
 
+/// Materializes missing revision metadata.
 fn applied_migration_revision(db: &mut Value) -> Result<usize, Error> {
     latest_migration_revision_accessor(db)
         .map(|v| from_value::<usize>(v.clone()))
@@ -997,6 +998,7 @@ mod tests {
                     "https://community-registry.start9.com/": "Community Registry",
                 }),
             ),
+            (1, json!({ "https://registry.example/": "Custom" })),
             (2, json!({ "https://registry.example/": "Custom" })),
         ] {
             let mut db = json!({ "public": {
