@@ -896,7 +896,7 @@ mod tests {
             ("0.4.0.4", "0.4.0.5", 3),
             ("0.4.1.2", "0.4.1.3", 0),
             ("0.4.1.3", "0.4.2", 0),
-            ("0.4.2", "0.4.2.1", 1),
+            ("0.4.2", "0.4.2.1", 2),
             ("0.4.2.1", "0.4.3", 0),
         ] {
             let previous = from_value::<Version>(json!(from))
@@ -996,40 +996,73 @@ mod tests {
     async fn old_alpha_registry_repair_precedes_software_sharing() {
         let previous = v0_4_2_1::Version;
         let current = Current::default();
-        let mut db = json!({ "public": {
+        for revision in [0, 1] {
+            let mut db = json!({ "public": {
+                "serverInfo": {
+                    "version": "0.4.2.1",
+                    "packageVersionCompat": ">=0.3.0 <0.5.0",
+                    "postInitMigrationTodos": {},
+                    "latestMigrationRevision": revision,
+                },
+                "ui": {
+                    "registries": {"https://registry.start9.com": "Mine"},
+                    "startosRegistry": "https://registry.start9.com/",
+                    "snakeHighScore": 42,
+                },
+            } });
+            let upgrade = Upgrade::load(&previous, &current, revision).await.unwrap();
+            upgrade.apply(&previous, &current, &mut db).unwrap();
+            let info = &db["public"]["serverInfo"];
+            assert_eq!(info["version"], json!("0.4.3"));
+            assert_eq!(info["latestMigrationRevision"], json!(0));
+            assert_eq!(
+                info["postInitMigrationTodos"],
+                json!({"0.4.2.1": null, "0.4.3": null})
+            );
+            assert_eq!(
+                info["bittorrent"],
+                json!({"downloads": false, "seeding": false})
+            );
+            assert_eq!(
+                info["registries"],
+                json!({
+                    "https://registry.start9.com": "Mine",
+                    "https://community-registry.start9.com/": "Community Registry",
+                })
+            );
+            assert_eq!(info["osRegistry"], json!("https://registry.start9.com/"));
+            assert_eq!(db["public"]["ui"], json!({"snakeHighScore": 42}));
+        }
+    }
+
+    #[tokio::test]
+    async fn software_sharing_preserves_server_owned_registries_and_saved_opt_ins() {
+        let previous = v0_4_2_1::Version;
+        let current = Current::default();
+        let registries = json!({"https://registry.example/": "Custom"});
+        let os_registry = json!("https://registry.example/");
+        let preferences = json!({"downloads": true, "seeding": true});
+        let ui = json!({"snakeHighScore": 42});
+        let mut db = json!({"public": {
             "serverInfo": {
                 "version": "0.4.2.1",
                 "packageVersionCompat": ">=0.3.0 <0.5.0",
                 "postInitMigrationTodos": {},
-                "latestMigrationRevision": 0,
+                "latestMigrationRevision": 2,
+                "registries": registries,
+                "osRegistry": os_registry,
+                "bittorrent": preferences,
             },
-            "ui": { "registries": {"https://registry.start9.com": "Mine"}, "snakeHighScore": 42 },
-        } });
-        let upgrade = Upgrade::load(&previous, &current, 0).await.unwrap();
+            "ui": ui,
+        }});
+        let upgrade = Upgrade::load(&previous, &current, 2).await.unwrap();
         upgrade.apply(&previous, &current, &mut db).unwrap();
-        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.3"));
-        assert_eq!(
-            db["public"]["serverInfo"]["latestMigrationRevision"],
-            json!(0)
-        );
-        assert_eq!(
-            db["public"]["serverInfo"]["postInitMigrationTodos"],
-            json!({"0.4.2.1": null, "0.4.3": null})
-        );
-        assert_eq!(
-            db["public"]["serverInfo"]["bittorrent"],
-            json!({"downloads": false, "seeding": false})
-        );
-        assert_eq!(
-            db["public"]["ui"],
-            json!({
-                "registries": {
-                    "https://registry.start9.com": "Mine",
-                    "https://community-registry.start9.com/": "Community Registry",
-                },
-                "snakeHighScore": 42,
-            })
-        );
+        let info = &db["public"]["serverInfo"];
+        assert_eq!(info["registries"], registries);
+        assert_eq!(info["osRegistry"], os_registry);
+        assert_eq!(info["bittorrent"], preferences);
+        assert_eq!(info["postInitMigrationTodos"], json!({"0.4.3": null}));
+        assert_eq!(db["public"]["ui"], ui);
     }
 
     #[tokio::test]
@@ -1054,9 +1087,9 @@ mod tests {
         .await
         .unwrap();
         upgrade.apply(&version, &version, &mut db).unwrap();
-        assert_eq!(applied_migration_revision(&mut db).unwrap(), 1);
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 2);
         assert_eq!(
-            db["public"]["ui"]["registries"],
+            db["public"]["serverInfo"]["registries"],
             json!({
                 "https://registry.start9.com/": "Start9 Registry",
                 "https://community-registry.start9.com/": "Community Registry",

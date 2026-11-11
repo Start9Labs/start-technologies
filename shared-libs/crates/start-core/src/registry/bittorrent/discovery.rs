@@ -16,11 +16,11 @@ pub(crate) async fn register_existing(ctx: &RpcContext) -> Result<(), Error> {
     if !ctx.torrents.downloads_enabled() {
         return Ok(());
     }
-    let (packages, ui) = {
+    let (packages, os_registry) = {
         let peek = ctx.db.peek().await;
         (
             peek.as_public().as_package_data().de()?,
-            peek.as_public().as_ui().de()?,
+            peek.as_public().as_server_info().as_os_registry().de()?,
         )
     };
     for (id, entry) in packages.0 {
@@ -68,13 +68,8 @@ pub(crate) async fn register_existing(ctx: &RpcContext) -> Result<(), Error> {
             tracing::warn!(%error, package = %id, "Cannot discover stored S9PK torrent metadata");
         }
     }
-    if let Some(registry) = crate::trusted_keys::selected_os_registry(&ui) {
-        let registry = registry
-            .parse::<url::Url>()
-            .with_kind(ErrorKind::ParseUrl)?;
-        if ctx.torrents.for_source(&registry).is_some() {
-            discover_images(ctx, registry).await?;
-        }
+    if ctx.torrents.for_source(&os_registry).is_some() {
+        discover_images(ctx, os_registry).await?;
     }
     Ok(())
 }

@@ -11421,6 +11421,129 @@
     }
   },
   {
+    "name": "server.registries.add",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/ConnectRegistryParams" }
+      ],
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "ConnectRegistryParams": {
+          "type": "object",
+          "properties": {
+            "url": { "type": "string" },
+            "name": { "type": ["string", "null"] }
+          },
+          "required": ["url"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "server.registries.list",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "propertyNames": { "type": "string" },
+      "additionalProperties": { "type": ["string", "null"] }
+    }
+  },
+  {
+    "name": "server.registries.remove",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/TrustedRegistryParams" }
+      ],
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "TrustedRegistryParams": {
+          "type": "object",
+          "properties": { "url": { "type": "string" } },
+          "required": ["url"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "server.registries.set-os",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/TrustedRegistryParams" }
+      ],
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "TrustedRegistryParams": {
+          "type": "object",
+          "properties": { "url": { "type": "string" } },
+          "required": ["url"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
     "name": "server.restart",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -11870,7 +11993,24 @@
     "name": "server.trusted-keys.add",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/AddTrustedKeyParams" }
+      ],
       "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
         "AddTrustedKeyParams": {
           "type": "object",
           "properties": {
@@ -11893,24 +12033,7 @@
         },
         "TrustContext": { "type": "string", "enum": ["marketplace", "os"] }
       },
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string",
-          "description": "Blank names each GPG key after its identity."
-        },
-        "publicKeys": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Ed25519 public keys in PEM or armored GPG format."
-        },
-        "trustFor": {
-          "description": "Grants this permission to every imported key, including existing keys.",
-          "anyOf": [{ "$ref": "#/$defs/TrustContext" }, { "type": "null" }]
-        }
-      },
-      "required": ["name", "publicKeys"],
-      "additionalProperties": true
+      "type": "object"
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -11953,27 +12076,159 @@
     }
   },
   {
-    "name": "server.trusted-keys.connect-registry",
+    "name": "server.trusted-keys.list",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$defs": {
-        "ConnectRegistryParams": {
-          "type": "object",
-          "properties": {
-            "url": { "type": "string" },
-            "name": { "type": ["string", "null"] }
-          },
-          "required": ["url"],
-          "additionalProperties": true
-        }
-      },
       "type": "object",
       "properties": {
-        "url": { "type": "string" },
-        "name": { "type": ["string", "null"] }
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
       },
-      "required": ["url"],
-      "additionalProperties": true
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "propertyNames": { "type": "string" },
+      "additionalProperties": { "$ref": "#/$defs/TrustedKey" },
+      "$defs": {
+        "TrustedKey": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "origin": {
+              "description": "`manual`, or the base URL of the registry that first offered the key.",
+              "type": "string"
+            },
+            "originRegistry": {
+              "description": "Registry identity recorded when this key was first imported.",
+              "anyOf": [
+                { "$ref": "#/$defs/RegistryIdentity" },
+                { "type": "null" }
+              ]
+            },
+            "publicKey": { "$ref": "#/$defs/AnyVerifyingKey" },
+            "gpgExports": {
+              "description": "Original GPG exports; signing trust is determined by `public_key`.",
+              "type": "array",
+              "items": { "$ref": "#/$defs/GpgPublicKeyExport" }
+            },
+            "contact": {
+              "description": "Contact details registries publish for the key's signer.",
+              "type": "array",
+              "items": { "$ref": "#/$defs/ContactInfo" }
+            },
+            "addedAt": { "type": "string" },
+            "removable": {
+              "type": "boolean",
+              "description": "False while a connected registry offers the key."
+            },
+            "marketplace": { "type": "boolean" },
+            "os": { "type": "boolean" }
+          },
+          "required": [
+            "name",
+            "origin",
+            "originRegistry",
+            "publicKey",
+            "gpgExports",
+            "contact",
+            "addedAt",
+            "removable",
+            "marketplace",
+            "os"
+          ],
+          "additionalProperties": true,
+          "description": "Signing-key material and independent package and OS-update trust."
+        },
+        "RegistryIdentity": {
+          "type": "object",
+          "properties": {
+            "name": { "type": ["string", "null"] },
+            "icon": {
+              "anyOf": [{ "$ref": "#/$defs/DataUrl" }, { "type": "null" }]
+            }
+          },
+          "required": ["name", "icon"],
+          "additionalProperties": true
+        },
+        "DataUrl": { "type": "string" },
+        "AnyVerifyingKey": { "type": "string" },
+        "GpgPublicKeyExport": {
+          "type": "object",
+          "properties": {
+            "armored": {
+              "type": "string",
+              "description": "Original armor, preserving all certificate packets and headers."
+            },
+            "fingerprints": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Primary-key fingerprints of the certificates in this export."
+            },
+            "userIds": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Self-certified user IDs containing names, comments, and email addresses."
+            },
+            "identities": {
+              "description": "Self-certified claims indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "keyFingerprints": {
+              "description": "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          },
+          "required": [
+            "armored",
+            "fingerprints",
+            "userIds",
+            "identities",
+            "keyFingerprints"
+          ],
+          "additionalProperties": true,
+          "description": "An original public-key export and its self-certified identity claims."
+        },
+        "ContactInfo": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "email": { "type": "string" } },
+              "required": ["email"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": { "matrix": { "type": "string" } },
+              "required": ["matrix"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": { "website": { "type": "string" } },
+              "required": ["website"],
+              "additionalProperties": true
+            }
+          ]
+        }
+      }
     }
   },
   {
@@ -12013,42 +12268,6 @@
         "ids": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["ids"],
-      "additionalProperties": true
-    }
-  },
-  {
-    "name": "server.trusted-keys.remove-registry",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$defs": {
-        "TrustedRegistryParams": {
-          "type": "object",
-          "properties": { "url": { "type": "string" } },
-          "required": ["url"],
-          "additionalProperties": true
-        }
-      },
-      "type": "object",
-      "properties": { "url": { "type": "string" } },
-      "required": ["url"],
-      "additionalProperties": true
-    }
-  },
-  {
-    "name": "server.trusted-keys.set-os-registry",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$defs": {
-        "TrustedRegistryParams": {
-          "type": "object",
-          "properties": { "url": { "type": "string" } },
-          "required": ["url"],
-          "additionalProperties": true
-        }
-      },
-      "type": "object",
-      "properties": { "url": { "type": "string" } },
-      "required": ["url"],
       "additionalProperties": true
     }
   },
@@ -12189,155 +12408,6 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {},
-      "additionalProperties": true
-    }
-  },
-  {
-    "name": "server.update-signers.add",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$defs": {
-        "SetOsUpdateSignerParams": {
-          "type": "object",
-          "properties": {
-            "key": { "$ref": "#/$defs/AnyVerifyingKey" },
-            "label": { "type": "string" }
-          },
-          "required": ["key", "label"],
-          "additionalProperties": true
-        },
-        "AnyVerifyingKey": { "type": "string" }
-      },
-      "type": "object",
-      "properties": {
-        "key": { "$ref": "#/$defs/AnyVerifyingKey" },
-        "label": { "type": "string" }
-      },
-      "required": ["key", "label"],
-      "additionalProperties": true
-    }
-  },
-  {
-    "name": "server.update-signers.get",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "allOf": [
-        {
-          "type": "object",
-          "properties": {
-            "format": {
-              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
-            }
-          },
-          "additionalProperties": true
-        },
-        { "type": "object", "properties": {}, "additionalProperties": true },
-        { "$ref": "#/$defs/OsUpdateSignerKeyParams" }
-      ],
-      "$defs": {
-        "IoFormat": {
-          "type": "string",
-          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
-        },
-        "OsUpdateSignerKeyParams": {
-          "type": "object",
-          "properties": { "key": { "$ref": "#/$defs/AnyVerifyingKey" } },
-          "required": ["key"],
-          "additionalProperties": true
-        },
-        "AnyVerifyingKey": { "type": "string" }
-      },
-      "type": "object"
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$defs": {
-        "TrustedOsUpdateSigner": {
-          "type": "object",
-          "properties": { "label": { "type": "string" } },
-          "required": ["label"],
-          "additionalProperties": true
-        }
-      },
-      "type": "object",
-      "properties": { "label": { "type": "string" } },
-      "required": ["label"],
-      "additionalProperties": true
-    }
-  },
-  {
-    "name": "server.update-signers.list",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "format": {
-          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
-        }
-      },
-      "$defs": {
-        "IoFormat": {
-          "type": "string",
-          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
-        }
-      }
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "propertyNames": { "type": "string" },
-      "additionalProperties": { "$ref": "#/$defs/TrustedOsUpdateSigner" },
-      "$defs": {
-        "TrustedOsUpdateSigner": {
-          "type": "object",
-          "properties": { "label": { "type": "string" } },
-          "required": ["label"],
-          "additionalProperties": true
-        }
-      }
-    }
-  },
-  {
-    "name": "server.update-signers.remove",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$defs": {
-        "OsUpdateSignerKeyParams": {
-          "type": "object",
-          "properties": { "key": { "$ref": "#/$defs/AnyVerifyingKey" } },
-          "required": ["key"],
-          "additionalProperties": true
-        },
-        "AnyVerifyingKey": { "type": "string" }
-      },
-      "type": "object",
-      "properties": { "key": { "$ref": "#/$defs/AnyVerifyingKey" } },
-      "required": ["key"],
-      "additionalProperties": true
-    }
-  },
-  {
-    "name": "server.update-signers.update",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$defs": {
-        "SetOsUpdateSignerParams": {
-          "type": "object",
-          "properties": {
-            "key": { "$ref": "#/$defs/AnyVerifyingKey" },
-            "label": { "type": "string" }
-          },
-          "required": ["key", "label"],
-          "additionalProperties": true
-        },
-        "AnyVerifyingKey": { "type": "string" }
-      },
-      "type": "object",
-      "properties": {
-        "key": { "$ref": "#/$defs/AnyVerifyingKey" },
-        "label": { "type": "string" }
-      },
-      "required": ["key", "label"],
       "additionalProperties": true
     }
   },
