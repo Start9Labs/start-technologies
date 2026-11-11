@@ -8,7 +8,9 @@ import { NetworkService } from 'src/app/services/network.service'
 import { StaleUiService } from 'src/app/services/stale-ui.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { IS_MOCK } from 'src/app/utils/workspace-config'
-import { RpcSocketService } from '@start9labs/shared'
+import { isNetworkError, RpcSocketService } from '@start9labs/shared'
+
+export { isNetworkError }
 
 const POLL_INTERVAL_MS = 3000
 /** Bounds recovery probes before their owner discards a stalled transport. */
@@ -351,8 +353,3 @@ export class ConnectionService {
 }
 
 /** A network-level failure (no HTTP response): HttpError.status / code 0. */
-export function isNetworkError(e: unknown): boolean {
-  return (
-    e != null && typeof e === 'object' && 'code' in e && (e as any).code === 0
-  )
-}

@@ -71,6 +71,7 @@ function harness(moduleOverrides = new Map(), globals = {}) {
     DOCUMENT: tokens.DOCUMENT,
     DestroyRef: tokens.DestroyRef,
     Injector: tokens.Injector,
+    ErrorHandler: class {},
     Injectable: () => value => value,
     Service: () => value => value,
     InjectionToken: class {},
@@ -104,6 +105,12 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       ...load('shared-libs/ts-modules/shared/src/util/misc.util.ts'),
       ...load('shared-libs/ts-modules/shared/src/util/format-progress.ts'),
       pauseFor: async () => {},
+      getErrorMessage: load(
+        'shared-libs/ts-modules/shared/src/services/error.service.ts',
+      ).getErrorMessage,
+      isNetworkError: load(
+        'shared-libs/ts-modules/shared/src/services/error.service.ts',
+      ).isNetworkError,
       ...load('shared-libs/ts-modules/shared/src/types/rpc.types.ts'),
       ...load('shared-libs/ts-modules/shared/src/services/rpc-request.ts'),
       ...load('shared-libs/ts-modules/shared/src/services/rpc-response.ts'),
@@ -438,6 +445,324 @@ test('StartOS derives the method path and forwards results untouched', async () 
   assert.equal(requests[2].method, 'package.action.get-input')
   await rpc.server.logs({ limit: 1 }, { timeout: 10000 })
   assert.equal(requests[3].timeout, 10000)
+})
+
+test('shared transport classification accepts numeric zero, not RPC or cancellation codes', () => {
+  const { isNetworkError, getErrorMessage } = harness().load(
+    'shared-libs/ts-modules/shared/src/services/error.service.ts',
+  )
+  assert.equal(isNetworkError({ code: 0 }), true)
+  for (const value of [
+    null,
+    undefined,
+    0,
+    '0',
+    {},
+    { code: '0' },
+    { code: 34 },
+    { code: -32072 },
+  ])
+    assert.equal(isNetworkError(value), false)
+  assert.match(getErrorMessage({ code: 0 }), /couldn't reach your server/)
+})
+
+function setupObservationHarness(status) {
+  const router = Symbol('Router')
+  const overrides = new Map([['@angular/router', { Router: router }]])
+  const { dependencies, tokens, load } = harness(overrides, {
+    AbortController,
+    Error,
+    setTimeout,
+    clearTimeout,
+  })
+  overrides.set('@start9labs/shared', {
+    ...load('shared-libs/ts-modules/shared/src/util/format-progress.ts'),
+    ...load('shared-libs/ts-modules/shared/src/services/error.service.ts'),
+    pauseFor: load('shared-libs/ts-modules/shared/src/util/misc.util.ts')
+      .pauseFor,
+  })
+  const { ApiService } = load(
+    'projects/start-os/web/setup-wizard/src/app/services/api.service.ts',
+  )
+  const routes = [],
+    destroy = []
+  dependencies.set(ApiService, {
+    streams: { setup: { status } },
+    rpc: {
+      setup: new Proxy(
+        {},
+        {
+          get: () => assert.fail('observation cannot replay or finalize setup'),
+        },
+      ),
+    },
+  })
+  dependencies.set(router, { navigate: async route => routes.push(route) })
+  dependencies.set(tokens.DestroyRef, {
+    onDestroy: callback => destroy.push(callback),
+  })
+  const service = new (load(
+    'projects/start-os/web/setup-wizard/src/app/services/setup-observation.ts',
+  ).SetupObservation)()
+  return {
+    service,
+    routes,
+    destroy: () => destroy.forEach(callback => callback()),
+  }
+}
+
+for (const failed of [false, true]) {
+  test(`setup waits for its terminal after 100 percent: ${failed ? 'late failure' : 'success'}`, async () => {
+    const terminal = Promise.withResolvers(),
+      reached = Promise.withResolvers()
+    let calls = 0
+    const fixture = setupObservationHarness(async (_, options) => {
+      calls++
+      assert.equal(options.signal.aborted, false)
+      return {
+        initial: {
+          status: 'running',
+          guid: null,
+          progress: { overall: false, phases: [] },
+        },
+        items: (async function* () {
+          yield { overall: true, phases: [] }
+          reached.resolve()
+          await terminal.promise
+          if (failed)
+            throw Object.assign(new Error('Late setup failure'), { code: 3 })
+          return null
+        })(),
+      }
+    })
+    await reached.promise
+    assert.equal(fixture.service.progress().total, 1)
+    assert.equal(fixture.routes.length, 0)
+    assert.equal(fixture.service.error(), '')
+    terminal.resolve()
+    await new Promise(setImmediate)
+    assert.equal(calls, 1)
+    assert.equal(fixture.routes.length, failed ? 0 : 1)
+    if (failed) assert.equal(fixture.service.error(), 'Late setup failure')
+    else assert.equal(fixture.routes[0][0], '/success')
+    fixture.destroy()
+  })
+}
+
+for (const status of ['needs-install', 'incomplete', 'complete']) {
+  test(`setup ${status} routing also requires its terminal`, async () => {
+    const terminal = Promise.withResolvers(),
+      reached = Promise.withResolvers()
+    const initial =
+      status === 'complete'
+        ? {
+            status,
+            hostname: 'fixture',
+            rootCa: 'certificate',
+            needsRestart: false,
+          }
+        : status === 'incomplete'
+          ? {
+              status,
+              guid: null,
+              osDrive: null,
+              attach: false,
+              mokEnrolled: false,
+            }
+          : { status }
+    const fixture = setupObservationHarness(async () => ({
+      initial,
+      items: (async function* () {
+        reached.resolve()
+        await terminal.promise
+        return null
+      })(),
+    }))
+    await reached.promise
+    assert.equal(fixture.routes.length, 0)
+    terminal.resolve()
+    await new Promise(setImmediate)
+    assert.equal(
+      fixture.routes[0][0],
+      status === 'complete' ? '/success' : '/language',
+    )
+    fixture.destroy()
+  })
+}
+
+for (const acquisition of [false, true]) {
+  test(`setup disposal cancels ${acquisition ? 'acquisition' : 'iteration'} without late UI or replay`, async () => {
+    const blocked = Promise.withResolvers(),
+      reached = Promise.withResolvers()
+    let signal,
+      calls = 0
+    const fixture = setupObservationHarness(async (_, options) => {
+      calls++
+      signal = options.signal
+      if (acquisition) await blocked.promise
+      return {
+        initial: {
+          status: 'running',
+          guid: null,
+          progress: { overall: false, phases: [] },
+        },
+        items: (async function* () {
+          reached.resolve()
+          await blocked.promise
+          throw new Error('disposed setup')
+        })(),
+      }
+    })
+    if (!acquisition) await reached.promise
+    fixture.destroy()
+    blocked.resolve()
+    await new Promise(setImmediate)
+    assert.equal(signal.aborted, true)
+    assert.equal(calls, 1)
+    assert.equal(fixture.routes.length, 0)
+    assert.equal(fixture.service.error(), '')
+  })
+}
+
+test('setup reconnects an active lost stream rather than treating its last progress as success', async () => {
+  const lost = Promise.withResolvers(),
+    resumed = Promise.withResolvers()
+  let calls = 0
+  const fixture = setupObservationHarness(async () => {
+    if (++calls === 1)
+      return {
+        initial: {
+          status: 'running',
+          guid: null,
+          progress: { overall: false, phases: [] },
+        },
+        items: (async function* () {
+          yield { overall: true, phases: [] }
+          lost.resolve()
+          throw { code: 0, message: 'transport lost' }
+        })(),
+      }
+    resumed.resolve()
+    return {
+      initial: {
+        status: 'complete',
+        hostname: 'fixture',
+        rootCa: 'certificate',
+        needsRestart: false,
+      },
+      items: (async function* () {
+        return null
+      })(),
+    }
+  })
+  await lost.promise
+  assert.equal(fixture.routes.length, 0)
+  await resumed.promise
+  await new Promise(setImmediate)
+  assert.equal(calls, 2)
+  assert.equal(fixture.routes[0][0], '/success')
+  fixture.destroy()
+})
+
+test('setup initiating application errors stop once without retry or navigation', async () => {
+  let calls = 0
+  const fixture = setupObservationHarness(async () => {
+    calls++
+    throw { code: 3, message: 'cached setup failure' }
+  })
+  await new Promise(setImmediate)
+  assert.equal(calls, 1)
+  assert.equal(fixture.service.error(), 'cached setup failure')
+  assert.equal(fixture.routes.length, 0)
+  fixture.destroy()
+})
+
+test('setup reconnects read-only status and cancels retry waits on disposal', async () => {
+  const retried = Promise.withResolvers()
+  let calls = 0
+  const fixture = setupObservationHarness(async () => {
+    if (++calls === 1) throw { code: 0, message: 'transport lost' }
+    retried.resolve()
+    return {
+      initial: { status: 'needs-install' },
+      items: (async function* () {
+        return null
+      })(),
+    }
+  })
+  await retried.promise
+  await new Promise(setImmediate)
+  assert.equal(calls, 2)
+  assert.equal(fixture.routes[0][0], '/language')
+  fixture.destroy()
+  let attempts = 0
+  const canceled = setupObservationHarness(async () => {
+    attempts++
+    throw { code: 0 }
+  })
+  await new Promise(setImmediate)
+  canceled.destroy()
+  await new Promise(setImmediate)
+  assert.equal(attempts, 1)
+  assert.equal(canceled.routes.length, 0)
+})
+
+test('setup stream capture precedes key acquisition and cancellation prevents late dispatch', async () => {
+  const { dependencies, tokens, load } = harness(new Map(), { AbortController })
+  const acquired = Promise.withResolvers()
+  let captures = 0,
+    dispatched = 0
+  dependencies.set(tokens.AuthKeyService, {
+    admissionLease: () => acquired.promise,
+  })
+  dependencies.set(tokens.HttpService, {})
+  dependencies.set(tokens.RpcSocketService, {
+    stream: () => {
+      dispatched++
+      assert.fail('late dispatch')
+    },
+  })
+  const client = new (load(
+    'projects/start-os/web/setup-wizard/src/app/services/live-api.service.ts',
+  ).LiveApiService)()
+  const abort = new AbortController()
+  const pending = client.streams.setup.status(
+    {
+      toJSON: () => {
+        captures++
+        return {}
+      },
+    },
+    { signal: abort.signal },
+  )
+  assert.equal(captures, 1)
+  abort.abort()
+  acquired.resolve({ signer: {}, signal: new AbortController().signal })
+  await assert.rejects(pending, { name: 'AbortError' })
+  assert.equal(dispatched, 0)
+})
+
+test('setup mock ordinary and typed status share their progress and terminal owner', async () => {
+  const { load } = harness(new Map(), { AbortController })
+  const mock = Object.create(
+    load(
+      'projects/start-os/web/setup-wizard/src/app/services/mock-api.service.ts',
+    ).MockApiService.prototype,
+  )
+  mock.statusIndex = 0
+  mock.installCompleted = false
+  assert.equal((await mock.setupStatus()).status, 'needs-install')
+  const response = await mock.setupStatusStream()
+  assert.equal(response.initial.status, 'running')
+  assert.equal(response.initial.guid, null)
+  assert.equal((await response.items.next()).value.overall, true)
+  assert.equal((await response.items.next()).done, true)
+  assert.equal((await mock.setupStatus()).status, 'complete')
+  const abort = new AbortController()
+  abort.abort()
+  await assert.rejects(mock.setupStatusStream({ signal: abort.signal }), {
+    name: 'AbortError',
+  })
 })
 
 test('Setup sends unwrapped secrets through encrypted admission and preserves the installation timeout', async () => {

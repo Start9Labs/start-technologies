@@ -8,7 +8,7 @@ import {
   RpcSocketService,
   rpcRequestBody,
 } from '@start9labs/shared'
-import { createRpcClient } from '@start9labs/start-core'
+import { createRpcClient, createRpcStreamClient } from '@start9labs/start-core'
 import { Observable } from 'rxjs'
 import { ApiClient, ApiService, Params } from './api.service'
 
@@ -26,6 +26,20 @@ export class LiveApiService extends ApiService {
         params: params as Record<string, unknown>,
         ...options,
       }),
+  })
+
+  readonly streams: ApiService['streams'] = createRpcStreamClient<
+    ApiService['streams']
+  >({
+    stream: async (method, params, options) => {
+      const body = rpcRequestBody({
+        method,
+        params: params as Record<string, unknown>,
+      })
+      const lease = await this.authKeys.admissionLease()
+      options?.signal?.throwIfAborted()
+      return this.sockets.stream(body, lease, options)
+    },
   })
 
   openWebsocket$<T>(guid: string): Observable<T> {

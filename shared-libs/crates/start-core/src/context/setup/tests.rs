@@ -36,10 +36,18 @@ async fn failed_setup_retains_its_error_without_marking_progress_complete() {
         ErrorKind::Filesystem
     );
     assert_eq!(
-        crate::setup::status(context.clone())
-            .await
-            .unwrap_err()
-            .kind,
+        crate::setup::status(rpc_toolkit::HandlerArgs {
+            context: context.clone(),
+            parent_method: Default::default(),
+            method: Default::default(),
+            params: rpc_toolkit::Empty {},
+            inherited_params: rpc_toolkit::Empty {},
+            raw_params: imbl_value::json!({}),
+            rpc_stream: None,
+        })
+        .await
+        .unwrap_err()
+        .kind,
         ErrorKind::Filesystem
     );
     assert_eq!(
@@ -148,7 +156,7 @@ async fn observer_drop_and_unopened_guid_do_not_abort_work_or_retain_its_context
         .unwrap();
     let source = context.progress_stream();
     drop(source);
-    let _unopened = context.progress().await;
+    let _unopened = context.progress(None).await;
     let owner = Arc::downgrade(&context.0);
     drop(context);
     finish.send(()).unwrap();
@@ -174,6 +182,110 @@ async fn worker_failure_is_an_error_not_completion_or_an_indefinite_progress_str
         .unwrap_err();
     assert_eq!(error.kind, ErrorKind::Unknown);
     assert!(!context.progress.snapshot().overall.is_complete());
+}
+
+#[tokio::test]
+async fn typed_setup_status_reports_late_failure_and_cached_initiating_error() {
+    use crate::context::CliContext;
+    use crate::context::config::ClientConfig;
+    use crate::net::web_server::{Acceptor, WebServer};
+    let (context, _unused_server) = context();
+    let (finish, pending) = oneshot::channel();
+    context
+        .run_setup(move || async move {
+            pending.await.unwrap();
+            Err(Error::new(
+                eyre!("typed setup failure"),
+                ErrorKind::Filesystem,
+            ))
+        })
+        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let host = format!("http://{}", listener.local_addr().unwrap());
+    let _server = WebServer::new(
+        Acceptor::new(listener),
+        crate::net::static_server::ui_router(context.clone()),
+    );
+    let cli = CliContext::init(ClientConfig {
+        host: Some(host.parse().unwrap()),
+        ..Default::default()
+    })
+    .unwrap();
+    context.progress.complete();
+    let mut response = cli
+        .call_startup_stream::<crate::progress::FullProgress, ()>(
+            "setup.status",
+            imbl_value::json!({}),
+            http::HeaderMap::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.initial["status"].as_str(), Some("running"));
+    assert!(response.initial["guid"].is_null());
+    assert!(
+        response
+            .items
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .overall
+            .is_complete()
+    );
+    assert!(futures::poll!(std::pin::pin!(response.items.next())).is_pending());
+    finish.send(()).unwrap();
+    let error = loop {
+        match response.items.next().await {
+            Ok(Some(_)) => (),
+            Err(error) => break error,
+            Ok(None) => panic!("percentage completed setup"),
+        }
+    };
+    assert_eq!(error.code, ErrorKind::Filesystem as i32);
+    assert_eq!(error.data.unwrap()["details"], "typed setup failure");
+    let error = cli
+        .call_startup_stream::<crate::progress::FullProgress, ()>(
+            "setup.status",
+            imbl_value::json!({}),
+            http::HeaderMap::new(),
+        )
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.code, ErrorKind::Filesystem as i32);
+}
+
+#[tokio::test]
+async fn idle_setup_status_has_a_successful_empty_typed_observation() {
+    use crate::context::CliContext;
+    use crate::context::config::ClientConfig;
+    use crate::net::web_server::{Acceptor, WebServer};
+    let (context, _unused_server) = context();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let host = format!("http://{}", listener.local_addr().unwrap());
+    let _server = WebServer::new(
+        Acceptor::new(listener),
+        crate::net::static_server::ui_router(context),
+    );
+    let cli = CliContext::init(ClientConfig {
+        host: Some(host.parse().unwrap()),
+        ..Default::default()
+    })
+    .unwrap();
+    let mut response = cli
+        .call_startup_stream::<crate::progress::FullProgress, ()>(
+            "setup.status",
+            imbl_value::json!({}),
+            http::HeaderMap::new(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        response.initial["status"].as_str(),
+        Some("needs-install" | "incomplete")
+    ));
+    assert!(response.items.next().await.unwrap().is_none());
+    response.items.finish().await.unwrap();
 }
 
 #[tokio::test]

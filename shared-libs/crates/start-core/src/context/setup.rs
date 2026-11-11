@@ -219,11 +219,24 @@ impl SetupContext {
         })
     }
 
-    /// Requires accepted setup work; continuation closure reports its outcome.
-    pub async fn progress(&self) -> SetupProgress {
-        let guid = Guid::new();
+    /// Requires accepted setup work; observation reports its actual outcome.
+    pub async fn progress(
+        &self,
+        rpc_stream: Option<rpc_toolkit::RpcStream<crate::progress::FullProgress>>,
+    ) -> SetupProgress {
         let progress = self.progress.snapshot();
         let source = self.progress_stream();
+        if let Some(stream) = rpc_stream {
+            tokio::spawn(async move {
+                let result = stream.forward(source).await;
+                let _ = stream.close(result);
+            });
+            return SetupProgress {
+                progress,
+                guid: None,
+            };
+        }
+        let guid = Guid::new();
         self.rpc_continuations
             .add(
                 guid.clone(),
@@ -249,7 +262,10 @@ impl SetupContext {
             )
             .await;
 
-        SetupProgress { progress, guid }
+        SetupProgress {
+            progress,
+            guid: Some(guid),
+        }
     }
 }
 

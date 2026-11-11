@@ -89,8 +89,10 @@ establish the running daemon's availability after router replacement.
 `SetupContext` reserves its worker before execution and retains the application outcome in
 its existing result cell. Its synchronous task slot owns a shared non-detaching join;
 observers await that task without owning or restarting it. Progress completion requires
-success. GUID observers reuse the shared progress/result forwarding and retain a weak
-context reference while waiting, including unconsumed continuations.
+success. Typed `setup.status` and GUID observers reuse the shared progress/result forwarding
+and retain a weak context reference while waiting, including unconsumed continuations.
+Ordinary replies retain GUIDs; opted-in running status returns progress with `guid: null`.
+Successful observation permits the wizard's separate `setup.complete` finalization call.
 
 ## Action file transfers
 

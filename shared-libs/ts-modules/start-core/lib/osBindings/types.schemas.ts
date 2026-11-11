@@ -5472,8 +5472,23 @@ export const SetupExecuteParams: z.ZodObject<{
 })
 export const SetupProgress: z.ZodObject<{
   progress: typeof FullProgress
-  guid: typeof Guid
-}> = /* @__PURE__ */ object({ progress: FullProgress, guid: Guid }).meta({
+  /**
+   * Present for ordinary replies; typed streams use same-ID events.
+   */
+  guid: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
+}> = /* @__PURE__ */ object({
+  progress: FullProgress,
+  /**
+   * Present for ordinary replies; typed streams use same-ID events.
+   */
+  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Present for ordinary replies; typed streams use same-ID events.',
+  }),
+}).meta({
   id: 'SetupProgress',
 })
 export const SideloadParams: z.ZodObject<{

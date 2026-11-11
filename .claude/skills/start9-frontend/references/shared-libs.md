@@ -4,7 +4,7 @@
 `RpcSocketService` (encrypted local RPC/continuations), `AuthKeyService` (device-key and
 unenrolled admission leases), `ServerIdentityService` (normal-product verified-peer observers),
 `rpcWebSocketUrl` (shared RPC/continuation endpoint selection), `ErrorService` +
-`getErrorMessage`, **`TaskService.run`** (the async-action wrapper), **`DialogService`**
+`getErrorMessage` / `isNetworkError`, **`TaskService.run`** (the async-action wrapper), **`DialogService`**
 (responsive + i18n prompt/confirm/alert/component), `CopyService` (clipboard + toast),
 `DownloadHTMLService`, `Exver` (version algebra façade), `SetupLogsService` +
 `provideSetupLogsService(Api)`, `i18nService`/`i18nPipe`/`LocalizePipe` + `I18N_PROVIDERS`,

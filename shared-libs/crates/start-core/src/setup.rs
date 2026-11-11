@@ -340,7 +340,7 @@ pub async fn attach(
         ))
     })?;
 
-    Ok(ctx.progress().await)
+    Ok(ctx.progress(None).await)
 }
 
 #[derive(Debug, Deserialize, Serialize, VisitVariants)]
@@ -376,31 +376,41 @@ rpc_toolkit::reflect_ts!(SetupInfo);
 #[serde(rename_all = "camelCase")]
 pub struct SetupProgress {
     pub progress: FullProgress,
-    pub guid: Guid,
+    /// Present for ordinary replies; typed streams use same-ID events.
+    pub guid: Option<Guid>,
 }
 
 rpc_toolkit::reflect_ts!(SetupProgress);
 rpc_toolkit::ts_export!(SetupProgress, namespaces = [""]);
 
-pub async fn status(ctx: SetupContext) -> Result<SetupStatusRes, Error> {
-    if let Some(res) = ctx.result.get() {
+pub async fn status(
+    HandlerArgs {
+        context: ctx,
+        rpc_stream,
+        ..
+    }: HandlerArgs<SetupContext, Empty, Empty, FullProgress>,
+) -> Result<SetupStatusRes, Error> {
+    let status = if let Some(res) = ctx.result.get() {
         match res {
-            Ok((res, _)) => Ok(SetupStatusRes::Complete(res.clone())),
-            Err(e) => Err(e.clone_output()),
+            Ok((res, _)) => SetupStatusRes::Complete(res.clone()),
+            Err(e) => return Err(e.clone_output()),
         }
+    } else if ctx.setup_started() {
+        return Ok(SetupStatusRes::Running(ctx.progress(rpc_stream).await));
     } else {
-        if ctx.setup_started() {
-            Ok(SetupStatusRes::Running(ctx.progress().await))
+        let path = Path::new("/media/startos/config/setup.json");
+        if tokio::fs::metadata(path).await.is_err() {
+            SetupStatusRes::NeedsInstall
         } else {
-            let path = Path::new("/media/startos/config/setup.json");
-            if tokio::fs::metadata(path).await.is_err() {
-                return Ok(SetupStatusRes::NeedsInstall);
-            }
             IoFormat::Json
                 .from_slice(read_file_to_string(path).await?.as_bytes())
-                .map(SetupStatusRes::Incomplete)
+                .map(SetupStatusRes::Incomplete)?
         }
+    };
+    if let Some(stream) = rpc_stream {
+        let _ = stream.close(Ok::<_, Error>(()));
     }
+    Ok(status)
 }
 
 /// Returns the public JWE key for legacy setup clients.
@@ -850,7 +860,7 @@ pub async fn execute(
     let setup_ctx = ctx.clone();
     ctx.run_setup(move || execute_inner(setup_ctx, guid, password, recovery, kiosk, hostname))?;
 
-    Ok(ctx.progress().await)
+    Ok(ctx.progress(None).await)
 }
 
 #[instrument(skip_all)]
