@@ -599,4 +599,5 @@ export const ENGLISH: Record<string, number> = {
   'line {line}': 630,
   'Check again': 631,
   'This section also has {option} {value}, set outside StartWRT. StartWRT shows the first value and leaves this one as it is.': 632,
+  'This device asked to open port(s) {ports} to the internet. The router refused because automatic port forwarding is off.': 633,
 }

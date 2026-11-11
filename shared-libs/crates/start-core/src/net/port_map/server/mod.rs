@@ -100,6 +100,18 @@ pub trait GatewayBackend: Send + Sync {
     /// Whether `peer` is a client this gateway will create mappings for.
     fn is_known_client(&self, peer: Ipv4Addr) -> impl Future<Output = bool> + Send;
 
+    /// `peer`, refused by [`GatewayBackend::is_known_client`], asked to open
+    /// `count` contiguous ports from `external_port`. `peer` is unverified for
+    /// a PCP request. Default: ignored.
+    fn refused_mapping(
+        &self,
+        _peer: Ipv4Addr,
+        _external_port: u16,
+        _count: u16,
+    ) -> impl Future<Output = ()> + Send {
+        async {}
+    }
+
     /// Whether `gua` is a global IPv6 address this gateway has delegated to a
     /// client — the authorization check for a v6 pinhole. Default: no v6 support.
     fn is_known_gua(&self, _gua: Ipv6Addr) -> impl Future<Output = bool> + Send {
@@ -376,7 +388,23 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
         return Some(error_response(opcode, MALFORMED_REQUEST, epoch));
     }
 
+    let lifetime = u32::from_be_bytes([req[4], req[5], req[6], req[7]]);
+    let internal_port = u16::from_be_bytes([req[40], req[41]]);
+    let suggested_external_port = u16::from_be_bytes([req[42], req[43]]);
+    let external_port = if suggested_external_port != 0 {
+        suggested_external_port
+    } else {
+        internal_port
+    };
+
     if !backend.is_known_client(peer).await {
+        if lifetime > 0 && external_port != 0 {
+            let count = parse_port_set_options(req.get(MAP_REQUEST_LEN..).unwrap_or(&[]))
+                .ok()
+                .flatten()
+                .map_or(1, |ps| ps.size.max(1));
+            backend.refused_mapping(peer, external_port, count).await;
+        }
         return Some(map_response(
             NOT_AUTHORIZED,
             req,
@@ -388,10 +416,6 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
         ));
     }
 
-    let lifetime = u32::from_be_bytes([req[4], req[5], req[6], req[7]]);
-    let internal_port = u16::from_be_bytes([req[40], req[41]]);
-    let suggested_external_port = u16::from_be_bytes([req[42], req[43]]);
-
     let Some(external_ip) = backend.external_ipv4(peer).await else {
         return Some(map_response(
             CANNOT_PROVIDE_EXTERNAL,
@@ -402,11 +426,6 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
             0,
             epoch,
         ));
-    };
-    let external_port = if suggested_external_port != 0 {
-        suggested_external_port
-    } else {
-        internal_port
     };
 
     if internal_port == 0 {
@@ -914,6 +933,108 @@ mod tests {
         req[1] = 3; // not ANNOUNCE(0) nor MAP(1)
         let resp = handle(&stub, Ipv4Addr::LOCALHOST, &req, 0).await.unwrap();
         assert_eq!(resp[3], UNSUPP_OPCODE);
+    }
+
+    /// Recognizes no peer and records what each refused peer asked to open.
+    #[derive(Default)]
+    struct RefusingStub {
+        refused: std::sync::Mutex<Vec<(Ipv4Addr, u16, u16)>>,
+    }
+    impl GatewayBackend for RefusingStub {
+        fn add_forward(
+            &self,
+            _: SocketAddrV4,
+            _: SocketAddrV4,
+            _: u16,
+            _: Ipv4Addr,
+            _: Option<u32>,
+        ) -> impl Future<Output = Result<(), u16>> + Send {
+            async { Ok(()) }
+        }
+        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
+            async {}
+        }
+        fn remove_forward_by_source(
+            &self,
+            _: SocketAddrV4,
+            _: Ipv4Addr,
+        ) -> impl Future<Output = bool> + Send {
+            async { false }
+        }
+        fn external_ipv4(&self, _: Ipv4Addr) -> impl Future<Output = Option<Ipv4Addr>> + Send {
+            async { Some(Ipv4Addr::new(203, 0, 113, 1)) }
+        }
+        fn is_known_client(&self, _: Ipv4Addr) -> impl Future<Output = bool> + Send {
+            async { false }
+        }
+        fn refused_mapping(
+            &self,
+            peer: Ipv4Addr,
+            external_port: u16,
+            count: u16,
+        ) -> impl Future<Output = ()> + Send {
+            self.refused
+                .lock()
+                .unwrap()
+                .push((peer, external_port, count));
+            async {}
+        }
+        fn sni(&self) -> Option<&Arc<SniDemux>> {
+            None
+        }
+    }
+
+    #[tokio::test]
+    async fn a_refused_map_reports_the_ports_it_asked_for() {
+        let stub = RefusingStub::default();
+        let peer = Ipv4Addr::new(10, 59, 0, 2);
+        let refused = |req: Vec<u8>| {
+            let stub = &stub;
+            async move {
+                let resp = handle(stub, peer, &req, 5).await.expect("answered");
+                assert_eq!(resp[3], NOT_AUTHORIZED);
+                stub.refused.lock().unwrap().pop()
+            }
+        };
+        assert_eq!(
+            refused(map_request([1; 12], 3600, 8443, 443)).await,
+            Some((peer, 443, 1))
+        );
+        assert_eq!(
+            refused(map_request([2; 12], 3600, 8443, 0)).await,
+            Some((peer, 8443, 1)),
+            "no suggestion asks for the internal port"
+        );
+        assert_eq!(
+            refused(map_request([3; 12], 0, 8443, 443)).await,
+            None,
+            "a delete opens nothing"
+        );
+        let mut range = map_request([4; 12], 3600, 5000, 5000);
+        encode_port_set_option(
+            &mut range,
+            &PortSet {
+                size: 10,
+                first_internal_port: 5000,
+                parity: false,
+            },
+        );
+        assert_eq!(refused(range).await, Some((peer, 5000, 10)));
+
+        let mut large_range = map_request([5; 12], 3600, 5000, 5000);
+        encode_port_set_option(
+            &mut large_range,
+            &PortSet {
+                size: 2000,
+                first_internal_port: 5000,
+                parity: false,
+            },
+        );
+        assert_eq!(
+            refused(large_range).await,
+            Some((peer, 5000, 2000)),
+            "report the requested range rather than the maximum grant"
+        );
     }
 
     struct RecordingStub {
