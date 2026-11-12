@@ -210,12 +210,10 @@ seed_notes() {
         ${since:+--since "$since"} "${base_args[@]}") > "$english"
 }
 
-# Open the English notes in the editor, translate them into every catalog
-# locale with the claude CLI, open the translations for review, and write the
-# prettier-formatted result into the bundle: <bundle> <english>. Translations
-# already in the bundle are kept while the English matches its en_US.
+# English is the editable source; generated translations bypass the editor.
+# Existing translations are kept while the English matches the bundle's en_US.
 edit_notes_bundle() (
-    local bundle=$1 dir locale file args=() filter="" translated=() pids=() pid
+    local bundle=$1 dir locale file args=() filter="" pids=() pid
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
     cp "$2" "$dir/en_US.md"
@@ -244,13 +242,8 @@ edit_notes_bundle() (
         echo "Translating into ${locale}..."
         translate_notes "$dir/en_US.md" "$dir/$locale.previous" "$locale" > "$dir/$locale.md" &
         pids+=("$!")
-        translated+=("$dir/$locale.md")
     done
     for pid in "${pids[@]}"; do wait "$pid"; done
-    if [ ${#translated[@]} -gt 0 ]; then
-        echo "Opening the generated translations for review..."
-        launch_editor "${translated[@]}"
-    fi
     for file in "$dir"/*.md; do
         locale=$(basename "$file" .md)
         if [ -s "$file" ] && [ "$(grep -o '<!--[^>]*-->' "$file")" != "$(grep -o '<!--[^>]*-->' "$dir/en_US.md")" ]; then
