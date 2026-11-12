@@ -27,9 +27,10 @@ The record has at most 1,024 bytes, with CBOR nesting bounded at 16 levels. Extr
 objects, trailing data, duplicate/unknown fields and invalid binary lengths are
 rejected. Maps use text keys; admission values are untagged. Binary fields are definite
 CBOR byte strings, not Base64 or integer arrays. CBOR integers preserve the full
-i64/u64 ranges without JavaScript-number rounding. The native decoder validates wire
-kinds through Ciborium before the existing DTOs interpret fields; buffered enum decoding
-must not normalize an otherwise invalid representation into an accepted field.
+i64/u64 ranges without JavaScript-number rounding. Native and browser decoders validate
+wire kinds through their existing CBOR libraries before DTO interpretation; buffered
+decoding must not normalize an invalid representation into an accepted field. Browser
+`decodeFirst` is asynchronous and returns the original first-object byte length.
 
 Each body has `protocol: "Start-RPC-Session"`, `version: 1` and a `hello` map:
 

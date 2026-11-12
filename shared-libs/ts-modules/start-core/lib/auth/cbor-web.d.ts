@@ -16,18 +16,42 @@ declare module 'cbor-web' {
       ]
     },
   ): Uint8Array
-  export function decodeFirstSync(
-    value: Uint8Array,
-    options: {
+  export class Decoder {
+    constructor(options: {
       extendedResults: true
       preferWeb: true
       preventDuplicateKeys: true
       max_depth: number
-    },
-  ): First
+    })
+    on(
+      event: 'start' | 'start-string' | 'more-bytes',
+      listener: (
+        type: number,
+        length: number | symbol,
+        parent: number | undefined,
+        index: number | undefined,
+      ) => void,
+    ): this
+    on(
+      event: 'value',
+      listener: (
+        value: unknown,
+        parent: number | undefined,
+        index: number | undefined,
+        additionalInfo: number,
+      ) => void,
+    ): this
+    once(event: 'data', listener: (value: First) => void): this
+    once(event: 'error', listener: (error: Error) => void): this
+    once(event: 'end', listener: () => void): this
+    end(bytes: Uint8Array): void
+    destroy(): void
+  }
+  export const Simple: { isSimple(value: unknown): boolean }
   const cbor: {
     encodeOne: typeof encodeOne
-    decodeFirstSync: typeof decodeFirstSync
+    Decoder: typeof Decoder
+    Simple: typeof Simple
   }
   export default cbor
 }

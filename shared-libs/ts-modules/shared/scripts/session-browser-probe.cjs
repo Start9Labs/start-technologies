@@ -4,7 +4,7 @@ const http = require('node:http')
 const net = require('node:net')
 const path = require('node:path')
 const { once } = require('node:events')
-const { decodeFirst } = require('@start9labs/start-core/auth/cbor')
+const { captureRecord, capturedHellos } = require('./captured-hellos.cjs')
 const {
   SIGNATURE_PROFILE,
 } = require('@start9labs/start-core/osBindings/signature-profile')
@@ -81,28 +81,14 @@ const bundle = fs.readFileSync(
     const hellos = []
     const serverHellos = []
     const urls = []
-    const captureHello = (response, destination) => {
-      if (response.opcode !== 2) return
-      const wire = Buffer.from(response.payloadData, 'base64').subarray(2)
-      try {
-        const body = decodeFirst(wire)
-        const proof = decodeFirst(wire.subarray(body.length))
-        if (body.value?.protocol !== 'Start-RPC-Session') return
-        destination.push({
-          body: body.value,
-          proof: proof.value,
-          complete: body.length + proof.length === wire.length,
-        })
-      } catch {}
-    }
     cdp.on('Network.webSocketCreated', ({ url }) => urls.push(new URL(url)))
     cdp.on('Network.webSocketFrameSent', ({ response }) => {
       if (response.opcode === 1) plaintext++
       if (response.opcode === 2) binary++
-      captureHello(response, hellos)
+      captureRecord(response, hellos)
     })
     cdp.on('Network.webSocketFrameReceived', ({ response }) =>
-      captureHello(response, serverHellos),
+      captureRecord(response, serverHellos),
     )
     await page.goto(`http://127.0.0.1:${server.address().port}/`)
     await page.waitForFunction(() => window.sessionProbe)
@@ -126,9 +112,6 @@ const bundle = fs.readFileSync(
     })
     const revision = await page.evaluate(() => sessionProbe.revision())
     assert.deepEqual(revision, { length: 5 * 1024 * 1024 + 1, bom: 0xfeff })
-    assert.ok(
-      hellos.some(hello => hello.body.hello.target.continuation === guid),
-    )
     console.log(
       'PASS exact-GUID server-first admission and 5 MiB PatchDB revision with UTF-8 BOM',
     )
@@ -146,27 +129,37 @@ const bundle = fs.readFileSync(
     )
     assert.equal(await page.evaluate(() => sessionProbe.tamper()), true)
     assert.equal(await page.evaluate(() => sessionProbe.revoke()), true)
+    const clientCaptures = await capturedHellos(hellos)
+    const serverCaptures = await capturedHellos(serverHellos)
+    assert.ok(
+      clientCaptures.some(
+        hello => hello.body.hello.target.continuation === guid,
+      ),
+    )
     assert.equal(plaintext, 0)
     assert.ok(binary > 20)
-    assert.ok(hellos.length >= 20)
+    assert.ok(clientCaptures.length >= 20)
     assert.equal(
-      new Set(hellos.map(hello => hello.proof.commitment.nonce.toString()))
-        .size,
-      hellos.length,
+      new Set(
+        clientCaptures.map(hello => hello.proof.commitment.nonce.toString()),
+      ).size,
+      clientCaptures.length,
     )
     assert.ok(
-      hellos.every(hello => hello.body.protocol === 'Start-RPC-Session'),
+      clientCaptures.every(
+        hello => hello.body.protocol === 'Start-RPC-Session',
+      ),
     )
     assert.ok(
-      hellos.every(
+      clientCaptures.every(
         hello =>
           hello.body.hello.ephemeral instanceof Uint8Array &&
           hello.proof.signer instanceof Uint8Array &&
           hello.proof.signature instanceof Uint8Array,
       ),
     )
-    assert.ok(serverHellos.length > 0)
-    for (const hello of [...hellos, ...serverHellos]) {
+    assert.ok(serverCaptures.length > 0)
+    for (const hello of [...clientCaptures, ...serverCaptures]) {
       assert.equal(hello.complete, true)
       const prefix = SIGNATURE_PROFILE.ed25519.signaturePrefix
       assert.equal(
@@ -188,7 +181,12 @@ const bundle = fs.readFileSync(
       'PASS AEAD tamper fails closed, logout invalidation, fresh per-socket nonces and binary-only RPC',
     )
     console.log(
-      JSON.stringify({ binary, plaintext, hellos: hellos.length, errors }),
+      JSON.stringify({
+        binary,
+        plaintext,
+        hellos: clientCaptures.length,
+        errors,
+      }),
     )
   } finally {
     await browser?.close()

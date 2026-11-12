@@ -18,7 +18,7 @@ const fixture = JSON.parse(
 const bytes = value => new Uint8Array(Buffer.from(value, 'base64'))
 const client = bytes(fixture.client)
 const server = bytes(fixture.server)
-const payload = client.subarray(0, decodeFirst(client).length)
+const payload = client.subarray(0, (await decodeFirst(client)).length)
 const proof = client.subarray(payload.length)
 const encoder = new TextEncoder()
 const concatenate = (...parts) => new Uint8Array(Buffer.concat(parts))
@@ -62,7 +62,7 @@ test('opaque fresh initiation signs once per connection and binds exact GUID int
     exported.mock.calls.every(call => call.arguments[1].type === 'public'),
   )
   const decode = async prepared => {
-    const body = decodeFirst(prepared.message)
+    const body = await decodeFirst(prepared.message)
     const proof = prepared.message.subarray(body.length)
     assert.equal(
       await auth.verifyRequestProof(
@@ -74,7 +74,7 @@ test('opaque fresh initiation signs once per connection and binds exact GUID int
     )
     return {
       hello: body.value.hello,
-      nonce: decodeFirst(proof).value.commitment.nonce,
+      nonce: (await decodeFirst(proof)).value.commitment.nonce,
     }
   }
   const a = await decode(one),
@@ -138,7 +138,7 @@ test('admission rejects unknown signed fields and invalid binary shapes', async 
   const signer = auth.requestSigner(await auth.generateAuthKey())
   for (const mode of ['unknown', 'text', 'array', 'length']) {
     const prepared = await frozenClient(context)
-    const body = decodeFirst(server).value
+    const body = (await decodeFirst(server)).value
     if (mode === 'unknown') body.hello.unexpected = true
     if (mode === 'text') body.hello.ephemeral = fixture.serverPublic
     if (mode === 'array') body.hello.ephemeral = [...body.hello.ephemeral]
@@ -152,6 +152,21 @@ test('admission rejects unknown signed fields and invalid binary shapes', async 
     )
     context.mock.restoreAll()
   }
+})
+
+test('admission rejects a correctly signed response with normalized typed-byte key material', async context => {
+  const prepared = await frozenClient(context)
+  const decoded = await decodeFirst(server)
+  const captured = server.subarray(0, decoded.length)
+  const field = encode(decoded.value.hello.ephemeral)
+  const offset = Buffer.from(captured).indexOf(field)
+  assert.ok(offset >= 0)
+  const tagged = concatenate(
+    captured.subarray(0, offset),
+    new Uint8Array([0xd8, 0x40]),
+    captured.subarray(offset),
+  )
+  await assert.rejects(prepared.finish(await signedResponse(tagged)))
 })
 
 test('admission requires exactly two CBOR objects and rejects the JSON predecessor', async context => {
@@ -170,7 +185,7 @@ test('admission requires exactly two CBOR objects and rejects the JSON predecess
 })
 
 test('a valid signed response for another captured client hello cannot admit this connection', async context => {
-  const body = decodeFirst(server.slice()).value
+  const body = (await decodeFirst(server.slice())).value
   body.hello.clientHello[0] ^= 1
   const response = await signedResponse(encode(body))
   const prepared = await frozenClient(context)

@@ -43,6 +43,25 @@ test('ephemeral possession signs and verifies without crypto.subtle or exposing 
   }
 })
 
+test('request proof verification rejects a normalized typed-byte tag', async () => {
+  const provider = await generateEphemeralRequestSigner()
+  const body = new TextEncoder().encode('captured body')
+  const proof = await provider.sign('server.test', body)
+  const parsed = (await decodeFirst(proof)).value as BinaryRequestProof
+  const field = encode(parsed.signature)
+  const offset = Buffer.from(proof).indexOf(field)
+  expect(offset).toBeGreaterThanOrEqual(0)
+  const tagged = new Uint8Array([
+    ...proof.subarray(0, offset),
+    0xd8,
+    0x40,
+    ...proof.subarray(offset),
+  ])
+  await expect(
+    verifyRequestProof(tagged, 'server.test', body),
+  ).rejects.toThrow()
+})
+
 test('DER64 normalization preserves standard Base64 and padding', () => {
   expect(normalizeDer64(pem)).toBe(der64)
   expect(normalizeDer64(pem.replace(/\n/g, '\r\n'))).toBe(der64)
@@ -109,10 +128,10 @@ test('independent native-consumed WebCrypto proofs preserve full-u64 commitments
   )
   for (const side of ['client', 'server']) {
     const wire = new Uint8Array(Buffer.from(fixture[side], 'base64'))
-    const body = decodeFirst(wire)
+    const body = await decodeFirst(wire)
     const payload = wire.subarray(0, body.length)
     const proof = wire.subarray(body.length)
-    const decoded = decodeFirst(proof).value as BinaryRequestProof
+    const decoded = (await decodeFirst(proof)).value as BinaryRequestProof
     await expect(
       verifyRequestProof(proof, fixture.context, payload),
     ).resolves.toBe(fixture[side + 'Identity'])
@@ -179,8 +198,8 @@ test('generic opaque signer shares commitment serialization without crossing the
   await expect(verifyRequestProof(proof, 'server.test', bytes)).resolves.toBe(
     normalizeDer64(key.pubkeyPem),
   )
-  const first = decodeFirst(proof).value as BinaryRequestProof
-  const second = decodeFirst(await provider.sign('server.test', bytes))
+  const first = (await decodeFirst(proof)).value as BinaryRequestProof
+  const second = (await decodeFirst(await provider.sign('server.test', bytes)))
     .value as BinaryRequestProof
   expect(BigInt(first.commitment.nonce)).not.toBe(
     BigInt(second.commitment.nonce),

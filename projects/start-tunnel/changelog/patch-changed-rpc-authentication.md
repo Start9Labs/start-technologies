@@ -2,7 +2,7 @@
 release-notes: false
 ---
 
-- Reject invalid native encrypted-admission CBOR representations before field interpretation.
+- Reject invalid encrypted-admission CBOR representations before native or browser field interpretation.
 
 - Encrypt browser RPC, PatchDB WebSocket traffic and keyed remote CLI administration after signed ephemeral-DH admission, preserving public HTTP bootstrap, resource headers and local-token access.
 - Remember the browser's verified server identity and warn on changes without blocking the connection, with fingerprint details for verification.

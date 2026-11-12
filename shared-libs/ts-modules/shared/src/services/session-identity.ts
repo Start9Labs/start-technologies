@@ -115,7 +115,7 @@ export async function prepareSession(
       try {
         if (response.length > maximum)
           throw new Error('Oversized signed handshake')
-        const captured = decodeFirst(response)
+        const captured = await decodeFirst(response)
         const peer = await auth.verifyRequestProof(
           response.subarray(captured.length),
           context,

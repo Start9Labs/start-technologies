@@ -158,7 +158,7 @@ export async function verifyRequestProof(
     import('./cbor'),
     import('../osBindings/session.schemas'),
   ])
-  const decoded = decodeFirst(encodedProof)
+  const decoded = await decodeFirst(encodedProof)
   if (decoded.length !== encodedProof.length)
     throw new Error('Trailing request proof data')
   const proof = schemas.BinaryRequestProof.extend({

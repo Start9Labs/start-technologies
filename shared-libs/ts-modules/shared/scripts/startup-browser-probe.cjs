@@ -7,7 +7,7 @@ const net = require('node:net')
 const path = require('node:path')
 const readline = require('node:readline')
 const { build } = require('esbuild')
-const { decodeFirst } = require('@start9labs/start-core/auth/cbor')
+const { captureRecord, capturedHellos } = require('./captured-hellos.cjs')
 const {
   SIGNATURE_PROFILE,
 } = require('@start9labs/start-core/osBindings/signature-profile')
@@ -109,26 +109,13 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright')
       plaintext = 0
     const clientHellos = [],
       serverHellos = []
-    const capture = (response, destination) => {
-      if (response.opcode !== 2) return
-      try {
-        const wire = Buffer.from(response.payloadData, 'base64').subarray(2)
-        const body = decodeFirst(wire)
-        if (body.value.protocol !== 'Start-RPC-Session') return
-        const proof = decodeFirst(wire.subarray(body.length))
-        assert.equal(body.length + proof.length, wire.length)
-        destination.push(proof.value)
-      } catch (error) {
-        if (error.code === 'ERR_ASSERTION') throw error
-      }
-    }
     cdp.on('Network.webSocketFrameSent', ({ response }) => {
       if (response.opcode === 1) plaintext++
       if (response.opcode === 2) binary++
-      capture(response, clientHellos)
+      captureRecord(response, clientHellos)
     })
     cdp.on('Network.webSocketFrameReceived', ({ response }) =>
-      capture(response, serverHellos),
+      captureRecord(response, serverHellos),
     )
     await page.goto(`http://startup-http.local:${server.address().port}/`)
     await page.waitForFunction(() => window.startupProbe)
@@ -145,27 +132,32 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright')
     assert.equal(result.canceled, true)
     assert.equal(result.freshIdentity, true)
     assert.deepEqual(result.records, [])
+    const clientCaptures = await capturedHellos(clientHellos)
+    const serverCaptures = await capturedHellos(serverHellos)
     assert.equal(plaintext, 0)
     assert.ok(binary > 8)
-    assert.ok(clientHellos.length >= 4)
-    assert.equal(serverHellos.length, clientHellos.length)
+    assert.ok(clientCaptures.length >= 4)
+    assert.equal(serverCaptures.length, clientCaptures.length)
     assert.equal(
-      new Set(clientHellos.map(hello => hello.commitment.nonce.toString()))
-        .size,
-      clientHellos.length,
+      new Set(
+        clientCaptures.map(hello => hello.proof.commitment.nonce.toString()),
+      ).size,
+      clientCaptures.length,
     )
     const prefix = SIGNATURE_PROFILE.ed25519.signaturePrefix
-    for (const hello of [...clientHellos, ...serverHellos])
+    for (const hello of [...clientCaptures, ...serverCaptures]) {
+      assert.equal(hello.complete, true)
       assert.deepEqual(
-        Array.from(hello.signature.subarray(0, prefix.length)),
+        Array.from(hello.proof.signature.subarray(0, prefix.length)),
         prefix,
       )
+    }
     assert.deepEqual(errors, [])
     const evidence = {
       ...result,
       binary,
       plaintext,
-      hellos: clientHellos.length,
+      hellos: clientCaptures.length,
       errors,
     }
     fs.writeFileSync(
