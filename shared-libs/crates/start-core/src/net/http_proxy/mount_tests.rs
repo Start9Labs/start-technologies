@@ -41,7 +41,8 @@ async fn provider_mounts_isolate_continuations_in_outer_and_subcontainer_roots()
             .await
             .unwrap();
         let (target, _app) = echo_application().await;
-        let _route = ChainRoute::new(&sockets, &binding(), &[stage("waf")], target).await;
+        let _route =
+            ChainRoute::new(&sockets, &binding(), &gateway(), &[stage("waf")], target).await;
         for _ in 0..2 {
             let rootfs = TmpDir::new().await.unwrap();
             node_rootfs(&rootfs).await;
@@ -62,8 +63,18 @@ async fn provider_mounts_isolate_continuations_in_outer_and_subcontainer_roots()
                         .any(|option| option == expected)
                 );
             }
-            let ingress = binding().socket_path(Path::new(CONTAINER_SOCKET_DIR), "in", "standard");
-            let next = binding().socket_path(Path::new(CONTAINER_SOCKET_DIR), "next", "standard");
+            let ingress = binding().socket_path(
+                Path::new(CONTAINER_SOCKET_DIR),
+                "in",
+                &gateway(),
+                "standard",
+            );
+            let next = binding().socket_path(
+                Path::new(CONTAINER_SOCKET_DIR),
+                "next",
+                &gateway(),
+                "standard",
+            );
             tokio::process::Command::new("chroot")
                 .arg("--userspec=100000:100000")
                 .arg(&*rootfs)

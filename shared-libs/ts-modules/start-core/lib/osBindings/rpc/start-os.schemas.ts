@@ -2521,7 +2521,38 @@ export const HostnameMetadata: z.ZodUnion<
   })
 
 /**
- * A provider/profile pair occurring once in a binding's ordered chain.
+ * The ingress gateway, independent of chain order and public-only applicability.
+ */
+export const HttpProxyGateway: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'network'> }>,
+      z.ZodObject<{ gatewayId: typeof GatewayId }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'url-plugin'> }>,
+      z.ZodObject<{ packageId: typeof PackageId }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.intersection(
+      object({ kind: z.literal('network') }),
+      object({ gatewayId: GatewayId }),
+    ),
+    z.intersection(
+      object({ kind: z.literal('url-plugin') }),
+      object({ packageId: PackageId }),
+    ),
+  ])
+  .meta({
+    id: 'HttpProxyGateway',
+    description:
+      'The ingress gateway, independent of chain order and public-only applicability.',
+  })
+
+/**
+ * A provider/profile pair occurring once in a gateway's ordered chain.
  */
 export const HttpProxyStage: z.ZodObject<{
   packageId: typeof PackageId
@@ -2532,7 +2563,7 @@ export const HttpProxyStage: z.ZodObject<{
 }).meta({
   id: 'HttpProxyStage',
   description:
-    "A provider/profile pair occurring once in a binding's ordered chain.",
+    "A provider/profile pair occurring once in a gateway's ordered chain.",
 })
 export const InfoParams: z.ZodObject<{
   targetId: typeof BackupTargetId
@@ -3837,6 +3868,31 @@ export const HostnameInfo: z.ZodObject<{
 }).meta({
   id: 'HostnameInfo',
 })
+
+/**
+ * Operator intent for one binding × gateway. Missing policies have empty chains.
+ */
+export const HttpProxyChain: z.ZodObject<{
+  gateway: typeof HttpProxyGateway
+  chain: z.ZodArray<typeof HttpProxyStage>
+  /**
+   * Bypasses private clients. URL-plugin gateways require false.
+   */
+  publicOnly: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  gateway: HttpProxyGateway,
+  chain: z.array(HttpProxyStage),
+  /**
+   * Bypasses private clients. URL-plugin gateways require false.
+   */
+  publicOnly: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Bypasses private clients. URL-plugin gateways require false.',
+  }),
+}).meta({
+  id: 'HttpProxyChain',
+  description:
+    'Operator intent for one binding × gateway. Missing policies have empty chains.',
+})
 export const InstallParams: z.ZodObject<{
   acceptSigners: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
@@ -4255,20 +4311,6 @@ export const Sessions: z.ZodObject<{
 }).meta({
   id: 'Sessions',
   description: "The server's sessions, by credential type.",
-})
-
-/**
- * Replaces the binding's operator-selected proxy chain.
- */
-export const SetHttpProxyChainParams: z.ZodObject<{
-  internalPort: z.ZodInt
-  chain: z.ZodArray<typeof HttpProxyStage>
-}> = /* @__PURE__ */ object({
-  internalPort: z.int(),
-  chain: z.array(HttpProxyStage),
-}).meta({
-  id: 'SetHttpProxyChainParams',
-  description: "Replaces the binding's operator-selected proxy chain.",
 })
 export const SideloadParams: z.ZodObject<{
   acceptSigners: z.ZodCodec<
@@ -4813,6 +4855,21 @@ export const SessionList: z.ZodObject<{
 })
 
 /**
+ * Replaces one gateway's chain without changing the binding's other gateways.
+ */
+export const SetHttpProxyChainParams: z.ZodObject<{
+  internalPort: z.ZodInt
+  policy: typeof HttpProxyChain
+}> = /* @__PURE__ */ object({
+  internalPort: z.int(),
+  policy: HttpProxyChain,
+}).meta({
+  id: 'SetHttpProxyChainParams',
+  description:
+    "Replaces one gateway's chain without changing the binding's other gateways.",
+})
+
+/**
  * Active DNS authority and its bootstrap gateway.
  */
 export const DnsStatus: z.ZodObject<{
@@ -5029,9 +5086,9 @@ export const BindInfo: z.ZodObject<{
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof ServiceInterface>>,
     z.ZodRecord<z.ZodString, typeof ServiceInterface>
   >
-  proxyChain: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof HttpProxyStage>>,
-    z.ZodArray<typeof HttpProxyStage>
+  proxyChains: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof HttpProxyChain>>,
+    z.ZodArray<typeof HttpProxyChain>
   >
 }> = /* @__PURE__ */ object({
   enabled: z.boolean(),
@@ -5050,7 +5107,10 @@ export const BindInfo: z.ZodObject<{
     description:
       'Service interfaces exported from this binding (`Origin.export`). A single\nbinding (host + internal port) may back several interfaces (e.g. a `ui`\nand an `api` on the same port), so this is keyed by interface id.',
   }),
-  proxyChain: wire(z.array(HttpProxyStage).optional(), z.array(HttpProxyStage)),
+  proxyChains: wire(
+    z.array(HttpProxyChain).optional(),
+    z.array(HttpProxyChain),
+  ),
 }).meta({
   id: 'BindInfo',
 })

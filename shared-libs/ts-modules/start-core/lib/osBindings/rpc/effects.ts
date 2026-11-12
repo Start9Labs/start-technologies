@@ -287,9 +287,14 @@ export type HardwareRequirements = z.output<typeof schemas.HardwareRequirements>
 export type HostnameMetadata = z.output<typeof schemas.HostnameMetadata>
 
 /**
- * The protected binding, shared by all its exported interfaces and addresses.
+ * The protected binding, shared by its exported interfaces.
  */
 export type HttpProxyBinding = z.output<typeof schemas.HttpProxyBinding>
+
+/**
+ * The ingress gateway, independent of chain order and public-only applicability.
+ */
+export type HttpProxyGateway = z.output<typeof schemas.HttpProxyGateway>
 
 /**
  * Provider-owned settings selectable in a binding's proxy chain.
@@ -297,7 +302,7 @@ export type HttpProxyBinding = z.output<typeof schemas.HttpProxyBinding>
 export type HttpProxyProfileInput = z.input<typeof schemas.HttpProxyProfile>
 
 /**
- * A provider/profile pair occurring once in a binding's ordered chain.
+ * A provider/profile pair occurring once in a gateway's ordered chain.
  */
 export type HttpProxyStage = z.output<typeof schemas.HttpProxyStage>
 export type ImageSource = z.output<typeof schemas.ImageSource>
@@ -395,9 +400,14 @@ export type ExportServiceInterfaceParamsInput = z.input<
 export type HostnameInfo = z.output<typeof schemas.HostnameInfo>
 
 /**
- * Identified within its provider by `binding` and `profileId`, independently of chain order.
+ * Identified within its provider by binding, gateway and profile, independently of chain order.
  */
 export type HttpProxyAttachment = z.output<typeof schemas.HttpProxyAttachment>
+
+/**
+ * Operator intent for one binding × gateway. Missing policies have empty chains.
+ */
+export type HttpProxyChain = z.output<typeof schemas.HttpProxyChain>
 export type ImageConfigRepr = z.output<typeof schemas.ImageConfigRepr>
 export type MetadataSrc = z.output<typeof schemas.MetadataSrc>
 export type MountParamsInput = z.input<typeof schemas.MountParams>

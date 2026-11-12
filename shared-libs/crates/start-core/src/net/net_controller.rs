@@ -540,7 +540,7 @@ struct HostBinds {
     /// contiguous range forward.
     forwards: BTreeMap<u16, (SocketAddrV4, u16, ForwardRequirements, Arc<()>)>,
     vhosts: BTreeMap<VHostKey, (ProxyTarget, ProxyHandle)>,
-    chains: BTreeMap<u16, crate::net::http_proxy::ChainRoute>,
+    chains: BTreeMap<u16, crate::net::http_proxy::BindingRoutes>,
     private_dns: BTreeMap<InternedString, Arc<()>>,
     /// Directly-forwarded v6: `(host GUA, external port) -> (container v6,
     /// internal port, LAN source filter)`. A GUA on a port no listener of ours
@@ -587,9 +587,8 @@ impl NetServiceData {
         binds.chains.retain(|port, _| {
             host.bindings
                 .get(port)
-                .is_some_and(|bind| bind.enabled && !bind.proxy_chain.is_empty())
+                .is_some_and(|bind| bind.enabled && bind.has_proxy_chains())
         });
-        let proxy_providers = ctrl.http_proxy.providers.read();
         for (port, bind) in host.bindings.iter() {
             if !bind.enabled {
                 continue;
@@ -631,28 +630,23 @@ impl NetServiceData {
                 .rewrap()
                 .map(|ssl| ctrl.upstream_client_config(&ssl.upstream_cert_validation));
             let mut target = binding_proxy_target(&bind.options, addr, addr_v6, connect_ssl);
-            if !bind.proxy_chain.is_empty() {
-                let previous = binds.chains.remove(port);
-                let route = if previous.as_ref().is_some_and(|route| {
-                    route.matches(&bind.proxy_chain, &proxy_providers, &target)
-                }) {
-                    previous.unwrap()
-                } else {
-                    drop(previous);
-                    crate::net::http_proxy::ChainRoute::new(
+            if bind.has_proxy_chains() {
+                let routes = binds.chains.entry(*port).or_insert_with(|| {
+                    crate::net::http_proxy::BindingRoutes::new(ctrl.dns.clone())
+                });
+                routes
+                    .reconcile(
                         &ctrl.http_proxy,
                         &crate::net::http_proxy::HttpProxyBinding {
                             package_id: self.id.clone().unwrap_or_else(PackageId::start_os),
                             host_id: id.clone(),
                             internal_port: *port,
                         },
-                        &bind.proxy_chain,
-                        target.clone(),
+                        &bind.proxy_chains,
+                        &target,
                     )
-                    .await
-                };
-                target.http_chain = Some(route.target.clone());
-                binds.chains.insert(*port, route);
+                    .await;
+                target.http_chain = Some(routes.target.clone());
             }
 
             // `*` vhost: every assigned_ssl_port is answered by a listener of

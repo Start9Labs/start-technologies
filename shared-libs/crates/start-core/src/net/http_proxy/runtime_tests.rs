@@ -11,6 +11,7 @@ use tokio::net::{TcpListener, UnixListener, UnixStream};
 
 use super::*;
 use crate::net::host::binding::ProxyOptions;
+use crate::net::http_proxy::tests::gateway;
 use crate::net::vhost::ProxyTarget;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::TmpDir;
@@ -22,6 +23,127 @@ mod mount_tests;
 
 #[path = "tls_tests.rs"]
 mod tls_tests;
+
+fn dns() -> Arc<crate::net::dns::DnsController> {
+    Arc::new(crate::net::dns::DnsController::new(Watch::new(
+        Default::default(),
+    )))
+}
+
+#[tokio::test]
+async fn gateway_routes_isolate_public_only_and_container_source_lifetimes() {
+    use crate::net::request_origin::RequestOrigin;
+    let sockets = sockets().await;
+    let dns = dns();
+    let tor_ip = [10, 0, 3, 9].into();
+    let tor = dns
+        .add_service(
+            Some("tor".parse().unwrap()),
+            tor_ip,
+            Some("fd00::9".parse().unwrap()),
+        )
+        .unwrap();
+    let mut routes = BindingRoutes::new(dns.clone());
+    let network = |name: &str| HttpProxyGateway::Network {
+        gateway_id: name.parse().unwrap(),
+    };
+    let url = |name: &str| HttpProxyGateway::UrlPlugin {
+        package_id: name.parse().unwrap(),
+    };
+    let policies = vec![
+        HttpProxyChain {
+            gateway: network("eth0"),
+            chain: vec![stage("waf")],
+            public_only: true,
+        },
+        HttpProxyChain {
+            gateway: network("eth1"),
+            chain: vec![stage("waf")],
+            public_only: false,
+        },
+        HttpProxyChain {
+            gateway: url("tor"),
+            chain: vec![stage("waf")],
+            public_only: false,
+        },
+        HttpProxyChain {
+            gateway: url("replacement"),
+            chain: vec![stage("waf")],
+            public_only: false,
+        },
+    ];
+    let target = upstream("127.0.0.1:1".parse().unwrap());
+    routes
+        .reconcile(&sockets, &binding(), &policies, &target)
+        .await;
+    let mut origin = RequestOrigin {
+        peer_ip: Some("198.51.100.9".parse().unwrap()),
+        gateway: Some("eth0".parse().unwrap()),
+        public: true,
+        ..Default::default()
+    };
+    let eth0 = routes.target.select(&origin).unwrap().unwrap();
+    origin.public = false;
+    assert!(routes.target.select(&origin).unwrap().is_none());
+    origin.gateway = Some("eth1".parse().unwrap());
+    let eth1 = routes.target.select(&origin).unwrap().unwrap();
+    assert!(!Arc::ptr_eq(&eth0, &eth1));
+    origin.gateway = Some("eth0".parse().unwrap());
+    for ip in [
+        std::net::IpAddr::V4(tor_ip),
+        "fd00::9".parse().unwrap(),
+        "::ffff:10.0.3.9".parse().unwrap(),
+    ] {
+        origin.peer_ip = Some(ip);
+        let selected = routes.target.select(&origin).unwrap().unwrap();
+        assert!(!Arc::ptr_eq(&selected, &eth0));
+        assert!(!Arc::ptr_eq(&selected, &eth1));
+    }
+    let source = routes.target.select(&origin).unwrap().unwrap();
+    let projection = routes.target.clone();
+    routes
+        .reconcile(&sockets, &binding(), &policies, &target)
+        .await;
+    assert!(Arc::ptr_eq(&projection, &routes.target));
+    drop(tor);
+    assert!(routes.target.select(&origin).is_err());
+    let _replacement = dns
+        .add_service(
+            Some("replacement".parse().unwrap()),
+            tor_ip,
+            Some("fd00::9".parse().unwrap()),
+        )
+        .unwrap();
+    let reassigned = routes.target.select(&origin).unwrap().unwrap();
+    assert!(!Arc::ptr_eq(&source, &reassigned));
+    let _internal = dns
+        .add_service(
+            Some("internal-client".parse().unwrap()),
+            [10, 0, 3, 10].into(),
+            None,
+        )
+        .unwrap();
+    origin.peer_ip = Some("10.0.3.10".parse().unwrap());
+    origin.public = true;
+    assert!(routes.target.select(&origin).unwrap().is_none());
+    sockets
+        .providers
+        .send_modify(|providers| providers.get_mut("waf").unwrap().running = false);
+    routes
+        .reconcile(&sockets, &binding(), &policies, &target)
+        .await;
+    origin.peer_ip = Some("198.51.100.9".parse().unwrap());
+    origin.public = false;
+    assert!(routes.target.select(&origin).unwrap().is_none());
+    origin.public = true;
+    let unavailable = routes.target.select(&origin).unwrap().unwrap();
+    let (mut client, driver) =
+        hyper::client::conn::http1::handshake(TokioIo::new(unavailable.connect().await))
+            .await
+            .unwrap();
+    let _driver: NonDetachingJoinHandle<_> = tokio::spawn(driver).into();
+    assert_eq!(client.send_request(request()).await.unwrap().status(), 503);
+}
 
 async fn sockets() -> HttpProxySockets {
     let profiles = BTreeMap::from([(
@@ -132,8 +254,9 @@ async fn copying_stage(
     let stage = stage(provider);
     let root = sockets.prepare_provider(&stage.package_id).await.unwrap();
     let listener =
-        UnixListener::bind(binding().socket_path(&root, "in", &stage.profile_id)).unwrap();
-    let next = binding().socket_path(&root, "next", &stage.profile_id);
+        UnixListener::bind(binding().socket_path(&root, "in", &gateway(), &stage.profile_id))
+            .unwrap();
+    let next = binding().socket_path(&root, "next", &gateway(), &stage.profile_id);
     let provider = provider.to_owned();
     tokio::spawn(async move {
         loop {
@@ -165,7 +288,7 @@ async fn unrelated_profiles_do_not_invalidate_an_existing_chain() {
     let sockets = sockets().await;
     let target = upstream("127.0.0.1:1".parse().unwrap());
     let stages = [stage("waf")];
-    let route = ChainRoute::new(&sockets, &binding(), &stages, target.clone()).await;
+    let route = ChainRoute::new(&sockets, &binding(), &gateway(), &stages, target.clone()).await;
     sockets.providers.send_modify(|providers| {
         providers
             .get_mut("waf")
@@ -197,7 +320,8 @@ async fn unix_chain_preserves_body_cookies_authority_and_order_then_reorders() {
             [stage("anubis"), stage("waf")],
         ] {
             order.replace(Vec::new());
-            let route = ChainRoute::new(&sockets, &binding(), &stages, target.clone()).await;
+            let route =
+                ChainRoute::new(&sockets, &binding(), &gateway(), &stages, target.clone()).await;
             let (mut client, connection) =
                 hyper::client::conn::http1::handshake(TokioIo::new(route.target.connect().await))
                     .await
@@ -234,7 +358,8 @@ async fn unix_chain_carries_http2_streams() {
         let sockets = sockets().await;
         let (target, _app) = echo_application().await;
         let _waf = copying_stage(&sockets, "waf", Arc::new(SyncMutex::new(Vec::new()))).await;
-        let route = ChainRoute::new(&sockets, &binding(), &[stage("waf")], target).await;
+        let route =
+            ChainRoute::new(&sockets, &binding(), &gateway(), &[stage("waf")], target).await;
         let (mut client, connection) = hyper::client::conn::http2::handshake(
             TokioExecutor::new(),
             TokioIo::new(route.target.connect().await),
@@ -272,7 +397,8 @@ async fn absent_stopped_or_missing_profile_never_falls_back_to_application() {
                 ..stage("waf")
             }],
         ] {
-            let route = ChainRoute::new(&sockets, &binding(), &stages, target.clone()).await;
+            let route =
+                ChainRoute::new(&sockets, &binding(), &gateway(), &stages, target.clone()).await;
             let (mut client, connection) =
                 hyper::client::conn::http1::handshake(TokioIo::new(route.target.connect().await))
                     .await
@@ -283,7 +409,8 @@ async fn absent_stopped_or_missing_profile_never_falls_back_to_application() {
         sockets
             .providers
             .send_modify(|providers| providers.get_mut("waf").unwrap().running = false);
-        let route = ChainRoute::new(&sockets, &binding(), &[stage("waf")], target).await;
+        let route =
+            ChainRoute::new(&sockets, &binding(), &gateway(), &[stage("waf")], target).await;
         let (mut client, connection) =
             hyper::client::conn::http1::handshake(TokioIo::new(route.target.connect().await))
                 .await
@@ -317,8 +444,15 @@ async fn ingress_authentication_precedes_plugins_and_cancellation_closes_the_fro
             }),
         });
         let _waf = copying_stage(&sockets, "waf", Arc::new(SyncMutex::new(Vec::new()))).await;
-        let route = ChainRoute::new(&sockets, &binding(), &[stage("waf")], target.clone()).await;
-        target.http_chain = Some(route.target.clone());
+        let route = ChainRoute::new(
+            &sockets,
+            &binding(),
+            &gateway(),
+            &[stage("waf")],
+            target.clone(),
+        )
+        .await;
+        let chain = route.target.clone();
         let backend = route.target.connect().await;
         let (client, frontend) = tokio::io::duplex(4096);
         let proxy = tokio::spawn(async move {
@@ -329,6 +463,7 @@ async fn ingress_authentication_precedes_plugins_and_cancellation_closes_the_fro
                     None,
                     Some("203.0.113.9".parse().unwrap()),
                     false,
+                    Some(chain),
                 )
                 .await;
         });
@@ -371,15 +506,22 @@ async fn http2_is_rejected_instead_of_bypassing_an_http1_only_profile() {
                 .unwrap()
                 .remove(&HttpProxyProtocol::Http2);
         });
-        let (mut target, _app) = echo_application().await;
+        let (target, _app) = echo_application().await;
         let _waf = copying_stage(&sockets, "waf", Arc::new(SyncMutex::new(Vec::new()))).await;
-        let route = ChainRoute::new(&sockets, &binding(), &[stage("waf")], target.clone()).await;
-        target.http_chain = Some(route.target.clone());
+        let route = ChainRoute::new(
+            &sockets,
+            &binding(),
+            &gateway(),
+            &[stage("waf")],
+            target.clone(),
+        )
+        .await;
+        let chain = route.target.clone();
         let backend = route.target.connect().await;
         let (client, frontend) = tokio::io::duplex(4096);
         let proxy = tokio::spawn(async move {
             target
-                .relay(Box::pin(frontend), backend, None, None, false)
+                .relay(Box::pin(frontend), backend, None, None, false, Some(chain))
                 .await;
         });
         let (mut client, connection) =
@@ -400,7 +542,7 @@ async fn challenge_response_short_circuits_the_chain() {
     tokio::time::timeout(Duration::from_secs(5), async {
         let sockets = sockets().await;
         let root = sockets.prepare_provider(&stage("anubis").package_id).await.unwrap();
-        let listener = UnixListener::bind(binding().socket_path(&root, "in", "standard")).unwrap();
+        let listener = UnixListener::bind(binding().socket_path(&root, "in", &gateway(), "standard")).unwrap();
         let challenge = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut byte = [0];
@@ -409,7 +551,7 @@ async fn challenge_response_short_circuits_the_chain() {
             stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 9\r\nSet-Cookie: challenge=1\r\n\r\nchallenge").await.unwrap();
         });
         let (target, _app) = echo_application().await;
-        let route = ChainRoute::new(&sockets, &binding(), &[stage("anubis")], target).await;
+        let route = ChainRoute::new(&sockets, &binding(), &gateway(), &[stage("anubis")], target).await;
         let (mut client, connection) = hyper::client::conn::http1::handshake(TokioIo::new(route.target.connect().await)).await.unwrap();
         let _driver: NonDetachingJoinHandle<_> = tokio::spawn(connection).into();
         let response = client.send_request(request()).await.unwrap();

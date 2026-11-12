@@ -335,7 +335,7 @@ impl ServiceCallbacks {
     pub(super) fn add_get_http_proxy_attachments(
         &self,
         package_id: PackageId,
-        watch: TypedDbWatch<crate::db::model::package::AllPackageData>,
+        watch: TypedDbWatch<crate::db::model::public::Public>,
         handler: CallbackHandler,
     ) {
         self.get_http_proxy_attachments

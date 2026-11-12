@@ -41,7 +41,7 @@ const host = (available: T.HostnameInfo[]): T.Host => ({
   bindings: {
     80: {
       enabled: true,
-      proxyChain: [],
+      proxyChains: [],
       options: {
         preferredExternalPort: 80,
         addSsl: null,

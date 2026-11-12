@@ -249,6 +249,7 @@ impl ChainRoute {
     pub async fn new(
         sockets: &HttpProxySockets,
         binding: &HttpProxyBinding,
+        gateway: &HttpProxyGateway,
         stages: &[HttpProxyStage],
         upstream: ProxyTarget,
     ) -> Self {
@@ -281,7 +282,7 @@ impl ChainRoute {
             paths: Vec::new(),
         };
         if available {
-            match route.start(sockets, binding).await {
+            match route.start(sockets, binding, gateway).await {
                 Ok(head) => Arc::get_mut(&mut route.target).unwrap().head = Some(head),
                 Err(error) => {
                     tracing::error!(?error, ?binding, "Failed to start HTTP proxy chain");
@@ -299,6 +300,7 @@ impl ChainRoute {
         &mut self,
         sockets: &HttpProxySockets,
         binding: &HttpProxyBinding,
+        gateway: &HttpProxyGateway,
     ) -> Result<PathBuf, Error> {
         let mut next = NextHop::Application {
             address: self.upstream.addr,
@@ -306,7 +308,7 @@ impl ChainRoute {
         };
         for stage in self.stages.iter().rev() {
             let root = sockets.prepare_provider(&stage.package_id).await?;
-            let path = binding.socket_path(&root, "next", &stage.profile_id);
+            let path = binding.socket_path(&root, "next", gateway, &stage.profile_id);
             match tokio::fs::remove_file(&path).await {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -343,7 +345,7 @@ impl ChainRoute {
                 }
             });
             self.listeners.push(worker.into());
-            next = NextHop::Unix(binding.socket_path(&root, "in", &stage.profile_id));
+            next = NextHop::Unix(binding.socket_path(&root, "in", gateway, &stage.profile_id));
         }
         let NextHop::Unix(head) = next else {
             unreachable!("a chain has a stage")

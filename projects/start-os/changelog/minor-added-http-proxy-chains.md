@@ -2,4 +2,4 @@
 release-notes: true
 ---
 
-- Add ordered HTTP proxy chains to service bindings. Choose profiles from installed proxy services for bot protection or request filtering; unavailable stages block traffic instead of bypassing protection.
+- Add independent HTTP proxy chains for each binding and gateway. Choose profiles from installed proxy services for bot protection or request filtering, with optional public-client-only filtering on network gateways. URL-plugin gateways match their originating service container; unavailable stages block applicable traffic instead of bypassing protection.

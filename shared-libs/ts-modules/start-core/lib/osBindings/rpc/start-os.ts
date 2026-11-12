@@ -452,12 +452,22 @@ export type HostnameMetadata = z.output<typeof schemas.HostnameMetadata>
 export type HostnameMetadataInput = z.input<typeof schemas.HostnameMetadata>
 
 /**
- * A provider/profile pair occurring once in a binding's ordered chain.
+ * The ingress gateway, independent of chain order and public-only applicability.
+ */
+export type HttpProxyGateway = z.output<typeof schemas.HttpProxyGateway>
+
+/**
+ * The ingress gateway, independent of chain order and public-only applicability.
+ */
+export type HttpProxyGatewayInput = z.input<typeof schemas.HttpProxyGateway>
+
+/**
+ * A provider/profile pair occurring once in a gateway's ordered chain.
  */
 export type HttpProxyStage = z.output<typeof schemas.HttpProxyStage>
 
 /**
- * A provider/profile pair occurring once in a binding's ordered chain.
+ * A provider/profile pair occurring once in a gateway's ordered chain.
  */
 export type HttpProxyStageInput = z.input<typeof schemas.HttpProxyStage>
 export type InfoParamsInput = z.input<typeof schemas.InfoParams>
@@ -604,6 +614,16 @@ export type HardwareInfo = z.output<typeof schemas.HardwareInfo>
 export type HostAddress = z.output<typeof schemas.HostAddress>
 export type HostnameInfo = z.output<typeof schemas.HostnameInfo>
 export type HostnameInfoInput = z.input<typeof schemas.HostnameInfo>
+
+/**
+ * Operator intent for one binding × gateway. Missing policies have empty chains.
+ */
+export type HttpProxyChain = z.output<typeof schemas.HttpProxyChain>
+
+/**
+ * Operator intent for one binding × gateway. Missing policies have empty chains.
+ */
+export type HttpProxyChainInput = z.input<typeof schemas.HttpProxyChain>
 export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type Metrics = z.output<typeof schemas.Metrics>
 export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
@@ -622,13 +642,6 @@ export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
  * The server's sessions, by credential type.
  */
 export type Sessions = z.output<typeof schemas.Sessions>
-
-/**
- * Replaces the binding's operator-selected proxy chain.
- */
-export type SetHttpProxyChainParamsInput = z.input<
-  typeof schemas.SetHttpProxyChainParams
->
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 
 /**
@@ -656,6 +669,13 @@ export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type OsIndex = z.output<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 export type SessionList = z.output<typeof schemas.SessionList>
+
+/**
+ * Replaces one gateway's chain without changing the binding's other gateways.
+ */
+export type SetHttpProxyChainParamsInput = z.input<
+  typeof schemas.SetHttpProxyChainParams
+>
 
 /**
  * Active DNS authority and its bootstrap gateway.

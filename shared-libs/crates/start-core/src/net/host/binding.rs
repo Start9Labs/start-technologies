@@ -507,7 +507,7 @@ pub struct BindInfo {
     #[serde(default)]
     pub interfaces: BTreeMap<ServiceInterfaceId, ServiceInterface>,
     #[serde(default)]
-    pub proxy_chain: Vec<crate::net::http_proxy::HttpProxyStage>,
+    pub proxy_chains: Vec<crate::net::http_proxy::HttpProxyChain>,
 }
 
 rpc_toolkit::reflect_ts!(BindInfo);
@@ -523,6 +523,12 @@ pub struct NetInfo {
 rpc_toolkit::reflect_ts!(NetInfo);
 rpc_toolkit::ts_export!(NetInfo, namespaces = [""]);
 impl BindInfo {
+    pub(crate) fn has_proxy_chains(&self) -> bool {
+        self.proxy_chains
+            .iter()
+            .any(|policy| !policy.chain.is_empty())
+    }
+
     /// Addresses actually served by this binding. A binding with no exported
     /// service interface listens internally only (lo / lxcbr0) — the operator's
     /// per-address `enabled`/`disabled` overrides stay stored but dormant until
@@ -563,7 +569,7 @@ impl BindInfo {
             },
             addresses: DerivedAddressInfo::default(),
             interfaces: BTreeMap::new(),
-            proxy_chain: Vec::new(),
+            proxy_chains: Vec::new(),
         })
     }
     pub fn update(
@@ -572,19 +578,19 @@ impl BindInfo {
         options: BindOptions,
         privileged: bool,
     ) -> Result<Self, Error> {
-        let Self {
-            net: held,
-            addresses,
-            interfaces,
-            proxy_chain,
-            ..
-        } = self;
-        if !proxy_chain.is_empty() && options.proxy.is_none() {
+        if self.has_proxy_chains() && options.proxy.is_none() {
             return Err(Error::new(
                 eyre!("{}", t!("net.http-proxy.remove-chain-before-disabling")),
                 ErrorKind::InvalidRequest,
             ));
         }
+        let Self {
+            net: held,
+            addresses,
+            interfaces,
+            proxy_chains,
+            ..
+        } = self;
         // Free both up front so each leg can reclaim the number it already holds —
         // it is in the user's address book and keys their per-address overrides.
         available_ports.free(held.assigned_port.into_iter().chain(held.assigned_ssl_port));
@@ -615,7 +621,7 @@ impl BindInfo {
             },
             addresses,
             interfaces,
-            proxy_chain,
+            proxy_chains,
         })
     }
     pub fn disable(&mut self) {
@@ -2062,7 +2068,7 @@ mod test {
             },
             addresses: DerivedAddressInfo::default(),
             interfaces: BTreeMap::new(),
-            proxy_chain: Vec::new(),
+            proxy_chains: Vec::new(),
         };
 
         let ui = seeded.update(&mut ports, admin.clone(), true).unwrap();
@@ -2105,7 +2111,7 @@ mod test {
             },
             addresses: DerivedAddressInfo::default(),
             interfaces: BTreeMap::new(),
-            proxy_chain: Vec::new(),
+            proxy_chains: Vec::new(),
         };
 
         let mut ports = AvailablePorts::new();
@@ -2138,7 +2144,7 @@ mod test {
             },
             addresses: DerivedAddressInfo::default(),
             interfaces: BTreeMap::new(),
-            proxy_chain: Vec::new(),
+            proxy_chains: Vec::new(),
         };
 
         let ui = drifted.update(&mut ports, admin, true).unwrap();
@@ -2155,14 +2161,20 @@ mod test {
         });
         let mut binding = BindInfo::new(&mut ports, options.clone(), false).unwrap();
         binding
-            .proxy_chain
-            .push(crate::net::http_proxy::HttpProxyStage {
-                package_id: "waf".parse().unwrap(),
-                profile_id: "strict".into(),
+            .proxy_chains
+            .push(crate::net::http_proxy::HttpProxyChain {
+                gateway: crate::net::http_proxy::HttpProxyGateway::Network {
+                    gateway_id: "eth0".parse().unwrap(),
+                },
+                chain: vec![crate::net::http_proxy::HttpProxyStage {
+                    package_id: "waf".parse().unwrap(),
+                    profile_id: "strict".into(),
+                }],
+                public_only: true,
             });
-        let chain = binding.proxy_chain.clone();
+        let chain = binding.proxy_chains.clone();
         let binding = binding.update(&mut ports, options, false).unwrap();
-        assert_eq!(binding.proxy_chain, chain);
+        assert_eq!(binding.proxy_chains, chain);
         assert!(
             binding
                 .update(&mut ports, opts(8080, Some(8443), None), false)
@@ -2175,9 +2187,9 @@ mod test {
         let mut ports = AvailablePorts::new();
         let binding = BindInfo::new(&mut ports, opts(8080, None, None), false).unwrap();
         let mut wire = serde_json::to_value(binding).unwrap();
-        wire.as_object_mut().unwrap().remove("proxyChain");
+        wire.as_object_mut().unwrap().remove("proxyChains");
         let decoded: BindInfo = serde_json::from_value(wire).unwrap();
-        assert!(decoded.proxy_chain.is_empty());
+        assert!(decoded.proxy_chains.is_empty());
     }
 
     #[test]

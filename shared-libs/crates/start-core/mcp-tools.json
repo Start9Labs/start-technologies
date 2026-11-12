@@ -3708,9 +3708,9 @@
               "propertyNames": { "type": "string" },
               "additionalProperties": { "$ref": "#/$defs/ServiceInterface" }
             },
-            "proxyChain": {
+            "proxyChains": {
               "type": "array",
-              "items": { "$ref": "#/$defs/HttpProxyStage" }
+              "items": { "$ref": "#/$defs/HttpProxyChain" }
             }
           },
           "required": [
@@ -3719,7 +3719,7 @@
             "net",
             "addresses",
             "interfaces",
-            "proxyChain"
+            "proxyChains"
           ],
           "additionalProperties": true
         },
@@ -4108,6 +4108,44 @@
           "type": "string",
           "enum": ["ui", "p2p", "api"]
         },
+        "HttpProxyChain": {
+          "type": "object",
+          "properties": {
+            "gateway": { "$ref": "#/$defs/HttpProxyGateway" },
+            "chain": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/HttpProxyStage" }
+            },
+            "publicOnly": {
+              "description": "Bypasses private clients. URL-plugin gateways require false.",
+              "type": "boolean"
+            }
+          },
+          "required": ["gateway", "chain", "publicOnly"],
+          "additionalProperties": true,
+          "description": "Operator intent for one binding × gateway. Missing policies have empty chains."
+        },
+        "HttpProxyGateway": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "network" },
+                "gatewayId": { "$ref": "#/$defs/GatewayId" }
+              },
+              "required": ["kind", "gatewayId"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "url-plugin" },
+                "packageId": { "$ref": "#/$defs/PackageId" }
+              },
+              "required": ["kind", "packageId"]
+            }
+          ],
+          "description": "The ingress gateway, independent of chain order and public-only applicability."
+        },
         "HttpProxyStage": {
           "type": "object",
           "properties": {
@@ -4116,7 +4154,7 @@
           },
           "required": ["packageId", "profileId"],
           "additionalProperties": true,
-          "description": "A provider/profile pair occurring once in a binding's ordered chain."
+          "description": "A provider/profile pair occurring once in a gateway's ordered chain."
         }
       },
       "type": "object",
@@ -4428,15 +4466,51 @@
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
             },
+            "policy": { "$ref": "#/$defs/HttpProxyChain" }
+          },
+          "required": ["internalPort", "policy"],
+          "additionalProperties": true,
+          "description": "Replaces one gateway's chain without changing the binding's other gateways."
+        },
+        "HttpProxyChain": {
+          "type": "object",
+          "properties": {
+            "gateway": { "$ref": "#/$defs/HttpProxyGateway" },
             "chain": {
               "type": "array",
               "items": { "$ref": "#/$defs/HttpProxyStage" }
+            },
+            "publicOnly": {
+              "description": "Bypasses private clients. URL-plugin gateways require false.",
+              "type": "boolean"
             }
           },
-          "required": ["internalPort", "chain"],
+          "required": ["gateway", "chain"],
           "additionalProperties": true,
-          "description": "Replaces the binding's operator-selected proxy chain."
+          "description": "Operator intent for one binding × gateway. Missing policies have empty chains."
         },
+        "HttpProxyGateway": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "network" },
+                "gatewayId": { "$ref": "#/$defs/GatewayId" }
+              },
+              "required": ["kind", "gatewayId"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "url-plugin" },
+                "packageId": { "$ref": "#/$defs/PackageId" }
+              },
+              "required": ["kind", "packageId"]
+            }
+          ],
+          "description": "The ingress gateway, independent of chain order and public-only applicability."
+        },
+        "GatewayId": { "type": "string" },
         "HttpProxyStage": {
           "type": "object",
           "properties": {
@@ -4445,7 +4519,7 @@
           },
           "required": ["packageId", "profileId"],
           "additionalProperties": true,
-          "description": "A provider/profile pair occurring once in a binding's ordered chain."
+          "description": "A provider/profile pair occurring once in a gateway's ordered chain."
         }
       },
       "type": "object"
@@ -9953,9 +10027,9 @@
               "propertyNames": { "type": "string" },
               "additionalProperties": { "$ref": "#/$defs/ServiceInterface" }
             },
-            "proxyChain": {
+            "proxyChains": {
               "type": "array",
-              "items": { "$ref": "#/$defs/HttpProxyStage" }
+              "items": { "$ref": "#/$defs/HttpProxyChain" }
             }
           },
           "required": [
@@ -9964,7 +10038,7 @@
             "net",
             "addresses",
             "interfaces",
-            "proxyChain"
+            "proxyChains"
           ],
           "additionalProperties": true
         },
@@ -10353,6 +10427,44 @@
           "type": "string",
           "enum": ["ui", "p2p", "api"]
         },
+        "HttpProxyChain": {
+          "type": "object",
+          "properties": {
+            "gateway": { "$ref": "#/$defs/HttpProxyGateway" },
+            "chain": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/HttpProxyStage" }
+            },
+            "publicOnly": {
+              "description": "Bypasses private clients. URL-plugin gateways require false.",
+              "type": "boolean"
+            }
+          },
+          "required": ["gateway", "chain", "publicOnly"],
+          "additionalProperties": true,
+          "description": "Operator intent for one binding × gateway. Missing policies have empty chains."
+        },
+        "HttpProxyGateway": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "network" },
+                "gatewayId": { "$ref": "#/$defs/GatewayId" }
+              },
+              "required": ["kind", "gatewayId"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "url-plugin" },
+                "packageId": { "$ref": "#/$defs/PackageId" }
+              },
+              "required": ["kind", "packageId"]
+            }
+          ],
+          "description": "The ingress gateway, independent of chain order and public-only applicability."
+        },
         "HttpProxyStage": {
           "type": "object",
           "properties": {
@@ -10361,7 +10473,7 @@
           },
           "required": ["packageId", "profileId"],
           "additionalProperties": true,
-          "description": "A provider/profile pair occurring once in a binding's ordered chain."
+          "description": "A provider/profile pair occurring once in a gateway's ordered chain."
         }
       },
       "type": "object",
@@ -10640,15 +10752,52 @@
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
             },
+            "policy": { "$ref": "#/$defs/HttpProxyChain" }
+          },
+          "required": ["internalPort", "policy"],
+          "additionalProperties": true,
+          "description": "Replaces one gateway's chain without changing the binding's other gateways."
+        },
+        "HttpProxyChain": {
+          "type": "object",
+          "properties": {
+            "gateway": { "$ref": "#/$defs/HttpProxyGateway" },
             "chain": {
               "type": "array",
               "items": { "$ref": "#/$defs/HttpProxyStage" }
+            },
+            "publicOnly": {
+              "description": "Bypasses private clients. URL-plugin gateways require false.",
+              "type": "boolean"
             }
           },
-          "required": ["internalPort", "chain"],
+          "required": ["gateway", "chain"],
           "additionalProperties": true,
-          "description": "Replaces the binding's operator-selected proxy chain."
+          "description": "Operator intent for one binding × gateway. Missing policies have empty chains."
         },
+        "HttpProxyGateway": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "network" },
+                "gatewayId": { "$ref": "#/$defs/GatewayId" }
+              },
+              "required": ["kind", "gatewayId"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "url-plugin" },
+                "packageId": { "$ref": "#/$defs/PackageId" }
+              },
+              "required": ["kind", "packageId"]
+            }
+          ],
+          "description": "The ingress gateway, independent of chain order and public-only applicability."
+        },
+        "GatewayId": { "type": "string" },
+        "PackageId": { "type": "string" },
         "HttpProxyStage": {
           "type": "object",
           "properties": {
@@ -10657,9 +10806,8 @@
           },
           "required": ["packageId", "profileId"],
           "additionalProperties": true,
-          "description": "A provider/profile pair occurring once in a binding's ordered chain."
-        },
-        "PackageId": { "type": "string" }
+          "description": "A provider/profile pair occurring once in a gateway's ordered chain."
+        }
       },
       "type": "object",
       "properties": {
@@ -10668,14 +10816,11 @@
           "minimum": -9007199254740991,
           "maximum": 9007199254740991
         },
-        "chain": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/HttpProxyStage" }
-        }
+        "policy": { "$ref": "#/$defs/HttpProxyChain" }
       },
-      "required": ["internalPort", "chain"],
+      "required": ["internalPort", "policy"],
       "additionalProperties": true,
-      "description": "Replaces the binding's operator-selected proxy chain."
+      "description": "Replaces one gateway's chain without changing the binding's other gateways."
     }
   },
   {

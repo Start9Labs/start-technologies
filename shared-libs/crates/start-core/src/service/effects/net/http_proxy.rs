@@ -9,6 +9,7 @@ use crate::service::effects::callbacks::CallbackHandler;
 use crate::service::effects::plugin::PluginId;
 use crate::service::effects::prelude::*;
 use crate::service::rpc::CallbackId;
+use crate::{HostId, PackageId};
 
 fn require_http_proxy_plugin(service: &Arc<Service>) -> Result<(), Error> {
     if !service
@@ -88,19 +89,29 @@ pub async fn get_attachments(
 ) -> Result<Vec<HttpProxyAttachment>, Error> {
     let context = context.deref()?;
     require_http_proxy_plugin(&context)?;
-    let mut watch = context
+    let mut watch: patch_db::TypedDbWatch<crate::db::model::public::Public> = context
         .seed
         .ctx
         .db
-        .watch("/public/packageData".parse().unwrap())
-        .await;
-    let packages = imbl_value::from_value(watch.peek_and_mark_seen()?)?;
-    let attachments = attachments_for(&packages, &context.seed.id);
+        .watch("/public".parse().unwrap())
+        .await
+        .typed();
+    let snapshot = watch.peek_and_mark_seen()?;
+    let packages = snapshot.as_package_data().de()?;
+    let os = snapshot.as_server_info().as_network().as_host().de()?;
+    let mut attachments = attachments_for(&packages, &context.seed.id);
+    attachments.extend(crate::net::http_proxy::host_attachments(
+        &packages,
+        &context.seed.id,
+        &PackageId::start_os(),
+        &HostId::admin(),
+        &os,
+    ));
     if let Some(callback) = callback {
         let callback = callback.register(&context.seed.persistent_container);
         context.seed.ctx.callbacks.add_get_http_proxy_attachments(
             context.seed.id.clone(),
-            watch.typed(),
+            watch,
             CallbackHandler::new(&context, callback),
         );
     }

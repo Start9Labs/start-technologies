@@ -938,7 +938,7 @@ mod tests {
                 assigned_ssl_port: Some(443),
             },
             interfaces: [(interface.id.clone(), interface)].into_iter().collect(),
-            proxy_chain: Vec::new(),
+            proxy_chains: Vec::new(),
             addresses: DerivedAddressInfo {
                 available: [
                     domain("public.example", true, "eth0"),

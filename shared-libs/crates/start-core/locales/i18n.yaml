@@ -2067,11 +2067,11 @@ backup.target.cifs.target-not-found-id:
 
 # service/effects/net/plugin.rs
 net.http-proxy.duplicate-stage:
-  en_US: A proxy profile can appear only once in a binding's chain.
-  de_DE: Ein Proxy-Profil darf nur einmal in der Kette einer Bindung vorkommen.
-  es_ES: Un perfil de proxy solo puede aparecer una vez en la cadena de un enlace.
-  fr_FR: Un profil de proxy ne peut apparaître qu’une fois dans la chaîne d’une liaison.
-  pl_PL: Profil proxy może wystąpić tylko raz w łańcuchu powiązania.
+  en_US: A proxy profile can appear only once in a gateway's chain.
+  de_DE: Ein Proxy-Profil darf nur einmal in der Kette eines Gateways vorkommen.
+  es_ES: Un perfil de proxy solo puede aparecer una vez en la cadena de una puerta de enlace.
+  fr_FR: Un profil de proxy ne peut apparaître qu’une fois dans la chaîne d’une passerelle.
+  pl_PL: Profil proxy może wystąpić tylko raz w łańcuchu bramy.
 
 net.http-proxy.incompatible-chain:
   en_US: All proxy profiles must exist and support a common HTTP protocol.
@@ -2087,12 +2087,19 @@ net.http-proxy.invalid-profiles:
   fr_FR: Les profils de proxy nécessitent des identifiants uniques non vides et au moins un protocole HTTP pris en charge.
   pl_PL: Profile proxy wymagają unikalnych niepustych identyfikatorów i co najmniej jednego obsługiwanego protokołu HTTP.
 
+net.http-proxy.public-only-network:
+  en_US: Public-only filtering is available only for network gateways.
+  de_DE: Die Filterung nur öffentlicher Clients ist nur für Netzwerk-Gateways verfügbar.
+  es_ES: El filtrado solo público está disponible únicamente para puertas de enlace de red.
+  fr_FR: Le filtrage public uniquement est réservé aux passerelles réseau.
+  pl_PL: Filtrowanie tylko publicznych klientów jest dostępne tylko dla bram sieciowych.
+
 net.http-proxy.remove-chain-before-disabling:
-  en_US: Remove the proxy chain before disabling HTTP proxying for this binding.
-  de_DE: Entfernen Sie die Proxy-Kette, bevor Sie den HTTP-Proxy für diese Bindung deaktivieren.
-  es_ES: Elimine la cadena de proxy antes de desactivar el proxy HTTP para este enlace.
-  fr_FR: Supprimez la chaîne de proxy avant de désactiver le proxy HTTP pour cette liaison.
-  pl_PL: Usuń łańcuch proxy przed wyłączeniem proxy HTTP dla tego powiązania.
+  en_US: Clear all gateway proxy chains before disabling HTTP proxying for this binding.
+  de_DE: Leeren Sie alle Gateway-Proxy-Ketten, bevor Sie den HTTP-Proxy für diese Bindung deaktivieren.
+  es_ES: Borre todas las cadenas de proxy de las puertas de enlace antes de desactivar el proxy HTTP para este enlace.
+  fr_FR: Videz toutes les chaînes de proxy des passerelles avant de désactiver le proxy HTTP pour cette liaison.
+  pl_PL: Wyczyść wszystkie łańcuchy proxy bram przed wyłączeniem proxy HTTP dla tego powiązania.
 
 net.http-proxy.requires-http:
   en_US: This binding must enable HTTP proxying before attaching proxy profiles.

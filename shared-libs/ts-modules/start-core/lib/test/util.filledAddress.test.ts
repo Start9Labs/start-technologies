@@ -5,7 +5,7 @@ import { fillHost, isAddressEnabled } from '../util/filledAddress'
 const host = (fingerprint: string): Host => ({
   bindings: {
     5223: {
-      proxyChain: [],
+      proxyChains: [],
       enabled: true,
       options: {
         preferredExternalPort: 5223,

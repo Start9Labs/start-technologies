@@ -4,6 +4,7 @@ import { GetHttpProxyAttachments } from '../util/GetHttpProxyAttachments'
 
 const attachment: HttpProxyAttachment = {
   binding: { packageId: 'app', hostId: 'web', internalPort: 8080 },
+  gateway: { kind: 'network', gatewayId: 'eth0' },
   profileId: 'standard',
   ingress: { transport: 'unix', path: '/media/startos/http-proxy/in/a.sock' },
   next: { transport: 'unix', path: '/media/startos/http-proxy/next/a.sock' },
@@ -47,6 +48,18 @@ test('watch emits attachment changes through the standard callback subscription'
   update([])
   expect((await next).value).toEqual([])
   await values.return(undefined as never)
+})
+
+test('one profile remains independently assigned to multiple gateways', async () => {
+  const { reader, update } = fixture()
+  const other: HttpProxyAttachment = {
+    ...attachment,
+    gateway: { kind: 'url-plugin', packageId: 'tor' },
+    ingress: { transport: 'unix', path: '/media/startos/http-proxy/in/b.sock' },
+    next: { transport: 'unix', path: '/media/startos/http-proxy/next/b.sock' },
+  }
+  update([attachment, other])
+  expect(await reader.once()).toEqual([attachment, other])
 })
 
 test('const invalidates the calling context when its assignments change', async () => {

@@ -152,7 +152,7 @@ Network interface declaration and port binding:
 - `ServiceInterfaceBuilder.ts` — Builder for constructing `ServiceInterface` objects with name, type, description, scheme overrides, username, path, and query params
 - `setupExportedUrls.ts` — URL plugin support for exporting URLs to other services
 
-`StartSdk.plugin.httpProxy` is gated by `http-proxy-v0`. Providers publish their complete profile list through effects. `GetHttpProxyAttachments` extends the existing `Watchable` primitive; its callback uses the runtime's `CallbackHolder` and the backend's DB-watched callbacks. Binding intent belongs to StartOS, while profile settings and listener readiness belong to the provider. Socket mounts are supplied by the host for outer containers and subcontainers.
+`StartSdk.plugin.httpProxy` is gated by `http-proxy-v0`. Providers publish their complete profile list through effects. `GetHttpProxyAttachments` extends the existing `Watchable` primitive; its callback uses the runtime's `CallbackHolder` and the backend's DB-watched callbacks. Binding × gateway intent belongs to StartOS, while profile settings and listener readiness belong to the provider. Attachments distinguish gateway kind/ID; endpoint identity excludes chain order and Public only. Socket mounts are supplied by the host for outer containers and subcontainers.
 
 ### Initialization (`shared-libs/ts-modules/start-core/lib/inits/`)
 
