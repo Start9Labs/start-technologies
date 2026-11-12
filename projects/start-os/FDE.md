@@ -48,7 +48,9 @@ Pre-verification udev must not invoke shells or select external command names fr
 
 The supported FDE initramfs profile excludes effective module `install`/`remove` commands. The transform queries the platform's `modprobe --showconfig` for the single included kernel and explicit configuration directories, including `modules.softdep`/`modules.weakdep`. It preserves platform precedence, options, blacklists and dependency parsing rather than rewriting configuration or maintaining another parser. Command overrides from the build environment cannot change the query. Parser errors and executable commands reject before mutation. The build query and copied runtime must use the same libkmod.
 
-This transform is not a complete image builder or executable-closure audit. Helper binaries, matching runtime dependencies/plugins and final archive verification remain prerequisites before signing or activating an FDE image.
+`fde-initramfs-archive.mjs` checks provenance of a private generated gzip initramfs: native-generated uncompressed prefixes match byte-for-byte, and the complete decompressed main stream matches its native-generated CPIO source. The producer must capture those sources after its executable-closure audit and exclude concurrent writes through consumption. Public proof files cannot authorize an image. Native extraction alone is insufficient: `unmkinitramfs` 0.148.4 does not inspect multiple compressed archives, and extraction can omit a later archive the kernel consumes. This provenance check delegates decompression to zlib and requires complete compressed-input consumption, including bytes following zero padding; it neither parses CPIO nor establishes arbitrary archive validity.
+
+These helpers are not a complete image builder or executable-closure audit. Capturing trusted native streams, helper binaries, matching runtime dependencies/plugins and generation/archive integration remain prerequisites before signing or activating an FDE image.
 
 ## Persistent overlay
 
