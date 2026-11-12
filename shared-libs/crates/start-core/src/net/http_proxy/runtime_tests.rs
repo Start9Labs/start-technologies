@@ -16,6 +16,13 @@ use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::TmpDir;
 use crate::util::sync::{SyncMutex, Watch};
 
+#[cfg(target_os = "linux")]
+#[path = "mount_tests.rs"]
+mod mount_tests;
+
+#[path = "tls_tests.rs"]
+mod tls_tests;
+
 async fn sockets() -> HttpProxySockets {
     let profiles = BTreeMap::from([(
         "standard".into(),

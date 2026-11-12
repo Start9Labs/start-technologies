@@ -2990,7 +2990,7 @@ mod conn_cap_tests {
 
 /// Which protocols `preprocess` offers the container and the client.
 #[cfg(test)]
-mod upstream_alpn_tests {
+pub(crate) mod upstream_alpn_tests {
     use std::net::Ipv4Addr;
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -3184,8 +3184,23 @@ mod upstream_alpn_tests {
         client_alpn: &[&str],
         probe: &'static [u8],
     ) -> Result<Option<String>, std::io::Error> {
+        try_negotiate_target(
+            target(backend, connect_ssl, alpn),
+            base_alpn,
+            client_alpn,
+            probe,
+        )
+        .await
+    }
+
+    pub(crate) async fn try_negotiate_target(
+        target: ProxyTarget,
+        base_alpn: &[&str],
+        client_alpn: &[&str],
+        probe: &'static [u8],
+    ) -> Result<Option<String>, std::io::Error> {
         let handler = Preprocessing {
-            target: target(backend, connect_ssl, alpn),
+            target,
             base_alpn: base_alpn.iter().map(|a| a.to_string()).collect(),
             probe,
         };
