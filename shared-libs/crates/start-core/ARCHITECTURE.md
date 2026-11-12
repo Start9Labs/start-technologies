@@ -55,7 +55,7 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 
 `NetController` owns `HttpProxySockets` and its provider-state watcher. Each binding's `ChainRoute` owns fixed-destination continuation listeners and cancellation. Routes are replaced when their selected profiles, availability, order, or application target change. Ingress reuses the HTTP proxy's authentication and header policy, and TLS preprocessing intersects supported framing with binding ALPN. Continuations retain upstream TLS validation and return 503 on connection failure.
 
-`mount_provider` supplies a provider-scoped read-only socket root with a writable `in` mount. The OS owns `next`. Persistent containers and subcontainer filesystems share that mount primitive and unmount nested guards in reverse order. Dropping a route cancels active streams and unlinks continuation sockets before replacement; the HTTP proxy's owned upgrade tasks give WebSockets the same cancellation lifetime.
+`mount_provider` supplies a provider-scoped read-only socket root with a writable `in` mount. The OS owns `next`. Startd connects to provider-writable `in` sockets without following symlinks. Persistent containers and subcontainer filesystems share that mount primitive and unmount nested guards in reverse order. Dropping a route cancels active streams and unlinks continuation sockets before replacement; the HTTP proxy's owned upgrade tasks give WebSockets the same cancellation lifetime.
 
 ## RPC Pattern
 

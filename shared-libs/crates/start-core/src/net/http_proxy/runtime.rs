@@ -148,6 +148,21 @@ fn selected_profiles(
         .collect()
 }
 
+/// Refuses a symlink, which the provider can plant in its writable `in` directory.
+async fn connect_ingress(path: &Path) -> std::io::Result<UnixStream> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
+
+    let socket = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)?;
+    if !socket.metadata()?.file_type().is_socket() {
+        return Err(std::io::Error::other("HTTP proxy ingress is not a socket"));
+    }
+    UnixStream::connect(format!("/proc/self/fd/{}", socket.as_raw_fd())).await
+}
+
 #[derive(Debug)]
 pub(crate) struct ChainTarget {
     head: Option<PathBuf>,
@@ -160,7 +175,7 @@ impl ChainTarget {
         if let Some(head) = &self.head {
             if let Ok(Ok(stream)) = tokio::time::timeout(
                 crate::net::vhost::BACKEND_DIAL_TIMEOUT,
-                UnixStream::connect(head),
+                connect_ingress(head),
             )
             .await
             {
@@ -333,7 +348,7 @@ impl NextHop {
         let backend = async {
             match self {
                 Self::Unix(path) => {
-                    Ok::<AcceptStream, Error>(Box::pin(UnixStream::connect(path).await?))
+                    Ok::<AcceptStream, Error>(Box::pin(connect_ingress(path).await?))
                 }
                 Self::Application { address, tls } => {
                     let protocol = if tls.is_some() {

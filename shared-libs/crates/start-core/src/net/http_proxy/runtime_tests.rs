@@ -419,3 +419,14 @@ async fn challenge_response_short_circuits_the_chain() {
         challenge.await.unwrap();
     }).await.expect("challenge stalled");
 }
+
+#[tokio::test]
+async fn ingress_connections_refuse_provider_symlinks() {
+    let dir = TmpDir::new().await.unwrap();
+    let host_socket = dir.join("host.sock");
+    let _host = UnixListener::bind(&host_socket).unwrap();
+    let planted = dir.join("planted.sock");
+    std::os::unix::fs::symlink(&host_socket, &planted).unwrap();
+    assert!(connect_ingress(&planted).await.is_err());
+    connect_ingress(&host_socket).await.unwrap();
+}
