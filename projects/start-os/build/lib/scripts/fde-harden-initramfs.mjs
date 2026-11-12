@@ -164,6 +164,15 @@ const inputs = {
 
 export const bootModules = ['overlay', 'btrfs', 'dm_verity', 'loop', 'squashfs']
 
+function requireReviewedInput(path, bytes) {
+  if (path === 'conf/arch.conf') {
+    if (!/^DPKG_ARCH=[a-z0-9-]+\n$/.test(bytes.toString()))
+      throw Error('Unsupported architecture configuration')
+  } else {
+    requireReviewedContext(bytes, inputs[path]?.[0], path)
+  }
+}
+
 function replaceRange(text, first, last, replacement) {
   const start = text.indexOf(first)
   const end = text.indexOf(last, start)
@@ -199,6 +208,32 @@ async function filesUnder(root, relative) {
     else throw Error(`Unsupported generated file type: ${path}`)
   }
   return entries
+}
+
+async function admitRuntimeDirectory(root, directory) {
+  const paths = await filesUnder(root, directory)
+  for (const path of paths) {
+    const key = `scripts/${path.slice(directory.length + 1)}`
+    if (inputs[key]?.[1] === 'order')
+      throw Error(`Generated ordering is not a runtime source: ${key}`)
+    requireReviewedInput(key, await readFile(join(root, path)))
+  }
+  return paths
+}
+
+/** Original providers and configuration remain stable through native generation. */
+export async function admitRuntimeSources(sourceRoot, configDirectory) {
+  const shared = 'usr/share/initramfs-tools/scripts'
+  const providers = await admitRuntimeDirectory(sourceRoot, shared)
+  if (!providers.includes(`${shared}/functions`))
+    throw Error('Missing native runtime functions source')
+  try {
+    await lstat(join(configDirectory, 'scripts'))
+  } catch (error) {
+    if (error.code === 'ENOENT') return
+    throw error
+  }
+  await admitRuntimeDirectory(configDirectory, 'scripts')
 }
 
 async function rejectAlternateRules(root) {
@@ -340,12 +375,7 @@ export async function harden(root) {
     if (!(await lstat(join(root, path))).isFile())
       throw Error(`Unsupported generated file type: ${path}`)
     const bytes = await readFile(join(root, path))
-    if (path === 'conf/arch.conf') {
-      if (!/^DPKG_ARCH=[a-z0-9-]+\n$/.test(bytes.toString()))
-        throw Error('Unsupported architecture configuration')
-    } else {
-      requireReviewedContext(bytes, inputs[path]?.[0], path)
-    }
+    requireReviewedInput(path, bytes)
     original.set(path, bytes.toString())
   }
   for (const [path, [, , required = true]] of Object.entries(inputs)) {

@@ -23,7 +23,8 @@ export function capturedStreams(directory) {
  * The caller owns stable providers, the generated tree and a private capture directory.
  * FDE_NATIVE_HOOKS is the private directory admitted by prepareNativeHooks.
  * CONFDIR and its additional hooks also belong to this private generation.
- * Runtime prerequisite sources, helpers and firmware need admission before execution.
+ * FDE_ADMIT_RUNTIME checks original runtime sources before native configuration sourcing.
+ * Helpers and firmware also need admission before execution.
  * FDE_PREPARE must audit/harden the tree and native early stream before success.
  * FDE_CAPTURE_DIR holds the captured streams, outside the generated tree.
  * Captures establish byte provenance, not authorization to sign an image.
@@ -43,6 +44,11 @@ export function instrumentProducer(mkinitramfs, hookFunctions) {
     mkinitramfs.toString(),
     'run_scripts /usr/share/initramfs-tools/hooks',
     ': "${FDE_NATIVE_HOOKS:?Missing admitted private native hooks}"\nrun_scripts "${FDE_NATIVE_HOOKS}"',
+  )
+  output = replaceOnce(
+    output,
+    '. /usr/share/initramfs-tools/scripts/functions',
+    ': "${FDE_ADMIT_RUNTIME:?Missing runtime source admission}"\n"${FDE_ADMIT_RUNTIME}" "${CONFDIR}" || exit 1\n\n. /usr/share/initramfs-tools/scripts/functions',
   )
   const preparation = `: "\${FDE_PREPARE:?Missing FDE preparation program}"
 : "\${FDE_CAPTURE_DIR:?Missing private FDE capture directory}"
