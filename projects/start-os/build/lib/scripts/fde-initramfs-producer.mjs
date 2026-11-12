@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 import { join } from 'node:path'
 
 import { replaceOnce, requireReviewedContext } from './fde-reviewed-source.mjs'
@@ -16,6 +18,34 @@ export function capturedStreams(directory) {
     ],
     mainCpio: join(directory, streamNames.main),
   }
+}
+
+/**
+ * Runs admitted native production through ordinary namespace completion.
+ * Namespace-init exit ends detached writers before successful return or producer-exit rejection.
+ * The caller retains admitted sources and the private workspace until this settles.
+ * The source root must be a mountpoint; mount propagation stays private.
+ * Launcher death is an error, not proof of completed production.
+ */
+export async function runNativeProducer(producer, args, environment) {
+  const child = spawn(
+    '/usr/bin/unshare',
+    [
+      '--mount',
+      '--pid',
+      '--fork',
+      '--kill-child=SIGKILL',
+      '--propagation=private',
+      '--mount-proc',
+      '--',
+      producer,
+      ...args,
+    ],
+    { env: environment, stdio: ['ignore', 'inherit', 'inherit'] },
+  )
+  const [code, signal] = await once(child, 'close')
+  if (signal) throw Error(`Native producer launcher terminated by ${signal}`)
+  if (code !== 0) throw Error(`Native producer exited with ${code}`)
 }
 
 export function requireNativeHookFunctions(bytes) {

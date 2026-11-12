@@ -7,6 +7,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  readlink,
   rm,
   stat,
   writeFile,
@@ -19,6 +20,7 @@ import test from 'node:test'
 import {
   capturedStreams,
   instrumentProducer,
+  runNativeProducer,
 } from '../lib/scripts/fde-initramfs-producer.mjs'
 import { verifyGeneratedArchive } from '../lib/scripts/fde-initramfs-archive.mjs'
 import { withPrivateInitramfs } from '../lib/scripts/fde-initramfs-generation.mjs'
@@ -268,6 +270,72 @@ for (const failure of ['producer', 'verification', 'consumer']) {
       'native packaging data',
     )
   })
+}
+
+for (const fail of [false, true]) {
+  test(
+    `native producer namespace ends detached writers before ${fail ? 'failure cleanup' : 'archive consumption'}`,
+    { skip: process.env.FDE_KERNEL_PROCESS_TEST !== '1' },
+    async t => {
+      const f = await fixture(t)
+      const parentNamespace = await readlink('/proc/self/ns/pid')
+      let workspace
+      let consumed = false
+      const namespaceFile = join(f.root, 'writer-namespace')
+      const prepare = await callback(
+        f,
+        `setsid sh -c 'readlink /proc/self/ns/pid > "$FDE_TEST_NAMESPACE"; while :; do printf x >> "$FDE_TEST_WRITER"; sleep 0.01; done' </dev/null >/dev/null 2>&1 &
+while [ ! -s "$FDE_TEST_NAMESPACE" ] || [ ! -s "$FDE_TEST_WRITER" ]; do sleep 0.01; done
+exit ${fail ? 17 : 0}
+`,
+      )
+      const producer = join(f.root, 'producer')
+      await writeFile(producer, '#!/bin/sh\n' + packaging, { mode: 0o700 })
+      async function assertWritersEnded() {
+        const namespace = (await readFile(namespaceFile, 'utf8')).trim()
+        assert.notEqual(namespace, parentNamespace)
+        for (const pid of await readdir('/proc')) {
+          if (!/^\d+$/.test(pid)) continue
+          try {
+            assert.notEqual(await readlink(`/proc/${pid}/ns/pid`), namespace)
+          } catch (error) {
+            if (error.code !== 'ENOENT' && error.code !== 'ESRCH') throw error
+          }
+        }
+        assert.equal(await readlink('/proc/self/ns/pid'), parentNamespace)
+      }
+      const operation = withPrivateInitramfs(
+        f.root,
+        async generation => {
+          workspace = generation.directory
+          try {
+            await runNativeProducer(producer, [], {
+              ...f.environment,
+              outfile: generation.archive,
+              FDE_CAPTURE_DIR: generation.captures,
+              FDE_PREPARE: prepare,
+              FDE_TEST_NAMESPACE: namespaceFile,
+              FDE_TEST_WRITER: join(workspace, 'writer'),
+            })
+          } catch (error) {
+            await assertWritersEnded()
+            throw error
+          }
+          await assertWritersEnded()
+        },
+        async archive => {
+          consumed = true
+          await assertWritersEnded()
+          assert.ok((await stat(archive)).size > 0)
+        },
+      )
+      if (fail) await assert.rejects(operation, /Native producer exited with 1/)
+      else await operation
+      assert.equal(consumed, !fail)
+      await assert.rejects(stat(workspace), { code: 'ENOENT' })
+      await assertWritersEnded()
+    },
+  )
 }
 
 for (const name of ['mainCpio', 'uncompressed']) {
