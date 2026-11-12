@@ -13,15 +13,17 @@ use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::{TmpDir, write_file_private_atomic};
 
-const PCR_REGISTERS: [u8; 7] = [0, 2, 4, 7, 11, 14, 15];
-
 fn pcr_selection() -> String {
     format!(
         "sha256:{}",
-        PCR_REGISTERS.map(|pcr| pcr.to_string()).join(",")
+        PCR_REGISTERS
+            .iter()
+            .map(|pcr| pcr.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
     )
 }
-const POLICY_REF: &[u8] = b"StartOS FDE bootstrap policy v1";
+const POLICY_DOMAIN: &[u8] = b"StartOS FDE bootstrap policy v2\0";
 const PRIMARY_TEMPLATE: &str = "ecc256:null:aes128cfb";
 const PRIMARY_ATTRIBUTES: &str =
     "restricted|decrypt|fixedtpm|fixedparent|sensitivedataorigin|userwithauth";
@@ -41,65 +43,52 @@ pub struct Authorization {
     pub signature: Vec<u8>,
 }
 
-/// Firmware, option ROMs, loaded applications, Secure Boot, UKI, MOK policy and verified filesystems.
-/// The authority must authorize the direct firmware → shim → UKI route, excluding command interpreters.
-#[derive(Clone, Debug)]
-pub struct BootMeasurements {
-    pub firmware: [u8; 32],
-    pub option_roms: [u8; 32],
-    pub applications: [u8; 32],
-    pub secure_boot: [u8; 32],
-    pub uki: [u8; 32],
-    pub shim_policy: [u8; 32],
-    pub files: [u8; 32],
+macro_rules! boot_measurements {
+    ($($field:ident: $pcr:literal),+ $(,)?) => {
+        const PCR_REGISTERS: &[u8] = &[$($pcr),+];
+
+        /// Measurement inputs for the direct firmware → shim → UKI profile.
+        /// PCRs 12 and 13 must be empty; external stub inputs are excluded.
+        #[derive(Clone, Debug)]
+        pub struct BootMeasurements {
+            $(pub $field: [u8; 32]),+
+        }
+
+        impl BootMeasurements {
+            fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+                if bytes.len() != PCR_REGISTERS.len() * 32 {
+                    return Err(invalid_policy());
+                }
+                let mut values = bytes.chunks_exact(32);
+                Ok(Self { $($field: values.next().unwrap().try_into().unwrap()),+ })
+            }
+
+            fn bytes(&self) -> Vec<u8> {
+                [$(self.$field.as_slice()),+].concat()
+            }
+
+            // tpm2-tools 5.7 misindexes raw PCR input above eight registers.
+            fn pcr_digest(&self) -> [u8; 32] {
+                openssl::sha::sha256(&self.bytes())
+            }
+        }
+    };
 }
 
-impl BootMeasurements {
-    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-        if bytes.len() != PCR_REGISTERS.len() * 32 {
-            return Err(Error::new(
-                eyre!("{}", t!("fde.tpm.invalid-policy")),
-                ErrorKind::Bios,
-            ));
-        }
-        let values: [[u8; 32]; PCR_REGISTERS.len()] = bytes
-            .chunks_exact(32)
-            .map(|chunk| chunk.try_into().unwrap())
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-        let [
-            firmware,
-            option_roms,
-            applications,
-            secure_boot,
-            uki,
-            shim_policy,
-            files,
-        ] = values;
-        Ok(Self {
-            firmware,
-            option_roms,
-            applications,
-            secure_boot,
-            uki,
-            shim_policy,
-            files,
-        })
-    }
+boot_measurements! {
+    firmware: 0,
+    option_roms: 2,
+    applications: 4,
+    secure_boot: 7,
+    uki: 11,
+    stub_parameters: 12,
+    stub_extensions: 13,
+    shim_policy: 14,
+    files: 15,
+}
 
-    fn bytes(&self) -> Vec<u8> {
-        [
-            &self.firmware[..],
-            &self.option_roms[..],
-            &self.applications[..],
-            &self.secure_boot[..],
-            &self.uki[..],
-            &self.shim_policy[..],
-            &self.files[..],
-        ]
-        .concat()
-    }
+fn invalid_policy() -> Error {
+    Error::new(eyre!("{}", t!("fde.tpm.invalid-policy")), ErrorKind::Bios)
 }
 
 /// The caller verifies stable rootfs and overlay content before extending PCR 15.
@@ -175,7 +164,8 @@ impl Workspace {
             ],
         )
         .await?;
-        self.write("policy.ref", POLICY_REF).await
+        self.write("policy.ref", &policy_reference(&pcr_selection()))
+            .await
     }
 
     async fn create_primary(&self) -> Result<(), Error> {
@@ -193,6 +183,15 @@ impl Workspace {
                 "-c",
                 "primary.ctx",
             ],
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn start_trial(&self) -> Result<(), Error> {
+        self.run(
+            "tpm2_startauthsession",
+            &["-g", "sha256", "-S", "trial.ctx"],
         )
         .await?;
         Ok(())
@@ -216,37 +215,49 @@ fn public_key(key: &PKey<Private>) -> Result<PKey<Public>, Error> {
     Ok(PKey::public_key_from_der(&key.public_key_to_der()?)?)
 }
 
-fn authorization_message(policy: &[u8; 32]) -> Vec<u8> {
-    [policy.as_slice(), POLICY_REF].concat()
+fn policy_reference(selection: &str) -> [u8; 32] {
+    openssl::sha::sha256(&[POLICY_DOMAIN, selection.as_bytes()].concat())
 }
 
+fn authorization_message(policy: &[u8; 32]) -> Vec<u8> {
+    [
+        policy.as_slice(),
+        policy_reference(&pcr_selection()).as_slice(),
+    ]
+    .concat()
+}
+
+/// Signs trusted pre-phase measurements; external stub inputs fail closed.
 pub async fn authorize(
     measurements: &BootMeasurements,
     authority: &PKey<Private>,
 ) -> Result<Authorization, Error> {
+    if measurements.stub_parameters != [0; 32] || measurements.stub_extensions != [0; 32] {
+        return Err(invalid_policy());
+    }
     let workspace = Workspace::new().await?;
-    workspace.write("pcrs.bin", &measurements.bytes()).await?;
-    workspace
+    workspace.start_trial().await?;
+    let result = workspace
         .run(
-            "tpm2_createpolicy",
+            "tpm2_policypcr",
             &[
-                "--policy-pcr",
-                "-g",
-                "sha256",
+                "-S",
+                "trial.ctx",
                 "-l",
                 &pcr_selection(),
-                "-f",
-                "pcrs.bin",
                 "-L",
                 "approved.policy",
+                &hex::encode(measurements.pcr_digest()),
             ],
         )
-        .await?;
+        .await;
+    workspace.flush("trial.ctx").await;
+    result?;
     let policy: [u8; 32] = workspace
         .read("approved.policy")
         .await?
         .try_into()
-        .map_err(|_| Error::new(eyre!("{}", t!("fde.tpm.invalid-policy")), ErrorKind::Bios))?;
+        .map_err(|_| invalid_policy())?;
     let mut signer = Signer::new(MessageDigest::sha256(), authority)?;
     let signature = signer.sign_oneshot_to_vec(&authorization_message(&policy))?;
     Ok(Authorization { policy, signature })
@@ -267,12 +278,7 @@ pub fn verify_authorization(
 pub async fn seal(key: &[u8; 32], authority: &PKey<Private>) -> Result<SealedKey, Error> {
     let workspace = Workspace::new().await?;
     workspace.load_authority(&public_key(authority)?).await?;
-    workspace
-        .run(
-            "tpm2_startauthsession",
-            &["-g", "sha256", "-S", "trial.ctx"],
-        )
-        .await?;
+    workspace.start_trial().await?;
     let trial = async {
         workspace
             .run(
@@ -506,11 +512,18 @@ mod tests {
 
     #[test]
     fn measurement_file_binds_loaded_applications_before_secure_boot() {
-        let bytes = [0u8, 2, 4, 7, 11, 14, 15].map(|pcr| [pcr; 32]).concat();
+        let bytes = [0u8, 2, 4, 7, 11, 12, 13, 14, 15]
+            .map(|pcr| [pcr; 32])
+            .concat();
         let measurements = BootMeasurements::from_bytes(&bytes).unwrap();
+        assert_eq!(pcr_selection(), "sha256:0,2,4,7,11,12,13,14,15");
+        assert_eq!(measurements.firmware, [0; 32]);
+        assert_eq!(measurements.option_roms, [2; 32]);
         assert_eq!(measurements.applications, [4; 32]);
         assert_eq!(measurements.secure_boot, [7; 32]);
         assert_eq!(measurements.uki, [11; 32]);
+        assert_eq!(measurements.stub_parameters, [12; 32]);
+        assert_eq!(measurements.stub_extensions, [13; 32]);
         assert_eq!(measurements.shim_policy, [14; 32]);
         assert_eq!(measurements.files, [15; 32]);
         assert_eq!(measurements.bytes(), bytes);
@@ -518,6 +531,24 @@ mod tests {
         let mut extra = bytes;
         extra.push(0);
         assert!(BootMeasurements::from_bytes(&extra).is_err());
+    }
+
+    #[tokio::test]
+    async fn authorizations_exclude_external_stub_inputs_before_using_the_tpm() {
+        let authority = crate::util::crypto::gen_nistp256().unwrap();
+        let empty = BootMeasurements::from_bytes(&vec![0; PCR_REGISTERS.len() * 32]).unwrap();
+        let mut parameters = empty.clone();
+        parameters.stub_parameters = [1; 32];
+        let mut extensions = empty;
+        extensions.stub_extensions = [1; 32];
+        for measurements in [parameters, extensions] {
+            let error = authorize(&measurements, &authority).await.unwrap_err();
+            assert_eq!(error.kind, ErrorKind::Bios);
+            assert_eq!(
+                error.source.to_string(),
+                t!("fde.tpm.invalid-policy").to_string()
+            );
+        }
     }
 
     #[test]
@@ -545,6 +576,214 @@ mod tests {
         authorization.policy[0] ^= 1;
         let other_key = crate::net::ssl::gen_nistp256().unwrap();
         assert!(!verify_authorization(&authorization, &public_key(&other_key).unwrap()).unwrap());
+        for reference in [
+            b"StartOS FDE bootstrap policy v1".to_vec(),
+            policy_reference("sha256:11,15").to_vec(),
+        ] {
+            let signature = Signer::new(MessageDigest::sha256(), &key)
+                .unwrap()
+                .sign_oneshot_to_vec(&[policy.as_slice(), &reference].concat())
+                .unwrap();
+            assert!(
+                !verify_authorization(
+                    &Authorization { policy, signature },
+                    &public_key(&key).unwrap()
+                )
+                .unwrap()
+            );
+        }
+    }
+
+    async fn reject_weaker_authorizations_at_the_tpm(
+        sealed: &SealedKey,
+        authority: &PKey<Private>,
+    ) {
+        let measurements = read_measurements().await.unwrap();
+        for reference in [
+            b"StartOS FDE bootstrap policy v1".to_vec(),
+            policy_reference("sha256:11,15").to_vec(),
+        ] {
+            let workspace = Workspace::new().await.unwrap();
+            workspace
+                .load_authority(&public_key(authority).unwrap())
+                .await
+                .unwrap();
+            workspace.write("policy.ref", &reference).await.unwrap();
+            workspace
+                .write(
+                    "weak-pcrs.bin",
+                    &[measurements.uki.as_slice(), measurements.files.as_slice()].concat(),
+                )
+                .await
+                .unwrap();
+            workspace
+                .run(
+                    "tpm2_createpolicy",
+                    &[
+                        "--policy-pcr",
+                        "-g",
+                        "sha256",
+                        "-l",
+                        "sha256:11,15",
+                        "-f",
+                        "weak-pcrs.bin",
+                        "-L",
+                        "weak.policy",
+                    ],
+                )
+                .await
+                .unwrap();
+            let policy = workspace.read("weak.policy").await.unwrap();
+            let message = [policy.as_slice(), &reference].concat();
+            let signature = Signer::new(MessageDigest::sha256(), authority)
+                .unwrap()
+                .sign_oneshot_to_vec(&message)
+                .unwrap();
+            workspace.write("weak.message", &message).await.unwrap();
+            workspace.write("weak.sig", &signature).await.unwrap();
+            workspace
+                .run(
+                    "tpm2_verifysignature",
+                    &[
+                        "-c",
+                        "authority.ctx",
+                        "-g",
+                        "sha256",
+                        "-m",
+                        "weak.message",
+                        "-s",
+                        "weak.sig",
+                        "-f",
+                        "ecdsa",
+                        "-t",
+                        "weak.ticket",
+                    ],
+                )
+                .await
+                .unwrap();
+            workspace.create_primary().await.unwrap();
+            workspace.write("sealed.pub", &sealed.public).await.unwrap();
+            workspace
+                .write("sealed.priv", &sealed.private)
+                .await
+                .unwrap();
+            workspace
+                .run(
+                    "tpm2_load",
+                    &[
+                        "-C",
+                        "primary.ctx",
+                        "-u",
+                        "sealed.pub",
+                        "-r",
+                        "sealed.priv",
+                        "-c",
+                        "sealed.ctx",
+                    ],
+                )
+                .await
+                .unwrap();
+            workspace
+                .run(
+                    "tpm2_startauthsession",
+                    &[
+                        "--policy-session",
+                        "-g",
+                        "sha256",
+                        "-c",
+                        "primary.ctx",
+                        "-S",
+                        "weak.ctx",
+                    ],
+                )
+                .await
+                .unwrap();
+            workspace
+                .run("tpm2_policypcr", &["-S", "weak.ctx", "-l", "sha256:11,15"])
+                .await
+                .unwrap();
+            workspace
+                .run(
+                    "tpm2_policyauthorize",
+                    &[
+                        "-S",
+                        "weak.ctx",
+                        "-i",
+                        "weak.policy",
+                        "-n",
+                        "authority.name",
+                        "-t",
+                        "weak.ticket",
+                        "-q",
+                        "policy.ref",
+                    ],
+                )
+                .await
+                .unwrap();
+            workspace
+                .restrict_to_unseal("weak.ctx", "weak.command.policy")
+                .await
+                .unwrap();
+            assert!(
+                workspace
+                    .run(
+                        "tpm2_unseal",
+                        &["-c", "sealed.ctx", "-p", "session:weak.ctx"]
+                    )
+                    .await
+                    .is_err(),
+                "weaker PCR authorization bypassed the sealed object's policy reference"
+            );
+            workspace.flush("weak.ctx").await;
+            workspace.flush("sealed.ctx").await;
+            workspace.flush("primary.ctx").await;
+            workspace.flush("authority.ctx").await;
+        }
+    }
+
+    async fn reject_external_stub_input(register: u8) {
+        let authority = crate::util::crypto::gen_nistp256().unwrap();
+        let key = super::super::bootstrap::generate_key().unwrap();
+        let authorization = authorize(&read_measurements().await.unwrap(), &authority)
+            .await
+            .unwrap();
+        let sealed = seal(&key, &authority).await.unwrap();
+        let public = public_key(&authority).unwrap();
+        assert_eq!(
+            unseal(&sealed, &authorization, &public)
+                .await
+                .unwrap()
+                .as_slice(),
+            key.as_slice()
+        );
+        let workspace = Workspace::new().await.unwrap();
+        workspace
+            .run(
+                "tpm2_pcrextend",
+                &[&format!("{register}:sha256={}", "01".repeat(32))],
+            )
+            .await
+            .unwrap();
+        assert!(unseal(&sealed, &authorization, &public).await.is_err());
+        let error = authorize(&read_measurements().await.unwrap(), &authority)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.source.to_string(),
+            t!("fde.tpm.invalid-policy").to_string()
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an exclusively owned software TPM and tpm2-tools"]
+    async fn software_tpm_rejects_external_stub_parameters() {
+        reject_external_stub_input(12).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an exclusively owned software TPM and tpm2-tools"]
+    async fn software_tpm_rejects_external_stub_extensions() {
+        reject_external_stub_input(13).await;
     }
 
     #[tokio::test]
@@ -563,8 +802,20 @@ mod tests {
                 .as_slice(),
             key.as_slice(),
         );
+        reject_weaker_authorizations_at_the_tpm(&sealed, &authority).await;
+        assert_eq!(
+            unseal(&sealed, &authorization, &authority_public)
+                .await
+                .unwrap()
+                .as_slice(),
+            key.as_slice()
+        );
         let workspace = Workspace::new().await.unwrap();
-        for register in PCR_REGISTERS {
+        for register in PCR_REGISTERS
+            .iter()
+            .copied()
+            .filter(|pcr| ![12, 13].contains(pcr))
+        {
             workspace
                 .run(
                     "tpm2_pcrextend",

@@ -5,10 +5,15 @@ binary=$(realpath "${1:?path to the start-core unit-test executable}")
 directory=$(cd "$(dirname "$0")" && pwd)
 image=startos-fde-tpm-test
 docker build --load -t "$image" -f "$directory/fde-tpm.Dockerfile" "$directory"
-docker run --rm --network none \
-    --mount "type=bind,source=$binary,target=/fde-tests,readonly" \
-    "$image" sh -eu -c '
-        test=fde::tpm::tests::software_tpm_unseals_only_the_authorized_boot_state
+for test in \
+    software_tpm_unseals_only_the_authorized_boot_state \
+    software_tpm_rejects_external_stub_parameters \
+    software_tpm_rejects_external_stub_extensions; do
+    docker run --rm --network none \
+        --env "FDE_TEST=fde::tpm::tests::$test" \
+        --mount "type=bind,source=$binary,target=/fde-tests,readonly" \
+        "$image" sh -eu -c '
+        test=$FDE_TEST
         /fde-tests --list | grep -Fx "$test: test"
         mkdir -m 700 /tmp/tpm
         swtpm socket --tpm2 --tpmstate dir=/tmp/tpm \
@@ -32,4 +37,5 @@ docker run --rm --network none \
             sleep 0.05
         done
         exec /fde-tests --ignored --exact "$test" --nocapture
-    '
+        '
+done
