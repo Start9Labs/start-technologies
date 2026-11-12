@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'fs'
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { FileHelper } from '../util/fileHelper'
@@ -223,4 +223,50 @@ describe('FileHelper.merge', () => {
       'automation: !include automations.yaml',
     )
   })
+
+  test.each(['original', 'withPath'])(
+    '%s preserves the file when onRead validation rejects',
+    async location => {
+      const before = '{"A": 123, "secret": "keep"}'
+      const path = seeded(`transform-error-${location}.json`, before)
+      const file = FileHelper.json(
+        location === 'original' ? path : join(dir, 'unused.json'),
+        z.looseObject({ A: z.string().catch('default') }),
+        {
+          onRead: raw => z.looseObject({ A: z.string() }).parse(raw),
+          onWrite: data => data,
+        },
+      )
+      const target = location === 'original' ? file : file.withPath(path)
+
+      await expect(target.merge(effects, {})).rejects.toThrow()
+
+      expect(readFileSync(path, 'utf-8')).toBe(before)
+    },
+  )
+
+  test.each([
+    ['json', '{"A": "keep",'],
+    ['yaml', 'A: [keep'],
+    ['toml', 'A = "keep'],
+  ])(
+    '%s backs up a file it cannot parse, then rebuilds it from the defaults',
+    async (kind, before) => {
+      const name = `unparseable.${kind}`
+      const path = seeded(name, before)
+      const file = (FileHelper as any)[kind](
+        path,
+        z.looseObject({ A: z.string().catch('default') }),
+      )
+
+      await file.merge(effects, {})
+
+      expect(await file.read().once()).toEqual({ A: 'default' })
+      const backups = readdirSync(dir).filter(f =>
+        f.startsWith(`${name}.unparseable-`),
+      )
+      expect(backups).toHaveLength(1)
+      expect(readFileSync(join(dir, backups[0]), 'utf-8')).toBe(before)
+    },
+  )
 })
