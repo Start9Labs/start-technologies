@@ -124,7 +124,7 @@ const es: Record<number, string> = {
   118: 'Las contraseñas no coinciden',
   119: 'IPv4',
   120: 'IPv4 + IPv6',
-  121: 'Enruta TLS por TCP o QUIC por UDP según el nombre de host. Las asignaciones TCP y UDP son independientes. Solo IPv4. Déjalo en blanco para publicar ambos protocolos sin enrutamiento por nombre de host.',
+  121: 'Enruta TLS por TCP o QUIC por UDP según el nombre de host. TCP/UDP comparte una asignación; las asignaciones TCP y UDP separadas pueden usar servidores distintos. Solo IPv4. Déjalo en blanco para publicar ambos protocolos sin enrutamiento por nombre de host.',
   122: 'Publica esta cantidad de puertos consecutivos, contando a partir de los puertos externo e interno de arriba. Déjalo en 1 para un solo puerto. Los nombres de host SNI no son compatibles con rangos.',
   123: 'Nombre de host (opcional, solo ipv4)',
   124: 'Nombre de host (opcional)',
@@ -135,7 +135,6 @@ const es: Record<number, string> = {
   129: 'Generar configuración',
   130: 'TCP',
   131: 'UDP',
-  132: 'Selecciona al menos un protocolo',
 }
 
 export default es

@@ -27,6 +27,15 @@ export const mockTunnelData: TunnelData = {
             allowAutoPortForward: true,
             wanIp: null,
           },
+          '10.59.0.6': {
+            name: 'Server Two',
+            key: '',
+            psk: '',
+            kind: 'server',
+            allowDnsInjection: true,
+            allowAutoPortForward: true,
+            wanIp: null,
+          },
           '10.59.0.3': {
             name: 'Phone',
             key: '',
@@ -90,6 +99,17 @@ export const mockTunnelData: TunnelData = {
   portForwards: {
     '203.0.113.42:443': {
       kind: 'sni',
+      both: {
+        routes: {
+          'dashboard.example.com': {
+            target: '10.59.0.2:443',
+            label: 'HTTPS dashboard',
+            enabled: true,
+            auto: false,
+          },
+        },
+        fallback: null,
+      },
       udp: {
         routes: {
           'blog.example.com': {

@@ -131,7 +131,7 @@ export const ENGLISH: Record<string, number> = {
   'Passwords do not match': 118,
   'IPv4': 119,
   'IPv4 + IPv6': 120,
-  'Routes TLS over TCP or QUIC over UDP by hostname. TCP and UDP mappings are independent. IPv4 only. Leave blank to publish both transports without hostname routing.': 121,
+  'Routes TLS over TCP or QUIC over UDP by hostname. TCP/UDP shares one mapping; separate TCP and UDP mappings may use different servers. IPv4 only. Leave blank to publish both transports without hostname routing.': 121,
   'Publish this many consecutive ports, counting up from the external and internal ports above. Leave at 1 for a single port. SNI hostnames are not supported for ranges.': 122,
   'Hostname (optional, ipv4 only)': 123,
   'Hostname (optional)': 124,
@@ -142,7 +142,6 @@ export const ENGLISH: Record<string, number> = {
   'Generate config': 129,
   'TCP': 130,
   'UDP': 131,
-  'Select at least one protocol': 132,
 }
 
 export default ENGLISH

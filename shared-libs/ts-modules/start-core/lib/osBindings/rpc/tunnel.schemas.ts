@@ -304,6 +304,18 @@ export const ListParams: typeof empty = /* @__PURE__ */ empty.meta({
 export const LogoutParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'LogoutParams',
 })
+
+/**
+ * Transports owned together by one port mapping.
+ */
+export const Protocol: z.ZodEnum<{
+  tcp: 'tcp'
+  udp: 'udp'
+  'tcp+udp': 'tcp+udp'
+}> = /* @__PURE__ */ z.enum(['tcp', 'udp', 'tcp+udp']).meta({
+  id: 'Protocol',
+  description: 'Transports owned together by one port mapping.',
+})
 export const RemoveDeviceParams: z.ZodObject<{
   subnet: z.ZodString
   ip: z.ZodString
@@ -499,15 +511,6 @@ export const SubscribeParams: z.ZodObject<{
 }).meta({
   id: 'SubscribeParams',
 })
-
-/**
- * Transport identity for independently owned port mappings.
- */
-export const TransportProtocol: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp' }> =
-  /* @__PURE__ */ z.enum(['tcp', 'udp']).meta({
-    id: 'TransportProtocol',
-    description: 'Transport identity for independently owned port mappings.',
-  })
 export const TunnelCertData: z.ZodObject<{
   key: typeof literal_0
   cert: typeof literal_0
@@ -614,10 +617,7 @@ export const AddKeyParams: z.ZodObject<{
   id: 'AddKeyParams',
 })
 export const AddPortForwardParams: z.ZodObject<{
-  protocol: z.ZodCodec<
-    z.ZodOptional<typeof TransportProtocol>,
-    typeof TransportProtocol
-  >
+  protocol: z.ZodCodec<z.ZodOptional<typeof Protocol>, typeof Protocol>
   /**
    * External (WAN) port to forward. The external IP is fixed to the target's
    * WAN so return traffic stays symmetric.
@@ -645,7 +645,7 @@ export const AddPortForwardParams: z.ZodObject<{
     z.ZodNullable<z.ZodInt>
   >
 }> = /* @__PURE__ */ object({
-  protocol: wire(TransportProtocol.optional(), TransportProtocol),
+  protocol: wire(Protocol.optional(), Protocol),
   /**
    * External (WAN) port to forward. The external IP is fixed to the target's
    * WAN so return traffic stays symmetric.
@@ -761,8 +761,8 @@ export const RemovePortForwardParams: z.ZodObject<{
    * Omitted selects both transports for whole-forward removal, otherwise TCP.
    */
   protocol: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof TransportProtocol>>,
-    z.ZodNullable<typeof TransportProtocol>
+    z.ZodOptional<z.ZodNullable<typeof Protocol>>,
+    z.ZodNullable<typeof Protocol>
   >
   fallback: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   source: z.ZodString
@@ -777,10 +777,7 @@ export const RemovePortForwardParams: z.ZodObject<{
   /**
    * Omitted selects both transports for whole-forward removal, otherwise TCP.
    */
-  protocol: wire(
-    TransportProtocol.nullable().optional(),
-    TransportProtocol.nullable(),
-  ).meta({
+  protocol: wire(Protocol.nullable().optional(), Protocol.nullable()).meta({
     description:
       'Omitted selects both transports for whole-forward removal, otherwise TCP.',
   }),
@@ -808,10 +805,7 @@ export const SetDeviceKindParams: z.ZodObject<{
   id: 'SetDeviceKindParams',
 })
 export const SetPortForwardEnabledParams: z.ZodObject<{
-  protocol: z.ZodCodec<
-    z.ZodOptional<typeof TransportProtocol>,
-    typeof TransportProtocol
-  >
+  protocol: z.ZodCodec<z.ZodOptional<typeof Protocol>, typeof Protocol>
   source: z.ZodString
   enabled: z.ZodBoolean
   /**
@@ -822,7 +816,7 @@ export const SetPortForwardEnabledParams: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
 }> = /* @__PURE__ */ object({
-  protocol: wire(TransportProtocol.optional(), TransportProtocol),
+  protocol: wire(Protocol.optional(), Protocol),
   source: z.string(),
   enabled: z.boolean(),
   /**
@@ -874,10 +868,7 @@ export const SubscribeRes: z.ZodObject<{
   id: 'SubscribeRes',
 })
 export const UpdatePortForwardLabelParams: z.ZodObject<{
-  protocol: z.ZodCodec<
-    z.ZodOptional<typeof TransportProtocol>,
-    typeof TransportProtocol
-  >
+  protocol: z.ZodCodec<z.ZodOptional<typeof Protocol>, typeof Protocol>
   source: z.ZodString
   label: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -891,7 +882,7 @@ export const UpdatePortForwardLabelParams: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
 }> = /* @__PURE__ */ object({
-  protocol: wire(TransportProtocol.optional(), TransportProtocol),
+  protocol: wire(Protocol.optional(), Protocol),
   source: z.string(),
   label: wire(z.string().nullable().optional(), z.string().nullable()),
   /**

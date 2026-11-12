@@ -1,7 +1,5 @@
 import { inject, Injectable } from '@angular/core'
-import { shareReplay, Subject, tap } from 'rxjs'
-import { WebSocketSubject } from 'rxjs/webSocket'
-import { Api, ApiClient, ApiService } from './api.service'
+import { toObservable } from '@angular/core/rxjs-interop'
 import { pauseFor } from '@start9labs/shared'
 import {
   createRpcClient,
@@ -9,7 +7,6 @@ import {
   T,
   tableTransport,
 } from '@start9labs/start-core'
-import { AuthService } from '../auth.service'
 import {
   AddOperation,
   Operation,
@@ -18,8 +15,13 @@ import {
   ReplaceOperation,
   Revision,
 } from 'patch-db-client'
-import { toObservable } from '@angular/core/rxjs-interop'
+import { shareReplay, Subject, tap } from 'rxjs'
+import { WebSocketSubject } from 'rxjs/webSocket'
+import { FORWARD_PROTOCOLS, sniBindings } from 'src/app/utils/port-forwards'
+
+import { AuthService } from '../auth.service'
 import { mockTunnelData } from '../patch-db/data-model'
+import { Api, ApiClient, ApiService } from './api.service'
 
 @Injectable({
   providedIn: 'root',
@@ -244,12 +246,23 @@ export class MockApiService extends ApiService {
             : {
                 kind: 'sni',
                 routes: {},
-                fallback,
-                udp: { routes: {}, fallback: fallback && { ...fallback } },
+                fallback: null,
+                udp: { routes: {}, fallback: null },
+                both: { routes: {}, fallback },
               }
-        const bindings = params.protocol === 'udp' ? value.udp : value
+        const protocol = params.protocol ?? 'tcp'
+        const bindings = sniBindings(value, protocol)
         for (const hostname of params.sni) {
           const name = hostname.toLowerCase()
+          if (
+            FORWARD_PROTOCOLS.some(
+              other =>
+                other !== protocol &&
+                (other === 'tcp+udp' || protocol === 'tcp+udp') &&
+                sniBindings(value, other).routes[name],
+            )
+          )
+            throw new Error('Hostname already mapped')
           const old = bindings.routes[name]
           if (
             old &&
@@ -274,23 +287,28 @@ export class MockApiService extends ApiService {
           },
         ])
       } else if (existing?.kind === 'sni' && (params.count ?? 1) === 1) {
-        for (const bindings of [existing, existing.udp]) {
-          if (
-            bindings.fallback &&
-            bindings.fallback.target !== params.target &&
-            (bindings.fallback.auto ||
-              bindings.fallback.target.split(':')[0] !==
-                params.target.split(':')[0])
+        if (
+          FORWARD_PROTOCOLS.some(
+            protocol =>
+              protocol !== 'tcp+udp' &&
+              sniBindings(existing, protocol).fallback,
           )
-            throw new Error('Port already mapped')
-        }
-        for (const bindings of [existing, existing.udp]) {
-          bindings.fallback = {
-            target: params.target,
-            label: bindings.fallback?.label ?? params.label ?? null,
-            enabled: bindings.fallback?.enabled ?? true,
-            auto: bindings.fallback?.auto ?? false,
-          }
+        )
+          throw new Error('Port already mapped')
+        const bindings = sniBindings(existing, 'tcp+udp')
+        if (
+          bindings.fallback &&
+          bindings.fallback.target !== params.target &&
+          (bindings.fallback.auto ||
+            bindings.fallback.target.split(':')[0] !==
+              params.target.split(':')[0])
+        )
+          throw new Error('Port already mapped')
+        bindings.fallback = {
+          target: params.target,
+          label: bindings.fallback?.label ?? params.label ?? null,
+          enabled: bindings.fallback?.enabled ?? true,
+          auto: bindings.fallback?.auto ?? false,
         }
         this.mockRevision([
           {
@@ -328,7 +346,7 @@ export class MockApiService extends ApiService {
       if (!entry) return null
 
       if (entry.kind === 'sni') {
-        const bindings = params.protocol === 'udp' ? entry.udp : entry
+        const bindings = sniBindings(entry, params.protocol ?? 'tcp')
         const route = params.hostname
           ? bindings.routes[params.hostname.toLowerCase()]
           : bindings.fallback
@@ -361,7 +379,7 @@ export class MockApiService extends ApiService {
       if (!entry) return null
 
       if (entry.kind === 'sni') {
-        const bindings = params.protocol === 'udp' ? entry.udp : entry
+        const bindings = sniBindings(entry, params.protocol ?? 'tcp')
         const route = params.hostname
           ? bindings.routes[params.hostname.toLowerCase()]
           : bindings.fallback
@@ -397,10 +415,10 @@ export class MockApiService extends ApiService {
         const protocols = params.protocol
           ? [params.protocol]
           : params.hostname == null && !params.fallback
-            ? (['tcp', 'udp'] as const)
+            ? FORWARD_PROTOCOLS
             : (['tcp'] as const)
         for (const protocol of protocols) {
-          const bindings = protocol === 'udp' ? entry.udp : entry
+          const bindings = sniBindings(entry, protocol)
           if (params.fallback) bindings.fallback = null
           else if (params.hostname != null)
             delete bindings.routes[params.hostname.toLowerCase()]
@@ -410,9 +428,10 @@ export class MockApiService extends ApiService {
           }
         }
         if (
-          [entry, entry.udp].some(
-            b => Object.keys(b.routes).length || b.fallback,
-          )
+          FORWARD_PROTOCOLS.some(protocol => {
+            const bindings = sniBindings(entry, protocol)
+            return Object.keys(bindings.routes).length || bindings.fallback
+          })
         ) {
           this.mockRevision([
             {

@@ -123,7 +123,7 @@ const de: Record<number, string> = {
   118: 'Die Passwörter stimmen nicht überein',
   119: 'IPv4',
   120: 'IPv4 + IPv6',
-  121: 'Leitet TLS über TCP oder QUIC über UDP anhand des Hostnamens weiter. TCP- und UDP-Zuordnungen sind unabhängig. Nur IPv4. Leer lassen, um beide Transportprotokolle ohne Hostnamen-Routing zu veröffentlichen.',
+  121: 'Leitet TLS über TCP oder QUIC über UDP anhand des Hostnamens weiter. TCP/UDP verwendet eine gemeinsame Zuordnung; getrennte TCP- und UDP-Zuordnungen können verschiedene Server verwenden. Nur IPv4. Leer lassen, um beide Transportprotokolle ohne Hostnamen-Routing zu veröffentlichen.',
   122: 'Diese Anzahl aufeinanderfolgender Ports veröffentlichen, beginnend mit dem externen und internen Port oben. Für einen einzelnen Port bei 1 belassen. SNI-Hostnamen werden für Portbereiche nicht unterstützt.',
   123: 'Hostname (optional, nur IPv4)',
   124: 'Hostname (optional)',
@@ -134,7 +134,6 @@ const de: Record<number, string> = {
   129: 'Konfiguration generieren',
   130: 'TCP',
   131: 'UDP',
-  132: 'Mindestens ein Protokoll auswählen',
 }
 
 export default de

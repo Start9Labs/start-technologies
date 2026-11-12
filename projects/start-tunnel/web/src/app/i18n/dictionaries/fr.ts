@@ -123,7 +123,7 @@ const fr: Record<number, string> = {
   118: 'Les mots de passe ne correspondent pas',
   119: 'IPv4',
   120: 'IPv4 + IPv6',
-  121: 'Achemine TLS sur TCP ou QUIC sur UDP selon le nom d’hôte. Les mappages TCP et UDP sont indépendants. IPv4 uniquement. Laisser vide pour publier les deux protocoles sans routage par nom d’hôte.',
+  121: 'Achemine TLS sur TCP ou QUIC sur UDP selon le nom d’hôte. TCP/UDP partage une correspondance ; des correspondances TCP et UDP séparées peuvent utiliser des serveurs différents. IPv4 uniquement. Laisser vide pour publier les deux protocoles sans routage par nom d’hôte.',
   122: 'Publier ce nombre de ports consécutifs à partir des ports externe et interne ci-dessus. Laisser à 1 pour un seul port. Les noms d’hôte SNI ne sont pas pris en charge pour les plages de ports.',
   123: 'Nom d’hôte (facultatif, IPv4 uniquement)',
   124: 'Nom d’hôte (facultatif)',
@@ -134,7 +134,6 @@ const fr: Record<number, string> = {
   129: 'Générer la configuration',
   130: 'TCP',
   131: 'UDP',
-  132: 'Sélectionner au moins un protocole',
 }
 
 export default fr

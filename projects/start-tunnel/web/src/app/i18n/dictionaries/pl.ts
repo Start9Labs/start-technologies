@@ -123,7 +123,7 @@ const pl: Record<number, string> = {
   118: 'Hasła nie są zgodne',
   119: 'IPv4',
   120: 'IPv4 + IPv6',
-  121: 'Kieruje TLS przez TCP lub QUIC przez UDP według nazwy hosta. Mapowania TCP i UDP są niezależne. Tylko IPv4. Pozostaw puste, aby opublikować oba protokoły bez routingu według nazwy hosta.',
+  121: 'Kieruje TLS przez TCP lub QUIC przez UDP według nazwy hosta. TCP/UDP współdzieli jedno mapowanie; oddzielne mapowania TCP i UDP mogą używać różnych serwerów. Tylko IPv4. Pozostaw puste, aby opublikować oba protokoły bez routingu według nazwy hosta.',
   122: 'Opublikuj tyle kolejnych portów, zaczynając od podanych powyżej portów zewnętrznego i wewnętrznego. Pozostaw 1 dla pojedynczego portu. Nazwy hostów SNI nie są obsługiwane dla zakresów portów.',
   123: 'Nazwa hosta (opcjonalnie, tylko IPv4)',
   124: 'Nazwa hosta (opcjonalnie)',
@@ -134,7 +134,6 @@ const pl: Record<number, string> = {
   129: 'Wygeneruj konfigurację',
   130: 'TCP',
   131: 'UDP',
-  132: 'Wybierz co najmniej jeden protokół',
 }
 
 export default pl

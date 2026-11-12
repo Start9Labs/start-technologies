@@ -13,8 +13,7 @@ import { provideHelp } from 'src/app/help/help'
 import { ModalHelp } from 'src/app/help/modal-help'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { ApiService } from 'src/app/services/api/api.service'
-
-import { ForwardProtocol } from './utils'
+import { ForwardProtocol } from 'src/app/utils/port-forwards'
 
 export interface EditLabelData {
   readonly protocol: ForwardProtocol

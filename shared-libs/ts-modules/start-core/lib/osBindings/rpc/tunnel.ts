@@ -118,6 +118,11 @@ export type IoFormatInput = z.input<typeof schemas.IoFormat>
 export type ListDevicesParamsInput = z.input<typeof schemas.ListDevicesParams>
 export type ListParamsInput = z.input<typeof schemas.ListParams>
 export type LogoutParamsInput = z.input<typeof schemas.LogoutParams>
+
+/**
+ * Transports owned together by one port mapping.
+ */
+export type ProtocolInput = z.input<typeof schemas.Protocol>
 export type RemoveDeviceParamsInput = z.input<typeof schemas.RemoveDeviceParams>
 export type RemoveDnsRecordParamsInput = z.input<
   typeof schemas.RemoveDnsRecordParams
@@ -148,11 +153,6 @@ export type SetSubnetWanParamsInput = z.input<typeof schemas.SetSubnetWanParams>
 export type ShowConfigParamsInput = z.input<typeof schemas.ShowConfigParams>
 export type SubnetParamsInput = z.input<typeof schemas.SubnetParams>
 export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
-
-/**
- * Transport identity for independently owned port mappings.
- */
-export type TransportProtocolInput = z.input<typeof schemas.TransportProtocol>
 export type TunnelCertDataInput = z.input<typeof schemas.TunnelCertData>
 export type TunnelUpdateResult = z.output<typeof schemas.TunnelUpdateResult>
 export type UpdatePinholeLabelParamsInput = z.input<

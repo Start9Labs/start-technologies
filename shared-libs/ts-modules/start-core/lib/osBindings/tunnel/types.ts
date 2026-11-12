@@ -100,6 +100,16 @@ export type Pinhole = z.output<typeof schemas.Pinhole>
  * the v6 analogue of a `PortForward::Dnat`.
  */
 export type PinholeInput = z.input<typeof schemas.Pinhole>
+
+/**
+ * Transports owned together by one port mapping.
+ */
+export type Protocol = z.output<typeof schemas.Protocol>
+
+/**
+ * Transports owned together by one port mapping.
+ */
+export type ProtocolInput = z.input<typeof schemas.Protocol>
 export type RemoveDeviceParams = z.output<typeof schemas.RemoveDeviceParams>
 export type RemoveDeviceParamsInput = z.input<typeof schemas.RemoveDeviceParams>
 export type RemoveDnsRecordParams = z.output<
@@ -162,16 +172,6 @@ export type SniRoute = z.output<typeof schemas.SniRoute>
 export type SniRouteInput = z.input<typeof schemas.SniRoute>
 export type SubnetParams = z.output<typeof schemas.SubnetParams>
 export type SubnetParamsInput = z.input<typeof schemas.SubnetParams>
-
-/**
- * Transport identity for independently owned port mappings.
- */
-export type TransportProtocol = z.output<typeof schemas.TransportProtocol>
-
-/**
- * Transport identity for independently owned port mappings.
- */
-export type TransportProtocolInput = z.input<typeof schemas.TransportProtocol>
 export type TunnelCertData = z.output<typeof schemas.TunnelCertData>
 export type TunnelCertDataInput = z.input<typeof schemas.TunnelCertData>
 export type TunnelUpdateResult = z.output<typeof schemas.TunnelUpdateResult>
@@ -280,12 +280,12 @@ export type SetSubnetDnsParams = z.output<typeof schemas.SetSubnetDnsParams>
 export type SetSubnetDnsParamsInput = z.input<typeof schemas.SetSubnetDnsParams>
 
 /**
- * Independent hostname routes and catch-all for one transport on a shared port.
+ * Hostname routes and catch-all for one logical protocol selection.
  */
 export type SniBindings = z.output<typeof schemas.SniBindings>
 
 /**
- * Independent hostname routes and catch-all for one transport on a shared port.
+ * Hostname routes and catch-all for one logical protocol selection.
  */
 export type SniBindingsInput = z.input<typeof schemas.SniBindings>
 export type UpdatePortForwardLabelParams = z.output<

@@ -386,6 +386,18 @@ export const Pinhole: z.ZodObject<{
   description:
     "One IPv6 GUA firewall entry, keyed by the exposed `[GUA]:external_port`. The\ndestination is always the same GUA. When `internal_port` is `None` (or equals\nthe key's port) it's a pure firewall pinhole — `ct state new accept`, no NAT.\nWhen it differs it's a port-only DNAT to `[GUA]:internal_port` (e.g. 80→443),\nthe v6 analogue of a `PortForward::Dnat`.",
 })
+
+/**
+ * Transports owned together by one port mapping.
+ */
+export const Protocol: z.ZodEnum<{
+  tcp: 'tcp'
+  udp: 'udp'
+  'tcp+udp': 'tcp+udp'
+}> = /* @__PURE__ */ z.enum(['tcp', 'udp', 'tcp+udp']).meta({
+  id: 'Protocol',
+  description: 'Transports owned together by one port mapping.',
+})
 export const RemoveDeviceParams: z.ZodObject<{
   subnet: z.ZodString
   ip: z.ZodString
@@ -598,15 +610,6 @@ export const SubnetParams: z.ZodObject<{ subnet: z.ZodString }> =
   /* @__PURE__ */ object({ subnet: z.string() }).meta({
     id: 'SubnetParams',
   })
-
-/**
- * Transport identity for independently owned port mappings.
- */
-export const TransportProtocol: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp' }> =
-  /* @__PURE__ */ z.enum(['tcp', 'udp']).meta({
-    id: 'TransportProtocol',
-    description: 'Transport identity for independently owned port mappings.',
-  })
 export const TunnelCertData: z.ZodObject<{
   key: typeof literal_0
   cert: typeof literal_0
@@ -713,10 +716,7 @@ export const AddKeyParams: z.ZodObject<{
   id: 'AddKeyParams',
 })
 export const AddPortForwardParams: z.ZodObject<{
-  protocol: z.ZodCodec<
-    z.ZodOptional<typeof TransportProtocol>,
-    typeof TransportProtocol
-  >
+  protocol: z.ZodCodec<z.ZodOptional<typeof Protocol>, typeof Protocol>
   /**
    * External (WAN) port to forward. The external IP is fixed to the target's
    * WAN so return traffic stays symmetric.
@@ -744,7 +744,7 @@ export const AddPortForwardParams: z.ZodObject<{
     z.ZodNullable<z.ZodInt>
   >
 }> = /* @__PURE__ */ object({
-  protocol: wire(TransportProtocol.optional(), TransportProtocol),
+  protocol: wire(Protocol.optional(), Protocol),
   /**
    * External (WAN) port to forward. The external IP is fixed to the target's
    * WAN so return traffic stays symmetric.
@@ -918,8 +918,8 @@ export const RemovePortForwardParams: z.ZodObject<{
    * Omitted selects both transports for whole-forward removal, otherwise TCP.
    */
   protocol: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof TransportProtocol>>,
-    z.ZodNullable<typeof TransportProtocol>
+    z.ZodOptional<z.ZodNullable<typeof Protocol>>,
+    z.ZodNullable<typeof Protocol>
   >
   fallback: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   source: z.ZodString
@@ -934,10 +934,7 @@ export const RemovePortForwardParams: z.ZodObject<{
   /**
    * Omitted selects both transports for whole-forward removal, otherwise TCP.
    */
-  protocol: wire(
-    TransportProtocol.nullable().optional(),
-    TransportProtocol.nullable(),
-  ).meta({
+  protocol: wire(Protocol.nullable().optional(), Protocol.nullable()).meta({
     description:
       'Omitted selects both transports for whole-forward removal, otherwise TCP.',
   }),
@@ -965,10 +962,7 @@ export const SetDeviceKindParams: z.ZodObject<{
   id: 'SetDeviceKindParams',
 })
 export const SetPortForwardEnabledParams: z.ZodObject<{
-  protocol: z.ZodCodec<
-    z.ZodOptional<typeof TransportProtocol>,
-    typeof TransportProtocol
-  >
+  protocol: z.ZodCodec<z.ZodOptional<typeof Protocol>, typeof Protocol>
   source: z.ZodString
   enabled: z.ZodBoolean
   /**
@@ -979,7 +973,7 @@ export const SetPortForwardEnabledParams: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
 }> = /* @__PURE__ */ object({
-  protocol: wire(TransportProtocol.optional(), TransportProtocol),
+  protocol: wire(Protocol.optional(), Protocol),
   source: z.string(),
   enabled: z.boolean(),
   /**
@@ -1026,7 +1020,7 @@ export const SetSubnetDnsParams: z.ZodObject<{
 })
 
 /**
- * Independent hostname routes and catch-all for one transport on a shared port.
+ * Hostname routes and catch-all for one logical protocol selection.
  */
 export const SniBindings: z.ZodObject<{
   routes: z.ZodCodec<
@@ -1046,13 +1040,10 @@ export const SniBindings: z.ZodObject<{
 }).meta({
   id: 'SniBindings',
   description:
-    'Independent hostname routes and catch-all for one transport on a shared port.',
+    'Hostname routes and catch-all for one logical protocol selection.',
 })
 export const UpdatePortForwardLabelParams: z.ZodObject<{
-  protocol: z.ZodCodec<
-    z.ZodOptional<typeof TransportProtocol>,
-    typeof TransportProtocol
-  >
+  protocol: z.ZodCodec<z.ZodOptional<typeof Protocol>, typeof Protocol>
   source: z.ZodString
   label: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1066,7 +1057,7 @@ export const UpdatePortForwardLabelParams: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
 }> = /* @__PURE__ */ object({
-  protocol: wire(TransportProtocol.optional(), TransportProtocol),
+  protocol: wire(Protocol.optional(), Protocol),
   source: z.string(),
   label: wire(z.string().nullable().optional(), z.string().nullable()),
   /**
@@ -1291,10 +1282,22 @@ export const PortForward: z.ZodUnion<
       }>
     >,
     z.ZodIntersection<
-      z.ZodObject<{ kind: z.ZodLiteral<'sni'> }>,
+      z.ZodObject<{
+        /**
+         * Logical mappings for a hostname or fallback own disjoint transport sets.
+         */
+        kind: z.ZodLiteral<'sni'>
+      }>,
       z.ZodIntersection<
         z.ZodObject<{
           udp: z.ZodCodec<z.ZodOptional<typeof SniBindings>, typeof SniBindings>
+          /**
+           * One shared owner, target, label and enabled state for TCP/UDP.
+           */
+          both: z.ZodCodec<
+            z.ZodOptional<typeof SniBindings>,
+            typeof SniBindings
+          >
         }>,
         typeof SniBindings
       >
@@ -1325,9 +1328,26 @@ export const PortForward: z.ZodUnion<
       }),
     ),
     z.intersection(
-      object({ kind: z.literal('sni') }),
+      object({
+        /**
+         * Logical mappings for a hostname or fallback own disjoint transport sets.
+         */
+        kind: z.literal('sni').meta({
+          description:
+            'Logical mappings for a hostname or fallback own disjoint transport sets.',
+        }),
+      }),
       z.intersection(
-        object({ udp: wire(SniBindings.optional(), SniBindings) }),
+        object({
+          udp: wire(SniBindings.optional(), SniBindings),
+          /**
+           * One shared owner, target, label and enabled state for TCP/UDP.
+           */
+          both: wire(SniBindings.optional(), SniBindings).meta({
+            description:
+              'One shared owner, target, label and enabled state for TCP/UDP.',
+          }),
+        }),
         SniBindings.meta({
           description: 'Legacy routes and fallback belong to TCP.',
         }),
