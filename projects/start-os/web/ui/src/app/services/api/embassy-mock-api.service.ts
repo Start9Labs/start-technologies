@@ -59,6 +59,7 @@ import { ConfigService } from 'src/app/services/config.service'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { toAuthorityUrl } from 'src/app/utils/acme'
 import { getCurrentManifest, getManifest } from 'src/app/utils/get-package-data'
+import { getDriveName } from 'src/app/utils/get-drive-name'
 import { parsePemPublicKey, parsePublicKeys } from 'src/app/utils/public-keys'
 import { BackupRun } from 'src/app/routes/portal/routes/system/routes/backups/backup.types'
 import { Mock } from './api.fixures'
@@ -143,8 +144,6 @@ export class MockApiService extends ApiService {
   private readonly gitHash = inject(ConfigService).gitHash
   private readonly revertTime = 1800
   private readonly crypto = inject(WA_CRYPTO)
-  private readonly retainedVolumes = new Map<string, string>()
-  private labels?: Map<string, string | null>
   private drives?: Map<string, number>
   private history?: BackupRun[]
   private readonly conversionJobs: T.ServerStatus['backupConversions'] = {}
@@ -155,19 +154,6 @@ export class MockApiService extends ApiService {
         Mock.driveLink(partition.logicalname),
         partition.available ?? partition.capacity,
       ]),
-    ))
-  }
-
-  private get driveLabels() {
-    return (this.labels ??= new Map(
-      Mock.Disks.flatMap(disk =>
-        disk.partitions.map(partition => [
-          partition.logicalname,
-          partition.label ||
-            [disk.vendor, disk.model].filter(Boolean).join(' ') ||
-            null,
-        ]),
-      ),
     ))
   }
 
@@ -518,13 +504,12 @@ export class MockApiService extends ApiService {
       await pauseFor(3000)
       const partition = `${disk}1`
       const drive = Mock.Disks.find(d => d.logicalname === disk)!
-      this.driveLabels.set(partition, label ?? 'StartOS Backups')
       this.attachedDrives.set(Mock.driveLink(partition), drive.capacity)
       drive.partitions = [
         {
           logicalname: partition,
           stablePath: `${drive.stablePath}-part1`,
-          label: label ?? null,
+          label: label ?? 'StartOS Backups',
           capacity: drive.capacity,
           used: 0,
           available: drive.capacity,
@@ -912,8 +897,6 @@ export class MockApiService extends ApiService {
       await pauseFor(2000)
       return null
     },
-    'volumes.list-retained': async () =>
-      Object.fromEntries(this.retainedVolumes),
     'volumes.create': async ({ name, source }) => {
       await pauseFor(1000)
       const id = this.guid()
@@ -993,15 +976,18 @@ export class MockApiService extends ApiService {
         `/sharedVolumes/${id}`,
       )
       if (!volume) return null
+      if (volume.source.kind === 'local') {
+        await this.mockRevision([
+          {
+            op: PatchOp.REPLACE,
+            path: `/sharedVolumes/${id}/grants`,
+            value: {},
+          },
+        ])
+      }
       await this.mockRevision([
         { op: PatchOp.REMOVE, path: `/sharedVolumes/${id}` },
       ])
-      return null
-    },
-    'volumes.delete-data': async ({ id }) => {
-      if (this.mockData(`/sharedVolumes/${id}`))
-        throw new Error('Remove the volume definition first')
-      this.retainedVolumes.delete(id)
       return null
     },
     'volumes.inspect': async ({ id }) => {
@@ -1063,7 +1049,8 @@ export class MockApiService extends ApiService {
       const added: string[] = []
       for (const partition of Mock.Disks.flatMap(disk => disk.partitions)) {
         if (!Object.keys(partition.startOs).length) continue
-        const logicalname = Mock.driveLink(partition.logicalname)
+        const storedSource = Mock.diskSource(partition.logicalname)
+        const logicalname = storedSource.logicalname
         const targets: Record<string, T.BackupTarget> =
           this.mockData('/backupTargets')
         if (
@@ -1077,7 +1064,9 @@ export class MockApiService extends ApiService {
           continue
         added.push(
           await this.rpc.backup.target.create({
-            name: partition.label || partition.logicalname,
+            name: partition.label?.trim()
+              ? partition.label
+              : getDriveName(storedSource.drive) || partition.logicalname,
             source: {
               kind: 'disk',
               logicalname: partition.logicalname,
@@ -2992,12 +2981,7 @@ export class MockApiService extends ApiService {
           username: source.username ?? '',
         }
       case 'disk':
-        return {
-          kind: 'disk',
-          logicalname: Mock.driveLink(source.logicalname),
-          path: (source.path ?? '').replace(/^\/+/, ''),
-          label: this.driveLabels.get(source.logicalname) ?? null,
-        }
+        return Mock.diskSource(source.logicalname, source.path)
       default:
         return source
     }

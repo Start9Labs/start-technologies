@@ -13,7 +13,7 @@ import { TuiIcon, TuiInput } from '@taiga-ui/core'
 import { TuiPassword, TuiTextarea, TuiTooltip } from '@taiga-ui/kit'
 
 import { ApiClient } from 'src/app/services/api/api.types'
-import { VOLUME_STATUSES, VOLUME_TYPES } from './types'
+import { VOLUME_STATUSES, VOLUME_TYPES, volumeName } from './types'
 
 export type SourceEntry = Pick<
   T.SharedVolume,
@@ -26,14 +26,16 @@ export function sourceEdit(entry: Signal<SourceEntry | undefined>) {
     const source = entry()?.source
     return source?.kind === 'cifs' ? source : null
   })
-  const storedName = computed(() => entry()?.name ?? '')
+  const storedName = computed((value = entry()) =>
+    value ? volumeName(value) : '',
+  )
   const name = linkedSignal(storedName)
   const hostname = linkedSignal(() => cifs()?.hostname ?? '')
   const path = linkedSignal(() => cifs()?.path ?? '')
   const username = linkedSignal(() => cifs()?.username ?? '')
   const password = signal('')
   const newName = computed(() => (cifs() ? hostname().trim() : name().trim()))
-  const renamed = computed(() => newName() !== entry()?.name)
+  const renamed = computed(() => newName() !== storedName())
   const cifsChanged = computed(
     () =>
       !!cifs() &&

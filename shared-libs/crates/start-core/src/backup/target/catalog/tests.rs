@@ -91,6 +91,68 @@ async fn failed_local_deletion_stays_registered_and_can_be_retried() {
 }
 
 #[tokio::test]
+#[ignore = "requires BTRFS_TEST_VOLUMES_DIR and Btrfs subvolume permissions"]
+async fn local_targets_are_private_subvolumes_and_delete_before_unregistering() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = crate::util::btrfs::tests::directory();
+    let id = BackupTargetId::new();
+    let path = local_path(fixture.path(), &id);
+    create_local_target(&path).await.unwrap();
+    assert!(crate::util::btrfs::is_subvolume(&path).await);
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    let mut model = database();
+    model
+        .as_public_mut()
+        .as_backup_targets_mut()
+        .insert(
+            &id,
+            &BackupTarget::new("Local".into(), SharedVolumeSource::Local),
+        )
+        .unwrap();
+    let database = TypedPatchDb::<crate::db::model::Database>::load_unchecked(
+        patch_db::PatchDb::open(fixture.path().join("state.db"))
+            .await
+            .unwrap(),
+    );
+    database.put(&ROOT, &model).await.unwrap();
+    let held = TmpMountGuard::mount(&Bind::new(&path), ReadOnly)
+        .await
+        .unwrap();
+    tokio::fs::write(path.join("sentinel"), b"target data")
+        .await
+        .unwrap();
+    assert!(remove_target(&database, &id, fixture.path()).await.is_err());
+    assert!(
+        database
+            .peek()
+            .await
+            .as_public()
+            .as_backup_targets()
+            .as_idx(&id)
+            .is_some()
+    );
+    assert_eq!(
+        tokio::fs::read(path.join("sentinel")).await.unwrap(),
+        b"target data"
+    );
+    held.unmount().await.unwrap();
+    remove_target(&database, &id, fixture.path()).await.unwrap();
+    assert!(!path.exists());
+    assert!(
+        database
+            .peek()
+            .await
+            .as_public()
+            .as_backup_targets()
+            .as_idx(&id)
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn content_inspection_validates_backup_metadata_before_legacy_edits_publish() {
     let root = tempfile::tempdir().unwrap();
     let (inspection, contents) = inspect_contents(root.path(), "server").await.unwrap();
@@ -299,7 +361,10 @@ fn find_registration_preserves_existing_targets_and_can_rediscover_removed_backu
     let root = SharedVolumeSource::Disk {
         logicalname: "/dev/disk/by-uuid/backup-filesystem".into(),
         path: PathBuf::new(),
-        label: Some("Backup drive".into()),
+        drive: Some(SharedVolumeDrive {
+            label: Some("Backup drive".into()),
+            ..Default::default()
+        }),
     };
     let mut nested = root.clone();
     if let SharedVolumeSource::Disk { path, .. } = &mut nested {

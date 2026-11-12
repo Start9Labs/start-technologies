@@ -135,9 +135,7 @@ pub async fn create(
     let (source, credentials) = match source {
         CreateSharedVolumeSource::Local => {
             let path = local_path(crate::PACKAGE_DATA, &id);
-            tokio::fs::create_dir_all(&path).await?;
-            use std::os::unix::fs::PermissionsExt;
-            tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).await?;
+            create_local_target(&path).await?;
             (SharedVolumeSource::Local, None)
         }
         CreateSharedVolumeSource::Disk { logicalname, path } => (
@@ -172,6 +170,16 @@ pub async fn create(
         publication?;
     }
     Ok(id)
+}
+
+async fn create_local_target(path: &Path) -> Result<(), Error> {
+    use std::os::unix::fs::PermissionsExt;
+    tokio::fs::create_dir_all(path.parent().expect("managed target root")).await?;
+    crate::util::btrfs::create_subvolume(path).await?;
+    let permissions = tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+        .await
+        .map_err(Error::from);
+    source::finish_directory_publication(path, permissions).await
 }
 
 /// Registers partition roots containing `StartOSBackupsV2` metadata on explicit request.
@@ -366,7 +374,7 @@ async fn remove_target(
     };
     // Registration survives failed or interrupted managed-data deletion.
     if local {
-        crate::util::io::delete_dir(&path).await?;
+        crate::util::btrfs::delete_volume_root(&path).await?;
     }
     database
         .mutate(|db| {

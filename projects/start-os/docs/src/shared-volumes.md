@@ -37,7 +37,7 @@ Remove a volume from its **Manage** dialog. Removing revokes all service access,
 - For a managed **Local folder**, the button reads **Delete**. It permanently deletes the folder and its contents after attachments are detached, so StartOS asks you to type the volume's name to confirm.
 - For an **External drive** or **CIFS share**, **Remove** deletes the volume configuration but leaves the source's contents untouched.
 
-If detachment or local cleanup fails, the error is reported. Managed local contents remain under **Pending local deletion** for a retry; they are not deleted while detachment has failed.
+If detachment or local deletion fails, StartOS reports the error and keeps the local volume registered without service access. Retry **Delete** from its **Manage** dialog. Local deletion completes before the request returns; the filesystem can reclaim its space afterward.
 
 Uninstalling or rolling back a consuming service leaves volume contents untouched.
 

@@ -3,6 +3,7 @@ import { ISB } from '@start9labs/start-core'
 
 import { Params } from 'src/app/services/api/api.types'
 import { getPartitionName } from 'src/app/utils/get-partition-name'
+import { getDriveName } from 'src/app/utils/get-drive-name'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 
 export type Source = Params<'volumes.create'>['source']
@@ -38,8 +39,7 @@ export const usableDrives = (disks: Disk[]) =>
   )
 
 export const driveName = (i18n: i18nPipe, drive: Disk) =>
-  [drive.vendor, drive.model].filter(Boolean).join(' ') ||
-  i18n.transform('Unknown Drive')
+  getDriveName(drive) || i18n.transform('Unknown Drive')
 
 export function diskSpec(i18n: i18nPipe, drives: Disk[]) {
   return ISB.InputSpec.of({

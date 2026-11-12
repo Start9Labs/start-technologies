@@ -321,7 +321,7 @@ impl TmpMountGuard {
             .await;
         if slot.1.upgrade().is_some() {
             return Err(Error::new(
-                eyre!(t!("backup.target.in-use")),
+                eyre!(t!("disk.mount.guard.in-use")),
                 ErrorKind::InvalidRequest,
             ));
         }

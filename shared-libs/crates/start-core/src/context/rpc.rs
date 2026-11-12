@@ -482,6 +482,8 @@ impl RpcContext {
         });
 
         let res = Self(seed.clone());
+        crate::update::signer_files::initialize(&res.db).await?;
+        res.cleanup_and_initialize(cleanup_init).await?;
         #[cfg(target_os = "linux")]
         {
             let weak = Arc::downgrade(&seed);
@@ -489,8 +491,6 @@ impl RpcContext {
                 weak.upgrade().map(Self)
             }));
         }
-        crate::update::signer_files::initialize(&res.db).await?;
-        res.cleanup_and_initialize(cleanup_init).await?;
         tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
 
         crate::version::post_init(&res, run_migrations).await?;
@@ -590,8 +590,7 @@ impl RpcContext {
         });
         cleanup_sessions.complete();
 
-        // Must run before services init: volume conversion requires that no
-        // container hold a mount on a package volume.
+        // Conversion requires unmounted, quiescent roots before observers and services start.
         optimize_storage.start();
         let peek = self.db.peek().await;
         let mut installed = BTreeSet::new();
@@ -611,6 +610,11 @@ impl RpcContext {
             tracing::warn!("{}", t!("context.rpc.volume-maintenance-failed", error = e));
             tracing::debug!("{e:?}");
         }
+        crate::volume::convert_directories_to_subvolumes(
+            crate::shared_volumes::managed_local_paths(&peek)?,
+            &mut optimize_storage,
+        )
+        .await?;
         optimize_storage.complete();
 
         init_services.start();

@@ -1508,7 +1508,13 @@ disk.format.unsupported-sector-size:
   fr_FR: "Ce disque utilise une taille de secteur non prise en charge (%{size} octets) ; StartOS peut formater des disques à secteurs de 512 ou 4096 octets"
   pl_PL: "Ten dysk używa nieobsługiwanego rozmiaru sektora (%{size} bajtów); StartOS może formatować dyski o sektorach 512 lub 4096 bajtów"
 
-# disk/mount/util.rs
+disk.mount.guard.in-use:
+  en_US: "This storage source is in use. Wait for its operations to finish before deleting it."
+  de_DE: "Diese Speicherquelle wird verwendet. Warte, bis ihre Vorgänge abgeschlossen sind, bevor du sie löschst."
+  es_ES: "Este origen de almacenamiento está en uso. Espera a que terminen sus operaciones antes de eliminarlo."
+  fr_FR: "Cette source de stockage est utilisée. Attendez la fin de ses opérations avant de la supprimer."
+  pl_PL: "To źródło pamięci masowej jest używane. Poczekaj na zakończenie operacji, zanim je usuniesz."
+
 disk.mount.binding:
   en_US: "Binding %{src} to %{dst}"
   de_DE: "Binde %{src} an %{dst}"
@@ -2056,13 +2062,6 @@ backup.restore.package-installed:
   es_ES: "No se puede restaurar %{id}: ya está instalado. Desinstálalo primero."
   fr_FR: "Impossible de restaurer %{id} : il est déjà installé. Désinstallez-le d’abord."
   pl_PL: "Nie można przywrócić %{id}: jest już zainstalowany. Najpierw go odinstaluj."
-
-backup.target.in-use:
-  en_US: "This backup target is in use. Unmount it and wait for its operations to finish before removing it."
-  de_DE: "Dieses Sicherungsziel wird verwendet. Hänge es aus und warte, bis seine Vorgänge abgeschlossen sind, bevor du es entfernst."
-  es_ES: "Este destino de copia de seguridad está en uso. Desmóntalo y espera a que terminen sus operaciones antes de eliminarlo."
-  fr_FR: "Cette cible de sauvegarde est utilisée. Démontez-la et attendez la fin de ses opérations avant de la supprimer."
-  pl_PL: "Ten cel kopii zapasowej jest używany. Odmontuj go i poczekaj na zakończenie operacji, zanim go usuniesz."
 
 backup.target.partial-mount:
   en_US: "The base filesystem mounted successfully at %{path}."
@@ -3862,13 +3861,6 @@ shared-volumes.not-cifs:
   es_ES: "Solo los volúmenes de recursos compartidos CIFS pueden cambiar sus datos de conexión"
   fr_FR: "Seuls les volumes de partages CIFS peuvent modifier leurs informations de connexion"
   pl_PL: "Tylko woluminy udziałów CIFS mogą zmieniać dane połączenia"
-
-shared-volumes.remove-before-delete:
-  en_US: "Remove the volume definition before deleting its local data"
-  de_DE: "Die Volume-Definition vor dem Löschen ihrer lokalen Daten entfernen"
-  es_ES: "Elimina la definición del volumen antes de borrar sus datos locales"
-  fr_FR: "Supprimez la définition du volume avant de supprimer ses données locales"
-  pl_PL: "Usuń definicję woluminu przed usunięciem jego danych lokalnych"
 
 shared-volumes.source-unavailable:
   en_US: "The volume source is unavailable. Check the source, network and credentials."

@@ -28,6 +28,7 @@ const mockDescription = {
 
 export namespace Mock {
   export function driveLink(logicalname: string) {
+    if (logicalname.startsWith('/dev/disk/by-uuid/')) return logicalname
     const hex = [0, 1, 2, 3]
       .map(seed =>
         [...logicalname]
@@ -42,6 +43,34 @@ export namespace Mock {
       )
       .join('')
     return `/dev/disk/by-uuid/${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+
+  export function diskSource(
+    logicalname: string,
+    path = '',
+  ): T.SharedVolumeSource & { kind: 'disk' } {
+    const entry = Disks.flatMap(disk =>
+      disk.partitions.map(partition => ({ disk, partition })),
+    ).find(({ partition }) =>
+      [
+        partition.logicalname,
+        partition.stablePath,
+        driveLink(partition.logicalname),
+      ].includes(logicalname),
+    )
+    return {
+      kind: 'disk',
+      logicalname: driveLink(entry?.partition.logicalname ?? logicalname),
+      path: path.replace(/^\/+/, ''),
+      drive: entry
+        ? {
+            vendor: entry.disk.vendor,
+            model: entry.disk.model,
+            label: entry.partition.label,
+            capacity: entry.disk.capacity,
+          }
+        : null,
+    }
   }
 
   export const ServerId = '1234-5678-9876-5432'

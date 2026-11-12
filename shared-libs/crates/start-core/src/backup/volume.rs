@@ -288,7 +288,11 @@ struct IncompleteRestore(Option<PathBuf>);
 impl IncompleteRestore {
     async fn clean(&mut self) {
         if let Some(path) = self.0.as_ref() {
-            if delete_dir(path).await.log_err().is_some() {
+            if crate::util::btrfs::delete_tree(path)
+                .await
+                .log_err()
+                .is_some()
+            {
                 self.0.take();
             }
         }
@@ -299,25 +303,16 @@ impl Drop for IncompleteRestore {
     fn drop(&mut self) {
         if let Some(path) = self.0.take() {
             tokio::spawn(async move {
-                delete_dir(path).await.log_err();
+                crate::util::btrfs::delete_tree(path).await.log_err();
             });
         }
     }
 }
 
 fn new_local_restore(name: String) -> (SharedVolumeId, SharedVolume) {
-    (
-        SharedVolumeId::new(),
-        SharedVolume {
-            name,
-            source: SharedVolumeSource::Local,
-            grants: BTreeMap::new(),
-            inspection: crate::shared_volumes::SharedVolumeInspection {
-                availability: SharedVolumeAvailability::Available,
-                ..Default::default()
-            },
-        },
-    )
+    let mut volume = SharedVolume::new(name, SharedVolumeSource::Local);
+    volume.inspection.availability = SharedVolumeAvailability::Available;
+    (SharedVolumeId::new(), volume)
 }
 
 async fn restore_local_copy<F: Future<Output = Result<(), Error>>>(
@@ -329,12 +324,12 @@ async fn restore_local_copy<F: Future<Output = Result<(), Error>>>(
     let (id, volume) = new_local_restore(name);
     let path = local_path(package_data, &id);
     tokio::fs::create_dir_all(path.parent().expect("local volume parent")).await?;
-    tokio::fs::create_dir(&path).await?;
+    crate::util::btrfs::create_subvolume(&path).await?;
     let mut incomplete = IncompleteRestore(Some(path.clone()));
     let result = async {
-        source::create_local_directory(&path).await?;
+        source::set_local_permissions(&path).await?;
         copy_folder(source, &path).await?;
-        source::create_local_directory(&path).await?;
+        source::set_local_permissions(&path).await?;
         sync_directory(&path).await?;
         // Publication can commit after its caller cancels.
         incomplete.0.take();
@@ -600,9 +595,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires root and UID/GID 100000 mapped"]
+    #[ignore = "requires BTRFS_TEST_VOLUMES_DIR and UID/GID 100000 mapped"]
     async fn restore_creates_a_new_local_volume_without_touching_existing_data() {
-        let fixture = tempfile::tempdir().unwrap();
+        let fixture = crate::util::btrfs::tests::directory();
         let old_id = SharedVolumeId::new();
         let old_path = local_path(fixture.path(), &old_id);
         let source = fixture.path().join("backup");
@@ -632,6 +627,7 @@ mod tests {
             std::fs::read(source.join("sentinel")).unwrap(),
             b"restored data"
         );
+        assert!(crate::util::btrfs::is_subvolume(local_path(fixture.path(), &created)).await);
         let metadata = std::fs::metadata(local_path(fixture.path(), &created)).unwrap();
         assert_eq!(metadata.uid(), 100000);
         assert_eq!(metadata.gid(), 100000);
@@ -639,9 +635,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires root and UID/GID 100000 mapped"]
+    #[ignore = "requires BTRFS_TEST_VOLUMES_DIR and UID/GID 100000 mapped"]
     async fn failed_restore_copy_or_publication_leaves_no_new_data() {
-        let fixture = tempfile::tempdir().unwrap();
+        let fixture = crate::util::btrfs::tests::directory();
         let source = fixture.path().join("backup");
         std::fs::create_dir(&source).unwrap();
         std::fs::write(source.join("sentinel"), b"backup data").unwrap();

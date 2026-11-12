@@ -565,7 +565,13 @@
           "anyOf": [
             {
               "type": "object",
-              "properties": { "kind": { "type": "string", "const": "local" } },
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "local",
+                  "description": "Managed Btrfs subvolume on the encrypted data partition."
+                }
+              },
               "required": ["kind"],
               "additionalProperties": true
             },
@@ -575,12 +581,15 @@
                 "kind": { "type": "string", "const": "disk" },
                 "logicalname": { "type": "string" },
                 "path": { "type": "string" },
-                "label": {
-                  "description": "The partition label or drive model when the volume was created, for display.",
-                  "type": ["string", "null"]
+                "drive": {
+                  "description": "The drive as reported when the source was created, for display.",
+                  "anyOf": [
+                    { "$ref": "#/$defs/SharedVolumeDrive" },
+                    { "type": "null" }
+                  ]
                 }
               },
-              "required": ["kind", "logicalname", "path", "label"]
+              "required": ["kind", "logicalname", "path", "drive"]
             },
             {
               "type": "object",
@@ -593,6 +602,21 @@
               "required": ["kind", "hostname", "path", "username"]
             }
           ]
+        },
+        "SharedVolumeDrive": {
+          "type": "object",
+          "properties": {
+            "vendor": { "type": ["string", "null"] },
+            "model": { "type": ["string", "null"] },
+            "label": { "type": ["string", "null"] },
+            "capacity": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["vendor", "model", "label", "capacity"],
+          "additionalProperties": true
         },
         "StartOsRecoveryInfo": {
           "type": "object",
@@ -727,7 +751,13 @@
           "anyOf": [
             {
               "type": "object",
-              "properties": { "kind": { "type": "string", "const": "local" } },
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "local",
+                  "description": "Managed Btrfs subvolume on the encrypted data partition."
+                }
+              },
               "required": ["kind"],
               "additionalProperties": true
             },
@@ -737,12 +767,15 @@
                 "kind": { "type": "string", "const": "disk" },
                 "logicalname": { "type": "string" },
                 "path": { "type": "string" },
-                "label": {
-                  "description": "The partition label or drive model when the volume was created, for display.",
-                  "type": ["string", "null"]
+                "drive": {
+                  "description": "The drive as reported when the source was created, for display.",
+                  "anyOf": [
+                    { "$ref": "#/$defs/SharedVolumeDrive" },
+                    { "type": "null" }
+                  ]
                 }
               },
-              "required": ["kind", "logicalname", "path", "label"]
+              "required": ["kind", "logicalname", "path", "drive"]
             },
             {
               "type": "object",
@@ -755,6 +788,21 @@
               "required": ["kind", "hostname", "path", "username"]
             }
           ]
+        },
+        "SharedVolumeDrive": {
+          "type": "object",
+          "properties": {
+            "vendor": { "type": ["string", "null"] },
+            "model": { "type": ["string", "null"] },
+            "label": { "type": ["string", "null"] },
+            "capacity": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["vendor", "model", "label", "capacity"],
+          "additionalProperties": true
         },
         "StartOsRecoveryInfo": {
           "type": "object",
@@ -1177,7 +1225,13 @@
           "anyOf": [
             {
               "type": "object",
-              "properties": { "kind": { "type": "string", "const": "local" } },
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "local",
+                  "description": "Managed Btrfs subvolume on the encrypted data partition."
+                }
+              },
               "required": ["kind"],
               "additionalProperties": true
             },
@@ -1187,12 +1241,15 @@
                 "kind": { "type": "string", "const": "disk" },
                 "logicalname": { "type": "string" },
                 "path": { "type": "string" },
-                "label": {
-                  "description": "The partition label or drive model when the volume was created, for display.",
-                  "type": ["string", "null"]
+                "drive": {
+                  "description": "The drive as reported when the source was created, for display.",
+                  "anyOf": [
+                    { "$ref": "#/$defs/SharedVolumeDrive" },
+                    { "type": "null" }
+                  ]
                 }
               },
-              "required": ["kind", "logicalname", "path", "label"]
+              "required": ["kind", "logicalname", "path", "drive"]
             },
             {
               "type": "object",
@@ -1205,6 +1262,21 @@
               "required": ["kind", "hostname", "path", "username"]
             }
           ]
+        },
+        "SharedVolumeDrive": {
+          "type": "object",
+          "properties": {
+            "vendor": { "type": ["string", "null"] },
+            "model": { "type": ["string", "null"] },
+            "label": { "type": ["string", "null"] },
+            "capacity": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["vendor", "model", "label", "capacity"],
+          "additionalProperties": true
         },
         "StartOsRecoveryInfo": {
           "type": "object",
@@ -12706,28 +12778,6 @@
     }
   },
   {
-    "name": "volumes.delete-data",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$defs": {
-        "SharedVolumeParams": {
-          "type": "object",
-          "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
-          "required": ["id"],
-          "additionalProperties": true
-        },
-        "SharedVolumeId": {
-          "type": "string",
-          "description": "A 32-character uppercase base32 volume identity."
-        }
-      },
-      "type": "object",
-      "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
-      "required": ["id"],
-      "additionalProperties": true
-    }
-  },
-  {
     "name": "volumes.inspect",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -12794,21 +12844,6 @@
       },
       "required": ["availability", "available", "error", "checkedAt"],
       "additionalProperties": true
-    }
-  },
-  {
-    "name": "volumes.list-retained",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {},
-      "additionalProperties": true
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "propertyNames": { "type": "string" },
-      "additionalProperties": { "type": "string" }
     }
   },
   {

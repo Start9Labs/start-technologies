@@ -1,5 +1,5 @@
 import { KeyValuePipe } from '@angular/common'
-import { Component, inject, signal } from '@angular/core'
+import { Component, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { RouterLink } from '@angular/router'
 import {
@@ -18,7 +18,6 @@ import { PatchDB } from 'patch-db-client'
 import { filter, firstValueFrom } from 'rxjs'
 
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
-import { Result } from 'src/app/services/api/api.types'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { FormDialogService } from 'src/app/services/form-dialog.service'
@@ -125,37 +124,6 @@ import { DELETE_LOCAL } from './delete-local'
         }
       </table>
     </section>
-    @let retainedItems = retained() | keyvalue: null;
-    @if (retainedItems.length) {
-      <section class="g-card">
-        <header>{{ 'Pending local deletion' | i18n }}</header>
-        <p>
-          {{
-            'Local data left after an unsuccessful deletion. Retry to delete it permanently.'
-              | i18n
-          }}
-        </p>
-        <table [appTable]="['Name', null]">
-          @for (volume of retainedItems; track volume.key) {
-            <tr>
-              <td>{{ volume.value }}</td>
-              <td>
-                <button
-                  tuiIconButton
-                  size="s"
-                  appearance="flat-grayscale"
-                  iconStart="@tui.trash-2"
-                  [tuiHint]="'Delete local data' | i18n"
-                  (click)="deleteData(volume.key)"
-                >
-                  {{ 'Delete local data' | i18n }}
-                </button>
-              </td>
-            </tr>
-          }
-        </table>
-      </section>
-    }
   `,
   styles: `
     :host {
@@ -228,14 +196,12 @@ export default class Volumes {
     inject<PatchDB<DataModel>>(PatchDB).watch$('sharedVolumes')
 
   protected readonly volumes = toSignal(this.volumes$, { initialValue: {} })
-  protected readonly retained = signal<Result<'volumes.list-retained'>>({})
   protected readonly types = VOLUME_TYPES
   protected readonly name = volumeName
   protected readonly path = volumePath
   protected readonly statuses = VOLUME_STATUSES
 
   constructor() {
-    this.refreshRetained()
     this.recheckStale()
   }
 
@@ -250,14 +216,6 @@ export default class Volumes {
             .catch(error => this.errors.handleError(error as HttpError)),
         ),
     )
-  }
-
-  private async refreshRetained() {
-    try {
-      this.retained.set(await this.api.rpc.volumes.listRetained({}))
-    } catch (error) {
-      this.errors.handleError(error as HttpError)
-    }
   }
 
   protected add() {
@@ -305,33 +263,5 @@ export default class Volumes {
       () => this.api.rpc.volumes.remove({ id }),
       local ? 'Deleting' : 'Removing',
     )
-    await this.refreshRetained()
-  }
-
-  protected async deleteData(id: string) {
-    if (
-      !(await firstValueFrom(
-        this.dialogs.openConfirm({
-          label: 'Delete local data',
-          data: {
-            content:
-              'Permanently delete this local volume folder and all its contents?',
-            yes: 'Delete local data',
-            no: 'Cancel',
-            appearance: 'primary-destructive',
-          },
-        }),
-        { defaultValue: false },
-      ))
-    )
-      return
-    if (
-      await this.tasks.run(
-        () => this.api.rpc.volumes.deleteData({ id }),
-        'Deleting',
-      )
-    ) {
-      await this.refreshRetained()
-    }
   }
 }

@@ -22,6 +22,7 @@ export const VOLUME_STATUSES: Record<T.SharedVolumeAvailability, i18nKey> = {
 export const volumePath = (source: T.SharedVolumeSource) =>
   source.kind === 'local' ? '/' : `/${source.path.replace(/^\//, '')}`
 
+/** CIFS display names follow the hostname, independent of stored aliases. */
 export const volumeName = ({
   name,
   source,

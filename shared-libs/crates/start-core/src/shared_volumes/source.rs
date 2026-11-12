@@ -17,7 +17,12 @@ use crate::shared_volumes::{
 };
 
 pub async fn create_local_directory(path: &Path) -> Result<(), Error> {
-    tokio::fs::create_dir_all(path).await?;
+    tokio::fs::create_dir_all(path.parent().expect("managed volume root")).await?;
+    crate::util::btrfs::create_subvolume(path).await?;
+    finish_directory_publication(path, set_local_permissions(path).await).await
+}
+
+pub(crate) async fn set_local_permissions(path: &Path) -> Result<(), Error> {
     std::os::unix::fs::chown(
         path,
         Some(crate::lxc::BASE_IDMAP.to_id),
@@ -33,7 +38,7 @@ pub(crate) async fn finish_directory_publication(
     result: Result<(), Error>,
 ) -> Result<(), Error> {
     if result.is_err() {
-        crate::util::io::delete_dir(path).await.log_err();
+        crate::util::btrfs::delete_tree(path).await.log_err();
     }
     result
 }
@@ -145,7 +150,7 @@ impl<D: FileSystem, C: FileSystem> FileSystem for PreparedFilesystem<D, C> {
     ) -> Result<(), Error> {
         match self {
             Self::Local(path) => {
-                if !tokio::fs::metadata(path).await?.is_dir() {
+                if !crate::util::btrfs::is_subvolume(path).await {
                     return Err(Error::new(
                         eyre!(t!("shared-volumes.source-unavailable")),
                         ErrorKind::Filesystem,

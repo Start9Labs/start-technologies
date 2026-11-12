@@ -90,12 +90,7 @@ export const mockPatchData: DataModel = {
     },
     MOCKDISKVOLUME234567ABCDEFGHIJKL: {
       name: 'Photos library',
-      source: {
-        kind: 'disk',
-        logicalname: Mock.driveLink('/dev/sdc1'),
-        path: 'media/photos',
-        label: 'T7',
-      },
+      source: Mock.diskSource('/dev/sdc1', 'media/photos'),
       grants: {
         nextcloud: { readonly: true },
         jellyfin: { readonly: true },
@@ -108,10 +103,13 @@ export const mockPatchData: DataModel = {
     MOCKMISSINGDRIVE234567ABCDEFGHIJ: {
       name: 'Movies',
       source: {
-        kind: 'disk',
-        logicalname: Mock.driveLink('/dev/sdz1'),
-        path: 'movies',
-        label: 'Elements',
+        ...Mock.diskSource('/dev/sdz1', 'movies'),
+        drive: {
+          vendor: 'WD',
+          model: 'Elements',
+          label: 'Elements',
+          capacity: 4000000000000,
+        },
       },
       grants: { jellyfin: { readonly: true } },
       availability: 'unavailable',
@@ -172,12 +170,7 @@ export const mockPatchData: DataModel = {
     },
     MOCKBACKUPDRIVE234567ABCDEFGHIJK: {
       name: 'Samsung T7',
-      source: {
-        kind: 'disk',
-        logicalname: Mock.driveLink('/dev/sdc1'),
-        path: '',
-        label: 'T7',
-      },
+      source: Mock.diskSource('/dev/sdc1'),
       availability: 'available',
       available: 900000000000,
       error: null,
@@ -194,12 +187,7 @@ export const mockPatchData: DataModel = {
     },
     MOCKBACKUPLEGACY234567ABCDEFGHIJ: {
       name: 'SSK drive',
-      source: {
-        kind: 'disk',
-        logicalname: Mock.driveLink('/dev/sdd1'),
-        path: 'backups',
-        label: null,
-      },
+      source: Mock.diskSource('/dev/sdd1', 'backups'),
       availability: 'available',
       available: 1000000000,
       error: null,
@@ -216,12 +204,7 @@ export const mockPatchData: DataModel = {
     },
     MOCKBACKUPPASSPORT234567ABCDEFGH: {
       name: 'WD Passport',
-      source: {
-        kind: 'disk',
-        logicalname: Mock.driveLink('/dev/sde1'),
-        path: 'StartOS',
-        label: 'My Passport',
-      },
+      source: Mock.diskSource('/dev/sde1', 'StartOS'),
       availability: 'available',
       available: 61200000000,
       error: null,

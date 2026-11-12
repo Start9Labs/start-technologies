@@ -1195,6 +1195,28 @@ export const SharedVolumeBackupInfo: z.ZodObject<{
 }).meta({
   id: 'SharedVolumeBackupInfo',
 })
+export const SharedVolumeDrive: z.ZodObject<{
+  vendor: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  model: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  label: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  capacity: z.ZodInt
+}> = /* @__PURE__ */ object({
+  vendor: wire(z.string().nullable().optional(), z.string().nullable()),
+  model: wire(z.string().nullable().optional(), z.string().nullable()),
+  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  capacity: z.int(),
+}).meta({
+  id: 'SharedVolumeDrive',
+})
 export const SharedVolumeGrant: z.ZodObject<{ readonly: z.ZodBoolean }> =
   /* @__PURE__ */ object({ readonly: z.boolean() }).meta({
     id: 'SharedVolumeGrant',
@@ -1207,64 +1229,6 @@ export const SharedVolumeId: z.ZodString = /* @__PURE__ */ z.string().meta({
   id: 'SharedVolumeId',
   description: 'A 32-character uppercase base32 volume identity.',
 })
-export const SharedVolumeSource: z.ZodUnion<
-  readonly [
-    z.ZodObject<{ kind: z.ZodLiteral<'local'> }>,
-    z.ZodIntersection<
-      z.ZodObject<{ kind: z.ZodLiteral<'disk'> }>,
-      z.ZodObject<{
-        logicalname: z.ZodString
-        path: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
-        /**
-         * The partition label or drive model when the volume was created, for display.
-         */
-        label: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodString>>,
-          z.ZodNullable<z.ZodString>
-        >
-      }>
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ kind: z.ZodLiteral<'cifs'> }>,
-      z.ZodObject<{
-        hostname: z.ZodString
-        path: z.ZodString
-        username: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
-      }>
-    >,
-  ]
-> = /* @__PURE__ */ z
-  .union([
-    object({ kind: z.literal('local') }),
-    z.intersection(
-      object({ kind: z.literal('disk') }),
-      object({
-        logicalname: z.string(),
-        path: wire(z.string().optional(), z.string()),
-        /**
-         * The partition label or drive model when the volume was created, for display.
-         */
-        label: wire(
-          z.string().nullable().optional(),
-          z.string().nullable(),
-        ).meta({
-          description:
-            'The partition label or drive model when the volume was created, for display.',
-        }),
-      }),
-    ),
-    z.intersection(
-      object({ kind: z.literal('cifs') }),
-      object({
-        hostname: z.string(),
-        path: z.string(),
-        username: wire(z.string().optional(), z.string()),
-      }),
-    ),
-  ])
-  .meta({
-    id: 'SharedVolumeSource',
-  })
 export const ShutdownParams: z.ZodObject<{
   /**
    * Block until graceful teardown completes (default over the CLI; the
@@ -3546,6 +3510,76 @@ export const SharedVolumeInspection: z.ZodObject<{
 export const SharedVolumeParams: z.ZodObject<{ id: typeof SharedVolumeId }> =
   /* @__PURE__ */ object({ id: SharedVolumeId }).meta({
     id: 'SharedVolumeParams',
+  })
+export const SharedVolumeSource: z.ZodUnion<
+  readonly [
+    z.ZodObject<{
+      /**
+       * Managed Btrfs subvolume on the encrypted data partition.
+       */
+      kind: z.ZodLiteral<'local'>
+    }>,
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'disk'> }>,
+      z.ZodObject<{
+        logicalname: z.ZodString
+        path: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+        /**
+         * The drive as reported when the source was created, for display.
+         */
+        drive: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<typeof SharedVolumeDrive>>,
+          z.ZodNullable<typeof SharedVolumeDrive>
+        >
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'cifs'> }>,
+      z.ZodObject<{
+        hostname: z.ZodString
+        path: z.ZodString
+        username: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+      }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    object({
+      /**
+       * Managed Btrfs subvolume on the encrypted data partition.
+       */
+      kind: z.literal('local').meta({
+        description: 'Managed Btrfs subvolume on the encrypted data partition.',
+      }),
+    }),
+    z.intersection(
+      object({ kind: z.literal('disk') }),
+      object({
+        logicalname: z.string(),
+        path: wire(z.string().optional(), z.string()),
+        /**
+         * The drive as reported when the source was created, for display.
+         */
+        drive: wire(
+          SharedVolumeDrive.nullable().optional(),
+          SharedVolumeDrive.nullable(),
+        ).meta({
+          description:
+            'The drive as reported when the source was created, for display.',
+        }),
+      }),
+    ),
+    z.intersection(
+      object({ kind: z.literal('cifs') }),
+      object({
+        hostname: z.string(),
+        path: z.string(),
+        username: wire(z.string().optional(), z.string()),
+      }),
+    ),
+  ])
+  .meta({
+    id: 'SharedVolumeSource',
   })
 export const SideloadResponse: z.ZodObject<{
   upload: typeof Guid
@@ -7415,17 +7449,9 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ CreateSharedVolumeParams,
           _RETURN: /* @__PURE__ */ SharedVolumeId,
         },
-        'delete-data': {
-          _PARAMS: /* @__PURE__ */ SharedVolumeParams,
-          _RETURN: /* @__PURE__ */ z.null(),
-        },
         inspect: {
           _PARAMS: /* @__PURE__ */ SharedVolumeParams,
           _RETURN: /* @__PURE__ */ SharedVolumeInspection,
-        },
-        'list-retained': {
-          _PARAMS: /* @__PURE__ */ empty,
-          _RETURN: /* @__PURE__ */ z.record(z.string(), z.string()),
         },
         remove: {
           _PARAMS: /* @__PURE__ */ SharedVolumeParams,

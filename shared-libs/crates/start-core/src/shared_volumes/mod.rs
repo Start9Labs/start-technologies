@@ -77,6 +77,7 @@ impl AsRef<str> for SharedVolumeId {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, VisitVariants)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum SharedVolumeSource {
+    /// Managed Btrfs subvolume on the encrypted data partition.
     Local,
     Disk {
         logicalname: PathBuf,
@@ -155,6 +156,53 @@ pub struct SharedVolume {
     pub inspection: SharedVolumeInspection,
 }
 
+impl SharedVolume {
+    pub(crate) fn new(name: String, source: SharedVolumeSource) -> Self {
+        Self {
+            name,
+            source,
+            grants: BTreeMap::new(),
+            inspection: SharedVolumeInspection::default(),
+        }
+    }
+}
+
+pub(crate) fn managed_local_paths(
+    database: &crate::db::model::DatabaseModel,
+) -> Result<Vec<PathBuf>, Error> {
+    let mut paths = Vec::new();
+    for (id, volume) in database.as_public().as_shared_volumes().as_entries()? {
+        if matches!(volume.as_source().de()?, SharedVolumeSource::Local) {
+            paths.push(local_path(crate::PACKAGE_DATA, &id));
+        }
+    }
+    for (id, target) in database.as_public().as_backup_targets().as_entries()? {
+        if matches!(target.as_source().de()?, SharedVolumeSource::Local) {
+            paths.push(crate::backup::target::catalog::local_path(
+                crate::PACKAGE_DATA,
+                &id,
+            ));
+        }
+    }
+    Ok(paths)
+}
+
+/// Restores pending local deletions as ungranted registrations for retry.
+pub(crate) fn recover_pending_deletions(
+    volumes: &mut BTreeMap<SharedVolumeId, SharedVolume>,
+    private: &Value,
+) -> Result<(), Error> {
+    if let Some(saved) = private.get("retainedSharedVolumes") {
+        let pending: BTreeMap<SharedVolumeId, String> = from_value(saved.clone())?;
+        for (id, name) in pending {
+            volumes
+                .entry(id)
+                .or_insert_with(|| SharedVolume::new(name, SharedVolumeSource::Local));
+        }
+    }
+    Ok(())
+}
+
 rpc_toolkit::reflect_ts!(SharedVolume);
 rpc_toolkit::ts_export!(SharedVolume, namespaces = [""]);
 
@@ -218,8 +266,6 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         .subcommand("update-cifs", from_fn_async(update_cifs).no_cli())
         .subcommand("set-grant", from_fn_async(set_grant).no_cli())
         .subcommand("remove", from_fn_async(remove).no_cli())
-        .subcommand("delete-data", from_fn_async(delete_data).no_cli())
-        .subcommand("list-retained", from_fn_async(list_retained).no_cli())
         .subcommand("inspect", from_fn_async(inspect).no_cli())
 }
 
@@ -286,15 +332,9 @@ pub async fn create(
                     .as_shared_volume_credentials_mut()
                     .insert(&id, credentials)?;
             }
-            db.as_public_mut().as_shared_volumes_mut().insert(
-                &id,
-                &SharedVolume {
-                    name,
-                    source,
-                    grants: BTreeMap::new(),
-                    inspection: SharedVolumeInspection::default(),
-                },
-            )?;
+            db.as_public_mut()
+                .as_shared_volumes_mut()
+                .insert(&id, &SharedVolume::new(name, source))?;
             Ok(())
         })
         .await
@@ -472,15 +512,12 @@ pub struct SharedVolumeParams {
 
 rpc_toolkit::reflect_ts!(SharedVolumeParams);
 
+/// Revokes local grants before detachment; failed deletion keeps the registration.
 pub async fn remove(
     ctx: RpcContext,
     SharedVolumeParams { id }: SharedVolumeParams,
 ) -> Result<(), Error> {
-    let packages = ctx
-        .db
-        .mutate(|db| remove_definition(db, &id))
-        .await
-        .result?;
+    let (source, packages) = ctx.db.mutate(|db| prepare_removal(db, &id)).await.result?;
     let mut errors = ErrorCollection::new();
     for package_id in &packages {
         let service = ctx.services.get(package_id).await;
@@ -495,77 +532,58 @@ pub async fn remove(
         }
     }
     errors.into_result()?;
-    delete_retained_data(&ctx, &id).await
+    if matches!(source, Some(SharedVolumeSource::Local)) {
+        delete_local_volume(&ctx.db, &id, Path::new(crate::PACKAGE_DATA)).await?;
+    }
+    Ok(())
+}
+
+fn prepare_removal(
+    db: &mut crate::db::model::DatabaseModel,
+    id: &SharedVolumeId,
+) -> Result<(Option<SharedVolumeSource>, BTreeSet<PackageId>), Error> {
+    let source = db
+        .as_public()
+        .as_shared_volumes()
+        .as_idx(id)
+        .map(|volume| volume.as_source().de())
+        .transpose()?;
+    if matches!(source, Some(SharedVolumeSource::Local)) {
+        db.as_public_mut()
+            .as_shared_volumes_mut()
+            .as_idx_mut(id)
+            .unwrap()
+            .as_grants_mut()
+            .ser(&BTreeMap::new())?;
+    } else {
+        remove_definition(db, id)?;
+    }
+    Ok((source, db.as_public().as_package_data().keys()?))
+}
+
+async fn delete_local_volume(
+    database: &TypedPatchDb<crate::db::model::Database>,
+    id: &SharedVolumeId,
+    package_data: &Path,
+) -> Result<(), Error> {
+    use crate::disk::mount::filesystem::ReadOnly;
+    use crate::disk::mount::filesystem::bind::Bind;
+    use crate::disk::mount::guard::TmpMountGuard;
+    let path = local_path(package_data, id);
+    let _unused = TmpMountGuard::reserve_unmounted(&Bind::new(&path), ReadOnly).await?;
+    crate::util::btrfs::delete_volume_root(&path).await?;
+    database.mutate(|db| remove_definition(db, id)).await.result
 }
 
 fn remove_definition(
     db: &mut crate::db::model::DatabaseModel,
     id: &SharedVolumeId,
-) -> Result<BTreeSet<PackageId>, Error> {
-    if let Some(volume) = db.as_public_mut().as_shared_volumes_mut().remove(id)? {
-        let volume = volume.de()?;
-        if matches!(volume.source, SharedVolumeSource::Local) {
-            db.as_private_mut()
-                .as_retained_shared_volumes_mut()
-                .insert(id, &volume.name)?;
-        }
-    }
+) -> Result<(), Error> {
+    db.as_public_mut().as_shared_volumes_mut().remove(id)?;
     db.as_private_mut()
         .as_shared_volume_credentials_mut()
         .remove(id)?;
-    db.as_public().as_package_data().keys()
-}
-
-pub async fn list_retained(ctx: RpcContext) -> Result<BTreeMap<SharedVolumeId, String>, Error> {
-    ctx.db
-        .peek()
-        .await
-        .as_private()
-        .as_retained_shared_volumes()
-        .de()
-}
-
-pub async fn delete_data(
-    ctx: RpcContext,
-    SharedVolumeParams { id }: SharedVolumeParams,
-) -> Result<(), Error> {
-    if ctx
-        .db
-        .peek()
-        .await
-        .as_public()
-        .as_shared_volumes()
-        .contains_key(&id)?
-    {
-        return Err(Error::new(
-            eyre!(t!("shared-volumes.remove-before-delete")),
-            ErrorKind::InvalidRequest,
-        ));
-    }
-    remove(ctx, SharedVolumeParams { id }).await
-}
-
-async fn delete_retained_data(ctx: &RpcContext, id: &SharedVolumeId) -> Result<(), Error> {
-    if !ctx
-        .db
-        .peek()
-        .await
-        .as_private()
-        .as_retained_shared_volumes()
-        .contains_key(id)?
-    {
-        return Ok(());
-    }
-    crate::util::io::delete_dir(local_path(crate::PACKAGE_DATA, id)).await?;
-    ctx.db
-        .mutate(|db| {
-            db.as_private_mut()
-                .as_retained_shared_volumes_mut()
-                .remove(id)?;
-            Ok(())
-        })
-        .await
-        .result
+    Ok(())
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, HasModel, VisitFields)]
@@ -681,34 +699,33 @@ mod tests {
     }
 
     #[test]
-    fn only_managed_local_data_is_retained_for_deletion_retries() {
+    fn removal_revokes_local_grants_before_deletion_and_unregisters_external_sources() {
         use crate::db::model::DatabaseModel;
         let local = SharedVolumeId::new();
         let cifs = SharedVolumeId::new();
         let disk = SharedVolumeId::new();
         let mut db = DatabaseModel::from(to_value(&serde_json::json!({
             "public": { "sharedVolumes": {
-                local.to_string(): {"name":"Photos", "source":{"kind":"local"}, "grants":{}},
+                local.to_string(): {"name":"Photos", "source":{"kind":"local"}, "grants":{"consumer":{"readonly":false}}},
                 cifs.to_string(): {"name":"Remote", "source":{"kind":"cifs","hostname":"nas","path":"/share"}, "grants":{}},
                 disk.to_string(): {"name":"Drive", "source":{"kind":"disk","logicalname":"/dev/disk/by-uuid/aabbccdd-0000-4000-8000-0123456789ab"}, "grants":{}}
             }, "packageData": {} },
             "private": { "sharedVolumeCredentials": {
                 cifs.to_string(): {"password":"secret"}
-            }, "retainedSharedVolumes": {} }
+            } }
         })).unwrap());
-        remove_definition(&mut db, &local).unwrap();
-        remove_definition(&mut db, &local).unwrap();
-        remove_definition(&mut db, &cifs).unwrap();
-        remove_definition(&mut db, &disk).unwrap();
+        let (source, _) = prepare_removal(&mut db, &local).unwrap();
+        assert!(matches!(source, Some(SharedVolumeSource::Local)));
+        prepare_removal(&mut db, &cifs).unwrap();
+        prepare_removal(&mut db, &disk).unwrap();
         let reloaded = DatabaseModel::from(to_value(&db).unwrap());
-        assert_eq!(
-            reloaded
-                .as_private()
-                .as_retained_shared_volumes()
-                .de()
-                .unwrap(),
-            BTreeMap::from([(local, "Photos".to_owned())])
-        );
+        let volume = reloaded
+            .as_public()
+            .as_shared_volumes()
+            .as_idx(&local)
+            .unwrap();
+        assert_eq!(volume.as_name().de().unwrap(), "Photos");
+        assert!(volume.as_grants().de().unwrap().is_empty());
         assert!(
             reloaded
                 .as_private()
@@ -718,12 +735,195 @@ mod tests {
                 .is_empty()
         );
         assert!(
-            reloaded
+            reloaded.as_public().as_shared_volumes().keys().unwrap() == BTreeSet::from([local])
+        );
+    }
+
+    #[test]
+    fn boot_maintenance_selects_only_managed_local_roots_from_both_catalogs() {
+        let volume = SharedVolumeId::new();
+        let target = crate::backup::target::BackupTargetId::new();
+        let remote = SharedVolumeId::new();
+        let external = crate::backup::target::BackupTargetId::new();
+        let database = crate::db::model::DatabaseModel::from(imbl_value::json!({
+            "public": {
+                "sharedVolumes": {
+                    volume.to_string(): {"source": {"kind": "local"}},
+                    remote.to_string(): {"source": {"kind": "cifs", "hostname": "nas", "path": "/files"}}
+                },
+                "backupTargets": {
+                    target.to_string(): {"source": {"kind": "local"}},
+                    external.to_string(): {"source": {"kind": "disk", "logicalname": "/dev/disk/by-uuid/external"}}
+                }
+            }
+        }));
+        let paths: BTreeSet<_> = managed_local_paths(&database)
+            .unwrap()
+            .into_iter()
+            .collect();
+        assert_eq!(
+            paths,
+            BTreeSet::from([
+                Path::new(crate::PACKAGE_DATA)
+                    .join("shared-volumes")
+                    .join(volume.as_ref()),
+                Path::new(crate::PACKAGE_DATA)
+                    .join("backup-targets")
+                    .join(target.as_ref()),
+            ])
+        );
+    }
+
+    #[test]
+    fn interrupted_deletions_recover_as_named_ungranted_local_entries() {
+        let id = SharedVolumeId::new();
+        let mut volumes = BTreeMap::new();
+        recover_pending_deletions(
+            &mut volumes,
+            &imbl_value::json!({
+                "retainedSharedVolumes": { id.to_string(): "Photos" }
+            }),
+        )
+        .unwrap();
+        assert_eq!(volumes.len(), 1);
+        let volume = &volumes[&id];
+        assert_eq!(volume.name, "Photos");
+        assert!(matches!(volume.source, SharedVolumeSource::Local));
+        assert!(volume.grants.is_empty());
+        assert_eq!(
+            volume.inspection.availability,
+            SharedVolumeAvailability::Unknown
+        );
+    }
+
+    async fn deletion_database(
+        root: &Path,
+        id: &SharedVolumeId,
+    ) -> TypedPatchDb<crate::db::model::Database> {
+        use patch_db::json_ptr::ROOT;
+        let mut volume = SharedVolume::new("Photos".into(), SharedVolumeSource::Local);
+        volume.grants.insert(
+            "consumer".parse().unwrap(),
+            SharedVolumeGrant { readonly: false },
+        );
+        let model = crate::db::model::DatabaseModel::from(imbl_value::json!({
+            "public": { "sharedVolumes": {id.to_string(): to_value(&volume).unwrap()}, "packageData": {} },
+            "private": { "sharedVolumeCredentials": {} }
+        }));
+        let database = TypedPatchDb::<crate::db::model::Database>::load_unchecked(
+            patch_db::PatchDb::open(root.join("state.db"))
+                .await
+                .unwrap(),
+        );
+        database.put(&ROOT, &model).await.unwrap();
+        database
+    }
+
+    #[tokio::test]
+    async fn failed_local_deletion_preserves_registration_without_grants_for_retry() {
+        let root = tempfile::tempdir().unwrap();
+        let id = SharedVolumeId::new();
+        let database = deletion_database(root.path(), &id).await;
+        database
+            .mutate(|db| prepare_removal(db, &id))
+            .await
+            .result
+            .unwrap();
+        let path = local_path(root.path(), &id);
+        tokio::fs::create_dir_all(path.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&path, b"not a directory").await.unwrap();
+        assert!(
+            delete_local_volume(&database, &id, root.path())
+                .await
+                .is_err()
+        );
+        let snapshot = database.peek().await;
+        let stored = snapshot
+            .as_public()
+            .as_shared_volumes()
+            .as_idx(&id)
+            .unwrap()
+            .de()
+            .unwrap();
+        assert_eq!(stored.name, "Photos");
+        assert!(stored.grants.is_empty());
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), b"not a directory");
+        tokio::fs::remove_file(&path).await.unwrap();
+        tokio::fs::create_dir(&path).await.unwrap();
+        tokio::fs::write(path.join("contents"), b"data")
+            .await
+            .unwrap();
+        delete_local_volume(&database, &id, root.path())
+            .await
+            .unwrap();
+        assert!(!path.exists());
+        assert!(
+            database
+                .peek()
+                .await
                 .as_public()
                 .as_shared_volumes()
+                .as_idx(&id)
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires BTRFS_TEST_VOLUMES_DIR and Btrfs subvolume permissions"]
+    async fn local_deletion_rejects_active_sources_then_deletes_before_unregistering() {
+        use crate::disk::mount::filesystem::ReadOnly;
+        use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
+        let fixture = crate::util::btrfs::tests::directory();
+        let id = SharedVolumeId::new();
+        let database = deletion_database(fixture.path(), &id).await;
+        let path = local_path(fixture.path(), &id);
+        source::create_local_directory(&path).await.unwrap();
+        tokio::fs::write(path.join("sentinel"), b"managed contents")
+            .await
+            .unwrap();
+        let filesystem = source::SourceFilesystem::Local(path.clone());
+        let held = TmpMountGuard::mount(&filesystem, ReadOnly).await.unwrap();
+        database
+            .mutate(|db| prepare_removal(db, &id))
+            .await
+            .result
+            .unwrap();
+        assert!(
+            delete_local_volume(&database, &id, fixture.path())
+                .await
+                .is_err()
+        );
+        let snapshot = database.peek().await;
+        assert!(
+            snapshot
+                .as_public()
+                .as_shared_volumes()
+                .as_idx(&id)
+                .unwrap()
+                .as_grants()
                 .de()
                 .unwrap()
                 .is_empty()
+        );
+        assert_eq!(
+            tokio::fs::read(path.join("sentinel")).await.unwrap(),
+            b"managed contents"
+        );
+        held.unmount().await.unwrap();
+        delete_local_volume(&database, &id, fixture.path())
+            .await
+            .unwrap();
+        assert!(!path.exists());
+        assert!(
+            database
+                .peek()
+                .await
+                .as_public()
+                .as_shared_volumes()
+                .as_idx(&id)
+                .is_none()
         );
     }
 

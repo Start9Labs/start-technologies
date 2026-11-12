@@ -1480,6 +1480,48 @@ test('source editor preserves unsaved fields when an inspection replaces its ent
   assert.equal(edit.invalid(), false)
 })
 
+test('source editor opens legacy CIFS aliases clean and saves a real hostname edit once', async () => {
+  const entry = signal({
+    name: 'Original alias',
+    source: {
+      kind: 'cifs',
+      hostname: 'nas',
+      path: '/files',
+      username: 'reader',
+    },
+    availability: 'available',
+    available: 4096,
+    error: null,
+  })
+  const edit = sourceEdit(entry)
+  const calls = []
+  const client = {
+    rename: async params => calls.push(['rename', params]),
+    updateCifs: async params => calls.push(['update', params]),
+  }
+  assert.equal(edit.changed(), false)
+  entry.update(value => ({ ...value, available: 8192 }))
+  assert.equal(edit.changed(), false)
+  await edit.save(volumeA, client)
+  assert.deepEqual(calls, [])
+  edit.hostname.set('new-nas')
+  assert.equal(edit.changed(), true)
+  await edit.save(volumeA, client)
+  assert.deepEqual(calls, [
+    ['rename', { id: volumeA, name: 'new-nas' }],
+    [
+      'update',
+      {
+        id: volumeA,
+        hostname: 'new-nas',
+        path: '/files',
+        username: 'reader',
+        password: undefined,
+      },
+    ],
+  ])
+})
+
 test('source editor follows an actual stored rename without treating it as an edit', () => {
   const entry = signal({
     name: 'Music',
@@ -1523,6 +1565,34 @@ test('partition names distinguish partitions on one drive and fall back to their
 
 const volumeA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
 const volumeB = 'BCDEFGHIJKLMNOPQRSTUVWXYZ234567A'
+
+test('mock disk sources capture physical drive metadata independently of later inventory edits', t => {
+  const disk = VolumeMock.Disks.find(disk => disk.logicalname === '/dev/sdc')
+  const partition = disk.partitions[0]
+  const original = structuredClone(disk)
+  t.after(() => Object.assign(disk, original))
+  const source = VolumeMock.diskSource('/dev/sdc1', '/media/photos')
+  assert.deepEqual(source, {
+    kind: 'disk',
+    logicalname: VolumeMock.driveLink('/dev/sdc1'),
+    path: 'media/photos',
+    drive: {
+      vendor: 'Samsung',
+      model: 'T7',
+      label: 'T7',
+      capacity: 2000000000000,
+    },
+  })
+  assert.deepEqual(
+    VolumeMock.diskSource(source.logicalname).drive,
+    source.drive,
+  )
+  assert.equal(VolumeMock.driveLink(source.logicalname), source.logicalname)
+  disk.vendor = 'Replacement'
+  partition.label = 'Changed'
+  assert.equal(source.drive.vendor, 'Samsung')
+  assert.equal(source.drive.label, 'T7')
+})
 
 function volumeFixture(t, packageData = {}, disks = VolumeMock.Disks) {
   const source = new Subject()
@@ -1658,7 +1728,6 @@ function volumeFixture(t, packageData = {}, disks = VolumeMock.Disks) {
         },
       },
       volumes: {
-        listRetained: async () => ({ [volumeA]: 'Retained Photos' }),
         remove: async params =>
           requests.push({ kind: 'remove-volume', params }),
         create: async params => {
@@ -2161,28 +2230,6 @@ test('volume sources map blank optional fields to their wire defaults', () => {
   )
 })
 
-test('retained-volume page loading never starts a global task', async t => {
-  const f = volumeFixture(t)
-  const model = f.make(SystemVolumes)
-  await Promise.resolve()
-  assert.deepEqual(model.retained(), { [volumeA]: 'Retained Photos' })
-  assert.deepEqual(f.taskCalls, [])
-  assert.deepEqual(f.errors, [])
-})
-
-test('retained-volume page failures reach ErrorService without a global task', async t => {
-  const f = volumeFixture(t)
-  const error = { code: 0, message: 'unavailable' }
-  f.api.rpc.volumes.listRetained = async () => {
-    throw error
-  }
-  const model = f.make(SystemVolumes)
-  await Promise.resolve()
-  assert.deepEqual(model.retained(), {})
-  assert.deepEqual(f.errors, [error])
-  assert.deepEqual(f.taskCalls, [])
-})
-
 test('the volumes page re-checks only volumes whose last check is stale', async t => {
   const f = volumeFixture(t)
   const requested = []
@@ -2358,24 +2405,26 @@ test('the restore picker lists every server backup newest first and disables unu
   )
 })
 
-test('failed volume deletion refreshes pending local cleanup after catalog removal', async t => {
+test('failed local deletion is reported and can be retried from the catalog', async t => {
   const f = volumeFixture(t)
   const model = f.make(SystemVolumes)
-  await Promise.resolve()
+  const volume = model.volumes()[volumeA]
   const error = new Error('detach failed')
   f.api.rpc.volumes.remove = async () => {
-    f.api.rpc.volumes.listRetained = async () => ({
-      [volumeB]: 'Needs cleanup',
-    })
     throw error
   }
-  await model.remove(volumeB, {
-    name: 'Needs cleanup',
-    source: { kind: 'local' },
-  })
-  assert.deepEqual(model.retained(), { [volumeB]: 'Needs cleanup' })
+  await model.remove(volumeA, volume)
+  assert.equal(model.volumes()[volumeA], volume)
   assert.deepEqual(f.errors, [error])
   assert.deepEqual(f.taskCalls, ['Deleting'])
+  f.api.rpc.volumes.remove = async params =>
+    f.requests.push({ kind: 'remove-volume', params })
+  await model.remove(volumeA, volume)
+  assert.deepEqual(f.requests.at(-1), {
+    kind: 'remove-volume',
+    params: { id: volumeA },
+  })
+  assert.deepEqual(f.taskCalls, ['Deleting', 'Deleting'])
 })
 
 test('volume-only backup selection includes unavailable sources and sends an explicit empty service selection', async t => {
@@ -2600,9 +2649,11 @@ test('production mocks support inspection, independent failed backups and new-lo
     await import('src/app/services/patch-db/patch-db-source')
   const originalInfo = structuredClone(Mock.BackupInfo)
   const originalNotifications = [...Mock.Notifications]
+  const originalDisks = structuredClone(Mock.Disks)
   t.after(() => {
     Object.assign(Mock.BackupInfo, originalInfo)
     Mock.Notifications.splice(0, Infinity, ...originalNotifications)
+    Mock.Disks.splice(0, Infinity, ...originalDisks)
   })
   const cache = new BehaviorSubject({
     id: 1,
@@ -2638,6 +2689,21 @@ test('production mocks support inspection, independent failed backups and new-lo
     Mock.Disks[1].partitions[0].startOs,
   )
   assert.deepEqual(await api.rpc.backup.target.find({}), [])
+  Mock.Disks[2].partitions[0].startOs = structuredClone(
+    Mock.Disks[1].partitions[0].startOs,
+  )
+  const withoutLabel = await api.rpc.backup.target.find({})
+  assert.equal(withoutLabel.length, 1)
+  assert.equal(cache.value.value.backupTargets[withoutLabel[0]].name, 'SSK')
+  assert.deepEqual(
+    cache.value.value.backupTargets[withoutLabel[0]].source.drive,
+    {
+      vendor: 'SSK',
+      model: null,
+      label: null,
+      capacity: 2000000000000,
+    },
+  )
   const targetId = await api.rpc.backup.target.create({
     name: 'Archive',
     source: { kind: 'local' },
@@ -2708,7 +2774,7 @@ test('production mocks support inspection, independent failed backups and new-lo
   const stored = {
     kind: 'disk',
     logicalname: Mock.driveLink('/dev/sdz1'),
-    label: null,
+    drive: null,
   }
   assert.deepEqual(cache.value.value.sharedVolumes[disk].source, {
     ...stored,
@@ -2794,12 +2860,25 @@ test('production mocks support inspection, independent failed backups and new-lo
     error: null,
   })
   await api.rpc.volumes.remove({ id: local })
-  assert.deepEqual(await api.rpc.volumes.listRetained({}), {})
-  await api.rpc.volumes.deleteData({ id: local })
-  await api.rpc.volumes.deleteData({ id: local })
+  assert.equal(cache.value.value.sharedVolumes[local], undefined)
+  await api.rpc.volumes.remove({ id: local })
   await api.rpc.volumes.remove({ id: disk })
   await api.rpc.volumes.remove({ id: remote })
-  assert.deepEqual(await api.rpc.volumes.listRetained({}), {})
+  const formatted = await api.rpc.disk.format({ disk: '/dev/sdb' })
+  assert.equal(
+    cache.value.value.disks[0].partitions[0].label,
+    'StartOS Backups',
+  )
+  assert.deepEqual(
+    api.mockSource({ kind: 'disk', logicalname: Mock.driveLink(formatted) })
+      .drive,
+    {
+      vendor: 'SanDisk',
+      model: 'Extreme Pro',
+      label: 'StartOS Backups',
+      capacity: 2000000000000,
+    },
+  )
 })
 
 test('a candidate disappearing during the asynchronous UI registry lookup prevents submission', async t => {

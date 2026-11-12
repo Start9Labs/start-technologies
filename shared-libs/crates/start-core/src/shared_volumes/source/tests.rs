@@ -41,6 +41,36 @@ async fn failed_publications_remove_new_directories_and_successful_ones_preserve
     );
 }
 
+#[tokio::test]
+#[ignore = "requires BTRFS_TEST_VOLUMES_DIR and UID/GID 100000 mapped"]
+async fn local_creation_uses_service_owned_subvolumes_and_rolls_back_failed_publication() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let fixture = crate::util::btrfs::tests::directory();
+    let path = fixture.path().join("volume");
+    create_local_directory(&path).await.unwrap();
+    assert!(crate::util::btrfs::is_subvolume(&path).await);
+    let metadata = std::fs::metadata(&path).unwrap();
+    assert_eq!(
+        (metadata.uid(), metadata.gid()),
+        (crate::lxc::BASE_IDMAP.to_id, crate::lxc::BASE_IDMAP.to_id)
+    );
+    assert_eq!(metadata.permissions().mode() & 0o777, 0o777);
+    tokio::fs::write(path.join("sentinel"), b"allocated data")
+        .await
+        .unwrap();
+    finish_directory_publication(
+        &path,
+        Err(Error::new(eyre!("publication failed"), ErrorKind::Database)),
+    )
+    .await
+    .unwrap_err();
+    assert!(!path.exists());
+    create_local_directory(&path).await.unwrap();
+    finish_directory_publication(&path, Ok(())).await.unwrap();
+    assert!(crate::util::btrfs::is_subvolume(&path).await);
+    crate::util::btrfs::delete_volume_root(&path).await.unwrap();
+}
+
 #[test]
 fn public_observations_hide_private_cache_identity_without_losing_failure_details() {
     let private = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
