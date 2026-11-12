@@ -42,9 +42,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration::NameProfileFirewallSections,
     Migration::BindLuciToLoopback,
     Migration::DisableFlowOffloading,
+    Migration::RestoreFlowOffloading,
 ];
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Migration {
     /// Earlier images staged their nft includes in `/etc/nftables.d`, which
     /// fw4 loads alongside the ones in `/usr/share/nftables.d`.
@@ -79,6 +80,8 @@ enum Migration {
     BindLuciToLoopback,
     /// Earlier releases offloaded established forwarded connections.
     DisableFlowOffloading,
+    /// The previous release cleared flow offloading.
+    RestoreFlowOffloading,
 }
 
 impl Migration {
@@ -93,7 +96,9 @@ impl Migration {
             Migration::RemoveSessionsJson => remove_sessions_json(root).await,
             Migration::ForceDhcpPools => force_dhcp_pools(root).await,
             Migration::RemoveServerCert => remove_server_cert(root).await,
-            Migration::EnableFlowOffloading => enable_flow_offloading(root).await,
+            Migration::EnableFlowOffloading | Migration::RestoreFlowOffloading => {
+                enable_flow_offloading(root).await
+            }
             Migration::ScopeReservedNames => scope_reserved_names(root).await,
             Migration::ReissueRootCa => reissue_root_ca(root).await,
             Migration::NameProfileFirewallSections => name_profile_firewall_sections(root).await,
@@ -122,7 +127,9 @@ impl Migration {
             Migration::RemoveServerCert => {
                 "remove the single HTTPS certificate earlier versions used"
             }
-            Migration::EnableFlowOffloading => "speed up forwarding of established connections",
+            Migration::EnableFlowOffloading | Migration::RestoreFlowOffloading => {
+                "speed up forwarding of established connections"
+            }
             Migration::ScopeReservedNames => {
                 "serve each reserved device's name only within its own profile"
             }
@@ -134,6 +141,14 @@ impl Migration {
             Migration::DisableFlowOffloading => {
                 "stop offloading established connections, which stalled traffic to Wi-Fi devices from other profiles"
             }
+        }
+    }
+
+    fn undone_by(self) -> Option<Migration> {
+        match self {
+            Migration::EnableFlowOffloading => Some(Migration::DisableFlowOffloading),
+            Migration::DisableFlowOffloading => Some(Migration::RestoreFlowOffloading),
+            _ => None,
         }
     }
 }
@@ -197,7 +212,11 @@ impl Progress {
 }
 
 fn purposes(migrations: &[Migration]) -> String {
-    let purposes: Vec<_> = migrations.iter().map(|m| m.purpose()).collect();
+    let purposes: Vec<_> = migrations
+        .iter()
+        .filter(|m| !m.undone_by().is_some_and(|undo| migrations.contains(&undo)))
+        .map(|m| m.purpose())
+        .collect();
     match purposes.as_slice() {
         [] => String::new(),
         [one] => one.to_string(),
@@ -643,6 +662,14 @@ mod tests {
                 "Updated settings for v{v} to hand out addresses without first checking for another DHCP server, remove the single HTTPS certificate earlier versions used, and speed up forwarding of established connections"
             ))
         );
+        let disable = Migration::DisableFlowOffloading;
+        let restore = Migration::RestoreFlowOffloading;
+        assert_eq!(
+            progress(&[offload, cert, disable, restore], None).summary(true),
+            Some(format!(
+                "Updated settings for v{v} to remove the single HTTPS certificate earlier versions used and speed up forwarding of established connections"
+            ))
+        );
         assert_eq!(
             progress(&[], Some(cert)).summary(false),
             Some(format!(
@@ -883,7 +910,7 @@ config forwarding
         assert_eq!(read(&dir, "etc/config/uhttpd"), migrated[5]);
         assert_eq!(wan_ipv6(&dir).as_deref(), Some("1"));
         assert!(migrated[1].contains("option dest 'vlan_guest'"));
-        assert!(!migrated[1].contains("flow_offloading"));
+        assert!(migrated[1].contains("option flow_offloading '1'"));
         assert!(migrated[2].contains("option lan_access 'all'"));
         assert!(migrated[2].contains("option lan_access 'same_profile'"));
         assert!(migrated[5].contains("list listen_http '127.0.0.1:8080'"));
@@ -1049,35 +1076,40 @@ config forwarding
     }
 
     #[tokio::test]
-    async fn flow_offloading_stays_off_from_before_it_shipped() {
-        let dir = router(Some("9\n"), true);
-        write(&dir, "etc/config/firewall", SHIPPED_FIREWALL_DEFAULTS);
-        run(dir.path()).await.unwrap();
-        assert_eq!(record(&dir), current());
-        assert_eq!(read(&dir, "etc/config/firewall"), SHIPPED_FIREWALL_DEFAULTS);
+    async fn flow_offloading_is_enabled_unless_set() {
+        let offloaded = format!("{SHIPPED_FIREWALL_DEFAULTS}\toption flow_offloading '1'\n");
+        let last = format!("{}\n", MIGRATIONS.len() - 1);
+        for done in ["9\n", last.as_str()] {
+            let dir = router(Some(done), true);
+            write(&dir, "etc/config/firewall", SHIPPED_FIREWALL_DEFAULTS);
+            run(dir.path()).await.unwrap();
+            assert_eq!(record(&dir), current());
+            assert_eq!(read(&dir, "etc/config/firewall"), offloaded);
 
-        let disabled = format!("{SHIPPED_FIREWALL_DEFAULTS}\toption flow_offloading '0'\n");
-        let dir = router(Some("9\n"), true);
-        write(&dir, "etc/config/firewall", &disabled);
-        run(dir.path()).await.unwrap();
-        assert_eq!(read(&dir, "etc/config/firewall"), disabled);
+            for kept in ["0", "yes"] {
+                let chosen =
+                    format!("{SHIPPED_FIREWALL_DEFAULTS}\toption flow_offloading '{kept}'\n");
+                let dir = router(Some(done), true);
+                write(&dir, "etc/config/firewall", &chosen);
+                run(dir.path()).await.unwrap();
+                assert_eq!(read(&dir, "etc/config/firewall"), chosen);
+            }
+        }
     }
 
     #[tokio::test]
     async fn flow_offloading_an_earlier_release_enabled_is_cleared() {
         let offloaded = format!("{SHIPPED_FIREWALL_DEFAULTS}\toption flow_offloading '1'\n");
-        let before = format!("{}\n", MIGRATIONS.len() - 1);
-        let dir = router(Some(&before), true);
+        let dir = router(Some("9\n"), true);
         write(&dir, "etc/config/firewall", &offloaded);
-        run(dir.path()).await.unwrap();
-        assert_eq!(record(&dir), current());
+        disable_flow_offloading(dir.path()).await.unwrap();
         assert_eq!(read(&dir, "etc/config/firewall"), SHIPPED_FIREWALL_DEFAULTS);
 
         for kept in ["0", "yes"] {
             let chosen = format!("{SHIPPED_FIREWALL_DEFAULTS}\toption flow_offloading '{kept}'\n");
-            let dir = router(Some(&before), true);
+            let dir = router(Some("9\n"), true);
             write(&dir, "etc/config/firewall", &chosen);
-            run(dir.path()).await.unwrap();
+            disable_flow_offloading(dir.path()).await.unwrap();
             assert_eq!(read(&dir, "etc/config/firewall"), chosen);
         }
     }

@@ -409,5 +409,10 @@ To move the kernel:
    different sublevel, still references an excluded driver, or adds Red Hat lines outside
    `FEDORA`. It lists every path new to the patch; add any that carries only Fedora changes to
    `FEDORA` and rerun.
-4. Rebuild the image and bench it. Commit the version, hash, regenerated patch, and a changelog
-   fragment together.
+4. Re-check `patches-6.18/0005` and `0006`, the flowtable fixes carried until 6.18.y has its
+   own. Both still apply over an upstream fix that changes what they do, so read the new
+   release's `net/netfilter/nf_flow_table_path.c` and `nf_flow_table_ip.c`, then drop or rework
+   them.
+5. Rebuild the image and bench it, including offloaded traffic to a Wi-Fi client and to a wired
+   client on a single-profile router. Commit the version, hash, regenerated patch, and a
+   changelog fragment together.
