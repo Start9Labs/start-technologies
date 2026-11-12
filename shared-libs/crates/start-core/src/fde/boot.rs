@@ -289,6 +289,7 @@ mod tests {
     use openssl::pkey::Private;
 
     use super::*;
+    use crate::util::Invoke;
 
     fn public(key: &PKey<Private>) -> PKey<Public> {
         PKey::public_key_from_der(&key.public_key_to_der().unwrap()).unwrap()
@@ -465,6 +466,94 @@ mod tests {
         );
         assert!(std::fs::write(mounted.overlay().join("setting"), b"mutable").is_err());
         (temp, mounted, sealed, public(&authority))
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires software TPM, kernel verity/mounts and a genuine FDE_SOURCE_IMAGE"]
+    async fn verified_build_source_uses_public_providers_and_packaged_runtime_read_only() {
+        let image =
+            std::env::var_os("FDE_SOURCE_IMAGE").expect("Provide genuine OS SquashFS image");
+        let temp = tempfile::tempdir_in("/var/tmp").unwrap();
+        let images = temp.path().join("images");
+        let config = temp.path().join("config");
+        let raw = temp.path().join("raw");
+        std::fs::create_dir(&images).unwrap();
+        std::fs::create_dir_all(raw.join("usr/bin")).unwrap();
+        std::fs::write(raw.join("usr/bin/node"), b"unsigned working provider").unwrap();
+        let rootfs = images.join("image.rootfs");
+        std::fs::copy(&image, &rootfs).unwrap();
+        let key = crate::util::crypto::gen_nistp256().unwrap();
+        let authority = crate::util::crypto::gen_nistp256().unwrap();
+        let descriptor =
+            Descriptor::new("image.rootfs".into(), public(&key), public(&authority)).unwrap();
+        std::fs::create_dir_all(generation_store(&config)).unwrap();
+        let prepared =
+            PreparedGeneration::import_raw(&raw, &rootfs, &generation_store(&config), &key)
+                .await
+                .unwrap();
+        let expected = tpm::read_measurements()
+            .await
+            .unwrap()
+            .with_filesystems(
+                &prepared.manifest().rootfs_sha256,
+                &prepared.manifest().overlay_sha256,
+            )
+            .unwrap();
+        let profile = MeasurementProfile::sign(expected, &authority)
+            .await
+            .unwrap();
+        descriptor.stage_profile(&prepared, &profile).await.unwrap();
+        prepared.publish().await.unwrap();
+        let mappings = boot_mappings();
+        let mounted_at = temp.path().join("verified");
+        let mounted = descriptor
+            .mount(&images, &config, &mounted_at)
+            .await
+            .unwrap()
+            .unwrap();
+        let runtime = temp.path().join("runtime");
+        let root = temp.path().join("source");
+        std::fs::write(&root, b"occupied").unwrap();
+        assert!(
+            super::super::source::BuildSource::mount(mounted, &runtime, &root)
+                .await
+                .is_err()
+        );
+        assert_eq!(boot_mappings(), mappings);
+        assert!(
+            !crate::disk::mount::util::is_mountpoint(&runtime)
+                .await
+                .unwrap()
+        );
+        std::fs::remove_file(&root).unwrap();
+        let mounted = descriptor
+            .mount(&images, &config, &mounted_at)
+            .await
+            .unwrap()
+            .unwrap();
+        let source = super::super::source::BuildSource::mount(mounted, &runtime, &root)
+            .await
+            .unwrap();
+        assert!(std::fs::write(source.path().join("unexpected"), b"write").is_err());
+        let output = tokio::process::Command::new("chroot")
+            .arg(source.path()).args(["/usr/bin/node", "--input-type=module", "-e", "import {writeFileSync} from 'node:fs'; try { writeFileSync('/unexpected', 'write'); process.exit(9); } catch (e) { if (e.code !== 'EROFS') throw e; } console.log(process.version);"])
+            .env_clear().env("PATH", "/usr/sbin:/usr/bin:/sbin:/bin")
+            .invoke(ErrorKind::Filesystem).await.unwrap();
+        assert!(std::str::from_utf8(&output).unwrap().starts_with("v20.19."));
+        source.unmount().await.unwrap();
+        assert_eq!(boot_mappings(), mappings);
+        assert!(
+            !crate::disk::mount::util::is_mountpoint(&root)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !crate::disk::mount::util::is_mountpoint(&runtime)
+                .await
+                .unwrap()
+        );
+        assert_eq!(tpm::read_measurements().await.unwrap().files, [0; 32]);
     }
 
     #[cfg(target_os = "linux")]

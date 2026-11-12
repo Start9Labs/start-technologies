@@ -11,4 +11,5 @@ pub mod initramfs;
 pub mod loader;
 pub mod memory;
 mod root;
+pub mod source;
 pub mod tpm;

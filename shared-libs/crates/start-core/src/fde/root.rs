@@ -8,11 +8,43 @@ use crate::disk::mount::guard::MountGuard;
 use crate::prelude::*;
 
 /// Running-root writes and working configuration edits have disjoint RAM uppers.
-/// Verified lower mappings outlive every dependent mount.
 pub(super) struct RootComposition {
+    layers: VerifiedMounts,
+    working_upper: PathBuf,
+}
+
+/// Verified lower mappings outlive every dependent mount.
+pub(super) struct VerifiedMounts {
     mounts: Vec<MountGuard>,
     lower: Option<MountedGeneration>,
-    working_upper: PathBuf,
+}
+
+impl VerifiedMounts {
+    pub fn new(lower: MountedGeneration) -> Self {
+        Self {
+            mounts: Vec::new(),
+            lower: Some(lower),
+        }
+    }
+
+    pub fn lower(&self) -> &MountedGeneration {
+        self.lower.as_ref().unwrap()
+    }
+
+    pub fn push(&mut self, mount: MountGuard) {
+        self.mounts.push(mount);
+    }
+
+    pub fn persist(mut self) {
+        for mount in std::mem::take(&mut self.mounts) {
+            mount.persist();
+        }
+        self.lower.take().unwrap().persist();
+    }
+
+    pub async fn unmount(mut self) -> Result<(), Error> {
+        teardown(std::mem::take(&mut self.mounts), self.lower.take().unwrap()).await
+    }
 }
 
 async fn teardown(mut mounts: Vec<MountGuard>, lower: MountedGeneration) -> Result<(), Error> {
@@ -41,13 +73,12 @@ impl RootComposition {
         runtime: &Path,
     ) -> Result<Self, Error> {
         let mut composition = Self {
-            mounts: Vec::new(),
-            lower: Some(lower),
+            layers: VerifiedMounts::new(lower),
             working_upper: runtime.join("working-upper"),
         };
         let result = async {
-            let lower = composition.lower.as_ref().unwrap();
-            composition.mounts.push(
+            let lower = composition.layers.lower.as_ref().unwrap();
+            composition.layers.mounts.push(
                 MountGuard::mount(
                     &OverlayFs::new(
                         vec![lower.overlay(), lower.rootfs()],
@@ -78,10 +109,11 @@ impl RootComposition {
                 ),
             ] {
                 composition
+                    .layers
                     .mounts
                     .push(MountGuard::mount(&Bind::new(source), target, mode).await?);
             }
-            composition.mounts.push(
+            composition.layers.mounts.push(
                 MountGuard::mount(
                     &crate::os_overlay::working_filesystem(
                         lower.overlay(),
@@ -106,26 +138,23 @@ impl RootComposition {
     }
 
     pub fn verified(&self) -> &MountedGeneration {
-        self.lower.as_ref().unwrap()
+        self.layers.lower()
     }
 
     pub fn working_upper(&self) -> &Path {
         &self.working_upper
     }
 
-    pub fn persist(mut self) {
-        for mount in std::mem::take(&mut self.mounts) {
-            mount.persist();
-        }
-        self.lower.take().unwrap().persist();
+    pub fn persist(self) {
+        self.layers.persist();
     }
 
-    pub async fn unmount(mut self) -> Result<(), Error> {
-        teardown(std::mem::take(&mut self.mounts), self.lower.take().unwrap()).await
+    pub async fn unmount(self) -> Result<(), Error> {
+        self.layers.unmount().await
     }
 }
 
-impl Drop for RootComposition {
+impl Drop for VerifiedMounts {
     fn drop(&mut self) {
         if let Some(lower) = self.lower.take() {
             let mounts = std::mem::take(&mut self.mounts);

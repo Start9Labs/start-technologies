@@ -1,6 +1,6 @@
 use std::fmt::Display;
 use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use digest::Digest;
 use itertools::Itertools;
@@ -14,8 +14,7 @@ use crate::util::io::TmpDir;
 
 pub struct OverlayFs<P0: AsRef<Path>, P1: AsRef<Path>, P2: AsRef<Path>> {
     lower: Vec<P0>,
-    upper: P1,
-    work: P2,
+    writable: Option<(P1, P2)>,
     options: Vec<String>,
 }
 impl<P0: AsRef<Path>, P1: AsRef<Path>, P2: AsRef<Path>> OverlayFs<P0, P1, P2> {
@@ -23,8 +22,7 @@ impl<P0: AsRef<Path>, P1: AsRef<Path>, P2: AsRef<Path>> OverlayFs<P0, P1, P2> {
     pub fn new(lower: Vec<P0>, upper: P1, work: P2) -> Self {
         Self {
             lower,
-            upper,
-            work,
+            writable: Some((upper, work)),
             options: Vec::new(),
         }
     }
@@ -32,6 +30,16 @@ impl<P0: AsRef<Path>, P1: AsRef<Path>, P2: AsRef<Path>> OverlayFs<P0, P1, P2> {
     pub fn with_options(mut self, options: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.options = options.into_iter().map(Into::into).collect();
         self
+    }
+}
+impl<P0: AsRef<Path>> OverlayFs<P0, PathBuf, PathBuf> {
+    /// Lower contents remain stable only while their owners exclude writes.
+    pub fn read_only(lower: Vec<P0>) -> Self {
+        Self {
+            lower,
+            writable: None,
+            options: Vec::new(),
+        }
     }
 }
 impl<P0: AsRef<Path> + Send + Sync, P1: AsRef<Path> + Send + Sync, P2: AsRef<Path> + Send + Sync>
@@ -44,32 +52,44 @@ impl<P0: AsRef<Path> + Send + Sync, P1: AsRef<Path> + Send + Sync, P2: AsRef<Pat
         Ok(Some("overlay"))
     }
     fn mount_options(&self) -> impl IntoIterator<Item = impl Display> {
-        [
-            Box::new(lazy_format!(
-                "lowerdir={}",
-                self.lower.iter().map(|p| p.as_ref().display()).join(":")
-            )) as Box<dyn Display>,
-            Box::new(lazy_format!("upperdir={}", self.upper.as_ref().display())),
-            Box::new(lazy_format!("workdir={}", self.work.as_ref().display())),
-        ]
-        .into_iter()
-        .chain(
+        let mut options: Vec<Box<dyn Display + '_>> = vec![Box::new(lazy_format!(
+            "lowerdir={}",
+            self.lower.iter().map(|p| p.as_ref().display()).join(":")
+        ))];
+        if let Some((upper, work)) = &self.writable {
+            options.push(Box::new(lazy_format!(
+                "upperdir={}",
+                upper.as_ref().display()
+            )));
+            options.push(Box::new(lazy_format!(
+                "workdir={}",
+                work.as_ref().display()
+            )));
+        }
+        options.into_iter().chain(
             self.options
                 .iter()
                 .map(|option| Box::new(option) as Box<dyn Display>),
         )
     }
     async fn pre_mount(&self, mountpoint: &Path, _: MountType) -> Result<(), Error> {
-        tokio::fs::create_dir_all(self.upper.as_ref()).await?;
-        tokio::fs::create_dir_all(self.work.as_ref()).await?;
+        if let Some((upper, work)) = &self.writable {
+            tokio::fs::create_dir_all(upper.as_ref()).await?;
+            tokio::fs::create_dir_all(work.as_ref()).await?;
+        }
         tokio::fs::create_dir_all(mountpoint).await?;
         Ok(())
     }
     async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
-        tokio::fs::create_dir_all(self.upper.as_ref()).await?;
-        tokio::fs::create_dir_all(self.work.as_ref()).await?;
+        if let Some((upper, work)) = &self.writable {
+            tokio::fs::create_dir_all(upper.as_ref()).await?;
+            tokio::fs::create_dir_all(work.as_ref()).await?;
+        }
         let mut sha = Sha256::new();
         sha.update("OverlayFs");
+        if self.writable.is_none() {
+            sha.update("ReadOnly");
+        }
         for lower in &self.lower {
             sha.update(
                 tokio::fs::canonicalize(lower.as_ref())
@@ -85,32 +105,18 @@ impl<P0: AsRef<Path> + Send + Sync, P1: AsRef<Path> + Send + Sync, P2: AsRef<Pat
             );
             sha.update(b"\0");
         }
-        sha.update(
-            tokio::fs::canonicalize(self.upper.as_ref())
-                .await
-                .with_ctx(|_| {
-                    (
-                        crate::ErrorKind::Filesystem,
-                        self.upper.as_ref().display().to_string(),
-                    )
-                })?
-                .as_os_str()
-                .as_bytes(),
-        );
-        sha.update(b"\0");
-        sha.update(
-            tokio::fs::canonicalize(self.work.as_ref())
-                .await
-                .with_ctx(|_| {
-                    (
-                        crate::ErrorKind::Filesystem,
-                        self.upper.as_ref().display().to_string(),
-                    )
-                })?
-                .as_os_str()
-                .as_bytes(),
-        );
-        sha.update(b"\0");
+        if let Some((upper, work)) = &self.writable {
+            for path in [upper.as_ref(), work.as_ref()] {
+                sha.update(
+                    tokio::fs::canonicalize(path)
+                        .await
+                        .with_ctx(|_| (crate::ErrorKind::Filesystem, path.display().to_string()))?
+                        .as_os_str()
+                        .as_bytes(),
+                );
+                sha.update(b"\0");
+            }
+        }
         for option in &self.options {
             sha.update(option.as_bytes());
             sha.update(b"\0");
@@ -122,6 +128,40 @@ impl<P0: AsRef<Path> + Send + Sync, P1: AsRef<Path> + Send + Sync, P2: AsRef<Pat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn read_only_layers_have_no_writable_storage_or_identity_alias() {
+        let temp = tempfile::tempdir().unwrap();
+        let upper = temp.path().join("upper");
+        let work = temp.path().join("work");
+        let writable = OverlayFs::new(vec![temp.path()], &upper, &work);
+        writable.source_hash().await.unwrap();
+        let read_only = OverlayFs::read_only(vec![temp.path(), &upper, &work]);
+        let options: Vec<_> = read_only
+            .mount_options()
+            .into_iter()
+            .map(|p| p.to_string())
+            .collect();
+        assert_eq!(options.len(), 1);
+        assert!(options[0].starts_with("lowerdir="));
+        assert_ne!(
+            read_only.source_hash().await.unwrap(),
+            writable.source_hash().await.unwrap()
+        );
+        tokio::fs::remove_dir(&upper).await.unwrap();
+        tokio::fs::remove_dir(&work).await.unwrap();
+        let source = OverlayFs::read_only(vec![temp.path()]);
+        source.source_hash().await.unwrap();
+        source
+            .pre_mount(
+                &temp.path().join("mount"),
+                crate::disk::mount::filesystem::ReadOnly,
+            )
+            .await
+            .unwrap();
+        assert!(!upper.exists());
+        assert!(!work.exists());
+    }
 
     #[tokio::test]
     async fn mount_identity_includes_extra_options_without_changing_default_options() {
