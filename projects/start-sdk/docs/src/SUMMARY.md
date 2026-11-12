@@ -90,6 +90,7 @@
 - [Main](main.md)
 - [Initialization](init.md)
 - [Interfaces](interfaces.md)
+- [HTTP Proxy Plugins](http-proxy-plugins.md)
 - [Service-to-Service Networking](service-to-service.md)
 - [Outbound Network Access](outbound-networking.md)
 - [Actions](actions.md)

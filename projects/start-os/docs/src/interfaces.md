@@ -24,6 +24,17 @@ To open one particular address instead, open it from its own row in the gateway 
 
 Open the **Interfaces** tab to see every interface the service exposes. Each interface expands to reveal its **addresses** — all the ways that interface can be reached, organized by [gateway](gateways.md). When a service exposes only one interface, it is expanded by default.
 
+### HTTP Proxy Chains
+
+For an HTTP-proxied interface, **HTTP proxy chain** lets you put installed proxy services, such as bot protection or a web application firewall, in front of the application. Configure profiles through the proxy service's actions, choose **Add proxy**, select a profile, and use the arrows to order the stages. **Save** applies the chain; **Cancel** discards edits. Remove every stage and save to clear it.
+
+The chain applies to every address and interface sharing the same binding, including different URL paths. Requests pass through the stages in order. A provider can appear with different profiles, but the same provider/profile pair appears once.
+
+Unavailable selections remain visible and block traffic with HTTP 503. Start or configure the provider, restore the missing profile, or remove its stage to restore access. Saving a changed chain disconnects existing clients, including WebSockets. A profile's supported HTTP versions can also limit which clients can connect.
+
+> [!WARNING]
+> Proxy services can read and modify requests and responses, including credentials and cookies. Select providers you trust. Stopping or uninstalling one blocks the bindings that use it until you repair or remove the selection.
+
 ### Gateway Tables
 
 Each inbound gateway on your server has its own table. The rows in each table are the addresses available through that gateway. Addresses can be individually enabled or disabled. A LAN IP address you have not switched yourself follows the interface's `.local` address, so an address your server is assigned later starts out the way `.local` is set. On an interface served without TLS the two go together: switching on a LAN IP address switches `.local` on, and switching `.local` off switches its LAN IP addresses off. There, a `.local` address that is on while every IP address in its table is off shows a warning, since those are the addresses the name resolves to. The `.local` address stays in the table while the gateway is disconnected.

@@ -24,6 +24,8 @@ A package's README, in its repository, is the developer's account of how the pac
 
 Each interface lists every address it can be reached at: its LAN and IPv6 addresses, your server's .local name, your public IP address, and your domains. Each address turns on or off on its own, and public addresses stay off until you turn them on. A public domain gets a Let's Encrypt certificate. To connect over HTTPS on your local network or over a VPN, a device must [trust your server's Root CA](trust-ca.md), the certificate authority your server creates during setup; devices that connect over Tor or a public domain don't need it. Installing the Tor service gives any interface an onion address.
 
+On HTTP-proxied [interfaces](interfaces.md#http-proxy-chains), an ordered chain of installed proxy services can provide bot protection or request filtering. Each proxy publishes profiles configured through its own actions. A chain covers every address and interface sharing its binding; an unavailable stage blocks traffic. Selected proxies can read and modify that traffic, including credentials.
+
 A [gateway](gateways.md) carries your server's traffic. Your home router and a StartTunnel server are inbound and outbound gateways, and a VPN provider's WireGuard configuration is an outbound-only gateway. When you make an address public, StartOS asks the gateway to open the port, and closes it again when you turn the address off. StartTunnel does this on its own, and StartWRT does once you allow it for your server.
 
 ## Backups

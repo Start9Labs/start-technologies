@@ -49,6 +49,14 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 
 `startd` creates one shared `DnsController` before selecting setup, initialization, or diagnostic UI. Those contexts and the runtime `NetController` share its handle and listener-reconciliation task. Attaching the persisted `NetworkInterfaceController` transfers DNS authority and keeps that controller alive independently of later RPC initialization success. See [DNS forwarding](policy-routing.md#dns-forwarding) for bootstrap policy, watcher handoff, and requester-based routing.
 
+## HTTP proxy plugins
+
+`net::http_proxy` owns profile validation, binding-chain validation, attachment identity, and protocol intersection. `BindInfo.proxy_chain` stores operator intent independently of package-supplied bind options; profile publication lives in `PackagePlugin.http_proxy`. The existing initialization round-trip through `Database` materializes their serde defaults for older databases.
+
+`NetController` owns `HttpProxySockets` and its provider-state watcher. Each binding's `ChainRoute` owns fixed-destination continuation listeners and cancellation. Routes are replaced when their selected profiles, availability, order, or application target change. Ingress reuses the HTTP proxy's authentication and header policy, and TLS preprocessing intersects supported framing with binding ALPN. Continuations retain upstream TLS validation and return 503 on connection failure.
+
+`mount_provider` supplies a provider-scoped read-only socket root with a writable `in` mount. The OS owns `next`. Persistent containers and subcontainer filesystems share that mount primitive and unmount nested guards in reverse order. Dropping a route cancels active streams and unlinks continuation sockets before replacement; the HTTP proxy's owned upgrade tasks give WebSockets the same cancellation lifetime.
+
 ## RPC Pattern
 
 The control API uses JSON-RPC. RPC methods are organized in a hierarchical command structure using [rpc-toolkit](https://github.com/Start9Labs/start-technologies/tree/master/shared-libs/crates/rpc-toolkit). Handlers are registered in a tree of `ParentHandler` nodes, with four handler types: `from_fn_async` (standard), `from_fn_async_local` (non-Send), `from_fn` (sync), and `from_fn_blocking` (blocking). Metadata like `.with_about()` drives middleware and documentation.
