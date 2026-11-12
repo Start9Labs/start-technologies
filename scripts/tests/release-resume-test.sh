@@ -44,6 +44,7 @@ cmd_pre_check() {
     DONE[push-gz]=1
     DONE[tag]=1
     DONE[create-gh-release]=1
+    DONE[publish-gh-release]=1
     DONE[index]=1
 }
 cmd_sign() {
