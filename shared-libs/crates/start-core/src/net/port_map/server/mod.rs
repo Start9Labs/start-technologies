@@ -41,8 +41,8 @@ const MALFORMED_OPTION: u8 = 6;
 use crate::net::port_map::pcp::RESULT_NO_RESOURCES as NO_RESOURCES;
 const CANNOT_PROVIDE_EXTERNAL: u8 = 11;
 
-/// PCP protocol field value for TCP (the only transport the SNI demux handles).
 const PROTO_TCP: u8 = 6;
+const PROTO_UDP: u8 = 17;
 /// Largest PORT_SET range we will grant in one MAP (RFC 7753 lets us grant
 /// fewer than requested; the client skips the range if it can't get them all).
 const MAX_PORT_SET: u16 = 1024;
@@ -376,8 +376,8 @@ fn map_response_with_port_set(
 
 fn map_transport(protocol: u8) -> Option<TransportProtocol> {
     match protocol {
-        6 => Some(TransportProtocol::Tcp),
-        17 => Some(TransportProtocol::Udp),
+        PROTO_TCP => Some(TransportProtocol::Tcp),
+        PROTO_UDP => Some(TransportProtocol::Udp),
         _ => None,
     }
 }

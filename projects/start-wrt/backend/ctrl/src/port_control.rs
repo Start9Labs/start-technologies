@@ -559,7 +559,7 @@ impl PortControl {
             return;
         };
         self.remove_client_forwards(&client.mac, move |r| {
-            if !redirect_protocols(&r.proto).contains(&transport) {
+            if !uci_protocols(&r.proto).contains(&transport) {
                 return false;
             }
             r.dest_port
@@ -583,7 +583,7 @@ impl PortControl {
         };
         let external_port = source.port();
         self.remove_client_forwards(&client.mac, move |r| {
-            if !redirect_protocols(&r.proto).contains(&transport) {
+            if !uci_protocols(&r.proto).contains(&transport) {
                 return false;
             }
             r.src_dport
@@ -681,7 +681,7 @@ impl PortControl {
                             external_end,
                             internal,
                             kind,
-                            redirect_protocols(&r.proto),
+                            uci_protocols(&r.proto),
                         ))
                     })
                     .collect())
@@ -1253,7 +1253,8 @@ where
     .map_err(|e| Error::new(eyre!("uci task panicked: {e}"), ErrorKind::Filesystem))?
 }
 
-fn redirect_protocols(protocols: &[String]) -> Vec<TransportProtocol> {
+/// fw4 defaults an empty `proto` list to TCP and UDP.
+fn uci_protocols(protocols: &[String]) -> Vec<TransportProtocol> {
     if protocols.is_empty()
         || protocols
             .iter()
@@ -1286,7 +1287,7 @@ pub(crate) async fn split_legacy_forwards_uci(
             let Ok(r) = sec.get::<FirewallRedirect>() else {
                 continue;
             };
-            if r._apf_label.is_none() || redirect_protocols(&r.proto).len() != 2 {
+            if r._apf_label.is_none() || uci_protocols(&r.proto).len() != 2 {
                 continue;
             }
             let Some(name) = sec.name() else {
@@ -1439,20 +1440,10 @@ pub(crate) fn wan_reserved_overlaps(
         if rule.src != "wan" || rule.dest.is_some() || rule.family.as_deref() == Some("ipv6") {
             continue;
         }
-        // fw4 treats an empty protocol list as TCP and UDP.
-        let (rule_tcp, rule_udp) = if rule.proto.is_empty() {
-            (true, true)
-        } else {
-            let any = rule
-                .proto
-                .iter()
-                .any(|p| p.eq_ignore_ascii_case("all") || p.eq_ignore_ascii_case("tcpudp"));
-            (
-                any || rule.proto.iter().any(|p| p.eq_ignore_ascii_case("tcp")),
-                any || rule.proto.iter().any(|p| p.eq_ignore_ascii_case("udp")),
-            )
-        };
-        if !((tcp && rule_tcp) || (udp && rule_udp)) {
+        let protocols = uci_protocols(&rule.proto);
+        if !((tcp && protocols.contains(&TransportProtocol::Tcp))
+            || (udp && protocols.contains(&TransportProtocol::Udp)))
+        {
             continue;
         }
         let Some(spec) = rule.dest_port.as_deref() else {
@@ -1532,7 +1523,7 @@ async fn apply_forward_uci(
                 continue;
             };
             if ranges_overlap(want, range)
-                && redirect_protocols(&r.proto)
+                && uci_protocols(&r.proto)
                     .iter()
                     .any(|p| transport.protocols().contains(p))
             {
@@ -2420,6 +2411,24 @@ pub(crate) async fn close_device_forwards(mac: &str, known_ips: &[String]) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn uci_protocol_lists_share_fw4_defaults_and_normalization() {
+        use TransportProtocol::{Tcp, Udp};
+        for (raw, expected) in [
+            (vec![], vec![Tcp, Udp]),
+            (vec!["tcp"], vec![Tcp]),
+            (vec!["udp"], vec![Udp]),
+            (vec!["uDp", "TcP"], vec![Tcp, Udp]),
+            (vec!["ALL"], vec![Tcp, Udp]),
+            (vec!["TcpUdp"], vec![Tcp, Udp]),
+            (vec!["tcp", "tcp"], vec![Tcp]),
+            (vec!["icmp"], vec![]),
+        ] {
+            let raw: Vec<_> = raw.into_iter().map(str::to_owned).collect();
+            assert_eq!(uci_protocols(&raw), expected, "{raw:?}");
+        }
+    }
+
     #[tokio::test]
     async fn protocol_mappings_coexist_and_remove_independently() {
         let dir = temp_root("");
@@ -2452,7 +2461,7 @@ mod tests {
         assert_eq!(pc.leases.lock().unwrap()[&udp_key], udp_expiry);
         let removed = pc
             .remove_client_forwards(mac, |r| {
-                redirect_protocols(&r.proto).contains(&TransportProtocol::Tcp)
+                uci_protocols(&r.proto).contains(&TransportProtocol::Tcp)
             })
             .await;
         assert_eq!(removed, 1);

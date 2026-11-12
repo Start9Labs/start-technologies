@@ -388,23 +388,14 @@ pub async fn handle_control<B: GatewayBackend + ?Sized>(
     }
 }
 
-/// `NewProtocol` from a SOAP body, normalized to the IGD spelling.
-fn soap_protocol(body: &str) -> Option<&'static str> {
+fn soap_protocol(body: &str) -> Option<TransportProtocol> {
     match soap_arg::<String>(body, "NewProtocol")?
         .to_ascii_uppercase()
         .as_str()
     {
-        "TCP" => Some("TCP"),
-        "UDP" => Some("UDP"),
-        _ => None,
-    }
-}
-
-fn soap_transport(body: &str) -> Option<TransportProtocol> {
-    match soap_protocol(body)? {
         "TCP" => Some(TransportProtocol::Tcp),
         "UDP" => Some(TransportProtocol::Udp),
-        _ => unreachable!(),
+        _ => None,
     }
 }
 
@@ -450,7 +441,7 @@ async fn get_specific_mapping<B: GatewayBackend + ?Sized>(
         .list_forwards(peer)
         .await
         .into_iter()
-        .find(|e| e.external_port == external_port && e.protocol == protocol)
+        .find(|e| e.external_port == external_port && e.protocol == protocol.igd_name())
     {
         Some(entry) => mapping_response("GetSpecificPortMappingEntry", &entry),
         None => fault(714, "NoSuchEntryInArray"),
@@ -526,7 +517,7 @@ async fn add_mapping<B: GatewayBackend + ?Sized>(
         Some(secs) => Some(secs.min(IGD_MAX_LEASE_SECONDS)),
     };
 
-    let Some(transport) = soap_transport(body) else {
+    let Some(transport) = soap_protocol(body) else {
         return fault(402, "Invalid Args");
     };
     match backend
@@ -556,7 +547,7 @@ async fn delete_mapping<B: GatewayBackend + ?Sized>(
     let source = SocketAddrV4::new(source_ip, external_port);
 
     // Owner-scoped so a peer can't delete (or probe for) another's mapping.
-    let Some(transport) = soap_transport(body) else {
+    let Some(transport) = soap_protocol(body) else {
         return fault(402, "Invalid Args");
     };
     if backend
@@ -593,7 +584,7 @@ async fn add_hostname_mapping<B: GatewayBackend + ?Sized>(
     }
     if external_port == 0
         || internal_port == 0
-        || soap_protocol(body) != Some("TCP")
+        || soap_protocol(body) != Some(TransportProtocol::Tcp)
         || !matches!(enabled.as_str(), "1" | "true")
     {
         return fault(402, "Invalid Args");
@@ -654,7 +645,10 @@ async fn delete_hostname_mapping<B: GatewayBackend + ?Sized>(
     if !remote_host.is_empty() {
         return fault(801, upnp_error_text(801));
     }
-    if external_port == 0 || internal_port == 0 || soap_protocol(body) != Some("TCP") {
+    if external_port == 0
+        || internal_port == 0
+        || soap_protocol(body) != Some(TransportProtocol::Tcp)
+    {
         return fault(402, "Invalid Args");
     }
     let Some(hostname) = soap_raw_text(body, "NewHostname")
@@ -772,8 +766,8 @@ mod tests {
 </s:Envelope>"#
             )
         };
-        assert_eq!(soap_protocol(&body("TCP")), Some("TCP"));
-        assert_eq!(soap_protocol(&body("udp")), Some("UDP"));
+        assert_eq!(soap_protocol(&body("TCP")), Some(TransportProtocol::Tcp));
+        assert_eq!(soap_protocol(&body("udp")), Some(TransportProtocol::Udp));
         assert_eq!(soap_protocol(&body("SCTP")), None);
     }
 
