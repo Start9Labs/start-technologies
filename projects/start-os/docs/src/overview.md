@@ -1,6 +1,6 @@
 # Overview
 
-StartOS is a Linux distribution built for one purpose: running a personal server. It runs self-hosted software as services, and you administer it from your browser, or from the command line with start-cli. It has one administrator, who signs in with the master password and controls the whole server and every service on it; it has no other accounts or roles ([can I give someone limited access?](faq.md#can-i-give-someone-access-to-my-server-but-not-to-some-of-its-services)).
+StartOS is a Linux distribution built for one purpose: running a personal server. It runs self-hosted software as services, and you administer it from your browser, or from the command line with start-cli.
 
 ## Services
 

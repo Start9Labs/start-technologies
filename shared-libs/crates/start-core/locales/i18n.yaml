@@ -4993,6 +4993,48 @@ help.arg.trust:
   fr_FR: "Installer sans exiger un signataire de confiance ; les contrôles de signature et d'intégrité restent obligatoires"
   pl_PL: "Instaluj bez wymogu zaufanego sygnatariusza; kontrole podpisu i integralności pozostają obowiązkowe"
 
+help.arg.trust-for:
+  en_US: "Grant this trust to every imported key, including keys already present"
+  de_DE: "Diese Vertrauensstufe jedem importierten Schlüssel gewähren, auch bereits vorhandenen"
+  es_ES: "Conceder esta confianza a cada clave importada, incluidas las que ya existen"
+  fr_FR: "Accorder cette confiance à chaque clé importée, y compris celles déjà présentes"
+  pl_PL: "Nadaj to zaufanie każdemu importowanemu kluczowi, także już istniejącym"
+
+help.arg.trust-marketplace:
+  en_US: "Whether to trust the key for packages"
+  de_DE: "Ob dem Schlüssel für Pakete vertraut wird"
+  es_ES: "Si se confía en la clave para los paquetes"
+  fr_FR: "Indique si la clé est approuvée pour les paquets"
+  pl_PL: "Czy ufać kluczowi w przypadku pakietów"
+
+help.arg.trust-os:
+  en_US: "Whether to trust the key for StartOS updates"
+  de_DE: "Ob dem Schlüssel für StartOS-Updates vertraut wird"
+  es_ES: "Si se confía en la clave para las actualizaciones de StartOS"
+  fr_FR: "Indique si la clé est approuvée pour les mises à jour de StartOS"
+  pl_PL: "Czy ufać kluczowi w przypadku aktualizacji StartOS"
+
+help.arg.trusted-key-id:
+  en_US: "ID of the trusted key, as listed"
+  de_DE: "ID des vertrauenswürdigen Schlüssels, wie aufgelistet"
+  es_ES: "ID de la clave de confianza, tal como aparece en la lista"
+  fr_FR: "Identifiant de la clé de confiance, tel qu'il apparaît dans la liste"
+  pl_PL: "Identyfikator zaufanego klucza, taki jak na liście"
+
+help.arg.trusted-key-name:
+  en_US: "Name for the key; blank names each GPG key after its identity"
+  de_DE: "Name des Schlüssels; leer benennt jeden GPG-Schlüssel nach seiner Identität"
+  es_ES: "Nombre de la clave; si se deja en blanco, cada clave GPG toma el nombre de su identidad"
+  fr_FR: "Nom de la clé ; vide, chaque clé GPG prend le nom de son identité"
+  pl_PL: "Nazwa klucza; pusta nadaje każdemu kluczowi GPG nazwę jego tożsamości"
+
+help.arg.trusted-public-keys:
+  en_US: "Ed25519 public keys in PEM or armored GPG format; put options before -- and keys after it"
+  de_DE: "Öffentliche Ed25519-Schlüssel im PEM- oder ASCII-armierten GPG-Format; Optionen vor -- und Schlüssel danach angeben"
+  es_ES: "Claves públicas Ed25519 en formato PEM o GPG blindado; coloque las opciones antes de -- y las claves después"
+  fr_FR: "Clés publiques Ed25519 au format PEM ou GPG armuré ; placer les options avant -- et les clés après"
+  pl_PL: "Klucze publiczne Ed25519 w formacie PEM lub GPG z pancerzem ASCII; opcje podaj przed --, a klucze po nim"
+
 help.arg.tunnel-address:
   en_US: "Tunnel server address"
   de_DE: "Tunnel-Server-Adresse"
@@ -5737,6 +5779,13 @@ about.add-public-domain-to-host:
   fr_FR: "Ajouter un domaine public à cet hôte"
   pl_PL: "Dodaj publiczną domenę do tego hosta"
 
+about.add-registry:
+  en_US: "Connect a registry, trusting the keys it offers for packages"
+  de_DE: "Eine Registry verbinden und ihren angebotenen Schlüsseln für Pakete vertrauen"
+  es_ES: "Conectar un registro y confiar en las claves que ofrece para los paquetes"
+  fr_FR: "Connecter un registre et faire confiance aux clés qu'il propose pour les paquets"
+  pl_PL: "Połącz rejestr i zaufaj oferowanym przez niego kluczom dla pakietów"
+
 about.add-remove-list-package-signers:
   en_US: "Add, remove, and list package signers"
   de_DE: "Paket-Unterzeichner hinzufügen, entfernen und auflisten"
@@ -5785,6 +5834,13 @@ about.add-ssh-key:
   es_ES: "Agregar clave ssh"
   fr_FR: "Ajouter une clé ssh"
   pl_PL: "Dodaj klucz ssh"
+
+about.add-trusted-key:
+  en_US: "Import public keys; newly added keys are trusted for packages"
+  de_DE: "Öffentliche Schlüssel importieren; neu hinzugefügten Schlüsseln wird für Pakete vertraut"
+  es_ES: "Importar claves públicas; las claves recién añadidas son de confianza para los paquetes"
+  fr_FR: "Importer des clés publiques ; les clés nouvellement ajoutées sont approuvées pour les paquets"
+  pl_PL: "Zaimportuj klucze publiczne; nowo dodane klucze są zaufane dla pakietów"
 
 about.add-version-signer:
   en_US: "Add version signer"
@@ -6151,6 +6207,20 @@ about.commands-http-redirect:
   fr_FR: "Commandes pour gérer les redirections HTTP→HTTPS"
   pl_PL: "Polecenia do zarządzania przekierowaniami HTTP→HTTPS"
 
+about.commands-registries:
+  en_US: "Manage the registries this server's Marketplace is connected to"
+  de_DE: "Die Registrys verwalten, mit denen der Marketplace dieses Servers verbunden ist"
+  es_ES: "Administrar los registros a los que está conectado el Marketplace de este servidor"
+  fr_FR: "Gérer les registres auxquels le Marketplace de ce serveur est connecté"
+  pl_PL: "Zarządzaj rejestrami, z którymi połączony jest Marketplace tego serwera"
+
+about.commands-trusted-keys:
+  en_US: "Manage the keys this server trusts for packages and StartOS updates"
+  de_DE: "Die Schlüssel verwalten, denen dieser Server für Pakete und StartOS-Updates vertraut"
+  es_ES: "Administrar las claves en las que este servidor confía para paquetes y actualizaciones de StartOS"
+  fr_FR: "Gérer les clés auxquelles ce serveur fait confiance pour les paquets et les mises à jour de StartOS"
+  pl_PL: "Zarządzaj kluczami, którym ten serwer ufa w przypadku pakietów i aktualizacji StartOS"
+
 about.list-http-redirects:
   en_US: "List the port-80 HTTP→HTTPS redirect status of every public IPv4"
   de_DE: "Den HTTP→HTTPS-Weiterleitungsstatus (Port 80) jeder öffentlichen IPv4 auflisten"
@@ -6234,13 +6304,6 @@ about.commands-setup:
   es_ES: "Comandos relacionados con la configuración inicial"
   fr_FR: "Commandes liées à la configuration initiale"
   pl_PL: "Polecenia związane z początkową konfiguracją"
-
-about.commands-os-update-signers:
-  en_US: "Manage trusted OS update signers"
-  de_DE: "Vertrauenswürdige Unterzeichner für Betriebssystem-Updates verwalten"
-  es_ES: "Administrar firmantes de confianza para actualizaciones del sistema"
-  fr_FR: "Gérer les signataires de confiance des mises à jour du système"
-  pl_PL: "Zarządzaj zaufanymi sygnatariuszami aktualizacji systemu"
 
 about.commands-ssh-keys:
   en_US: "Commands for interacting with ssh keys i.e. add, delete, list"
@@ -6655,19 +6718,26 @@ about.get-device-info:
   fr_FR: "Afficher les informations de l'appareil"
   pl_PL: "Wyświetl informacje o urządzeniu"
 
-about.get-os-update-signer:
-  en_US: "Get a trusted OS update signer's label"
-  de_DE: "Bezeichnung eines vertrauenswürdigen Update-Unterzeichners abrufen"
-  es_ES: "Obtener la etiqueta de un firmante de confianza de actualizaciones del sistema"
-  fr_FR: "Obtenir le libellé d’un signataire de confiance des mises à jour du système"
-  pl_PL: "Pobierz etykietę zaufanego sygnatariusza aktualizacji systemu"
-
 about.get-id-pubkey:
   en_US: "Get the identity public key"
   de_DE: "Öffentlichen Identitätsschlüssel abrufen"
   es_ES: "Obtener la clave pública de identidad"
   fr_FR: "Obtenir la clé publique d'identité"
   pl_PL: "Pobierz klucz publiczny tożsamości"
+
+about.list-registries:
+  en_US: "List connected registries and their names"
+  de_DE: "Verbundene Registrys und ihre Namen auflisten"
+  es_ES: "Listar los registros conectados y sus nombres"
+  fr_FR: "Lister les registres connectés et leurs noms"
+  pl_PL: "Wyświetl połączone rejestry i ich nazwy"
+
+about.list-trusted-keys:
+  en_US: "List trusted keys and what each is trusted for"
+  de_DE: "Vertrauenswürdige Schlüssel auflisten und wofür jedem vertraut wird"
+  es_ES: "Listar las claves de confianza y para qué se confía en cada una"
+  fr_FR: "Lister les clés de confiance et ce pour quoi chacune est approuvée"
+  pl_PL: "Wyświetl zaufane klucze i to, do czego każdy jest zaufany"
 
 about.print-shell-completions:
   en_US: "Print a shell completion script"
@@ -7083,6 +7153,20 @@ about.publish-s9pk:
   fr_FR: "Publier s9pk dans le bucket S3 et indexer dans le registre"
   pl_PL: "Opublikuj s9pk do bucketu S3 i zindeksuj w rejestrze"
 
+about.remove-registry:
+  en_US: "Disconnect a registry, including the Start9 and Community registries"
+  de_DE: "Eine Registry trennen, auch die Start9- und Community-Registrys"
+  es_ES: "Desconectar un registro, incluidos los registros de Start9 y de la comunidad"
+  fr_FR: "Déconnecter un registre, y compris les registres Start9 et Communauté"
+  pl_PL: "Odłącz rejestr, także rejestry Start9 i Community"
+
+about.remove-trusted-key:
+  en_US: "Remove a trusted key"
+  de_DE: "Einen vertrauenswürdigen Schlüssel entfernen"
+  es_ES: "Eliminar una clave de confianza"
+  fr_FR: "Supprimer une clé de confiance"
+  pl_PL: "Usuń zaufany klucz"
+
 about.select-s9pk-for-device:
   en_US: "Select the best compatible s9pk for a target device"
   de_DE: "Das beste kompatible s9pk für ein Zielgerät auswählen"
@@ -7341,6 +7425,13 @@ about.reset-user-interface-password:
   es_ES: "Restablecer contraseña de la interfaz de usuario"
   fr_FR: "Réinitialiser le mot de passe de l'interface utilisateur"
   pl_PL: "Zresetuj hasło interfejsu użytkownika"
+
+about.set-os-registry:
+  en_US: "Use a connected registry for StartOS updates"
+  de_DE: "Eine verbundene Registry für StartOS-Updates verwenden"
+  es_ES: "Usar un registro conectado para las actualizaciones de StartOS"
+  fr_FR: "Utiliser un registre connecté pour les mises à jour de StartOS"
+  pl_PL: "Używaj połączonego rejestru do aktualizacji StartOS"
 
 about.uninitialize-webserver:
   en_US: "Uninitialize the webserver"
@@ -7798,6 +7889,13 @@ about.update-port-forward-label:
   fr_FR: "Mettre à jour le libellé d'une redirection de port"
   pl_PL: "Zaktualizuj etykietę przekierowania portu"
 
+about.update-trusted-key:
+  en_US: "Rename a trusted key and set what it is trusted for"
+  de_DE: "Einen vertrauenswürdigen Schlüssel umbenennen und festlegen, wofür ihm vertraut wird"
+  es_ES: "Cambiar el nombre de una clave de confianza y definir para qué se confía en ella"
+  fr_FR: "Renommer une clé de confiance et définir ce pour quoi elle est approuvée"
+  pl_PL: "Zmień nazwę zaufanego klucza i określ, do czego jest zaufany"
+
 about.update-tunnel:
   en_US: "Replace a gateway's WireGuard config in place, keeping its identity"
   de_DE: "Die WireGuard-Konfiguration eines Gateways direkt ersetzen, unter Beibehaltung seiner Identität"
@@ -7895,20 +7993,6 @@ update.security.selected-registry:
   es_ES: "el registro del SO seleccionado"
   fr_FR: "le registre du système sélectionné"
   pl_PL: "wybranym rejestrze systemu"
-
-update.signers.already-exists:
-  en_US: "This public key is already a trusted OS update signer"
-  de_DE: "Dieser öffentliche Schlüssel ist bereits als Update-Unterzeichner vertrauenswürdig"
-  es_ES: "Esta clave pública ya es un firmante de confianza de actualizaciones del sistema"
-  fr_FR: "Cette clé publique est déjà un signataire de confiance des mises à jour du système"
-  pl_PL: "Ten klucz publiczny jest już zaufanym sygnatariuszem aktualizacji systemu"
-
-update.signers.not-found:
-  en_US: "Trusted OS update signer not found"
-  de_DE: "Vertrauenswürdiger Update-Unterzeichner nicht gefunden"
-  es_ES: "No se encontró el firmante de confianza de actualizaciones del sistema"
-  fr_FR: "Signataire de confiance des mises à jour du système introuvable"
-  pl_PL: "Nie znaleziono zaufanego sygnatariusza aktualizacji systemu"
 
 trusted-keys.invalid:
   en_US: "Enter a name and at least one Ed25519 public key"

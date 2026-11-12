@@ -7,8 +7,7 @@ BUILD_SRC := $(call ls-files, projects/start-os/build/lib projects/start-os/buil
 IMAGE_RECIPE_SRC := $(call ls-files, projects/start-os/build/image-recipe/)
 STARTD_SRC := projects/start-os/startd.service projects/start-os/services.slice projects/start-os/startos-shutdown.service projects/start-os/startos-restart.service $(BUILD_SRC)
 STARTOS_RELEASE_NOTES := projects/start-os/release-notes/$(shell cat $(VERSION_FILE)).md
-STARTOS_LOCALIZED_RELEASE_NOTES := $(filter-out %.pre-update.md,$(wildcard $(basename $(STARTOS_RELEASE_NOTES)).*.md))
-STARTOS_RELEASE_NOTES_SRC := scripts/changelog.mjs scripts/changelog-version.mjs shared-libs/crates/start-core/locales/release-notes.json .prettierrc.json package.json $(wildcard $(STARTOS_RELEASE_NOTES)) $(STARTOS_LOCALIZED_RELEASE_NOTES) $(call ls-files, projects/start-os/changelog)
+STARTOS_RELEASE_NOTES_SRC := scripts/changelog.mjs scripts/changelog-version.mjs shared-libs/crates/start-core/locales/release-notes.json .prettierrc.json package.json $(wildcard $(STARTOS_RELEASE_NOTES)) $(call ls-files, projects/start-os/changelog)
 COMPILED_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox target/$(RUST_ARCH)-unknown-linux-musl/release/start-container target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs projects/start-os/container-runtime/rootfs.$(ARCH).squashfs
 STARTOS_TARGETS := $(STARTD_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE) $(STARTOS_RELEASE_NOTES_SRC) $(COMPILED_TARGETS) $(PLATFORM_FILE) \
 	$(shell if [ "$(PLATFORM)" = "raspberrypi" ]; then \
@@ -31,7 +30,11 @@ backup-fs-test: $(call ls-files, projects/start-os/backup-fs/src) projects/start
 container-runtime-test: projects/start-os/container-runtime/node_modules/.package-lock.json $(call ls-files, projects/start-os/container-runtime/src) projects/start-os/container-runtime/package.json projects/start-os/container-runtime/tsconfig.json
 	cd projects/start-os/container-runtime && npm test
 
-start-os-scripts-test: projects/start-os/build/tests/dns-config-test.sh projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/update-image.sh projects/start-os/build/lib/scripts/normalize-fstab projects/start-os/build/tests/normalize-fstab-test.sh projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh projects/start-os/build/tests/init-resize-test.sh projects/start-os/build/image-recipe/build.sh projects/start-os/build/tests/backports-pref-test.sh projects/start-os/build/lib/scripts/gather-debug-info projects/start-os/debian/postinst projects/start-os/build/tests/crash-diagnostics-test.sh projects/start-os/build/tests/btrfsmaintenance-test.sh projects/start-os/build/dpkg-deps/depends projects/start-os/build/tests/runtime-package-upgrade-test.sh projects/start-os/build/tests/migration-images-test.sh projects/start-os/build/save-migration-images.sh
+.PHONY: start-os-grub-test
+start-os-grub-test: projects/start-os/build/tests/grub-overrides-test.sh projects/start-os/build/lib/grub-user.cfg projects/start-os/build/lib/scripts/nvme-isolation-test projects/start-os/debian/postinst projects/start-os/build/image-recipe/raspberrypi/squashfs/etc/default/grub.d/raspberrypi.cfg
+	./projects/start-os/build/tests/grub-overrides-test.sh
+
+start-os-scripts-test: start-os-grub-test projects/start-os/build/tests/dns-config-test.sh projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/update-image.sh projects/start-os/build/lib/scripts/normalize-fstab projects/start-os/build/tests/normalize-fstab-test.sh projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh projects/start-os/build/tests/init-resize-test.sh projects/start-os/build/image-recipe/build.sh projects/start-os/build/tests/backports-pref-test.sh projects/start-os/build/lib/scripts/gather-debug-info projects/start-os/debian/postinst projects/start-os/build/tests/crash-diagnostics-test.sh projects/start-os/build/tests/btrfsmaintenance-test.sh projects/start-os/build/dpkg-deps/depends projects/start-os/build/tests/runtime-package-upgrade-test.sh projects/start-os/build/tests/migration-images-test.sh projects/start-os/build/save-migration-images.sh
 	./projects/start-os/build/tests/migration-images-test.sh
 	./projects/start-os/build/tests/normalize-fstab-test.sh
 	./projects/start-os/build/tests/init-resize-test.sh
@@ -117,15 +120,7 @@ start-os-install: $(STARTOS_TARGETS) build/bash-completion
 	$(call cp,build/env/VERSION.txt,$(DESTDIR)/usr/lib/startos/VERSION.txt)
 	@set -e; notes=$$(mktemp -d .release-notes.XXXXXX); trap 'rm -rf "$$notes"' EXIT; \
 		node scripts/changelog.mjs notes projects/start-os "$$(cat $(VERSION_FILE))" > "$$notes/main.md"; \
-		locales=$$(node scripts/changelog.mjs locales projects/start-os "$$(cat $(VERSION_FILE))"); \
-		for locale in $$locales; do \
-			node scripts/changelog.mjs notes projects/start-os "$$(cat $(VERSION_FILE))" --locale "$$locale" > "$$notes/$$locale.md"; \
-		done; \
-		$(call cp,$$notes/main.md,$(DESTDIR)/usr/lib/startos/release-notes.md); \
-		$(call mkdir,$(DESTDIR)/usr/lib/startos/release-notes); \
-		for locale in $$locales; do \
-			$(call cp,$$notes/$$locale.md,$(DESTDIR)/usr/lib/startos/release-notes/$$locale.md); \
-		done
+		$(call cp,$$notes/main.md,$(DESTDIR)/usr/lib/startos/release-notes.md)
 
 start-os-update-overlay: $(STARTOS_TARGETS)
 	@echo "\033[33m!!! THIS WILL ONLY REFLASH YOUR DEVICE IN MEMORY !!!\033[0m"
