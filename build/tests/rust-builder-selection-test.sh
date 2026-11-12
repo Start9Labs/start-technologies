@@ -138,7 +138,10 @@ for builder in \
             assert_log_contains --release
             assert_log_contains 'Parent profile: release'
         else
-            ! grep -Fxq -- --release "$DOCKER_LOG"
+            if grep -Fxq -- --release "$DOCKER_LOG"; then
+                printf 'Unexpected release flag for %s (profile %s)\n' "$builder" "$profile" >&2
+                exit 1
+            fi
             assert_log_contains 'Parent profile: debug'
         fi
         if [[ "$profile" == unknown-profile ]]; then
