@@ -3900,6 +3900,27 @@ tunnel.api.route-not-found:
   fr_FR: "Route par nom d’hôte ou destination de repli introuvable"
   pl_PL: "Nie znaleziono trasy według nazwy hosta ani celu domyślnego"
 
+tunnel.forward.fallback-conflict:
+  en_US: "Fallback overlaps an existing mapping"
+  de_DE: "Das Fallback überschneidet sich mit einer vorhandenen Zuordnung"
+  es_ES: "El destino predeterminado se superpone con una asignación existente"
+  fr_FR: "La destination de repli chevauche une correspondance existante"
+  pl_PL: "Cel domyślny nakłada się na istniejące mapowanie"
+
+tunnel.forward.hostname-held:
+  en_US: "Hostname %{hostname} is held by another client"
+  de_DE: "Der Hostname %{hostname} ist einem anderen Client zugeordnet"
+  es_ES: "El nombre de host %{hostname} pertenece a otro cliente"
+  fr_FR: "Le nom d’hôte %{hostname} est attribué à un autre client"
+  pl_PL: "Nazwa hosta %{hostname} jest przypisana do innego klienta"
+
+tunnel.forward.hostname-protocol-conflict:
+  en_US: "Hostname %{hostname} overlaps an existing protocol selection"
+  de_DE: "Der Hostname %{hostname} überschneidet sich mit einer vorhandenen Protokollauswahl"
+  es_ES: "El nombre de host %{hostname} se superpone con una selección de protocolo existente"
+  fr_FR: "Le nom d’hôte %{hostname} chevauche une sélection de protocole existante"
+  pl_PL: "Nazwa hosta %{hostname} nakłada się na istniejący wybór protokołu"
+
 util.crypto.invalid-backup-key:
   en_US: "The wrapped backup key is invalid or could not be authenticated."
   de_DE: "Der verschlüsselte Sicherungsschlüssel ist ungültig oder konnte nicht authentifiziert werden."

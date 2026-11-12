@@ -9,8 +9,8 @@ impl TunnelMigration for SniTransports {
     fn action(&self, db: &mut Value) -> Result<(), Error> {
         let mut forwards: PortForwards = from_value(db["portForwards"].clone())?;
         for forward in forwards.0.values_mut() {
-            if let PortForward::Sni { tcp, udp } = forward {
-                for bindings in [tcp, udp] {
+            if let PortForward::Sni { tcp, udp, both } = forward {
+                for bindings in [tcp, udp, both] {
                     for (hostname, route) in std::mem::take(&mut bindings.routes) {
                         let hostname = hostname.to_ascii_lowercase();
                         match bindings.routes.get(&hostname) {
@@ -36,7 +36,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn materializes_empty_udp_without_copying_tcp_ownership() {
+    fn materializes_empty_udp_and_combined_without_copying_tcp_ownership() {
         let mut db = imbl_value::json!({
             "portForwards": {
                 "203.0.113.1:443": {
@@ -50,6 +50,10 @@ mod tests {
         SniTransports.action(&mut db).unwrap();
         assert_eq!(
             db["portForwards"]["203.0.113.1:443"]["udp"],
+            imbl_value::json!({ "routes": {}, "fallback": null })
+        );
+        assert_eq!(
+            db["portForwards"]["203.0.113.1:443"]["both"],
             imbl_value::json!({ "routes": {}, "fallback": null })
         );
         assert_eq!(

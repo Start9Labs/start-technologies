@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::net::{SocketAddrV4, SocketAddrV6};
 use std::time::{Duration, Instant};
 
-use crate::net::port_map::TransportProtocol;
+use crate::net::port_map::Protocol;
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::PortForward;
@@ -33,19 +33,24 @@ pub enum LeaseKey {
     Sni {
         source: SocketAddrV4,
         hostname: String,
-        protocol: TransportProtocol,
+        protocol: Protocol,
     },
     /// The hostname-less fallback on an SNI-demuxed port, keyed by its single
     /// external address (there is at most one fallback per port).
     SniFallback {
         source: SocketAddrV4,
-        protocol: TransportProtocol,
+        protocol: Protocol,
     },
     Pinhole(SocketAddrV6),
 }
 
 impl LeaseKey {
-    pub fn sni(source: SocketAddrV4, hostname: Option<&str>, protocol: TransportProtocol) -> Self {
+    pub fn sni(
+        source: SocketAddrV4,
+        hostname: Option<&str>,
+        protocol: impl Into<Protocol>,
+    ) -> Self {
+        let protocol = protocol.into();
         match hostname {
             Some(hostname) => Self::Sni {
                 source,
@@ -56,10 +61,13 @@ impl LeaseKey {
         }
     }
 
-    fn target(&self, forwards: &BTreeMap<SocketAddrV4, PortForward>) -> Option<SocketAddrV4> {
-        match self {
+    fn automatic_target(
+        &self,
+        forwards: &BTreeMap<SocketAddrV4, PortForward>,
+    ) -> Option<SocketAddrV4> {
+        let (target, auto) = match self {
             Self::Dnat(source) => match forwards.get(source)? {
-                PortForward::Dnat { target, .. } => Some(*target),
+                PortForward::Dnat { target, auto, .. } => Some((*target, *auto)),
                 _ => None,
             },
             Self::Sni {
@@ -70,18 +78,19 @@ impl LeaseKey {
                 .get(source)?
                 .bindings(*protocol)?
                 .route(Some(hostname))
-                .map(|r| r.target),
+                .map(|r| (r.target, r.auto)),
             Self::SniFallback { source, protocol } => forwards
                 .get(source)?
                 .bindings(*protocol)?
                 .route(None)
-                .map(|r| r.target),
+                .map(|r| (r.target, r.auto)),
             Self::Pinhole(_) => None,
-        }
+        }?;
+        auto.then_some(target)
     }
 }
 
-/// Carries lease deadlines with mappings that survive a WAN-key change.
+/// Carries deadlines with automatic mappings that retain their target after a WAN-key change.
 pub fn rekey(
     leases: &mut Leases,
     moves: &[(LeaseKey, LeaseKey)],
@@ -95,7 +104,10 @@ pub fn rekey(
             continue;
         }
         if let Some((_, new)) = moves.iter().find(|(old, _)| *old == key) {
-            if key.target(old).is_some() && key.target(old) == new.target(want) {
+            if key
+                .automatic_target(old)
+                .is_some_and(|target| Some(target) == new.automatic_target(want))
+            {
                 leases
                     .entry(new.clone())
                     .and_modify(|e| *e = (*e).max(expiry))
@@ -106,6 +118,13 @@ pub fn rekey(
 }
 
 pub type Leases = BTreeMap<LeaseKey, Instant>;
+
+/// Transfers the DNAT deadline to its single combined fallback.
+pub fn convert_dnat_to_sni(leases: &mut Leases, source: SocketAddrV4) {
+    if let Some(expiry) = leases.remove(&LeaseKey::Dnat(source)) {
+        leases.insert(LeaseKey::sni(source, None, Protocol::TcpUdp), expiry);
+    }
+}
 
 /// Stamp (or refresh) an auto mapping's lease to `now + lifetime`, and wake the
 /// reaper so it can pull its next wake-up earlier if this lease is now the
@@ -258,12 +277,7 @@ async fn reap_dnat(ctx: &TunnelContext, source: SocketAddrV4) {
     }
 }
 
-async fn reap_sni(
-    ctx: &TunnelContext,
-    source: SocketAddrV4,
-    hostname: &str,
-    protocol: TransportProtocol,
-) {
+async fn reap_sni(ctx: &TunnelContext, source: SocketAddrV4, hostname: &str, protocol: Protocol) {
     let target = ctx
         .db
         .peek()
@@ -289,7 +303,7 @@ async fn reap_sni(
     tracing::info!("PCP lease lapsed: removed auto SNI route {hostname} on {source}");
 }
 
-async fn reap_sni_fallback(ctx: &TunnelContext, source: SocketAddrV4, protocol: TransportProtocol) {
+async fn reap_sni_fallback(ctx: &TunnelContext, source: SocketAddrV4, protocol: Protocol) {
     let target = ctx
         .db
         .peek()
@@ -326,6 +340,7 @@ async fn reap_pinhole(ctx: &TunnelContext, key: SocketAddrV6) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::net::port_map::TransportProtocol;
 
     #[tokio::test]
     async fn a_renewal_before_expiry_lock_preserves_the_mapping() {
@@ -334,6 +349,8 @@ mod tests {
             LeaseKey::Dnat(source),
             LeaseKey::sni(source, Some("quic.example.com"), TransportProtocol::Udp),
             LeaseKey::sni(source, None, TransportProtocol::Tcp),
+            LeaseKey::sni(source, Some("combined.example.com"), Protocol::TcpUdp),
+            LeaseKey::sni(source, None, Protocol::TcpUdp),
             LeaseKey::Pinhole("[2001:db8::1]:443".parse().unwrap()),
         ] {
             let lock = tokio::sync::Mutex::new(());
@@ -353,6 +370,63 @@ mod tests {
                     .await
                     .is_some()
             );
+        }
+    }
+
+    #[test]
+    fn dnat_conversion_transfers_one_deadline_to_the_combined_fallback() {
+        let source = "203.0.113.1:443".parse().unwrap();
+        let expiry = Instant::now();
+        let mut leases = Leases::from([(LeaseKey::Dnat(source), expiry)]);
+        convert_dnat_to_sni(&mut leases, source);
+        let combined = LeaseKey::sni(source, None, Protocol::TcpUdp);
+        assert_eq!(leases.len(), 1);
+        assert_eq!(leases[&combined], expiry);
+        assert_eq!(expired_keys(&leases, expiry), vec![combined]);
+        let mut manual = Leases::new();
+        convert_dnat_to_sni(&mut manual, source);
+        assert!(manual.is_empty());
+    }
+
+    #[test]
+    fn wan_rekey_does_not_give_a_manual_destination_an_incoming_automatic_lease() {
+        use crate::tunnel::db::SniRoute;
+        let source = "192.0.2.1:443".parse().unwrap();
+        let destination = "203.0.113.1:443".parse().unwrap();
+        for protocol in Protocol::ALL {
+            for hostname in [Some("service.example.com"), None] {
+                let mut entry = PortForward::empty_sni();
+                let route = SniRoute {
+                    target: "10.59.0.2:443".parse().unwrap(),
+                    label: None,
+                    enabled: true,
+                    auto: true,
+                };
+                let bindings = entry.bindings_mut(protocol).unwrap();
+                match hostname {
+                    Some(hostname) => {
+                        bindings.routes.insert(hostname.to_owned(), route);
+                    }
+                    None => bindings.fallback = Some(route),
+                }
+                let old = BTreeMap::from([(source, entry.clone())]);
+                entry
+                    .bindings_mut(protocol)
+                    .unwrap()
+                    .route_mut(hostname)
+                    .unwrap()
+                    .auto = false;
+                let want = BTreeMap::from([(destination, entry)]);
+                let key = LeaseKey::sni(source, hostname, protocol);
+                let mut leases = Leases::from([(key.clone(), Instant::now())]);
+                rekey(
+                    &mut leases,
+                    &[(key, LeaseKey::sni(destination, hostname, protocol))],
+                    &old,
+                    &want,
+                );
+                assert!(leases.is_empty());
+            }
         }
     }
 
@@ -384,12 +458,12 @@ mod tests {
         let a = LeaseKey::Sni {
             source,
             hostname: "a.example.com".into(),
-            protocol: TransportProtocol::Tcp,
+            protocol: Protocol::Tcp,
         };
         let b = LeaseKey::Sni {
             source,
             hostname: "b.example.com".into(),
-            protocol: TransportProtocol::Tcp,
+            protocol: Protocol::Tcp,
         };
         leases.insert(a.clone(), now - Duration::from_secs(1));
         leases.insert(b.clone(), now + Duration::from_secs(60));

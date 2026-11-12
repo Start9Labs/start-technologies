@@ -70,11 +70,8 @@ impl WebserverInfo {
             let enabled = match forward {
                 PortForward::Dnat { enabled, .. } => *enabled,
                 PortForward::Sni { .. } => forward
-                    .bindings(crate::net::port_map::TransportProtocol::Tcp)
-                    .unwrap()
-                    .fallback
-                    .as_ref()
-                    .is_some_and(|f| f.enabled),
+                    .overlapping_route(crate::net::port_map::Protocol::Tcp, None)
+                    .is_some_and(|(_, fallback)| fallback.enabled),
             };
             if enabled && self.reserves_plain_forward(*source, forward.port_span()) {
                 return Err(Error::new(
@@ -163,6 +160,7 @@ mod tests {
                         fallback: None,
                     },
                     udp: Default::default(),
+                    both: Default::default(),
                 },
             )])))
             .unwrap();
@@ -205,6 +203,7 @@ mod tests {
                         }),
                     },
                     udp: Default::default(),
+                    both: Default::default(),
                 },
             ] {
                 let mut db = Model::new(&TunnelDatabase::default()).unwrap();
@@ -222,6 +221,39 @@ mod tests {
                     assert!(db.as_webserver().as_enabled().de().unwrap());
                 }
             }
+        }
+    }
+
+    #[test]
+    fn combined_fallback_reserves_tcp_admin_access_but_named_routes_do_not() {
+        use crate::net::port_map::Protocol;
+        use crate::tunnel::db::SniRoute;
+        let source = "203.0.113.1:443".parse().unwrap();
+        let web = WebserverInfo {
+            enabled: true,
+            listen: Some("0.0.0.0:443".parse().unwrap()),
+            certificate: None,
+        };
+        for enabled in [false, true] {
+            let mut entry = PortForward::empty_sni();
+            let route = SniRoute {
+                target: "10.59.0.2:443".parse().unwrap(),
+                label: None,
+                enabled,
+                auto: false,
+            };
+            entry.bindings_mut(Protocol::TcpUdp).unwrap().fallback = Some(route.clone());
+            let mut forwards = PortForwards(std::collections::BTreeMap::from([(source, entry)]));
+            assert_eq!(web.check_forward_conflicts(&forwards).is_err(), enabled);
+            let bindings = forwards
+                .0
+                .get_mut(&source)
+                .unwrap()
+                .bindings_mut(Protocol::TcpUdp)
+                .unwrap();
+            bindings.fallback = None;
+            bindings.routes.insert("service.example.com".into(), route);
+            web.check_forward_conflicts(&forwards).unwrap();
         }
     }
 

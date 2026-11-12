@@ -12,8 +12,8 @@ use crate::context::CliContext;
 use crate::db::model::public::NetworkInterfaceType;
 use crate::net::dns_update::rfc2136::InjectedRecord;
 use crate::net::forward::nft_rule;
-use crate::net::port_map::TransportProtocol;
 use crate::net::port_map::server::GatewayBackend;
+use crate::net::port_map::{Protocol, TransportProtocol};
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::{DnsRecordEntry, PortForward, TunnelDatabase};
@@ -1276,7 +1276,7 @@ pub struct AddPortForwardParams {
         help = "help.arg.tunnel-forward-protocol"
     )]
     #[serde(default)]
-    protocol: TransportProtocol,
+    protocol: Protocol,
 
     /// External (WAN) port to forward. The external IP is fixed to the target's
     /// WAN so return traffic stays symmetric.
@@ -1328,7 +1328,7 @@ pub async fn add_forward(
 
     let covers_80 =
         external_port <= 80 && 80 <= external_port.saturating_add(count.saturating_sub(1));
-    if covers_80 && (sni.is_empty() || protocol == TransportProtocol::Tcp) {
+    if covers_80 && (sni.is_empty() || protocol.contains(TransportProtocol::Tcp)) {
         let peek = ctx.db.peek().await;
         let disabled = peek.as_http_redirects().de()?.disabled;
         let public = crate::tunnel::redirect::public_ipv4s(&peek.as_gateways().de()?);
@@ -1360,7 +1360,7 @@ pub async fn add_forward(
         return Ok(());
     }
 
-    if protocol != TransportProtocol::Tcp {
+    if protocol == Protocol::Udp {
         return Err(Error::new(
             eyre!(t!("tunnel.api.protocol-requires-hostname")),
             ErrorKind::InvalidRequest,
@@ -1473,7 +1473,7 @@ pub struct RemovePortForwardParams {
     /// Omitted selects both transports for whole-forward removal, otherwise TCP.
     #[arg(long, value_enum, help = "help.arg.tunnel-forward-remove-protocol")]
     #[serde(default)]
-    protocol: Option<TransportProtocol>,
+    protocol: Option<Protocol>,
     #[arg(long, help = "help.arg.tunnel-forward-fallback")]
     #[serde(default)]
     fallback: bool,
@@ -1489,12 +1489,13 @@ rpc_toolkit::reflect_ts!(RemovePortForwardParams);
 rpc_toolkit::ts_export!(RemovePortForwardParams, namespaces = ["tunnel"]);
 
 impl RemovePortForwardParams {
-    fn protocols(&self) -> &'static [TransportProtocol] {
+    fn protocols(&self) -> &'static [Protocol] {
         match self.protocol {
-            Some(TransportProtocol::Tcp) => &[TransportProtocol::Tcp],
-            Some(TransportProtocol::Udp) => &[TransportProtocol::Udp],
-            None if self.hostname.is_none() && !self.fallback => &TransportProtocol::ALL,
-            None => &[TransportProtocol::Tcp],
+            Some(Protocol::Tcp) => &[Protocol::Tcp],
+            Some(Protocol::Udp) => &[Protocol::Udp],
+            Some(Protocol::TcpUdp) => &[Protocol::TcpUdp],
+            None if self.hostname.is_none() && !self.fallback => &Protocol::ALL,
+            None => &[Protocol::Tcp],
         }
     }
 }
@@ -1576,7 +1577,7 @@ pub struct UpdatePortForwardLabelParams {
         help = "help.arg.tunnel-forward-protocol"
     )]
     #[serde(default)]
-    protocol: TransportProtocol,
+    protocol: Protocol,
 
     source: SocketAddrV4,
     label: Option<String>,
@@ -1646,7 +1647,7 @@ pub struct SetPortForwardEnabledParams {
         help = "help.arg.tunnel-forward-protocol"
     )]
     #[serde(default)]
-    protocol: TransportProtocol,
+    protocol: Protocol,
 
     source: SocketAddrV4,
     #[arg(long)]
@@ -1676,7 +1677,7 @@ fn update_forward_enabled(
     source: SocketAddrV4,
     enabled: bool,
     hostname: Option<&str>,
-    protocol: TransportProtocol,
+    protocol: Protocol,
 ) -> Result<ForwardToggle, Error> {
     let web = db.as_webserver().de()?;
     db.as_port_forwards_mut().mutate(|pf| {
@@ -1704,7 +1705,7 @@ fn update_forward_enabled(
             }
             PortForward::Sni { .. } => {
                 let hostname = hostname.map(str::to_ascii_lowercase);
-                if enabled && hostname.is_none() && protocol == TransportProtocol::Tcp {
+                if enabled && hostname.is_none() && protocol.contains(TransportProtocol::Tcp) {
                     web.check_plain_forward(source, 1)?;
                 }
                 let route = entry
@@ -1775,7 +1776,7 @@ pub async fn set_forward_enabled(
                         )
                     })?;
                     let result = match hostname {
-                        Some(hostname) => ctx.sni.register_transport(
+                        Some(hostname) => ctx.sni.register_protocol(
                             protocol,
                             *source.ip(),
                             source.port(),
@@ -1783,7 +1784,7 @@ pub async fn set_forward_enabled(
                             target,
                             None,
                         ),
-                        None => ctx.sni.register_fallback_transport(
+                        None => ctx.sni.register_fallback_protocol(
                             protocol,
                             *source.ip(),
                             source.port(),
@@ -1798,14 +1799,14 @@ pub async fn set_forward_enabled(
                     })?;
                 } else {
                     match hostname {
-                        Some(hostname) => ctx.sni.unregister_transport(
+                        Some(hostname) => ctx.sni.unregister_protocol(
                             protocol,
                             *source.ip(),
                             source.port(),
                             &[hostname],
                             target,
                         ),
-                        None => ctx.sni.unregister_fallback_transport(
+                        None => ctx.sni.unregister_fallback_protocol(
                             protocol,
                             *source.ip(),
                             source.port(),
@@ -2290,7 +2291,7 @@ mod tests {
                 },
             )])))
             .unwrap();
-        let error = update_forward_enabled(&mut db, source, true, None, TransportProtocol::Tcp)
+        let error = update_forward_enabled(&mut db, source, true, None, Protocol::Tcp)
             .err()
             .unwrap();
         assert_eq!(error.kind, ErrorKind::InvalidRequest);
@@ -2298,10 +2299,9 @@ mod tests {
             db.as_port_forwards().de().unwrap().0[&source],
             PortForward::Dnat { enabled: false, .. }
         ));
-        update_forward_enabled(&mut db, source, false, None, TransportProtocol::Tcp).unwrap();
+        update_forward_enabled(&mut db, source, false, None, Protocol::Tcp).unwrap();
         db.as_webserver_mut().as_enabled_mut().ser(&false).unwrap();
-        let toggle =
-            update_forward_enabled(&mut db, source, true, None, TransportProtocol::Tcp).unwrap();
+        let toggle = update_forward_enabled(&mut db, source, true, None, Protocol::Tcp).unwrap();
         assert!(matches!(toggle, ForwardToggle::Dnat { target: t, count: 3 } if t == target));
         assert!(matches!(
             db.as_port_forwards().de().unwrap().0[&source],
@@ -2347,11 +2347,12 @@ mod tests {
                         fallback: None,
                     },
                     udp: Default::default(),
+                    both: Default::default(),
                 },
             )])))
             .unwrap();
         assert!(matches!(
-            update_forward_enabled(&mut db, source, true, Some("service.example.com"), TransportProtocol::Tcp).unwrap(),
+            update_forward_enabled(&mut db, source, true, Some("service.example.com"), Protocol::Tcp).unwrap(),
             ForwardToggle::Sni { target: t, .. } if t == target
         ));
     }
@@ -2387,29 +2388,24 @@ mod tests {
         assert!(parse_dns_server("").is_err());
     }
     #[test]
-    fn legacy_whole_forward_removal_selects_both_transports() {
+    fn legacy_whole_forward_removal_selects_all_logical_mappings() {
         let legacy: RemovePortForwardParams =
             serde_json::from_value(serde_json::json!({"source": "203.0.113.1:443"})).unwrap();
-        assert_eq!(legacy.protocols(), &TransportProtocol::ALL);
+        assert_eq!(legacy.protocols(), &Protocol::ALL);
         let cli = RemovePortForwardParams::try_parse_from(["remove", "203.0.113.1:443"]).unwrap();
-        assert_eq!(cli.protocols(), &TransportProtocol::ALL);
+        assert_eq!(cli.protocols(), &Protocol::ALL);
         for (extra, expected) in [
+            (serde_json::json!({"protocol": "udp"}), &[Protocol::Udp][..]),
+            (serde_json::json!({"protocol": "tcp"}), &[Protocol::Tcp][..]),
             (
-                serde_json::json!({"protocol": "udp"}),
-                &[TransportProtocol::Udp][..],
-            ),
-            (
-                serde_json::json!({"protocol": "tcp"}),
-                &[TransportProtocol::Tcp][..],
+                serde_json::json!({"protocol": "tcp+udp"}),
+                &[Protocol::TcpUdp][..],
             ),
             (
                 serde_json::json!({"hostname": "Cloud.Example.com"}),
-                &[TransportProtocol::Tcp][..],
+                &[Protocol::Tcp][..],
             ),
-            (
-                serde_json::json!({"fallback": true}),
-                &[TransportProtocol::Tcp][..],
-            ),
+            (serde_json::json!({"fallback": true}), &[Protocol::Tcp][..]),
         ] {
             let mut request = serde_json::json!({"source": "203.0.113.1:443"});
             request
@@ -2427,7 +2423,7 @@ mod tests {
             "externalPort": 443, "target": "10.59.0.2:443", "sni": ["service.example.com"]
         }))
         .unwrap();
-        assert_eq!(params.protocol, TransportProtocol::Tcp);
+        assert_eq!(params.protocol, Protocol::Tcp);
         let udp = AddPortForwardParams::try_parse_from([
             "add",
             "443",
@@ -2438,7 +2434,102 @@ mod tests {
             "udp",
         ])
         .unwrap();
-        assert_eq!(udp.protocol, TransportProtocol::Udp);
+        assert_eq!(udp.protocol, Protocol::Udp);
+        let both = AddPortForwardParams::try_parse_from([
+            "add",
+            "443",
+            "10.59.0.2:443",
+            "--sni",
+            "service.example.com",
+            "--protocol",
+            "tcp+udp",
+        ])
+        .unwrap();
+        assert_eq!(both.protocol, Protocol::TcpUdp);
+    }
+
+    #[test]
+    fn combined_toggle_uses_one_record_and_preserves_tcp_ui_reservations() {
+        use crate::tunnel::db::{PortForwards, SniRoute};
+        let source = "203.0.113.1:443".parse().unwrap();
+        let target = "10.59.0.2:443".parse().unwrap();
+        let mut entry = PortForward::empty_sni();
+        let bindings = entry.bindings_mut(Protocol::TcpUdp).unwrap();
+        let route = SniRoute {
+            target,
+            label: Some("shared".into()),
+            enabled: false,
+            auto: false,
+        };
+        bindings
+            .routes
+            .insert("service.example.com".into(), route.clone());
+        bindings.fallback = Some(route);
+        let mut db = Model::new(&TunnelDatabase::default()).unwrap();
+        db.as_port_forwards_mut()
+            .ser(&PortForwards(std::collections::BTreeMap::from([(
+                source, entry,
+            )])))
+            .unwrap();
+        db.as_webserver_mut().as_enabled_mut().ser(&true).unwrap();
+        db.as_webserver_mut()
+            .as_listen_mut()
+            .ser(&Some("0.0.0.0:443".parse::<SocketAddr>().unwrap()))
+            .unwrap();
+        update_forward_enabled(
+            &mut db,
+            source,
+            true,
+            Some("SERVICE.EXAMPLE.COM"),
+            Protocol::TcpUdp,
+        )
+        .unwrap();
+        for protocol in [Protocol::Tcp, Protocol::Udp] {
+            let error = update_forward_enabled(
+                &mut db,
+                source,
+                true,
+                Some("service.example.com"),
+                protocol,
+            )
+            .err()
+            .unwrap();
+            assert_eq!(error.kind, ErrorKind::NotFound);
+        }
+        assert!(update_forward_enabled(&mut db, source, true, None, Protocol::TcpUdp).is_err());
+        let forwards = db.as_port_forwards().de().unwrap();
+        let entry = &forwards.0[&source];
+        assert_eq!(entry.sni_routes().count(), 2);
+        assert!(entry.bindings(Protocol::TcpUdp).unwrap().routes["service.example.com"].enabled);
+        assert_eq!(
+            entry.bindings(Protocol::TcpUdp).unwrap().routes["service.example.com"]
+                .label
+                .as_deref(),
+            Some("shared")
+        );
+        assert!(
+            !entry
+                .bindings(Protocol::TcpUdp)
+                .unwrap()
+                .fallback
+                .as_ref()
+                .unwrap()
+                .enabled
+        );
+        db.as_webserver_mut().as_enabled_mut().ser(&false).unwrap();
+        update_forward_enabled(&mut db, source, true, None, Protocol::TcpUdp).unwrap();
+        update_forward_enabled(
+            &mut db,
+            source,
+            false,
+            Some("service.example.com"),
+            Protocol::TcpUdp,
+        )
+        .unwrap();
+        let forwards = db.as_port_forwards().de().unwrap();
+        let bindings = forwards.0[&source].bindings(Protocol::TcpUdp).unwrap();
+        assert!(!bindings.routes["service.example.com"].enabled);
+        assert!(bindings.fallback.as_ref().unwrap().enabled);
     }
 
     #[test]
@@ -2478,13 +2569,11 @@ mod tests {
             source,
             true,
             Some("SERVICE.EXAMPLE.COM"),
-            TransportProtocol::Udp,
+            Protocol::Udp,
         )
         .unwrap();
-        update_forward_enabled(&mut db, source, true, None, TransportProtocol::Udp).unwrap();
-        assert!(
-            update_forward_enabled(&mut db, source, true, None, TransportProtocol::Tcp).is_err()
-        );
+        update_forward_enabled(&mut db, source, true, None, Protocol::Udp).unwrap();
+        assert!(update_forward_enabled(&mut db, source, true, None, Protocol::Tcp).is_err());
         let forwards = db.as_port_forwards().de().unwrap();
         let entry = &forwards.0[&source];
         assert!(

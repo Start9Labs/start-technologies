@@ -30,7 +30,7 @@ use crate::middleware::auth::signature::{NonceCache, url_host_str};
 use crate::middleware::cors::Cors;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord, UpdateAuth};
 use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6};
-use crate::net::port_map::TransportProtocol;
+use crate::net::port_map::Protocol;
 use crate::net::static_server::{EMPTY_DIR, UiContext};
 use crate::prelude::*;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
@@ -430,11 +430,11 @@ impl TunnelContext {
     pub async fn gc_forwards(
         &self,
         keep: &BTreeSet<SocketAddrV4>,
-        dropped_sni: &[(TransportProtocol, SocketAddrV4, String, SocketAddrV4)],
-        dropped_fallbacks: &[(TransportProtocol, SocketAddrV4, SocketAddrV4)],
+        dropped_sni: &[(Protocol, SocketAddrV4, String, SocketAddrV4)],
+        dropped_fallbacks: &[(Protocol, SocketAddrV4, SocketAddrV4)],
     ) -> Result<(), Error> {
         for (protocol, source, hostname, target) in dropped_sni {
-            self.sni.unregister_transport(
+            self.sni.unregister_protocol(
                 *protocol,
                 *source.ip(),
                 source.port(),
@@ -444,7 +444,7 @@ impl TunnelContext {
         }
         for (protocol, source, target) in dropped_fallbacks {
             self.sni
-                .unregister_fallback_transport(*protocol, *source.ip(), source.port(), *target);
+                .unregister_fallback_protocol(*protocol, *source.ip(), source.port(), *target);
         }
         use crate::tunnel::forward::lease::LeaseKey;
         self.leases.mutate(|l| {
@@ -635,31 +635,20 @@ impl TunnelContext {
         let mut lease_moves = Vec::new();
         let old = self.db.peek().await.as_port_forwards().de()?.0;
 
-        let mut want: BTreeMap<SocketAddrV4, PortForward> = BTreeMap::new();
+        let mut rekeys = Vec::new();
         for (src, entry) in &old {
             match entry {
-                PortForward::Dnat {
-                    target,
-                    label,
-                    enabled,
-                    count,
-                    auto,
-                } => {
+                PortForward::Dnat { target, .. } => {
                     let ip = crate::tunnel::forward::igd::external_ipv4(self, *target.ip())
                         .await
                         .unwrap_or(*src.ip());
                     let key = SocketAddrV4::new(ip, src.port());
                     lease_moves.push((LeaseKey::Dnat(*src), LeaseKey::Dnat(key)));
-                    want.insert(
-                        key,
-                        PortForward::Dnat {
-                            target: *target,
-                            label: label.clone(),
-                            enabled: *enabled,
-                            count: *count,
-                            auto: *auto,
-                        },
-                    );
+                    rekeys.push(ForwardRekey {
+                        previous_source: *src,
+                        source: key,
+                        mapping: RekeyMapping::Dnat(entry),
+                    });
                 }
                 PortForward::Sni { .. } => {
                     for (protocol, hostname, route) in entry.sni_routes() {
@@ -672,23 +661,29 @@ impl TunnelContext {
                             LeaseKey::sni(*src, hostname, protocol),
                             LeaseKey::sni(key, hostname, protocol),
                         ));
-                        if !insert_rekeyed_sni_route(&mut want, key, protocol, hostname, route) {
-                            tracing::warn!(
-                                "dropping SNI route {hostname:?} on {key}: external IP now collides with a DNAT forward"
-                            );
-                        }
+                        rekeys.push(ForwardRekey {
+                            previous_source: *src,
+                            source: key,
+                            mapping: RekeyMapping::Sni {
+                                protocol,
+                                hostname,
+                                route,
+                            },
+                        });
                     }
                 }
             }
         }
 
-        reconcile_sni_demux(&self.sni, &old, &want);
+        let want = apply_forward_rekeys(&mut rekeys);
+        reconcile_sni_demux(&self.sni, &old, &want.0);
 
         let old_dnat: BTreeSet<SocketAddrV4> = old
             .iter()
             .filter_map(|(src, e)| matches!(e, PortForward::Dnat { .. }).then_some(*src))
             .collect();
         let new_dnat: BTreeMap<SocketAddrV4, (SocketAddrV4, u16, bool)> = want
+            .0
             .iter()
             .filter_map(|(src, e)| match e {
                 PortForward::Dnat {
@@ -701,7 +696,7 @@ impl TunnelContext {
             })
             .collect();
         for src in &old_dnat {
-            if !new_dnat.contains_key(src) {
+            if new_dnat.get(src).is_none_or(|(_, _, enabled)| !enabled) {
                 if let Some(rc) = self.active_forwards.mutate(|m| m.remove(src)) {
                     drop(rc);
                 }
@@ -709,9 +704,6 @@ impl TunnelContext {
         }
         for (src, (target, count, enabled)) in &new_dnat {
             if !enabled {
-                continue;
-            }
-            if self.active_forwards.peek(|m| m.contains_key(src)) {
                 continue;
             }
             let prefix = crate::tunnel::forward::igd::prefix_for(self, target.ip()).await;
@@ -726,24 +718,81 @@ impl TunnelContext {
         self.forward.gc().await.log_err();
 
         self.db
-            .mutate(|db| db.as_port_forwards_mut().ser(&PortForwards(want.clone())))
+            .mutate(|db| db.as_port_forwards_mut().ser(&want))
             .await
             .result?;
         self.leases
-            .mutate(|l| lease::rekey(l, &lease_moves, &old, &want));
+            .mutate(|l| lease::rekey(l, &lease_moves, &old, &want.0));
         Ok(())
     }
 }
-fn insert_rekeyed_sni_route(
-    forwards: &mut BTreeMap<SocketAddrV4, PortForward>,
+struct ForwardRekey<'a> {
+    previous_source: SocketAddrV4,
     source: SocketAddrV4,
-    protocol: TransportProtocol,
+    mapping: RekeyMapping<'a>,
+}
+
+enum RekeyMapping<'a> {
+    Dnat(&'a PortForward),
+    Sni {
+        protocol: Protocol,
+        hostname: Option<&'a str>,
+        route: &'a crate::tunnel::db::SniRoute,
+    },
+}
+
+/// Stationary mappings retain destination ownership before incoming WAN moves.
+fn apply_forward_rekeys(rekeys: &mut [ForwardRekey<'_>]) -> PortForwards {
+    rekeys.sort_by_key(|rekey| rekey.previous_source != rekey.source);
+    let mut forwards = PortForwards::default();
+    for rekey in rekeys {
+        let inserted = match &rekey.mapping {
+            RekeyMapping::Dnat(forward) => {
+                if forwards.0.contains_key(&rekey.source)
+                    || forwards
+                        .overlapping(rekey.source, forward.port_span())
+                        .is_some()
+                {
+                    false
+                } else {
+                    forwards.0.insert(rekey.source, (*forward).clone());
+                    true
+                }
+            }
+            RekeyMapping::Sni {
+                protocol,
+                hostname,
+                route,
+            } => insert_rekeyed_sni_route(&mut forwards, rekey.source, *protocol, *hostname, route),
+        };
+        if !inserted {
+            tracing::warn!(
+                "dropping mapping from {} to {}: external IP now collides with an existing mapping",
+                rekey.previous_source,
+                rekey.source
+            );
+        }
+    }
+    forwards
+}
+
+fn insert_rekeyed_sni_route(
+    forwards: &mut PortForwards,
+    source: SocketAddrV4,
+    protocol: Protocol,
     hostname: Option<&str>,
     route: &crate::tunnel::db::SniRoute,
 ) -> bool {
+    if forwards.overlapping(source, 1).is_some() {
+        return false;
+    }
     let entry = forwards
+        .0
         .entry(source)
         .or_insert_with(PortForward::empty_sni);
+    if entry.overlapping_route(protocol, hostname).is_some() {
+        return false;
+    }
     let Some(bindings) = entry.bindings_mut(protocol) else {
         return false;
     };
@@ -760,13 +809,13 @@ fn insert_rekeyed_sni_route(
 
 fn register_sni_route(
     sni: &Arc<crate::tunnel::forward::sni::SniDemux>,
-    protocol: TransportProtocol,
+    protocol: Protocol,
     source: SocketAddrV4,
     hostname: Option<&str>,
     target: SocketAddrV4,
 ) -> Result<(), u8> {
     match hostname {
-        Some(host) => sni.register_transport(
+        Some(host) => sni.register_protocol(
             protocol,
             *source.ip(),
             source.port(),
@@ -774,7 +823,7 @@ fn register_sni_route(
             target,
             None,
         ),
-        None => sni.register_fallback_transport(protocol, *source.ip(), source.port(), target),
+        None => sni.register_fallback_protocol(protocol, *source.ip(), source.port(), target),
     }
 }
 
@@ -802,14 +851,14 @@ fn reconcile_sni_demux(
     for ((protocol, source, hostname), target) in &old_routes {
         if desired.get(&(*protocol, *source, hostname.clone())) != Some(target) {
             match hostname {
-                Some(host) => sni.unregister_transport(
+                Some(host) => sni.unregister_protocol(
                     *protocol,
                     *source.ip(),
                     source.port(),
                     std::slice::from_ref(host),
                     *target,
                 ),
-                None => sni.unregister_fallback_transport(
+                None => sni.unregister_fallback_protocol(
                     *protocol,
                     *source.ip(),
                     source.port(),
@@ -961,6 +1010,7 @@ mod tests {
     }
 
     use super::*;
+    use crate::net::port_map::TransportProtocol;
     use crate::tunnel::wg::{WgClientKind, WgConfig, WgSubnetClients, WgSubnetConfig, WgSubnetMap};
 
     fn server_with_client(ipv6: Option<Ipv6Net>) -> WgServer {
@@ -1031,6 +1081,7 @@ mod tests {
         let forwards = BTreeMap::from([(
             source,
             PortForward::Sni {
+                both: Default::default(),
                 tcp: crate::tunnel::db::SniBindings {
                     routes,
                     fallback: None,
@@ -1091,6 +1142,132 @@ mod tests {
         assert_eq!(routes[0].target, "10.59.0.2:443".parse().unwrap());
     }
     #[test]
+    fn wan_rekey_preserves_stationary_ownership_without_splitting_combined_mappings() {
+        let source = "203.0.113.1:443".parse().unwrap();
+        let stationary = crate::tunnel::db::SniRoute {
+            target: "10.59.0.2:443".parse().unwrap(),
+            label: Some("operator".into()),
+            enabled: false,
+            auto: false,
+        };
+        let incoming = crate::tunnel::db::SniRoute {
+            target: "10.59.0.3:8443".parse().unwrap(),
+            label: Some("incoming".into()),
+            enabled: true,
+            auto: true,
+        };
+        for (owner, requested) in [
+            (Protocol::TcpUdp, Protocol::Tcp),
+            (Protocol::TcpUdp, Protocol::Udp),
+            (Protocol::Tcp, Protocol::TcpUdp),
+            (Protocol::Udp, Protocol::TcpUdp),
+            (Protocol::TcpUdp, Protocol::TcpUdp),
+        ] {
+            for hostname in [Some("service.example.com"), None] {
+                let mut rekeys = [
+                    ForwardRekey {
+                        previous_source: "192.0.2.1:443".parse().unwrap(),
+                        source,
+                        mapping: RekeyMapping::Sni {
+                            protocol: requested,
+                            hostname,
+                            route: &incoming,
+                        },
+                    },
+                    ForwardRekey {
+                        previous_source: source,
+                        source,
+                        mapping: RekeyMapping::Sni {
+                            protocol: owner,
+                            hostname,
+                            route: &stationary,
+                        },
+                    },
+                ];
+                let forwards = apply_forward_rekeys(&mut rekeys);
+                assert_eq!(forwards.0.len(), 1);
+                let entry = &forwards.0[&source];
+                assert_eq!(entry.sni_routes().count(), 1);
+                let kept = entry.bindings(owner).unwrap().route(hostname).unwrap();
+                assert_eq!(kept.target, stationary.target);
+                assert_eq!(kept.label, stationary.label);
+                assert!(!kept.enabled);
+                assert!(!kept.auto);
+                if owner != requested {
+                    assert!(entry.bindings(requested).unwrap().is_empty());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wan_rekey_preserves_stationary_ranges_and_combined_sni_claims() {
+        let source = "203.0.113.1:443".parse().unwrap();
+        let range_source = "203.0.113.1:442".parse().unwrap();
+        let range = PortForward::Dnat {
+            target: "10.59.0.3:8442".parse().unwrap(),
+            label: None,
+            enabled: true,
+            count: 3,
+            auto: true,
+        };
+        let route = crate::tunnel::db::SniRoute {
+            target: "10.59.0.2:443".parse().unwrap(),
+            label: None,
+            enabled: true,
+            auto: false,
+        };
+        let mut rekeys = [
+            ForwardRekey {
+                previous_source: "192.0.2.1:442".parse().unwrap(),
+                source: range_source,
+                mapping: RekeyMapping::Dnat(&range),
+            },
+            ForwardRekey {
+                previous_source: source,
+                source,
+                mapping: RekeyMapping::Sni {
+                    protocol: Protocol::TcpUdp,
+                    hostname: Some("service.example.com"),
+                    route: &route,
+                },
+            },
+        ];
+        let forwards = apply_forward_rekeys(&mut rekeys);
+        assert_eq!(forwards.0.len(), 1);
+        assert_eq!(
+            forwards.0[&source]
+                .bindings(Protocol::TcpUdp)
+                .unwrap()
+                .routes["service.example.com"]
+                .target,
+            route.target
+        );
+        let mut rekeys = [
+            ForwardRekey {
+                previous_source: "192.0.2.1:443".parse().unwrap(),
+                source,
+                mapping: RekeyMapping::Sni {
+                    protocol: Protocol::TcpUdp,
+                    hostname: Some("service.example.com"),
+                    route: &route,
+                },
+            },
+            ForwardRekey {
+                previous_source: range_source,
+                source: range_source,
+                mapping: RekeyMapping::Dnat(&range),
+            },
+        ];
+        let forwards = apply_forward_rekeys(&mut rekeys);
+        assert_eq!(forwards.0.len(), 1);
+        assert!(matches!(
+            forwards.0[&range_source],
+            PortForward::Dnat { count: 3, .. }
+        ));
+    }
+
+    #[test]
     fn wan_rekey_keeps_tcp_and_udp_owners_independent() {
         let source = "203.0.113.1:443".parse().unwrap();
         let tcp = crate::tunnel::db::SniRoute {
@@ -1105,30 +1282,30 @@ mod tests {
             enabled: true,
             auto: true,
         };
-        let mut want = BTreeMap::new();
+        let mut want = PortForwards::default();
         assert!(insert_rekeyed_sni_route(
             &mut want,
             source,
-            TransportProtocol::Tcp,
+            Protocol::Tcp,
             Some("service.example.com"),
             &tcp,
         ));
         assert!(insert_rekeyed_sni_route(
             &mut want,
             source,
-            TransportProtocol::Udp,
+            Protocol::Udp,
             Some("service.example.com"),
             &udp,
         ));
         assert!(insert_rekeyed_sni_route(
             &mut want,
             source,
-            TransportProtocol::Udp,
+            Protocol::Udp,
             None,
             &udp
         ));
         assert_eq!(
-            want[&source]
+            want.0[&source]
                 .bindings(TransportProtocol::Udp)
                 .unwrap()
                 .routes["service.example.com"]
@@ -1136,7 +1313,7 @@ mod tests {
             udp.target
         );
         assert_eq!(
-            want[&source]
+            want.0[&source]
                 .bindings(TransportProtocol::Tcp)
                 .unwrap()
                 .routes["service.example.com"]
@@ -1145,7 +1322,7 @@ mod tests {
             Some("TLS")
         );
         assert!(
-            want[&source]
+            want.0[&source]
                 .bindings(TransportProtocol::Udp)
                 .unwrap()
                 .fallback
