@@ -5084,6 +5084,13 @@ help.arg.tunnel-forward-fallback:
   fr_FR: "Supprimer uniquement la destination de repli sans nom du protocole sélectionné"
   pl_PL: "Usuń tylko domyślny cel bez nazwy hosta dla wybranego protokołu"
 
+help.arg.tunnel-forward-management-protocol:
+  en_US: "Logical protocol selection; omitted selects the mapping that owns TCP"
+  de_DE: "Logische Protokollauswahl; ohne Angabe wird die Zuordnung ausgewählt, die TCP belegt"
+  es_ES: "Selección lógica de protocolo; si se omite, selecciona la asignación que ocupa TCP"
+  fr_FR: "Sélection logique du protocole ; sans indication, sélectionne la correspondance qui détient TCP"
+  pl_PL: "Logiczny wybór protokołu; pominięcie wybiera mapowanie zajmujące TCP"
+
 help.arg.tunnel-forward-protocol:
   en_US: "Logical protocol selection; tcp+udp shares one mapping. Plain DNAT forwards use both transports."
   de_DE: "Logische Protokollauswahl; tcp+udp verwendet eine gemeinsame Zuordnung. Einfache DNAT-Weiterleitungen verwenden beide Protokolle."
@@ -5092,11 +5099,11 @@ help.arg.tunnel-forward-protocol:
   pl_PL: "Logiczny wybór protokołu; tcp+udp współdzieli jedno mapowanie. Zwykłe przekierowania DNAT używają obu protokołów."
 
 help.arg.tunnel-forward-remove-protocol:
-  en_US: "Limit removal to TCP or UDP. Omit to remove the whole forward; hostname or fallback selection defaults to TCP"
-  de_DE: "Entfernen auf TCP oder UDP begrenzen. Ohne Angabe die gesamte Weiterleitung entfernen; für Hostnamen oder Fallbacks gilt standardmäßig TCP"
-  es_ES: "Limitar la eliminación a TCP o UDP. Omitir para eliminar todo el reenvío; al seleccionar un nombre o destino predeterminado se usa TCP por defecto"
-  fr_FR: "Limiter la suppression à TCP ou UDP. Omettre pour supprimer toute la redirection ; la sélection d’un nom ou d’un repli utilise TCP par défaut"
-  pl_PL: "Ogranicz usuwanie do TCP lub UDP. Pomiń, aby usunąć całe przekierowanie; wybór nazwy hosta lub celu domyślnego domyślnie używa TCP"
+  en_US: "Limit removal to tcp, udp, or tcp+udp. Omit to remove the whole forward; hostname or fallback selection follows the mapping that owns TCP"
+  de_DE: "Entfernen auf tcp, udp oder tcp+udp begrenzen. Ohne Angabe die gesamte Weiterleitung entfernen; bei Hostnamen oder Fallbacks wird die Zuordnung ausgewählt, die TCP belegt"
+  es_ES: "Limitar la eliminación a tcp, udp o tcp+udp. Omitir para eliminar todo el reenvío; al seleccionar un nombre o destino predeterminado se usa la asignación que ocupa TCP"
+  fr_FR: "Limiter la suppression à tcp, udp ou tcp+udp. Omettre pour supprimer toute la redirection ; un nom ou un repli sélectionne la correspondance qui détient TCP"
+  pl_PL: "Ogranicz usuwanie do tcp, udp lub tcp+udp. Pomiń, aby usunąć całe przekierowanie; wybór nazwy hosta lub celu domyślnego wskazuje mapowanie zajmujące TCP"
 
 help.arg.tunnel-listen-address:
   en_US: "Address for tunnel to listen on"

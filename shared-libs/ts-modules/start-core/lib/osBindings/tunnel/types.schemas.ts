@@ -915,7 +915,7 @@ export const RemoveKeyParams: z.ZodObject<{ key: typeof AnyVerifyingKey }> =
   })
 export const RemovePortForwardParams: z.ZodObject<{
   /**
-   * Omitted removes the whole forward, or selects TCP for hostname/fallback removal.
+   * Omitted removes the whole forward, or selects the TCP-owning hostname/fallback mapping.
    */
   protocol: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof Protocol>>,
@@ -932,11 +932,11 @@ export const RemovePortForwardParams: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   /**
-   * Omitted removes the whole forward, or selects TCP for hostname/fallback removal.
+   * Omitted removes the whole forward, or selects the TCP-owning hostname/fallback mapping.
    */
   protocol: wire(Protocol.nullable().optional(), Protocol.nullable()).meta({
     description:
-      'Omitted removes the whole forward, or selects TCP for hostname/fallback removal.',
+      'Omitted removes the whole forward, or selects the TCP-owning hostname/fallback mapping.',
   }),
   fallback: wire(z.boolean().optional(), z.boolean()),
   source: z.string(),
@@ -962,7 +962,13 @@ export const SetDeviceKindParams: z.ZodObject<{
   id: 'SetDeviceKindParams',
 })
 export const SetPortForwardEnabledParams: z.ZodObject<{
-  protocol: z.ZodCodec<z.ZodOptional<typeof Protocol>, typeof Protocol>
+  /**
+   * Omitted selects the logical mapping that owns TCP.
+   */
+  protocol: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Protocol>>,
+    z.ZodNullable<typeof Protocol>
+  >
   source: z.ZodString
   enabled: z.ZodBoolean
   /**
@@ -973,7 +979,12 @@ export const SetPortForwardEnabledParams: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
 }> = /* @__PURE__ */ object({
-  protocol: wire(Protocol.optional(), Protocol),
+  /**
+   * Omitted selects the logical mapping that owns TCP.
+   */
+  protocol: wire(Protocol.nullable().optional(), Protocol.nullable()).meta({
+    description: 'Omitted selects the logical mapping that owns TCP.',
+  }),
   source: z.string(),
   enabled: z.boolean(),
   /**
@@ -1042,7 +1053,13 @@ export const SniBindings: z.ZodObject<{
     'Hostname routes and catch-all for one logical protocol selection.',
 })
 export const UpdatePortForwardLabelParams: z.ZodObject<{
-  protocol: z.ZodCodec<z.ZodOptional<typeof Protocol>, typeof Protocol>
+  /**
+   * Omitted selects the logical mapping that owns TCP.
+   */
+  protocol: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Protocol>>,
+    z.ZodNullable<typeof Protocol>
+  >
   source: z.ZodString
   label: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1056,7 +1073,12 @@ export const UpdatePortForwardLabelParams: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
 }> = /* @__PURE__ */ object({
-  protocol: wire(Protocol.optional(), Protocol),
+  /**
+   * Omitted selects the logical mapping that owns TCP.
+   */
+  protocol: wire(Protocol.nullable().optional(), Protocol.nullable()).meta({
+    description: 'Omitted selects the logical mapping that owns TCP.',
+  }),
   source: z.string(),
   label: wire(z.string().nullable().optional(), z.string().nullable()),
   /**

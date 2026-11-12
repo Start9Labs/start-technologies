@@ -22,3 +22,30 @@ export function sniBindings(
   const key = SNI_BINDING_KEYS[protocol]
   return key ? forward[key] : forward
 }
+
+export function sniRoute(
+  forward: SniForward,
+  protocol: ForwardProtocol,
+  hostname: string | null | undefined,
+) {
+  const bindings = sniBindings(forward, protocol)
+  return hostname == null
+    ? bindings.fallback
+    : bindings.routes[hostname.toLowerCase()]
+}
+
+/** Omitted management selectors address the logical mapping that owns TCP. */
+export function resolveSniProtocol(
+  forward: SniForward,
+  protocol: ForwardProtocol | null | undefined,
+  hostname: string | null | undefined,
+): ForwardProtocol {
+  return (
+    protocol ??
+    FORWARD_PROTOCOLS.find(
+      candidate =>
+        candidate !== 'udp' && sniRoute(forward, candidate, hostname),
+    ) ??
+    'tcp'
+  )
+}

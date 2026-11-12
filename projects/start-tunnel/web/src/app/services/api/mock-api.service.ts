@@ -17,7 +17,12 @@ import {
 } from 'patch-db-client'
 import { shareReplay, Subject, tap } from 'rxjs'
 import { WebSocketSubject } from 'rxjs/webSocket'
-import { FORWARD_PROTOCOLS, sniBindings } from 'src/app/utils/port-forwards'
+import {
+  FORWARD_PROTOCOLS,
+  resolveSniProtocol,
+  sniBindings,
+  sniRoute,
+} from 'src/app/utils/port-forwards'
 
 import { AuthService } from '../auth.service'
 import { mockTunnelData } from '../patch-db/data-model'
@@ -346,11 +351,12 @@ export class MockApiService extends ApiService {
       if (!entry) return null
 
       if (entry.kind === 'sni') {
-        const bindings = sniBindings(entry, params.protocol ?? 'tcp')
-        const route = params.hostname
-          ? bindings.routes[params.hostname.toLowerCase()]
-          : bindings.fallback
-        if (!route) return null
+        const route = sniRoute(
+          entry,
+          resolveSniProtocol(entry, params.protocol, params.hostname),
+          params.hostname,
+        )
+        if (!route) throw new Error('Port forward route not found')
         route.label = params.label ?? null
         this.mockRevision([
           {
@@ -379,11 +385,12 @@ export class MockApiService extends ApiService {
       if (!entry) return null
 
       if (entry.kind === 'sni') {
-        const bindings = sniBindings(entry, params.protocol ?? 'tcp')
-        const route = params.hostname
-          ? bindings.routes[params.hostname.toLowerCase()]
-          : bindings.fallback
-        if (!route) return null
+        const route = sniRoute(
+          entry,
+          resolveSniProtocol(entry, params.protocol, params.hostname),
+          params.hostname,
+        )
+        if (!route) throw new Error('Port forward route not found')
         route.enabled = params.enabled
         this.mockRevision([
           {
@@ -416,7 +423,13 @@ export class MockApiService extends ApiService {
           ? [params.protocol]
           : params.hostname == null && !params.fallback
             ? FORWARD_PROTOCOLS
-            : (['tcp'] as const)
+            : [
+                resolveSniProtocol(
+                  entry,
+                  params.protocol,
+                  params.fallback ? null : params.hostname,
+                ),
+              ]
         for (const protocol of protocols) {
           const bindings = sniBindings(entry, protocol)
           if (params.fallback) bindings.fallback = null

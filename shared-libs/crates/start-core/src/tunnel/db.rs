@@ -326,6 +326,19 @@ impl PortForward {
             .find_map(|(other, bindings)| bindings.route(hostname).map(|route| (other, route)))
     }
 
+    /// Omitted management selectors address the logical mapping that owns TCP.
+    pub fn resolve_sni_protocol(
+        &self,
+        protocol: Option<Protocol>,
+        hostname: Option<&str>,
+    ) -> Protocol {
+        protocol.unwrap_or_else(|| {
+            let hostname = hostname.map(str::to_ascii_lowercase);
+            self.overlapping_route(Protocol::Tcp, hostname.as_deref())
+                .map_or(Protocol::Tcp, |(owner, _)| owner)
+        })
+    }
+
     pub fn sni_routes(&self) -> impl Iterator<Item = (Protocol, Option<&str>, &SniRoute)> {
         self.sni_bindings().flat_map(|(protocol, bindings)| {
             bindings
