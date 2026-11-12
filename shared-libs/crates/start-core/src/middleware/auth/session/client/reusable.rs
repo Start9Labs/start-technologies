@@ -53,7 +53,10 @@ pub(crate) struct Connection {
 
 impl Connection {
     pub(crate) async fn request(&self, request: CapturedRequest) -> Result<Value, RpcError> {
-        self.dispatcher.send_request(request).await?.map(Into::into)
+        self.dispatcher
+            .send_cancellable_request(request)
+            .await?
+            .map(Into::into)
     }
 }
 
@@ -160,6 +163,8 @@ impl Client {
         connection.dispatcher.send_stream(request).await
     }
 
+    /// Dropping this future cancels only its WebSocket request.
+    /// Use `tokio::time::timeout` for a per-call deadline; no reply deadline applies by default.
     pub async fn call(
         &self,
         signer: &Signer,

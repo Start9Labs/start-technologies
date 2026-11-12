@@ -88,6 +88,51 @@ async fn cancellation_releases_its_pending_slot_without_disconnecting_siblings()
 }
 
 #[tokio::test]
+async fn canceled_websocket_calls_send_one_close_and_ignore_late_replies_without_harming_siblings()
+{
+    let (client, mut requests, mut responses) = channel();
+    let captured = RpcClient::capture(&client.id, method("canceled"), json!({})).unwrap();
+    let mut canceled = Box::pin(client.send_cancellable_request(captured));
+    assert!(futures::poll!(&mut canceled).is_pending());
+    let old: Value = serde_json::from_str(&requests.next().await.unwrap()).unwrap();
+    drop(canceled);
+    let close: Value = serde_json::from_str(
+        &tokio::time::timeout(Duration::from_secs(2), requests.next())
+            .await
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        close,
+        json!({"rpcstream":rpc_toolkit::RPCSTREAM_VERSION,"close":old["id"]})
+    );
+    let captured = RpcClient::capture(&client.id, method("kept"), json!({})).unwrap();
+    let mut sibling = Box::pin(client.send_cancellable_request(captured));
+    assert!(futures::poll!(&mut sibling).is_pending());
+    let current: Value = serde_json::from_str(&requests.next().await.unwrap()).unwrap();
+    assert_eq!(current["method"], "kept");
+    for (id, result) in [(old["id"].clone(), "late"), (current["id"].clone(), "kept")] {
+        responses
+            .send(Ok(
+                json!({"jsonrpc":"2.0","id":id,"result":result}).to_string()
+            ))
+            .await
+            .unwrap();
+    }
+    assert_eq!(sibling.await.unwrap().unwrap(), json!("kept"));
+    assert_eq!(
+        client
+            .responses
+            .upgrade()
+            .unwrap()
+            .peek(|pending| pending.as_ref().unwrap().len()),
+        0
+    );
+    assert!(futures::poll!(requests.next()).is_pending());
+}
+
+#[tokio::test]
 async fn a_failed_writer_invalidates_queued_requests_without_replaying_or_reentering_it() {
     let writes = Arc::new(AtomicUsize::new(0));
     let observed = writes.clone();

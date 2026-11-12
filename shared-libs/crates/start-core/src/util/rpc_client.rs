@@ -31,6 +31,7 @@ pub use stream::{RpcResponseItems, RpcResponseStream};
 type MessageWriter = Pin<Box<dyn Sink<String, Error = Error> + Send>>;
 type ResponseMap = BTreeMap<Id, ResponseSlot>;
 type Responses = SyncMutex<Option<ResponseMap>>;
+type CallResponse = oneshot::Receiver<Result<Value, RpcError>>;
 
 pub(crate) struct CapturedRequest {
     id: Id,
@@ -246,26 +247,52 @@ impl RpcClient {
         result
     }
 
-    /// Consumes a captured request once; transport failure never replays it.
-    pub(crate) async fn send_request(
-        &self,
-        request: CapturedRequest,
-    ) -> Result<Result<Value, RpcError>, Error> {
+    fn register_call(&self, id: &Id) -> Result<(Arc<Responses>, CallResponse), Error> {
         let responses = self.responses.upgrade().ok_or_else(disconnected)?;
         let (sender, receiver) = oneshot::channel();
         responses.mutate(|pending| {
             pending
                 .as_mut()
                 .ok_or_else(disconnected)?
-                .insert(request.id.clone(), ResponseSlot::Call(sender));
+                .insert(id.clone(), ResponseSlot::Call(sender));
             Ok::<_, Error>(())
         })?;
-        let pending = responses.clone();
-        let _cancel = GeneralGuard::new(move || {
-            pending.mutate(|map| map.as_mut().and_then(|map| map.remove(&request.id)))
-        });
-        self.send(request.body).await?;
+        Ok((responses, receiver))
+    }
+
+    async fn send_registered_call(
+        &self,
+        body: String,
+        receiver: CallResponse,
+    ) -> Result<Result<Value, RpcError>, Error> {
+        self.send(body).await?;
         receiver.await.map_err(|_| disconnected())
+    }
+
+    /// Consumes a captured Unix-line request once, with local cancellation.
+    pub(crate) async fn send_request(
+        &self,
+        request: CapturedRequest,
+    ) -> Result<Result<Value, RpcError>, Error> {
+        let (responses, receiver) = self.register_call(&request.id)?;
+        let _cancel = GeneralGuard::new(move || {
+            responses.mutate(|map| map.as_mut().and_then(|map| map.remove(&request.id)))
+        });
+        self.send_registered_call(request.body, receiver).await
+    }
+
+    /// Dropping the WebSocket call cancels its server handler without closing siblings.
+    pub(crate) async fn send_cancellable_request(
+        &self,
+        request: CapturedRequest,
+    ) -> Result<Result<Value, RpcError>, Error> {
+        let (responses, receiver) = self.register_call(&request.id)?;
+        let _cancel = Cancellation {
+            responses: Arc::downgrade(&responses),
+            notify: self.cancel.clone(),
+            id: request.id,
+        };
+        self.send_registered_call(request.body, receiver).await
     }
 
     /// Opts into response streaming without replaying a possibly sent request.

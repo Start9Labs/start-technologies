@@ -8,6 +8,7 @@ use axum::routing::get;
 
 use super::*;
 
+mod cancellation;
 mod streaming;
 use crate::middleware::auth::session::RpcSessionUpgrader;
 use crate::util::future::NonDetachingJoinHandle;

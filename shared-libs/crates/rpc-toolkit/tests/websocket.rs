@@ -1,5 +1,7 @@
 #![cfg(feature = "websocket")]
 
+#[path = "websocket/cancellation.rs"]
+mod cancellation;
 #[path = "websocket/flush.rs"]
 mod flush;
 #[path = "websocket/upgrade.rs"]
@@ -37,6 +39,7 @@ struct TestContext {
     release: Arc<Notify>,
     producer: Arc<Mutex<Option<RpcStream<Revision, Value>>>>,
     echo_calls: Arc<AtomicUsize>,
+    completed: Arc<AtomicUsize>,
     deny: Arc<AtomicBool>,
     http_calls: Arc<AtomicUsize>,
     rpc_calls: Arc<AtomicUsize>,
@@ -170,6 +173,7 @@ async fn blocked(args: WatchArgs) -> Result<Dump, RpcError> {
     let guard = ProducerGuard(args.context.clone());
     args.context.started.notify_one();
     args.context.release.notified().await;
+    args.context.completed.fetch_add(1, Ordering::SeqCst);
     drop(guard);
     watch(args).await
 }
@@ -772,8 +776,7 @@ async fn stream_capacity_is_released_by_closure_and_does_not_block_ordinary_call
 }
 
 #[tokio::test]
-async fn request_capacity_rejects_work_before_execution_and_ordinary_calls_are_not_stream_cancelled(
-) {
+async fn request_capacity_rejects_work_before_execution_and_cancellation_releases_it() {
     let options = WebSocketOptions {
         max_in_flight: NonZeroUsize::new(1).unwrap(),
         ..Default::default()
@@ -785,7 +788,6 @@ async fn request_capacity_rejects_work_before_execution_and_ordinary_calls_are_n
     )
     .await;
     context.started.notified().await;
-    send(&mut socket, wire!({"rpcstream":"1.0","close":23})).await;
     send(
         &mut socket,
         wire!({"jsonrpc":"2.0","id":24,"method":"echo"}),
@@ -793,11 +795,10 @@ async fn request_capacity_rejects_work_before_execution_and_ordinary_calls_are_n
     .await;
     assert_eq!(receive(&mut socket).await["error"]["code"], -32000);
     assert_eq!(context.echo_calls.load(Ordering::SeqCst), 0);
-    context.release.notify_one();
-    assert_eq!(
-        receive(&mut socket).await,
-        wire!({"jsonrpc":"2.0","id":23,"result":{"snapshot":1}})
-    );
+    send(&mut socket, wire!({"rpcstream":"1.0","close":23})).await;
+    tokio::time::timeout(Duration::from_secs(3), context.drop_signal.notified())
+        .await
+        .unwrap();
     send(
         &mut socket,
         wire!({"jsonrpc":"2.0","id":24,"method":"echo"}),

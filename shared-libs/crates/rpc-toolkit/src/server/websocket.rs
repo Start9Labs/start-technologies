@@ -7,8 +7,8 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{FromRequestParts, Request};
 use axum::handler::Handler;
 use axum::response::{IntoResponse, Response};
-use futures::future::{AbortHandle, Abortable, BoxFuture};
-use futures::stream::FuturesUnordered;
+use futures::future::BoxFuture;
+use futures::stream::Once;
 use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt};
 use imbl_value::imbl::Vector;
 use imbl_value::Value;
@@ -243,7 +243,7 @@ struct ResponseGroup {
 }
 
 enum CallState {
-    Pending(AbortHandle),
+    Pending(usize),
     Ready(Option<ResponseEvents>),
 }
 
@@ -259,7 +259,7 @@ struct Connection<C: Context> {
     context: Arc<C>,
     middleware: Vector<DynMiddleware<C>>,
     options: WebSocketOptions,
-    calls: FuturesUnordered<BoxFuture<'static, Option<CompletedCall>>>,
+    calls: StreamMap<(usize, usize), Once<BoxFuture<'static, CompletedCall>>>,
     active: HashMap<Id, TrackedCall>,
     streams: StreamMap<Id, ResponseEvents>,
     groups: HashMap<usize, ResponseGroup>,
@@ -280,7 +280,7 @@ impl<C: Context> Connection<C> {
             context,
             middleware,
             options,
-            calls: FuturesUnordered::new(),
+            calls: StreamMap::new(),
             active: HashMap::new(),
             streams: StreamMap::new(),
             groups: HashMap::new(),
@@ -321,7 +321,10 @@ impl<C: Context> Connection<C> {
                     }
                 }
                 completed = self.calls.next(), if !self.calls.is_empty() => {
-                    if let Some(Some(completed)) = completed { self.complete(completed).await?; }
+                    if let Some((key, completed)) = completed {
+                        self.calls.remove(&key);
+                        self.complete(completed).await?;
+                    }
                 }
                 event = self.streams.next(), if !self.streams.is_empty() => {
                     if let Some((id, (result, end, flushed))) = event {
@@ -383,16 +386,16 @@ impl<C: Context> Connection<C> {
                 .map(imbl_value::from_value)
                 .transpose()
             {
-                Ok(Some(id)) if id != Id::Null => id,
+                Ok(Some(id)) => id,
                 _ => {
                     return self
                         .send(&RpcResponse::from(invalid_request(
-                            "stream closure requires a request ID",
+                            "cancellation requires a request ID",
                         )))
                         .await;
                 }
             };
-            return self.close_stream(id).await;
+            return self.cancel_request(id).await;
         }
         let batch = value.is_array();
         let requests: Vec<Value> = if let Some(values) = value.as_array() {
@@ -445,9 +448,11 @@ impl<C: Context> Connection<C> {
                 ids: Vec::new(),
             },
         );
-        for request in requests {
+        for (member, request) in requests.into_iter().enumerate() {
             match request {
-                Ok((request, opted_in)) => self.start_call(group, request, opted_in).await?,
+                Ok((request, opted_in)) => {
+                    self.start_call(group, member, request, opted_in).await?
+                }
                 Err(response) => {
                     self.complete(CompletedCall {
                         group,
@@ -466,6 +471,7 @@ impl<C: Context> Connection<C> {
     async fn start_call(
         &mut self,
         group: usize,
+        member: usize,
         request: RpcRequest,
         opted_in: bool,
     ) -> Result<(), ()> {
@@ -522,7 +528,6 @@ impl<C: Context> Connection<C> {
                 source,
             }
         };
-        let (abort, registration) = AbortHandle::new_pair();
         if let Some(id) = id {
             self.groups.get_mut(&group).unwrap().ids.push(id.clone());
             self.active.insert(
@@ -530,12 +535,12 @@ impl<C: Context> Connection<C> {
                 TrackedCall {
                     group,
                     opted_in,
-                    state: CallState::Pending(abort),
+                    state: CallState::Pending(member),
                 },
             );
         }
         self.calls
-            .push(Abortable::new(call, registration).map(Result::ok).boxed());
+            .insert((group, member), futures::stream::once(call.boxed()));
         Ok(())
     }
 
@@ -573,31 +578,30 @@ impl<C: Context> Connection<C> {
         Ok(())
     }
 
-    async fn close_stream(&mut self, id: Id) -> Result<(), ()> {
+    async fn cancel_request(&mut self, id: Id) -> Result<(), ()> {
         if self.streams.remove(&id).is_some() {
             return self.send(&stream_event(id, Ok(Value::Null), true)).await;
         }
-        let pending = self
-            .active
-            .get_mut(&id)
-            .filter(|call| call.opted_in)
-            .map(|call| match &mut call.state {
-                CallState::Pending(abort) => {
-                    abort.abort();
-                    Some(call.group)
-                }
-                CallState::Ready(source) => {
-                    source.take();
-                    None
-                }
-            })
-            .flatten();
-        if let Some(group) = pending {
+        let Some(call) = self.active.get_mut(&id) else {
+            return Ok(());
+        };
+        let pending = match &mut call.state {
+            CallState::Pending(member) => {
+                // Cancellation must release handler resources before any subsequent response write.
+                self.calls.remove(&(call.group, *member));
+                Some((call.group, call.opted_in))
+            }
+            CallState::Ready(source) => {
+                source.take();
+                None
+            }
+        };
+        if let Some((group, opted_in)) = pending {
             self.complete(CompletedCall {
                 group,
                 id: Some(id.clone()),
                 response: RpcResponse::new(Some(id), Err(RPCSTREAM_CANCELLED_ERROR)),
-                respond: true,
+                respond: opted_in,
                 source: None,
             })
             .await?;

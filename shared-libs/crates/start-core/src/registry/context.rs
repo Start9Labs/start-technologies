@@ -354,6 +354,7 @@ impl CallRemote<RegistryContext> for CliContext {
     }
 }
 
+/// Encrypted registry calls have no default reply deadline.
 pub(crate) async fn call(
     client: &crate::context::rpc::ReloadableHttpClient,
     signer: &crate::sign::Signer,

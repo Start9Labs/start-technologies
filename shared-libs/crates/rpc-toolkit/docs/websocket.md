@@ -127,7 +127,7 @@ terminal event, no further events are sent for that request ID. An initiating
 error drops the receiver and creates no response stream. Client cancellation
 and socket loss can discard queued events and terminal results.
 
-The client cancels a stream with a standalone control message:
+The client cancels a request or response stream with a standalone control message:
 
 ```json
 { "rpcstream": "1.0", "close": 42 }
@@ -139,14 +139,28 @@ progress aborts the handler and returns a JSON-RPC error with code `-32800`,
 without a response stream. If its initiating result is already buffered inside
 an unfinished batch, cancellation drops its receiver; the initiating response
 remains part of the batch and no stream events follow it. Unknown or already-ended
-IDs are ignored. Canceling an ordinary, non-opted-in call has no effect.
+IDs are ignored. Canceling a pending ordinary call drops its handler future and sends no
+cancellation response. Its batch siblings still receive their results. An ordinary result
+already buffered in an unfinished batch can still arrive.
 
-The client must tolerate events already in flight when it cancels a stream. IDs
+Cancellation drops the connection-owned handler future before awaiting any subsequent
+response write, including a stalled sibling batch flush. It is never polled again. Closing
+or losing the WebSocket drops every pending handler future, including notifications.
+Applications retain responsibility for independently accepted work and external side effects;
+dropping a future cannot roll those back or preempt an already running blocking callback.
+
+Clients own per-request reply deadlines. A timeout cancels that ID through the same control
+message, without closing healthy siblings. Clients must ignore subsequent replies or events
+for a canceled ID; no cancellation acknowledgment is required. Connection keepalive and
+write deadlines remain independent of a handler's response time.
+
+The client must tolerate events already in flight when it cancels a request. IDs
 are scoped to the connection and must remain unique while their initiating call
 or response stream is active. Reusing an active ID returns an invalid-request
 error without replacing the original operation. String and numeric IDs are
 separate; integer IDs retain their JSON precision. The version discriminator is
-the string `"1.0"`, including in close messages.
+the string `"1.0"`, including in close messages. A null ID can identify an ordinary
+call; response-stream opt-in still requires a non-null ID.
 
 ## Ownership and limits
 

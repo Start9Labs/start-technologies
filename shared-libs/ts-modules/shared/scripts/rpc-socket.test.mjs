@@ -360,6 +360,41 @@ test('a stream beyond its byte budget fails while its sibling completes', async 
   assert.equal((await sibling).result, 'unblocked')
 })
 
+test('an ordinary per-call deadline cancels only its ID and ignores late replies on the live session', async context => {
+  const { service, lease } = await streamFixture(context)
+  const sibling = service.message(body, {}, lease)
+  const expired = service
+    .message(body, { timeout: 10 }, lease)
+    .catch(error => error)
+  await tick()
+  const socket = LogicalSocket.instances[0]
+  const [kept, canceled] = socket.writes
+  network(await expired)
+  assert.deepEqual(
+    socket.writes.filter(value => value.close === canceled.id),
+    [{ rpcstream: version, close: canceled.id }],
+  )
+  for (const response of [
+    { jsonrpc: '2.0', id: canceled.id, result: 'late' },
+    {
+      jsonrpc: '2.0',
+      id: canceled.id,
+      error: { code: 34, message: 'late rejection' },
+    },
+    { rpcstream: version, id: canceled.id, result: 'late item', end: false },
+  ])
+    socket.receive(response)
+  assert.equal(socket.closed, 0)
+  const fresh = service.message(body, {}, lease)
+  const current = socket.writes.at(-1)
+  assert.notEqual(current.id, canceled.id)
+  socket.receive({ jsonrpc: '2.0', id: current.id, result: 'fresh' })
+  assert.equal((await fresh).result, 'fresh')
+  socket.receive({ jsonrpc: '2.0', id: kept.id, result: 'kept' })
+  assert.equal((await sibling).result, 'kept')
+  assert.equal(LogicalSocket.instances.length, 1)
+})
+
 test('a stream initialization deadline closes only its own ID', async context => {
   const { service, lease } = await streamFixture(context)
   const sibling = service.message(body, {}, lease)

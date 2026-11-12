@@ -21,6 +21,8 @@ struct FlushContext {
     started: Arc<Notify>,
     release: Arc<Notify>,
     done: Arc<Notify>,
+    pending_started: Arc<Notify>,
+    pending_dropped: Arc<Notify>,
     result: Arc<Mutex<Option<Result<(), RpcError>>>>,
     fail: bool,
 }
@@ -49,7 +51,8 @@ impl Sink<Message> for FlushSocket {
         let this = self.get_mut();
         if let Message::Text(text) = &message {
             let value: serde_json::Value = serde_json::from_str(text).unwrap();
-            this.terminal |= value.get("end").and_then(serde_json::Value::as_bool) == Some(true);
+            this.terminal |= value.is_array()
+                || value.get("end").and_then(serde_json::Value::as_bool) == Some(true);
         }
         this.inner.start_send_unpin(message)
     }
@@ -103,6 +106,74 @@ impl WebSocketUpgrader<FlushContext> for FlushUpgrader {
         }
         .boxed()
     }
+}
+
+struct PendingHandler(Arc<Notify>);
+impl Drop for PendingHandler {
+    fn drop(&mut self) {
+        self.0.notify_one();
+    }
+}
+
+#[tokio::test]
+async fn cancellation_drops_the_handler_before_a_sibling_batch_flush_can_stall() {
+    let context = FlushContext::default();
+    let base = context.clone();
+    let server = Server::new(
+        move || {
+            let base = base.clone();
+            async move { Ok(base) }
+        },
+        ParentHandler::new()
+            .subcommand(
+                "blocked",
+                from_fn_async(|args: HandlerArgs<FlushContext>| async move {
+                    let _guard = PendingHandler(args.context.pending_dropped.clone());
+                    args.context.pending_started.notify_one();
+                    futures::future::pending::<()>().await;
+                    Ok::<_, RpcError>(())
+                })
+                .no_cli()
+                .no_ts(),
+            )
+            .subcommand(
+                "echo",
+                from_fn_async(|_: HandlerArgs<FlushContext>| async { Ok::<_, RpcError>(()) })
+                    .no_cli()
+                    .no_ts(),
+            ),
+    )
+    .for_websocket()
+    .with_upgrader(FlushUpgrader);
+    let (url, _guard) = serve(server).await;
+    let (mut socket, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    send(
+        &mut socket,
+        serde_json::json!([
+            {"jsonrpc":"2.0","id":1,"method":"blocked"},
+            {"jsonrpc":"2.0","id":2,"method":"echo"}
+        ]),
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(3), context.pending_started.notified())
+        .await
+        .unwrap();
+    send(
+        &mut socket,
+        serde_json::json!({"rpcstream":"1.0","close":1}),
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(3), context.started.notified())
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), context.pending_dropped.notified())
+        .await
+        .unwrap();
+    context.release.notify_one();
+    assert_eq!(
+        receive(&mut socket).await,
+        serde_json::json!([{"jsonrpc":"2.0","id":2,"result":null}])
+    );
 }
 
 #[tokio::test]

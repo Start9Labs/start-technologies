@@ -9,3 +9,4 @@ release-notes: false
 - Bound replay-cache memory when clock synchronization is unavailable.
 - Preserve request IDs on middleware errors.
 - Keep encrypted browser RPC available over HTTP/2 connections.
+- Cancel timed-out or disposed WebSocket requests without interrupting sibling calls, and release pending handlers when the socket closes.

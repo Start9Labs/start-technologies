@@ -15,3 +15,4 @@ release-notes: false
 - Preserve request IDs on middleware errors and consecutive browser RPC calls as prior connections finish closing.
 - Reject unsupported parameter shapes without dropping an authenticated connection.
 - Keep encrypted browser RPC available over HTTP/2 connections.
+- Cancel timed-out or disposed WebSocket requests without interrupting sibling calls, and release pending handlers when the socket closes.

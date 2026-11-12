@@ -42,7 +42,7 @@ impl Cancellation {
         if let Some(responses) = self.responses.upgrade() {
             responses.mutate(|pending| {
                 if let Some(slot) = pending.as_mut().and_then(|map| map.get_mut(&self.id)) {
-                    if matches!(slot, ResponseSlot::Stream(_)) {
+                    if matches!(slot, ResponseSlot::Call(_) | ResponseSlot::Stream(_)) {
                         *slot = ResponseSlot::Canceled;
                         self.notify.notify_one();
                     }

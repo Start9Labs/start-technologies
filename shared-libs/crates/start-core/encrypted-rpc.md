@@ -75,8 +75,14 @@ retains them with the CLI context. Its immutable HTTP/1 client owns network poli
 endpoint, selected signing name, signer and upgrade headers scope reuse. The existing
 `util::rpc_client::RpcClient` dispatches correlated responses through separate Unix-line
 and encrypted-WebSocket adapters. Its idle reader drives the existing WebSocket keepalive.
-Cancellation removes pending response slots without closing siblings. Application errors
-retain healthy sockets; transport failure invalidates them without replaying sent calls.
+Dropping an ordinary WebSocket call or stream sends its per-ID cancellation through the
+existing reader; late replies cannot settle a canceled call or affect its siblings. The
+server drops the pending handler future before any following response write. Native callers
+set per-request deadlines with `tokio::time::timeout`; browser calls accept `timeout` in
+milliseconds. These deadlines cancel the same ID and do not impose a default registry reply
+deadline. Socket loss drops every pending handler future. Accepted application-owned work
+and external side effects retain their independent lifetimes. Application errors retain
+healthy sockets; transport failure invalidates them without replaying sent calls.
 The Unix pool likewise never retries a possibly executed request.
 
 `SessionClient::stream<Item, Final>` uses the same dispatcher for versioned encrypted
@@ -86,7 +92,8 @@ terminal value. Receiver/future drop cancels its ID, including during initializa
 Native queues share the 64 MiB response budget across serialized UTF-8 bytes and per-item storage, with a separate terminal slot. Backlog bursts do not fail solely on item count, and the reader never waits for a consumer.
 Browser queues retain backlogs behind initiating PatchDB fences within the serialized UTF-8 response budget, without a scheduler-dependent item cap.
 Application terminals drain accepted items; physical loss discards unfinished queues.
-Canceled IDs remain in the bounded stream slots until their close frames are written.
+Canceled IDs remain in the response-slot map until their close frames are written or the
+transport ends.
 The existing owned reader polls cancellation writes concurrently with incoming traffic;
 a blocked writer cannot suspend replies or keepalive reads. No per-call task or second
 connection manager owns cancellation. Container/effects Unix-line calls retain their

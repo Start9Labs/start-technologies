@@ -16,3 +16,4 @@ release-notes: false
 - Preserve request IDs on middleware errors.
 - Prevent duplicate operations when a Unix RPC fails or loses its response.
 - Keep encrypted browser RPC available over HTTP/2 connections.
+- Cancel timed-out or disposed WebSocket requests without interrupting sibling calls, and release pending handlers when the socket closes.
