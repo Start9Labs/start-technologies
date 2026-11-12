@@ -14,11 +14,11 @@ unset RUST_BUILDER_IMAGE FMT_NATIVE RISCV_OBJDUMP
 
 cat > "$scratch/bin/docker" <<'MOCK'
 #!/bin/bash
-printf '%s\n' '---' "$@" >> "$DOCKER_LOG"
+printf '%s\n' '---' "$@" "Parent profile: ${PROFILE-}" >> "$DOCKER_LOG"
 if [[ "$*" == *'/verify/binary'* ]]; then
     printf '00000000 <probe>:\n    0: addi a0, a0, 1\n'
 fi
-if [[ "$*" == *' cargo run '* ]]; then
+if [[ "$*" == *' cargo run '* || "$*" == *' cargo zigbuild '* ]]; then
     exit "${MOCK_CARGO_EXIT:-0}"
 fi
 MOCK
@@ -121,6 +121,34 @@ else
 fi
 assert_log_contains chown
 
+for builder in \
+    projects/start-os/build/build-startbox.sh \
+    projects/start-os/build/build-start-container.sh \
+    projects/start-os/backup-fs/build-backup-fs.sh \
+    projects/start-cli/build/build-cli.sh \
+    projects/start-registry/build/build-registrybox.sh \
+    projects/start-tunnel/build/build-tunnelbox.sh; do
+    for profile in '' release debug unknown-profile; do
+        : > "$DOCKER_LOG"
+        status=0
+        PROFILE="$profile" BUILD_FLAGS=--release ARCH=x86_64 MOCK_CARGO_EXIT=19 \
+            bash "$builder" > "$scratch/build.stdout" 2> "$scratch/build.stderr" || status=$?
+        test "$status" = 19
+        if [[ -z "$profile" || "$profile" == release ]]; then
+            assert_log_contains --release
+            assert_log_contains 'Parent profile: release'
+        else
+            ! grep -Fxq -- --release "$DOCKER_LOG"
+            assert_log_contains 'Parent profile: debug'
+        fi
+        if [[ "$profile" == unknown-profile ]]; then
+            test "$(<"$scratch/build.stderr")" = 'Unknown profile unknown-profile: falling back to debug...'
+        else
+            test ! -s "$scratch/build.stderr"
+        fi
+    done
+done
+
 : > "$DOCKER_LOG"
 bash shared-libs/crates/start-core/run-tests.sh
 assert_log_contains "RUST_BUILDER_IMAGE=$image"
@@ -183,4 +211,4 @@ RISCV_OBJDUMP="$scratch/bin/objdump" bash projects/start-wrt/build/verify-isa.sh
 test ! -s "$DOCKER_LOG"
 grep -Fxq -- "$scratch/probe.o" "$OBJDUMP_LOG"
 
-printf 'Builder selection, RVA23 opt-out, containerized bindings, overrides, derived images, and K1 disassembly checks passed.\n'
+printf 'Builder/profile selection, RVA23 opt-out, containerized bindings, overrides, derived images, and K1 disassembly checks passed.\n'

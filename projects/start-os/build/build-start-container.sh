@@ -7,15 +7,7 @@ source ./build/builder-alias.sh
 set -ea
 shopt -s expand_aliases
 
-PROFILE=${PROFILE:-release}
-if [ "${PROFILE}" = "release" ]; then
-	BUILD_FLAGS="--release"
-else
-  if [ "$PROFILE" != "debug"]; then
-    >&2 echo "Unknown profile $PROFILE: falling back to debug..."
-    PROFILE=debug
-  fi
-fi
+set_build_profile
 
 if [ -z "$ARCH" ]; then
 	ARCH=$(uname -m)
