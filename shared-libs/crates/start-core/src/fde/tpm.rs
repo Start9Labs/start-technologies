@@ -179,7 +179,9 @@ impl Workspace {
         let mut command = Command::new(executable);
         command
             .current_dir(self.path())
-            .env_remove("TPM2TOOLS_AUTOFLUSH");
+            .env_remove("TPM2TOOLS_AUTOFLUSH")
+            // TSS debug output includes session keys.
+            .env_remove("TSS2_LOG");
         command
     }
 
@@ -574,6 +576,18 @@ pub async fn measure_filesystems(event: &[u8; 32]) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn tpm_helpers_do_not_inherit_session_key_logging() {
+        let workspace = Workspace::new().await.unwrap();
+        let command = workspace.command("tpm2_unseal");
+        assert!(
+            command
+                .as_std()
+                .get_envs()
+                .any(|(name, value)| name == "TSS2_LOG" && value.is_none())
+        );
+    }
 
     #[test]
     fn measurement_file_binds_loaded_applications_before_secure_boot() {
