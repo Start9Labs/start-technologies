@@ -448,6 +448,8 @@ export type SharedVolumeBackupInfo = z.output<
 export type SharedVolumeBackupInfoInput = z.input<
   typeof schemas.SharedVolumeBackupInfo
 >
+export type SharedVolumeDrive = z.output<typeof schemas.SharedVolumeDrive>
+export type SharedVolumeDriveInput = z.input<typeof schemas.SharedVolumeDrive>
 export type SharedVolumeGrant = z.output<typeof schemas.SharedVolumeGrant>
 export type SharedVolumeGrantInput = z.input<typeof schemas.SharedVolumeGrant>
 
@@ -460,8 +462,6 @@ export type SharedVolumeId = z.output<typeof schemas.SharedVolumeId>
  * A 32-character uppercase base32 volume identity.
  */
 export type SharedVolumeIdInput = z.input<typeof schemas.SharedVolumeId>
-export type SharedVolumeSource = z.output<typeof schemas.SharedVolumeSource>
-export type SharedVolumeSourceInput = z.input<typeof schemas.SharedVolumeSource>
 export type SharedVolumeUnavailableReason = z.output<
   typeof schemas.SharedVolumeUnavailableReason
 >
@@ -1098,6 +1098,8 @@ export type SharedVolumeMountResult = z.output<
 export type SharedVolumeMountResultInput = z.input<
   typeof schemas.SharedVolumeMountResult
 >
+export type SharedVolumeSource = z.output<typeof schemas.SharedVolumeSource>
+export type SharedVolumeSourceInput = z.input<typeof schemas.SharedVolumeSource>
 export type SideloadResponse = z.output<typeof schemas.SideloadResponse>
 export type SideloadResponseInput = z.input<typeof schemas.SideloadResponse>
 export type SignAssetParams = z.output<typeof schemas.SignAssetParams>
