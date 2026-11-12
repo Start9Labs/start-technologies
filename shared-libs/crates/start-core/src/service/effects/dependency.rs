@@ -12,6 +12,7 @@ use crate::db::model::package::{
     TaskEntry,
 };
 use crate::dependencies::DepInfo;
+use crate::dependencies::providers::{find_package, resolve_package};
 use crate::disk::mount::filesystem::bind::{Bind, FileType};
 use crate::disk::mount::filesystem::idmapped::{IdMap, IdMapped};
 use crate::disk::mount::filesystem::{FileSystem, MountType};
@@ -181,6 +182,11 @@ pub async fn mount(
     }: MountParams,
 ) -> Result<(), Error> {
     let context = context.deref()?;
+    let package_id = resolve_package(
+        &context.seed.ctx.db.peek().await,
+        &context.seed.id,
+        &package_id,
+    )?;
     let volume = data_dir(DATA_DIR, &package_id, &volume_id);
     if tokio::fs::metadata(&volume).await.is_err() {
         return Err(Error::new(
@@ -402,6 +408,7 @@ pub async fn set_dependencies(
     let context = context.deref()?;
     let id = &context.seed.id;
     let s9pk = &context.seed.persistent_container.s9pk;
+    let initialized = context.is_initialized();
     let mut deps = required_base_dependencies(s9pk).await?.0;
     for dependency in dependencies {
         let (dep_id, kind, version_range) = match dependency {
@@ -434,11 +441,12 @@ pub async fn set_dependencies(
             );
         }
     }
-    context
+    let recheck = context
         .seed
         .ctx
         .db
         .mutate(|db| {
+            let previous = crate::service::action::conditional_task_targets(db, id)?;
             let pde = db
                 .as_public_mut()
                 .as_package_data_mut()
@@ -446,10 +454,24 @@ pub async fn set_dependencies(
                 .or_not_found(id)?;
             let deps = CurrentDependencies(deps);
             pde.as_current_dependencies_mut().ser(&deps)?;
-            Ok(())
+            if initialized {
+                crate::dependencies::providers::initialize_new_bindings(db, id)?;
+            } else {
+                crate::dependencies::providers::initialize_bindings(db, id)?;
+            }
+            crate::service::action::reset_task_conditions(db, id, previous)
         })
         .await
-        .result
+        .result?;
+    if initialized && recheck {
+        context
+            .seed
+            .ctx
+            .services
+            .recheck_dependency_tasks(&context.seed.ctx, id)
+            .await?;
+    }
+    Ok(())
 }
 
 pub async fn get_dependencies(context: EffectContext) -> Result<Vec<DependencyRequirement>, Error> {
@@ -502,6 +524,7 @@ rpc_toolkit::ts_export!(CheckDependenciesParam, namespaces = [""]);
 #[serde(rename_all = "camelCase")]
 pub struct CheckDependenciesResult {
     package_id: PackageId,
+    provider_id: Option<PackageId>,
     title: Option<String>,
     installed_version: Option<VersionString>,
     satisfies: BTreeSet<VersionString>,
@@ -536,16 +559,21 @@ pub async fn check_dependencies(
     let mut results = Vec::with_capacity(package_dependency_info.len());
 
     for (package_id, dependency_info) in package_dependency_info {
-        let title = dependency_info.title.clone();
-        let Some(package) = db.as_public().as_package_data().as_idx(&package_id) else {
-            let tasks = tasks
-                .iter()
-                .filter(|(_, v)| v.task.package_id == package_id)
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
+        let title = dependency_info.title.clone().map(|t| t.localized());
+        let tasks = tasks
+            .iter()
+            .filter(|(_, v)| v.task.package_id == package_id)
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let provider_id = find_package(&db, &context.seed.id, &package_id)?;
+        let package = provider_id
+            .as_ref()
+            .and_then(|id| db.as_public().as_package_data().as_idx(id));
+        let Some(package) = package else {
             results.push(CheckDependenciesResult {
                 package_id,
-                title: title.map(|t| t.localized()),
+                provider_id: None,
+                title,
                 installed_version: None,
                 satisfies: BTreeSet::new(),
                 is_running: false,
@@ -554,24 +582,30 @@ pub async fn check_dependencies(
             });
             continue;
         };
-        let manifest = package.as_state_info().as_manifest(ManifestPreference::New);
-        let installed_version = manifest.as_version().de()?.into_version();
-        let satisfies = manifest.as_metadata().as_satisfies().de()?;
-        let installed_version = Some(installed_version.clone().into());
+        let manifest = package.as_state_info().as_manifest(ManifestPreference::Old);
+        let (installed_version, satisfies) = if provider_id.as_ref() == Some(&package_id) {
+            (
+                Some(manifest.as_version().de()?.into_version().into()),
+                manifest.as_metadata().as_satisfies().de()?,
+            )
+        } else {
+            let binding = pde
+                .as_dependency_bindings()
+                .as_idx(&package_id)
+                .or_not_found(&package_id)?
+                .de()?;
+            dependency_release_versions(binding.versions)
+        };
         let is_running = package
             .as_status_info()
             .as_started()
             .transpose_ref()
             .is_some();
         let health_checks = package.as_status_info().as_health().de()?;
-        let tasks = tasks
-            .iter()
-            .filter(|(_, v)| v.task.package_id == package_id)
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
         results.push(CheckDependenciesResult {
             package_id,
-            title: title.map(|t| t.localized()),
+            provider_id,
+            title,
             installed_version,
             satisfies,
             is_running,
@@ -580,6 +614,12 @@ pub async fn check_dependencies(
         });
     }
     Ok(results)
+}
+
+fn dependency_release_versions(
+    mut versions: BTreeSet<VersionString>,
+) -> (Option<VersionString>, BTreeSet<VersionString>) {
+    (versions.pop_first(), versions)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
@@ -606,6 +646,14 @@ pub async fn get_service_manifest(
 
     let context = context.deref()?;
 
+    let Some(package_id) = find_package(
+        &context.seed.ctx.db.peek().await,
+        &context.seed.id,
+        &package_id,
+    )?
+    else {
+        return Ok(None);
+    };
     let ptr = format!("/public/packageData/{}/stateInfo", package_id)
         .parse()
         .expect("valid json pointer");
@@ -633,6 +681,20 @@ pub async fn get_service_manifest(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn dependency_release_reports_the_logical_versions_without_a_provider_primary() {
+        let logical: VersionString = "2.0.0:0".parse().unwrap();
+        let alias: VersionString = "2.1.0:0".parse().unwrap();
+        let (installed, satisfies) =
+            dependency_release_versions([logical.clone(), alias.clone()].into());
+        assert_eq!(installed, Some(logical));
+        assert_eq!(satisfies, [alias].into());
+        assert_eq!(
+            dependency_release_versions(BTreeSet::new()),
+            (None, BTreeSet::new())
+        );
+    }
 
     #[test]
     fn required_manifest_requirement_is_the_static_fallback() {

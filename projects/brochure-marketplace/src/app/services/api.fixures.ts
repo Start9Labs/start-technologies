@@ -145,6 +145,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
           icon: BTC_ICON,
           sourceVersion: '>=26.0.0:0',
           satisfies: [],
+          satisfiesPackages: {},
           dependencyMetadata: {},
           donationUrl: null,
           s9pks: [
@@ -183,6 +184,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
           icon: BTC_ICON,
           sourceVersion: null,
           satisfies: [],
+          satisfiesPackages: {},
           dependencyMetadata: {},
           donationUrl: null,
           s9pks: [
@@ -231,6 +233,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
           icon: LND_ICON,
           sourceVersion: null,
           satisfies: [],
+          satisfiesPackages: {},
           dependencyMetadata: {
             bitcoind: BitcoinDep,
             'btc-rpc-proxy': ProxyDep,
@@ -282,6 +285,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
           icon: PROXY_ICON,
           sourceVersion: null,
           satisfies: [],
+          satisfiesPackages: {},
           dependencyMetadata: {
             bitcoind: BitcoinDep,
           },
@@ -319,6 +323,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
           icon: PROXY_ICON,
           sourceVersion: null,
           satisfies: ['0.3.2.7:0'],
+          satisfiesPackages: {},
           dependencyMetadata: {
             bitcoind: BitcoinDep,
           },

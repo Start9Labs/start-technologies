@@ -1,3 +1,4 @@
+use crate::dependencies::providers::find_package;
 use crate::net::host::Host;
 use crate::service::effects::callbacks::CallbackHandler;
 use crate::service::effects::prelude::*;
@@ -26,6 +27,14 @@ pub async fn get_host_info(
 ) -> Result<Option<Host>, Error> {
     let context = context.deref()?;
     let package_id = package_id.unwrap_or_else(|| context.seed.id.clone());
+    let Some(package_id) = find_package(
+        &context.seed.ctx.db.peek().await,
+        &context.seed.id,
+        &package_id,
+    )?
+    else {
+        return Ok(None);
+    };
 
     // `start-os` is the server: its single `admin` host lives in serverInfo.
     let ptr = if package_id.is_start_os() {

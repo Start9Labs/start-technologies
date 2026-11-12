@@ -961,4 +961,8 @@ export default {
   1110: 'Taille maximale du fichier',
   1111: 'Voir dans la bibliothèque de services',
   1112: 'Cette implémentation alternative remplit la condition requise',
+  1113: 'Automatique',
+  1114: 'Fourni par',
+  1115: 'Sélectionner un fournisseur de dépendance',
+  1116: 'Indisponible',
 } satisfies i18n

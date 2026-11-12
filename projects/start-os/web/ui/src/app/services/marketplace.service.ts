@@ -193,13 +193,26 @@ export class MarketplaceService extends AbstractMarketplaceService {
     )
   }
 
-  private fetchPackages$(url: string): Observable<MarketplacePkg[]> {
+  fetchProviders$(
+    url: string,
+    provides: string,
+    range: string,
+  ): Observable<MarketplacePkg[]> {
+    return this.fetchPackages$(url, provides, range)
+  }
+
+  private fetchPackages$(
+    url: string,
+    provides: string | null = null,
+    range: string | null = null,
+  ): Observable<MarketplacePkg[]> {
     return from(
       this.api.rpc.registry.package
         .get({
           registry: url,
           id: null,
-          targetVersion: null,
+          targetVersion: range,
+          provides,
           sourceVersion: null,
           otherVersions: 'short',
         })

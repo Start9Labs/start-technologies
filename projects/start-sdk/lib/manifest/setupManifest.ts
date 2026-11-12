@@ -1,3 +1,4 @@
+import { Version as ExverVersion } from '@start9labs/start-core/exver'
 import * as T from '@start9labs/start-core/types'
 import { ImageConfig, ImageId, VolumeId } from '@start9labs/start-core/types'
 import {
@@ -77,15 +78,24 @@ export function buildManifest<
     },
     {} as { [k: string]: ImageConfig },
   )
+  let osVersion = manifest.osVersion ?? OSVersion
+  if (
+    Object.keys(versions.current.options.satisfiesPackages).length &&
+    ExverVersion.parse(osVersion).compare(ExverVersion.parse('0.4.3')) ===
+      'less'
+  ) {
+    osVersion = '0.4.3'
+  }
   return {
     ...manifest,
     dependencies: dependencies.manifestDependencies(),
     gitHash: null,
-    osVersion: manifest.osVersion ?? OSVersion,
+    osVersion,
     sdkVersion: sdkPackage.version,
     version: versions.current.options.version,
     releaseNotes: versions.current.options.releaseNotes,
     satisfies: versions.current.options.satisfies || [],
+    satisfiesPackages: versions.current.options.satisfiesPackages,
     canMigrateTo: versions.canMigrateTo().toString(),
     canMigrateFrom: versions.canMigrateFrom().toString(),
     images,

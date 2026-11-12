@@ -9,8 +9,16 @@ import {
   MarketplaceRegistrySelectComponent,
   MarketplaceTileComponent,
 } from '@start9labs/marketplace'
-import { i18nPipe, registryUrl } from '@start9labs/shared'
-import { tap } from 'rxjs'
+import { ErrorService, i18nPipe, registryUrl } from '@start9labs/shared'
+import {
+  catchError,
+  combineLatest,
+  map,
+  of,
+  startWith,
+  switchMap,
+  tap,
+} from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { StorageService } from 'src/app/services/storage.service'
@@ -62,6 +70,7 @@ import { MarketplaceControlsComponent } from './components/controls.component'
 })
 export default class Marketplace {
   private readonly marketplaceService = inject(MarketplaceService)
+  private readonly error = inject(ErrorService)
   private readonly configService = inject(ConfigService)
   private readonly router = inject(Router)
   private readonly storage = inject(StorageService)
@@ -98,6 +107,26 @@ export default class Marketplace {
     .subscribe()
 
   protected readonly registry = toSignal(
-    this.marketplaceService.currentRegistry$,
+    combineLatest([
+      this.marketplaceService.currentRegistry$,
+      inject(ActivatedRoute).queryParamMap,
+    ]).pipe(
+      switchMap(([registry, params]) => {
+        const provides = params.get('provides')
+        const range = params.get('requireRange')
+        return provides && range
+          ? this.marketplaceService
+              .fetchProviders$(registry.url, provides, range)
+              .pipe(
+                map(packages => ({ ...registry, packages })),
+                catchError(error => {
+                  this.error.handleError(error)
+                  return of({ ...registry, packages: [] })
+                }),
+                startWith(undefined),
+              )
+          : of(registry)
+      }),
+    ),
   )
 }

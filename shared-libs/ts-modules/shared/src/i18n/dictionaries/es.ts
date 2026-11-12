@@ -961,4 +961,8 @@ export default {
   1110: 'Tamaño máximo del archivo',
   1111: 'Ver en el Mercado',
   1112: 'Esta implementación alternativa cumple el requisito',
+  1113: 'Automático',
+  1114: 'Proporcionado por',
+  1115: 'Selecciona un proveedor de dependencias',
+  1116: 'No disponible',
 } satisfies i18n

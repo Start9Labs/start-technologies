@@ -1630,7 +1630,7 @@ function controlsFixture({
       },
     },
     marketplace: { currentRegistryUrl$: of('https://registry.test') },
-    installOrUpload: async (...params) => {
+    dryInstall: async (...params) => {
       calls.push(params)
     },
   }
@@ -2469,4 +2469,147 @@ test('clearing a pending sideload validation keeps its eventual result hidden', 
   assert.equal(page.file, null)
   assert.equal(page.package(), null)
   assert.equal(page.error(), null)
+})
+
+test('provider-change preview completes before install and uses affected consumer names', async () => {
+  const events = []
+  const pending = deferred()
+  const metadata = {
+    ...pkg,
+    satisfies: [],
+    satisfiesPackages: { bitcoin: ['26.0.0:0'] },
+  }
+  const instance = {
+    pkg: () => metadata,
+    patch: {
+      watch$: () =>
+        of({
+          consumer: {
+            stateInfo: {
+              state: 'installed',
+              manifest: { title: 'Bitcoin consumer' },
+            },
+          },
+        }),
+    },
+    tasks: { runInline: runTask },
+    api: {
+      rpc: {
+        package: {
+          previewProviderChange: async request => {
+            events.push(['preview', request])
+            return pending.promise
+          },
+        },
+      },
+    },
+    alerts: {
+      alertBreakages: async titles => {
+        events.push(['warning', titles])
+        return true
+      },
+    },
+    installOrUpload: async (...args) => events.push(['install', ...args]),
+  }
+  const installing = Controls.prototype.dryInstall.call(
+    instance,
+    'registry',
+    false,
+  )
+  await tick()
+  assert.deepEqual(events, [
+    [
+      'preview',
+      {
+        id: metadata.id,
+        version: metadata.version,
+        satisfies: [],
+        satisfiesPackages: metadata.satisfiesPackages,
+      },
+    ],
+  ])
+  pending.resolve(['consumer'])
+  await installing
+  assert.deepEqual(events.slice(1), [
+    ['warning', ['Bitcoin consumer']],
+    ['install', 'registry', false],
+  ])
+})
+
+test('failed provider preview prevents installation', async () => {
+  let installed = false
+  const instance = {
+    pkg: () => pkg,
+    patch: { watch$: () => of({}) },
+    tasks: {
+      runInline: async work => {
+        try {
+          await work()
+          return true
+        } catch {
+          return false
+        }
+      },
+    },
+    api: {
+      rpc: {
+        package: {
+          previewProviderChange: async () => {
+            throw Error('offline')
+          },
+        },
+      },
+    },
+    installOrUpload: async () => {
+      installed = true
+    },
+  }
+  await Controls.prototype.dryInstall.call(instance, 'registry', false)
+  assert.equal(installed, false)
+})
+
+test('provider discovery queries every registry package using the logical alias range', async () => {
+  const requests = []
+  const service = Object.create(MarketplaceService.prototype)
+  service.api = {
+    rpc: {
+      registry: {
+        package: {
+          get: async request => {
+            requests.push(request)
+            return {
+              alternate: {
+                categories: [],
+                otherVersions: {},
+                best: {
+                  '1.0.0:0': {
+                    title: 'Alternate',
+                    satisfies: [],
+                    satisfiesPackages: { bitcoin: ['26.0.0:0'] },
+                  },
+                },
+              },
+            }
+          },
+        },
+      },
+    },
+  }
+  service.exver = { getFlavor: () => null }
+  const packages = await firstValueFrom(
+    service.fetchProviders$('registry', 'bitcoin', '>=26.0.0'),
+  )
+  assert.deepEqual(requests, [
+    {
+      registry: 'registry',
+      id: null,
+      targetVersion: '>=26.0.0',
+      provides: 'bitcoin',
+      sourceVersion: null,
+      otherVersions: 'short',
+    },
+  ])
+  assert.equal(packages[0].id, 'alternate')
+  assert.equal(packages[0].version, '1.0.0:0')
+  assert.deepEqual(packages[0].satisfiesPackages, { bitcoin: ['26.0.0:0'] })
 })

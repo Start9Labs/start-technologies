@@ -485,6 +485,9 @@ export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
 export type PasswordTypeInput = z.input<typeof schemas.PasswordType>
 export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
+export type PreviewProviderChangeParamsInput = z.input<
+  typeof schemas.PreviewProviderChangeParams
+>
 
 /**
  * Auth gate enforced by the OS reverse proxy on incoming requests.
@@ -529,6 +532,9 @@ export type RestorePackageParamsInput = z.input<
   typeof schemas.RestorePackageParams
 >
 export type RunActionParamsInput = z.input<typeof schemas.RunActionParams>
+export type SelectProviderParamsInput = z.input<
+  typeof schemas.SelectProviderParams
+>
 export type ServiceStats = z.output<typeof schemas.ServiceStats>
 export type SetDefaultOutboundParamsInput = z.input<
   typeof schemas.SetDefaultOutboundParams

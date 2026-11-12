@@ -23,7 +23,32 @@ Pass `dependencies` to `buildManifest(versionGraph, sdkManifest, dependencies)` 
 
 The base is serializable at pack time, without effects: every dependency needs a description (which may be `null`), inline title and icon, version range, kind, and health checks when `kind` is `running`. Write `'*'` when any version is accepted. Name multi-flavor dependencies generically: for `bitcoind`, use **Bitcoin**, not Bitcoin Core or Bitcoin Knots. The base is the loosest requirement the service accepts in any configuration.
 
-A range is compared against the installed version and any versions declared in the dependency's `satisfies` list. One declared version must satisfy a complete `&&` conjunction; `||` branches may match different declared versions. Negated ranges and `!=` veto a matching branch.
+For a provider with the dependency's own package ID, a range is compared against its installed version and its `satisfies` list. For a different package ID, the range is compared against its explicit `satisfiesPackages` claims for the dependency ID. One version must satisfy a complete `&&` conjunction; `||` branches may match different declared versions. Negated ranges and `!=` veto a matching branch.
+
+## Compatible Providers
+
+A package can provide the complete contract of another package. Declare the exact ExVer versions it replaces on the current `VersionInfo`:
+
+```typescript
+import { VersionInfo } from '@start9labs/start-sdk'
+
+export const current = VersionInfo.of({
+  version: '5.0.0:0',
+  releaseNotes: 'Initial release',
+  migrations: {},
+})
+  .satisfies('4.0.0:0')
+  .satisfies('bitcoind', '28.0:0')
+  .satisfies('bitcoind', '29.0:0')
+```
+
+The one-argument overload declares compatibility with a version of the package itself; it populates `satisfies`. The two-argument overload declares compatibility with a version of the named package; it accumulates `satisfiesPackages`, a mapping of package IDs to version lists. Both take concrete ExVer versions, not ranges. `buildManifest` publishes the current version's claims; historical version declarations do not carry forward automatically. Cross-package claims raise the manifest's minimum StartOS version to 0.4.3. Provider discovery requires Start Registry 1.6.0 or later.
+
+A cross-package claim promises the named package version's **complete dependency contract**: the same host, service-interface, volume, action, and health-check IDs and their behavior, including action inputs and results. Matching a network protocol alone is not sufficient. Dependents continue using the declared dependency ID; StartOS routes dependency checks, addresses and interfaces, volume mounts, actions and tasks to the selected provider.
+
+Claims are **direct**, not transitive. If A claims B and B claims C, A must explicitly claim C to provide it. A provider's own version and its one-argument `satisfies` entries never count toward another package ID, even when their version numbers match.
+
+Provider selection belongs to each dependent service, not to the server globally. StartOS automatically selects a unique compatible installed provider. A selected provider stays selected while compatible, even when another compatible provider is installed. If the selection becomes incompatible or unavailable, StartOS falls back to a sole compatible provider. With multiple compatible candidates and no compatible selection, the user must select a provider in that dependent's dependency UI; with none, the dependency is unsatisfied. An explicit user choice remains the preferred provider and returns when compatible again. Changing the effective provider rebuilds the dependent service before it uses the replacement's resources.
 
 ## Optional and Conditional Dependencies
 

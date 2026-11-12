@@ -28,6 +28,8 @@ function mockService(
     lastBackup: null,
     statusInfo,
     actions: {},
+    dependencySelections: {},
+    dependencyBindings: {},
     currentDependencies: {},
     hosts: {},
     storeExposedDependents: [],
@@ -510,6 +512,8 @@ export const mockPatchData: DataModel = {
           group: 'Connecting',
         },
       },
+      dependencySelections: {},
+      dependencyBindings: {},
       currentDependencies: {
         bitcoind: {
           title: Mock.BitcoinDep.title,
@@ -609,7 +613,7 @@ export const mockPatchData: DataModel = {
         state: 'installed',
         manifest: {
           ...Mock.MockManifestBitcoind,
-          version: '0.20.0:0-alpha.1',
+          version: '26.0.0:0',
         },
       },
       s9pk: '/media/startos/data/package-data/archive/installed/asdfasdf.s9pk',
@@ -744,6 +748,8 @@ export const mockPatchData: DataModel = {
           group: null,
         },
       },
+      dependencySelections: {},
+      dependencyBindings: {},
       currentDependencies: {},
       hosts: {
         abcdefg: {
@@ -1229,6 +1235,8 @@ export const mockPatchData: DataModel = {
           group: null,
         },
       },
+      dependencySelections: {},
+      dependencyBindings: {},
       currentDependencies: {},
       hosts: {},
       storeExposedDependents: [],
@@ -1294,4 +1302,52 @@ export const mockPatchData: DataModel = {
       },
     ),
   },
+}
+
+const bitcoinCandidates = {
+  bitcoind: ['26.0.0:0'],
+  'bitcoin-alternative': ['26.0.0:0'],
+}
+
+mockPatchData.packageData['bitcoin-alternative'] = {
+  ...mockPatchData.packageData['bitcoind']!,
+  stateInfo: {
+    state: 'installed',
+    manifest: {
+      ...Mock.MockManifestBitcoind,
+      id: 'bitcoin-alternative',
+      title: 'Bitcoin Alternative',
+      version: '1.0.0:0',
+      satisfiesPackages: { bitcoind: ['26.0.0:0'] },
+    },
+  },
+  statusInfo: {
+    desired: { main: 'running' },
+    started: new Date().toISOString(),
+    error: null,
+    health: {},
+  },
+  tasks: {},
+}
+mockPatchData.packageData['lnd']!.dependencySelections = {
+  bitcoind: 'bitcoin-alternative',
+}
+mockPatchData.packageData['lnd']!.dependencyBindings = {
+  bitcoind: {
+    providerId: 'bitcoin-alternative',
+    versions: ['26.0.0:0'],
+    candidates: bitcoinCandidates,
+  },
+  'btc-rpc-proxy': { providerId: null, versions: [], candidates: {} },
+}
+mockPatchData.packageData['electrs']!.currentDependencies = {
+  bitcoind: {
+    title: 'Bitcoin',
+    kind: 'running',
+    versionRange: '>=26.0.0',
+    healthChecks: [],
+  },
+}
+mockPatchData.packageData['electrs']!.dependencyBindings = {
+  bitcoind: { providerId: null, versions: [], candidates: bitcoinCandidates },
 }

@@ -18,6 +18,7 @@ const depsFor = (
     checkDependencies: async () => [
       {
         packageId: 'filebrowser',
+        providerId: null,
         title: 'File Browser',
         installedVersion: null,
         satisfies: [],
@@ -88,6 +89,21 @@ describe('checkDependencies version checks', () => {
         'does not match expected version range',
       )
     }
+  })
+
+  test('a selected cross-package provider retains the logical dependency identity', async () => {
+    const deps = await depsFor('>=2:0 && <3:0', {
+      providerId: 'alternative-filebrowser',
+      installedVersion: '2.1:0',
+      satisfies: ['2.2:0'],
+    })
+    expect(deps.satisfied('filebrowser')).toBe(true)
+    expect(deps.infoFor('filebrowser').result.providerId).toBe(
+      'alternative-filebrowser',
+    )
+    expect(() => deps.infoFor('alternative-filebrowser')).toThrow(
+      'Unknown DependencyId',
+    )
   })
 
   test('the per-package and whole-set boolean checks are both callable', async () => {

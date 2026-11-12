@@ -4791,6 +4791,60 @@
     }
   },
   {
+    "name": "package.preview-provider-change",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "PreviewProviderChangeParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/PackageId" },
+            "version": {
+              "anyOf": [{ "$ref": "#/$defs/Version" }, { "type": "null" }]
+            },
+            "satisfies": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Version" }
+            },
+            "satisfiesPackages": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/Version" }
+              }
+            }
+          },
+          "required": ["id"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" },
+        "Version": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/PackageId" },
+        "version": {
+          "anyOf": [{ "$ref": "#/$defs/Version" }, { "type": "null" }]
+        },
+        "satisfies": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Version" }
+        },
+        "satisfiesPackages": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/Version" }
+          }
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "package.rebuild",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4825,6 +4879,37 @@
       "type": "object",
       "properties": { "id": { "$ref": "#/$defs/PackageId" } },
       "required": ["id"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "package.select-dependency-provider",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SelectProviderParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/PackageId" },
+            "dependencyId": { "$ref": "#/$defs/PackageId" },
+            "providerId": {
+              "anyOf": [{ "$ref": "#/$defs/PackageId" }, { "type": "null" }]
+            }
+          },
+          "required": ["id", "dependencyId"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/PackageId" },
+        "dependencyId": { "$ref": "#/$defs/PackageId" },
+        "providerId": {
+          "anyOf": [{ "$ref": "#/$defs/PackageId" }, { "type": "null" }]
+        }
+      },
+      "required": ["id", "dependencyId"],
       "additionalProperties": true
     }
   },
@@ -6135,6 +6220,15 @@
             "satisfies": {
               "type": "array",
               "items": { "$ref": "#/$defs/Version" }
+            },
+            "satisfiesPackages": {
+              "description": "Promises the named package's dependency contract, including resource IDs and action schemas.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/Version" }
+              }
             }
           },
           "required": [
@@ -6154,7 +6248,8 @@
             "virtualNetworking",
             "hardwareVirtualization",
             "plugins",
-            "satisfies"
+            "satisfies",
+            "satisfiesPackages"
           ],
           "additionalProperties": true
         },
@@ -8581,6 +8676,10 @@
               "anyOf": [{ "$ref": "#/$defs/PackageId" }, { "type": "null" }]
             },
             "targetVersion": { "type": ["string", "null"] },
+            "provides": {
+              "description": "Filters releases by a dependency contract rather than their own package version.",
+              "anyOf": [{ "$ref": "#/$defs/PackageId" }, { "type": "null" }]
+            },
             "sourceVersion": {
               "anyOf": [{ "$ref": "#/$defs/Version" }, { "type": "null" }]
             },
@@ -8943,6 +9042,15 @@
             "satisfies": {
               "type": "array",
               "items": { "$ref": "#/$defs/Version" }
+            },
+            "satisfiesPackages": {
+              "description": "Promises the named package's dependency contract, including resource IDs and action schemas.",
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/Version" }
+              }
             }
           },
           "required": [
@@ -8962,7 +9070,8 @@
             "virtualNetworking",
             "hardwareVirtualization",
             "plugins",
-            "satisfies"
+            "satisfies",
+            "satisfiesPackages"
           ],
           "additionalProperties": true
         },

@@ -1,38 +1,44 @@
 import { KeyValuePipe } from '@angular/common'
-import { Component, inject, input } from '@angular/core'
+import { Component, inject, input, signal } from '@angular/core'
+import { FormsModule, NgModel } from '@angular/forms'
 import { RouterLink } from '@angular/router'
-import { Exver, i18nKey, i18nPipe } from '@start9labs/shared'
-import { TuiIcon, TuiTitle, TuiCell } from '@taiga-ui/core'
-import { TuiAvatar, TuiSkeleton } from '@taiga-ui/kit'
+import { i18nKey, i18nPipe, TaskService } from '@start9labs/shared'
+import {
+  TuiCell,
+  TuiDataList,
+  TuiIcon,
+  TuiTextfield,
+  TuiTitle,
+} from '@taiga-ui/core'
+import { TuiAvatar, TuiChevron, TuiSelect, TuiSkeleton } from '@taiga-ui/kit'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
+import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
+import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { PkgDependencyErrors } from 'src/app/services/dep-error.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
-import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
+import { getManifest } from 'src/app/utils/get-package-data'
 import { ToManifestPipe } from '../../../pipes/to-manifest'
 
 @Component({
   selector: 'service-dependencies',
   template: `
     <header>{{ 'Dependencies' | i18n }}</header>
-
     @let services = this.services();
-
-    @for (d of pkg().currentDependencies | keyvalue; track $index) {
-      @let manifest = services[d.key] ? (services[d.key]! | toManifest) : null;
-      @let compatible =
-        manifest && errors()[d.key]?.type !== 'incorrectVersion';
+    @for (d of pkg().currentDependencies | keyvalue; track d.key) {
+      @let binding = pkg().dependencyBindings?.[d.key];
+      @let providerId = binding?.providerId;
+      @let provider = providerId ? services[providerId] : undefined;
+      @let manifest = provider ? (provider | toManifest) : null;
       <a
         tuiCell
-        [routerLink]="compatible ? ['..', d.key] : ['/marketplace']"
+        [routerLink]="providerId ? ['..', providerId] : ['/marketplace']"
         [queryParams]="
-          compatible
+          providerId
             ? {}
             : {
-                search: d.key,
-                id: manifest ? d.key : null,
+                provides: d.key,
                 requirePkg: d.key,
                 requireRange: d.value.versionRange,
-                flavor: manifest && exver.getFlavor(manifest.version),
               }
         "
         [class.error]="getError(d.key)"
@@ -45,28 +51,70 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
         >
           <img
             #icon="pkgIcon"
-            [pkgIcon]="services[d.key] || pkg()"
-            [dependency]="services[d.key] ? undefined : d.key"
+            [pkgIcon]="provider || pkg()"
+            [dependency]="provider ? undefined : d.key"
           />
         </span>
         <span tuiTitle>
-          {{ manifest?.title || d.value.title || d.key }}
+          {{ d.value.title || d.key }}
+          <span tuiSubtitle>{{ d.key }} · {{ d.value.versionRange }}</span>
+          @if (manifest) {
+            <span tuiSubtitle>
+              {{ 'Provided by' | i18n }}: {{ manifest.title }} ({{
+                providerId
+              }}) · {{ manifest.version }}
+            </span>
+          }
           @if (getError(d.key); as error) {
             <span tuiSubtitle class="g-warning">
               {{ error | i18n }}
-              @if (getHealthCheckName(d.key); as healthCheckName) {
-                : {{ healthCheckName }}
+              @if (getHealthCheckName(d.key); as name) {
+                : {{ name }}
               }
             </span>
-          } @else {
+          } @else if (providerId) {
             <span tuiSubtitle class="g-positive">{{ 'Satisfied' | i18n }}</span>
-          }
-          @if (services[d.key]?.stateInfo.manifest; as installedManifest) {
-            <span tuiSubtitle>{{ installedManifest.version }}</span>
+          } @else {
+            <span tuiSubtitle>{{ 'Loading' | i18n }}</span>
           }
         </span>
         <tui-icon icon="@tui.arrow-right" />
       </a>
+      @if (binding) {
+        <tui-textfield
+          tuiChevron
+          [tuiTextfieldCleaner]="false"
+          [stringify]="stringify"
+        >
+          <label tuiLabel>
+            {{ 'Provider' | i18n }}: {{ d.value.title || d.key }}
+          </label>
+          <input
+            #selection="ngModel"
+            tuiSelect
+            [ngModel]="pkg().dependencySelections?.[d.key] || ''"
+            [disabled]="saving()"
+            (ngModelChange)="select(d.key, $event, selection)"
+          />
+          <tui-data-list *tuiDropdown>
+            <button tuiOption [value]="''">{{ 'Automatic' | i18n }}</button>
+            @for (
+              candidate of binding.candidates | keyvalue;
+              track candidate.key
+            ) {
+              <button tuiOption [value]="candidate.key">
+                {{ candidate.key }} · {{ candidate.value.join(', ') }}
+              </button>
+            }
+            @let preferred = pkg().dependencySelections?.[d.key];
+            @if (preferred && !binding.candidates[preferred]) {
+              <button tuiOption [value]="preferred" [disabled]="true">
+                {{ preferred }} ({{ 'Unavailable' | i18n }})
+              </button>
+            }
+          </tui-data-list>
+        </tui-textfield>
+      }
     } @empty {
       <app-placeholder icon="@tui.boxes">
         {{ 'No dependencies' | i18n }}
@@ -78,7 +126,6 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
       min-height: 12rem;
       grid-column: span 3;
     }
-
     .error {
       box-shadow: inset 1.25rem 0 0 -1rem var(--tui-status-warning);
     }
@@ -86,12 +133,17 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
   host: { class: 'g-card' },
   imports: [
     KeyValuePipe,
+    FormsModule,
     RouterLink,
     TuiCell,
     TuiAvatar,
     TuiSkeleton,
     TuiTitle,
     TuiIcon,
+    TuiTextfield,
+    TuiChevron,
+    TuiSelect,
+    TuiDataList,
     PlaceholderComponent,
     i18nPipe,
     ToManifestPipe,
@@ -99,24 +151,46 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
   ],
 })
 export class ServiceDependenciesComponent {
-  protected readonly exver = inject(Exver)
+  private readonly api = inject(ApiService)
+  private readonly tasks = inject(TaskService)
+  private readonly i18n = inject(i18nPipe)
+  protected readonly saving = signal(false)
+  protected readonly stringify = (id: string) =>
+    id || this.i18n.transform('Automatic')
 
-  pkg = input.required<PackageDataEntry>()
-  services = input.required<Record<string, PackageDataEntry>>()
-  errors = input.required<PkgDependencyErrors>()
+  public readonly pkg = input.required<PackageDataEntry>()
+  public readonly services = input.required<Record<string, PackageDataEntry>>()
+  public readonly errors = input.required<PkgDependencyErrors>()
 
-  getError(id: string): i18nKey | undefined {
-    const depError = this.errors()[id]
-
-    if (!depError) {
-      return undefined
+  protected async select(
+    dependencyId: string,
+    providerId: string,
+    selection: NgModel,
+  ) {
+    this.saving.set(true)
+    try {
+      const saved = await this.tasks.runInline(() =>
+        this.api.rpc.package.selectDependencyProvider({
+          id: getManifest(this.pkg()).id,
+          dependencyId,
+          providerId: providerId || null,
+        }),
+      )
+      if (!saved)
+        selection.reset(this.pkg().dependencySelections?.[dependencyId] || '')
+    } finally {
+      this.saving.set(false)
     }
+  }
 
-    switch (depError.type) {
+  protected getError(id: string): i18nKey | undefined {
+    switch (this.errors()[id]?.type) {
+      case 'selectionRequired':
+        return 'Select a dependency provider'
       case 'notInstalled':
         return 'Not installed'
-      case 'incorrectVersion':
-        return 'Incompatible version'
+      case 'noCompatibleProvider':
+        return 'No compatible version available'
       case 'notRunning':
         return 'Not running'
       case 'taskRequired':
@@ -126,14 +200,12 @@ export class ServiceDependenciesComponent {
       case 'transitive':
         return 'Dependency has a dependency issue'
       default:
-        return 'Unknown error'
+        return undefined
     }
   }
 
-  getHealthCheckName(id: string) {
-    const depError = this.errors()[id]
-    return depError?.type === 'healthChecksFailed'
-      ? depError.check?.name
-      : undefined
+  protected getHealthCheckName(id: string) {
+    const error = this.errors()[id]
+    return error?.type === 'healthChecksFailed' ? error.check?.name : undefined
   }
 }

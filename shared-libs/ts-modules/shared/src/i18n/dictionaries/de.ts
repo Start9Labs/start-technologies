@@ -961,4 +961,8 @@ export default {
   1110: 'Maximale Dateigröße',
   1111: 'Im Marktplatz anzeigen',
   1112: 'Diese alternative Implementierung erfüllt die Anforderung',
+  1113: 'Automatisch',
+  1114: 'Bereitgestellt von',
+  1115: 'Abhängigkeitsanbieter auswählen',
+  1116: 'Nicht verfügbar',
 } satisfies i18n

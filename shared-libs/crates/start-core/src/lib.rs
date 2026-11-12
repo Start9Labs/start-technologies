@@ -606,6 +606,16 @@ pub fn package<C: Context>() -> ParentHandler<C> {
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
+            "preview-provider-change",
+            from_fn_async(dependencies::providers::preview_provider_change).no_cli(),
+        )
+        .subcommand(
+            "select-dependency-provider",
+            from_fn_async(dependencies::providers::select_provider)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_cli(),
+        )
+        .subcommand(
             "stats",
             from_fn_async(lxc::stats)
                 .with_display_serializable()

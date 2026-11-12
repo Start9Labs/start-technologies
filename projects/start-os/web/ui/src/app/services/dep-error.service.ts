@@ -1,11 +1,11 @@
 import { inject, Injectable } from '@angular/core'
-import { Exver } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import deepEqual from 'fast-deep-equal'
 import { PatchDB } from 'patch-db-client'
 import { Observable } from 'rxjs'
 import { distinctUntilChanged, map, shareReplay } from 'rxjs/operators'
-import { isInstalled } from 'src/app/utils/get-package-data'
+import { dependencyProvider } from '../utils/dependency-provider'
+import { isInstalled } from '../utils/get-package-data'
 import {
   DataModel,
   InstalledState,
@@ -17,65 +17,49 @@ export type AllDependencyErrors = Record<string, PkgDependencyErrors>
 export type PkgDependencyErrors = Record<string, DependencyError | null>
 
 export type DependencyError =
+  | { type: 'selectionRequired' }
+  | { type: 'noCompatibleProvider' }
   | DependencyErrorNotInstalled
   | DependencyErrorNotRunning
-  | DependencyErrorIncorrectVersion
   | DependencyErrorTaskRequired
   | DependencyErrorHealthChecksFailed
   | DependencyErrorTransitive
 
-export type DependencyErrorNotInstalled = {
-  type: 'notInstalled'
-}
-
-export type DependencyErrorNotRunning = {
-  type: 'notRunning'
-}
-
-export type DependencyErrorIncorrectVersion = {
-  type: 'incorrectVersion'
-  expected: string // version range
-  received: string // version
-}
-
-export interface DependencyErrorTaskRequired {
-  type: 'taskRequired'
-}
-
+export type DependencyErrorNotInstalled = { type: 'notInstalled' }
+export type DependencyErrorNotRunning = { type: 'notRunning' }
+export type DependencyErrorTaskRequired = { type: 'taskRequired' }
 export type DependencyErrorHealthChecksFailed = {
   type: 'healthChecksFailed'
   check?: T.NamedHealthCheckResult
 }
+export type DependencyErrorTransitive = { type: 'transitive' }
 
-export type DependencyErrorTransitive = {
-  type: 'transitive'
-}
-
-@Injectable({
-  providedIn: 'root',
-})
+@Injectable({ providedIn: 'root' })
 export class DepErrorService {
-  private readonly exver = inject(Exver)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
 
   readonly depErrors$: Observable<AllDependencyErrors> = this.patch
     .watch$('packageData')
     .pipe(
-      map(pkgs =>
-        Object.keys(pkgs)
-          .map(id => ({
+      map(pkgs => {
+        const errors = Object.fromEntries(
+          Object.keys(pkgs).map(id => [id, this.getDepErrors(pkgs, id)]),
+        )
+        return Object.fromEntries(
+          Object.entries(errors).map(([id, deps]) => [
             id,
-            depth: dependencyDepth(pkgs, id),
-          }))
-          .sort((a, b) => (b.depth > a.depth ? -1 : 1))
-          .reduce(
-            (errors, { id }): AllDependencyErrors => ({
-              ...errors,
-              [id]: this.getDepErrors(pkgs, id, errors),
-            }),
-            {} as AllDependencyErrors,
-          ),
-      ),
+            Object.fromEntries(
+              Object.entries(deps).map(([logical, error]) => [
+                logical,
+                error ||
+                  (hasTransitiveError(pkgs, errors, id, logical)
+                    ? { type: 'transitive' as const }
+                    : null),
+              ]),
+            ),
+          ]),
+        )
+      }),
       distinctUntilChanged(deepEqual),
       shareReplay(1),
     )
@@ -90,18 +74,14 @@ export class DepErrorService {
   private getDepErrors(
     pkgs: DataModel['packageData'],
     pkgId: string,
-    outerErrors: AllDependencyErrors,
   ): PkgDependencyErrors {
     const pkg = pkgs[pkgId]
-
     if (!pkg || !isInstalled(pkg)) return {}
 
-    return currentDeps(pkgs, pkgId).reduce(
-      (innerErrors, depId): PkgDependencyErrors => ({
-        ...innerErrors,
-        [depId]: this.getDepError(pkgs, pkg, depId, outerErrors),
-      }),
-      {} as PkgDependencyErrors,
+    return Object.fromEntries(
+      Object.keys(pkg.currentDependencies)
+        .filter(id => id !== pkgId)
+        .map(depId => [depId, this.getDepError(pkgs, pkg, depId)]),
     )
   }
 
@@ -109,101 +89,64 @@ export class DepErrorService {
     pkgs: DataModel['packageData'],
     pkg: PackageDataEntry<InstalledState>,
     depId: string,
-    outerErrors: AllDependencyErrors,
   ): DependencyError | null {
-    const dep = pkgs[depId]
-
-    // not installed
-    if (!dep || dep.stateInfo.state !== 'installed') {
-      return {
-        type: 'notInstalled',
-      }
+    const binding = pkg.dependencyBindings?.[depId]
+    if (!binding) return null
+    if (!binding.providerId && Object.keys(binding.candidates).length > 1) {
+      return { type: 'selectionRequired' }
+    }
+    if (!binding.providerId) return { type: 'noCompatibleProvider' }
+    const providerId = dependencyProvider(pkg, depId)
+    const dep = providerId ? pkgs[providerId] : undefined
+    if (
+      !dep ||
+      (dep.stateInfo.state !== 'installed' &&
+        dep.stateInfo.state !== 'updating')
+    ) {
+      return { type: 'notInstalled' }
     }
 
     const currentDep = pkg.currentDependencies[depId]
-    const depManifest = dep.stateInfo.manifest
-    const expected = currentDep?.versionRange || ''
-
-    // incorrect version
     if (
-      !this.exver.releaseSatisfies(
-        depManifest.version,
-        depManifest.satisfies,
-        expected,
+      Object.values(pkg.tasks).some(
+        t =>
+          t?.active &&
+          t.task.packageId === depId &&
+          t.task.severity === 'critical',
       )
     ) {
-      return {
-        expected,
-        type: 'incorrectVersion',
-        received: depManifest.version,
-      }
-    }
-
-    // action required
-    if (
-      Object.values(pkg.tasks)
-        .filter(t => !!t)
-        .some(
-          t =>
-            t.active &&
-            t.task.packageId === depId &&
-            t.task.severity === 'critical',
-        )
-    ) {
-      return {
-        type: 'taskRequired',
-      }
+      return { type: 'taskRequired' }
     }
 
     const depStatus = getInstalledBaseStatus(dep.statusInfo)
-
     if (currentDep?.kind === 'running') {
-      // not running
       if (depStatus !== 'running' && depStatus !== 'starting') {
-        return {
-          type: 'notRunning',
-        }
+        return { type: 'notRunning' }
       }
-      // health check failure
-      for (let id of currentDep.healthChecks) {
+      for (const id of currentDep.healthChecks) {
         const check = dep.statusInfo.health[id]
         if (check?.result !== 'success') {
-          return {
-            type: 'healthChecksFailed',
-            check,
-          }
+          return { type: 'healthChecksFailed', check }
         }
       }
     }
-
-    // transitive
-    const transitiveError = currentDeps(pkgs, depId).some(transitiveId =>
-      Object.values(outerErrors[transitiveId] || {}).some(err => !!err),
-    )
-
-    if (transitiveError) {
-      return {
-        type: 'transitive',
-      }
-    }
-
     return null
   }
 }
 
-function currentDeps(pkgs: DataModel['packageData'], id: string): string[] {
-  return Object.keys(pkgs[id]?.currentDependencies || {}).filter(
-    depId => depId !== id,
-  )
-}
-
-function dependencyDepth(
-  pkgs: DataModel['packageData'],
-  id: string,
-  depth = 0,
-): number {
-  return currentDeps(pkgs, id).reduce(
-    (prev, depId) => dependencyDepth(pkgs, depId, prev + 1),
-    depth,
+function hasTransitiveError(
+  packages: DataModel['packageData'],
+  errors: AllDependencyErrors,
+  ownerId: string,
+  logical: string,
+  visited = new Set<string>(),
+): boolean {
+  const owner = packages[ownerId]
+  const provider = owner && dependencyProvider(owner, logical)
+  if (!provider || visited.has(provider)) return false
+  visited.add(provider)
+  return Object.entries(errors[provider] || {}).some(
+    ([depId, error]) =>
+      !!error || hasTransitiveError(packages, errors, provider, depId, visited),
   )
 }

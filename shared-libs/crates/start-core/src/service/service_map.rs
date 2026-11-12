@@ -102,7 +102,6 @@ fn uninit_target(data_ver: &str, prev: &Manifest, next: &Manifest) -> Result<Exi
     }
 }
 
-/// This is the structure to contain all the services
 #[derive(Default)]
 pub struct ServiceMap(SyncMutex<OrdMap<PackageId, Arc<RwLock<Option<ServiceRef>>>>>);
 impl ServiceMap {
@@ -150,11 +149,67 @@ impl ServiceMap {
         id: &PackageId,
         disposition: LoadDisposition,
     ) -> Result<(), Error> {
-        let mut shutdown_err = Ok(());
         let mut service = self.get_mut(id).await;
-        if let Some(service) = service.take() {
-            shutdown_err = service.shutdown(None).await;
+        self.load_locked(ctx, id, disposition, &mut service).await?;
+        drop(service);
+        self.recheck_dependency_tasks(ctx, id).await
+    }
+
+    pub(crate) async fn reconcile_dependencies(
+        &self,
+        ctx: &RpcContext,
+        id: &PackageId,
+    ) -> Result<(), Error> {
+        let mut service = self.get_mut(id).await;
+        let reload = ctx
+            .db
+            .mutate(|db| crate::dependencies::providers::refresh_bindings(db, id))
+            .await
+            .result?;
+        if reload {
+            self.load_locked(ctx, id, LoadDisposition::Retry, &mut service)
+                .await?;
         }
+        drop(service);
+        if reload {
+            self.recheck_dependency_tasks(ctx, id).await?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn recheck_dependency_tasks(
+        &self,
+        ctx: &RpcContext,
+        owner: &PackageId,
+    ) -> Result<(), Error> {
+        let targets = super::action::conditional_task_targets(&ctx.db.peek().await, owner)?
+            .into_values()
+            .flatten()
+            .filter(|id| id != owner)
+            .collect::<std::collections::BTreeSet<_>>();
+        for target in targets {
+            let guard = self.get(&target).await;
+            if let Some(service) = guard.as_ref().filter(|service| service.is_initialized()) {
+                service.recheck_tasks().await.log_err();
+            }
+        }
+        Ok(())
+    }
+
+    async fn load_locked(
+        &self,
+        ctx: &RpcContext,
+        id: &PackageId,
+        disposition: LoadDisposition,
+        service: &mut Option<ServiceRef>,
+    ) -> Result<(), Error> {
+        if let Some(service) = service.take() {
+            service.shutdown(None).await?;
+        }
+        ctx.db
+            .mutate(|db| crate::dependencies::providers::initialize_bindings(db, id))
+            .await
+            .result?;
         match Service::load(ctx, id, disposition).await {
             Ok(s) => {
                 ctx.db
@@ -183,7 +238,6 @@ impl ServiceMap {
                     .result?;
             }
         }
-        shutdown_err?;
         Ok(())
     }
 
@@ -317,6 +371,8 @@ impl ServiceMap {
                                         developer_key: Der64::new(developer_key),
                                         last_backup: None,
                                         current_dependencies: Default::default(),
+                                        dependency_selections: Default::default(),
+                                        dependency_bindings: Default::default(),
                                         actions: Default::default(),
                                         tasks: Default::default(),
                                         hosts: Default::default(),
@@ -420,7 +476,7 @@ impl ServiceMap {
                         None
                     };
                     let new_service = Service::install(
-                        ctx,
+                        ctx.clone(),
                         s9pk,
                         &installed_path,
                         &registry,
@@ -451,6 +507,7 @@ impl ServiceMap {
                         .log_err();
 
                     drop(service);
+                    ctx.services.recheck_dependency_tasks(&ctx, &id).await?;
 
                     sync_progress_task.await.map_err(|_| {
                         Error::new(eyre!("progress sync task panicked"), ErrorKind::Unknown)
@@ -462,7 +519,6 @@ impl ServiceMap {
         .boxed())
     }
 
-    /// This is ran during the cleanup, so when we are uninstalling the service
     #[instrument(skip_all)]
     pub async fn uninstall(
         &self,

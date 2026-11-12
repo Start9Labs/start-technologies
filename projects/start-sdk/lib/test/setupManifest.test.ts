@@ -79,6 +79,48 @@ test('the builder publishes its complete base dependency requirements', () => {
   })
 })
 
+test('compatibility metadata defaults to empty claims', () => {
+  const built = buildManifest(versions, manifest(), Dependencies.of())
+
+  expect(built.satisfies).toEqual([])
+  expect(built.satisfiesPackages).toEqual({})
+})
+
+test('the manifest publishes current compatibility claims, not historical claims', () => {
+  const graph = VersionGraph.of({
+    current: versions.current
+      .satisfies('#fork:1.0.0:0')
+      .satisfies('bitcoind', '28.0:0')
+      .satisfies('bitcoind', '29.0:0'),
+    other: [
+      VersionInfo.of({
+        version: '0.9.0:0',
+        releaseNotes: '',
+        migrations: {},
+      }).satisfies('historical-provider', '1.0.0:0'),
+    ],
+  })
+  const built = buildManifest(graph, manifest(), Dependencies.of())
+
+  expect(built.satisfies).toEqual(['#fork:1.0.0:0'])
+  expect(built.satisfiesPackages).toEqual({ bitcoind: ['28.0:0', '29.0:0'] })
+  expect(built.osVersion).toBe('0.4.3')
+  expect(
+    buildManifest(
+      graph,
+      { ...manifest(), osVersion: '0.4.0' },
+      Dependencies.of(),
+    ).osVersion,
+  ).toBe('0.4.3')
+  expect(
+    buildManifest(
+      graph,
+      { ...manifest(), osVersion: '0.5.0' },
+      Dependencies.of(),
+    ).osVersion,
+  ).toBe('0.5.0')
+})
+
 test('images emulate missing architectures by default', () => {
   const built = buildManifest(versions, manifest(), Dependencies.of())
 

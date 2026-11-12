@@ -6,9 +6,11 @@ import {
   GetPackageRes,
   GetPackagesRes,
   registrySigningKeys,
+  satisfiesWithAliases,
 } from '@start9labs/marketplace'
 import {
   defaultRegistries,
+  Exver,
   FullKeyboard,
   pauseFor,
   registryUrl,
@@ -127,6 +129,7 @@ const INIT_PROGRESS: T.FullProgress = {
 @Injectable()
 export class MockApiService extends ApiService {
   readonly mockWsSource$ = new Subject<Revision>()
+  private readonly exver = inject(Exver)
   private readonly storage = inject(WA_SESSION_STORAGE)
   private readonly cache = inject(PATCH_CACHE)
   private readonly gitHash = inject(ConfigService).gitHash
@@ -1416,6 +1419,67 @@ export class MockApiService extends ApiService {
 
       return null
     },
+    'package.select-dependency-provider': async ({
+      id,
+      dependencyId,
+      providerId,
+    }) => {
+      const owner = mockPatchData.packageData[id]
+      const binding = owner?.dependencyBindings?.[dependencyId]
+      if (!owner || !binding) throw new Error('Unknown dependency')
+      if (providerId && !binding.candidates[providerId])
+        throw new Error('Incompatible provider')
+      const selected = providerId || binding.providerId
+      const selections = { ...owner.dependencySelections }
+      if (providerId) selections[dependencyId] = providerId
+      else delete selections[dependencyId]
+      const nextBinding: T.DependencyBinding = {
+        ...binding,
+        providerId: selected,
+        versions: selected ? binding.candidates[selected] || [] : [],
+      }
+      owner.dependencySelections = selections
+      owner.dependencyBindings = {
+        ...owner.dependencyBindings,
+        [dependencyId]: nextBinding,
+      }
+      await this.mockRevision<
+        T.PackageDataEntry['dependencySelections'] | T.DependencyBinding
+      >([
+        {
+          op: PatchOp.REPLACE,
+          path: `/packageData/${id}/dependencySelections`,
+          value: selections,
+        },
+        {
+          op: PatchOp.REPLACE,
+          path: `/packageData/${id}/dependencyBindings/${dependencyId}`,
+          value: nextBinding,
+        },
+      ])
+      return null
+    },
+    'package.preview-provider-change': async ({
+      id,
+      version,
+      satisfiesPackages,
+    }) => {
+      if (
+        version === null ||
+        (id === 'bitcoin-alternative' &&
+          !satisfiesPackages?.['bitcoind']?.length)
+      ) {
+        return Object.entries(mockPatchData.packageData).flatMap(
+          ([consumer, owner]) =>
+            Object.values(owner.dependencyBindings || {}).some(
+              binding => binding.providerId === id,
+            )
+              ? [consumer]
+              : [],
+        )
+      }
+      return []
+    },
     'package.rebuild': async params => {
       return this.handlers['package.restart']!(params)
     },
@@ -2684,6 +2748,12 @@ export class MockApiService extends ApiService {
       return Mock.RegistryPackages[id]!
     }
 
+    if (
+      targetVersion &&
+      Mock.RegistryPackages[id]?.best[targetVersion.replace(/^=/, '')]
+    ) {
+      return Mock.RegistryPackages[id]!
+    }
     if (!targetVersion || targetVersion === '=*') {
       return Mock.RegistryPackages[id]!
     } else {
@@ -2692,6 +2762,21 @@ export class MockApiService extends ApiService {
   }
   private async getRegistryPackages(params: GetRegistryPackagesReq) {
     await pauseFor(2000)
-    return Mock.RegistryPackages
+    if (!params.provides) return Mock.RegistryPackages
+    return Object.fromEntries(
+      Object.entries(Mock.RegistryPackages).flatMap(([id, info]) => {
+        const best = Object.fromEntries(
+          Object.entries(info.best).filter(([version, metadata]) =>
+            satisfiesWithAliases(
+              this.exver,
+              { id, version, ...metadata },
+              params.targetVersion || '*',
+              params.provides,
+            ),
+          ),
+        )
+        return Object.keys(best).length ? [[id, { ...info, best }]] : []
+      }),
+    )
   }
 }

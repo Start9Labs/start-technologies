@@ -664,6 +664,16 @@ export type CurrentDependencyKindInput = z.input<
 >
 export type DeleteLegacyParams = z.output<typeof schemas.DeleteLegacyParams>
 export type DeleteLegacyParamsInput = z.input<typeof schemas.DeleteLegacyParams>
+
+/**
+ * Observed providers use active manifests; staged updates do not change the dependency contract.
+ */
+export type DependencyBinding = z.output<typeof schemas.DependencyBinding>
+
+/**
+ * Observed providers use active manifests; staged updates do not change the dependency contract.
+ */
+export type DependencyBindingInput = z.input<typeof schemas.DependencyBinding>
 export type DependencyRequirement = z.output<
   typeof schemas.DependencyRequirement
 >

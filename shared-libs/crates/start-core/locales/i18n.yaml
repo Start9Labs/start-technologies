@@ -1177,6 +1177,20 @@ error.backup-password-mismatch:
   pl_PL: "Niezgodne Hasło Kopii Zapasowej"
 
 # disk/main.rs
+dependencies.providers.incompatible:
+  en_US: "The selected package cannot fulfill this dependency."
+  de_DE: "Das ausgewählte Paket kann diese Abhängigkeit nicht erfüllen."
+  es_ES: "El paquete seleccionado no puede satisfacer esta dependencia."
+  fr_FR: "Le paquet sélectionné ne peut pas satisfaire cette dépendance."
+  pl_PL: "Wybrany pakiet nie może spełnić tej zależności."
+
+dependencies.providers.unresolved:
+  en_US: "Choose a compatible provider for dependency %{dependency}."
+  de_DE: "Wählen Sie einen kompatiblen Anbieter für die Abhängigkeit %{dependency}."
+  es_ES: "Elija un proveedor compatible para la dependencia %{dependency}."
+  fr_FR: "Choisissez un fournisseur compatible pour la dépendance %{dependency}."
+  pl_PL: "Wybierz zgodnego dostawcę zależności %{dependency}."
+
 disk.main.defrag-failed:
   en_US: "Filesystem optimization failed; continuing with the converted filesystem."
   de_DE: "Die Dateisystemoptimierung ist fehlgeschlagen; die Konvertierung wird fortgesetzt."

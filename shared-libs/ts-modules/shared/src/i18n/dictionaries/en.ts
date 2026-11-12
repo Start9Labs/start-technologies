@@ -962,4 +962,8 @@ export const ENGLISH: Record<string, number> = {
   'Maximum file size': 1110,
   'View in Marketplace': 1111,
   'This alternative implementation meets the requirement': 1112,
+  "Automatic": 1113,
+  "Provided by": 1114,
+  "Select a dependency provider": 1115,
+  'Unavailable': 1116,
 }

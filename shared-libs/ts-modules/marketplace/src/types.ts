@@ -13,7 +13,6 @@ export type GetPackageRes = T.GetPackageResponse & {
 
 export type GetPackagesReq = PackageParams & {
   id: null
-  targetVersion: null
   sourceVersion: null
   otherVersions: 'short'
 }

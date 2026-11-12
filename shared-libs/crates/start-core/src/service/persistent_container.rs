@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use futures::Future;
 use futures::future::ready;
-use imbl::{Vector, vector};
+use imbl::vector;
 use imbl_value::InternedString;
 use rpc_toolkit::{Empty, Server, ShutdownHandle};
 use serde::de::DeserializeOwned;
@@ -28,9 +28,7 @@ use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::source::FileSource;
 use crate::service::effects::context::EffectContext;
 use crate::service::effects::handler;
-use crate::service::rpc::{
-    CallbackHandle, CallbackId, CallbackParams, ExitParams, InitKind, InitParams,
-};
+use crate::service::rpc::{CallbackId, ExitParams, InitKind, InitParams};
 use crate::service::{ProcedureName, Service, rpc};
 use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
@@ -42,19 +40,19 @@ use crate::{ARCH, DATA_DIR, ImageId, PACKAGE_DATA, VolumeId};
 const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(120);
 const DROP_RPC_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
-async fn shutdown_rpc_server<ExitFuture, ExitError, Shutdown, ServerFuture>(
+pub(super) async fn shutdown_rpc_server<ExitFuture, ExitError, Shutdown>(
     exit: ExitFuture,
     shutdown: Shutdown,
-    server: ServerFuture,
-    timeout: Option<Duration>,
+    mut server: NonDetachingJoinHandle<()>,
+    exit_timeout: Option<Duration>,
+    server_timeout: Option<Duration>,
     errs: &mut ErrorCollection,
 ) where
     ExitFuture: Future<Output = Result<(), ExitError>>,
     ExitError: Into<Error>,
     Shutdown: FnOnce(),
-    ServerFuture: Future<Output = Result<(), tokio::task::JoinError>>,
 {
-    let exit = match timeout {
+    let exit = match exit_timeout {
         Some(timeout) => tokio::time::timeout(timeout, exit)
             .await
             .with_kind(ErrorKind::Timeout)
@@ -63,11 +61,14 @@ async fn shutdown_rpc_server<ExitFuture, ExitError, Shutdown, ServerFuture>(
     };
     errs.handle(exit);
     shutdown();
-    let server = match timeout {
-        Some(timeout) => tokio::time::timeout(timeout, server)
-            .await
-            .with_kind(ErrorKind::Timeout)
-            .and_then(|result| result.with_kind(ErrorKind::Cancelled)),
+    let server = match server_timeout {
+        Some(timeout) => match tokio::time::timeout(timeout, &mut server).await {
+            Ok(result) => result.with_kind(ErrorKind::Cancelled),
+            Err(error) => {
+                server.wait_for_abort().await.ok();
+                Err(Error::new(error, ErrorKind::Timeout))
+            }
+        },
         None => server.await.with_kind(ErrorKind::Cancelled),
     };
     errs.handle(server);
@@ -473,6 +474,7 @@ impl PersistentContainer {
                     || shutdown.shutdown(),
                     hdl,
                     rpc_shutdown_timeout,
+                    rpc_shutdown_timeout,
                     &mut errs,
                 )
                 .await;
@@ -559,19 +561,6 @@ impl PersistentContainer {
     }
 
     #[instrument(skip_all)]
-    pub async fn callback(&self, handle: CallbackHandle, args: Vector<Value>) -> Result<(), Error> {
-        let mut params = None;
-        self.state.send_if_modified(|s| {
-            params = handle.params(&mut s.callbacks, args);
-            params.is_some()
-        });
-        if let Some(params) = params {
-            self._callback(params).await?;
-        }
-        Ok(())
-    }
-
-    #[instrument(skip_all)]
     async fn _execute(
         &self,
         id: Guid,
@@ -614,12 +603,6 @@ impl PersistentContainer {
             fut.await?
         })
     }
-
-    #[instrument(skip_all)]
-    async fn _callback(&self, params: CallbackParams) -> Result<(), Error> {
-        self.rpc_client.notify(rpc::Callback, params).await?;
-        Ok(())
-    }
 }
 
 impl Drop for PersistentContainer {
@@ -647,7 +630,8 @@ mod tests {
             shutdown_rpc_server(
                 futures::future::pending::<Result<(), Error>>(),
                 move || shutdown_observer.store(true, Ordering::SeqCst),
-                futures::future::pending::<Result<(), tokio::task::JoinError>>(),
+                tokio::spawn(futures::future::pending::<()>()).into(),
+                Some(DROP_RPC_SHUTDOWN_TIMEOUT),
                 Some(DROP_RPC_SHUTDOWN_TIMEOUT),
                 &mut errs,
             ),
@@ -660,6 +644,36 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn exit_failure_still_drains_effect_owners_before_cleanup() {
+        let owner = Arc::new(());
+        let held = owner.clone();
+        let server = tokio::spawn(async move {
+            let _held = held;
+            futures::future::pending::<()>().await;
+        });
+        let shutdown_called = Arc::new(AtomicBool::new(false));
+        let observed = shutdown_called.clone();
+        let mut errors = ErrorCollection::new();
+        shutdown_rpc_server(
+            async {
+                Err::<(), _>(Error::new(
+                    eyre!("uninit failed"),
+                    ErrorKind::InvalidRequest,
+                ))
+            },
+            move || observed.store(true, Ordering::SeqCst),
+            server.into(),
+            None,
+            Some(Duration::from_secs(1)),
+            &mut errors,
+        )
+        .await;
+        assert!(shutdown_called.load(Ordering::SeqCst));
+        assert_eq!(Arc::strong_count(&owner), 1);
+        assert!(errors.into_result().is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn explicit_rpc_shutdown_exceeds_drop_bounds() {
         let shutdown_called = Arc::new(AtomicBool::new(false));
         let shutdown_observer = shutdown_called.clone();
@@ -667,16 +681,22 @@ mod tests {
         let start = tokio::time::Instant::now();
         let mut errs = ErrorCollection::new();
 
+        let (stop, stopped) = oneshot::channel::<()>();
         shutdown_rpc_server(
             async {
                 tokio::time::sleep(wait).await;
                 Ok::<_, Error>(())
             },
-            move || shutdown_observer.store(true, Ordering::SeqCst),
-            async {
-                tokio::time::sleep(wait).await;
-                Ok::<_, tokio::task::JoinError>(())
+            move || {
+                shutdown_observer.store(true, Ordering::SeqCst);
+                stop.send(()).ok();
             },
+            tokio::spawn(async move {
+                stopped.await.ok();
+                tokio::time::sleep(wait).await;
+            })
+            .into(),
+            None,
             None,
             &mut errs,
         )

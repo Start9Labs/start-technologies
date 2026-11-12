@@ -961,4 +961,8 @@ export default {
   1110: 'Maksymalny rozmiar pliku',
   1111: 'Zobacz w sklepie',
   1112: 'Ta alternatywna implementacja spełnia wymaganie',
+  1113: 'Automatycznie',
+  1114: 'Dostarczane przez',
+  1115: 'Wybierz dostawcę zależności',
+  1116: 'Niedostępny',
 } satisfies i18n

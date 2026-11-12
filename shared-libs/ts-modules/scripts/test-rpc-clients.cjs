@@ -36,6 +36,7 @@ function harness(moduleOverrides = new Map()) {
       'AuthKeyService',
       'AuthService',
       'ConfigService',
+      'Exver',
       'StaleUiService',
       'PATCH_CACHE',
       'RELATIVE_URL',
@@ -47,6 +48,7 @@ function harness(moduleOverrides = new Map()) {
     DOCUMENT: tokens.DOCUMENT,
     Injector: tokens.Injector,
     Injectable: () => value => value,
+    Service: () => value => value,
     Component: () => value => value,
     signal: initial => {
       const stream$ = new BehaviorSubject(initial)
@@ -59,6 +61,14 @@ function harness(moduleOverrides = new Map()) {
       required: () => angular.signal(undefined),
     }),
     inject: token => {
+      if (token === tokens.Exver && !dependencies.has(token)) {
+        dependencies.set(
+          token,
+          new (load(
+            'shared-libs/ts-modules/shared/src/services/exver.service.ts',
+          ).Exver)(),
+        )
+      }
       assert.ok(dependencies.has(token), `Missing injection: ${String(token)}`)
       return dependencies.get(token)
     },
@@ -86,7 +96,12 @@ function harness(moduleOverrides = new Map()) {
         return { HttpClient: tokens.HttpClient }
       if (request === '@start9labs/shared') return shared()
       if (request === '@start9labs/marketplace')
-        return load('shared-libs/ts-modules/marketplace/src/types.ts')
+        return {
+          ...load('shared-libs/ts-modules/marketplace/src/types.ts'),
+          ...load(
+            'shared-libs/ts-modules/marketplace/src/util/compatible-versions.ts',
+          ),
+        }
       if (request.endsWith('auth.service'))
         return { AuthService: tokens.AuthService }
       if (request.endsWith('http.service'))
@@ -374,7 +389,13 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
   const pkg = { categories: [], best: {}, otherVersions: {} }
   const version = { ...pkg, best: { '1.0.0': {} } }
   const fixtures = {
-    RegistryPackages: { example: pkg },
+    RegistryPackages: {
+      example: pkg,
+      provider: {
+        ...pkg,
+        best: { '1.0.0:0': { satisfiesPackages: { example: ['2.0.0:0'] } } },
+      },
+    },
     OtherPackageVersions: { example: { '=1.0.0': version } },
   }
   const { dependencies, tokens, load } = harness(
@@ -415,6 +436,75 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
     }),
     version,
   )
+  const providers = await client.rpc.registry.package.get({
+    ...params,
+    provides: 'example',
+    targetVersion: '>=2.0.0:0',
+  })
+  assert.deepEqual(Object.keys(providers), ['provider'])
+})
+
+test('StartOS provider selection survives subscription bootstrap and rejects stale choices', async () => {
+  const storage = Symbol('session storage')
+  const owner = {
+    dependencySelections: {},
+    dependencyBindings: {
+      logical: {
+        providerId: 'first',
+        versions: ['1.0.0:0'],
+        candidates: { first: ['1.0.0:0'], second: ['1.0.0:0'] },
+      },
+    },
+  }
+  const data = {
+    ui: {},
+    serverInfo: { registries: {}, trustedKeys: {}, registryKeys: {} },
+    packageData: { consumer: owner },
+  }
+  const { dependencies, tokens, load } = harness(
+    new Map([
+      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
+      ['src/app/utils/acme', {}],
+      ['./api.fixures', { Mock: {} }],
+      ['./mock-patch', { mockPatchData: data }],
+      ['./md-sample.md', ''],
+    ]),
+  )
+  dependencies.set(storage, null)
+  dependencies.set(tokens.AuthService, { isVerified$: of(true) })
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: data }))
+  const client = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+  ).MockApiService)()
+  await client.rpc.package.selectDependencyProvider({
+    id: 'consumer',
+    dependencyId: 'logical',
+    providerId: 'second',
+  })
+  const { dump } = await client.rpc.db.subscribe({})
+  assert.equal(
+    dump.value.packageData.consumer.dependencySelections.logical,
+    'second',
+  )
+  assert.equal(
+    dump.value.packageData.consumer.dependencyBindings.logical.providerId,
+    'second',
+  )
+  await assert.rejects(
+    client.rpc.package.selectDependencyProvider({
+      id: 'consumer',
+      dependencyId: 'logical',
+      providerId: 'removed',
+    }),
+  )
+  assert.equal(owner.dependencySelections.logical, 'second')
+  await client.rpc.package.selectDependencyProvider({
+    id: 'consumer',
+    dependencyId: 'logical',
+    providerId: null,
+  })
+  assert.equal(Object.keys(owner.dependencySelections).length, 0)
+  assert.equal(owner.dependencyBindings.logical.providerId, 'second')
 })
 
 test('StartOS trust mock rejects whole batches and imports the requested trust atomically', async () => {

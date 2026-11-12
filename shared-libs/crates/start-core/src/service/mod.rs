@@ -35,7 +35,7 @@ use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::s9pk::S9pk;
-use crate::service::action::update_tasks;
+use crate::service::action::{task_targets_service, update_tasks_for_service};
 use crate::service::rpc::{ExitParams, InitKind};
 use crate::service::service_map::InstallProgressHandles;
 use crate::service::uninstall::cleanup;
@@ -229,26 +229,27 @@ impl ServiceRef {
         }
         .boxed())
     }
+    /// Waits for container cleanup even when the exit RPC fails.
     pub async fn shutdown(self, uninit: Option<ExitParams>) -> Result<(), Error> {
+        let mut errors = ErrorCollection::new();
         if let Some((hdl, shutdown)) = self.seed.persistent_container.rpc_server.send_replace(None)
         {
-            self.seed
-                .persistent_container
-                .rpc_client
-                .request(
+            persistent_container::shutdown_rpc_server(
+                self.seed.persistent_container.rpc_client.request(
                     rpc::Exit,
                     uninit.clone().unwrap_or_else(|| {
                         ExitParams::target_version(
                             &*self.seed.persistent_container.s9pk.as_manifest().version,
                         )
                     }),
-                )
-                .await?;
-            shutdown.shutdown();
-            tokio::time::timeout(Duration::from_secs(30), hdl)
-                .await
-                .with_kind(ErrorKind::Timeout)?
-                .with_kind(ErrorKind::Cancelled)?;
+                ),
+                || shutdown.shutdown(),
+                hdl,
+                None,
+                Some(Duration::from_secs(30)),
+                &mut errors,
+            )
+            .await;
         }
         let service = Arc::try_unwrap(self.0).map_err(|_| {
             Error::new(
@@ -258,9 +259,9 @@ impl ServiceRef {
         })?;
         service
             .actor
-            .shutdown(crate::util::actor::PendingMessageStrategy::FinishAll { timeout: None }) // TODO timeout
+            .shutdown(crate::util::actor::PendingMessageStrategy::FinishAll { timeout: None })
             .await;
-        Arc::try_unwrap(service.seed)
+        let cleanup = Arc::try_unwrap(service.seed)
             .map_err(|_| {
                 Error::new(
                     eyre!(
@@ -272,8 +273,9 @@ impl ServiceRef {
             })?
             .persistent_container
             .exit(uninit)
-            .await?;
-        Ok(())
+            .await;
+        errors.handle(cleanup);
+        errors.into_result()
     }
 }
 
@@ -298,40 +300,23 @@ impl Service {
         self.seed.persistent_container.state.borrow().rt_initialized
     }
 
-    /// Re-evaluate all tasks that reference this service's actions.
-    /// Called after every service init to update task active state.
+    /// Re-evaluates tasks whose owner resolves their target to this service.
     #[instrument(skip_all)]
     pub async fn recheck_tasks(&self) -> Result<(), Error> {
         let service_id = &self.seed.id;
         let peek = self.seed.ctx.db.peek().await;
         let mut action_input: BTreeMap<ActionId, Value> = BTreeMap::new();
-        let tasks: BTreeSet<_> = peek
-            .as_public()
-            .as_package_data()
-            .as_entries()?
-            .into_iter()
-            .map(|(_, pde)| {
-                Ok(pde
-                    .as_tasks()
-                    .as_entries()?
-                    .into_iter()
-                    .map(|(_, r)| {
-                        let t = r.as_task();
-                        Ok::<_, Error>(
-                            if t.as_package_id().de()? == *service_id
-                                && t.as_input().transpose_ref().is_some()
-                            {
-                                Some(t.as_action_id().de()?)
-                            } else {
-                                None
-                            },
-                        )
-                    })
-                    .filter_map_ok(|a| a))
-            })
-            .flatten_ok()
-            .map(|a| a.and_then(|a| a))
-            .try_collect()?;
+        let mut tasks = BTreeSet::new();
+        for (owner, pde) in peek.as_public().as_package_data().as_entries()? {
+            for (_, entry) in pde.as_tasks().as_entries()? {
+                let task = entry.as_task();
+                if task.as_input().transpose_ref().is_some()
+                    && task_targets_service(&peek, &owner, &task.as_package_id().de()?, service_id)?
+                {
+                    tasks.insert(task.as_action_id().de()?);
+                }
+            }
+        }
         let event_id = Guid::new();
         for action_id in tasks {
             if let Some(input) = self
@@ -349,12 +334,7 @@ impl Service {
             .db
             .mutate(|db| {
                 for (action_id, input) in &action_input {
-                    for (_, pde) in db.as_public_mut().as_package_data_mut().as_entries_mut()? {
-                        pde.as_tasks_mut().mutate(|tasks| {
-                            update_tasks(tasks, service_id, action_id, input, false);
-                            Ok(())
-                        })?;
-                    }
+                    update_tasks_for_service(db, service_id, action_id, input, false)?;
                 }
                 Ok(())
             })
@@ -394,7 +374,8 @@ impl Service {
                     .as_idx_mut(&id)
                     .or_not_found(&id)?
                     .as_current_dependencies_mut()
-                    .ser(&required)
+                    .ser(&required)?;
+                crate::dependencies::providers::initialize_bindings(db, &id)
             })
             .await
             .result?;

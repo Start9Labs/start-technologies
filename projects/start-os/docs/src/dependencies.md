@@ -11,6 +11,12 @@ Dependencies are other services that a service requires or can optionally integr
 
 StartOS lists required dependencies from the package as soon as it initializes the service. Optional integrations appear when the service activates them. Their published version and health requirements still apply when active. When you install a service, StartOS checks its dependencies. If a required dependency is not installed, you will be prompted to install it. StartOS also monitors version compatibility — if a dependency is installed but running an incompatible version, you will be notified.
 
+## Choosing a Provider
+
+A different package can fulfill a dependency when its developer declares the required compatibility. StartOS uses the sole compatible installed provider automatically. If several providers are available, choose one under **Dependencies** on the dependent service's page. Each service has its own choice.
+
+The selected provider stays in use while compatible. If it becomes unavailable or incompatible, StartOS falls back to the sole compatible alternative; if several alternatives remain, choose one. An explicit choice remains preferred and returns when compatible again. Switching providers rebuilds the dependent service before its connections, mounts, and tasks use the replacement.
+
 ## Configuring Dependencies
 
 Some dependencies need to be configured to work with the services that depend on them. When this is the case, a [task](tasks.md) will appear on the dashboard guiding you through the necessary steps. These tasks often link directly to an [action](actions.md) on the dependency, with form fields pre-filled to simplify configuration. While a service is not using an optional dependency, its tasks for that dependency are hidden and do not prevent it from starting.

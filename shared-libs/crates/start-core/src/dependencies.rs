@@ -8,6 +8,8 @@ use crate::s9pk::manifest::LocaleString;
 use crate::util::PathOrUrl;
 use crate::{Error, PackageId};
 
+pub mod providers;
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[model = "Model<Self>"]
 pub struct Dependencies(pub BTreeMap<PackageId, DepInfo>);
