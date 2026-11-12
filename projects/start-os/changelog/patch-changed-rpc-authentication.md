@@ -2,6 +2,8 @@
 release-notes: false
 ---
 
+- Reject invalid native encrypted-admission CBOR representations before field interpretation.
+
 - Encrypt normal browser and keyed CLI RPC, backend registry queries and WebSocket continuations after signed ephemeral-DH admission, without mode-based downgrade.
 - Encrypt browser setup, initialization, diagnostic RPC and continuations without enrolling or persisting a missing device key; preserve legacy HTTP callers and invalidate old RPC sessions when the active startup context changes.
 - Retain encrypted startup on ordinary LAN HTTP without a browser secure context.

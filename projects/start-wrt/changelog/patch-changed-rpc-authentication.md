@@ -2,6 +2,8 @@
 release-notes: false
 ---
 
+- Reject invalid native encrypted-admission CBOR representations before field interpretation.
+
 - Encrypt browser and CLI RPC, including anonymous setup and loopback local-token access, after signed ephemeral-DH admission, with same-peer, intended-GUID admission for secure-origin continuations, while preserving HTTP/header compatibility and reconnect behavior.
 - Send first-time and flash passwords inside encrypted RPC without an extra password envelope; retain legacy HTTP/JWE and NDJSON setup compatibility.
 - Report interrupted flash observations as errors rather than leaving the wizard stalled, without aborting accepted firmware writes.

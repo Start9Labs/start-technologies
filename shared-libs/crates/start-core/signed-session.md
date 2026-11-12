@@ -25,8 +25,11 @@ There are two binary handshake records. Each record has a two-byte big-endian le
 and exactly two consecutive CBOR objects: a body followed by a structured proof.
 The record has at most 1,024 bytes, with CBOR nesting bounded at 16 levels. Extra
 objects, trailing data, duplicate/unknown fields and invalid binary lengths are
-rejected. Binary fields are CBOR byte strings, not Base64 or integer arrays. CBOR
-integers preserve the full i64/u64 ranges without JavaScript-number rounding.
+rejected. Maps use text keys; admission values are untagged. Binary fields are definite
+CBOR byte strings, not Base64 or integer arrays. CBOR integers preserve the full
+i64/u64 ranges without JavaScript-number rounding. The native decoder validates wire
+kinds through Ciborium before the existing DTOs interpret fields; buffered enum decoding
+must not normalize an otherwise invalid representation into an accepted field.
 
 Each body has `protocol: "Start-RPC-Session"`, `version: 1` and a `hello` map:
 

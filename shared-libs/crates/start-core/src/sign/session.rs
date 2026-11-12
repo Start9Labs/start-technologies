@@ -16,6 +16,8 @@ use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::util::serde::binary::ByteString;
 
+mod cbor;
+
 const PROTOCOL: &str = "Start-RPC-Session";
 pub(crate) const VERSION: u8 = 1;
 const CIPHER_KEY_BYTES: usize = 32;
@@ -104,13 +106,9 @@ async fn decode(
         return Err(invalid());
     }
     let mut reader = std::io::Cursor::new(wire);
-    let message: Message =
-        serde_cbor::de::from_reader_with_recursion_limit(&mut reader, MAX_HANDSHAKE_DEPTH)
-            .map_err(|_| invalid())?;
+    let message: Message = cbor::read(&mut reader)?;
     let body_end = reader.position() as usize;
-    let proof: BinaryRequestProof =
-        serde_cbor::de::from_reader_with_recursion_limit(&mut reader, MAX_HANDSHAKE_DEPTH)
-            .map_err(|_| invalid())?;
+    let proof: BinaryRequestProof = cbor::read(&mut reader)?;
     if reader.position() as usize != wire.len() {
         return Err(invalid());
     }

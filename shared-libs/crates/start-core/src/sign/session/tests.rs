@@ -71,6 +71,128 @@ async fn resign(wire: &[u8], key: &Signer, change: impl FnOnce(&mut Message)) ->
     with_proof(&body, &proof)
 }
 
+fn cbor_field<'a>(value: &'a mut serde_cbor::Value, name: &str) -> &'a mut serde_cbor::Value {
+    let serde_cbor::Value::Map(fields) = value else {
+        panic!("expected map")
+    };
+    &mut fields
+        .iter_mut()
+        .find(|(key, _)| key == &serde_cbor::Value::Text(name.into()))
+        .unwrap()
+        .1
+}
+
+#[tokio::test]
+async fn strict_admission_kinds_reject_signed_alternative_representations() {
+    use serde_cbor::Value;
+
+    let key = signer(1);
+    let original = client(&key).await;
+    let (original_body, _) = split_proof(original.message());
+    for case in 0..6 {
+        let mut body: Value = serde_cbor::de::from_reader(original_body).unwrap();
+        match case {
+            0 => {
+                let value = cbor_field(&mut body, "protocol");
+                *value = Value::Tag(999, Box::new(value.clone()));
+            }
+            1 => {
+                let Value::Map(fields) = &mut body else {
+                    unreachable!()
+                };
+                fields[0].0 = Value::Bytes(b"protocol".to_vec());
+            }
+            2 => {
+                let Value::Map(fields) = cbor_field(&mut body, "hello") else {
+                    unreachable!()
+                };
+                for (name, _) in fields {
+                    if name == &Value::Text("ephemeral".into()) {
+                        *name = Value::Integer(0.into());
+                    } else if name == &Value::Text("target".into()) {
+                        *name = Value::Integer(1.into());
+                    }
+                }
+            }
+            3 => {
+                let hello = cbor_field(&mut body, "hello");
+                let ephemeral = cbor_field(hello, "ephemeral").clone();
+                *hello = Value::Array(vec![
+                    Value::Text("client".into()),
+                    ephemeral,
+                    Value::Text("rpc".into()),
+                ]);
+            }
+            4 => {
+                let value = cbor_field(cbor_field(&mut body, "hello"), "ephemeral");
+                *value = Value::Tag(64, Box::new(value.clone()));
+            }
+            5 => {}
+            _ => unreachable!(),
+        }
+        let mut wire_body = Vec::new();
+        serde_cbor::ser::into_writer(&body, &mut wire_body).unwrap();
+        if case == 5 {
+            let offset = wire_body
+                .windows(2)
+                .position(|bytes| bytes == [0x58, 0x20])
+                .unwrap();
+            wire_body.insert(offset, 0x5f);
+            wire_body.insert(offset + 35, 0xff);
+        }
+        let proof = RequestProof::sign_commitment(&key, &wire_body, "server.test")
+            .await
+            .unwrap();
+        assert!(
+            accept(
+                &signer(2),
+                &["server.test".into()],
+                &with_proof(&wire_body, &proof),
+                &Target::Rpc,
+                None,
+                |_| async { Ok(()) }
+            )
+            .await
+            .is_err(),
+            "alternative representation {case} was admitted"
+        );
+    }
+}
+
+#[tokio::test]
+async fn strict_admission_kinds_also_apply_to_proof_metadata() {
+    use serde_cbor::Value;
+
+    let key = signer(1);
+    let original = client(&key).await;
+    let (body, proof) = split_proof(original.message());
+    let mut encoded = Vec::new();
+    serde_cbor::ser::into_writer(&BinaryRequestProof::from(&proof), &mut encoded).unwrap();
+    for case in 0..3 {
+        let mut value: Value = serde_cbor::de::from_reader(encoded.as_slice()).unwrap();
+        match case {
+            0 => {
+                let signature = cbor_field(&mut value, "signature");
+                *signature = Value::Tag(999, Box::new(signature.clone()));
+            }
+            1 => {
+                let nonce = cbor_field(cbor_field(&mut value, "commitment"), "nonce");
+                *nonce = Value::Tag(999, Box::new(nonce.clone()));
+            }
+            2 => {
+                let Value::Map(fields) = cbor_field(&mut value, "commitment") else {
+                    unreachable!()
+                };
+                fields[0].0 = Value::Bytes(b"timestamp".to_vec());
+            }
+            _ => unreachable!(),
+        }
+        let mut wire = body.to_vec();
+        serde_cbor::ser::into_writer(&value, &mut wire).unwrap();
+        reject_before_nonce(&wire, "server.test", None).await;
+    }
+}
+
 async fn pair() -> (SessionCipher, SessionCipher) {
     let client = client(&signer(1)).await;
     let (_, response, server) = accept_rpc(&signer(2), client.message()).await;
