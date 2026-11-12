@@ -360,8 +360,7 @@ impl TunnelContext {
                                 })
                                 .cloned()
                         })
-                        .map(|s| s.prefix_len())
-                        .unwrap_or(32);
+                        .map(|s| s.prefix_len());
                     active_forwards.insert(
                         from,
                         forward
