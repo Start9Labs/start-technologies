@@ -313,6 +313,101 @@ async fn os_asset_ingestion_defaults_old_requests_and_verifies_signatures_atomic
     assert_eq!(snapshot(&ctx).await, before);
 }
 
+#[tokio::test]
+async fn legacy_devices_can_discover_headline_free_releases() {
+    use crate::registry::device_info::DEVICE_INFO_HEADER;
+
+    let uploader = SigningKey::from_bytes(&[12; 32]);
+    let key = AnyVerifyingKey::Ed25519(uploader.verifying_key());
+    let temp = tempfile::tempdir().unwrap();
+    let key_path = temp.path().join("identity.pem");
+    write_signing_key(&uploader, &key_path).await.unwrap();
+    let cli = CliContext::init(ClientConfig {
+        id_key_path: Some(key_path),
+        ..Default::default()
+    })
+    .unwrap();
+    for startwrt in [false, true] {
+        let mut ctx = context(temp.path().join(startwrt.to_string()), key.clone()).await;
+        Arc::get_mut(&mut ctx.0).unwrap().startwrt = startwrt;
+        let version: exver::Version = "0.4.2.2".parse().unwrap();
+        let info = OsVersionInfo {
+            release_notes: "Release notes".parse().unwrap(),
+            squashfs: [(
+                "x86_64".into(),
+                RegistryAsset {
+                    published_at: chrono::Utc::now(),
+                    urls: vec!["https://example.com/os.squashfs".parse().unwrap()],
+                    commitment: commitment(),
+                    signatures: [(key.clone(), signature(&uploader, &commitment()))].into(),
+                },
+            )]
+            .into(),
+            ..Default::default()
+        };
+        ctx.db
+            .mutate(|db| {
+                db.as_index_mut()
+                    .as_os_mut()
+                    .as_versions_mut()
+                    .insert(&version, &info)
+            })
+            .await
+            .result
+            .unwrap();
+        let before = snapshot(&ctx).await;
+        let (url, task) = registry_server(ctx.clone()).await;
+        for method in ["os.version.get", "os.index", "index"] {
+            for (header, source, projected) in [
+                (
+                    Some("os.version=0.4.2.1&os.compat=*&os.platform=x86_64"),
+                    None,
+                    true,
+                ),
+                (
+                    Some("os.version=0.4.2.2&os.compat=*&os.platform=x86_64"),
+                    Some("0.4.2.1"),
+                    startwrt,
+                ),
+                (None, Some("0.4.2.1"), method == "os.version.get"),
+                (None, None, false),
+            ] {
+                let mut headers = http::HeaderMap::new();
+                if let Some(header) = header {
+                    headers.insert(
+                        http::HeaderName::from_bytes(DEVICE_INFO_HEADER.as_bytes()).unwrap(),
+                        http::HeaderValue::from_static(header),
+                    );
+                }
+                let result = crate::middleware::auth::signature::call_remote(
+                    &cli,
+                    url.join("rpc/v0").unwrap(),
+                    headers,
+                    url.host_str(),
+                    method,
+                    imbl_value::json!({ "sourceVersion": source }),
+                )
+                .await
+                .unwrap();
+                let versions = match method {
+                    "os.version.get" => &result,
+                    "os.index" => &result["versions"],
+                    _ => &result["os"]["versions"],
+                };
+                let release = &versions["0.4.2.2"];
+                assert_eq!(release["releaseNotes"].as_str(), Some("Release notes"));
+                if projected {
+                    assert_eq!(release["headline"].as_str(), Some("v0.4.2.2"));
+                } else {
+                    assert!(release.get("headline").is_none(), "{result:?}");
+                }
+            }
+        }
+        assert_eq!(snapshot(&ctx).await, before);
+        task.abort();
+    }
+}
+
 async fn snapshot(ctx: &RegistryContext) -> Value {
     to_value(&ctx.db.peek().await.de().unwrap()).unwrap()
 }
