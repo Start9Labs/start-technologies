@@ -36,17 +36,35 @@ use crate::{Error, MAIN_DATA, PACKAGE_DATA, ResultExt};
 pub const SYSTEM_REBUILD_PATH: &str = "/media/startos/config/system-rebuild";
 pub const STANDBY_MODE_PATH: &str = "/media/startos/config/standby";
 
+/// Observes systemd-compatible clock synchronization without subprocesses on Linux.
 pub async fn check_time_is_synchronized() -> Result<bool, Error> {
-    Ok(String::from_utf8(
-        Command::new("timedatectl")
-            .arg("show")
-            .arg("-p")
-            .arg("NTPSynchronized")
-            .invoke(crate::ErrorKind::Unknown)
-            .await?,
-    )?
-    .trim()
-        == "NTPSynchronized=yes")
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: all timex fields permit zero; modes zero requests a read.
+        let mut sample: libc::timex = unsafe { std::mem::zeroed() };
+        // SAFETY: the kernel receives a valid writable timex with modes zero.
+        let result = unsafe { libc::adjtimex(&mut sample) };
+        Ok(ntp_synchronized(result, &sample))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(String::from_utf8(
+            Command::new("timedatectl")
+                .arg("show")
+                .arg("-p")
+                .arg("NTPSynchronized")
+                .invoke(crate::ErrorKind::Unknown)
+                .await?,
+        )?
+        .trim()
+            == "NTPSynchronized=yes")
+    }
+}
+
+#[cfg(target_os = "linux")]
+/// Matches [systemd's NTPSynchronized](https://sources.debian.org/src/systemd/252.39-1~deb12u2/src/timedate/timedated.c/#L516); `STA_UNSYNC` may encode RTC policy.
+fn ntp_synchronized(query_result: libc::c_int, sample: &libc::timex) -> bool {
+    query_result >= 0 && sample.maxerror < 16_000_000
 }
 
 pub struct InitResult {
@@ -584,6 +602,93 @@ pub async fn cli_init_progress(
 #[cfg(test)]
 mod tests {
     use super::persist_pstore_archive;
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn clock_observation_does_not_launch_timedatectl() {
+        use std::os::unix::fs::PermissionsExt;
+
+        const CHILD: &str = "STARTOS_CLOCK_OBSERVATION_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let directory = tempfile::tempdir().unwrap();
+            let program = directory.path().join("timedatectl");
+            let marker = directory.path().join("invocations");
+            std::fs::write(
+                &program,
+                "#!/bin/sh\nprintf x >> \"$STARTOS_CLOCK_INVOCATIONS\"\nprintf 'NTPSynchronized=yes\\n'\n",
+            )
+            .unwrap();
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let output = tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                tokio::process::Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "init::tests::clock_observation_does_not_launch_timedatectl",
+                        "--nocapture",
+                    ])
+                    .env(CHILD, "1")
+                    .env("PATH", directory.path())
+                    .env("STARTOS_CLOCK_INVOCATIONS", &marker)
+                    .kill_on_drop(true)
+                    .output(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let launches = if marker.exists() {
+                std::fs::read(marker).unwrap().len()
+            } else {
+                0
+            };
+            assert_eq!(launches, 0, "clock observations launched timedatectl");
+            return;
+        }
+        for _ in 0..16 {
+            assert!(super::check_time_is_synchronized().await.is_ok());
+            crate::context::startup::StartupRpc::clock_synced().await;
+        }
+        crate::net::ssl::root_ca_start_time().await;
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn kernel_ntp_observation_matches_the_systemd_maximum_error_boundary() {
+        let mut sample: libc::timex = unsafe { std::mem::zeroed() };
+        sample.maxerror = 15_999_999;
+        assert!(super::ntp_synchronized(libc::TIME_OK, &sample));
+        sample.maxerror = 16_000_000;
+        assert!(!super::ntp_synchronized(libc::TIME_OK, &sample));
+        sample.maxerror = 0;
+        sample.status = libc::STA_UNSYNC;
+        assert!(super::ntp_synchronized(libc::TIME_ERROR, &sample));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn kernel_ntp_query_failure_does_not_establish_synchronization() {
+        let sample: libc::timex = unsafe { std::mem::zeroed() };
+        assert!(!super::ntp_synchronized(-1, &sample));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn kernel_ntp_observations_retain_changes_in_both_directions() {
+        let mut sample: libc::timex = unsafe { std::mem::zeroed() };
+        for (maximum_error, synchronized) in [(16_000_000, false), (0, true), (16_000_000, false)] {
+            sample.maxerror = maximum_error;
+            assert_eq!(
+                super::ntp_synchronized(libc::TIME_OK, &sample),
+                synchronized
+            );
+        }
+    }
 
     #[tokio::test]
     async fn pstore_archive_preserves_nested_and_flat_files() {

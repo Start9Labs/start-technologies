@@ -38,6 +38,8 @@ nonce/clock owner only while a check runs. RPC and GUID admission call the same
 An unpolled check cannot keep the owner alive. WRT acquires both authentication and
 continuation owners weakly.
 
+On Linux, `init::check_time_is_synchronized` reads the kernel with query-only `adjtimex`, matching systemd's `NTPSynchronized` maximum-error policy. Startup admission rereads this source without spawning a subprocess or caching a clock snapshot. Boot waiting, normal-context synchronization updates and root-CA dating share that owner.
+
 The toolkit's connection-local context carries provenance into handlers.
 `SignatureAuthContext` owns admission capabilities independently of database availability.
 `SignatureAuthorizationContext` owns database-backed enrollment, permissions and key lifecycle.
