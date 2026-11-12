@@ -1,0 +1,61 @@
+Subject: [PATCH] netfilter: flowtable: transmit a neigh flow through the route device
+
+Since commit b5964aac51e0 ("netfilter: flowtable: consolidate xmit path"),
+a FLOW_OFFLOAD_XMIT_NEIGH entry transmits on the device stored in its
+tuple ifidx, and since commit 2bdc536c9da7 ("netfilter: flowtable: always
+set route tuple out ifindex") nft_dev_forward_path() takes that device
+from dev_fill_forward_path(). Before them the entry transmitted on the
+route's device. Two things changed for a route that ends at a bridge:
+
+- When the walk fails, for instance at a mac80211 interface whose driver
+  has no .net_fill_forward_path (mt7915 without WED), ifidx stays 0.
+  nf_flow_offload_ip_hook() and nf_flow_offload_ipv6_hook() then find no
+  output device, tear the flow down and drop the packet. The next packet
+  takes the classic path and offloads the flow again, so up to every
+  other packet towards a Wi-Fi client is lost.
+- When the walk succeeds, ifidx is the bridge port the destination was
+  behind when the flow was offloaded. The flow bypasses the bridge: its
+  packets skip the bridge netfilter hooks, and keep leaving through that
+  port after the forwarding database has moved the address to another.
+
+Default the output device to the route's device, and take it from the
+walk only when the path's last device is a flowtable device, as before
+those commits. The previous patch keeps such a flow from sending to an
+unresolved or departed neighbour, which a bridge would flood to every
+port.
+
+Mainline instead refuses to offload a flow whose path cannot be
+discovered, in commits 871df5007eda ("netfilter: flowtable: bail out if
+forward path cannot be discovered") and 3ae37eafd366 ("netfilter:
+flowtable: restore ieee80211 forward path"). Those require the last
+device of a bridged path, the bridge port, to be a flowtable device.
+The fw4 in OpenWrt 25.12 registers the bridge or its VLAN devices
+instead, so with them no bridged LAN flow would be offloaded.
+---
+ net/netfilter/nf_flow_table_path.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+--- a/net/netfilter/nf_flow_table_path.c
++++ b/net/netfilter/nf_flow_table_path.c
+@@ -28,6 +28,7 @@ static void nft_default_forward_path(str
+ 				     enum ip_conntrack_dir dir)
+ {
+ 	route->tuple[!dir].in.ifindex	= dst_cache->dev->ifindex;
++	route->tuple[dir].out.ifindex	= dst_cache->dev->ifindex;
+ 	route->tuple[dir].dst		= dst_cache;
+ 	route->tuple[dir].xmit_type	= nft_xmit_type(dst_cache);
+ }
+@@ -204,12 +205,10 @@ static void nft_dev_forward_path(struct
+ 	if (nft_dev_fill_forward_path(route, dst, ct, dir, ha, &stack) >= 0)
+ 		nft_dev_path_info(&stack, &info, ha, &ft->data);
+
+-	if (info.outdev)
+-		route->tuple[dir].out.ifindex = info.outdev->ifindex;
+-
+ 	if (!info.indev || !nft_flowtable_find_dev(info.indev, ft))
+ 		return;
+
++	route->tuple[dir].out.ifindex = info.outdev->ifindex;
+ 	route->tuple[!dir].in.ifindex = info.indev->ifindex;
+ 	for (i = 0; i < info.num_encaps; i++) {
+ 		route->tuple[!dir].in.encap[i].id = info.encap[i].id;

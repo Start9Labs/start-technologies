@@ -1,0 +1,46 @@
+Subject: [PATCH] netfilter: flowtable: resolve the neighbour before a neigh xmit
+
+Since commit b5964aac51e0 ("netfilter: flowtable: consolidate xmit path"),
+the FLOW_OFFLOAD_XMIT_NEIGH path writes neigh->ha into the link-layer
+header itself instead of passing the packet to neigh_xmit(). It never
+looks at the neighbour state, so the state machine does not run for an
+offloaded flow:
+
+- A neighbour that is not resolved, such as one ip_neigh_gw4() has just
+  created, has an all-zero address, and the packet leaves for
+  00:00:00:00:00:00. A bridge floods it to every port.
+- A neighbour whose host has left stays STALE, since nothing moves it
+  to DELAY and PROBE, and the flow keeps sending to the old address for
+  as long as the sender does. A bridge floods that once the fdb entry
+  ages out.
+
+Call neigh_event_send() as the classic output path does. It moves a
+STALE neighbour to DELAY so that it is probed, and starts resolution for
+one that is unresolved or failed. When the neighbour cannot be used yet,
+tear the flow down and drop the packet, as for the other transmit
+failures here. The classic path then queues later packets until
+resolution completes.
+---
+ net/netfilter/nf_flow_table_ip.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+--- a/net/netfilter/nf_flow_table_ip.c
++++ b/net/netfilter/nf_flow_table_ip.c
+@@ -469,7 +469,7 @@ nf_flow_offload_ip_hook(void *priv, stru
+ 			return NF_DROP;
+ 		}
+ 		neigh = ip_neigh_gw4(rt->dst.dev, rt_nexthop(rt, flow->tuplehash[!dir].tuple.src_v4.s_addr));
+-		if (IS_ERR(neigh)) {
++		if (IS_ERR(neigh) || neigh_event_send(neigh, NULL)) {
+ 			flow_offload_teardown(flow);
+ 			return NF_DROP;
+ 		}
+@@ -774,7 +774,7 @@ nf_flow_offload_ipv6_hook(void *priv, st
+ 			return NF_DROP;
+ 		}
+ 		neigh = ip_neigh_gw6(rt->dst.dev, rt6_nexthop(rt, &flow->tuplehash[!dir].tuple.src_v6));
+-		if (IS_ERR(neigh)) {
++		if (IS_ERR(neigh) || neigh_event_send(neigh, NULL)) {
+ 			flow_offload_teardown(flow);
+ 			return NF_DROP;
+ 		}
