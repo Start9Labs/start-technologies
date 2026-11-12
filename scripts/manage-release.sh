@@ -2098,7 +2098,8 @@ Environment variables:
                            fails)
   UNCOMMITTED_NOTES        Set to 1 to release curated notes that differ from the
                            tagged commit; commit them to master afterwards
-  VISUAL, EDITOR           Editor create-gh-release opens the notes in (default: vi)
+  VISUAL, EDITOR           Editor create-gh-release opens the notes in (default:
+                           sensible-editor when installed, otherwise vi)
   NO_TRANSLATE             Set to 1 to publish English notes without translating
                            them with the claude CLI
   CLEAN                    Set to 1 to wipe and recreate the release directory
