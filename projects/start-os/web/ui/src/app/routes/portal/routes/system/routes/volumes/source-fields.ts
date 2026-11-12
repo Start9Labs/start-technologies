@@ -186,7 +186,7 @@ export type SourceEdit = ReturnType<typeof sourceEdit>
       </tui-textfield>
       @if (entry.error; as error) {
         <tui-textfield>
-          <label tuiLabel class="g-negative">{{ 'Error' | i18n }}</label>
+          <label tuiLabel>{{ 'Error' | i18n }}</label>
           <textarea
             tuiTextarea
             class="g-negative"
