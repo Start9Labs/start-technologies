@@ -1,4 +1,5 @@
 use super::super::quic::tests::{client_hello, initial};
+use super::super::tests::reserve_protocol_pair;
 use super::*;
 use crate::net::port_map::TransportProtocol;
 use crate::tunnel::forward::sni::SniDemux;
@@ -19,7 +20,7 @@ async fn receive(socket: &UdpSocket) -> (Vec<u8>, SocketAddr) {
     let (length, peer) =
         tokio::time::timeout(Duration::from_secs(3), socket.recv_from(&mut buffer))
             .await
-            .unwrap()
+            .unwrap_or_else(|error| panic!("UDP receive on {:?}: {error}", socket.local_addr()))
             .unwrap();
     buffer.truncate(length);
     (buffer, peer)
@@ -30,8 +31,8 @@ async fn fragmented_initials_are_verbatim_and_flows_remain_pinned() {
     for wire in [1, 0x6b3343cf] {
         let backend = socket().await;
         let replacement = socket().await;
-        let probe = bind((Ipv4Addr::LOCALHOST, 0, TransportProtocol::Udp)).unwrap();
-        let source = v4(probe.local_addr().unwrap());
+        let probe = reserve_protocol_pair();
+        let source = v4(probe.1.local_addr().unwrap());
         let demux = SniDemux::new();
         let names = ["quic.example.com".to_owned()];
         let target = v4(backend.local_addr().unwrap());
@@ -94,8 +95,8 @@ async fn fragmented_initials_are_verbatim_and_flows_remain_pinned() {
 }
 
 fn fallback_demux(backend: &UdpSocket) -> (Arc<SniDemux>, SocketAddrV4) {
-    let probe = bind((Ipv4Addr::LOCALHOST, 0, TransportProtocol::Udp)).unwrap();
-    let source = v4(probe.local_addr().unwrap());
+    let probe = reserve_protocol_pair();
+    let source = v4(probe.1.local_addr().unwrap());
     let demux = SniDemux::new();
     demux
         .register_fallback_transport(

@@ -1002,11 +1002,7 @@ mod tests {
     use super::*;
 
     fn free_port() -> u16 {
-        std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
+        exclusive_protocol_pair().0.local_addr().unwrap().port()
     }
 
     /// A rustls-generated ClientHello carrying SNI.
@@ -1679,13 +1675,12 @@ mod tests {
         });
     }
 
-    fn reserve_protocol_pair() -> (tokio::net::TcpListener, tokio::net::UdpSocket) {
+    fn exclusive_protocol_pair() -> (std::net::TcpListener, std::net::UdpSocket) {
+        // Port-zero reuse probes can select another test's listener.
         for _ in 0..64 {
-            let tcp =
-                crate::net::utils::bind_tokio_listener_reuse_port((Ipv4Addr::LOCALHOST, 0).into())
-                    .unwrap();
+            let tcp = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
             let port = tcp.local_addr().unwrap().port();
-            match udp::bind((Ipv4Addr::LOCALHOST, port, TransportProtocol::Udp)) {
+            match std::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, port)) {
                 Ok(udp) => return (tcp, udp),
                 Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {}
                 Err(error) => panic!("UDP fixture bind failed: {error}"),
@@ -1694,19 +1689,27 @@ mod tests {
         panic!("no free TCP/UDP fixture port");
     }
 
+    fn reusable_fixture_socket(socket: socket2::SockRef<'_>) {
+        socket.set_nonblocking(true).unwrap();
+        socket.set_reuse_address(true).unwrap();
+        #[cfg(unix)]
+        socket.set_reuse_port(true).unwrap();
+    }
+
+    pub(super) fn reserve_protocol_pair() -> (tokio::net::TcpListener, tokio::net::UdpSocket) {
+        let (tcp, udp) = exclusive_protocol_pair();
+        reusable_fixture_socket(socket2::SockRef::from(&tcp));
+        reusable_fixture_socket(socket2::SockRef::from(&udp));
+        (
+            tokio::net::TcpListener::from_std(tcp).unwrap(),
+            tokio::net::UdpSocket::from_std(udp).unwrap(),
+        )
+    }
+
     fn blocked_udp_port() -> (tokio::net::TcpListener, std::net::UdpSocket) {
-        for _ in 0..64 {
-            let udp = std::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-            let port = udp.local_addr().unwrap().port();
-            match crate::net::utils::bind_tokio_listener_reuse_port(
-                (Ipv4Addr::LOCALHOST, port).into(),
-            ) {
-                Ok(tcp) => return (tcp, udp),
-                Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {}
-                Err(error) => panic!("TCP fixture bind failed: {error}"),
-            }
-        }
-        panic!("no TCP fixture port with blocked UDP");
+        let (tcp, udp) = exclusive_protocol_pair();
+        reusable_fixture_socket(socket2::SockRef::from(&tcp));
+        (tokio::net::TcpListener::from_std(tcp).unwrap(), udp)
     }
 
     #[tokio::test]
