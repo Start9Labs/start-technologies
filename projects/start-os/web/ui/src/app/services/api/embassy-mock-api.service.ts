@@ -1579,6 +1579,26 @@ export class MockApiService extends ApiService {
 
       return null
     },
+    'package.host.binding.set-http-proxy-chain': async params => {
+      this.mockRevision([
+        {
+          op: PatchOp.ADD,
+          path: `${this.mockHostPath(params.package, params.host)}/bindings/${params.internalPort}/proxyChain`,
+          value: params.chain,
+        },
+      ])
+      return null
+    },
+    'server.host.binding.set-http-proxy-chain': async params => {
+      this.mockRevision([
+        {
+          op: PatchOp.ADD,
+          path: `/serverInfo/network/host/bindings/${params.internalPort}/proxyChain`,
+          value: params.chain,
+        },
+      ])
+      return null
+    },
     'package.host.binding.set-address-enabled': async params => {
       await pauseFor(2000)
 

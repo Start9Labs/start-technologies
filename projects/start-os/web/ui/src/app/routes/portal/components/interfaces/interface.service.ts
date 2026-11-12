@@ -123,12 +123,14 @@ export class InterfaceService {
       .map<MappedServiceInterface>(iFace => {
         const hostId = iFace.addressInfo.hostId || ''
         const host = hosts[hostId]
+        const binding = host?.bindings[iFace.addressInfo.internalPort]
         const sharedHostNames = all
           .filter(si => si.addressInfo.hostId === hostId && si.id !== iFace.id)
           .map(si => si.name)
 
         return {
           ...iFace,
+          binding,
           gatewayGroups: host
             ? this.getGatewayGroups(iFace, host, gateways)
             : [],
@@ -142,8 +144,7 @@ export class InterfaceService {
           ),
           // This interface's own binding: gates whether port/firewall tests are
           // meaningful while the service is stopped (see MappedServiceInterface).
-          addSsl:
-            !!host?.bindings[iFace.addressInfo.internalPort]?.options.addSsl,
+          addSsl: !!binding?.options.addSsl,
           sharedHostNames,
         }
       })
@@ -465,6 +466,7 @@ export type PluginAddressGroup = {
 }
 
 export type MappedServiceInterface = T.ServiceInterface & {
+  binding?: T.BindInfo
   gatewayGroups: GatewayAddressGroup[]
   pluginGroups: PluginAddressGroup[]
   // True when any binding on this interface's host adds SSL, not just this

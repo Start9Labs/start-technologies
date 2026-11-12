@@ -3,10 +3,22 @@ import { tuiButtonOptionsProvider } from '@taiga-ui/core'
 import { MappedServiceInterface } from './interface.service'
 import { GatewayComponent } from './addresses/gateway/gateway.component'
 import { PluginAddressesComponent } from './addresses/plugin/plugin.component'
+import { HttpProxyChain } from './proxy-chain'
 
 @Component({
   selector: 'service-interface',
   template: `
+    @if (value(); as iface) {
+      @if (iface.binding; as binding) {
+        @if (binding.options.proxy && packageId()) {
+          <section
+            [httpProxyChain]="iface.addressInfo"
+            [packageId]="packageId()"
+            [binding]="binding"
+          ></section>
+        }
+      }
+    }
     @for (group of value()?.gatewayGroups; track group.gatewayId) {
       <section
         [gatewayGroup]="group"
@@ -38,7 +50,7 @@ import { PluginAddressesComponent } from './addresses/plugin/plugin.component'
     }
   `,
   providers: [tuiButtonOptionsProvider({ size: 'xs' })],
-  imports: [GatewayComponent, PluginAddressesComponent],
+  imports: [GatewayComponent, PluginAddressesComponent, HttpProxyChain],
 })
 export class InterfaceComponent {
   readonly packageId = input('')
