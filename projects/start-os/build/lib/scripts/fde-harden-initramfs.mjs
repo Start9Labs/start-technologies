@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 // The caller owns a private generated tree and discards it on failure.
-import { createHash } from 'node:crypto'
 import {
   lstat,
   readdir,
@@ -13,6 +12,8 @@ import {
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
+
+import { replaceOnce, requireReviewedContext } from './fde-reviewed-source.mjs'
 
 const inputs = {
   init: [
@@ -152,12 +153,6 @@ const inputs = {
 
 export const bootModules = ['overlay', 'btrfs', 'dm_verity', 'loop', 'squashfs']
 
-function replaceOnce(text, before, after) {
-  if (text.split(before).length !== 2)
-    throw Error('Unsupported generated context')
-  return text.replace(before, after)
-}
-
 function replaceRange(text, first, last, replacement) {
   const start = text.indexOf(first)
   const end = text.indexOf(last, start)
@@ -291,11 +286,8 @@ export async function harden(root) {
     if (path === 'conf/arch.conf') {
       if (!/^DPKG_ARCH=[a-z0-9-]+\n$/.test(bytes.toString()))
         throw Error('Unsupported architecture configuration')
-    } else if (
-      !inputs[path] ||
-      createHash('sha256').update(bytes).digest('hex') !== inputs[path][0]
-    ) {
-      throw Error(`Unsupported generated context: ${path}`)
+    } else {
+      requireReviewedContext(bytes, inputs[path]?.[0], path)
     }
     original.set(path, bytes.toString())
   }
