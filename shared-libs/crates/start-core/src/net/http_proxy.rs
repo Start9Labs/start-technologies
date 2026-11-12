@@ -3,10 +3,13 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::db::model::package::AllPackageData;
+use crate::db::model::package::{AllPackageData, PackageDataEntry};
 use crate::prelude::*;
 use crate::s9pk::manifest::LocaleString;
 use crate::{HostId, PackageId};
+
+mod runtime;
+pub(crate) use runtime::{ChainRoute, ChainTarget, HttpProxySockets};
 
 #[cfg(test)]
 mod tests;
@@ -25,6 +28,10 @@ rpc_toolkit::reflect_ts!(HttpProxyProtocol);
 rpc_toolkit::ts_export!(HttpProxyProtocol, namespaces = [""]);
 
 impl HttpProxyProtocol {
+    pub(crate) fn all() -> BTreeSet<Self> {
+        BTreeSet::from([Self::Http1, Self::Http2])
+    }
+
     pub fn alpn(&self) -> &'static [u8] {
         match self {
             Self::Http1 => b"http/1.1",
@@ -237,7 +244,13 @@ pub fn profile_for<'a>(
     packages: &'a AllPackageData,
     stage: &HttpProxyStage,
 ) -> Option<&'a HttpProxyProfile> {
-    let package = packages.0.get(&stage.package_id)?;
+    registration_for(packages.0.get(&stage.package_id)?)?
+        .profiles
+        .iter()
+        .find(|profile| profile.id == stage.profile_id)
+}
+
+fn registration_for(package: &PackageDataEntry) -> Option<&HttpProxyRegistration> {
     if !package
         .state_info
         .as_manifest(crate::db::model::package::ManifestPreference::Old)
@@ -247,25 +260,29 @@ pub fn profile_for<'a>(
     {
         return None;
     }
-    package
-        .plugin
-        .http_proxy
-        .as_ref()?
-        .profiles
-        .iter()
-        .find(|profile| profile.id == stage.profile_id)
+    package.plugin.http_proxy.as_ref()
 }
 
 pub fn chain_protocols(
     packages: &AllPackageData,
     chain: &[HttpProxyStage],
 ) -> BTreeSet<HttpProxyProtocol> {
-    let mut protocols = BTreeSet::from([HttpProxyProtocol::Http1, HttpProxyProtocol::Http2]);
-    for stage in chain {
-        let Some(profile) = profile_for(packages, stage) else {
+    common_protocols(
+        chain
+            .iter()
+            .map(|stage| profile_for(packages, stage).map(|profile| &profile.protocols)),
+    )
+}
+
+fn common_protocols<'a>(
+    profiles: impl IntoIterator<Item = Option<&'a BTreeSet<HttpProxyProtocol>>>,
+) -> BTreeSet<HttpProxyProtocol> {
+    let mut protocols = HttpProxyProtocol::all();
+    for profile in profiles {
+        let Some(supported) = profile else {
             return BTreeSet::new();
         };
-        protocols.retain(|protocol| profile.protocols.contains(protocol));
+        protocols.retain(|protocol| supported.contains(protocol));
     }
     protocols
 }

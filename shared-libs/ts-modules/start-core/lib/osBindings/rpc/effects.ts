@@ -105,6 +105,21 @@ export type HealthCheckId = z.output<typeof schemas.HealthCheckId>
 export type HealthCheckIdInput = z.input<typeof schemas.HealthCheckId>
 export type HostId = z.output<typeof schemas.HostId>
 export type HostIdInput = z.input<typeof schemas.HostId>
+
+/**
+ * A socket path in the provider's container namespace.
+ */
+export type HttpProxyEndpoint = z.output<typeof schemas.HttpProxyEndpoint>
+
+/**
+ * HTTP framing supported on the plugin's Unix stream sockets.
+ */
+export type HttpProxyProtocol = z.output<typeof schemas.HttpProxyProtocol>
+
+/**
+ * HTTP framing supported on the plugin's Unix stream sockets.
+ */
+export type HttpProxyProtocolInput = z.input<typeof schemas.HttpProxyProtocol>
 export type IdMapInput = z.input<typeof schemas.IdMap>
 export type ImageIdInput = z.input<typeof schemas.ImageId>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
@@ -115,6 +130,7 @@ export type LegacyHealthCheckResultKindInput = z.input<
   typeof schemas.LegacyHealthCheckResultKind
 >
 export type LocaleString = z.output<typeof schemas.LocaleString>
+export type LocaleStringInput = z.input<typeof schemas.LocaleString>
 export type MaybeUtf8String = z.output<typeof schemas.MaybeUtf8String>
 export type MaybeUtf8StringInput = z.input<typeof schemas.MaybeUtf8String>
 export type NamedHealthCheckResultKind = z.output<
@@ -244,6 +260,9 @@ export type GetContainerIpParamsInput = z.input<
   typeof schemas.GetContainerIpParams
 >
 export type GetHostInfoParamsInput = z.input<typeof schemas.GetHostInfoParams>
+export type GetHttpProxyAttachmentsParamsInput = z.input<
+  typeof schemas.GetHttpProxyAttachmentsParams
+>
 export type GetOutboundGatewayParamsInput = z.input<
   typeof schemas.GetOutboundGatewayParams
 >
@@ -266,6 +285,21 @@ export type GetSystemSmtpParamsInput = z.input<
 >
 export type HardwareRequirements = z.output<typeof schemas.HardwareRequirements>
 export type HostnameMetadata = z.output<typeof schemas.HostnameMetadata>
+
+/**
+ * The protected binding, shared by all its exported interfaces and addresses.
+ */
+export type HttpProxyBinding = z.output<typeof schemas.HttpProxyBinding>
+
+/**
+ * Provider-owned settings selectable in a binding's proxy chain.
+ */
+export type HttpProxyProfileInput = z.input<typeof schemas.HttpProxyProfile>
+
+/**
+ * A provider/profile pair occurring once in a binding's ordered chain.
+ */
+export type HttpProxyStage = z.output<typeof schemas.HttpProxyStage>
 export type ImageSource = z.output<typeof schemas.ImageSource>
 export type LegacyAlpnInfo = z.output<typeof schemas.LegacyAlpnInfo>
 export type LegacyAlpnInfoInput = z.input<typeof schemas.LegacyAlpnInfo>
@@ -359,6 +393,11 @@ export type ExportServiceInterfaceParamsInput = z.input<
   typeof schemas.ExportServiceInterfaceParams
 >
 export type HostnameInfo = z.output<typeof schemas.HostnameInfo>
+
+/**
+ * Identified within its provider by `binding` and `profileId`, independently of chain order.
+ */
+export type HttpProxyAttachment = z.output<typeof schemas.HttpProxyAttachment>
 export type ImageConfigRepr = z.output<typeof schemas.ImageConfigRepr>
 export type MetadataSrc = z.output<typeof schemas.MetadataSrc>
 export type MountParamsInput = z.input<typeof schemas.MountParams>
@@ -375,6 +414,9 @@ export type ProxyOptionsInput = z.input<typeof schemas.ProxyOptions>
 export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
 export type SetDependenciesParamsInput = z.input<
   typeof schemas.SetDependenciesParams
+>
+export type SetHttpProxyProfilesParamsInput = z.input<
+  typeof schemas.SetHttpProxyProfilesParams
 >
 export type Task = z.output<typeof schemas.Task>
 export type TaskParams = z.input<typeof schemas.Task>

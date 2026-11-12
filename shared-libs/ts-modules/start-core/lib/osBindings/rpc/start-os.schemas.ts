@@ -911,11 +911,12 @@ export const PartitionTable: z.ZodEnum<{ mbr: 'mbr'; gpt: 'gpt' }> =
 export const Percentage: typeof literal_6 = /* @__PURE__ */ literal_6.meta({
   id: 'Percentage',
 })
-export const PluginId: z.ZodEnum<{ 'url-v0': 'url-v0' }> = /* @__PURE__ */ z
-  .enum(['url-v0'])
-  .meta({
-    id: 'PluginId',
-  })
+export const PluginId: z.ZodEnum<{
+  'url-v0': 'url-v0'
+  'http-proxy-v0': 'http-proxy-v0'
+}> = /* @__PURE__ */ z.enum(['url-v0', 'http-proxy-v0']).meta({
+  id: 'PluginId',
+})
 export const PreDownloadAlertWhen: z.ZodObject<{ sourceVersion: z.ZodString }> =
   /* @__PURE__ */ object({ sourceVersion: z.string() }).meta({
     id: 'PreDownloadAlertWhen',
@@ -2518,6 +2519,21 @@ export const HostnameMetadata: z.ZodUnion<
   .meta({
     id: 'HostnameMetadata',
   })
+
+/**
+ * A provider/profile pair occurring once in a binding's ordered chain.
+ */
+export const HttpProxyStage: z.ZodObject<{
+  packageId: typeof PackageId
+  profileId: z.ZodString
+}> = /* @__PURE__ */ object({
+  packageId: PackageId,
+  profileId: z.string(),
+}).meta({
+  id: 'HttpProxyStage',
+  description:
+    "A provider/profile pair occurring once in a binding's ordered chain.",
+})
 export const InfoParams: z.ZodObject<{
   targetId: typeof BackupTargetId
   serverId: z.ZodString
@@ -4240,6 +4256,20 @@ export const Sessions: z.ZodObject<{
   id: 'Sessions',
   description: "The server's sessions, by credential type.",
 })
+
+/**
+ * Replaces the binding's operator-selected proxy chain.
+ */
+export const SetHttpProxyChainParams: z.ZodObject<{
+  internalPort: z.ZodInt
+  chain: z.ZodArray<typeof HttpProxyStage>
+}> = /* @__PURE__ */ object({
+  internalPort: z.int(),
+  chain: z.array(HttpProxyStage),
+}).meta({
+  id: 'SetHttpProxyChainParams',
+  description: "Replaces the binding's operator-selected proxy chain.",
+})
 export const SideloadParams: z.ZodObject<{
   acceptSigners: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
@@ -4999,6 +5029,10 @@ export const BindInfo: z.ZodObject<{
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof ServiceInterface>>,
     z.ZodRecord<z.ZodString, typeof ServiceInterface>
   >
+  proxyChain: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof HttpProxyStage>>,
+    z.ZodArray<typeof HttpProxyStage>
+  >
 }> = /* @__PURE__ */ object({
   enabled: z.boolean(),
   options: BindOptions,
@@ -5016,6 +5050,7 @@ export const BindInfo: z.ZodObject<{
     description:
       'Service interfaces exported from this binding (`Origin.export`). A single\nbinding (host + internal port) may back several interfaces (e.g. a `ui`\nand an `api` on the same port), so this is keyed by interface id.',
   }),
+  proxyChain: wire(z.array(HttpProxyStage).optional(), z.array(HttpProxyStage)),
 }).meta({
   id: 'BindInfo',
 })
@@ -5806,6 +5841,13 @@ export const Api = {
                   _PARAMS: /* @__PURE__ */ z.intersection(
                     z.intersection(RequiresPackageId, RequiresHostId),
                     BindingSetGuaWanParams,
+                  ),
+                  _RETURN: /* @__PURE__ */ z.null(),
+                },
+                'set-http-proxy-chain': {
+                  _PARAMS: /* @__PURE__ */ z.intersection(
+                    z.intersection(RequiresPackageId, RequiresHostId),
+                    SetHttpProxyChainParams,
                   ),
                   _RETURN: /* @__PURE__ */ z.null(),
                 },
@@ -6747,6 +6789,10 @@ export const Api = {
                 },
                 'set-gua-wan': {
                   _PARAMS: /* @__PURE__ */ BindingSetGuaWanParams,
+                  _RETURN: /* @__PURE__ */ z.null(),
+                },
+                'set-http-proxy-chain': {
+                  _PARAMS: /* @__PURE__ */ SetHttpProxyChainParams,
                   _RETURN: /* @__PURE__ */ z.null(),
                 },
                 'set-range-address-enabled': {

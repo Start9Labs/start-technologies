@@ -403,9 +403,9 @@ impl VHostController {
             private: private.clone(),
             acme: None,
             addr: backend,
-            // A manual passthrough is not a container the box gateways.
             addr_v6: None,
             proxy: None,
+            http_chain: None,
             connect_ssl: None,
             alpn: None,
             passthrough: true,
@@ -759,7 +759,7 @@ fn compute_bind_reqs<A: Accept + 'static>(mapping: &Mapping<A>) -> VHostBindRequ
 /// still held by a torn-down listener — instead of latching the hole until the
 /// next network change.
 const BIND_RETRY_BACKOFF: Duration = Duration::from_secs(2);
-const BACKEND_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) const BACKEND_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Listener that manages its own TCP listeners with IP-level precision.
 /// Binds ALL IPs of public gateways and ONLY matching private IPs.
@@ -1099,6 +1099,7 @@ pub struct ProxyTarget {
     /// a v6 client's source can only be bound on a socket dialing v6.
     pub addr_v6: Option<SocketAddrV6>,
     pub proxy: Option<ProxyOptions>,
+    pub(crate) http_chain: Option<Arc<crate::net::http_proxy::ChainTarget>>,
     /// The config StartOS dials the container with when the container serves
     /// its own TLS. `None` dials it in plaintext.
     pub connect_ssl: Option<Arc<ClientConfig>>,
@@ -1119,6 +1120,8 @@ impl PartialEq for ProxyTarget {
             && self.addr == other.addr
             && self.addr_v6 == other.addr_v6
             && self.proxy == other.proxy
+            && self.http_chain.as_ref().map(Arc::as_ptr)
+                == other.http_chain.as_ref().map(Arc::as_ptr)
             && self.passthrough == other.passthrough
             && self.preserve_source_ip == other.preserve_source_ip
             && self.alpn == other.alpn
@@ -1162,6 +1165,13 @@ fn on_container_bridge(ip: IpAddr) -> bool {
 }
 
 impl ProxyTarget {
+    async fn chain_cancelled(&self) {
+        match &self.http_chain {
+            Some(chain) => chain.cancel.cancelled().await,
+            None => std::future::pending().await,
+        }
+    }
+
     /// Whether to accept a connection that arrived on local address `dst` from
     /// `src`, via gateway `gw_id` whose on-link subnets are `subnets`. WAN accept
     /// is gated per family by `dst`'s family — a gateway public only on its GUA
@@ -1291,7 +1301,21 @@ impl ProxyTarget {
         Ok(Some(origin.register_proxy(local, peer)))
     }
 
-    async fn relay(
+    pub(crate) async fn relay(
+        &self,
+        stream: AcceptStream,
+        backend: AcceptStream,
+        alpn: Option<MaybeUtf8String>,
+        source_ip: Option<IpAddr>,
+        ssl: bool,
+    ) {
+        tokio::select! {
+            _ = self.chain_cancelled() => {}
+            _ = self.relay_http(stream, backend, alpn, source_ip, ssl) => {}
+        }
+    }
+
+    async fn relay_http(
         &self,
         mut stream: AcceptStream,
         mut backend: AcceptStream,
@@ -1299,6 +1323,28 @@ impl ProxyTarget {
         source_ip: Option<IpAddr>,
         ssl: bool,
     ) {
+        if let Some(chain) = &self.http_chain {
+            let protocol = if ssl {
+                if alpn.as_ref().is_some_and(|alpn| alpn.0 == b"h2") {
+                    crate::net::http_proxy::HttpProxyProtocol::Http2
+                } else {
+                    crate::net::http_proxy::HttpProxyProtocol::Http1
+                }
+            } else {
+                let mut buffered = crate::util::io::BackTrackingIO::new(stream);
+                let Ok(Some(protocol)) = crate::net::http::read_http_protocol(&mut buffered).await
+                else {
+                    return;
+                };
+                stream = Box::pin(buffered);
+                protocol
+            };
+            if !chain.protocols.contains(&protocol) {
+                backend = crate::net::http::proxy_status_stream(
+                    http::StatusCode::HTTP_VERSION_NOT_SUPPORTED,
+                );
+            }
+        }
         match &self.proxy {
             Some(ProxyOptions::Http {
                 add_x_forwarded_headers,
@@ -1419,6 +1465,25 @@ where
         hello: &'a ClientHello<'a>,
         metadata: &'a <A as Accept>::Metadata,
     ) -> Option<(ServerConfig, Self::PreprocessRes)> {
+        if let Some(chain) = &self.http_chain {
+            let allowed: Vec<Vec<u8>> = chain
+                .protocols
+                .iter()
+                .map(|protocol| protocol.alpn().to_vec())
+                .filter(|protocol| {
+                    self.alpn
+                        .as_ref()
+                        .is_none_or(|alpn| alpn.0.iter().any(|p| p.0 == *protocol))
+                })
+                .collect();
+            if allowed.is_empty()
+                || (hello.alpn().is_none() && !allowed.iter().any(|p| p == b"http/1.1"))
+            {
+                return None;
+            }
+            prev.alpn_protocols = allowed;
+            return Some((prev, (chain.connect().await, None)));
+        }
         let peer = extract::<TcpMetadata, _>(metadata).map(|m| m.peer_addr);
         let (tcp_stream, deadline) = self.connect_backend(peer).await?;
         if let Err(e) = socket2::SockRef::from(&tcp_stream)
@@ -1754,19 +1819,25 @@ impl PlainHttpProxy {
                 tokio::spawn(async move {
                     let _registration = registration;
                     let work = async {
-                        let Some((backend, _)) = target.connect_plain().await else {
-                            return;
-                        };
-                        let Some(_origin) = target
-                            .register_origin::<VHostBindListener>(&metadata, &backend)
-                            .ok()
-                        else {
-                            return;
-                        };
                         let source = extract::<TcpMetadata, _>(&metadata).map(|m| m.peer_addr.ip());
-                        target
-                            .relay(stream, Box::pin(backend), None, source, false)
-                            .await;
+                        if let Some(chain) = &target.http_chain {
+                            target
+                                .relay(stream, chain.connect().await, None, source, false)
+                                .await;
+                        } else {
+                            let Some((backend, _)) = target.connect_plain().await else {
+                                return;
+                            };
+                            let Some(_origin) = target
+                                .register_origin::<VHostBindListener>(&metadata, &backend)
+                                .ok()
+                            else {
+                                return;
+                            };
+                            target
+                                .relay(stream, Box::pin(backend), None, source, false)
+                                .await;
+                        }
                     };
                     tokio::select! {
                         _ = conn_cancel.cancelled() => {}
@@ -2449,6 +2520,7 @@ mod port_map_tests {
             addr: "10.0.3.2:443".parse().unwrap(),
             addr_v6: None,
             proxy: None,
+            http_chain: None,
             connect_ssl: None,
             alpn: None,
             passthrough: false,
@@ -2667,6 +2739,7 @@ mod accept_filter_tests {
             addr: "10.0.0.1:443".parse().unwrap(),
             addr_v6: None,
             proxy: None,
+            http_chain: None,
             connect_ssl: None,
             alpn: None,
             passthrough: false,
@@ -3063,6 +3136,7 @@ mod upstream_alpn_tests {
             acme: None,
             addr: backend,
             addr_v6: None,
+            http_chain: None,
             proxy: Some(ProxyOptions::Http {
                 add_x_forwarded_headers: true,
                 auth: None,

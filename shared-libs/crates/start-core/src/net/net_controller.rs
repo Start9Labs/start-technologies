@@ -68,6 +68,7 @@ pub struct NetController {
     pub(crate) port_map: PortMapController,
     pub(super) _socks: SocksController,
     pub(crate) callbacks: Arc<ServiceCallbacks>,
+    pub(crate) http_proxy: crate::net::http_proxy::HttpProxySockets,
 }
 
 impl NetController {
@@ -172,6 +173,7 @@ impl NetController {
             net_iface,
             _socks: socks,
             callbacks: Arc::new(ServiceCallbacks::default()),
+            http_proxy: crate::net::http_proxy::HttpProxySockets::new(db).await?,
         })
     }
 
@@ -441,6 +443,7 @@ fn binding_proxy_target(
         addr,
         addr_v6,
         proxy: options.proxy.clone(),
+        http_chain: None,
         connect_ssl,
         alpn: options.add_ssl.as_ref().and_then(|ssl| ssl.alpn.clone()),
         passthrough: options.serves_own_tls(),
@@ -537,6 +540,7 @@ struct HostBinds {
     /// contiguous range forward.
     forwards: BTreeMap<u16, (SocketAddrV4, u16, ForwardRequirements, Arc<()>)>,
     vhosts: BTreeMap<VHostKey, (ProxyTarget, ProxyHandle)>,
+    chains: BTreeMap<u16, crate::net::http_proxy::ChainRoute>,
     private_dns: BTreeMap<InternedString, Arc<()>>,
     /// Directly-forwarded v6: `(host GUA, external port) -> (container v6,
     /// internal port, LAN source filter)`. A GUA on a port no listener of ours
@@ -580,7 +584,12 @@ impl NetServiceData {
         let net_ifaces = ctrl.net_iface.watcher.ip_info();
         let host_addresses: Vec<_> = host.addresses().collect();
 
-        // ── Build controller entries from enabled addresses ──
+        binds.chains.retain(|port, _| {
+            host.bindings
+                .get(port)
+                .is_some_and(|bind| bind.enabled && !bind.proxy_chain.is_empty())
+        });
+        let proxy_providers = ctrl.http_proxy.providers.read();
         for (port, bind) in host.bindings.iter() {
             if !bind.enabled {
                 continue;
@@ -621,7 +630,30 @@ impl NetServiceData {
                 .options
                 .rewrap()
                 .map(|ssl| ctrl.upstream_client_config(&ssl.upstream_cert_validation));
-            let target = binding_proxy_target(&bind.options, addr, addr_v6, connect_ssl);
+            let mut target = binding_proxy_target(&bind.options, addr, addr_v6, connect_ssl);
+            if !bind.proxy_chain.is_empty() {
+                let previous = binds.chains.remove(port);
+                let route = if previous.as_ref().is_some_and(|route| {
+                    route.matches(&bind.proxy_chain, &proxy_providers, &target)
+                }) {
+                    previous.unwrap()
+                } else {
+                    drop(previous);
+                    crate::net::http_proxy::ChainRoute::new(
+                        &ctrl.http_proxy,
+                        &crate::net::http_proxy::HttpProxyBinding {
+                            package_id: self.id.clone().unwrap_or_else(PackageId::start_os),
+                            host_id: id.clone(),
+                            internal_port: *port,
+                        },
+                        &bind.proxy_chain,
+                        target.clone(),
+                    )
+                    .await
+                };
+                target.http_chain = Some(route.target.clone());
+                binds.chains.insert(*port, route);
+            }
 
             // `*` vhost: every assigned_ssl_port is answered by a listener of
             // ours — terminating (add_ssl), or an SNI-agnostic passthrough when
@@ -1277,6 +1309,7 @@ impl NetService {
         let ctrl = data.net_controller()?;
         let pkg_id = data.id.clone();
         let db = ctrl.db.clone();
+        let mut proxy_providers = ctrl.http_proxy.providers.clone();
         drop(ctrl);
 
         let synced = Watch::new(0u64);
@@ -1319,6 +1352,7 @@ impl NetService {
                             (true, false)
                         }
                         _ = outbound_sub.recv() => (false, true),
+                        _ = proxy_providers.changed() => (true, false),
                         _ = async {
                             if let Some(ref mut w) = ip_info_watch {
                                 w.changed().await;
@@ -1877,6 +1911,7 @@ mod tests {
                     addr: "10.0.3.2:443".parse().unwrap(),
                     addr_v6: None,
                     proxy: None,
+                    http_chain: None,
                     connect_ssl: None,
                     alpn: None,
                     passthrough: false,
@@ -2218,6 +2253,7 @@ mod tests {
             addr: "10.0.3.2:80".parse().unwrap(),
             addr_v6: None,
             proxy: None,
+            http_chain: None,
             connect_ssl: None,
             alpn: Some(AlpnInfo(vec![MaybeUtf8String(b"h2".to_vec())])),
             passthrough: false,
@@ -2269,11 +2305,13 @@ mod tests {
             vhosts,
             private_dns,
             gua_forwards,
+            chains,
         } = HostBinds::default();
         assert!(forwards.is_empty());
         assert!(vhosts.is_empty());
         assert!(private_dns.is_empty());
         assert!(gua_forwards.is_empty());
+        assert!(chains.is_empty());
     }
 
     fn args(cmd: &Command) -> Vec<&str> {

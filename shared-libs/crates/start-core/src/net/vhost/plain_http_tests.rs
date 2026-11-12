@@ -86,6 +86,7 @@ async fn proxy(
         addr: backend,
         addr_v6: None,
         proxy: Some(proxy),
+        http_chain: None,
         connect_ssl: None,
         alpn: None,
         passthrough: false,

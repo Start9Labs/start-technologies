@@ -450,6 +450,16 @@ export type GovernorParamsInput = z.input<typeof schemas.GovernorParams>
 export type HardwareRequirements = z.output<typeof schemas.HardwareRequirements>
 export type HostnameMetadata = z.output<typeof schemas.HostnameMetadata>
 export type HostnameMetadataInput = z.input<typeof schemas.HostnameMetadata>
+
+/**
+ * A provider/profile pair occurring once in a binding's ordered chain.
+ */
+export type HttpProxyStage = z.output<typeof schemas.HttpProxyStage>
+
+/**
+ * A provider/profile pair occurring once in a binding's ordered chain.
+ */
+export type HttpProxyStageInput = z.input<typeof schemas.HttpProxyStage>
 export type InfoParamsInput = z.input<typeof schemas.InfoParams>
 export type InitAcmeParamsInput = z.input<typeof schemas.InitAcmeParams>
 export type InstalledVersionParamsInput = z.input<
@@ -612,6 +622,13 @@ export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
  * The server's sessions, by credential type.
  */
 export type Sessions = z.output<typeof schemas.Sessions>
+
+/**
+ * Replaces the binding's operator-selected proxy chain.
+ */
+export type SetHttpProxyChainParamsInput = z.input<
+  typeof schemas.SetHttpProxyChainParams
+>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 
 /**

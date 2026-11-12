@@ -374,11 +374,12 @@ export const PackageVersionCount: z.ZodObject<{
 }).meta({
   id: 'PackageVersionCount',
 })
-export const PluginId: z.ZodEnum<{ 'url-v0': 'url-v0' }> = /* @__PURE__ */ z
-  .enum(['url-v0'])
-  .meta({
-    id: 'PluginId',
-  })
+export const PluginId: z.ZodEnum<{
+  'url-v0': 'url-v0'
+  'http-proxy-v0': 'http-proxy-v0'
+}> = /* @__PURE__ */ z.enum(['url-v0', 'http-proxy-v0']).meta({
+  id: 'PluginId',
+})
 export const PreDownloadAlertWhen: z.ZodObject<{ sourceVersion: z.ZodString }> =
   /* @__PURE__ */ object({ sourceVersion: z.string() }).meta({
     id: 'PreDownloadAlertWhen',

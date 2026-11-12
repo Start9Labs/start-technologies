@@ -48,6 +48,7 @@ fn target(addr: SocketAddr) -> ProxyTarget {
         addr,
         addr_v6: None,
         proxy: None,
+        http_chain: None,
         connect_ssl: None,
         alpn: None,
         passthrough: false,

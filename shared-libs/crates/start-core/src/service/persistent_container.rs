@@ -96,6 +96,18 @@ pub struct Subcontainer {
     pub(super) name: InternedString,
     pub(super) image_id: ImageId,
     pub(super) overlay: OverlayGuard<Arc<MountGuard>>,
+    pub(super) proxy_mounts: Vec<MountGuard>,
+}
+
+impl Subcontainer {
+    pub(super) async fn unmount(self) -> Result<(), Error> {
+        let mut errors = ErrorCollection::new();
+        for mount in self.proxy_mounts.into_iter().rev() {
+            errors.handle(mount.unmount(false).await);
+        }
+        errors.handle(self.overlay.unmount(true).await);
+        errors.into_result()
+    }
 }
 
 // @DRB On top of this we need to also have  the procedures to have the effects and get the results back for them, maybe lock them to the running instance?
@@ -110,6 +122,7 @@ pub struct PersistentContainer {
     js_mount: MountGuard,
     volumes: BTreeMap<VolumeId, MountGuard>,
     assets: Vec<MountGuard>,
+    proxy_mounts: Vec<MountGuard>,
     pub(super) images: BTreeMap<ImageId, Arc<MountGuard>>,
     pub(super) subcontainers: Arc<Mutex<BTreeMap<Guid, Subcontainer>>>,
     pub(super) state: Arc<watch::Sender<ServiceState>>,
@@ -136,6 +149,19 @@ impl PersistentContainer {
                 },
             )
             .await?;
+        let proxy_mounts = if s9pk
+            .as_manifest()
+            .metadata
+            .plugins
+            .contains(&crate::service::effects::plugin::PluginId::HttpProxyV0)
+        {
+            ctx.net_controller
+                .http_proxy
+                .mount_provider(&s9pk.as_manifest().id, lxc_container.rootfs_dir())
+                .await?
+        } else {
+            Vec::new()
+        };
         let rpc_client = lxc_container.connect_rpc(Some(RPC_CONNECT_TIMEOUT)).await?;
         let js_mount = MountGuard::mount(
             &LoopDev::from(
@@ -319,6 +345,7 @@ impl PersistentContainer {
             js_mount,
             volumes,
             assets,
+            proxy_mounts,
             images,
             subcontainers: Arc::new(Mutex::new(BTreeMap::new())),
             state: Arc::new(watch::channel(ServiceState::new()).0),
@@ -457,6 +484,7 @@ impl PersistentContainer {
         let js_mount = self.js_mount.take();
         let volumes = std::mem::take(&mut self.volumes);
         let assets = std::mem::take(&mut self.assets);
+        let proxy_mounts = std::mem::take(&mut self.proxy_mounts);
         let images = std::mem::take(&mut self.images);
         let subcontainers = self.subcontainers.clone();
         let lxc_container = self.lxc_container.take();
@@ -485,7 +513,10 @@ impl PersistentContainer {
                 errs.handle(assets.unmount(true).await);
             }
             for (_, overlay) in std::mem::take(&mut *subcontainers.lock().await) {
-                errs.handle(overlay.overlay.unmount(true).await);
+                errs.handle(overlay.unmount().await);
+            }
+            for mount in proxy_mounts.into_iter().rev() {
+                errs.handle(mount.unmount(false).await);
             }
             for (_, images) in images {
                 errs.handle(images.unmount().await);

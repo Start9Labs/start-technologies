@@ -67,7 +67,7 @@ pub async fn destroy_subcontainer_fs(
                 .await
                 .with_kind(ErrorKind::Unknown)??;
         }
-        overlay.overlay.unmount(true).await?;
+        overlay.unmount().await?;
     } else {
         tracing::warn!(
             "Could not find a subcontainer fs to destroy; assumming that it already is destroyed and will be skipping"
@@ -149,8 +149,29 @@ pub async fn create_subcontainer_fs(
             &[]
         };
 
+        let overlay = OverlayGuard::mount_layers(&[], image, nvidia_overlay, &mountpoint).await?;
+        let proxy_mounts = if context
+            .seed
+            .persistent_container
+            .s9pk
+            .as_manifest()
+            .metadata
+            .plugins
+            .contains(&crate::service::effects::plugin::PluginId::HttpProxyV0)
+        {
+            context
+                .seed
+                .ctx
+                .net_controller
+                .http_proxy
+                .mount_provider(&context.seed.id, &mountpoint)
+                .await?
+        } else {
+            Vec::new()
+        };
         let subcontainer_wrapper = Subcontainer {
-            overlay: OverlayGuard::mount_layers(&[], image, nvidia_overlay, &mountpoint).await?,
+            overlay,
+            proxy_mounts,
             name: name
                 .unwrap_or_else(|| InternedString::intern(format!("subcontainer-{}", image_id))),
             image_id: image_id.clone(),
