@@ -1,6 +1,6 @@
 # Backups
 
-Back up your server's services and shared volumes to a backup target, review past backups, and restore from them. Everything is under **System → Backups**.
+Back up your server's services and shared volumes to a backup target, review past backups, and restore from them. Targets are under **System → Backup Targets**; creating, reviewing and restoring backups is under **System → Backups**.
 
 > [!IMPORTANT]
 > Creating backups is an essential responsibility of self-hosting. If you do not make backups, you _will_ eventually lose your data.
@@ -23,7 +23,7 @@ Back up your server's services and shared volumes to a backup target, review pas
 
 ## Backup Targets
 
-A backup target is where StartOS stores encrypted backups. The **Targets** table lists each target with its type, path, status, the time of this server's last backup to it, and its free space, so you can confirm a backup will fit before you start. StartOS rechecks a target's status and free space when you open the page if they have not been checked in the last 10 minutes.
+A backup target is where StartOS stores encrypted backups. The **Backup Targets** page lists each target with its type, path, status, the time of this server's last backup to it, and its free space, so you can confirm a backup will fit before you start. StartOS rechecks a target's status and free space when you open the page if they have not been checked in the last 10 minutes.
 
 To add a target, select **Add** and choose a type:
 
@@ -46,13 +46,13 @@ Removing an external drive or CIFS share target leaves its backups on the drive 
 >
 > If you are using a Raspberry Pi, backup drive _must_ be self-powered, or be connected via a powered USB hub, to prevent possible data corruption.
 
-To reconnect drives containing existing backups, plug them in and select **Find** in **System → Backups**. StartOS checks `StartOSBackupsV2` at each partition's root and adds partitions with recognized backups to the target list. Already registered targets keep their names and settings. Use **Find** again after removing a target to access its preserved backups.
+To use a drive that already contains backups, such as one moved from another server or a target you removed, add it as an external drive target. The partition list marks each partition that contains a StartOS backup; choose it and leave the folder blank.
 
 For a new drive or a new backup folder:
 
 1. Plug the drive into your server.
 
-1. In **System → Backups**, select **Add**, then **External drive**.
+1. In **System → Backup Targets**, select **Add**, then **External drive**.
 
 1. Choose the drive, then one of its partitions. To prepare a new drive, or one formatted for another system, choose **Erase and format this drive** instead: after a confirmation, StartOS erases everything on the drive and creates a single `Btrfs` partition. The server's own system and data drives are not offered.
 
@@ -360,7 +360,7 @@ A CIFS share sends your encrypted backup over the LAN to a shared folder on anot
 
 The **Hostname** field accepts an IP address, a DNS name containing a dot (such as `nas.home.arpa`), a `.local` mDNS name, or a bare NetBIOS computer name. For DNS, enter the full name rather than a bare name such as `nas`.
 
-1. In **System → Backups**, select **Add**, then **CIFS share**.
+1. In **System → Backup Targets**, select **Add**, then **CIFS share**.
 
 1. Complete the form. The hostname becomes the target's name:
 
@@ -451,7 +451,7 @@ The **Hostname** field accepts an IP address, a DNS name containing a dot (such 
 
 ## Creating a Backup
 
-1. In **System → Backups**, select **Create backup** in the **History** section.
+1. In **System → Backups**, select **Create**.
 
 1. Choose a target. Unavailable targets cannot be selected.
 
@@ -463,7 +463,7 @@ While a backup runs, its progress appears at the top of the page. Wait for the `
 
 ## History
 
-The **History** section lists past backups, newest first, with when each started, how long it took, its target and its result: **Succeeded**, **Completed with errors** or **Failed**. Select a backup's report button to see which services and volumes were backed up, and any errors.
+The **Backups** page lists past backups, newest first, with when each started, how long it took, its target and its result: **Succeeded**, **Completed with errors** or **Failed**. Select a backup's report button to see which services and volumes were backed up, and any errors.
 
 ## Restoring Backups
 
@@ -473,7 +473,7 @@ Restore previously created backups to recover individual services, volumes or yo
 
 Services must be uninstalled before they can be restored. A volume is restored as a new local copy.
 
-1. In **System → Backups**, select **Restore** in the **History** section.
+1. In **System → Backups**, select **Restore**.
 
 1. Choose a backup. The list shows every server backup on every target, newest first, and explains why any of them cannot be chosen, such as an unavailable target. This server's backups are marked **This server**.
 

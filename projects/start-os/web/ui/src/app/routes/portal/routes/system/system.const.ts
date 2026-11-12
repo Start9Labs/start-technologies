@@ -21,6 +21,11 @@ export const SYSTEM_MENU = [
       link: 'volumes',
     },
     {
+      icon: '@tui.hard-drive',
+      item: 'Backup Targets',
+      link: 'backup-targets',
+    },
+    {
       icon: '@tui.database-backup',
       item: 'Backups',
       link: 'backups',

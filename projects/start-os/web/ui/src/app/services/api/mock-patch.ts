@@ -106,7 +106,7 @@ export const mockPatchData: DataModel = {
         ...Mock.diskSource('/dev/sdz1', 'movies'),
         drive: {
           vendor: 'WD',
-          model: 'Elements',
+          model: 'Elements 25A3',
           label: 'Elements',
           capacity: 4000000000000,
         },
@@ -673,7 +673,7 @@ export const mockPatchData: DataModel = {
           version: '0.11.0:0.0.1',
         },
       },
-      s9pk: '/media/startos/data/package-data/archive/installed/asdfasdf.s9pk',
+      s9pk: '/media/startos/data/package-data/archive/installed/lnd.s9pk',
       lastBackup: null,
       statusInfo: {
         desired: { main: 'stopped' },
@@ -805,7 +805,7 @@ export const mockPatchData: DataModel = {
           version: '0.20.0:0-alpha.1',
         },
       },
-      s9pk: '/media/startos/data/package-data/archive/installed/asdfasdf.s9pk',
+      s9pk: '/media/startos/data/package-data/archive/installed/bitcoind.s9pk',
       lastBackup: new Date(new Date().valueOf() - 604800001).toISOString(),
       statusInfo: {
         desired: { main: 'stopped' },

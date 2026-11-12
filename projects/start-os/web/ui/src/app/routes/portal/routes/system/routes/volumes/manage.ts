@@ -1,13 +1,7 @@
 import { Component, computed, effect, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { i18nPipe, TaskService } from '@start9labs/shared'
-import {
-  TuiButton,
-  TuiCell,
-  TuiDialogContext,
-  TuiIcon,
-  TuiTitle,
-} from '@taiga-ui/core'
+import { TuiButton, TuiCell, TuiDialogContext, TuiTitle } from '@taiga-ui/core'
 import { TuiAvatar, TuiConfirmService } from '@taiga-ui/kit'
 import { TuiForm } from '@taiga-ui/layout'
 import { injectContext } from '@taiga-ui/polymorpheus'
@@ -15,7 +9,6 @@ import { PatchDB } from 'patch-db-client'
 
 import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
-import { VOLUME_TYPES, volumeName } from './types'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { getCurrentManifest } from 'src/app/utils/get-package-data'
@@ -26,10 +19,6 @@ import { SOURCE_MANAGE_STYLES } from './manage.styles'
 @Component({
   template: `
     @if (volume(); as volume) {
-      <div class="context">
-        <tui-icon [icon]="types[volume.source.kind].icon" />
-        {{ name(volume) }}
-      </div>
       <div tuiForm="l">
         <source-fields [edit]="edit" />
         <h3 tuiTitle="m">{{ 'Service access' | i18n }}</h3>
@@ -118,14 +107,11 @@ import { SOURCE_MANAGE_STYLES } from './manage.styles'
     TuiAvatar,
     PkgIconDirective,
     TuiForm,
-    TuiIcon,
     TuiTitle,
     i18nPipe,
   ],
 })
 export class VolumeManage {
-  protected readonly types = VOLUME_TYPES
-  protected readonly name = volumeName
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)

@@ -1,6 +1,6 @@
 import { Component, computed, effect, inject } from '@angular/core'
 import { i18nPipe, TaskService } from '@start9labs/shared'
-import { TuiButton, TuiDialogContext, TuiIcon } from '@taiga-ui/core'
+import { TuiButton, TuiDialogContext } from '@taiga-ui/core'
 import { TuiConfirmService } from '@taiga-ui/kit'
 import { TuiForm } from '@taiga-ui/layout'
 import { injectContext } from '@taiga-ui/polymorpheus'
@@ -11,20 +11,12 @@ import {
   SourceFields,
   sourceEdit,
 } from 'src/app/routes/portal/routes/system/routes/volumes/source-fields'
-import {
-  VOLUME_TYPES,
-  volumeName,
-} from 'src/app/routes/portal/routes/system/routes/volumes/types'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { BackupService } from './backup.service'
 
 @Component({
   template: `
     @if (target(); as target) {
-      <div class="context">
-        <tui-icon [icon]="types[target.source.kind].icon" />
-        {{ name(target) }}
-      </div>
       <div tuiForm="l">
         <source-fields [edit]="edit" />
         <footer>
@@ -59,11 +51,9 @@ import { BackupService } from './backup.service'
     }
   `,
   styles: SOURCE_MANAGE_STYLES,
-  imports: [SourceFields, TuiButton, TuiForm, TuiIcon, i18nPipe],
+  imports: [SourceFields, TuiButton, TuiForm, i18nPipe],
 })
 export class BackupTargetManage {
-  protected readonly types = VOLUME_TYPES
-  protected readonly name = volumeName
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
   protected readonly formDialog = inject(FormDialogService)

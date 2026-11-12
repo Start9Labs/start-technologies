@@ -95,6 +95,34 @@ export type SourceEdit = ReturnType<typeof sourceEdit>
       </tui-textfield>
       @switch (entry.source.kind) {
         @case ('disk') {
+          @let drive = entry.source.drive;
+          @let unknown = 'Unknown' | i18n;
+          <tui-textfield>
+            <label tuiLabel>{{ 'Model' | i18n }}</label>
+            <input
+              tuiInput
+              [readonly]="true"
+              [ngModel]="
+                [drive?.vendor, drive?.model].join(' ').trim() || unknown
+              "
+            />
+          </tui-textfield>
+          <tui-textfield>
+            <label tuiLabel>{{ 'Drive label' | i18n }}</label>
+            <input
+              tuiInput
+              [readonly]="true"
+              [ngModel]="drive?.label || unknown"
+            />
+          </tui-textfield>
+          <tui-textfield>
+            <label tuiLabel>{{ 'Capacity' | i18n }}</label>
+            <input
+              tuiInput
+              [readonly]="true"
+              [ngModel]="drive ? (drive.capacity | convertBytes) : unknown"
+            />
+          </tui-textfield>
           <tui-textfield>
             <label tuiLabel>{{ 'Path' | i18n }}</label>
             <input

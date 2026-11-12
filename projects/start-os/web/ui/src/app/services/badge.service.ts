@@ -65,7 +65,9 @@ export class BadgeService {
   )
 
   getWarning(id: string): Observable<boolean> {
-    return id === 'system' || id === 'backups' ? this.backups$ : of(false)
+    return id === 'system' || id === 'backup-targets'
+      ? this.backups$
+      : of(false)
   }
 
   getCount(id: string): Observable<number> {
