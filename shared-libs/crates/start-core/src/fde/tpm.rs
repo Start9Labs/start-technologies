@@ -43,13 +43,44 @@ pub struct Authorization {
     pub signature: Vec<u8>,
 }
 
+/// Public measurement metadata must verify before reuse as authorization inputs.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MeasurementProfile {
+    pub measurements: BootMeasurements,
+    pub authorization: Authorization,
+}
+
+impl MeasurementProfile {
+    /// Signs independently trusted pre-phase measurements.
+    pub async fn sign(
+        measurements: BootMeasurements,
+        authority: &PKey<Private>,
+    ) -> Result<Self, Error> {
+        let authorization = authorize(&measurements, authority).await?;
+        Ok(Self {
+            measurements,
+            authorization,
+        })
+    }
+
+    /// Authenticates the measurements by recomputing the policy in a TPM trial session.
+    pub async fn verify(&self, authority: &PKey<Public>) -> Result<bool, Error> {
+        if !verify_authorization(&self.authorization, authority)? {
+            return Ok(false);
+        }
+        Ok(policy_digest(&self.measurements).await? == self.authorization.policy)
+    }
+}
+
 macro_rules! boot_measurements {
     ($($field:ident: $pcr:literal),+ $(,)?) => {
         const PCR_REGISTERS: &[u8] = &[$($pcr),+];
 
         /// Measurement inputs for the direct firmware → shim → UKI profile.
         /// PCRs 12 and 13 must be empty; external stub inputs are excluded.
-        #[derive(Clone, Debug)]
+        #[derive(Clone, Debug, Serialize, Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
         pub struct BootMeasurements {
             $(pub $field: [u8; 32]),+
         }
@@ -103,8 +134,12 @@ pub fn filesystem_event(rootfs: &[u8; 32], overlay: &[u8; 32]) -> [u8; 32] {
     )
 }
 
+pub(crate) fn extend_pcr(pcr: &[u8; 32], event: &[u8; 32]) -> [u8; 32] {
+    openssl::sha::sha256(&[pcr.as_slice(), event.as_slice()].concat())
+}
+
 pub fn filesystem_pcr(event: &[u8; 32]) -> [u8; 32] {
-    openssl::sha::sha256(&[&[0; 32][..], event.as_slice()].concat())
+    extend_pcr(&[0; 32], event)
 }
 
 struct Workspace(TmpDir);
@@ -227,11 +262,7 @@ fn authorization_message(policy: &[u8; 32]) -> Vec<u8> {
     .concat()
 }
 
-/// Signs trusted pre-phase measurements; external stub inputs fail closed.
-pub async fn authorize(
-    measurements: &BootMeasurements,
-    authority: &PKey<Private>,
-) -> Result<Authorization, Error> {
+async fn policy_digest(measurements: &BootMeasurements) -> Result<[u8; 32], Error> {
     if measurements.stub_parameters != [0; 32] || measurements.stub_extensions != [0; 32] {
         return Err(invalid_policy());
     }
@@ -253,11 +284,19 @@ pub async fn authorize(
         .await;
     workspace.flush("trial.ctx").await;
     result?;
-    let policy: [u8; 32] = workspace
+    workspace
         .read("approved.policy")
         .await?
         .try_into()
-        .map_err(|_| invalid_policy())?;
+        .map_err(|_| invalid_policy())
+}
+
+/// Signs trusted pre-phase measurements; external stub inputs fail closed.
+pub async fn authorize(
+    measurements: &BootMeasurements,
+    authority: &PKey<Private>,
+) -> Result<Authorization, Error> {
+    let policy = policy_digest(measurements).await?;
     let mut signer = Signer::new(MessageDigest::sha256(), authority)?;
     let signature = signer.sign_oneshot_to_vec(&authorization_message(&policy))?;
     Ok(Authorization { policy, signature })
@@ -552,6 +591,17 @@ mod tests {
     }
 
     #[test]
+    fn pcr_extension_matches_the_sha256_known_vector() {
+        let expected: [u8; 32] =
+            hex::decode("f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b")
+                .unwrap()
+                .try_into()
+                .unwrap();
+        assert_eq!(extend_pcr(&[0; 32], &[0; 32]), expected);
+        assert_eq!(filesystem_pcr(&[0; 32]), expected);
+    }
+
+    #[test]
     fn rootfs_and_overlay_both_change_the_filesystem_measurement() {
         let rootfs = [1; 32];
         let overlay = [2; 32];
@@ -592,6 +642,50 @@ mod tests {
                 .unwrap()
             );
         }
+    }
+
+    async fn authenticate_public_profile(profile: &MeasurementProfile, authority: &PKey<Public>) {
+        let encoded = serde_json::to_value(profile).unwrap();
+        let decoded: MeasurementProfile = serde_json::from_value(encoded.clone()).unwrap();
+        assert!(decoded.verify(authority).await.unwrap());
+        for field in [
+            "firmware",
+            "optionRoms",
+            "applications",
+            "secureBoot",
+            "uki",
+            "shimPolicy",
+            "files",
+        ] {
+            let mut altered = encoded.clone();
+            let byte = altered["measurements"][field][0].as_u64().unwrap();
+            altered["measurements"][field][0] = serde_json::json!(byte ^ 1);
+            let substituted: MeasurementProfile = serde_json::from_value(altered).unwrap();
+            assert!(verify_authorization(&substituted.authorization, authority).unwrap());
+            assert!(
+                !substituted.verify(authority).await.unwrap(),
+                "unsigned {field} metadata was authenticated"
+            );
+        }
+        for field in ["stubParameters", "stubExtensions"] {
+            let mut altered = encoded.clone();
+            altered["measurements"][field][0] = serde_json::json!(1);
+            let substituted: MeasurementProfile = serde_json::from_value(altered).unwrap();
+            let error = substituted.verify(authority).await.unwrap_err();
+            assert_eq!(
+                error.source.to_string(),
+                t!("fde.tpm.invalid-policy").to_string()
+            );
+        }
+        let mut extra = encoded.clone();
+        extra["measurements"]["selection"] = serde_json::json!("sha256:11,15");
+        assert!(serde_json::from_value::<MeasurementProfile>(extra).is_err());
+        let mut partial = encoded;
+        partial["measurements"]
+            .as_object_mut()
+            .unwrap()
+            .remove("firmware");
+        assert!(serde_json::from_value::<MeasurementProfile>(partial).is_err());
     }
 
     async fn reject_weaker_authorizations_at_the_tpm(
@@ -792,7 +886,10 @@ mod tests {
         let authority = crate::net::ssl::gen_nistp256().unwrap();
         let key = super::super::bootstrap::generate_key().unwrap();
         let measurements = read_measurements().await.unwrap();
-        let mut authorization = authorize(&measurements, &authority).await.unwrap();
+        let profile = MeasurementProfile::sign(measurements, &authority)
+            .await
+            .unwrap();
+        let mut authorization = profile.authorization.clone();
         let sealed = seal(&key, &authority).await.unwrap();
         let authority_public = public_key(&authority).unwrap();
         assert_eq!(
@@ -802,6 +899,7 @@ mod tests {
                 .as_slice(),
             key.as_slice(),
         );
+        authenticate_public_profile(&profile, &authority_public).await;
         reject_weaker_authorizations_at_the_tpm(&sealed, &authority).await;
         assert_eq!(
             unseal(&sealed, &authorization, &authority_public)
