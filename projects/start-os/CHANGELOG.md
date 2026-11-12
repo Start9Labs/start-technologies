@@ -8,6 +8,40 @@ This file tracks notable changes since the move to the monorepo, and is what eac
 [GitHub release](https://github.com/Start9Labs/start-technologies/releases) links to
 for the detail behind its highlights.
 
+## [0.4.2.1]
+
+### Changed
+
+- Choosing a registry for StartOS updates checks it for updates right away.
+
+- The StartOS update dialog is titled with the version it installs and lists who signed it above the release notes.
+
+- RPC and MCP clients manage connected registries under `server.registries`. `server.update-signers` is removed; use `server.trusted-keys`.
+- The database keeps connected registries and the StartOS update registry at `serverInfo.registries` and `serverInfo.osRegistry`, no longer under `ui`.
+
+- Expanding an update on the Updates tab shows who signed the package and its release notes, with a link to the full Marketplace listing.
+
+- The welcome notification after an update shows the release notes as published, in your language.
+
+### Removed
+
+- Removed the Donate to Start9 link from the start menu.
+
+### Fixed
+
+- When a service requires a version only an alternative implementation of its dependency provides, the Marketplace opens that implementation, ready to switch to.
+
+- Restore the Start9 and Community registries on servers missing either, such as some updated from 0.3.5 whose Marketplace showed no registries.
+
+- Support persistent kernel argument customizations across reboots and OS updates through administrator GRUB drop-ins.
+- Fix NVMe isolation tests retaining earlier settings, and add persistent PCIe-port power-management and combined tests with conflict detection.
+
+- After a StartOS update, the prompt to refresh the page appears once StartOS has finished starting, and no longer reappears after refreshing.
+
+- Allow proxied downloads and other outbound connections to use IPv4 while IPv6 DNS resolution is slow or failing.
+
+- Prevent failed service subcontainer starts from leaking processes that can exhaust memory and stall other services.
+
 ## [0.4.2]
 
 ### Added
