@@ -42,6 +42,10 @@ Selection reuses `os_overlay::verified_generations` ordering and admits the newe
 
 The preparation helper excludes active swap and piped core handlers, disables its own dumpability and inherits a zero core limit into TPM tools. These conditions must remain stable until release finishes. Runtime identities and TPM workspaces use private `noswap` tmpfs mounts; the private handoff remains RAM-only after helper exit. This initramfs protection does not establish the separate OS-boot-lifetime volume-key cache or protect later daemon handling by itself.
 
+`fde-harden-initramfs.mjs` transforms the reviewed initramfs-tools 0.148.4 control plane in a caller-owned private tree. It rejects changed or unknown providers/configuration before mutation. Failure handling never returns to boot, including when reboot fails; break requests and alternate-init fallback cannot open a shell. The transform fixes the FDE boot route and removes resume, live boot, keymap execution, runtime parameter sourcing and automatic `/usr` mounts. Ordinary generated images are not transformed.
+
+This control-plane transform is not a complete image builder or executable-closure audit. Udev rules/helpers, copied tool dependencies and final archive verification remain prerequisites before signing or activating an FDE image.
+
 ## Persistent overlay
 
 The persistent overlay is an independently signed squashfs. Boot uses immutable verified rootfs and overlay images with a temporary writable root layer. `/media/startos/config/overlay` exposes a separate editable view of the overlay squashfs with its own RAM-backed upper layer; editing that view must not mutate an active lower layer of the running root.

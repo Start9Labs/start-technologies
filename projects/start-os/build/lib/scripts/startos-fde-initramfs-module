@@ -1,0 +1,19 @@
+. /scripts/local
+
+mount_premount()
+{
+	:
+}
+
+local_mount_root()
+{
+	local_top
+	[ -n "${ROOT}" ] || panic 'Missing OS volume'
+	local_device_setup "${ROOT}" 'OS volume'
+	ROOT="${DEV}"
+	[ "$(get_fstype "${ROOT}")" = btrfs ] || panic 'Unsupported OS volume'
+	local_premount
+	mkdir /startos
+	mount -t btrfs -o subvolid=5 "${ROOT}" /startos
+	/usr/bin/startbox start-fde-prepare /startos "${rootmnt}"
+}

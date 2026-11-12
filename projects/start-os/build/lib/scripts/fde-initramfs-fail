@@ -1,0 +1,9 @@
+fde_fail()
+{
+	trap - EXIT
+	printf '%s\n' 'FDE boot stopped' >&2
+	reboot -f || :
+	while :; do
+		sleep 86400 || :
+	done
+}
