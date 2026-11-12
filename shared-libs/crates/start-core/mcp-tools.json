@@ -3707,9 +3707,20 @@
               "type": "object",
               "propertyNames": { "type": "string" },
               "additionalProperties": { "$ref": "#/$defs/ServiceInterface" }
+            },
+            "proxyChain": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/HttpProxyStage" }
             }
           },
-          "required": ["enabled", "options", "net", "addresses", "interfaces"],
+          "required": [
+            "enabled",
+            "options",
+            "net",
+            "addresses",
+            "interfaces",
+            "proxyChain"
+          ],
           "additionalProperties": true
         },
         "BindOptions": {
@@ -4096,6 +4107,16 @@
         "ServiceInterfaceType": {
           "type": "string",
           "enum": ["ui", "p2p", "api"]
+        },
+        "HttpProxyStage": {
+          "type": "object",
+          "properties": {
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "profileId": { "type": "string" }
+          },
+          "required": ["packageId", "profileId"],
+          "additionalProperties": true,
+          "description": "A provider/profile pair occurring once in a binding's ordered chain."
         }
       },
       "type": "object",
@@ -4371,6 +4392,61 @@
         },
         "GatewayId": { "type": "string" },
         "ActionId": { "type": "string" }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "package.host.binding.set-http-proxy-chain",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        { "$ref": "#/$defs/RequiresPackageId" },
+        { "$ref": "#/$defs/RequiresHostId" },
+        { "$ref": "#/$defs/SetHttpProxyChainParams" }
+      ],
+      "$defs": {
+        "RequiresPackageId": {
+          "type": "object",
+          "properties": { "package": { "$ref": "#/$defs/PackageId" } },
+          "required": ["package"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" },
+        "RequiresHostId": {
+          "type": "object",
+          "properties": { "host": { "$ref": "#/$defs/HostId" } },
+          "required": ["host"],
+          "additionalProperties": true
+        },
+        "HostId": { "type": "string" },
+        "SetHttpProxyChainParams": {
+          "type": "object",
+          "properties": {
+            "internalPort": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "chain": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/HttpProxyStage" }
+            }
+          },
+          "required": ["internalPort", "chain"],
+          "additionalProperties": true,
+          "description": "Replaces the binding's operator-selected proxy chain."
+        },
+        "HttpProxyStage": {
+          "type": "object",
+          "properties": {
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "profileId": { "type": "string" }
+          },
+          "required": ["packageId", "profileId"],
+          "additionalProperties": true,
+          "description": "A provider/profile pair occurring once in a binding's ordered chain."
+        }
       },
       "type": "object"
     }
@@ -6183,7 +6259,7 @@
           "additionalProperties": true
         },
         "GitHash": { "type": "string" },
-        "PluginId": { "type": "string", "enum": ["url-v0"] },
+        "PluginId": { "type": "string", "enum": ["url-v0", "http-proxy-v0"] },
         "Version": { "type": "string" },
         "OsIndex": {
           "type": "object",
@@ -8991,7 +9067,7 @@
           "additionalProperties": true
         },
         "GitHash": { "type": "string" },
-        "PluginId": { "type": "string", "enum": ["url-v0"] },
+        "PluginId": { "type": "string", "enum": ["url-v0", "http-proxy-v0"] },
         "Version": { "type": "string" }
       },
       "type": "object",
@@ -9876,9 +9952,20 @@
               "type": "object",
               "propertyNames": { "type": "string" },
               "additionalProperties": { "$ref": "#/$defs/ServiceInterface" }
+            },
+            "proxyChain": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/HttpProxyStage" }
             }
           },
-          "required": ["enabled", "options", "net", "addresses", "interfaces"],
+          "required": [
+            "enabled",
+            "options",
+            "net",
+            "addresses",
+            "interfaces",
+            "proxyChain"
+          ],
           "additionalProperties": true
         },
         "BindOptions": {
@@ -10265,6 +10352,16 @@
         "ServiceInterfaceType": {
           "type": "string",
           "enum": ["ui", "p2p", "api"]
+        },
+        "HttpProxyStage": {
+          "type": "object",
+          "properties": {
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "profileId": { "type": "string" }
+          },
+          "required": ["packageId", "profileId"],
+          "additionalProperties": true,
+          "description": "A provider/profile pair occurring once in a binding's ordered chain."
         }
       },
       "type": "object",
@@ -10528,6 +10625,57 @@
       },
       "required": ["internalPort", "address", "wan"],
       "additionalProperties": true
+    }
+  },
+  {
+    "name": "server.host.binding.set-http-proxy-chain",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SetHttpProxyChainParams": {
+          "type": "object",
+          "properties": {
+            "internalPort": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "chain": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/HttpProxyStage" }
+            }
+          },
+          "required": ["internalPort", "chain"],
+          "additionalProperties": true,
+          "description": "Replaces the binding's operator-selected proxy chain."
+        },
+        "HttpProxyStage": {
+          "type": "object",
+          "properties": {
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "profileId": { "type": "string" }
+          },
+          "required": ["packageId", "profileId"],
+          "additionalProperties": true,
+          "description": "A provider/profile pair occurring once in a binding's ordered chain."
+        },
+        "PackageId": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "internalPort": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "chain": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/HttpProxyStage" }
+        }
+      },
+      "required": ["internalPort", "chain"],
+      "additionalProperties": true,
+      "description": "Replaces the binding's operator-selected proxy chain."
     }
   },
   {

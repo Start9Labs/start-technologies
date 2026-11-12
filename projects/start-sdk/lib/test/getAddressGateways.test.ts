@@ -38,6 +38,7 @@ const host = (
   bindings: {
     3478: {
       enabled: true,
+      proxyChain: [],
       options: {
         preferredExternalPort: 3478,
         addSsl: null,
