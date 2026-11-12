@@ -15,8 +15,11 @@ for test in \
         --mount "type=bind,source=$binary,target=/fde-tests,readonly" \
         "$image" fde-tpm-run /fde-tests "$test"
 done
-test=os_overlay::tests::verity_mount_retains_protection_through_handoff_and_cleans_failures
-"$binary" --list | grep -Fx "$test: test"
-docker run --rm --privileged --network none \
-    --mount "type=bind,source=$binary,target=/fde-tests,readonly" \
-    "$image" /fde-tests --ignored --exact "$test" --nocapture
+for test in \
+    os_overlay::tests::verity_mount_retains_protection_through_handoff_and_cleans_failures \
+    os_overlay::tests::cancelled_native_verity_setup_closes_abandoned_mappings_and_mounts; do
+    "$binary" --list | grep -Fx "$test: test"
+    docker run --rm --privileged --network none \
+        --mount "type=bind,source=$binary,target=/fde-tests,readonly" \
+        "$image" /fde-tests --ignored --exact "$test" --nocapture
+done

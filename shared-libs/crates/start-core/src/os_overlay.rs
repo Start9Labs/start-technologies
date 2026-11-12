@@ -156,14 +156,25 @@ impl VerityImage {
     }
 
     /// Opens and fully reads a read-only mapping against the signed verity root.
-    /// Later corruption returns I/O errors. The caller owns the name until all mounts
-    /// are unmounted and must close it; failed initial reads close their new mapping.
-    pub async fn open(
+    /// Cancellation leaves setup owned until completion and closes an abandoned result.
+    /// A fresh name remains reserved through cleanup; inputs stay stable through setup.
+    /// Dependent mounts must end before the guard closes.
+    pub async fn open(&self, data: &Path, tree: &Path, name: &str) -> Result<VerityMapping, Error> {
+        let (image, data, tree, name) = (
+            self.clone(),
+            data.to_owned(),
+            tree.to_owned(),
+            name.to_owned(),
+        );
+        complete_verity_operation(async move { image.open_inner(&data, &tree, &name).await }).await
+    }
+
+    async fn open_inner(
         &self,
         data: &Path,
         tree: &Path,
         name: &str,
-    ) -> Result<BlockDev<PathBuf>, Error> {
+    ) -> Result<VerityMapping, Error> {
         if Path::new(name).file_name().and_then(|name| name.to_str()) != Some(name) {
             return Err(Error::new(
                 eyre!(t!("error.invalid-request")),
@@ -181,23 +192,32 @@ impl VerityImage {
             .arg(tree)
             .arg(hex::encode(self.root_hash));
         command.invoke(ErrorKind::Filesystem).await?;
-        let device = Path::new("/dev/mapper").join(name);
-        let result = async {
-            let read =
-                tokio::io::copy(&mut open_file(&device).await?, &mut tokio::io::sink()).await?;
+        let mapping = VerityMapping {
+            name: Some(name.to_owned()),
+        };
+        let read = async {
+            let read = tokio::io::copy(
+                &mut open_file(mapping.path()).await?,
+                &mut tokio::io::sink(),
+            )
+            .await?;
             if Some(read) != self.data_blocks.checked_mul(VERITY_BLOCK_SIZE) {
                 return Err(invalid_signature());
             }
-            Ok(BlockDev::new(device))
+            Ok::<_, Error>(())
         }
         .await;
-        if result.is_err() {
-            Self::close(name).await.log_err();
+        match read {
+            Ok(()) => Ok(mapping),
+            Err(error) => {
+                mapping.close_inner().await.log_err();
+                Err(error)
+            }
         }
-        result
     }
 
     /// Mounts a fully read mapping as read-only SquashFS; the guard owns both resources.
+    /// A fresh name remains reserved through setup and cleanup, including cancellation.
     pub async fn mount(
         &self,
         data: &Path,
@@ -205,17 +225,28 @@ impl VerityImage {
         name: &str,
         mountpoint: &Path,
     ) -> Result<VerityMount, Error> {
-        let device = self.open(data, tree, name).await?;
-        match MountGuard::mount(&SquashfsDevice(device), mountpoint, ReadOnly).await {
-            Ok(mount) => Ok(VerityMount {
-                mount,
-                mapping: Some(name.to_owned()),
-            }),
-            Err(error) => {
-                Self::close(name).await.log_err();
-                Err(error)
+        let (image, data, tree, name, mountpoint) = (
+            self.clone(),
+            data.to_owned(),
+            tree.to_owned(),
+            name.to_owned(),
+            mountpoint.to_owned(),
+        );
+        complete_verity_operation(async move {
+            let mapping = image.open_inner(&data, &tree, &name).await?;
+            let filesystem = SquashfsDevice(BlockDev::new(mapping.path()));
+            match MountGuard::mount(&filesystem, &mountpoint, ReadOnly).await {
+                Ok(mount) => Ok(VerityMount {
+                    mount,
+                    mapping: Some(mapping),
+                }),
+                Err(error) => {
+                    mapping.close_inner().await.log_err();
+                    Err(error)
+                }
             }
-        }
+        })
+        .await
     }
 
     /// Requires every mount using the mapping to be unmounted first.
@@ -227,6 +258,50 @@ impl VerityImage {
             .invoke(ErrorKind::Filesystem)
             .await?;
         Ok(())
+    }
+}
+
+/// Caller cancellation abandons the result, not in-flight kernel resource setup.
+async fn complete_verity_operation<T: Send + 'static>(
+    operation: impl std::future::Future<Output = Result<T, Error>> + Send + 'static,
+) -> Result<T, Error> {
+    tokio::spawn(operation)
+        .await
+        .with_kind(ErrorKind::Filesystem)?
+}
+
+/// A fully read signed mapping, closed on drop while the runtime remains active.
+/// External mounts must end before closing; failed close retains kernel protection.
+#[derive(Debug)]
+pub struct VerityMapping {
+    name: Option<String>,
+}
+
+impl VerityMapping {
+    pub fn path(&self) -> PathBuf {
+        Path::new("/dev/mapper").join(self.name.as_ref().unwrap())
+    }
+
+    pub async fn close(self) -> Result<(), Error> {
+        complete_verity_operation(self.close_inner()).await
+    }
+
+    async fn close_inner(mut self) -> Result<(), Error> {
+        VerityImage::close(&self.name.take().unwrap()).await
+    }
+
+    fn persist(mut self) {
+        self.name.take();
+    }
+}
+
+impl Drop for VerityMapping {
+    fn drop(&mut self) {
+        if let Some(name) = self.name.take() {
+            tokio::spawn(async move {
+                VerityImage::close(&name).await.log_err();
+            });
+        }
     }
 }
 
@@ -251,13 +326,13 @@ impl FileSystem for SquashfsDevice {
 #[derive(Debug)]
 pub struct VerityMount {
     mount: MountGuard,
-    mapping: Option<String>,
+    mapping: Option<VerityMapping>,
 }
 
 impl VerityMount {
     /// Transfers mount and mapping lifetime to the caller without removing protection.
     pub fn persist(mut self) -> PathBuf {
-        self.mapping.take();
+        self.mapping.take().unwrap().persist();
         self.mount.take().persist()
     }
 }
@@ -268,24 +343,28 @@ impl GenericMountGuard for VerityMount {
     }
 
     async fn unmount(mut self) -> Result<(), Error> {
-        let name = self.mapping.take().unwrap();
-        self.mount.take().unmount(false).await?;
-        VerityImage::close(&name).await
+        let mapping = self.mapping.take().unwrap();
+        complete_verity_operation(unmount_verity(self.mount.take(), mapping)).await
     }
 }
 
 impl Drop for VerityMount {
     fn drop(&mut self) {
-        if let Some(name) = self.mapping.take() {
+        if let Some(mapping) = self.mapping.take() {
             let mount = self.mount.take();
             tokio::spawn(async move {
-                match mount.unmount(false).await {
-                    Ok(()) => VerityImage::close(&name).await.log_err(),
-                    Err(error) => Err::<(), _>(error).log_err(),
-                };
+                unmount_verity(mount, mapping).await.log_err();
             });
         }
     }
+}
+
+async fn unmount_verity(mount: MountGuard, mapping: VerityMapping) -> Result<(), Error> {
+    if let Err(error) = mount.unmount(false).await {
+        mapping.persist();
+        return Err(error);
+    }
+    mapping.close_inner().await
 }
 
 /// The signed binding between complete rootfs and overlay file contents.
@@ -1003,9 +1082,6 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires CAP_SYS_ADMIN, CAP_MKNOD and loop devices"]
     async fn mounted_squashfs_overlay_honors_whiteouts_and_opaque_directories() {
-        use crate::disk::mount::filesystem::ReadOnly;
-        use crate::disk::mount::guard::MountGuard;
-
         async fn mount_view(
             filesystem: &impl FileSystem,
             view: &Path,
@@ -1025,17 +1101,9 @@ mod tests {
             tree: &Path,
             verity: &VerityImage,
             at: &Path,
-        ) -> (MountGuard, crate::util::GeneralBoxedGuard) {
+        ) -> VerityMount {
             let name = format!("overlay-test-{}", Guid::new());
-            let device = verity.open(image, tree, &name).await.unwrap();
-            let mapping = crate::util::GeneralBoxedGuard::new(move || {
-                let _ = std::process::Command::new("veritysetup")
-                    .arg("close")
-                    .arg(name)
-                    .output();
-            });
-            let mount = MountGuard::mount(&device, at, ReadOnly).await.unwrap();
-            (mount, mapping)
+            verity.mount(image, tree, &name, at).await.unwrap()
         }
 
         fn assert_root(root: &Path, added: &[u8]) {
@@ -1114,7 +1182,7 @@ mod tests {
         assert_eq!(manifest1.rootfs_verity.data_blocks, 1);
         assert_eq!(manifest1.overlay_verity.data_blocks, 1);
         let base_mount = temp.path().join("base-mount");
-        let (public, public_verity) = mount_image(
+        let public = mount_image(
             &rootfs,
             &generation1.join(ROOTFS_VERITY_FILE),
             &manifest1.rootfs_verity,
@@ -1122,7 +1190,7 @@ mod tests {
         )
         .await;
         let lower1 = temp.path().join("lower1");
-        let (lower1_guard, lower1_verity) = mount_image(
+        let lower1_guard = mount_image(
             &generation1.join(OVERLAY_FILE),
             &generation1.join(OVERLAY_VERITY_FILE),
             &manifest1.overlay_verity,
@@ -1158,7 +1226,7 @@ mod tests {
         let manifest2 = prepared.manifest().clone();
         let generation2 = prepared.publish().await.unwrap();
         let lower2 = temp.path().join("lower2");
-        let (lower2_guard, lower2_verity) = mount_image(
+        let lower2_guard = mount_image(
             &generation2.join(OVERLAY_FILE),
             &generation2.join(OVERLAY_VERITY_FILE),
             &manifest2.overlay_verity,
@@ -1199,7 +1267,7 @@ mod tests {
         let manifest3 = prepared.manifest().clone();
         let generation3 = prepared.publish().await.unwrap();
         let lower3 = temp.path().join("lower3");
-        let (lower3_guard, lower3_verity) = mount_image(
+        let lower3_guard = mount_image(
             &generation3.join(OVERLAY_FILE),
             &generation3.join(OVERLAY_VERITY_FILE),
             &manifest3.overlay_verity,
@@ -1227,14 +1295,10 @@ mod tests {
         drop(running2_guard);
         drop(view1_guard);
         drop(running1_guard);
-        lower3_guard.unmount(false).await.unwrap();
-        lower2_guard.unmount(false).await.unwrap();
-        lower1_guard.unmount(false).await.unwrap();
-        public.unmount(false).await.unwrap();
-        drop(lower3_verity);
-        drop(lower2_verity);
-        drop(lower1_verity);
-        drop(public_verity);
+        lower3_guard.unmount().await.unwrap();
+        lower2_guard.unmount().await.unwrap();
+        lower1_guard.unmount().await.unwrap();
+        public.unmount().await.unwrap();
     }
 
     #[cfg(target_os = "linux")]
@@ -1330,8 +1394,6 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires CAP_SYS_ADMIN and loop devices"]
     async fn verity_mapping_reads_all_blocks_and_closes_failed_opens() {
-        use crate::disk::mount::filesystem::FileSystem;
-
         let temp = tempfile::tempdir().unwrap();
         let data = temp.path().join("data");
         let tree = temp.path().join("tree");
@@ -1348,7 +1410,9 @@ mod tests {
 
         fs::write(&data, &original).unwrap();
         let mapping = verity.open(&data, &tree, &name).await.unwrap();
-        assert_eq!(mapping.source().await.unwrap().unwrap().as_ref(), device);
+        assert_eq!(mapping.path(), device);
+        assert!(verity.open(&data, &tree, &name).await.is_err());
+        assert!(device.exists());
         fs::write(&data, &corrupt).unwrap();
         let mut command = tokio::process::Command::new("dd");
         command.arg(format!("if={}", device.display())).args([
@@ -1358,8 +1422,108 @@ mod tests {
             "status=none",
         ]);
         assert!(command.invoke(ErrorKind::Filesystem).await.is_err());
-        VerityImage::close(&name).await.unwrap();
+        mapping.close().await.unwrap();
         assert!(!device.exists());
+    }
+
+    #[tokio::test]
+    async fn abandoned_verity_setup_finishes_and_drops_its_result() {
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (finish, complete) = tokio::sync::oneshot::channel();
+        let (destroyed, observed) = tokio::sync::oneshot::channel();
+        let waiter = tokio::spawn(complete_verity_operation(async move {
+            started.send(()).unwrap();
+            complete.await.unwrap();
+            Ok(crate::util::GeneralGuard::new(move || {
+                destroyed.send(()).unwrap();
+            }))
+        }));
+        ready.await.unwrap();
+        waiter.abort();
+        assert!(matches!(waiter.await, Err(error) if error.is_cancelled()));
+        finish.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), observed)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires CAP_SYS_ADMIN, native veritysetup and loop devices"]
+    async fn cancelled_native_verity_setup_closes_abandoned_mappings_and_mounts() {
+        use std::time::Duration;
+
+        use futures::StreamExt;
+        use inotify::{Inotify, WatchMask};
+
+        async fn cancel_at_creation<T>(
+            operation: impl std::future::Future<Output = Result<T, Error>>,
+            name: &str,
+        ) {
+            let inotify = Inotify::init().unwrap();
+            inotify
+                .watches()
+                .add("/dev/mapper", WatchMask::CREATE | WatchMask::MOVED_TO)
+                .unwrap();
+            let mut events = inotify.into_event_stream([0; 4096]).unwrap();
+            let mut operation = Box::pin(operation);
+            tokio::time::timeout(Duration::from_secs(10), async {
+                tokio::select! {
+                    biased;
+                    _ = async {
+                        while let Some(event) = events.next().await {
+                            if event.unwrap().name.as_deref() == Some(std::ffi::OsStr::new(name)) {
+                                return;
+                            }
+                        }
+                        panic!("mapper event stream ended");
+                    } => (),
+                    _ = &mut operation => panic!("setup completed before native mapper creation was observed"),
+                }
+            }).await.unwrap();
+            drop(operation);
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while Path::new("/dev/mapper").join(name).exists() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+        }
+
+        let temp = tempfile::tempdir_in("/dev/shm").unwrap();
+        let source = temp.path().join("source");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("setting"), b"real native mapping").unwrap();
+        let data = temp.path().join("image");
+        let mut file = create_file_mod(&data, 0o600).await.unwrap();
+        Squashfs::from_directory(&source)
+            .await
+            .unwrap()
+            .serialize(&mut file)
+            .await
+            .unwrap();
+        file.sync_all().await.unwrap();
+        let tree = temp.path().join("tree");
+        let verity = VerityImage::format(&data, &tree).await.unwrap();
+        let name = format!("verity-cancel-{}", Guid::new());
+        cancel_at_creation(verity.open(&data, &tree, &name), &name).await;
+        let name = format!("verity-cancel-{}", Guid::new());
+        let at = temp.path().join("mounted");
+        cancel_at_creation(verity.mount(&data, &tree, &name, &at), &name).await;
+        assert!(!crate::disk::mount::util::is_mountpoint(&at).await.unwrap());
+        let name = format!("verity-cancel-{}", Guid::new());
+        let mapping = verity.open(&data, &tree, &name).await.unwrap();
+        assert!(mapping.path().exists());
+        drop(mapping);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while Path::new("/dev/mapper").join(&name).exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
     }
 
     async fn squashfs_tools_available() -> bool {
