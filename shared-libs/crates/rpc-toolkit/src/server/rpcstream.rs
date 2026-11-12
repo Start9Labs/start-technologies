@@ -6,7 +6,6 @@ use std::num::NonZeroUsize;
 
 #[cfg(feature = "websocket")]
 use futures::stream::BoxStream;
-#[cfg(feature = "websocket")]
 use futures::StreamExt;
 use imbl_value::Value;
 use serde::de::Error as _;
