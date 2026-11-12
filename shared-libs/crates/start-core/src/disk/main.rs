@@ -60,7 +60,7 @@ where
     P: AsRef<Path>,
 {
     Command::new("dmsetup")
-        .arg("remove_all") // TODO: find a higher finesse way to do this for portability reasons
+        .arg("remove_all")
         .invoke(crate::ErrorKind::DiskManagement)
         .await?;
     for disk in disks {
@@ -74,7 +74,7 @@ where
                 .invoke(crate::ErrorKind::DiskManagement)
                 .await?;
         }
-        tokio::fs::write(disk.as_ref(), &[0; 2048]).await?; // wipe partition table
+        tokio::fs::write(disk.as_ref(), &[0; 2048]).await?;
         Command::new("pvcreate")
             .arg("-yff")
             .arg(disk.as_ref())
@@ -247,7 +247,7 @@ pub async fn unmount_all_fs<P: AsRef<Path>>(guid: &str, datadir: P) -> Result<()
     unmount_fs(guid, &datadir, "main").await?;
     unmount_fs(guid, &datadir, "package-data").await?;
     Command::new("dmsetup")
-        .arg("remove_all") // TODO: find a higher finesse way to do this for portability reasons
+        .arg("remove_all")
         .invoke(crate::ErrorKind::DiskManagement)
         .await?;
     Ok(())
@@ -395,7 +395,7 @@ pub(crate) async fn import<P: AsRef<Path>>(
         ));
     }
     Command::new("dmsetup")
-        .arg("remove_all") // TODO: find a higher finesse way to do this for portability reasons
+        .arg("remove_all")
         .invoke(crate::ErrorKind::DiskManagement)
         .await?;
     match Command::new("vgimport")
@@ -452,9 +452,7 @@ pub(crate) async fn mount_fs<P: AsRef<Path>>(
             phase.start();
         }
         tracing::info!("{}", t!("disk.main.running-e2fsck", name = name));
-        // e2fsck exit codes: 0 = no errors, 1 = errors corrected, 2 = corrected + reboot needed
-        // Only codes >= 4 indicate actual failure, so we can't use .invoke() which treats any
-        // non-zero exit as an error.
+        // e2fsck reports corrected filesystems with exit codes 1–3.
         let e2fsck_output = Command::new("e2fsck")
             .arg("-fy")
             .arg(&blockdev_path)
@@ -502,22 +500,12 @@ pub(crate) async fn mount_fs<P: AsRef<Path>>(
         ImportMode::ReadWrite(repair) => {
             let reboot = repair.fsck(&blockdev_path).await?;
             if !guid.ends_with("_UNENC") {
-                let luks_folder = Path::new("/media/startos/config/luks");
-                tokio::fs::create_dir_all(luks_folder).await?;
-                let tmp_luks_bak = luks_folder.join(format!(".{mapper_name}.luks.bak.tmp"));
-                if tokio::fs::metadata(&tmp_luks_bak).await.is_ok() {
-                    tokio::fs::remove_file(&tmp_luks_bak).await?;
-                }
-                let luks_bak = luks_folder.join(format!("{mapper_name}.luks.bak"));
-                Command::new("cryptsetup")
-                    .arg("-q")
-                    .arg("luksHeaderBackup")
-                    .arg("--header-backup-file")
-                    .arg(&tmp_luks_bak)
-                    .arg(&orig_path)
-                    .invoke(crate::ErrorKind::DiskManagement)
-                    .await?;
-                tokio::fs::rename(&tmp_luks_bak, &luks_bak).await?;
+                super::fde::replace_header_backup(
+                    &orig_path,
+                    &mapper_name,
+                    Path::new(super::fde::HEADER_BACKUP_DIR),
+                )
+                .await?;
             }
             reboot
         }

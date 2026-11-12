@@ -14,6 +14,7 @@ use crate::util::Invoke;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 use crate::{Error, ErrorKind};
 
+pub mod fde;
 pub mod format;
 pub mod fsck;
 pub mod main;
