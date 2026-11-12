@@ -35,6 +35,10 @@ fn ws_url(url: &Url, path: &str) -> String {
         .replacen("http:", "ws:", 1)
 }
 
+pub(super) fn rpc_ws_url(url: &Url) -> String {
+    ws_url(url, RpcSessionUpgrader::PATH.trim_start_matches('/'))
+}
+
 pub(super) async fn encrypted(url: &str, signer: &Signer) -> EncryptedSocket {
     let path = Url::parse(url).unwrap();
     let target = path
@@ -118,7 +122,7 @@ async fn unknown_key_admission_observes_enrollment_and_revocation_on_the_same_co
     let (url, _task) = session_server(ctx.clone()).await;
     let key: Signer = crate::sign::AnySigningKey::generate().into();
     let public = key.verifying_key().await.unwrap();
-    let mut socket = encrypted(&ws_url(&url, "ws/rpc"), &key).await;
+    let mut socket = encrypted(&rpc_ws_url(&url), &key).await;
     let info = call(&mut socket, json!({"jsonrpc":"2.0","id":1,"method":"info"})).await;
     assert!(info.get("result").is_some(), "{info}");
     let request = json!({"jsonrpc":"2.0","id":2,"method":"admin.list"});
@@ -164,7 +168,7 @@ async fn unknown_key_admission_observes_enrollment_and_revocation_on_the_same_co
 async fn bare_rpc_rejects_plaintext_without_a_negotiation_flag() {
     let (_temp, ctx, _admin, _reader, _) = fixture().await;
     let (url, _task) = session_server(ctx).await;
-    let mut socket = raw_socket(&ws_url(&url, "ws/rpc")).await;
+    let mut socket = raw_socket(&rpc_ws_url(&url)).await;
     socket
         .send(LogicalMessage::Text(
             json!({"jsonrpc":"2.0","id":1,"method":"info"})

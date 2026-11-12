@@ -97,12 +97,7 @@ async fn rpc(url: &Url, method: &str, params: Value, signer: Option<&Signer>) ->
 }
 
 async fn registry_socket(url: &Url, signer: &Signer) -> crate::util::net::secure::EncryptedSocket {
-    let url = url
-        .join("ws/rpc")
-        .unwrap()
-        .to_string()
-        .replacen("http:", "ws:", 1);
-    session::encrypted(&url, signer).await
+    session::encrypted(&session::rpc_ws_url(url), signer).await
 }
 
 async fn post_json_message(url: &Url, message: &Value) -> Value {
@@ -156,13 +151,7 @@ async fn websocket_upgrade_headers_and_root_fields_cannot_override_an_unknown_en
     use axum::extract::ws::Message as LogicalMessage;
     let (_temp, ctx, admin, _reader, _) = fixture().await;
     let (url, _task) = server(ctx).await;
-    let mut request = url
-        .join("ws/rpc")
-        .unwrap()
-        .to_string()
-        .replacen("http:", "ws:", 1)
-        .into_client_request()
-        .unwrap();
+    let mut request = session::rpc_ws_url(&url).into_client_request().unwrap();
     request.headers_mut().insert(
         AUTH_SIG_HEADER,
         SignatureHeader::sign(&admin, b"", "127.0.0.1")
