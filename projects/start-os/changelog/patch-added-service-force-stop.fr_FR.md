@@ -1,1 +1,0 @@
-- **Forcez l’arrêt des services bloqués pendant leur arrêt.** Une confirmation avertit du risque de perte de données et d’un état incohérent du service. Le bouton apparaît après 30 secondes par défaut, délai configurable avec `force-stop-delay-seconds` dans `config.yaml`.
