@@ -2,5 +2,6 @@
 release-notes: true
 ---
 
-- Prevent subcontainer images from redirecting hostname and hosts-file setup into host files through filesystem symlinks.
+- Confine subcontainer overlay creation, mount cleanup, and hostname/hosts writes to the intended container filesystem when images or runtimes replace paths.
+- Prevent image-supplied process metadata from redirecting subcontainer cleanup; namespace-init signals use pinned process handles.
 - Reject symlink targets when the host connects or reconnects to a service's runtime socket.

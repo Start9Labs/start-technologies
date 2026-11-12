@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use std::path::{Path, PathBuf};
 
 use imbl_value::InternedString;
@@ -9,7 +10,9 @@ use crate::disk::mount::guard::GenericMountGuard;
 use crate::rpc_continuations::Guid;
 use crate::service::effects::prelude::*;
 use crate::service::persistent_container::Subcontainer;
-use crate::util::directory::{create_directory_at, open_directory_nofollow};
+use crate::util::directory::{
+    create_directory_at, create_directory_beneath, open_directory_nofollow,
+};
 use crate::util::io::write_file_owned_at;
 
 fn chown_directory(directory: &std::fs::File) -> Result<(), Error> {
@@ -20,6 +23,8 @@ fn chown_directory(directory: &std::fs::File) -> Result<(), Error> {
     )
     .with_kind(ErrorKind::Filesystem)
 }
+
+const SUBCONTAINER_DIR: &str = "/media/startos/subcontainers";
 
 pub const NVIDIA_OVERLAY_PATH: &str = "/var/tmp/startos/nvidia-overlay";
 pub const NVIDIA_OVERLAY_DEBIAN: &str = "/var/tmp/startos/nvidia-overlay/debian";
@@ -59,20 +64,9 @@ pub async fn destroy_subcontainer_fs(
         .remove(&guid)
     {
         #[cfg(target_os = "linux")]
-        if tokio::fs::metadata(overlay.overlay.path().join("proc/1"))
-            .await
-            .is_ok()
         {
-            let procfs = context
-                .seed
-                .persistent_container
-                .lxc_container
-                .get()
-                .or_not_found("lxc container")?
-                .rootfs_dir()
-                .join("proc");
-            let overlay_path = overlay.overlay.path().to_owned();
-            tokio::task::spawn_blocking(move || sync::kill_init(&procfs, &overlay_path))
+            let root = std::fs::File::open(overlay.overlay.path())?;
+            tokio::task::spawn_blocking(move || sync::kill_init(&root))
                 .await
                 .with_kind(ErrorKind::Unknown)??;
         }
@@ -121,16 +115,11 @@ pub async fn create_subcontainer_fs(
                 )
             })?;
         let container_guid = &lxc_container.guid;
-        let rootfs_dir = lxc_container.rootfs_dir();
-        let mountpoint = rootfs_dir
-            .join("media/startos/subcontainers")
-            .join(guid.as_ref());
-        tokio::fs::create_dir_all(&mountpoint).await?;
-        let container_mountpoint = Path::new("/").join(
-            mountpoint
-                .strip_prefix(rootfs_dir)
-                .with_kind(ErrorKind::Incoherent)?,
-        );
+        let rootfs = open_directory_nofollow(lxc_container.rootfs_dir())?;
+        let parent =
+            create_directory_beneath(&rootfs, Path::new(SUBCONTAINER_DIR.trim_start_matches('/')))?;
+        let entry_name = CString::new(guid.as_ref()).unwrap();
+        let container_mountpoint = Path::new(SUBCONTAINER_DIR).join(guid.as_ref());
         tracing::info!("Mounting overlay {guid} for {image_id}");
 
         let nvidia_overlay: &[&str] = if context
@@ -156,7 +145,9 @@ pub async fn create_subcontainer_fs(
             &[]
         };
 
-        let overlay = OverlayGuard::mount_layers(&[], image, nvidia_overlay, &mountpoint).await?;
+        let overlay =
+            OverlayGuard::mount_layers_at(&[], image, nvidia_overlay, &parent, &entry_name).await?;
+        let root = std::fs::File::open(overlay.path())?;
         let proxy_mounts = if context
             .seed
             .persistent_container
@@ -172,7 +163,7 @@ pub async fn create_subcontainer_fs(
                     .ctx
                     .net_controller
                     .http_proxy
-                    .mount_provider(&context.seed.id, &mountpoint)
+                    .mount_provider_at(&context.seed.id, &root)
                     .await?,
             )
         } else {
@@ -186,7 +177,6 @@ pub async fn create_subcontainer_fs(
             image_id: image_id.clone(),
         };
 
-        let root = open_directory_nofollow(&mountpoint)?;
         chown_directory(&root)?;
         let (etc, created) = create_directory_at(&root, c"etc")?;
         if created {

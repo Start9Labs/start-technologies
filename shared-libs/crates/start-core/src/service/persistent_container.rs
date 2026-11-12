@@ -16,7 +16,7 @@ use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::idmapped::{IdMap, IdMapped};
 use crate::disk::mount::filesystem::loop_dev::LoopDev;
-use crate::disk::mount::filesystem::overlayfs::OverlayGuard;
+use crate::disk::mount::filesystem::overlayfs::AnchoredOverlayGuard;
 use crate::disk::mount::filesystem::{MountType, ReadOnly};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
 use crate::lxc::{HOST_RPC_SERVER_SOCKET, LxcConfig, LxcContainer};
@@ -94,7 +94,7 @@ pub struct Subcontainer {
     pub(super) name: InternedString,
     pub(super) image_id: ImageId,
     pub(super) proxy_mounts: Option<crate::net::http_proxy::HttpProxyMounts>,
-    pub(super) overlay: OverlayGuard<Arc<MountGuard>>,
+    pub(super) overlay: AnchoredOverlayGuard<Arc<MountGuard>>,
 }
 
 impl Subcontainer {
@@ -103,7 +103,7 @@ impl Subcontainer {
         if let Some(mounts) = self.proxy_mounts {
             errors.handle(mounts.unmount().await);
         }
-        errors.handle(self.overlay.unmount(true).await);
+        errors.handle(self.overlay.unmount().await);
         errors.into_result()
     }
 }

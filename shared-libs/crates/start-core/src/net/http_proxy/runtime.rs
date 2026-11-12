@@ -96,13 +96,21 @@ impl HttpProxySockets {
         provider: &PackageId,
         rootfs: &Path,
     ) -> Result<HttpProxyMounts, Error> {
+        let rootfs = open_directory_nofollow(rootfs)?;
+        self.mount_provider_at(provider, &rootfs).await
+    }
+
+    pub async fn mount_provider_at(
+        &self,
+        provider: &PackageId,
+        rootfs: &std::fs::File,
+    ) -> Result<HttpProxyMounts, Error> {
         let root = self.prepare_provider(provider).await?;
         let ingress = root.join("in");
         std::os::unix::fs::chown(&ingress, Some(100000), Some(100000))?;
         tokio::fs::set_permissions(&ingress, std::fs::Permissions::from_mode(0o770)).await?;
-        let rootfs = open_directory_nofollow(rootfs)?;
         let target = create_directory_beneath(
-            &rootfs,
+            rootfs,
             Path::new(CONTAINER_SOCKET_DIR.trim_start_matches('/')),
         )?;
         let outer = bind_directory_at(&root, &target, true)?;

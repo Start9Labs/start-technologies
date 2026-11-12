@@ -56,12 +56,26 @@ pub async fn bind<P0: AsRef<Path>, P1: AsRef<Path>>(
 /// [`sync_directory`] for those.
 #[instrument(skip_all)]
 pub async fn sync_filesystem<P: AsRef<Path>>(path: P) -> Result<(), Error> {
-    tokio::process::Command::new("sync")
-        .arg("-f")
-        .arg(path.as_ref())
+    filesystem_sync_command(path.as_ref())
         .invoke(crate::ErrorKind::Filesystem)
         .await?;
     Ok(())
+}
+
+/// Flushes a pinned filesystem; the child inherits its own descriptor reference.
+pub async fn sync_filesystem_at(directory: &std::fs::File) -> Result<(), Error> {
+    let file = directory.try_clone().with_kind(ErrorKind::Filesystem)?;
+    filesystem_sync_command(Path::new("/proc/self/fd/0"))
+        .stdin(file)
+        .invoke(ErrorKind::Filesystem)
+        .await?;
+    Ok(())
+}
+
+fn filesystem_sync_command(path: &Path) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new("sync");
+    command.arg("-f").arg(path);
+    command
 }
 
 /// Flush the directory at `path` via `fsync(2)` (`sync` with no flag).

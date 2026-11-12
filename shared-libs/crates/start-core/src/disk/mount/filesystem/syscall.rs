@@ -1,7 +1,7 @@
-//! Detached Linux bind mounts with optional idmaps and read-only attributes.
+//! Detached Linux mounts with optional idmaps and read-only attributes.
 //! `open_tree_attr` requires Linux 6.15+ for cloning an already-idmapped source.
 
-use std::ffi::{CString, OsString};
+use std::ffi::{CStr, CString, OsString};
 use std::io;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
@@ -20,6 +20,10 @@ use crate::prelude::*;
 use crate::util::directory::descriptor_path;
 
 // libc's musl targets omit these linux/mount.h flags.
+const FSOPEN_CLOEXEC: libc::c_uint = 0x00000001;
+const FSMOUNT_CLOEXEC: libc::c_uint = 0x00000001;
+const FSCONFIG_SET_STRING: libc::c_uint = 1;
+const FSCONFIG_CMD_CREATE: libc::c_uint = 6;
 const MOVE_MOUNT_F_EMPTY_PATH: libc::c_uint = 0x00000004;
 const MOVE_MOUNT_T_EMPTY_PATH: libc::c_uint = 0x00000040;
 const MOVE_MOUNT_BENEATH: libc::c_uint = 0x00000200;
@@ -168,6 +172,57 @@ pub struct DetachedMount {
     fd: OwnedFd,
 }
 impl DetachedMount {
+    /// Creates a filesystem without attaching it to a host pathname.
+    pub fn create<'a>(
+        filesystem: &CStr,
+        options: impl IntoIterator<Item = (&'a CStr, &'a CStr)>,
+    ) -> Result<Self, Error> {
+        let context = fd_from_raw(
+            unsafe { libc::syscall(libc::SYS_fsopen, filesystem.as_ptr(), FSOPEN_CLOEXEC) },
+            "fsopen",
+        )?;
+        for (key, value) in options {
+            check(
+                unsafe {
+                    libc::syscall(
+                        libc::SYS_fsconfig,
+                        context.as_raw_fd(),
+                        FSCONFIG_SET_STRING,
+                        key.as_ptr(),
+                        value.as_ptr(),
+                        0_i32,
+                    )
+                },
+                "fsconfig option",
+            )?;
+        }
+        check(
+            unsafe {
+                libc::syscall(
+                    libc::SYS_fsconfig,
+                    context.as_raw_fd(),
+                    FSCONFIG_CMD_CREATE,
+                    std::ptr::null::<libc::c_char>(),
+                    std::ptr::null::<libc::c_void>(),
+                    0_i32,
+                )
+            },
+            "fsconfig create",
+        )?;
+        let fd = fd_from_raw(
+            unsafe {
+                libc::syscall(
+                    libc::SYS_fsmount,
+                    context.as_raw_fd(),
+                    FSMOUNT_CLOEXEC,
+                    0_u32,
+                )
+            },
+            "fsmount",
+        )?;
+        Ok(Self::from_fd(fd))
+    }
+
     pub fn from_fd(fd: OwnedFd) -> Self {
         Self { fd }
     }

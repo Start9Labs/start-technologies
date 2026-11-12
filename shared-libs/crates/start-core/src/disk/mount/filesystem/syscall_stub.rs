@@ -5,6 +5,7 @@
 //! off Linux. These stubs are signature-compatible and error at runtime;
 //! `start-cli` never invokes the mount layer, so they should never be called.
 
+use std::ffi::CStr;
 use std::os::fd::{BorrowedFd, OwnedFd};
 use std::path::Path;
 
@@ -32,6 +33,13 @@ pub fn open_tree_attr_idmap(
 
 pub struct DetachedMount;
 impl DetachedMount {
+    pub fn create<'a>(
+        _filesystem: &CStr,
+        _options: impl IntoIterator<Item = (&'a CStr, &'a CStr)>,
+    ) -> Result<Self, Error> {
+        unsupported()
+    }
+
     pub fn from_fd(_fd: OwnedFd) -> Self {
         Self
     }
