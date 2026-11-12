@@ -1,0 +1,48 @@
+#!/bin/sh
+
+case "${1-}" in
+    prereqs) exit 0 ;;
+esac
+
+set -eu
+. /usr/share/initramfs-tools/hook-functions
+
+# The generation owner installs this hook only in its private configuration.
+copy_exec /usr/bin/startbox
+copy_exec /usr/sbin/veritysetup
+copy_exec /usr/bin/tpm2
+
+files=$(dpkg-query -L "tpm2-tools:$(dpkg --print-architecture)")
+aliases=0
+for file in $files; do
+    case "$file" in
+        /usr/bin/tpm2_*)
+            if [ ! -L "$file" ] || [ "$(readlink -f "$file")" != /usr/bin/tpm2 ]; then
+                printf 'Unsupported TPM2 alias: %s\n' "$file" >&2
+                exit 1
+            fi
+            copy_exec "$file"
+            aliases=$((aliases + 1))
+            ;;
+    esac
+done
+if [ "$aliases" = 0 ]; then
+    printf 'Missing TPM2 package aliases\n' >&2
+    exit 1
+fi
+
+# TCTI providers are loaded dynamically, outside copy_exec's dependency walk.
+files=$(dpkg-query -L "libtss2-tcti-device0t64:$(dpkg --print-architecture)")
+providers=0
+for file in $files; do
+    case "$file" in
+        */libtss2-tcti-device.so.0)
+            copy_exec "$file"
+            providers=$((providers + 1))
+            ;;
+    esac
+done
+if [ "$providers" != 1 ]; then
+    printf 'Expected one device TCTI provider\n' >&2
+    exit 1
+fi
