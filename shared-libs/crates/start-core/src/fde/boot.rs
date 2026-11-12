@@ -1,4 +1,4 @@
-//! Boot inputs pinned by the signed UKI and generation admission before PCR 15.
+//! Signed filesystem inputs and boot-policy admission pinned by the UKI.
 //!
 //! Descriptors belong inside the authenticated initramfs. Public policy files
 //! cannot replace these keys or select the boot mode. Selection does not stabilize
@@ -148,6 +148,33 @@ impl Descriptor {
         Ok(None)
     }
 
+    /// Mounts authenticated public build providers independently of live TPM state.
+    /// Source admission grants neither bootstrap release nor configuration-provider authority.
+    pub async fn mount_source(
+        &self,
+        images: &Path,
+        config: &Path,
+        mountpoint: &Path,
+    ) -> Result<Option<super::source::BuildSource>, Error> {
+        let rootfs = self.rootfs_path(images)?;
+        let Some(generation) =
+            os_overlay::select_latest(&generation_store(config), &rootfs, &self.overlay_key)
+                .await?
+        else {
+            return Ok(None);
+        };
+        let verified = generation
+            .mount_rootfs(&rootfs, &mountpoint.join("rootfs"))
+            .await?;
+        super::source::BuildSource::mount(
+            verified,
+            &mountpoint.join("runtime"),
+            &mountpoint.join("source"),
+        )
+        .await
+        .map(Some)
+    }
+
     /// Opens and fully reads both signed mappings before exposing read-only mounts.
     /// The mount directory is private to the boot owner; dependent mounts must end first.
     pub async fn mount(
@@ -160,14 +187,8 @@ impl Descriptor {
             return Ok(None);
         };
         let rootfs = generation
-            .manifest()
-            .rootfs_verity
-            .mount(
-                &self.rootfs_path(images)?,
-                &generation.path().join(os_overlay::ROOTFS_VERITY_FILE),
-                &format!("startos-fde-root-{}", Guid::new()),
-                &mountpoint.join("rootfs"),
-            )
+            .generation
+            .mount_rootfs(&self.rootfs_path(images)?, &mountpoint.join("rootfs"))
             .await?;
         let overlay = generation
             .manifest()
@@ -279,6 +300,16 @@ impl MountedGeneration {
         let rootfs = self.rootfs.unmount().await;
         overlay?;
         rootfs
+    }
+}
+
+impl GenericMountGuard for MountedGeneration {
+    fn path(&self) -> &Path {
+        self.rootfs()
+    }
+
+    async fn unmount(self) -> Result<(), Error> {
+        MountedGeneration::unmount(self).await
     }
 }
 
@@ -480,7 +511,7 @@ mod tests {
         let raw = temp.path().join("raw");
         std::fs::create_dir(&images).unwrap();
         std::fs::create_dir_all(raw.join("usr/bin")).unwrap();
-        std::fs::write(raw.join("usr/bin/node"), b"unsigned working provider").unwrap();
+        std::fs::write(raw.join("usr/bin/node"), b"configuration provider override").unwrap();
         let rootfs = images.join("image.rootfs");
         std::fs::copy(&image, &rootfs).unwrap();
         let key = crate::util::crypto::gen_nistp256().unwrap();
@@ -504,7 +535,7 @@ mod tests {
             .await
             .unwrap();
         descriptor.stage_profile(&prepared, &profile).await.unwrap();
-        prepared.publish().await.unwrap();
+        let generation = prepared.publish().await.unwrap();
         let mappings = boot_mappings();
         let mounted_at = temp.path().join("verified");
         let mounted = descriptor
@@ -512,11 +543,31 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let runtime = temp.path().join("runtime");
-        let root = temp.path().join("source");
+        mounted.measure().await.unwrap();
+        mounted.unmount().await.unwrap();
+        let measured = tpm::read_measurements().await.unwrap();
+        assert_ne!(measured.files, [0; 32]);
+        assert!(descriptor.select(&images, &config).await.is_err());
+        std::fs::remove_dir_all(generation.join(POLICIES_DIR)).unwrap();
+        let wrong = Descriptor::new(
+            "image.rootfs".into(),
+            public(&authority),
+            public(&authority),
+        )
+        .unwrap();
+        assert!(
+            wrong
+                .mount_source(&images, &config, &mounted_at)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let runtime = mounted_at.join("runtime");
+        let root = mounted_at.join("source");
         std::fs::write(&root, b"occupied").unwrap();
         assert!(
-            super::super::source::BuildSource::mount(mounted, &runtime, &root)
+            descriptor
+                .mount_source(&images, &config, &mounted_at)
                 .await
                 .is_err()
         );
@@ -527,14 +578,12 @@ mod tests {
                 .unwrap()
         );
         std::fs::remove_file(&root).unwrap();
-        let mounted = descriptor
-            .mount(&images, &config, &mounted_at)
+        let source = descriptor
+            .mount_source(&images, &config, &mounted_at)
             .await
             .unwrap()
             .unwrap();
-        let source = super::super::source::BuildSource::mount(mounted, &runtime, &root)
-            .await
-            .unwrap();
+        assert_eq!(boot_mappings().len(), mappings.len() + 1);
         assert!(std::fs::write(source.path().join("unexpected"), b"write").is_err());
         let output = tokio::process::Command::new("chroot")
             .arg(source.path()).args(["/usr/bin/node", "--input-type=module", "-e", "import {writeFileSync} from 'node:fs'; try { writeFileSync('/unexpected', 'write'); process.exit(9); } catch (e) { if (e.code !== 'EROFS') throw e; } console.log(process.version);"])
@@ -553,7 +602,22 @@ mod tests {
                 .await
                 .unwrap()
         );
-        assert_eq!(tpm::read_measurements().await.unwrap().files, [0; 32]);
+        assert_eq!(tpm::read_measurements().await.unwrap(), measured);
+        use std::io::Write;
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&rootfs)
+            .unwrap()
+            .write_all(b"tamper")
+            .unwrap();
+        assert!(
+            descriptor
+                .mount_source(&images, &config, &mounted_at)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(boot_mappings(), mappings);
     }
 
     #[cfg(target_os = "linux")]

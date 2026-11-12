@@ -4,30 +4,30 @@ use super::boot::MountedGeneration;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::overlayfs::OverlayFs;
 use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
-use crate::disk::mount::guard::MountGuard;
+use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
 use crate::prelude::*;
 
 /// Running-root writes and working configuration edits have disjoint RAM uppers.
 pub(super) struct RootComposition {
-    layers: VerifiedMounts,
+    layers: VerifiedMounts<MountedGeneration>,
     working_upper: PathBuf,
 }
 
 /// Verified lower mappings outlive every dependent mount.
-pub(super) struct VerifiedMounts {
+pub(super) struct VerifiedMounts<L: GenericMountGuard> {
     mounts: Vec<MountGuard>,
-    lower: Option<MountedGeneration>,
+    lower: Option<L>,
 }
 
-impl VerifiedMounts {
-    pub fn new(lower: MountedGeneration) -> Self {
+impl<L: GenericMountGuard> VerifiedMounts<L> {
+    pub fn new(lower: L) -> Self {
         Self {
             mounts: Vec::new(),
             lower: Some(lower),
         }
     }
 
-    pub fn lower(&self) -> &MountedGeneration {
+    pub fn lower(&self) -> &L {
         self.lower.as_ref().unwrap()
     }
 
@@ -35,19 +35,21 @@ impl VerifiedMounts {
         self.mounts.push(mount);
     }
 
+    pub async fn unmount(mut self) -> Result<(), Error> {
+        teardown(std::mem::take(&mut self.mounts), self.lower.take().unwrap()).await
+    }
+}
+
+impl VerifiedMounts<MountedGeneration> {
     pub fn persist(mut self) {
         for mount in std::mem::take(&mut self.mounts) {
             mount.persist();
         }
         self.lower.take().unwrap().persist();
     }
-
-    pub async fn unmount(mut self) -> Result<(), Error> {
-        teardown(std::mem::take(&mut self.mounts), self.lower.take().unwrap()).await
-    }
 }
 
-async fn teardown(mut mounts: Vec<MountGuard>, lower: MountedGeneration) -> Result<(), Error> {
+async fn teardown(mut mounts: Vec<MountGuard>, lower: impl GenericMountGuard) -> Result<(), Error> {
     let mut result = Ok(());
     while let Some(mount) = mounts.pop() {
         if let Err(error) = mount.unmount(false).await {
@@ -154,7 +156,7 @@ impl RootComposition {
     }
 }
 
-impl Drop for VerifiedMounts {
+impl<L: GenericMountGuard> Drop for VerifiedMounts<L> {
     fn drop(&mut self) {
         if let Some(lower) = self.lower.take() {
             let mounts = std::mem::take(&mut self.mounts);

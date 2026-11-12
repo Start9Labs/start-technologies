@@ -626,6 +626,23 @@ impl VerifiedGeneration {
     pub fn overlay_path(&self) -> PathBuf {
         self.path.join(OVERLAY_FILE)
     }
+
+    /// Opens the authenticated public image with retained read-only verity protection.
+    pub async fn mount_rootfs(
+        &self,
+        rootfs: &Path,
+        mountpoint: &Path,
+    ) -> Result<VerityMount, Error> {
+        self.manifest
+            .rootfs_verity
+            .mount(
+                rootfs,
+                &self.path.join(ROOTFS_VERITY_FILE),
+                &format!("startos-fde-root-{}", Guid::new()),
+                mountpoint,
+            )
+            .await
+    }
 }
 
 /// Selects the newest valid complete generation by directory modification time.

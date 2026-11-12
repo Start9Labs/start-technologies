@@ -1,17 +1,17 @@
 use std::path::{Path, PathBuf};
 
-use super::boot::MountedGeneration;
 use super::root::VerifiedMounts;
 use crate::disk::mount::filesystem::ReadOnly;
 use crate::disk::mount::filesystem::loop_dev::LoopDev;
 use crate::disk::mount::filesystem::overlayfs::OverlayFs;
-use crate::disk::mount::guard::MountGuard;
+use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
+use crate::os_overlay::VerityMount;
 use crate::prelude::*;
 
 /// Read-only public providers with the packaged build runtime as fallback.
-/// Verified mappings outlive the runtime image and composed source mounts.
+/// The signed public-rootfs mapping outlives the runtime and source mounts.
 pub struct BuildSource {
-    layers: VerifiedMounts,
+    layers: VerifiedMounts<VerityMount>,
     path: PathBuf,
 }
 
@@ -32,14 +32,14 @@ async fn runtime_image(public: &Path) -> Result<PathBuf, Error> {
 }
 
 impl BuildSource {
-    pub async fn mount(
-        verified: MountedGeneration,
+    pub(super) async fn mount(
+        verified: VerityMount,
         runtime: &Path,
         root: &Path,
     ) -> Result<Self, Error> {
         let mut layers = VerifiedMounts::new(verified);
         let result = async {
-            let public = layers.lower().rootfs().to_owned();
+            let public = layers.lower().path().to_owned();
             layers.push(
                 MountGuard::mount(
                     &LoopDev::new(runtime_image(&public).await?, 0, 0),
