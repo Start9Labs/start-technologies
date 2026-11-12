@@ -299,7 +299,10 @@ fn find_registration_preserves_existing_targets_and_can_rediscover_removed_backu
     let root = SharedVolumeSource::Disk {
         logicalname: "/dev/disk/by-uuid/backup-filesystem".into(),
         path: PathBuf::new(),
-        label: Some("Backup drive".into()),
+        drive: Some(SharedVolumeDrive {
+            label: Some("Backup drive".into()),
+            ..Default::default()
+        }),
     };
     let mut nested = root.clone();
     if let SharedVolumeSource::Disk { path, .. } = &mut nested {
