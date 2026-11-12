@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::ffi::OsString;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -24,6 +25,26 @@ use sha2::Digest;
 use super::IntoDoubleEndedIterator;
 use crate::prelude::*;
 use crate::util::{Apply, FromStrParser};
+
+/// Accepts strings and Serde's native byte-preserving argument representation.
+pub fn deserialize_os_strings<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Vec<OsString>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Argument {
+        Text(String),
+        Native(OsString),
+    }
+    Vec::<Argument>::deserialize(deserializer).map(|arguments| {
+        IntoIterator::into_iter(arguments)
+            .map(|argument| match argument {
+                Argument::Text(text) => text.into(),
+                Argument::Native(native) => native,
+            })
+            .collect()
+    })
+}
 
 pub fn const_true() -> bool {
     true

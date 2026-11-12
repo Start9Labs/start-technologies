@@ -2127,6 +2127,9 @@ export const ApplyWithPathParams: z.ZodIntersection<
   })
 export const AttachParams: z.ZodObject<{
   id: typeof PackageId
+  /**
+   * Accepts strings and legacy platform arguments without losing bytes.
+   */
   command: z.ZodArray<z.ZodString>
   tty: z.ZodBoolean
   stderrTty: z.ZodBoolean
@@ -2152,7 +2155,13 @@ export const AttachParams: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   id: PackageId,
-  command: z.array(z.string()),
+  /**
+   * Accepts strings and legacy platform arguments without losing bytes.
+   */
+  command: z.array(z.string()).meta({
+    description:
+      'Accepts strings and legacy platform arguments without losing bytes.',
+  }),
   tty: z.boolean(),
   stderrTty: z.boolean(),
   ptySize: wire(TermSize.nullable().optional(), TermSize.nullable()),

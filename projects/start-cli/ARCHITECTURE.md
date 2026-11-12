@@ -71,6 +71,8 @@ old/new fingerprints and verification advice. Storage/output failures never chan
 RPC result or command status. This registry-administration policy does not apply to
 normal OS/Tunnel/WRT calls or to the OS's registry-cache connections.
 
+Native terminal attach keeps its bidirectional GUID protocol. `service::attach_output` requires the explicit four-byte big-endian exit result; a Close or transport EOF cannot substitute for it. The existing blocking stdin worker polls its input and a cancellation socket; dropping the peer and bounded receiver releases idle reads and blocked sends before exit. Raw mode is restored before process exit. JSON attach arguments accept strings and legacy native encodings through shared Serde decoding; native CLI emission preserves non-UTF-8 bytes.
+
 ### Configuration
 
 `ClientConfig` (in `start-core::context::config`) is the single config type — the workspace

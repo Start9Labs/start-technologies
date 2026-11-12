@@ -53,8 +53,14 @@ use crate::{ActionId, CAP_1_KiB, DATA_DIR, ImageId, PackageId};
 
 pub mod action;
 pub mod action_files;
+#[cfg(test)]
+mod attach_cli_tests;
 mod attach_environment;
 mod attach_input;
+mod attach_output;
+mod attach_stdin;
+#[cfg(test)]
+mod attach_tests;
 pub mod cli;
 pub mod effects;
 pub mod exec;
@@ -927,7 +933,9 @@ impl std::fmt::Display for SubcontainerInfo {
 #[serde(rename_all = "camelCase")]
 pub struct AttachParams {
     pub id: PackageId,
+    /// Accepts strings and legacy platform arguments without losing bytes.
     #[visit(opaque, wire = "Vec<String>", type_attributes(visit::wire))]
+    #[serde(deserialize_with = "crate::util::serde::deserialize_os_strings")]
     pub command: Vec<OsString>,
     pub tty: bool,
     pub stderr_tty: bool,
@@ -1154,8 +1162,6 @@ pub async fn cli_attach(
         ..
     }: HandlerArgs<CliContext, CliAttachParams>,
 ) -> Result<(), Error> {
-    use std::io::Write;
-
     use tokio_tungstenite::tungstenite::Message;
 
     let stdin = std::io::stdin();
@@ -1205,20 +1211,11 @@ pub async fn cli_attach(
     let mut ws = context.ws_continuation::<RpcContext>(guid).await?;
 
     print!("\r");
-    let (kill, thread_kill) = tokio::sync::oneshot::channel();
+    let (stdin_cancel, thread_cancel) = std::os::unix::net::UnixStream::pair()?;
     let (thread_send, recv) = tokio::sync::mpsc::channel(4 * CAP_1_KiB);
     let stdin_thread: NonDetachingJoinHandle<()> = tokio::task::spawn_blocking(move || {
-        use std::io::Read;
-        let mut stdin = stdin.lock().bytes();
-
-        while thread_kill.is_empty() {
-            if let Some(b) = stdin.next() {
-                if let Err(_) = thread_send.blocking_send(b) {
-                    break;
-                }
-            } else {
-                break;
-            }
+        if let Err(error) = attach_stdin::forward(stdin, thread_cancel, &thread_send) {
+            let _ = thread_send.blocking_send(Err(error));
         }
     })
     .into();
@@ -1260,58 +1257,18 @@ pub async fn cli_attach(
             }
             msg = ws.try_next().fuse() => {
                 if let Some(msg) = msg.with_kind(ErrorKind::Network)? {
-                    match msg {
-                        Message::Text(out_ty) => {
-                            current_out = out_ty;
-                        }
-                        Message::Binary(data) => {
-                            match &*current_out {
-                                "stdout" => {
-                                    if let Some(stdout) = &mut stdout {
-                                        stdout.write_all(&data)?;
-                                        stdout.flush()?;
-                                    }
-                                }
-                                "stderr" => {
-                                    if let Some(stderr) = &mut stderr {
-                                        stderr.write_all(&data)?;
-                                        stderr.flush()?;
-                                    }
-                                }
-                                "close-stdout" => {
-                                    stdout.take();
-                                }
-                                "close-stderr" => {
-                                    stderr.take();
-                                }
-                                "exit" => {
-                                    if data.len() != 4 {
-                                        return Err(Error::new(
-                                            eyre!("{}", t!("service.mod.invalid-byte-length-for-exit-code", length = data.len())),
-                                            ErrorKind::InvalidRequest
-                                        ));
-                                    }
-                                    let mut exit_buf = [0u8; 4];
-                                    exit_buf.clone_from_slice(&data);
-                                    let code = i32::from_be_bytes(exit_buf);
-                                    drop(raw);
-                                    std::process::exit(code);
-                                }
-                                _ => (),
-                            }
-                        }
-                        Message::Close(frame) => {
-                            break crate::util::net::tungstenite::close_result(frame);
-                        }
-                        _ => ()
+                    if let Some(code) = attach_output::handle(msg, &mut current_out, &mut stdout, &mut stderr)? {
+                        break Ok::<_, Error>(code);
                     }
                 } else {
-                    break Err(Error::new(std::io::Error::from(std::io::ErrorKind::UnexpectedEof), ErrorKind::Network));
+                    break Err(crate::util::net::tungstenite::unexpected_eof());
                 }
             }
         }
     };
-    kill.send(()).ok();
+    drop(stdin);
+    drop(stdin_cancel);
     stdin_thread.wait_for_abort().await.log_err();
-    result
+    drop(raw);
+    std::process::exit(result?);
 }

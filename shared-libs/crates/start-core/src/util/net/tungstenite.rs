@@ -57,7 +57,7 @@ pub fn native_messages(
         })
 }
 
-fn unexpected_eof() -> Error {
+pub(crate) fn unexpected_eof() -> Error {
     Error::new(
         std::io::Error::from(std::io::ErrorKind::UnexpectedEof),
         ErrorKind::Network,

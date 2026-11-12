@@ -3041,7 +3041,11 @@
           "type": "object",
           "properties": {
             "id": { "$ref": "#/$defs/PackageId" },
-            "command": { "type": "array", "items": { "type": "string" } },
+            "command": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Accepts strings and legacy platform arguments without losing bytes."
+            },
             "tty": { "type": "boolean" },
             "stderrTty": { "type": "boolean" },
             "ptySize": {
@@ -3106,7 +3110,11 @@
       "type": "object",
       "properties": {
         "id": { "$ref": "#/$defs/PackageId" },
-        "command": { "type": "array", "items": { "type": "string" } },
+        "command": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Accepts strings and legacy platform arguments without losing bytes."
+        },
         "tty": { "type": "boolean" },
         "stderrTty": { "type": "boolean" },
         "ptySize": {

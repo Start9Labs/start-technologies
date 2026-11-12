@@ -100,6 +100,8 @@ Successful observation permits the wizard's separate `setup.complete` finalizati
 
 `system::observe_metrics` snapshots and marks the existing sensor `Watch<Option<Metrics>>`, then observes its coalesced available updates. Disposing an observation releases its clone, not the sensor producer. `server.metrics.follow` exposes that snapshot plus typed Metrics items/unit terminal or an ordinary GUID; typed and ordinary observations retain existing live revocation owners. Sensor shutdown does not promise a terminal before process replacement. Logs and metrics share `rpc_continuations::forward_json_stream` for legacy GUID payload forwarding; callers retain their result-close/logging policies. Finite native metrics reads remain ordinary.
 
+Native `package.attach` retains its bidirectional continuation protocol. `service::attach_output` requires an explicit four-byte big-endian exit value; normal Close/EOF does not establish process success. Its existing stdin worker and bounded queue are released through a per-attach cancellation socket pair without changing stdin's flags or adding a polling timer. `util::serde::deserialize_os_strings` accepts declared JSON strings and existing native argument encodings through Serde's own decoder; CLI byte-preserving emission remains compatible.
+
 ## Action file transfers
 
 `ServiceSeed.action_files` owns transient prepared descriptors and completed upload receipts; `RpcContinuations` owns their single-use HTTP endpoints. The store scopes IDs to the service and procedure event, with expiry independent of SDK form caching. Successful uploads remain service-owned. Returning a File result arms its requested download cleanup after action/task processing succeeds. Service teardown cancels active transfers.
