@@ -165,10 +165,7 @@ import { getMenu } from 'src/app/utils/system-utilities'
 
     .link tui-icon.warning {
       font-size: 0.75rem;
-      padding: 0.125rem;
-      border-radius: 50%;
       color: var(--tui-status-warning);
-      background: var(--tui-background-base);
     }
   `,
   imports: [
