@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
 
-use rpc_toolkit::{from_fn_async_local, ParentHandler};
+use rpc_toolkit::{from_fn_async_local, HandlerExt, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
     DeviceType, InterfaceProto, NetworkBridgeVlan, NetworkDevice, NetworkInterface,
@@ -9,7 +9,6 @@ use uciedit::openwrt::{
 };
 use uciedit::{dump_all, parse_all, Arena, Configs};
 
-use crate::invoke::Invoke;
 use crate::prelude::*;
 use crate::profiles::{self, ProfileId, ProfileIdOpt};
 use crate::utils::{DeserializeStdin, HandlerExtSerde};
@@ -48,6 +47,22 @@ pub struct Ethernet<Id: Ord = ProfileId> {
     pub ports: BTreeMap<String, Port<Id>>,
 }
 rpc_toolkit::reflect_ts!(impl [Id: Ord] for Ethernet<Id> where [BTreeMap<String, Port<Id>>: rpc_toolkit::ts::TS]);
+
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
+pub struct EthernetInfo {
+    #[serde(flatten)]
+    pub ethernet: Ethernet,
+    /// The USB ports among `ports`.
+    pub usb_ports: BTreeMap<String, crate::usb_ports::UsbPortStatus>,
+}
+rpc_toolkit::reflect_ts!(EthernetInfo);
+
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
+pub struct RemoveUsbPortRequest {
+    /// The port's name among `usb_ports`.
+    pub port: String,
+}
+rpc_toolkit::reflect_ts!(RemoveUsbPortRequest);
 
 /// `ethernet.set` request: the desired port layout. With `preview`, nothing is
 /// applied and the result lists the devices that keep settings for the profile
@@ -95,7 +110,7 @@ pub fn ethernet<C: CtrlContext + Clone>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand(
             "get",
-            from_fn_async_local(get::<C>).with_display_serializable(),
+            from_fn_async_local(info::<C>).with_display_serializable(),
         )
         .subcommand(
             "set",
@@ -105,6 +120,60 @@ pub fn ethernet<C: CtrlContext + Clone>() -> ParentHandler<C> {
             "edit",
             from_fn_async_local(edit::<C>).with_display_serializable(),
         )
+        .subcommand(
+            "remove-usb-port",
+            from_fn_async_local(remove_usb_port::<C>).no_display(),
+        )
+}
+
+#[instrument(skip_all)]
+pub async fn info<C: CtrlContext>(ctx: C) -> Result<EthernetInfo, Error> {
+    let arena = Arena::new();
+    let cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"]).await?;
+    Ok(EthernetInfo {
+        ethernet: get_config(ctx, &cfgs)?,
+        usb_ports: crate::usb_ports::statuses(&crate::usb_ports::Sys::host(), &cfgs)?,
+    })
+}
+
+#[instrument(skip_all)]
+pub async fn remove_usb_port<C: CtrlContext>(
+    ctx: C,
+    DeserializeStdin(req): DeserializeStdin<RemoveUsbPortRequest>,
+) -> Result<(), Error> {
+    let result = crate::usb_ports::remove(
+        &crate::usb_ports::Sys::host(),
+        &ctx.uci_root(),
+        &req.port,
+        ctx.effectful(),
+    )
+    .await;
+    match &result {
+        Ok(()) => {
+            crate::activity::log(
+                "ethernet",
+                "usb-port-removed",
+                true,
+                &format!("Removed {}", req.port),
+                None,
+            );
+            if ctx.effectful() {
+                // netifd would give a later port of the same name this one's VLAN.
+                // A dropped request leaves the reload running.
+                if let Err(e) = tokio::spawn(reload_bridge_ports()).await {
+                    tracing::warn!("Network reload after removing {} failed: {e}", req.port);
+                }
+            }
+        }
+        Err(e) => crate::activity::log(
+            "ethernet",
+            "usb-port-removed",
+            false,
+            &format!("Failed to remove {}", req.port),
+            Some(&e.to_string()),
+        ),
+    }
+    result
 }
 
 #[instrument(skip_all)]
@@ -112,6 +181,33 @@ pub async fn get<C: CtrlContext>(ctx: C) -> Result<Ethernet, Error> {
     let arena = Arena::new();
     let cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"]).await?;
     get_config(ctx, &cfgs)
+}
+
+/// Each bridge port's untagged VLAN; a primary (PVID) entry wins.
+pub(crate) fn port_vlans(cfgs: &Configs) -> Result<HashMap<String, u16>, Error> {
+    let mut vlan_ports = HashMap::new();
+    for section in &cfgs["network"].sections {
+        if let Some(vlan) = section.get_typed::<NetworkBridgeVlan>()? {
+            for port in vlan.ports {
+                match port.tagging {
+                    None | Some(NetworkVlanPortTagging::TAGGED) => (),
+                    Some(NetworkVlanPortTagging::UNTAGGED) => {
+                        vlan_ports.entry(port.port).or_insert((vlan.vlan, false));
+                    }
+                    Some(NetworkVlanPortTagging::PRIMARY) => {
+                        let entry = vlan_ports.entry(port.port).or_insert((vlan.vlan, true));
+                        if !entry.1 {
+                            entry.0 = vlan.vlan;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(vlan_ports
+        .into_iter()
+        .map(|(port, (vlan, _))| (port, vlan))
+        .collect())
 }
 
 fn get_config(ctx: impl CtrlContext, cfgs: &Configs) -> Result<Ethernet, Error> {
@@ -126,24 +222,8 @@ fn get_config(ctx: impl CtrlContext, cfgs: &Configs) -> Result<Ethernet, Error> 
         .into_iter()
         .filter(|p| !p.starts_with("wlan") && !p.starts_with("phy"))
         .collect();
-    let mut vlan_ports = HashMap::new();
+    let vlan_ports = port_vlans(cfgs)?;
     for section in &cfgs["network"].sections {
-        if let Some(vlan) = section.get_typed::<NetworkBridgeVlan>()? {
-            for port in vlan.ports {
-                match port.tagging {
-                    None | Some(NetworkVlanPortTagging::TAGGED) => (),
-                    Some(NetworkVlanPortTagging::UNTAGGED) => {
-                        vlan_ports.entry(port.port).or_insert((vlan.vlan, false));
-                    }
-                    Some(NetworkVlanPortTagging::PRIMARY) => {
-                        let entry = vlan_ports.entry(port.port).or_insert((vlan.vlan, true));
-                        if !entry.1 {
-                            entry.0 = vlan.vlan; // primary overrides untagged
-                        }
-                    }
-                }
-            }
-        }
         if let Some(iface) = section.get_typed::<NetworkInterface>()? {
             if section.name().as_deref() == Some(DEFAULT_WAN_INTERFACE) {
                 wan_port = Some(iface.device.clone());
@@ -158,7 +238,7 @@ fn get_config(ctx: impl CtrlContext, cfgs: &Configs) -> Result<Ethernet, Error> 
                 Port {
                     profile: vlan_ports
                         .get(name)
-                        .and_then(|(tag, _)| lookup.from_vlan(*tag))
+                        .and_then(|tag| lookup.from_vlan(*tag))
                         .cloned(),
                 },
             )
@@ -324,60 +404,58 @@ pub async fn set<C: CtrlContext>(
                     // membership briefly disappears and packets between
                     // WiFi clients and br-lan are dropped — including
                     // this RPC's response if we blocked here.
-                    //
-                    // `network reload` is sufficient and correct: netifd
-                    // reprograms an existing bridge member's VLAN/PVID live
-                    // via RTM_SETLINK/RTM_DELLINK netlink (no teardown, no
-                    // reboot).  odhcpd re-binds automatically (it has a
-                    // `network` procd reload trigger); dnsmasq needs nothing
-                    // because moving eth0 between VLANs doesn't recreate the
-                    // per-profile sub-interfaces it's bound to.
-                    //
-                    // `firewall reload` (NOT `restart`): a port-VLAN move
-                    // doesn't change any zone↔interface binding, so the fw4
-                    // ruleset is still valid and only needs an incremental
-                    // refresh.  `firewall restart` flushes the whole table
-                    // and rebuilds from zero — under the default `input
-                    // REJECT` policy that opens a window where management
-                    // traffic is dropped, which (racing netifd's bridge
-                    // work) intermittently locked out all access until a
-                    // manual reboot.
-                    //
-                    // `wifi reload` AFTER the network reload: the AP netdevs
-                    // are attached to br-lan at runtime by hostapd, not by
-                    // netifd, and they never appear in the `network` bridge
-                    // config — so `network reload` rebuilds the bridge VLAN
-                    // table without them and they lose their VLAN membership.
-                    // Re-running `wifi` re-attaches them so they pick up
-                    // their PVID once the VLANs exist again (this mirrors
-                    // `lan::restart_network_services` and `profiles`).  It
-                    // doesn't flush the firewall or cycle br-lan/ethernet, so
-                    // it can't re-trigger the lockout above; WiFi clients
-                    // just briefly reassociate.  Run sequentially so it
-                    // doesn't race the network reload.
                     tokio::spawn(async move {
-                        let _ = crate::run_quiet_async(
-                            tokio::process::Command::new("/etc/init.d/network").arg("reload"),
-                        )
-                        .await;
-                        let _ = crate::run_quiet_async(
-                            tokio::process::Command::new("/etc/init.d/firewall").arg("reload"),
-                        )
-                        .await;
-                        if let Err(e) = crate::wifi::reload_wifi(
-                            "/etc/config",
-                            crate::wifi::WifiReload::Restart,
-                        )
-                        .await
-                        {
-                            tracing::warn!("WiFi restart failed: {e}");
-                        }
+                        reload_bridge_ports().await;
                         bounce_changed_ports(&old_ports, &ethernet).await;
                     });
                 }
                 return Ok(EthernetSetResult::default());
             }
         }
+    }
+}
+
+/// Applies rewritten LAN bridge ports and VLANs.
+async fn reload_bridge_ports() {
+    // `network reload` is sufficient and correct: netifd
+    // reprograms an existing bridge member's VLAN/PVID live
+    // via RTM_SETLINK/RTM_DELLINK netlink (no teardown, no
+    // reboot).  odhcpd re-binds automatically (it has a
+    // `network` procd reload trigger); dnsmasq needs nothing
+    // because moving eth0 between VLANs doesn't recreate the
+    // per-profile sub-interfaces it's bound to.
+    //
+    // `firewall reload` (NOT `restart`): a port-VLAN move
+    // doesn't change any zone↔interface binding, so the fw4
+    // ruleset is still valid and only needs an incremental
+    // refresh.  `firewall restart` flushes the whole table
+    // and rebuilds from zero — under the default `input
+    // REJECT` policy that opens a window where management
+    // traffic is dropped, which (racing netifd's bridge
+    // work) intermittently locked out all access until a
+    // manual reboot.
+    //
+    // `wifi reload` AFTER the network reload: the AP netdevs
+    // are attached to br-lan at runtime by hostapd, not by
+    // netifd, and they never appear in the `network` bridge
+    // config — so `network reload` rebuilds the bridge VLAN
+    // table without them and they lose their VLAN membership.
+    // Re-running `wifi` re-attaches them so they pick up
+    // their PVID once the VLANs exist again (this mirrors
+    // `lan::restart_network_services` and `profiles`).  It
+    // doesn't flush the firewall or cycle br-lan/ethernet, so
+    // it can't re-trigger the lockout above; WiFi clients
+    // just briefly reassociate.  Run sequentially so it
+    // doesn't race the network reload.
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/network").arg("reload"))
+            .await;
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("reload"))
+            .await;
+    if let Err(e) = crate::wifi::reload_wifi("/etc/config", crate::wifi::WifiReload::Restart).await
+    {
+        tracing::warn!("WiFi restart failed: {e}");
     }
 }
 
@@ -397,26 +475,21 @@ async fn bounce_changed_ports(old_ports: &HashMap<String, Option<u16>>, new_ethe
             to_bounce.push(name.clone());
         }
     }
-    if to_bounce.is_empty() {
+    let sys = crate::usb_ports::Sys::host();
+    let targets: Vec<crate::usb_ports::LinkTarget> = to_bounce
+        .iter()
+        .flat_map(|port| crate::usb_ports::link_targets(&sys, port))
+        .collect();
+    if targets.is_empty() {
         return;
     }
-    // Bring changed ports down
-    for port in &to_bounce {
-        let _ = tokio::process::Command::new("ip")
-            .args(["link", "set", port, "down"])
-            .capture(false)
-            .invoke(ErrorKind::Network.into())
-            .await;
+    for target in &targets {
+        target.set_link(false).await;
     }
     // IEEE 802.3 break_link_timer: hold down for ≥1.5 s
     tokio::time::sleep(Duration::from_secs(PORT_BOUNCE_DOWN_SECS)).await;
-    // Bring them back up
-    for port in &to_bounce {
-        let _ = tokio::process::Command::new("ip")
-            .args(["link", "set", port, "up"])
-            .capture(false)
-            .invoke(ErrorKind::Network.into())
-            .await;
+    for target in &targets {
+        target.set_link(true).await;
     }
 }
 
@@ -443,8 +516,31 @@ fn set_config(
         .cloned()
         .collect();
 
+    let usb_ports = crate::usb_ports::recorded(cfgs)?;
+    if let Some(wan) = ethernet
+        .wan_port
+        .as_ref()
+        .filter(|wan| usb_ports.contains_key(*wan))
+    {
+        return Err(Error::new(
+            eyre!("A USB port cannot be the WAN port: {wan}"),
+            ErrorKind::InvalidValue,
+        ));
+    }
+    let current_vlans = port_vlans(cfgs)?;
+    let mut layout = ethernet.ports.clone();
+    // A layout read before a USB port appeared omits it.
+    for name in bridge.ports.iter().filter(|p| usb_ports.contains_key(*p)) {
+        layout.entry(name.clone()).or_insert_with(|| Port {
+            profile: current_vlans
+                .get(name)
+                .and_then(|vlan| lookup.from_vlan(*vlan))
+                .cloned(),
+        });
+    }
+
     bridge.ports.clear();
-    for (port_name, port) in &ethernet.ports {
+    for (port_name, port) in &layout {
         if Some(port_name) == ethernet.wan_port.as_ref() {
             if port.profile.is_some() {
                 return Err(Error::new(
@@ -554,7 +650,7 @@ fn set_config(
 
     for profile in lookup.list() {
         let mut ports = Vec::new();
-        for (port_name, port) in &ethernet.ports {
+        for (port_name, port) in &layout {
             if Some(port_name) == ethernet.wan_port.as_ref() {
                 continue;
             }
@@ -1778,6 +1874,113 @@ config interface 'guest'
             }
         }
         panic!("br-lan bridge device not found");
+    }
+
+    /// `setup_basic` plus a recorded USB port in the Guest profile.
+    fn setup_usb(dir: &std::path::Path) {
+        setup_basic(dir);
+        let network = std::fs::read_to_string(dir.join("network")).unwrap();
+        let network = network
+            .replacen(
+                "\tlist ports 'eth1'\n",
+                "\tlist ports 'eth1'\n\tlist ports 'usb_eth0'\n",
+                1,
+            )
+            .replace(
+                "\toption vlan '3'\n",
+                "\toption vlan '3'\n\tlist ports 'usb_eth0:u*'\n",
+            );
+        std::fs::write(dir.join("network"), network).unwrap();
+        let mut startwrt = std::fs::read_to_string(dir.join("startwrt")).unwrap();
+        startwrt.push_str("\nconfig usb_port 'usb_eth0'\n\toption path 'c:1.4'\n");
+        std::fs::write(dir.join("startwrt"), startwrt).unwrap();
+    }
+
+    fn admin_port() -> Port<ProfileIdOpt> {
+        Port {
+            profile: Some(ProfileIdOpt {
+                fullname: None,
+                interface: Some("lan".into()),
+                vlan_tag: None,
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn info_lists_usb_ports() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_usb(dir.path());
+        let info = info(TestContext(dir.path().to_path_buf())).await.unwrap();
+        assert_eq!(
+            info.ethernet.ports["usb_eth0"]
+                .profile
+                .as_ref()
+                .map(|p| p.interface.as_str()),
+            Some("guest")
+        );
+        assert_eq!(info.usb_ports.len(), 1);
+        assert!(!info.usb_ports["usb_eth0"].active);
+    }
+
+    #[tokio::test]
+    async fn set_keeps_usb_ports_the_request_omits() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_usb(dir.path());
+        let ctx = TestContext(dir.path().to_path_buf());
+        set(
+            ctx.clone(),
+            DeserializeStdin(Ethernet {
+                wan_ipv6: false,
+                wan_port: None,
+                ports: BTreeMap::from([
+                    ("eth0".into(), admin_port()),
+                    ("eth1".into(), admin_port()),
+                ]),
+            }),
+        )
+        .await
+        .unwrap();
+        let after = get(ctx).await.unwrap();
+        assert_eq!(
+            after.ports["usb_eth0"]
+                .profile
+                .as_ref()
+                .map(|p| p.interface.as_str()),
+            Some("guest")
+        );
+        assert_eq!(
+            after.ports["eth1"]
+                .profile
+                .as_ref()
+                .map(|p| p.interface.as_str()),
+            Some("lan")
+        );
+    }
+
+    #[tokio::test]
+    async fn set_refuses_a_usb_port_as_wan() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_usb(dir.path());
+        let before = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        let err = set(
+            TestContext(dir.path().to_path_buf()),
+            DeserializeStdin(Ethernet {
+                wan_ipv6: false,
+                wan_port: Some("usb_eth0".into()),
+                ports: BTreeMap::from([
+                    ("eth0".into(), admin_port()),
+                    ("eth1".into(), admin_port()),
+                    ("usb_eth0".into(), Port { profile: None }),
+                ]),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("USB port"), "{err}");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("network")).unwrap(),
+            before
+        );
     }
 
     #[tokio::test]

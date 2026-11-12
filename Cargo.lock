@@ -8324,7 +8324,7 @@ dependencies = [
 
 [[package]]
 name = "start-cli"
-version = "2.8.0"
+version = "3.0.0"
 dependencies = [
  "start-core",
  "tracing",
@@ -8582,6 +8582,7 @@ dependencies = [
  "patch-db",
  "pwhash",
  "rand 0.9.5",
+ "regex",
  "reqwest",
  "rpassword",
  "rpc-toolkit",
