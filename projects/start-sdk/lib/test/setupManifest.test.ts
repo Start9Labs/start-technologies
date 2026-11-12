@@ -42,7 +42,7 @@ function manifest(emulateMissing?: boolean) {
 
 test('defaults to the binding transport enforcement compatibility floor', () => {
   expect(buildManifest(versions, manifest(), Dependencies.of()).osVersion).toBe(
-    '0.4.2.1',
+    '0.4.2.2',
   )
 })
 
