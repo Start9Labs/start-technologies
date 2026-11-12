@@ -91,7 +91,7 @@ function getAddressType(h: T.HostnameInfo): string {
   }
 }
 
-/** Saved gateway policies remain editable after gateway/provider removal. */
+/** Retains saved gateway policies after gateway or URL-plugin removal. */
 @Injectable({
   providedIn: 'root',
 })

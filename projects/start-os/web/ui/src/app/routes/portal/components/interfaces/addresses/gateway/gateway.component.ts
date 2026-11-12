@@ -26,7 +26,7 @@ import {
   GatewayAddressGroup,
   MappedServiceInterface,
 } from '../../interface.service'
-import { HttpProxyChainButton } from '../../proxy-chain'
+import { HTTP_PROXY_PLUGINS, HttpProxyChainButton } from '../../proxy-chain'
 import { DomainHealthService } from './domain-health.service'
 import { DOMAIN_TYPE_PICKER, DomainType } from './domain-type-picker.component'
 import { GatewayItemComponent } from './item.component'
@@ -49,7 +49,7 @@ import { GatewayItemComponent } from './item.component'
       <span tuiTitle>{{ gatewayGroup().gatewayName }}</span>
       <aside tuiAccessories>
         @if (value(); as iface) {
-          @if (iface.binding?.options?.proxy) {
+          @if (iface.binding?.options?.proxy && proxyPlugins().length) {
             <button
               [httpProxyChain]="{
                 kind: 'network',
@@ -116,6 +116,8 @@ export class GatewayComponent {
   private readonly api = inject(ApiService)
   private readonly i18n = inject(i18nPipe)
   private readonly domainHealth = inject(DomainHealthService)
+
+  protected readonly proxyPlugins = inject(HTTP_PROXY_PLUGINS)
 
   readonly gatewayGroup = input.required<GatewayAddressGroup>()
   readonly packageId = input('')

@@ -11,7 +11,7 @@ import {
   MappedServiceInterface,
   PluginAddressGroup,
 } from '../../interface.service'
-import { HttpProxyChainButton } from '../../proxy-chain'
+import { HTTP_PROXY_PLUGINS, HttpProxyChainButton } from '../../proxy-chain'
 import { PluginItemComponent } from './item.component'
 
 @Component({
@@ -26,7 +26,7 @@ import { PluginItemComponent } from './item.component'
       <span tuiTitle>{{ pluginGroup().pluginName }}</span>
       <aside tuiAccessories>
         @if (value(); as iface) {
-          @if (iface.binding?.options?.proxy) {
+          @if (iface.binding?.options?.proxy && proxyPlugins().length) {
             <button
               [httpProxyChain]="{
                 kind: 'url-plugin',
@@ -87,6 +87,7 @@ import { PluginItemComponent } from './item.component'
 })
 export class PluginAddressesComponent {
   private readonly actionService = inject(ActionService)
+  protected readonly proxyPlugins = inject(HTTP_PROXY_PLUGINS)
 
   readonly pluginGroup = input.required<PluginAddressGroup>()
   readonly packageId = input('')

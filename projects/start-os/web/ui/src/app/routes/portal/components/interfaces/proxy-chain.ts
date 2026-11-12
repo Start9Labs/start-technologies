@@ -2,6 +2,7 @@ import {
   Component,
   computed,
   inject,
+  InjectionToken,
   input,
   linkedSignal,
   signal,
@@ -30,15 +31,31 @@ import { TuiBadge, TuiButtonLoading, TuiSwitch } from '@taiga-ui/kit'
 import { TuiForm, TuiHeader } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { PatchDB } from 'patch-db-client'
-import { of } from 'rxjs'
+import { map, of } from 'rxjs'
 
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
+import { LocalPackagesService } from 'src/app/services/local-packages.service'
 import {
   PrimaryRendering,
   renderPkgStatus,
 } from 'src/app/services/pkg-status-rendering.service'
 import { getManifest } from 'src/app/utils/get-package-data'
+
+/** Installed manifests gate chain controls; running state and profile publication do not. */
+export const HTTP_PROXY_PLUGINS = new InjectionToken('HTTP proxy plugins', {
+  factory: () =>
+    toSignal(
+      inject(LocalPackagesService).pipe(
+        map(packages =>
+          Object.entries(packages).filter(([, pkg]) =>
+            pkg.stateInfo.manifest?.plugins.includes('http-proxy-v0'),
+          ),
+        ),
+      ),
+      { initialValue: [] },
+    ),
+})
 
 interface ChainContext {
   packageId: string
@@ -65,7 +82,7 @@ function stageKey(stage: T.HttpProxyStage): string {
 })
 export class HttpProxyChainButton {
   private readonly dialogs = inject(DialogService)
-  private readonly icon = tuiIconStart(computed(() => '@tui.settings'))
+  private readonly icon = tuiIconStart(computed(() => '@tui.waypoints'))
 
   public readonly gateway = input.required<T.HttpProxyGateway>({
     alias: 'httpProxyChain',
@@ -102,15 +119,11 @@ export class HttpProxyChainButton {
         {{
           'Applies to every address and interface on this gateway and binding.'
             | i18n
-        }}
-      </p>
-      <p class="g-secondary">
+        }}&ngsp;
         {{
           'Proxy services can read and modify traffic, including credentials.'
             | i18n
-        }}
-      </p>
-      <p class="g-secondary">
+        }}&ngsp;
         {{
           'Unavailable proxies block traffic. Applying changes disconnects existing clients.'
             | i18n
@@ -244,6 +257,7 @@ class HttpProxyChainDialog {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
+  private readonly plugins = inject(HTTP_PROXY_PLUGINS)
 
   protected readonly context =
     injectContext<TuiDialogContext<void, ChainContext>>()
@@ -288,9 +302,8 @@ class HttpProxyChainDialog {
         status: i18nKey
       }
     >()
-    for (const [packageId, pkg] of Object.entries(this.packages() ?? {})) {
+    for (const [packageId, pkg] of this.plugins()) {
       const manifest = getManifest(pkg)
-      if (!manifest.plugins.includes('http-proxy-v0')) continue
       for (const profile of pkg.plugin.httpProxy?.profiles ?? []) {
         const choice = {
           packageId,

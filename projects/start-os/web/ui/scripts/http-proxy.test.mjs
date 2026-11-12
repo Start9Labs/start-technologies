@@ -35,10 +35,6 @@ loadTypeScript(
       'src/app/services/pkg-status-rendering.service',
       'export const PrimaryRendering={running:{display:"Running"},stopped:{display:"Stopped"}}; export const renderPkgStatus=pkg=>({primary:pkg.status??"running"})',
     ],
-    [
-      'src/app/utils/get-package-data',
-      'export const getManifest=pkg=>pkg.manifest',
-    ],
     ['src/app/utils/acme', 'export const toAuthorityName=()=>""'],
   ]),
 )
@@ -46,8 +42,14 @@ const { TaskService } = await import('@start9labs/shared')
 const { setContext } = await import('@taiga-ui/polymorpheus')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
 const { ConfigService } = await import('src/app/services/config.service')
-const { HTTP_PROXY_CHAIN } =
+const { HTTP_PROXY_CHAIN, HTTP_PROXY_PLUGINS } =
   await import('../src/app/routes/portal/components/interfaces/proxy-chain.ts')
+const { LocalPackagesService } =
+  await import('../src/app/services/local-packages.service.ts')
+const pluginProviders = [
+  LocalPackagesService,
+  { provide: HTTP_PROXY_PLUGINS, useFactory: HTTP_PROXY_PLUGINS.ɵprov.factory },
+]
 const { InterfaceService } =
   await import('../src/app/routes/portal/components/interfaces/interface.service.ts')
 
@@ -86,7 +88,7 @@ function dialog(t, gateway = network('eth0')) {
           },
         },
       },
-      manifest: { plugins: [] },
+      stateInfo: { state: 'installed', manifest: { plugins: [] } },
     },
   })
   const submissions = [],
@@ -101,6 +103,7 @@ function dialog(t, gateway = network('eth0')) {
     completeWith: value => closed.push(value),
   })
   const injector = createEnvironmentInjector([
+    pluginProviders,
     { provide: PatchDB, useValue: { watch$: () => packages } },
     {
       provide: ApiService,
@@ -134,7 +137,10 @@ test('a gateway draft survives sibling policy and provider status updates', t =>
   const sibling = structuredClone(packages.value)
   sibling.app.hosts.web.bindings[8080].proxyChains[1].chain = []
   sibling.waf = {
-    manifest: { id: 'waf', title: 'WAF', plugins: ['http-proxy-v0'] },
+    stateInfo: {
+      state: 'installed',
+      manifest: { id: 'waf', title: 'WAF', plugins: ['http-proxy-v0'] },
+    },
     plugin: { httpProxy: { profiles: [] } },
     status: 'stopped',
   }
@@ -193,6 +199,7 @@ test('OS binding edits use the server host and server setter', async t => {
     completeWith() {},
   })
   const injector = createEnvironmentInjector([
+    pluginProviders,
     {
       provide: PatchDB,
       useValue: {
@@ -233,6 +240,57 @@ test('OS binding edits use the server host and server setter', async t => {
   assert.deepEqual(submissions, [
     { internalPort: 80, policy: policy(network('eth0'), [], true) },
   ])
+})
+
+test('installed proxy plugins remain eligible while stopped, unpublished or updating', t => {
+  const packages = new BehaviorSubject({})
+  const injector = createEnvironmentInjector([
+    pluginProviders,
+    { provide: PatchDB, useValue: { watch$: () => packages } },
+  ])
+  t.after(() => injector.destroy())
+  const plugins = injector.get(HTTP_PROXY_PLUGINS)
+  const manifest = { plugins: ['http-proxy-v0'] }
+  assert.deepEqual(plugins(), [])
+  packages.next({
+    waf: {
+      stateInfo: {
+        state: 'installing',
+        installingInfo: { newManifest: manifest },
+      },
+    },
+  })
+  assert.deepEqual(plugins(), [])
+  packages.next({
+    waf: {
+      stateInfo: { state: 'installed', manifest },
+      status: 'stopped',
+      plugin: { httpProxy: null },
+    },
+  })
+  assert.deepEqual(
+    plugins().map(([id]) => id),
+    ['waf'],
+  )
+  packages.next({
+    waf: {
+      stateInfo: {
+        state: 'updating',
+        manifest,
+        installingInfo: { newManifest: { plugins: [] } },
+      },
+    },
+  })
+  assert.deepEqual(
+    plugins().map(([id]) => id),
+    ['waf'],
+  )
+  packages.next({ waf: { stateInfo: { state: 'removing', manifest } } })
+  assert.deepEqual(plugins(), [])
+  packages.next({
+    other: { stateInfo: { state: 'installed', manifest: { plugins: [] } } },
+  })
+  assert.deepEqual(plugins(), [])
 })
 
 test('saved network and URL policies remain discoverable without addresses or providers', t => {
