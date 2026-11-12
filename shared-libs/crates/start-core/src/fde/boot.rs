@@ -585,12 +585,25 @@ mod tests {
             .unwrap();
         assert_eq!(boot_mappings().len(), mappings.len() + 1);
         assert!(std::fs::write(source.path().join("unexpected"), b"write").is_err());
-        let output = tokio::process::Command::new("chroot")
-            .arg(source.path()).args(["/usr/bin/node", "--input-type=module", "-e", "import {writeFileSync} from 'node:fs'; try { writeFileSync('/unexpected', 'write'); process.exit(9); } catch (e) { if (e.code !== 'EROFS') throw e; } console.log(process.version);"])
-            .env_clear().env("PATH", "/usr/sbin:/usr/bin:/sbin:/bin")
-            .invoke(ErrorKind::Filesystem).await.unwrap();
-        assert!(std::str::from_utf8(&output).unwrap().starts_with("v20.19."));
-        source.unmount().await.unwrap();
+        let script = PathBuf::from("/usr/share/nodejs/acorn/bin/acorn");
+        let output = source
+            .run_script(script.clone(), Vec::new(), b"42".to_vec())
+            .await
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(parsed["body"][0]["expression"]["value"], 42);
+        assert_eq!(boot_mappings(), mappings);
+        let source = descriptor
+            .mount_source(&images, &config, &mounted_at)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            source
+                .run_script(script, vec!["--invalid-option".into()], Vec::new())
+                .await
+                .is_err()
+        );
         assert_eq!(boot_mappings(), mappings);
         assert!(
             !crate::disk::mount::util::is_mountpoint(&root)
@@ -602,6 +615,13 @@ mod tests {
                 .await
                 .unwrap()
         );
+        for scratch in ["dev", "run", "tmp", "var/tmp"] {
+            assert!(
+                !crate::disk::mount::util::is_mountpoint(root.join(scratch))
+                    .await
+                    .unwrap()
+            );
+        }
         assert_eq!(tpm::read_measurements().await.unwrap(), measured);
         use std::io::Write;
         std::fs::OpenOptions::new()

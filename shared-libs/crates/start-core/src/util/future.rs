@@ -235,6 +235,15 @@ impl<'a> Until<'a> {
     }
 }
 
+/// Caller cancellation abandons the result, not the owned operation.
+pub(crate) async fn complete_owned_operation<T: Send + 'static>(
+    operation: impl Future<Output = Result<T, Error>> + Send + 'static,
+) -> Result<T, Error> {
+    tokio::spawn(operation)
+        .await
+        .with_kind(ErrorKind::Filesystem)?
+}
+
 pub async fn make_send<F, Fut, T>(f: F) -> Result<T, Error>
 where
     F: FnOnce() -> Fut + Send + 'static,

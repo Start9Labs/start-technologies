@@ -29,6 +29,7 @@ use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::merkle_archive::source::DynFileSource;
 pub use crate::util::crypto::gen_nistp256 as generate_signing_key;
+use crate::util::future::complete_owned_operation;
 use crate::util::io::{create_file_mod, open_file};
 use crate::util::squashfs::Squashfs;
 use crate::util::{HashWriter, Invoke};
@@ -166,7 +167,7 @@ impl VerityImage {
             tree.to_owned(),
             name.to_owned(),
         );
-        complete_verity_operation(async move { image.open_inner(&data, &tree, &name).await }).await
+        complete_owned_operation(async move { image.open_inner(&data, &tree, &name).await }).await
     }
 
     async fn open_inner(
@@ -232,7 +233,7 @@ impl VerityImage {
             name.to_owned(),
             mountpoint.to_owned(),
         );
-        complete_verity_operation(async move {
+        complete_owned_operation(async move {
             let mapping = image.open_inner(&data, &tree, &name).await?;
             let filesystem = SquashfsDevice(BlockDev::new(mapping.path()));
             match MountGuard::mount(&filesystem, &mountpoint, ReadOnly).await {
@@ -261,15 +262,6 @@ impl VerityImage {
     }
 }
 
-/// Caller cancellation abandons the result, not in-flight kernel resource setup.
-async fn complete_verity_operation<T: Send + 'static>(
-    operation: impl std::future::Future<Output = Result<T, Error>> + Send + 'static,
-) -> Result<T, Error> {
-    tokio::spawn(operation)
-        .await
-        .with_kind(ErrorKind::Filesystem)?
-}
-
 /// A fully read signed mapping, closed on drop while the runtime remains active.
 /// External mounts must end before closing; failed close retains kernel protection.
 #[derive(Debug)]
@@ -283,7 +275,7 @@ impl VerityMapping {
     }
 
     pub async fn close(self) -> Result<(), Error> {
-        complete_verity_operation(self.close_inner()).await
+        complete_owned_operation(self.close_inner()).await
     }
 
     async fn close_inner(mut self) -> Result<(), Error> {
@@ -344,7 +336,7 @@ impl GenericMountGuard for VerityMount {
 
     async fn unmount(mut self) -> Result<(), Error> {
         let mapping = self.mapping.take().unwrap();
-        complete_verity_operation(unmount_verity(self.mount.take(), mapping)).await
+        complete_owned_operation(unmount_verity(self.mount.take(), mapping)).await
     }
 }
 
@@ -1431,7 +1423,7 @@ mod tests {
         let (started, ready) = tokio::sync::oneshot::channel();
         let (finish, complete) = tokio::sync::oneshot::channel();
         let (destroyed, observed) = tokio::sync::oneshot::channel();
-        let waiter = tokio::spawn(complete_verity_operation(async move {
+        let waiter = tokio::spawn(complete_owned_operation(async move {
             started.send(()).unwrap();
             complete.await.unwrap();
             Ok(crate::util::GeneralGuard::new(move || {
