@@ -4,7 +4,7 @@ Every StartOS package must define a backup strategy. The SDK provides builders f
 
 ## Solution
 
-Use `sdk.setupBackups()` with the appropriate builder. `sdk.Backups.ofVolumes('main')` for simple volume snapshots. `sdk.Backups.withPgDump()` for PostgreSQL (handles dump and restore). `sdk.Backups.withMysqlDump()` for MySQL and `sdk.Backups.withMariadbDump()` for MariaDB. Chain `.addVolume('name')` for additional volumes. Use `.addSync({ dataPath, backupPath })` instead of `.addVolume()` for large, mostly-unchanged datasets (user uploads, media) — rsync is incremental and much faster than full volume copies.
+Use `sdk.setupBackups()` with the appropriate builder. `sdk.Backups.ofVolumes('main')` for simple volume snapshots. `sdk.Backups.withPgDump()` for PostgreSQL (handles dump and restore). `sdk.Backups.withMysqlDump()` and `sdk.Backups.withMariadbDump()` dump MySQL and MariaDB, though a copied volume is usually the better choice for those (see [Databases](#databases-copy-the-volume-or-dump-it)). Chain `.addVolume('name')` for additional volumes. Use `.addSync({ dataPath, backupPath })` instead of `.addVolume()` for large, mostly-unchanged datasets (user uploads, media) — rsync is incremental and much faster than full volume copies.
 
 A restore installs the s9pk stored in the backup, so it runs that version's own backup and restore code; the current version's migrations run on the update after it. Changing the backup set never affects backups taken before the change.
 
@@ -13,6 +13,15 @@ A restore installs the s9pk stored in the backup, so it runs that version's own 
 
 > [!NOTE]
 > Progress is reported per phase, weighted so the rsync copy — the slow part — dominates the bar (`DEFAULT_SYNC_WEIGHT` = 80 per sync, `DEFAULT_HOOK_WEIGHT` = 10 per pre/post hook). A pre/post phase appears only when you set that hook. Override any phase's weight with the optional `weight` argument to `setPreBackup` / `setPostBackup` / `setPreRestore` / `setPostRestore`, or the `weight` field on a sync (`addSync` / `addVolume`).
+
+## Databases: copy the volume or dump it
+
+Copy a database's volume with `ofVolumes` unless one of the cases below applies. The backup runs on a stopped service, so the copy is of a cleanly shut-down database. And the restore reinstalls the s9pk that made the backup, so the same engine version reads the files back. A copied volume restores everything the engine keeps there, exactly as it was: every database, its accounts and grants, roles, extensions, settings. It also restores quickly however large the database is, and rsync carries only the files that changed.
+
+A dump captures one database's contents, and the restore rebuilds the engine around it. Whatever lives outside that database, accounts included, comes from the restore code rather than from the backup. Use one when:
+
+- **The data files are tied to the CPU architecture.** A backup can be restored onto a server of another architecture. PostgreSQL does not guarantee that its data files are portable across architectures, so keep `withPgDump` for PostgreSQL. InnoDB data files are documented as cross-platform, so MySQL and MariaDB volumes can be copied.
+- **The data directory is much larger than the data in it** (bloat, large indexes) and backup size matters more than restore time.
 
 **Reference:** [Main](main.md) · [File Models](file-models.md)
 
