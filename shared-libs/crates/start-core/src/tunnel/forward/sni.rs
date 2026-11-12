@@ -18,14 +18,19 @@ use tokio::net::TcpStream;
 #[cfg(test)]
 use tokio::time::timeout;
 
-use crate::net::port_map::TransportProtocol;
 use crate::net::port_map::pcp::RESULT_NO_RESOURCES;
 use crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN;
+use crate::net::port_map::{Protocol, TransportProtocol};
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::sync::SyncMutex;
 
 /// (external IP, external port, transport).
 type PortKey = (Ipv4Addr, u16, TransportProtocol);
+
+enum PreparedListener {
+    Tcp(tokio::net::TcpListener),
+    Udp(tokio::net::UdpSocket),
+}
 
 const CLIENTHELLO_CAP: usize = 16384;
 const CLIENTHELLO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -136,13 +141,13 @@ pub type LocalPrefix = Arc<dyn Fn(Ipv4Addr) -> BoxFuture<'static, Option<u8>> + 
 
 /// A registration that can restore the exact prior bindings.
 pub struct SniRegistration {
-    key: PortKey,
-    previous: Vec<(String, Option<Binding>)>,
+    previous: Vec<(PortKey, Vec<(String, Option<Binding>)>)>,
     applied: Binding,
 }
 
 pub struct SniDemux {
     ports: Arc<SyncMutex<BTreeMap<PortKey, PortBindings>>>,
+    // Lock `ports` before `listeners` when acquiring both.
     listeners: SyncMutex<BTreeMap<PortKey, NonDetachingJoinHandle<()>>>,
     on_change: Option<OnChange>,
     local_prefix: Option<LocalPrefix>,
@@ -293,70 +298,135 @@ impl SniDemux {
         target: SocketAddrV4,
         lifetime_secs: Option<u32>,
     ) -> Result<SniRegistration, u8> {
-        let hostnames = &lowercased(hostnames);
+        self.register_transaction_protocol(
+            protocol.into(),
+            ext_ip,
+            ext_port,
+            hostnames,
+            target,
+            lifetime_secs,
+        )
+    }
+
+    /// Publishes every selected transport together; a failed bind changes none.
+    pub fn register_protocol(
+        self: &Arc<Self>,
+        protocol: Protocol,
+        ext_ip: Ipv4Addr,
+        ext_port: u16,
+        hostnames: &[String],
+        target: SocketAddrV4,
+        lifetime_secs: Option<u32>,
+    ) -> Result<(), u8> {
+        self.register_transaction_protocol(
+            protocol,
+            ext_ip,
+            ext_port,
+            hostnames,
+            target,
+            lifetime_secs,
+        )
+        .map(|_| ())
+    }
+
+    /// Registers a logical mapping and retains each transport's prior bindings.
+    pub fn register_transaction_protocol(
+        self: &Arc<Self>,
+        protocol: Protocol,
+        ext_ip: Ipv4Addr,
+        ext_port: u16,
+        hostnames: &[String],
+        target: SocketAddrV4,
+        lifetime_secs: Option<u32>,
+    ) -> Result<SniRegistration, u8> {
+        let hostnames = lowercased(hostnames);
         let now = Instant::now();
         let applied = Binding {
             target,
             expiry: lifetime_secs.map(|s| now + Duration::from_secs(s as u64)),
         };
-        let key = (ext_ip, ext_port, protocol);
-        let previous = self.ports.mutate(|ports| {
-            let entry = ports.entry(key).or_default();
-            entry.prune(now);
-            for name in hostnames {
-                if let Some(b) = entry.hostnames.get(name) {
-                    if b.target.ip() != target.ip() {
-                        return Err(RESULT_HOSTNAME_TAKEN);
+        if hostnames.is_empty() {
+            return Ok(SniRegistration {
+                previous: Vec::new(),
+                applied,
+            });
+        }
+        let keys: Vec<_> = protocol
+            .transports()
+            .iter()
+            .map(|&transport| (ext_ip, ext_port, transport))
+            .collect();
+        let (previous, opened) = self.ports.mutate(|ports| {
+            for key in &keys {
+                if let Some(entry) = ports.get(key) {
+                    for name in &hostnames {
+                        if entry.hostnames.get(name).is_some_and(|binding| {
+                            binding.expiry.is_none_or(|expiry| expiry > now)
+                                && binding.target.ip() != target.ip()
+                        }) {
+                            return Err(RESULT_HOSTNAME_TAKEN);
+                        }
                     }
                 }
             }
-            let previous = hostnames
-                .iter()
-                .map(|name| (name.clone(), entry.hostnames.get(name).cloned()))
-                .collect::<Vec<_>>();
-            for name in hostnames {
-                entry.hostnames.insert(name.clone(), applied.clone());
-            }
-            Ok(previous)
+            self.listeners.mutate(|listeners| {
+                let prepared = self.prepare_listeners(&keys, listeners).map_err(|error| {
+                    tracing::warn!(
+                        "SNI demux bind on {ext_ip}:{ext_port} failed; refusing the grant: {error}"
+                    );
+                    RESULT_NO_RESOURCES
+                })?;
+                let previous = keys
+                    .iter()
+                    .map(|&key| {
+                        let entry = ports.entry(key).or_default();
+                        entry.prune(now);
+                        let previous = hostnames
+                            .iter()
+                            .map(|name| (name.clone(), entry.hostnames.get(name).cloned()))
+                            .collect();
+                        for name in &hostnames {
+                            entry.hostnames.insert(name.clone(), applied.clone());
+                        }
+                        (key, previous)
+                    })
+                    .collect();
+                let opened = self.start_listeners(listeners, prepared);
+                Ok((previous, opened))
+            })
         })?;
-        let registration = SniRegistration {
-            key,
-            previous,
-            applied,
-        };
-        if let Err(e) = self.ensure_listener(key) {
-            tracing::warn!(
-                "SNI demux bind on {}:{} failed; refusing the grant: {e}",
-                key.0,
-                key.1
-            );
-            self.rollback(registration);
-            return Err(RESULT_NO_RESOURCES);
-        }
-        Ok(registration)
+        self.notify_opened(&opened);
+        Ok(SniRegistration { previous, applied })
     }
 
     /// Restores bindings unchanged since the registration.
     pub fn rollback(&self, registration: SniRegistration) {
-        self.ports.mutate(|ports| {
-            let Some(entry) = ports.get_mut(&registration.key) else {
-                return;
-            };
-            for (name, previous) in registration.previous {
-                if entry.hostnames.get(&name) != Some(&registration.applied) {
+        let keys = self.ports.mutate(|ports| {
+            let mut keys = Vec::new();
+            for (key, previous) in registration.previous {
+                let Some(entry) = ports.get_mut(&key) else {
                     continue;
-                }
-                match previous {
-                    Some(binding) => {
-                        entry.hostnames.insert(name, binding);
+                };
+                for (name, previous) in previous {
+                    if entry.hostnames.get(&name) != Some(&registration.applied) {
+                        continue;
                     }
-                    None => {
-                        entry.hostnames.remove(&name);
+                    match previous {
+                        Some(binding) => {
+                            entry.hostnames.insert(name, binding);
+                        }
+                        None => {
+                            entry.hostnames.remove(&name);
+                        }
                     }
                 }
+                keys.push(key);
             }
+            keys
         });
-        self.reap_if_empty(registration.key);
+        for key in keys {
+            self.reap_if_empty(key);
+        }
     }
 
     /// Removes bindings held by the target.
@@ -379,22 +449,42 @@ impl SniDemux {
         hostnames: &[String],
         target: SocketAddrV4,
     ) {
-        let hostnames = &lowercased(hostnames);
-        let key = (ext_ip, ext_port, protocol);
+        self.unregister_protocol(protocol.into(), ext_ip, ext_port, hostnames, target);
+    }
+
+    /// Removes a target-owned logical mapping from every selected transport.
+    pub fn unregister_protocol(
+        &self,
+        protocol: Protocol,
+        ext_ip: Ipv4Addr,
+        ext_port: u16,
+        hostnames: &[String],
+        target: SocketAddrV4,
+    ) {
+        let hostnames = lowercased(hostnames);
+        let keys: Vec<_> = protocol
+            .transports()
+            .iter()
+            .map(|&transport| (ext_ip, ext_port, transport))
+            .collect();
         self.ports.mutate(|ports| {
-            if let Some(entry) = ports.get_mut(&key) {
-                for name in hostnames {
-                    if entry
-                        .hostnames
-                        .get(name)
-                        .is_some_and(|b| b.target == target)
-                    {
-                        entry.hostnames.remove(name);
+            for key in &keys {
+                if let Some(entry) = ports.get_mut(key) {
+                    for name in &hostnames {
+                        if entry
+                            .hostnames
+                            .get(name)
+                            .is_some_and(|binding| binding.target == target)
+                        {
+                            entry.hostnames.remove(name);
+                        }
                     }
                 }
             }
         });
-        self.reap_if_empty(key);
+        for key in keys {
+            self.reap_if_empty(key);
+        }
     }
 
     /// Registers a source-preserving fallback for unmatched traffic.
@@ -416,6 +506,26 @@ impl SniDemux {
         target: SocketAddrV4,
     ) -> Result<(), u8> {
         self.register_fallback_with(
+            protocol,
+            ext_ip,
+            ext_port,
+            Fallback {
+                target,
+                source: FallbackSource::Any,
+                transparent: true,
+            },
+        )
+    }
+
+    /// Publishes a logical catch-all on every selected transport together.
+    pub fn register_fallback_protocol(
+        self: &Arc<Self>,
+        protocol: Protocol,
+        ext_ip: Ipv4Addr,
+        ext_port: u16,
+        target: SocketAddrV4,
+    ) -> Result<(), u8> {
+        self.register_fallback_protocol_with(
             protocol,
             ext_ip,
             ext_port,
@@ -455,33 +565,38 @@ impl SniDemux {
         ext_port: u16,
         fallback: Fallback,
     ) -> Result<(), u8> {
-        let key = (ext_ip, ext_port, protocol);
-        let previous = self.ports.mutate(|ports| {
-            let entry = ports.entry(key).or_default();
-            if entry
-                .fallback
-                .is_some_and(|f| f.target.ip() != fallback.target.ip())
-            {
+        self.register_fallback_protocol_with(protocol.into(), ext_ip, ext_port, fallback)
+    }
+
+    fn register_fallback_protocol_with(
+        self: &Arc<Self>,
+        protocol: Protocol,
+        ext_ip: Ipv4Addr,
+        ext_port: u16,
+        fallback: Fallback,
+    ) -> Result<(), u8> {
+        let keys: Vec<_> = protocol
+            .transports()
+            .iter()
+            .map(|&transport| (ext_ip, ext_port, transport))
+            .collect();
+        let opened = self.ports.mutate(|ports| {
+            if keys.iter().any(|key| ports.get(key).and_then(|entry| entry.fallback)
+                .is_some_and(|old| old.target.ip() != fallback.target.ip())) {
                 return Err(RESULT_HOSTNAME_TAKEN);
             }
-            let previous = entry.fallback;
-            entry.fallback = Some(fallback);
-            Ok(previous)
-        })?;
-        if let Err(e) = self.ensure_listener(key) {
-            tracing::warn!(
-                "SNI demux bind on {}:{} failed; refusing the fallback: {e}",
-                key.0,
-                key.1
-            );
-            self.ports.mutate(|ports| {
-                if let Some(entry) = ports.get_mut(&key) {
-                    entry.fallback = previous;
+            self.listeners.mutate(|listeners| {
+                let prepared = self.prepare_listeners(&keys, listeners).map_err(|error| {
+                    tracing::warn!("SNI demux bind on {ext_ip}:{ext_port} failed; refusing the fallback: {error}");
+                    RESULT_NO_RESOURCES
+                })?;
+                for &key in &keys {
+                    ports.entry(key).or_default().fallback = Some(fallback);
                 }
-            });
-            self.reap_if_empty(key);
-            return Err(RESULT_NO_RESOURCES);
-        }
+                Ok(self.start_listeners(listeners, prepared))
+            })
+        })?;
+        self.notify_opened(&opened);
         Ok(())
     }
 
@@ -498,11 +613,26 @@ impl SniDemux {
         ext_port: u16,
         target: SocketAddrV4,
     ) {
-        let key = (ext_ip, ext_port, protocol);
+        self.unregister_fallback_protocol(protocol.into(), ext_ip, ext_port, target)
+    }
+
+    /// Removes a target-owned logical fallback from every selected transport.
+    pub fn unregister_fallback_protocol(
+        &self,
+        protocol: Protocol,
+        ext_ip: Ipv4Addr,
+        ext_port: u16,
+        target: SocketAddrV4,
+    ) {
         self.ports.mutate(|ports| {
-            if let Some(entry) = ports.get_mut(&key) {
-                if entry.fallback.is_some_and(|f| f.target == target) {
-                    entry.fallback = None;
+            for &transport in protocol.transports() {
+                if let Some(entry) = ports.get_mut(&(ext_ip, ext_port, transport)) {
+                    if entry
+                        .fallback
+                        .is_some_and(|fallback| fallback.target == target)
+                    {
+                        entry.fallback = None;
+                    }
                 }
             }
         });
@@ -603,71 +733,93 @@ impl SniDemux {
     }
 
     fn reap_if_empty(&self, key: PortKey) {
-        let empty = self.ports.peek(|ports| {
-            ports.get(&key).is_none_or(PortBindings::is_empty)
-                && inherited_local_fallback(ports, key).is_none()
+        let removed = self.ports.mutate(|ports| {
+            if !ports.get(&key).is_none_or(PortBindings::is_empty)
+                || inherited_local_fallback(ports, key).is_some()
+            {
+                return None;
+            }
+            ports.remove(&key);
+            self.listeners.mutate(|listeners| listeners.remove(&key))
         });
-        if empty {
-            self.ports.mutate(|ports| {
-                ports.remove(&key);
-            });
-            if let Some(handle) = self.listeners.mutate(|l| l.remove(&key)) {
-                drop(handle);
-                if let Some(cb) = &self.on_change {
-                    cb(key.1, key.2, false);
-                }
+        if let Some(handle) = removed {
+            drop(handle);
+            if let Some(cb) = &self.on_change {
+                cb(key.1, key.2, false);
+            }
+        }
+    }
+
+    fn prepare_listeners(
+        &self,
+        keys: &[PortKey],
+        listeners: &BTreeMap<PortKey, NonDetachingJoinHandle<()>>,
+    ) -> std::io::Result<Vec<(PortKey, PreparedListener)>> {
+        keys.iter()
+            .filter(|key| !listeners.contains_key(*key))
+            .map(|&key| {
+                let listener = match key.2 {
+                    TransportProtocol::Tcp => {
+                        PreparedListener::Tcp(crate::net::utils::bind_tokio_listener_reuse_port(
+                            SocketAddrV4::new(key.0, key.1).into(),
+                        )?)
+                    }
+                    TransportProtocol::Udp => PreparedListener::Udp(udp::bind(key)?),
+                };
+                Ok((key, listener))
+            })
+            .collect()
+    }
+
+    fn start_listeners(
+        &self,
+        listeners: &mut BTreeMap<PortKey, NonDetachingJoinHandle<()>>,
+        prepared: Vec<(PortKey, PreparedListener)>,
+    ) -> Vec<PortKey> {
+        let mut opened = Vec::new();
+        for (key, listener) in prepared {
+            let ports = self.ports.clone();
+            let local_prefix = self.local_prefix.clone();
+            let handle = match listener {
+                PreparedListener::Tcp(listener) => NonDetachingJoinHandle::from(tokio::spawn(
+                    run_listener(listener, key, ports, local_prefix),
+                )),
+                PreparedListener::Udp(socket) => NonDetachingJoinHandle::from(tokio::spawn(
+                    udp::run_listener(socket, key, ports, local_prefix, self.udp_limits.clone()),
+                )),
+            };
+            listeners.insert(key, handle);
+            opened.push(key);
+        }
+        opened
+    }
+
+    fn notify_opened(&self, keys: &[PortKey]) {
+        if let Some(callback) = &self.on_change {
+            for key in keys {
+                callback(key.1, key.2, true);
             }
         }
     }
 
     /// Starts the address-specific listener before callers grant a route.
     fn ensure_listener(self: &Arc<Self>, key: PortKey) -> std::io::Result<()> {
-        let already = self
-            .listeners
-            .mutate(|listeners| listeners.contains_key(&key));
-        if already {
-            return Ok(());
-        }
-        if self
-            .ports
-            .peek(|ports| ports.get(&key).is_none_or(PortBindings::is_empty))
-        {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "no bindings for SNI listener",
-            ));
-        }
-        let ports = self.ports.clone();
-        let local_prefix = self.local_prefix.clone();
-        let handle = match key.2 {
-            TransportProtocol::Tcp => {
-                let listener = crate::net::utils::bind_tokio_listener_reuse_port(
-                    SocketAddrV4::new(key.0, key.1).into(),
-                )?;
-                NonDetachingJoinHandle::from(tokio::spawn(run_listener(
-                    listener,
-                    key,
-                    ports,
-                    local_prefix,
-                )))
-            }
-            TransportProtocol::Udp => {
-                let socket = udp::bind(key)?;
-                NonDetachingJoinHandle::from(tokio::spawn(udp::run_listener(
-                    socket,
-                    key,
-                    ports,
-                    local_prefix,
-                    self.udp_limits.clone(),
-                )))
-            }
-        };
-        self.listeners.mutate(|l| {
-            l.insert(key, handle);
-        });
-        if let Some(cb) = &self.on_change {
-            cb(key.1, key.2, true);
-        }
+        let opened = self.ports.peek(|ports| {
+            self.listeners.mutate(|listeners| {
+                if listeners.contains_key(&key) {
+                    return Ok(Vec::new());
+                }
+                if ports.get(&key).is_none_or(PortBindings::is_empty) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "no bindings for SNI listener",
+                    ));
+                }
+                let prepared = self.prepare_listeners(&[key], listeners)?;
+                Ok(self.start_listeners(listeners, prepared))
+            })
+        })?;
+        self.notify_opened(&opened);
         Ok(())
     }
 }
@@ -1525,6 +1677,220 @@ mod tests {
             assert!(listeners.contains_key(&(Ipv4Addr::LOCALHOST, port, TransportProtocol::Tcp)));
             assert!(!listeners.contains_key(&(Ipv4Addr::LOCALHOST, port, TransportProtocol::Udp)));
         });
+    }
+
+    fn reserve_protocol_pair() -> (tokio::net::TcpListener, tokio::net::UdpSocket) {
+        for _ in 0..64 {
+            let tcp =
+                crate::net::utils::bind_tokio_listener_reuse_port((Ipv4Addr::LOCALHOST, 0).into())
+                    .unwrap();
+            let port = tcp.local_addr().unwrap().port();
+            match udp::bind((Ipv4Addr::LOCALHOST, port, TransportProtocol::Udp)) {
+                Ok(udp) => return (tcp, udp),
+                Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {}
+                Err(error) => panic!("UDP fixture bind failed: {error}"),
+            }
+        }
+        panic!("no free TCP/UDP fixture port");
+    }
+
+    fn blocked_udp_port() -> (tokio::net::TcpListener, std::net::UdpSocket) {
+        for _ in 0..64 {
+            let udp = std::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let port = udp.local_addr().unwrap().port();
+            match crate::net::utils::bind_tokio_listener_reuse_port(
+                (Ipv4Addr::LOCALHOST, port).into(),
+            ) {
+                Ok(tcp) => return (tcp, udp),
+                Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {}
+                Err(error) => panic!("TCP fixture bind failed: {error}"),
+            }
+        }
+        panic!("no TCP fixture port with blocked UDP");
+    }
+
+    #[tokio::test]
+    async fn combined_mapping_publishes_both_before_notifying() {
+        let owner = Arc::new(std::sync::OnceLock::<std::sync::Weak<SniDemux>>::new());
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed_owner = owner.clone();
+        let observed_events = events.clone();
+        let demux = SniDemux::with_on_change(
+            move |_, _, active| {
+                let snapshot = observed_owner.get().unwrap().upgrade().unwrap().snapshot();
+                observed_events.lock().unwrap().push((
+                    active,
+                    snapshot
+                        .into_iter()
+                        .map(|route| route.protocol)
+                        .collect::<Vec<_>>(),
+                ));
+            },
+            None,
+        );
+        assert!(owner.set(Arc::downgrade(&demux)).is_ok());
+        let reservation = reserve_protocol_pair();
+        let port = reservation.0.local_addr().unwrap().port();
+        let target = "127.0.0.2:8443".parse().unwrap();
+        let hostnames = ["both.example.com".to_owned()];
+        demux
+            .register_protocol(
+                Protocol::TcpUdp,
+                Ipv4Addr::LOCALHOST,
+                port,
+                &hostnames,
+                target,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![
+                (true, vec![TransportProtocol::Tcp, TransportProtocol::Udp]),
+                (true, vec![TransportProtocol::Tcp, TransportProtocol::Udp]),
+            ]
+        );
+        demux.unregister_protocol(
+            Protocol::TcpUdp,
+            Ipv4Addr::LOCALHOST,
+            port,
+            &hostnames,
+            target,
+        );
+        assert!(demux.snapshot().is_empty());
+        assert!(demux.listeners.peek(BTreeMap::is_empty));
+        assert_eq!(
+            &events.lock().unwrap()[2..],
+            &[(false, Vec::new()), (false, Vec::new())]
+        );
+    }
+
+    #[tokio::test]
+    async fn combined_bind_failure_preserves_prior_routes_and_fallback() {
+        let (tcp, _blocked_udp) = blocked_udp_port();
+        let port = tcp.local_addr().unwrap().port();
+        let demux = SniDemux::new();
+        let ip = Ipv4Addr::LOCALHOST;
+        let hostnames = ["both.example.com".to_owned()];
+        let old = "127.0.0.2:8443".parse().unwrap();
+        let new = "127.0.0.2:9443".parse().unwrap();
+        demux.register(ip, port, &hostnames, old, None).unwrap();
+        demux.register_fallback(ip, port, old).unwrap();
+        assert_eq!(
+            demux.register_protocol(Protocol::TcpUdp, ip, port, &hostnames, new, None),
+            Err(RESULT_NO_RESOURCES)
+        );
+        assert_eq!(
+            demux.register_fallback_protocol(Protocol::TcpUdp, ip, port, new),
+            Err(RESULT_NO_RESOURCES)
+        );
+        assert_eq!(demux.snapshot().len(), 1);
+        assert_eq!(demux.snapshot()[0].target, old);
+        assert_eq!(
+            select_target(&demux.ports, (ip, port, TransportProtocol::Tcp), None, ip),
+            Some((old, true))
+        );
+        assert_eq!(
+            select_target(&demux.ports, (ip, port, TransportProtocol::Udp), None, ip),
+            None
+        );
+        assert_eq!(demux.listeners.peek(BTreeMap::len), 1);
+    }
+
+    #[tokio::test]
+    async fn combined_transaction_restores_each_transports_exact_state() {
+        let reservation = reserve_protocol_pair();
+        let port = reservation.0.local_addr().unwrap().port();
+        let demux = SniDemux::new();
+        let ip = Ipv4Addr::LOCALHOST;
+        let hostnames = ["both.example.com".to_owned()];
+        let tcp = "127.0.0.2:8443".parse().unwrap();
+        let udp = "127.0.0.2:9443".parse().unwrap();
+        let combined = "127.0.0.2:443".parse().unwrap();
+        demux
+            .register(ip, port, &hostnames, tcp, Some(300))
+            .unwrap();
+        demux
+            .register_transport(TransportProtocol::Udp, ip, port, &hostnames, udp, None)
+            .unwrap();
+        let before = demux.ports.peek(|ports| {
+            TransportProtocol::ALL.map(|transport| ports[&(ip, port, transport)].hostnames.clone())
+        });
+        let transaction = demux
+            .register_transaction_protocol(
+                Protocol::TcpUdp,
+                ip,
+                port,
+                &hostnames,
+                combined,
+                Some(600),
+            )
+            .unwrap();
+        assert!(
+            demux
+                .snapshot()
+                .iter()
+                .all(|route| route.target == combined)
+        );
+        demux.rollback(transaction);
+        let after = demux.ports.peek(|ports| {
+            TransportProtocol::ALL.map(|transport| ports[&(ip, port, transport)].hostnames.clone())
+        });
+        assert_eq!(after, before);
+    }
+
+    #[tokio::test]
+    async fn combined_registration_relays_tcp_and_quic() {
+        let (tcp_backend, udp_backend) = reserve_protocol_pair();
+        let SocketAddr::V4(target) = tcp_backend.local_addr().unwrap() else {
+            unreachable!()
+        };
+        let reservation = reserve_protocol_pair();
+        let port = reservation.0.local_addr().unwrap().port();
+        let demux = SniDemux::new();
+        demux
+            .register_protocol(
+                Protocol::TcpUdp,
+                Ipv4Addr::LOCALHOST,
+                port,
+                &["quic.example.com".into()],
+                target,
+                None,
+            )
+            .unwrap();
+        drop(reservation);
+        timeout(Duration::from_secs(3), async {
+            let hello = real_client_hello("quic.example.com");
+            let mut client = TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+                .await
+                .unwrap();
+            client.write_all(&hello).await.unwrap();
+            let (mut upstream, _) = tcp_backend.accept().await.unwrap();
+            let mut received = vec![0; hello.len()];
+            upstream.read_exact(&mut received).await.unwrap();
+            assert_eq!(received, hello);
+            upstream.write_all(b"TCP reply").await.unwrap();
+            let mut reply = [0; 9];
+            client.read_exact(&mut reply).await.unwrap();
+            assert_eq!(&reply, b"TCP reply");
+            let client = tokio::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .unwrap();
+            let initial = quic::tests::initial(1, 0, 0, &quic::tests::client_hello(1, true));
+            client
+                .send_to(&initial, (Ipv4Addr::LOCALHOST, port))
+                .await
+                .unwrap();
+            let mut buffer = vec![0; 65535];
+            let (length, peer) = udp_backend.recv_from(&mut buffer).await.unwrap();
+            assert_eq!(&buffer[..length], initial.as_slice());
+            udp_backend.send_to(b"UDP reply", peer).await.unwrap();
+            let (length, source) = client.recv_from(&mut buffer).await.unwrap();
+            assert_eq!(&buffer[..length], b"UDP reply");
+            assert_eq!(source, SocketAddr::from((Ipv4Addr::LOCALHOST, port)));
+        })
+        .await
+        .expect("combined relay timed out");
     }
 
     #[tokio::test]
