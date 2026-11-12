@@ -194,6 +194,8 @@ Anything else is a failure. **`BAD signature`** means the file is not what Start
 
 A Raspberry Pi does not use the USB installer above. Instead, you flash the StartOS image directly to the Pi's microSD card. This is also how a Raspberry Pi is updated to a new major version of StartOS — it cannot update over the air. If you are updating an existing 0.3.5.1 server, complete the [preparation steps in the update guide](update-040.md#prepare-your-server) before flashing.
 
+1. Update the Pi's bootloader. A Pi 4 whose bootloader has never been updated may not start StartOS: its green light stays solid and it never appears on your network. In [Raspberry Pi Imager](https://www.raspberrypi.com/software/), choose **Raspberry Pi 4** as the device, then **Misc utility images** → **Bootloader (Pi 4 family)** → **SD Card Boot**, and write it to the microSD card. Insert the card into the Pi and power it on. When the green light blinks rapidly and continuously, the update is done: power off and remove the card. You only need to do this once per Pi.
+
 1. Visit the [Github release page](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.2.1) and, from the downloads list, download the **Raspberry Pi `.img.gz`** file.
 
 1. Check it against the release page, exactly as in [Verify your download](#verify-your-download). The release lists a checksum for the `.img` inside the archive as well — the line you want is the one ending in `.img.gz`, because that is the file you downloaded.
