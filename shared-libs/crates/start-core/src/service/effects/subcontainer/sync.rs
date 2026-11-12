@@ -1,4 +1,4 @@
-use std::ffi::{OsStr, OsString, c_int};
+use std::ffi::{OsString, c_int};
 use std::fs::File;
 use std::io::{BufRead, BufReader, IsTerminal, Read};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
@@ -39,13 +39,8 @@ pub fn kill_init(chroot: &File) -> Result<(), Error> {
 }
 
 fn kill_proc_init(mount: File) -> Result<(), Error> {
-    let root = descriptor_path(mount.as_fd());
-    let init = process_if_alive(procfs::process::Process::new_with_root(root.join("1")))?;
-    let namespace = match init {
-        Some(init) => process_if_alive(pid_namespace(&init))?.flatten(),
-        None => None,
-    };
-    if let Some(namespace) = namespace {
+    if let Some(namespace) = pid_namespace_at(&mount, 1)? {
+        let caller_proc = kernel_proc_mount(File::open("/proc")?)?.or_not_found("kernel procfs")?;
         for process in procfs::process::all_processes().with_kind(ErrorKind::Filesystem)? {
             let Some(process) = process_if_alive(process)? else {
                 continue;
@@ -54,7 +49,7 @@ fn kill_proc_init(mount: File) -> Result<(), Error> {
                 Err(error) if error.raw_os_error() == Some(libc::ESRCH) => continue,
                 result => result.with_kind(ErrorKind::Filesystem)?,
             };
-            if process_if_alive(pid_namespace(&process))?.flatten() != Some(namespace) {
+            if pid_namespace_at(&caller_proc, process.pid())? != Some(namespace) {
                 continue;
             }
             let Some(status) = process_if_alive(process.status())? else {
@@ -83,12 +78,41 @@ fn kill_proc_init(mount: File) -> Result<(), Error> {
     detach_proc(mount)
 }
 
-fn pid_namespace(process: &procfs::process::Process) -> procfs::ProcResult<Option<u64>> {
-    Ok(process
-        .namespaces()?
-        .0
-        .get(OsStr::new("pid"))
-        .map(|namespace| namespace.identifier))
+// Namespace identity must come from this procfs mount, not replacement submounts.
+fn pid_namespace_at(procfs: &File, pid: libc::pid_t) -> Result<Option<u64>, Error> {
+    use nix::fcntl::{OFlag, OpenHow, ResolveFlag, openat2, readlinkat};
+
+    let how = OpenHow::new()
+        .flags(OFlag::O_PATH | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC)
+        .resolve(
+            ResolveFlag::RESOLVE_BENEATH
+                | ResolveFlag::RESOLVE_NO_SYMLINKS
+                | ResolveFlag::RESOLVE_NO_XDEV,
+        );
+    let link = match openat2(procfs, format!("{pid}/ns/pid").as_str(), how) {
+        Err(nix::errno::Errno::ENOENT | nix::errno::Errno::ESRCH) => return Ok(None),
+        result => result.with_kind(ErrorKind::Filesystem)?,
+    };
+    let target = match readlinkat(&link, "") {
+        Err(nix::errno::Errno::ENOENT | nix::errno::Errno::ESRCH) => return Ok(None),
+        result => result.with_kind(ErrorKind::Filesystem)?,
+    };
+    let id = target
+        .to_str()
+        .and_then(|target| {
+            target
+                .strip_prefix("pid:[")?
+                .strip_suffix(']')?
+                .parse::<u64>()
+                .ok()
+        })
+        .ok_or_else(|| {
+            Error::new(
+                eyre!("Invalid kernel PID namespace link"),
+                ErrorKind::Filesystem,
+            )
+        })?;
+    Ok(Some(id))
 }
 
 fn process_if_alive<T>(value: procfs::ProcResult<T>) -> Result<Option<T>, Error> {
@@ -413,6 +437,8 @@ impl ExecParams {
 
 #[cfg(test)]
 mod environment_tests {
+    use std::ffi::OsStr;
+
     use super::*;
 
     #[test]

@@ -28,8 +28,24 @@ fn container_side_proc_lookup_retains_its_alias_support() {
     assert!(proc_mount(&root).is_err());
 }
 
+#[test]
+fn namespace_lookup_reads_the_pinned_kernel_link() {
+    use std::os::unix::fs::MetadataExt;
+
+    let procfs = kernel_proc_mount(File::open("/proc").unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        pid_namespace_at(&procfs, std::process::id() as libc::pid_t).unwrap(),
+        Some(std::fs::metadata("/proc/self/ns/pid").unwrap().ino())
+    );
+}
+
 async fn namespace_init_cleanup(depth: usize) {
     use tokio::io::{AsyncBufReadExt, BufReader};
+
+    use crate::disk::mount::filesystem::syscall::{DetachedMount, open_tree_clone};
+    use crate::disk::mount::guard::GenericMountGuard;
 
     let dir = tempfile::tempdir().unwrap();
     let original = dir.path().join("root");
@@ -61,8 +77,18 @@ async fn namespace_init_cleanup(depth: usize) {
         .unwrap()
         .unwrap();
     assert_eq!(ready.as_deref(), Some("ready"));
-    assert!(proc_mount(&root).unwrap().is_some());
+    let procfs = proc_mount(&root).unwrap().unwrap();
     assert!(init.try_wait().unwrap().is_none());
+    let forged = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink("/proc/self/ns/pid", forged.path().join("pid")).unwrap();
+    let ns = File::open(original.join("proc/1/ns")).unwrap();
+    let replacement = DetachedMount::from_fd(open_tree_clone(forged.path(), false).unwrap())
+        .attach_at(ns.as_fd())
+        .unwrap();
+    assert!(proc_mount(&root).unwrap().is_some());
+    assert!(pid_namespace_at(&procfs, 1).is_err());
+    replacement.unmount().await.unwrap();
+    assert!(pid_namespace_at(&procfs, 1).unwrap().is_some());
 
     let mut unrelated = tokio::process::Command::new("sleep")
         .arg("300")
