@@ -13,7 +13,8 @@ import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 
 import {
   VOLUME_TYPES,
-  volumeLocation,
+  volumeName,
+  volumePath,
 } from 'src/app/routes/portal/routes/system/routes/volumes/types'
 import { BackupService } from './backup.service'
 
@@ -40,11 +41,11 @@ export interface Picked {
             })
           "
         >
-          <tui-icon [icon]="types[target.source.kind].icon" />
           <span tuiTitle>
-            <strong>{{ target.name }}</strong>
+            <strong>{{ name(target) }}</strong>
             <span tuiSubtitle>
-              {{ location(target.source) || ('This server' | i18n) }}
+              <tui-icon [icon]="types[target.source.kind].icon" />
+              {{ path(target.source) }}
             </span>
             <span tuiSubtitle>
               @if (target.availability === 'unavailable') {
@@ -56,11 +57,15 @@ export interface Picked {
                 } @else {
                   {{ 'Never' | i18n }}
                 }
-                @if (target.available !== null) {
-                  · {{ 'Free' | i18n }}: {{ target.available | convertBytes }}
-                }
               }
             </span>
+            @if (
+              target.availability !== 'unavailable' && target.available !== null
+            ) {
+              <span tuiSubtitle>
+                {{ 'Free' | i18n }}: {{ target.available | convertBytes }}
+              </span>
+            }
           </span>
           <tui-icon icon="@tui.chevron-right" />
         </button>
@@ -75,15 +80,9 @@ export interface Picked {
           [disabled]="!backup.usable"
           (click)="context.completeWith(backup)"
         >
-          <tui-icon icon="@tui.server" />
           <span tuiTitle>
             <strong>
-              {{ backup.hostname }}.local
-              @if (backup.serverId === service.serverId()) {
-                <span tuiBadge appearance="info" size="s">
-                  {{ 'This server' | i18n }}
-                </span>
-              }
+              {{ backup.targetName }}
               @if (backup.formatStatus === 'legacy') {
                 <span
                   tuiBadge
@@ -96,13 +95,20 @@ export interface Picked {
               }
             </strong>
             <span tuiSubtitle>
-              {{ backup.timestamp | date: 'medium' }} · StartOS
-              {{ backup.version }}
+              <tui-icon [icon]="types[backup.source.kind].icon" />
+              {{ path(backup.source) }}
             </span>
-            <span tuiSubtitle>
-              <tui-icon [icon]="types[backup.kind].icon" />
-              {{ backup.targetName }}
+            <span tuiSubtitle class="server">
+              <span>
+                {{ backup.hostname }}.local · StartOS {{ backup.version }}
+              </span>
+              @if (backup.serverId === service.serverId()) {
+                <span tuiBadge appearance="info" size="s">
+                  {{ 'This server' | i18n }}
+                </span>
+              }
             </span>
+            <span tuiSubtitle>{{ backup.timestamp | date: 'medium' }}</span>
             @if (!backup.usable) {
               <span tuiSubtitle class="g-negative">
                 {{
@@ -134,7 +140,12 @@ export interface Picked {
       text-align: start;
     }
 
-    strong {
+    .server {
+      flex-wrap: wrap;
+    }
+
+    strong,
+    .server {
       display: flex;
       align-items: center;
       gap: 0.5rem;
@@ -167,7 +178,8 @@ class BackupPicker {
     injectContext<TuiDialogContext<Picked, PickerMode>>()
   protected readonly service = inject(BackupService)
   protected readonly types = VOLUME_TYPES
-  protected readonly location = volumeLocation
+  protected readonly name = volumeName
+  protected readonly path = volumePath
   protected readonly oldFormat =
     'This backup uses an old format. It remains usable for restores. To enable stronger tamper detection and read-only snapshots, update it on the Backups page of the server this backup belongs to. Conversion may take a long time, and this backup is unavailable until it finishes.' as const
 
@@ -178,8 +190,8 @@ class BackupPicker {
           ...backup,
           targetId,
           serverId,
-          targetName: target.name,
-          kind: target.source.kind,
+          targetName: volumeName(target),
+          source: target.source,
           usable:
             target.availability !== 'unavailable' &&
             backup.formatStatus !== 'interrupted',

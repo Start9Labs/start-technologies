@@ -19,15 +19,11 @@ export const VOLUME_STATUSES: Record<T.SharedVolumeAvailability, i18nKey> = {
   unavailable: 'Unavailable',
 }
 
-export const volumeLocation = (source: T.SharedVolumeSource): string | null => {
-  switch (source.kind) {
-    case 'local':
-      return null
-    case 'disk': {
-      const { label, path } = source
-      return label ? [label, path].filter(Boolean).join('/') : `/${path}`
-    }
-    case 'cifs':
-      return `${source.hostname}${source.path}`
-  }
-}
+export const volumePath = (source: T.SharedVolumeSource) =>
+  source.kind === 'local' ? '/' : `/${source.path.replace(/^\//, '')}`
+
+export const volumeName = ({
+  name,
+  source,
+}: Pick<T.SharedVolume, 'name' | 'source'>) =>
+  source.kind === 'cifs' ? source.hostname : name

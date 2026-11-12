@@ -23,7 +23,7 @@ Back up your server's services and shared volumes to a backup target, review pas
 
 ## Backup Targets
 
-A backup target is where StartOS stores encrypted backups. The **Targets** table lists each target with its location, status, the time of this server's last backup to it, and its free space, so you can confirm a backup will fit before you start. StartOS rechecks a target's status and free space when you open the page if they have not been checked in the last 10 minutes.
+A backup target is where StartOS stores encrypted backups. The **Targets** table lists each target with its type, path, status, the time of this server's last backup to it, and its free space, so you can confirm a backup will fit before you start. StartOS rechecks a target's status and free space when you open the page if they have not been checked in the last 10 minutes.
 
 To add a target, select **Add** and choose a type:
 
@@ -54,7 +54,9 @@ For a new drive or a new backup folder:
 
 1. In **System → Backups**, select **Add**, then **External drive**.
 
-1. Name the target and choose the drive, then one of its partitions. To prepare a new drive, or one formatted for another system, choose **Erase and format this drive** instead: after a confirmation, StartOS erases everything on the drive and creates a single `Btrfs` partition. The server's own system and data drives are not offered.
+1. Choose the drive, then one of its partitions. To prepare a new drive, or one formatted for another system, choose **Erase and format this drive** instead: after a confirmation, StartOS erases everything on the drive and creates a single `Btrfs` partition. The server's own system and data drives are not offered.
+
+1. Keep the suggested name, taken from the partition's label or the drive's make and model, or enter one that is easier to recognize.
 
 1. Optionally enter a folder on the drive to use. Leaving it blank uses the whole partition.
 
@@ -360,7 +362,7 @@ The **Hostname** field accepts an IP address, a DNS name containing a dot (such 
 
 1. In **System → Backups**, select **Add**, then **CIFS share**.
 
-1. Name the target and complete the form:
+1. Complete the form. The hostname becomes the target's name:
 
 {{#tabs global="backup-target"}}
 

@@ -17,7 +17,7 @@ import {
   TuiTablePaginationEvent,
 } from '@taiga-ui/addon-table'
 import { TuiMapperPipe } from '@taiga-ui/cdk'
-import { TuiButton, TuiCell, TuiIcon, TuiLoader } from '@taiga-ui/core'
+import { TuiButton, TuiHint, TuiIcon, TuiLoader } from '@taiga-ui/core'
 import { TuiTooltip } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
 import {
@@ -37,7 +37,8 @@ import {
   isStale,
   VOLUME_STATUSES,
   VOLUME_TYPES,
-  volumeLocation,
+  volumeName,
+  volumePath,
 } from 'src/app/routes/portal/routes/system/routes/volumes/types'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { FormDialogService } from 'src/app/services/form-dialog.service'
@@ -102,18 +103,20 @@ const TARGET_SOURCES: SourcePickerData = {
 @Component({
   template: `
     <ng-container *title>
-      <a tuiIconButton routerLink=".." iconStart="@tui.arrow-left">
-        {{ 'Back' | i18n }}
-      </a>
-      {{ 'Backups' | i18n }}
-      <a
-        tuiIconButton
-        size="xs"
-        docsLink
-        path="/start-os/backups.html"
-        appearance="icon"
-        iconStart="@tui.book-open-text"
-      ></a>
+      <div>
+        <a tuiIconButton routerLink=".." iconStart="@tui.arrow-left">
+          {{ 'Back' | i18n }}
+        </a>
+        {{ 'Backups' | i18n }}
+        <a
+          tuiIconButton
+          size="xs"
+          docsLink
+          path="/start-os/backups.html"
+          appearance="icon"
+          iconStart="@tui.book-open-text"
+        ></a>
+      </div>
     </ng-container>
 
     @if (backingUp()) {
@@ -123,6 +126,17 @@ const TARGET_SOURCES: SourcePickerData = {
     <section class="g-card">
       <header>
         {{ 'Targets' | i18n }}
+        <a
+          tuiIconButton
+          size="xs"
+          docsLink
+          path="/start-os/backups.html"
+          fragment="#backup-targets"
+          appearance="icon"
+          iconStart="@tui.book-open-text"
+        >
+          {{ 'Documentation' | i18n }}
+        </a>
         <button
           tuiButton
           size="xs"
@@ -138,19 +152,34 @@ const TARGET_SOURCES: SourcePickerData = {
         </button>
       </header>
       <table
-        [appTable]="['Name', 'Location', 'Status', 'Last backup', 'Free', null]"
+        [appTable]="[
+          'Name',
+          'Type',
+          'Path',
+          'Status',
+          'Last backup',
+          'Free',
+          null,
+        ]"
       >
         @for (entry of service.targets() | keyvalue: null; track entry.key) {
           @let id = entry.key;
           @let target = entry.value;
+          @let conversion =
+            target.startOs
+              | backupConversionLabel
+                : service.conversions()[id]
+                : service.serverId();
           <tr>
-            <td>{{ target.name }}</td>
+            <td>{{ name(target) }}</td>
             <td>
-              <div tuiCell="s">
-                <tui-icon [icon]="types[target.source.kind].icon" />
-                {{ location(target.source) || ('This server' | i18n) }}
-              </div>
+              <tui-icon
+                [icon]="types[target.source.kind].icon"
+                [tuiHint]="types[target.source.kind].label | i18n"
+                [tuiHintShowDelay]="128"
+              />
             </td>
+            <td>{{ path(target.source) }}</td>
             <td
               [class.g-positive]="target.availability === 'available'"
               [class.g-negative]="target.availability === 'unavailable'"
@@ -175,13 +204,7 @@ const TARGET_SOURCES: SourcePickerData = {
               }
             </td>
             <td>
-              @if (
-                target.startOs
-                  | backupConversionLabel
-                    : service.conversions()[id]
-                    : service.serverId();
-                as label
-              ) {
+              @if (conversion) {
                 <button
                   tuiButton
                   size="s"
@@ -189,7 +212,7 @@ const TARGET_SOURCES: SourcePickerData = {
                   iconStart="@tui.shield-alert"
                   (click)="convert(id)"
                 >
-                  {{ label | i18n }}
+                  {{ conversion | i18n }}
                 </button>
               } @else if (target.legacyBackup) {
                 <backup-legacy-warning [id]="id" />
@@ -207,7 +230,7 @@ const TARGET_SOURCES: SourcePickerData = {
           </tr>
         } @empty {
           <tr>
-            <td colspan="6">{{ 'No backup targets' | i18n }}</td>
+            <td colspan="7">{{ 'No backup targets' | i18n }}</td>
           </tr>
         }
       </table>
@@ -216,6 +239,16 @@ const TARGET_SOURCES: SourcePickerData = {
     <section class="g-card">
       <header>
         {{ 'History' | i18n }}
+        <a
+          tuiIconButton
+          size="xs"
+          docsLink
+          path="/start-os/backups.html"
+          appearance="icon"
+          iconStart="@tui.book-open-text"
+        >
+          {{ 'Documentation' | i18n }}
+        </a>
         <button
           tuiButton
           size="xs"
@@ -311,22 +344,15 @@ const TARGET_SOURCES: SourcePickerData = {
       vertical-align: text-bottom;
     }
 
-    [tuiCell] {
-      margin: 0;
-      padding: 0;
-      min-block-size: 0;
-      gap: 0.75rem;
-
-      tui-icon {
-        font-size: 1.25rem;
-      }
-    }
-
     tui-table-pagination {
       margin-block-start: 0.5rem;
     }
 
     :host-context(tui-root._mobile) {
+      .g-card > header > [docsLink] {
+        display: none;
+      }
+
       tr {
         grid-template-columns: 1fr auto;
         row-gap: 0.25rem;
@@ -342,7 +368,7 @@ const TARGET_SOURCES: SourcePickerData = {
 
       td:last-child:not([colspan]) {
         grid-column: 2;
-        grid-row: 1 / span 5;
+        grid-row: 1 / span 6;
         align-self: center;
       }
     }
@@ -355,7 +381,7 @@ const TARGET_SOURCES: SourcePickerData = {
     ConvertBytesPipe,
     DocsLinkDirective,
     TuiButton,
-    TuiCell,
+    TuiHint,
     TuiIcon,
     TuiLoader,
     TuiMapperPipe,
@@ -409,7 +435,8 @@ export default class Backups {
   )
   protected readonly types = VOLUME_TYPES
   protected readonly statuses = VOLUME_STATUSES
-  protected readonly location = volumeLocation
+  protected readonly name = volumeName
+  protected readonly path = volumePath
 
   protected readonly toDuration = ({ startedAt, completedAt }: BackupRun) =>
     formatDuration(Date.parse(completedAt) - Date.parse(startedAt))

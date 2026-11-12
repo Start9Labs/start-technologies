@@ -2632,7 +2632,7 @@ test('production mocks support inspection, independent failed backups and new-lo
   assert.equal(found.length, 1)
   assert.match(found[0], /^[A-Z2-7]{32}$/)
   await api.rpc.backup.target.inspect({ id: found[0] })
-  assert.equal(cache.value.value.backupTargets[found[0]].name, 'Old Backups')
+  assert.equal(cache.value.value.backupTargets[found[0]].name, 'T7')
   assert.deepEqual(
     cache.value.value.backupTargets[found[0]].startOs,
     Mock.Disks[1].partitions[0].startOs,

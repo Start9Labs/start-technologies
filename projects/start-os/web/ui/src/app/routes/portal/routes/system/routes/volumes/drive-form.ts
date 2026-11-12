@@ -1,5 +1,12 @@
-import { Component, inject, viewChild } from '@angular/core'
+import {
+  AfterViewChecked,
+  Component,
+  inject,
+  OnDestroy,
+  viewChild,
+} from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
+import { FormGroup } from '@angular/forms'
 import {
   DialogService,
   HttpError,
@@ -10,7 +17,15 @@ import { T } from '@start9labs/start-core'
 import { TuiDialogContext } from '@taiga-ui/core'
 import { injectContext } from '@taiga-ui/polymorpheus'
 import { PatchDB } from 'patch-db-client'
-import { firstValueFrom, map, of, shareReplay, switchMap, tap } from 'rxjs'
+import {
+  firstValueFrom,
+  map,
+  of,
+  shareReplay,
+  Subscription,
+  switchMap,
+  tap,
+} from 'rxjs'
 
 import { FormComponent } from 'src/app/routes/portal/components/form.component'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
@@ -22,6 +37,7 @@ import {
   Disk,
   diskSource,
   diskSpec,
+  driveName,
   FORMAT,
   usableDrives,
 } from './create'
@@ -78,7 +94,7 @@ function sameDriveDescription(a: Disk, b: Disk) {
   `,
   imports: [FormComponent, PlaceholderComponent, i18nPipe],
 })
-export class DriveVolumeForm {
+export class DriveVolumeForm implements AfterViewChecked, OnDestroy {
   private readonly api = inject(ApiService)
   private readonly create =
     injectContext<TuiDialogContext<void, { create: Creator }>>().data.create
@@ -121,6 +137,33 @@ export class DriveVolumeForm {
       handler: (value: DriveValue) => this.save(value),
     },
   ]
+
+  private watched?: FormGroup
+  private nameDefault?: Subscription
+
+  ngAfterViewChecked() {
+    const form: FormGroup | undefined = this.form()?.form
+    if (!form || form === this.watched) return
+    this.watched = form
+    this.nameDefault?.unsubscribe()
+    this.nameDefault = form
+      .get('drive')
+      ?.valueChanges.subscribe((drive: DriveValue['drive']) => {
+        const name = form.get('name')
+        const disk = this.drives()?.find(
+          d => d.logicalname === drive?.selection,
+        )
+        if (!name || name.dirty || !disk) return
+        const partition = disk.partitions.find(
+          p => p.logicalname === drive.value?.partition,
+        )
+        name.setValue(partition?.label || driveName(this.i18n, disk))
+      })
+  }
+
+  ngOnDestroy() {
+    this.nameDefault?.unsubscribe()
+  }
 
   private rememberValue() {
     this.value =

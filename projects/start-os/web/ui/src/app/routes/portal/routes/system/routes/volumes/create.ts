@@ -43,7 +43,6 @@ export const driveName = (i18n: i18nPipe, drive: Disk) =>
 
 export function diskSpec(i18n: i18nPipe, drives: Disk[]) {
   return ISB.InputSpec.of({
-    name: nameSpec(i18n),
     drive: ISB.Value.union({
       name: i18n.transform('Drive'),
       default: null,
@@ -76,6 +75,7 @@ export function diskSpec(i18n: i18nPipe, drives: Disk[]) {
         ),
       ),
     }),
+    name: nameSpec(i18n),
     path: ISB.Value.text({
       name: i18n.transform('Path'),
       description: i18n.transform(
@@ -90,7 +90,6 @@ export function diskSpec(i18n: i18nPipe, drives: Disk[]) {
 
 export function cifsSpec(i18n: i18nPipe) {
   return ISB.InputSpec.of({
-    name: nameSpec(i18n),
     hostname: ISB.Value.text({
       name: i18n.transform('Hostname'),
       description: i18n.transform(

@@ -5,12 +5,11 @@ import {
   linkedSignal,
   signal,
   Signal,
-  inject,
 } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import { ConvertBytesPipe, CopyService, i18nPipe } from '@start9labs/shared'
+import { ConvertBytesPipe, i18nPipe } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import { TuiButton, TuiIcon, TuiInput } from '@taiga-ui/core'
+import { TuiIcon, TuiInput } from '@taiga-ui/core'
 import { TuiPassword, TuiTextarea, TuiTooltip } from '@taiga-ui/kit'
 
 import { ApiClient } from 'src/app/services/api/api.types'
@@ -33,7 +32,8 @@ export function sourceEdit(entry: Signal<SourceEntry | undefined>) {
   const path = linkedSignal(() => cifs()?.path ?? '')
   const username = linkedSignal(() => cifs()?.username ?? '')
   const password = signal('')
-  const renamed = computed(() => name().trim() !== entry()?.name)
+  const newName = computed(() => (cifs() ? hostname().trim() : name().trim()))
+  const renamed = computed(() => newName() !== entry()?.name)
   const cifsChanged = computed(
     () =>
       !!cifs() &&
@@ -51,12 +51,9 @@ export function sourceEdit(entry: Signal<SourceEntry | undefined>) {
     username,
     password,
     changed: computed(() => renamed() || cifsChanged()),
-    invalid: computed(
-      () =>
-        !name().trim() || (!!cifs() && (!hostname().trim() || !path().trim())),
-    ),
+    invalid: computed(() => !newName() || (!!cifs() && !path().trim())),
     async save(id: string, client: SourceClient) {
-      if (renamed()) await client.rename({ id, name: name().trim() })
+      if (renamed()) await client.rename({ id, name: newName() })
       if (cifsChanged())
         await client.updateCifs({
           id,
@@ -76,14 +73,16 @@ export type SourceEdit = ReturnType<typeof sourceEdit>
   template: `
     @let state = edit();
     @if (state.entry(); as entry) {
-      <tui-textfield>
-        <label tuiLabel>{{ 'Name' | i18n }}</label>
-        <input
-          tuiInput
-          [ngModel]="state.name()"
-          (ngModelChange)="state.name.set($event)"
-        />
-      </tui-textfield>
+      @if (entry.source.kind !== 'cifs') {
+        <tui-textfield>
+          <label tuiLabel>{{ 'Name' | i18n }}</label>
+          <input
+            tuiInput
+            [ngModel]="state.name()"
+            (ngModelChange)="state.name.set($event)"
+          />
+        </tui-textfield>
+      }
       <tui-textfield [iconStart]="types[entry.source.kind].icon">
         <label tuiLabel>{{ 'Type' | i18n }}</label>
         <input
@@ -94,32 +93,6 @@ export type SourceEdit = ReturnType<typeof sourceEdit>
       </tui-textfield>
       @switch (entry.source.kind) {
         @case ('disk') {
-          @if (driveLabel(); as label) {
-            <tui-textfield>
-              <label tuiLabel>{{ 'Label' | i18n }}</label>
-              <input tuiInput [readonly]="true" [ngModel]="label" />
-            </tui-textfield>
-          }
-          <tui-textfield>
-            <label tuiLabel>{{ 'Drive' | i18n }}</label>
-            <input
-              tuiInput
-              [readonly]="true"
-              [ngModel]="entry.source.logicalname"
-            />
-            <button
-              tuiIconButton
-              appearance="icon"
-              size="s"
-              type="button"
-              tabindex="-1"
-              iconStart="@tui.copy"
-              (pointerdown.stop)="(0)"
-              (click)="copy.copy(entry.source.logicalname)"
-            >
-              {{ 'Copy' | i18n }}
-            </button>
-          </tui-textfield>
           <tui-textfield>
             <label tuiLabel>{{ 'Path' | i18n }}</label>
             <input
@@ -217,7 +190,6 @@ export type SourceEdit = ReturnType<typeof sourceEdit>
   imports: [
     ConvertBytesPipe,
     FormsModule,
-    TuiButton,
     TuiIcon,
     TuiInput,
     TuiPassword,
@@ -227,14 +199,8 @@ export type SourceEdit = ReturnType<typeof sourceEdit>
   ],
 })
 export class SourceFields {
-  protected readonly copy = inject(CopyService)
   protected readonly types = VOLUME_TYPES
   protected readonly statuses = VOLUME_STATUSES
 
   public readonly edit = input.required<SourceEdit>()
-
-  protected readonly driveLabel = computed(() => {
-    const source = this.edit().entry()?.source
-    return source?.kind === 'disk' ? source.label : null
-  })
 }

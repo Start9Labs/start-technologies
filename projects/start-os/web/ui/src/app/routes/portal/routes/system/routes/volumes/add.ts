@@ -10,7 +10,7 @@ import { ISB } from '@start9labs/start-core'
 import { FormComponent } from 'src/app/routes/portal/components/form.component'
 import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
-import { cifsSource, cifsSpec, Creator, localSpec, Source } from './create'
+import { cifsSource, cifsSpec, Creator, localSpec } from './create'
 import { DriveVolumeForm } from './drive-form'
 import {
   SourcePickerData,
@@ -42,14 +42,14 @@ export class AddSourceService {
         return this.simple(
           'Add local folder',
           localSpec(this.i18n),
-          () => ({ kind: 'local' }),
+          ({ name }) => ({ name, source: { kind: 'local' } }),
           create,
         )
       case 'cifs':
         return this.simple(
           'Add CIFS share',
           cifsSpec(this.i18n),
-          cifsSource,
+          value => ({ name: value.hostname, source: cifsSource(value) }),
           create,
         )
       case 'disk':
@@ -60,10 +60,10 @@ export class AddSourceService {
     }
   }
 
-  private async simple<S extends { name: string }>(
+  private async simple<S>(
     label: i18nKey,
     spec: ISB.InputSpec<S>,
-    source: (value: S) => Source,
+    params: (value: S) => Parameters<Creator>[0],
     create: Creator,
   ) {
     this.formDialog.open(FormComponent, {
@@ -74,10 +74,7 @@ export class AddSourceService {
           {
             text: this.i18n.transform('Save'),
             handler: async (value: S) =>
-              this.tasks.run(
-                () => create({ name: value.name, source: source(value) }),
-                'Saving',
-              ),
+              this.tasks.run(() => create(params(value)), 'Saving'),
           },
         ],
       },

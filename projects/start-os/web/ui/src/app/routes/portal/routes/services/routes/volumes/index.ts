@@ -18,7 +18,8 @@ import { getCurrentManifest } from 'src/app/utils/get-package-data'
 import { VolumeGrant } from '../../../system/routes/volumes/grant'
 import {
   VOLUME_TYPES,
-  volumeLocation,
+  volumeName,
+  volumePath,
 } from '../../../system/routes/volumes/types'
 
 @Component({
@@ -46,16 +47,17 @@ import {
       @for (entry of volumeList; track entry.key) {
         <div tuiCell>
           <span tuiTitle>
-            {{ entry.value.name }}
+            {{ name(entry.value) }}
             <span tuiSubtitle class="location">
               <tui-icon [icon]="types[entry.value.source.kind].icon" />
-              {{ location(entry.value.source) || ('This server' | i18n) }}
+              {{ types[entry.value.source.kind].label | i18n }} ·
+              {{ path(entry.value.source) }}
             </span>
           </span>
           <volume-grant
             [volumeId]="entry.key"
             [packageId]="pkgId()"
-            [label]="entry.value.name"
+            [label]="name(entry.value)"
             [grant]="entry.value.grants[pkgId()]"
             [disabled]="!enabled()"
           />
@@ -107,7 +109,8 @@ export default class ServiceVolumes {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
 
   protected readonly types = VOLUME_TYPES
-  protected readonly location = volumeLocation
+  protected readonly name = volumeName
+  protected readonly path = volumePath
 
   public readonly pkgId = input.required<string>()
 

@@ -12,7 +12,7 @@ import {
   TaskService,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import { TuiButton, TuiHint, TuiIcon, TuiCell } from '@taiga-ui/core'
+import { TuiButton, TuiHint, TuiIcon } from '@taiga-ui/core'
 import { TuiTooltip } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
 import { filter, firstValueFrom } from 'rxjs'
@@ -25,7 +25,13 @@ import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { TitleDirective } from 'src/app/services/title.service'
 import { AddSourceService } from './add'
 import { VolumeManage } from './manage'
-import { isStale, VOLUME_STATUSES, VOLUME_TYPES, volumeLocation } from './types'
+import {
+  isStale,
+  VOLUME_STATUSES,
+  VOLUME_TYPES,
+  volumeName,
+  volumePath,
+} from './types'
 import { VOLUME_SOURCES } from './source-picker'
 
 import { DELETE_LOCAL } from './delete-local'
@@ -70,18 +76,20 @@ import { DELETE_LOCAL } from './delete-local'
           {{ 'Add' | i18n }}
         </button>
       </header>
-      <table [appTable]="['Name', 'Location', 'Status', 'Free', null]">
+      <table [appTable]="['Name', 'Type', 'Path', 'Status', 'Free', null]">
         @for (entry of volumes() | keyvalue: null; track entry.key) {
           @let id = entry.key;
           @let volume = entry.value;
           <tr>
-            <td>{{ volume.name }}</td>
+            <td>{{ name(volume) }}</td>
             <td>
-              <div tuiCell="s">
-                <tui-icon [icon]="types[volume.source.kind].icon" />
-                {{ location(volume.source) || ('This server' | i18n) }}
-              </div>
+              <tui-icon
+                [icon]="types[volume.source.kind].icon"
+                [tuiHint]="types[volume.source.kind].label | i18n"
+                [tuiHintShowDelay]="128"
+              />
             </td>
+            <td>{{ path(volume.source) }}</td>
             <td
               [class.g-positive]="volume.availability === 'available'"
               [class.g-negative]="volume.availability === 'unavailable'"
@@ -112,7 +120,7 @@ import { DELETE_LOCAL } from './delete-local'
           </tr>
         } @empty {
           <tr>
-            <td colspan="5">{{ 'No shared volumes' | i18n }}</td>
+            <td colspan="6">{{ 'No shared volumes' | i18n }}</td>
           </tr>
         }
       </table>
@@ -169,17 +177,6 @@ import { DELETE_LOCAL } from './delete-local'
       vertical-align: text-bottom;
     }
 
-    [tuiCell] {
-      margin: 0;
-      padding: 0;
-      min-block-size: 0;
-      gap: 0.75rem;
-
-      tui-icon {
-        font-size: 1.25rem;
-      }
-    }
-
     :host-context(tui-root._mobile) {
       .g-card > header > [docsLink] {
         display: none;
@@ -200,7 +197,7 @@ import { DELETE_LOCAL } from './delete-local'
 
       td:last-child:not([colspan]) {
         grid-column: 2;
-        grid-row: 1 / span 4;
+        grid-row: 1 / span 5;
         align-self: center;
       }
     }
@@ -215,7 +212,6 @@ import { DELETE_LOCAL } from './delete-local'
     TuiIcon,
     TuiTooltip,
     KeyValuePipe,
-    TuiCell,
     TableComponent,
     TitleDirective,
   ],
@@ -234,7 +230,8 @@ export default class Volumes {
   protected readonly volumes = toSignal(this.volumes$, { initialValue: {} })
   protected readonly retained = signal<Result<'volumes.list-retained'>>({})
   protected readonly types = VOLUME_TYPES
-  protected readonly location = volumeLocation
+  protected readonly name = volumeName
+  protected readonly path = volumePath
   protected readonly statuses = VOLUME_STATUSES
 
   constructor() {

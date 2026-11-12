@@ -1488,7 +1488,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           logicalname: '/dev/sdc1',
           stablePath:
             '/dev/disk/by-path/pci-0000:00:14.0-usb-0:3:1.0-scsi-0:0:0:0-part1',
-          label: 'Old Backups',
+          label: 'T7',
           capacity: 1000000000000,
           used: 100000000000,
           available: 900000000000,
@@ -1504,7 +1504,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           guid: null,
           filesystem: null,
         },
-        ...['Server One', 'Server Two', null].map((label, index) => ({
+        ...['Media', 'Archive', null].map((label, index) => ({
           logicalname: `/dev/sdc${index + 2}`,
           stablePath: `/dev/disk/by-path/pci-0000:00:14.0-usb-0:3:1.0-scsi-0:0:0:0-part${index + 2}`,
           label,
@@ -1531,19 +1531,37 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
         {
           logicalname: '/dev/sdd1',
           stablePath: '/dev/disk/by-path/pci-0000:00:17.0-ata-2-part1',
-          label: 'Another Drive',
+          label: null,
           capacity: 2000000000000,
           used: 100000000000,
           available: 1000000000,
-          startOs: {
-            [ServerId]: {
-              hostname: 'server-name',
-              timestamp: new Date().toISOString(),
-              version: '0.4.0',
-              formatStatus: 'interrupted',
-            },
-          },
-          legacyBackup: true,
+          startOs: {},
+          legacyBackup: false,
+          guid: null,
+          filesystem: null,
+        },
+      ],
+      capacity: 2000000000000,
+      guid: null,
+      filesystem: null,
+    },
+    {
+      logicalname: '/dev/sde',
+      stablePath: '/dev/disk/by-path/pci-0000:00:14.0-usb-0:4:1.0-scsi-0:0:0:0',
+      partitionTable: 'gpt',
+      vendor: 'WD',
+      model: 'My Passport 2626',
+      partitions: [
+        {
+          logicalname: '/dev/sde1',
+          stablePath:
+            '/dev/disk/by-path/pci-0000:00:14.0-usb-0:4:1.0-scsi-0:0:0:0-part1',
+          label: 'My Passport',
+          capacity: 2000000000000,
+          used: 1938800000000,
+          available: 61200000000,
+          startOs: {},
+          legacyBackup: false,
           guid: null,
           filesystem: null,
         },
@@ -1558,7 +1576,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     {
       id: 'MOCKRUNNAS3',
       targetId: 'MOCKBACKUPNAS234567ABCDEFGHIJKLM',
-      targetName: 'Office NAS',
+      targetName: 'office-nas.local',
       startedAt: new Date(Date.now() - 86400000 * 3 - 754000).toISOString(),
       completedAt: new Date(Date.now() - 86400000 * 3).toISOString(),
       report: {
@@ -1579,7 +1597,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     {
       id: 'MOCKRUNNAS10',
       targetId: 'MOCKBACKUPNAS234567ABCDEFGHIJKLM',
-      targetName: 'Office NAS',
+      targetName: 'office-nas.local',
       startedAt: new Date(Date.now() - 86400000 * 10 - 803000).toISOString(),
       completedAt: new Date(Date.now() - 86400000 * 10).toISOString(),
       report: {
@@ -1597,7 +1615,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     {
       id: 'MOCKRUNDESKTOP',
       targetId: 'MOCKBACKUPDESKTOP234567ABCDEFGHI',
-      targetName: 'Old desktop',
+      targetName: 'desktop.invalid',
       startedAt: new Date(Date.now() - 86400000 * 31 - 9000).toISOString(),
       completedAt: new Date(Date.now() - 86400000 * 31).toISOString(),
       report: {

@@ -94,7 +94,7 @@ export const mockPatchData: DataModel = {
         kind: 'disk',
         logicalname: Mock.driveLink('/dev/sdc1'),
         path: 'media/photos',
-        label: 'Old Backups',
+        label: 'T7',
       },
       grants: {
         nextcloud: { readonly: true },
@@ -111,7 +111,7 @@ export const mockPatchData: DataModel = {
         kind: 'disk',
         logicalname: Mock.driveLink('/dev/sdz1'),
         path: 'movies',
-        label: 'Movie Drive',
+        label: 'Elements',
       },
       grants: { jellyfin: { readonly: true } },
       availability: 'unavailable',
@@ -123,7 +123,7 @@ export const mockPatchData: DataModel = {
       checkedAt: new Date(Date.now() - 3600000).toISOString(),
     },
     MOCKCIFSDOCUMENTS234567ABCDEFGHI: {
-      name: 'Family documents',
+      name: 'nas.local',
       source: {
         kind: 'cifs',
         hostname: 'nas.local',
@@ -137,7 +137,7 @@ export const mockPatchData: DataModel = {
       checkedAt: new Date().toISOString(),
     },
     MOCKCIFSVOLUME234567ABCDEFGHIJKL: {
-      name: 'NAS music',
+      name: 'nas.invalid',
       source: {
         kind: 'cifs',
         hostname: 'nas.invalid',
@@ -153,13 +153,30 @@ export const mockPatchData: DataModel = {
     },
   },
   backupTargets: {
+    MOCKBACKUPLOCAL234567ABCDEFGHIJK: {
+      name: 'Quick restore',
+      source: { kind: 'local' },
+      availability: 'available',
+      available: 812400000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+      startOs: {
+        [Mock.ServerId]: {
+          hostname: 'server-name',
+          timestamp: new Date(Date.now() - 86400000 * 2).toISOString(),
+          version: '0.4.0',
+          formatStatus: 'current',
+        },
+      },
+      legacyBackup: false,
+    },
     MOCKBACKUPDRIVE234567ABCDEFGHIJK: {
       name: 'Samsung T7',
       source: {
         kind: 'disk',
         logicalname: Mock.driveLink('/dev/sdc1'),
         path: '',
-        label: 'Old Backups',
+        label: 'T7',
       },
       availability: 'available',
       available: 900000000000,
@@ -180,8 +197,8 @@ export const mockPatchData: DataModel = {
       source: {
         kind: 'disk',
         logicalname: Mock.driveLink('/dev/sdd1'),
-        path: '',
-        label: 'Another Drive',
+        path: 'backups',
+        label: null,
       },
       availability: 'available',
       available: 1000000000,
@@ -201,9 +218,9 @@ export const mockPatchData: DataModel = {
       name: 'WD Passport',
       source: {
         kind: 'disk',
-        logicalname: Mock.driveLink('/dev/sdc2'),
-        path: '',
-        label: 'Server One',
+        logicalname: Mock.driveLink('/dev/sde1'),
+        path: 'StartOS',
+        label: 'My Passport',
       },
       availability: 'available',
       available: 61200000000,
@@ -220,7 +237,7 @@ export const mockPatchData: DataModel = {
       legacyBackup: true,
     },
     MOCKBACKUPNAS234567ABCDEFGHIJKLM: {
-      name: 'Office NAS',
+      name: 'office-nas.local',
       source: {
         kind: 'cifs',
         hostname: 'office-nas.local',
@@ -248,7 +265,7 @@ export const mockPatchData: DataModel = {
       legacyBackup: false,
     },
     MOCKBACKUPDESKTOP234567ABCDEFGHI: {
-      name: 'Old desktop',
+      name: 'desktop.invalid',
       source: {
         kind: 'cifs',
         hostname: 'desktop.invalid',

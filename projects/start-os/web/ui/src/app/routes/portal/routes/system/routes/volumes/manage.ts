@@ -15,7 +15,7 @@ import { PatchDB } from 'patch-db-client'
 
 import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
-import { VOLUME_TYPES } from './types'
+import { VOLUME_TYPES, volumeName } from './types'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { getCurrentManifest } from 'src/app/utils/get-package-data'
@@ -28,7 +28,7 @@ import { SOURCE_MANAGE_STYLES } from './manage.styles'
     @if (volume(); as volume) {
       <div class="context">
         <tui-icon [icon]="types[volume.source.kind].icon" />
-        {{ volume.name }}
+        {{ name(volume) }}
       </div>
       <div tuiForm="l">
         <source-fields [edit]="edit" />
@@ -125,6 +125,7 @@ import { SOURCE_MANAGE_STYLES } from './manage.styles'
 })
 export class VolumeManage {
   protected readonly types = VOLUME_TYPES
+  protected readonly name = volumeName
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
