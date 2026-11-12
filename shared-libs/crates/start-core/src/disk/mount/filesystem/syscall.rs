@@ -206,6 +206,7 @@ impl DetachedMount {
 }
 
 /// Owns an attached mount independently of replacements of its target pathname.
+/// Cleanup lazily detaches the tree, including in unstable builds.
 #[derive(Debug)]
 pub struct AttachedMount {
     path: PathBuf,
@@ -232,11 +233,7 @@ impl GenericMountGuard for AttachedMount {
         &self.path
     }
     async fn unmount(mut self) -> Result<(), Error> {
-        self.detach(if cfg!(feature = "unstable") {
-            0
-        } else {
-            libc::MNT_DETACH
-        })
+        self.detach(libc::MNT_DETACH)
     }
 }
 
