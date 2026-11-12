@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import {
+  appendFile,
   cp,
   mkdir,
   mkdtemp,
@@ -20,6 +21,7 @@ import {
   instrumentProducer,
 } from '../lib/scripts/fde-initramfs-producer.mjs'
 import { verifyGeneratedArchive } from '../lib/scripts/fde-initramfs-archive.mjs'
+import { withPrivateInitramfs } from '../lib/scripts/fde-initramfs-generation.mjs'
 
 assert.ok(
   process.argv[2] && process.argv[3],
@@ -193,6 +195,80 @@ test('capture storage cannot be placed inside the generated tree', async t => {
   assert.match(result.stderr, /inside generated tree/)
   assert.deepEqual(await readdir(inside), [])
 })
+
+test('one private generation owns native capture, verification, consumption and cleanup', async t => {
+  const f = await fixture(t)
+  let workspace
+  const value = await withPrivateInitramfs(
+    f.root,
+    async generation => {
+      workspace = generation.directory
+      assert.equal((await stat(workspace)).mode & 0o777, 0o700)
+      assert.equal((await stat(generation.captures)).mode & 0o777, 0o700)
+      const result = runPackaging(f, {
+        outfile: generation.archive,
+        FDE_CAPTURE_DIR: generation.captures,
+      })
+      assert.equal(result.status, 0, result.stderr)
+    },
+    async archive => {
+      assert.equal(archive, join(workspace, 'initrd'))
+      assert.ok((await stat(archive)).size > 0)
+      return 'consumed'
+    },
+  )
+  assert.equal(value, 'consumed')
+  await assert.rejects(stat(workspace), { code: 'ENOENT' })
+  assert.equal(
+    await readFile(join(f.tree, 'payload'), 'utf8'),
+    'native packaging data',
+  )
+})
+
+for (const failure of ['producer', 'verification', 'consumer']) {
+  test(`private generation cleans up after ${failure} failure`, async t => {
+    const f = await fixture(t)
+    let workspace
+    let consumed = false
+    await assert.rejects(
+      withPrivateInitramfs(
+        f.root,
+        async generation => {
+          workspace = generation.directory
+          const result = runPackaging(f, {
+            outfile: generation.archive,
+            FDE_CAPTURE_DIR: generation.captures,
+            ...(failure === 'producer' ? { FDE_PREPARE: '/bin/false' } : {}),
+          })
+          if (failure === 'producer') {
+            assert.notEqual(result.status, 0)
+            throw Error('producer rejected')
+          }
+          assert.equal(result.status, 0, result.stderr)
+          if (failure === 'verification')
+            await appendFile(
+              capturedStreams(generation.captures).mainCpio,
+              'wrong private capture',
+            )
+        },
+        async archive => {
+          consumed = true
+          assert.ok((await stat(archive)).size > 0)
+          throw Error('consumer rejected')
+        },
+      ),
+      failure === 'verification'
+        ? /main CPIO stream differs/
+        : new RegExp(`${failure} rejected`),
+    )
+    assert.equal(consumed, failure === 'consumer')
+    await assert.rejects(stat(workspace), { code: 'ENOENT' })
+    assert.equal(
+      await readFile(join(f.tree, 'payload'), 'utf8'),
+      'native packaging data',
+    )
+  })
+}
 
 for (const name of ['mainCpio', 'uncompressed']) {
   test(`native ${name} capture I/O failure survives the packaging pipelines`, async t => {
