@@ -22,6 +22,7 @@ function prereleaseFixture(t) {
     'manage-release.sh',
     'changelog.mjs',
     'changelog-version.mjs',
+    'release-notes-select.mjs',
   ]) {
     write(`scripts/${name}`, '')
     copyFileSync(join(REPO, 'scripts', name), join(root, 'scripts', name))
@@ -31,10 +32,6 @@ function prereleaseFixture(t) {
   write(
     'projects/start-os/changelog/patch-fixed-localized.md',
     '---\nrelease-notes: true\n---\n\n- Visible correction.\n',
-  )
-  write(
-    'projects/start-os/changelog/patch-fixed-localized.pl_PL.md',
-    '- Widoczna poprawka.\n',
   )
   write(
     'package.json',
@@ -71,6 +68,8 @@ function prereleaseFixture(t) {
     HOME: join(root, 'home'),
     FIXTURE_ROOT: root,
     PATH: `${join(root, 'bin')}:${env.PATH}`,
+    VISUAL: 'true',
+    EDITOR: 'true',
   })
   write('home/.startos/id.key.pem', 'fixture')
   const index = hash => ({
@@ -135,7 +134,15 @@ const flag = name => args[args.indexOf(name) + 1]
 let data = existsSync(path) ? JSON.parse(readFileSync(path)) : null
 if (args[1] === 'view') {
   if (!data) process.exit(1)
-  console.log(args.includes('--jq') ? data.isDraft : JSON.stringify(data))
+  const jq = args.includes('--jq') ? flag('--jq') : null
+  if (jq === '.isDraft') console.log(data.isDraft)
+  else if (jq) for (const asset of data.assets) console.log(asset.name)
+  else console.log(JSON.stringify(data))
+  process.exit(0)
+}
+if (args[1] === 'download') {
+  if (!data?.notes) process.exit(1)
+  writeFileSync(flag('--output'), data.notes)
   process.exit(0)
 }
 appendFileSync(join(root, 'gh-events'), args.join(' ') + '\\n')
@@ -147,10 +154,22 @@ if (args.includes('--prerelease')) data.isPrerelease = true
 if (args.includes('--draft=false')) data.isDraft = false
 if (args[1] === 'upload') {
   if (process.env.FAIL_UPLOAD === '1') process.exit(42)
-  const name = 'CHANGELOG.md'
-  if (!data.assets.some(asset => asset.name === name)) data.assets.push({name})
+  for (const file of args.filter(arg => arg.startsWith('/'))) {
+    const name = file.split('/').pop()
+    if (name === 'release-notes.json') data.notes = readFileSync(file, 'utf8')
+    if (!data.assets.some(asset => asset.name === name)) data.assets.push({name})
+  }
 }
 writeFileSync(path, JSON.stringify(data))
+`,
+  )
+  nodeExecutable(
+    'bin/claude',
+    `
+import { readFileSync } from 'node:fs'
+const english = readFileSync(0, 'utf8').split('<english>\\n')[1].split('\\n</english>')[0]
+const locale = process.argv.at(-1).match(/into the (\\S+) locale/)[1]
+process.stdout.write('Translated ' + locale + '.\\n\\n' + english + '\\n')
 `,
   )
   function release(success = true, extra = '') {
@@ -173,7 +192,7 @@ ${extra}
 cmd_pre_release
 `,
       ],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', input: '\r' },
     )
     if (success) assert.equal(result.status, 0, result.stdout + result.stderr)
     else assert.notEqual(result.status, 0)
@@ -210,7 +229,8 @@ test('prerelease adopts the indexed image commit and allocates another RC after 
   assert.equal(data('beta.json').versions[VERSION].security, true)
   const notes = data('beta.json').versions[VERSION].releaseNotes
   assert.ok(notes.en_US.includes('Visible correction.'))
-  assert.ok(notes.pl_PL.includes('Widoczna poprawka.'))
+  assert.ok(notes.pl_PL.includes('Translated pl_PL.'))
+  assert.ok(notes.pl_PL.includes('Visible correction.'))
   assert.ok(notes.pl_PL.includes('Pełna lista zmian'))
   assert.equal(existsSync(join(root, 'removals')), false)
   assert.equal(
@@ -219,23 +239,44 @@ test('prerelease adopts the indexed image commit and allocates another RC after 
   )
 })
 
-test('another invocation creates a new RC even when the previous draft is incomplete', t => {
+test('a failure before the RC tag reuses that RC and its draft', t => {
   const { env, release, git, data, root } = prereleaseFixture(t)
   env.FAIL_UPLOAD = '1'
   release(false)
   assert.equal(data(`start-os_v${VERSION}-rc.1.json`).isDraft, true)
+  assert.equal(git('tag', '--list', `${PREFIX}-rc.*`).trim(), '')
   assert.equal(existsSync(join(root, 'promotions')), false)
   delete env.FAIL_UPLOAD
   release()
-  assert.equal(data(`start-os_v${VERSION}-rc.1.json`).isDraft, true)
-  assert.equal(data(`start-os_v${VERSION}-rc.2.json`).isDraft, false)
-  assert.equal(
-    git('tag', '--list', `${PREFIX}-rc.*`).trim(),
-    `${PREFIX}-rc.1\n${PREFIX}-rc.2`,
-  )
+  assert.equal(data(`start-os_v${VERSION}-rc.1.json`).isDraft, false)
+  assert.equal(existsSync(join(root, `start-os_v${VERSION}-rc.2.json`)), false)
+  assert.equal(git('tag', '--list', `${PREFIX}-rc.*`).trim(), `${PREFIX}-rc.1`)
   assert.ok(
     readFileSync(join(root, 'gh-events'), 'utf8').includes('--latest=false'),
   )
+})
+
+test('a later RC starts from the previous RC notes and inserts new fragments', t => {
+  const { write, commit, alpha, release, data } = prereleaseFixture(t)
+  release()
+  write(
+    'projects/start-os/changelog/patch-fixed-later.md',
+    '---\nrelease-notes: true\n---\n\n- Later correction.\n',
+  )
+  const next = commit()
+  alpha(next)
+  const first = JSON.parse(data(`start-os_v${VERSION}-rc.1.json`).notes)
+  release()
+  const second = JSON.parse(data(`start-os_v${VERSION}-rc.2.json`).notes)
+  assert.equal(
+    second.en_US,
+    first.en_US.replace(
+      '- Visible correction.\n',
+      '- Visible correction.\n\n- Later correction.\n',
+    ),
+  )
+  assert.equal((second.en_US.match(/## Highlights/g) ?? []).length, 1)
+  assert.ok(second.pl_PL.includes('Later correction.'))
 })
 
 test('the same image commit gets a new GitHub prerelease and replaces beta', t => {

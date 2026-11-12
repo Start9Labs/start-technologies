@@ -68,7 +68,7 @@ The SDK is a first-class project of the monorepo-wide release tool, [`scripts/ma
    ./scripts/manage-release.sh release start-sdk
    ```
 
-   This runs pre-check → tag → create the GitHub release → `npm publish`. It prompts for your npm 2FA one-time password at publish time; `OTP=…` skips the prompt.
+   This runs pre-check → draft the GitHub release with the picked, edited, and translated notes → tag → publish the GitHub release → `npm publish`. It prompts for your npm 2FA one-time password at publish time; `OTP=…` skips the prompt.
 
 The step order is deliberate: everything idempotent runs _before_ the one irreversible step. See the Gotcha below for why that matters, and never publish with `make publish`.
 
@@ -79,16 +79,17 @@ If a version reached npm without a tag and release, cut them after the fact with
 ```bash
 npm view @start9labs/start-sdk@<version> gitHead
 
+VERSION=<version> COMMIT=<sha> ./scripts/manage-release.sh create-gh-release start-sdk
 VERSION=<version> COMMIT=<sha> ./scripts/manage-release.sh tag start-sdk
-VERSION=<version> ./scripts/manage-release.sh create-gh-release start-sdk
+VERSION=<version> ./scripts/manage-release.sh publish-gh-release start-sdk
 ```
 
 If that commit never landed on `master` (e.g. the publish was cut from an unmerged branch), merge it first and tag the resulting `master` commit instead — verify its shipped subtree matches the published tarball rather than assuming it does.
 
 ## Gotchas
 
-- **Releasing is `./scripts/manage-release.sh release start-sdk`, not `make publish`.** The pipeline is pre-check → tag → GitHub release → `npm publish`, in that order because npm publish is the one step that can never be redone. `make publish` is _only_ that last step: run it on its own and the version lands on npm with no git tag and no GitHub release, and the normal flow can't recover (pre-check then refuses the version, and npm won't republish it). 2.0.4 and 2.0.5 shipped this way and had to be backfilled. See [Cutting a release](#cutting-a-release) above, which also documents the backfill.
-- **Version bumps pair with fragments.** Follow the root changelog rules; `package.json` owns the SDK version. Release-note files are optional notices; Highlights and Security compile from `release-notes: true` fragments selected under the root release-note rules.
+- **Releasing is `./scripts/manage-release.sh release start-sdk`, not `make publish`.** The pipeline is pre-check → draft GitHub release → tag → publish GitHub release → `npm publish`, in that order because npm publish is the one step that can never be redone. `make publish` is _only_ that last step: run it on its own and the version lands on npm with no git tag and no GitHub release, and the normal flow can't recover (pre-check then refuses the version, and npm won't republish it). 2.0.4 and 2.0.5 shipped this way and had to be backfilled. See [Cutting a release](#cutting-a-release) above, which also documents the backfill.
+- **Version bumps pair with fragments.** Follow the root changelog rules; `package.json` owns the SDK version. Release-note files are optional notices; Highlights and Security come from the fragments picked at release under the root release-note rules.
 - **`make bundle` verifies nothing.** It builds `dist/` and stops — `test` and `check-fmt` are deliberately not prerequisites (consumers like the OS build would otherwise re-run jest every build). Run `make test` and `make check-fmt` explicitly. And `check-fmt` is `npx prettier "**/*.ts" --check` — TypeScript only. The CI gate is repo-root `prettier --check .` across every file type, so a CHANGELOG or docs edit that passes here still breaks master.
 - **Whether package code spells out every field is decided per type, never by regeneration.** Where packages fill a type in — an action handler's return, a manifest field, a builder or effect argument, a `T.*` name they annotate values with — `FooInput` accepts omitted defaults and `Foo` requires every field. Action results take `Foo`, as `docs/src/actions.md` documents; manifests and notifications take `FooInput`, and `lib/types.ts` in start-core maps `T.DeviceFilter` to its input form. A Rust field that gains a default changes `Foo` without any SDK file changing, so run `check-consumers.sh` after every binding regeneration, not only before a release.
 - **Consumers read the built output.** After editing the SDK or `@start9labs/start-core`, run `make bundle` before checking container-runtime.

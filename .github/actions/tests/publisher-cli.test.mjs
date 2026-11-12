@@ -266,7 +266,7 @@ test('release-note catalog changes trigger image assembly without rebuilding ima
   for (const [path, expected] of [
     ['shared-libs/crates/start-core/locales/release-notes.json', true],
     ['shared-libs/crates/start-core/locales/i18n.yaml', false],
-    ['projects/start-os/changelog/patch-security-fix.pl_PL.md', true],
+    ['projects/start-os/changelog/patch-security-fix.md', true],
   ]) {
     const output = write('output', '')
     const result = run(
