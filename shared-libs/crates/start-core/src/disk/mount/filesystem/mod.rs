@@ -20,6 +20,7 @@ pub mod idmapped;
 pub mod label;
 pub mod loop_dev;
 pub mod overlayfs;
+pub mod private_tmpfs;
 #[cfg(target_os = "linux")]
 pub mod syscall;
 #[cfg(not(target_os = "linux"))]

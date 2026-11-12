@@ -1,0 +1,7 @@
+_version: 2
+fde.memory.unsafe-environment:
+  en_US: 'Bootstrap secrets require RAM-backed storage, no active swap and protected core-dump handling'
+  de_DE: 'Bootstrap-Geheimnisse erfordern RAM-Speicher, keinen aktiven Swap und geschützte Speicherabbilder'
+  es_ES: 'Los secretos de arranque requieren almacenamiento en RAM, sin intercambio activo y volcados de memoria protegidos'
+  fr_FR: 'Les secrets de démarrage nécessitent un stockage en RAM, sans échange actif et des vidages mémoire protégés'
+  pl_PL: 'Sekrety rozruchowe wymagają pamięci RAM, braku aktywnej wymiany i ochrony zrzutów pamięci'

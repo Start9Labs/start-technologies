@@ -7,5 +7,7 @@
 pub mod boot;
 pub mod bootstrap;
 pub mod credentials;
+pub mod initramfs;
 pub mod loader;
+pub mod memory;
 pub mod tpm;

@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use openssl::pkey::{PKey, Public};
 use serde::{Deserialize, Serialize};
 
+use super::credentials::{Credentials, SEALED_CREDENTIALS_FILE, SealedCredentials};
+use super::memory::InitramfsMemory;
 use super::tpm::{self, MeasurementProfile};
 use crate::disk::mount::guard::GenericMountGuard;
 use crate::os_overlay::{self, Manifest, PreparedGeneration, VerifiedGeneration, VerityMount};
@@ -182,6 +184,7 @@ impl Descriptor {
                 generation,
                 rootfs,
                 overlay,
+                authority: self.policy_key.0.clone(),
             })),
             Err(error) => {
                 rootfs.unmount().await.log_err();
@@ -218,6 +221,7 @@ pub struct MountedGeneration {
     generation: Generation,
     rootfs: VerityMount,
     overlay: VerityMount,
+    authority: PKey<Public>,
 }
 
 impl MountedGeneration {
@@ -247,6 +251,22 @@ impl MountedGeneration {
             &manifest.overlay_sha256,
         ))
         .await
+    }
+
+    /// Measures the protected filesystems before releasing bootstrap identities.
+    pub async fn release_bootstrap(
+        &self,
+        memory: &InitramfsMemory,
+        runtime: &Path,
+    ) -> Result<Credentials, Error> {
+        memory.check(runtime)?;
+        let bytes = tokio::fs::read(self.overlay().join(SEALED_CREDENTIALS_FILE)).await?;
+        let sealed: SealedCredentials =
+            serde_json::from_slice(&bytes).with_kind(ErrorKind::Deserialization)?;
+        self.measure().await?;
+        sealed
+            .unseal(&self.generation.profile.authorization, &self.authority)
+            .await
     }
 
     /// Transfers protected mount lifetime to the boot owner; dependent mounts must end first.
@@ -375,7 +395,26 @@ mod tests {
             public(&authority),
         )
         .unwrap();
-        let prepared = prepare(&config, &rootfs, &overlay_key, b"configuration override").await;
+        let raw = temp.path().join("raw");
+        std::fs::create_dir(&raw).unwrap();
+        std::fs::write(raw.join("setting"), b"configuration override").unwrap();
+        let snapshot =
+            SealedCredentials::seal(&super::super::credentials::test_credentials(), &authority)
+                .await
+                .unwrap();
+        let snapshot_path = raw.join(SEALED_CREDENTIALS_FILE);
+        std::fs::create_dir_all(snapshot_path.parent().unwrap()).unwrap();
+        std::fs::write(snapshot_path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+        std::fs::write(
+            temp.path().join("descriptor.json"),
+            serde_json::to_vec(&descriptor).unwrap(),
+        )
+        .unwrap();
+        std::fs::create_dir_all(generation_store(&config)).unwrap();
+        let prepared =
+            PreparedGeneration::import_raw(&raw, &rootfs, &generation_store(&config), &overlay_key)
+                .await
+                .unwrap();
         let expected = tpm::read_measurements()
             .await
             .unwrap()
@@ -457,6 +496,113 @@ mod tests {
         assert!(mounted.measure().await.is_err());
         mounted.unmount().await.unwrap();
         assert!(boot_mappings().is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires isolated initramfs-like root, software TPM, kernel verity and mounts"]
+    async fn software_tpm_initramfs_prepares_protected_bootstrap_handoff() {
+        use std::os::unix::fs::PermissionsExt;
+
+        use crate::util::Invoke;
+        let (temp, mounted, _sealed, _authority) = mounted_fixture().await;
+        mounted.unmount().await.unwrap();
+        let descriptor_path = Path::new(super::super::initramfs::DESCRIPTOR_FILE);
+        std::fs::create_dir_all(descriptor_path.parent().unwrap()).unwrap();
+        std::fs::copy(temp.path().join("descriptor.json"), descriptor_path).unwrap();
+        super::super::initramfs::prepare(&temp.path().join("images"), &temp.path().join("config"))
+            .await
+            .unwrap();
+        let runtime = Path::new(super::super::initramfs::RUNTIME);
+        let handoff_path = runtime.join(super::super::initramfs::HANDOFF_FILE);
+        assert_eq!(
+            std::fs::metadata(&handoff_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        let handoff: super::super::initramfs::BootHandoff =
+            serde_json::from_slice(&std::fs::read(&handoff_path).unwrap()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&handoff.credentials).unwrap(),
+            serde_json::to_value(&super::super::credentials::test_credentials()).unwrap()
+        );
+        assert_eq!(
+            std::fs::read(handoff.rootfs.join("setting")).unwrap(),
+            b"public default"
+        );
+        assert_eq!(
+            std::fs::read(handoff.overlay.join("setting")).unwrap(),
+            b"configuration override"
+        );
+        assert_eq!(unsafe { libc::prctl(libc::PR_GET_DUMPABLE, 0, 0, 0, 0) }, 0);
+        let options = tokio::process::Command::new("findmnt")
+            .args(["-n", "-o", "OPTIONS", "--target"])
+            .arg(runtime)
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+        assert!(
+            String::from_utf8(options)
+                .unwrap()
+                .trim()
+                .split(',')
+                .any(|option| option == "noswap")
+        );
+        assert!(
+            super::super::initramfs::prepare(
+                &temp.path().join("images"),
+                &temp.path().join("config")
+            )
+            .await
+            .is_err()
+        );
+        for path in [&handoff.overlay, &handoff.rootfs] {
+            tokio::process::Command::new("umount")
+                .arg(path)
+                .invoke(ErrorKind::Filesystem)
+                .await
+                .unwrap();
+        }
+        for name in boot_mappings() {
+            os_overlay::VerityImage::close(name.to_str().unwrap())
+                .await
+                .unwrap();
+        }
+        tokio::process::Command::new("umount")
+            .arg(runtime)
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+        assert!(boot_mappings().is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires isolated initramfs-like root, software TPM, kernel verity and mounts"]
+    async fn software_tpm_initramfs_failure_publishes_no_handoff() {
+        let (temp, mounted, _sealed, _authority) = mounted_fixture().await;
+        mounted.unmount().await.unwrap();
+        let descriptor_path = Path::new(super::super::initramfs::DESCRIPTOR_FILE);
+        std::fs::create_dir_all(descriptor_path.parent().unwrap()).unwrap();
+        std::fs::write(descriptor_path, b"invalid descriptor").unwrap();
+        assert!(
+            super::super::initramfs::prepare(
+                &temp.path().join("images"),
+                &temp.path().join("config")
+            )
+            .await
+            .is_err()
+        );
+        assert!(boot_mappings().is_empty());
+        assert!(
+            !Path::new(super::super::initramfs::RUNTIME)
+                .join(super::super::initramfs::HANDOFF_FILE)
+                .exists()
+        );
+        assert_eq!(tpm::read_measurements().await.unwrap().files, [0; 32]);
     }
 
     #[cfg(target_os = "linux")]

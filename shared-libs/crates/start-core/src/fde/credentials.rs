@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use openssl::pkey::{PKey, Private, Public};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -12,6 +13,36 @@ use crate::prelude::*;
 use crate::util::io::{delete_file, write_file_private_atomic};
 
 const RUNTIME_PROFILES: &str = "/run/NetworkManager/system-connections";
+pub const SEALED_CREDENTIALS_FILE: &str = "etc/startos/fde-bootstrap.json";
+
+/// Encrypted bootstrap identities and their TPM-sealed encryption key.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SealedCredentials {
+    key: super::tpm::SealedKey,
+    envelope: Vec<u8>,
+}
+
+impl SealedCredentials {
+    /// The caller protects transient key handling and the TPM workspace.
+    pub async fn seal(credentials: &Credentials, authority: &PKey<Private>) -> Result<Self, Error> {
+        let key = super::bootstrap::generate_key()?;
+        let envelope = credentials.encrypt(&key)?;
+        Ok(Self {
+            key: super::tpm::seal(&key, authority).await?,
+            envelope,
+        })
+    }
+
+    pub(super) async fn unseal(
+        &self,
+        authorization: &super::tpm::Authorization,
+        authority: &PKey<Public>,
+    ) -> Result<Credentials, Error> {
+        let key = super::tpm::unseal(&self.key, authorization, authority).await?;
+        Credentials::decrypt(&self.envelope, &key)
+    }
+}
 
 /// Bootstrap connection identities, without data-volume unlock credentials.
 #[derive(Deserialize, Serialize)]
@@ -102,25 +133,55 @@ fn profile_path(directory: &Path, name: &str) -> PathBuf {
 }
 
 #[cfg(test)]
+pub(super) fn test_credentials() -> Credentials {
+    Credentials {
+        disk_guid: InternedString::intern("STARTOS_TEST"),
+        hostname: ServerHostname::new_from_input(InternedString::intern("fde-test")).unwrap(),
+        identities: BTreeMap::new(),
+        local_issuer: None,
+        acme: BootstrapAcme::default(),
+        network_profiles: [(
+            "private.nmconnection".to_owned(),
+            "[wireguard]\nprivate-key=test-secret\n".to_owned(),
+        )]
+        .into_iter()
+        .collect(),
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::os::unix::fs::{PermissionsExt, symlink};
 
-    use super::*;
+    use super::{test_credentials as credentials, *};
 
-    fn credentials() -> Credentials {
-        Credentials {
-            disk_guid: InternedString::intern("STARTOS_TEST"),
-            hostname: ServerHostname::new_from_input(InternedString::intern("fde-test")).unwrap(),
-            identities: BTreeMap::new(),
-            local_issuer: None,
-            acme: BootstrapAcme::default(),
-            network_profiles: [(
-                "private.nmconnection".to_owned(),
-                "[wireguard]\nprivate-key=test-secret\n".to_owned(),
-            )]
-            .into_iter()
-            .collect(),
-        }
+    #[tokio::test]
+    #[ignore = "requires an exclusively owned software TPM and tpm2-tools"]
+    async fn software_tpm_sealed_snapshot_round_trips_and_rejects_tampering() {
+        let authority = crate::util::crypto::gen_nistp256().unwrap();
+        let public = PKey::public_key_from_der(&authority.public_key_to_der().unwrap()).unwrap();
+        let original = credentials();
+        let sealed = SealedCredentials::seal(&original, &authority)
+            .await
+            .unwrap();
+        let mut decoded: SealedCredentials =
+            serde_json::from_slice(&serde_json::to_vec(&sealed).unwrap()).unwrap();
+        let authorization = super::super::tpm::authorize(
+            &super::super::tpm::read_measurements().await.unwrap(),
+            &authority,
+        )
+        .await
+        .unwrap();
+        let round_trip = decoded.unseal(&authorization, &public).await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&round_trip).unwrap(),
+            serde_json::to_value(&original).unwrap()
+        );
+        *decoded.envelope.last_mut().unwrap() ^= 1;
+        assert!(decoded.unseal(&authorization, &public).await.is_err());
+        let mut extra = serde_json::to_value(&sealed).unwrap();
+        extra["diskPassword"] = serde_json::json!("not-a-bootstrap-field");
+        assert!(serde_json::from_value::<SealedCredentials>(extra).is_err());
     }
 
     #[test]

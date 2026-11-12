@@ -985,8 +985,10 @@ pub struct TmpDir {
     path: PathBuf,
 }
 impl TmpDir {
+    pub const BASE: &'static str = "/var/tmp/startos";
+
     pub async fn new() -> Result<Self, Error> {
-        let path = Path::new("/var/tmp/startos").join(base32::encode(
+        let path = Path::new(Self::BASE).join(base32::encode(
             base32::Alphabet::Rfc4648 { padding: false },
             &rand::random::<[u8; 8]>(),
         ));
