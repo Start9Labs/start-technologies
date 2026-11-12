@@ -1,10 +1,11 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Output;
 
 use tokio::process::Command;
 
 use crate::prelude::*;
-use crate::util::Invoke;
-use crate::util::io::{delete_file, maybe_open_file, write_file_atomic};
+use crate::util::io::{maybe_open_file, write_file_private_atomic};
+use crate::util::{GeneralBoxedGuard, Invoke, new_guid};
 
 pub const DKMS_MOK_KEY: &str = "/var/lib/dkms/mok.key";
 pub const DKMS_MOK_PUB: &str = "/var/lib/dkms/mok.pub";
@@ -25,7 +26,7 @@ pub async fn is_secure_boot_enabled() -> bool {
 pub async fn ensure_dkms_key(root: &Path) -> Result<bool, Error> {
     let key_path = root.join(DKMS_MOK_KEY.trim_start_matches('/'));
     if maybe_open_file(&key_path).await?.is_some() {
-        return Ok(false); // Already exists
+        return Ok(false);
     }
     Command::new("chroot")
         .arg(root)
@@ -33,11 +34,10 @@ pub async fn ensure_dkms_key(root: &Path) -> Result<bool, Error> {
         .arg("generate_mok")
         .invoke(ErrorKind::Bios)
         .await?;
-    Ok(true) // Newly generated
+    Ok(true)
 }
 
 /// Sign all unsigned kernel modules in the given root using the DKMS MOK key.
-/// Calls the sign-unsigned-modules script inside the chroot.
 pub async fn sign_unsigned_modules(root: &Path) -> Result<(), Error> {
     Command::new("chroot")
         .arg(root)
@@ -47,8 +47,7 @@ pub async fn sign_unsigned_modules(root: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-/// Read the start9 user's password hash from `<root>/etc/shadow`.
-/// Returns None if the user doesn't exist or the password is locked.
+/// The start9 user's password hash without shadow lock markers.
 async fn start9_shadow_hash(root: &Path) -> Result<Option<String>, Error> {
     let shadow = tokio::fs::read_to_string(root.join("etc/shadow")).await?;
     for line in shadow.lines() {
@@ -58,12 +57,48 @@ async fn start9_shadow_hash(root: &Path) -> Result<Option<String>, Error> {
                 if hash.starts_with('$') {
                     return Ok(Some(hash.to_owned()));
                 }
-                // Locked or invalid password
                 return Ok(None);
             }
         }
     }
     Ok(None)
+}
+
+fn mok_enrolled(certificate: &Path, output: Output) -> Result<bool, Error> {
+    let message = String::from_utf8_lossy(&output.stdout);
+    let certificate = certificate.display();
+    match output.status.code() {
+        Some(1) if message.trim() == format!("{certificate} is already enrolled") => {
+            return Ok(true);
+        }
+        Some(0) if message.trim() == format!("{certificate} is not enrolled") => return Ok(false),
+        Some(1)
+            if message.trim() == format!("{certificate} is already in the enrollment request") =>
+        {
+            return Ok(false);
+        }
+        _ => {}
+    }
+    super::check_command_output(output, ErrorKind::Bios, "mokutil --test-key")?;
+    Err(Error::new(
+        eyre!("{}", t!("util.mok.invalid-status")),
+        ErrorKind::Bios,
+    ))
+}
+
+async fn password_hash_file(
+    directory: &Path,
+    hash: &str,
+) -> Result<(PathBuf, GeneralBoxedGuard), Error> {
+    let path = directory.join(format!("startos-mok-{}", new_guid()));
+    let cleanup = GeneralBoxedGuard::new({
+        let path = path.clone();
+        move || {
+            let _ = std::fs::remove_file(path);
+        }
+    });
+    write_file_private_atomic(&path, hash).await?;
+    Ok((path, cleanup))
 }
 
 /// Enroll the DKMS MOK certificate, protected by the start9 user's password.
@@ -83,16 +118,14 @@ pub async fn enroll_mok(root: &Path) -> Result<bool, Error> {
         return Ok(false);
     }
 
-    // Check if already enrolled in firmware
     let test_output = Command::new("mokutil")
         .arg("--test-key")
         .arg(mok_pub)
-        .env("LANG", "C.UTF-8")
-        .invoke(ErrorKind::Bios)
+        .env("LC_ALL", "C")
+        .kill_on_drop(true)
+        .output()
         .await?;
-    let test_str = String::from_utf8(test_output)?;
-    tracing::info!("enroll_mok: mokutil --test-key output: {test_str:?}");
-    if test_str.contains("is enrolled") {
+    if mok_enrolled(mok_pub, test_output)? {
         tracing::info!("enroll_mok: already enrolled, skipping");
         return Ok(false);
     }
@@ -102,26 +135,88 @@ pub async fn enroll_mok(root: &Path) -> Result<bool, Error> {
         return Ok(false);
     };
 
-    // Revoke any pending enrollment (so we can re-import with current password)
     let _ = Command::new("mokutil")
         .arg("--revoke-import")
         .arg(mok_pub)
         .invoke(ErrorKind::Bios)
         .await;
 
-    let hash_file = Path::new("/tmp/mok-password-hash");
-    write_file_atomic(hash_file, &hash).await?;
+    let (hash_file, _cleanup) = password_hash_file(Path::new("/run"), &hash).await?;
 
     tracing::info!("Enrolling DKMS MOK certificate");
-    let result = Command::new("mokutil")
+    Command::new("mokutil")
         .arg("--import")
         .arg(mok_pub)
         .arg("--hash-file")
-        .arg(hash_file)
+        .arg(&hash_file)
         .invoke(ErrorKind::Bios)
-        .await;
-
-    delete_file(hash_file).await.log_err();
-    result?;
+        .await?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod enrollment_tests {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::ExitStatusExt;
+
+    use super::*;
+
+    fn output(code: i32, suffix: &str) -> Output {
+        Output {
+            status: std::process::ExitStatus::from_raw(code << 8),
+            stdout: format!("/test/mok.pub {suffix}\n").into_bytes(),
+            stderr: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn enrollment_probe_distinguishes_enrolled_pending_and_absent_certificates() {
+        let certificate = Path::new("/test/mok.pub");
+        for (code, message, enrolled) in [
+            (1, "is already enrolled", true),
+            (0, "is not enrolled", false),
+            (1, "is already in the enrollment request", false),
+        ] {
+            assert_eq!(
+                mok_enrolled(certificate, output(code, message)).unwrap(),
+                enrolled
+            );
+        }
+        for (code, message) in [
+            (1, "is blocked in dbx"),
+            (1, "is blocked in MokListX"),
+            (1, "is already in db"),
+            (0, "unexpected output"),
+            (0, "is already enrolled"),
+            (1, "is not enrolled"),
+            (255, "is already enrolled"),
+        ] {
+            assert!(mok_enrolled(certificate, output(code, message)).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn pending_password_hashes_are_private_independent_and_removed_on_drop() {
+        let directory = tempfile::tempdir().unwrap();
+        let (one, one_guard) = password_hash_file(directory.path(), "$6$test-hash")
+            .await
+            .unwrap();
+        let (two, two_guard) = password_hash_file(directory.path(), "$6$other-hash")
+            .await
+            .unwrap();
+        assert_ne!(one, two);
+        for path in [&one, &two] {
+            assert_eq!(
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        assert_eq!(std::fs::read(&one).unwrap(), b"$6$test-hash");
+        assert_eq!(std::fs::read(&two).unwrap(), b"$6$other-hash");
+        drop(one_guard);
+        assert!(!one.exists());
+        assert!(two.exists());
+        drop(two_guard);
+        assert!(!two.exists());
+    }
 }

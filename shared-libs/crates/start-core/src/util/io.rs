@@ -1194,6 +1194,7 @@ pub async fn write_file_atomic(
     Ok(())
 }
 
+/// The containing directory must not be writable by untrusted processes.
 #[instrument(skip_all)]
 pub async fn write_file_private_atomic(
     path: impl AsRef<Path>,

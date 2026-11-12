@@ -1,0 +1,7 @@
+_version: 2
+util.mok.invalid-status:
+  en_US: 'Unexpected MOK enrollment status'
+  de_DE: 'Unerwarteter MOK-Registrierungsstatus'
+  es_ES: 'Estado de inscripción MOK inesperado'
+  fr_FR: 'État d’inscription MOK inattendu'
+  pl_PL: 'Nieoczekiwany stan rejestracji MOK'
