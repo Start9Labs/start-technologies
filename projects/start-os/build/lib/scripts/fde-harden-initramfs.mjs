@@ -172,15 +172,19 @@ function replaceRange(text, first, last, replacement) {
   return text.slice(0, start) + replacement + text.slice(end)
 }
 
-async function filesUnder(root, relative) {
+async function checkedDirectory(root, relative) {
   let parent = root
   for (const part of relative.split('/')) {
     parent = join(parent, part)
     if (!(await lstat(parent)).isDirectory())
       throw Error(`Unsupported generated directory: ${relative}`)
   }
+  return parent
+}
+
+async function filesUnder(root, relative) {
   const entries = []
-  for (const entry of await readdir(join(root, relative), {
+  for (const entry of await readdir(await checkedDirectory(root, relative), {
     withFileTypes: true,
   })) {
     const path = `${relative}/${entry.name}`
@@ -211,13 +215,66 @@ async function rejectAlternateRules(root) {
     if (error.code !== 'ENOENT') throw error
   }
   if (
-    lib &&
-    (!lib.isSymbolicLink() || (await readlink(join(root, 'lib'))) !== 'usr/lib')
+    !lib ||
+    !lib.isSymbolicLink() ||
+    (await readlink(join(root, 'lib'))) !== 'usr/lib'
   )
     throw Error('Unsupported initramfs lib alias')
 }
 
-/** Hardens reviewed scripts and udev rules, not the complete executable closure. */
+/** Requires the build query and copied runtime to use the same libkmod. */
+async function auditModuleConfiguration(root) {
+  const moduleRoot = await checkedDirectory(root, 'usr/lib/modules')
+  const versions = await readdir(moduleRoot, { withFileTypes: true })
+  if (versions.length !== 1 || !versions[0].isDirectory())
+    throw Error('Expected one generated kernel module directory')
+  const version = versions[0].name
+  for (const name of ['modules.softdep', 'modules.weakdep']) {
+    try {
+      if (!(await lstat(join(moduleRoot, version, name))).isFile())
+        throw Error(`Unsupported module configuration: ${name}`)
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+  }
+  const directories = [
+    'etc/modprobe.d',
+    'run/modprobe.d',
+    'usr/local/lib/modprobe.d',
+    'usr/lib/modprobe.d',
+  ]
+  for (const directory of directories) {
+    try {
+      await filesUnder(root, directory)
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+  }
+  const query = spawnSync(
+    'modprobe',
+    [
+      '--showconfig',
+      `--dirname=${resolve(root)}`,
+      `--set-version=${version}`,
+      ...directories.flatMap(directory => ['--config', join(root, directory)]),
+    ],
+    {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, LC_ALL: 'C' },
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  )
+  if (query.error || query.status !== 0 || query.stderr)
+    throw Error(
+      `Cannot audit module configuration: ${query.error ?? query.stderr}`,
+    )
+  if (/^(install|remove) /m.test(query.stdout))
+    throw Error(
+      'Pre-verification module configuration invokes external commands',
+    )
+}
+
+/** Hardens reviewed scripts, rules and module configuration, not the complete executable closure. */
 export async function harden(root) {
   await rejectAlternateRules(root)
   const files = [
@@ -248,6 +305,7 @@ export async function harden(root) {
   }
   if (!original.has('conf/arch.conf'))
     throw Error('Missing architecture configuration')
+  await auditModuleConfiguration(root)
 
   const output = new Map(original)
   let init = output.get('init')

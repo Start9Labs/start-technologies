@@ -54,7 +54,7 @@ async function copyFixture(t) {
   const temp = await mkdtemp(join(tmpdir(), 'fde-initramfs-'))
   t.after(() => rm(temp, { recursive: true, force: true }))
   const tree = join(temp, 'tree')
-  await cp(fixture, tree, { recursive: true })
+  await cp(fixture, tree, { recursive: true, verbatimSymlinks: true })
   return { temp, tree }
 }
 
@@ -180,7 +180,6 @@ test('the executable entrypoint hardens when invoked through a symlink', async t
 
 test('canonical usr merge and absent optional package rules are supported', async t => {
   const { tree } = await copyFixture(t)
-  await symlink('usr/lib', join(tree, 'lib'))
   for (const directory of [
     'etc/udev/rules.d',
     'run/udev/rules.d',
@@ -206,7 +205,30 @@ test('canonical usr merge and absent optional package rules are supported', asyn
   )
 })
 
-for (const [name, mutate] of [
+test('module options, aliases and dependencies preserve platform parsing and priority', async t => {
+  const { tree } = await copyFixture(t)
+  const high = join(tree, 'etc/modprobe.d')
+  const low = join(tree, 'usr/lib/modprobe.d')
+  await mkdir(high, { recursive: true })
+  await writeFile(
+    join(low, 'priority.conf'),
+    'install fde_fixture /bin/sh -i\n',
+  )
+  const configuration =
+    'options fde_fixture label="install is data"\nalias fde_alias fde_fixture\nblacklist fde_unused\nsoftdep fde_fixture pre: fde_before post: fde_after\nweakdep fde_fixture fde_optional\n'
+  await writeFile(join(high, 'priority.conf'), configuration)
+  await harden(tree)
+  assert.equal(
+    await readFile(join(high, 'priority.conf'), 'utf8'),
+    configuration,
+  )
+  assert.equal(
+    await readFile(join(low, 'priority.conf'), 'utf8'),
+    'install fde_fixture /bin/sh -i\n',
+  )
+})
+
+for (const [name, mutate, error] of [
   [
     'changed init',
     tree => writeFile(join(tree, 'init'), '#!/bin/sh\nexec sh -i\n'),
@@ -284,8 +306,21 @@ for (const [name, mutate] of [
       await symlink('/usr/lib', library)
     },
   ],
-  ['unexpected lib alias', tree => symlink('/usr/lib', join(tree, 'lib'))],
-  ['independent lib directory', tree => mkdir(join(tree, 'lib'))],
+  [
+    'unexpected lib alias',
+    async tree => {
+      await rm(join(tree, 'lib'))
+      await symlink('/usr/lib', join(tree, 'lib'))
+    },
+  ],
+  [
+    'independent lib directory',
+    async tree => {
+      await rm(join(tree, 'lib'))
+      await mkdir(join(tree, 'lib'))
+    },
+  ],
+  ['missing lib alias', tree => rm(join(tree, 'lib'))],
   ...['etc', 'run', 'usr/local/lib'].map(prefix => [
     `alternate ${prefix} rules`,
     async tree => {
@@ -301,12 +336,87 @@ for (const [name, mutate] of [
     'symlink alternate rules ancestor',
     tree => symlink('/etc', join(tree, 'etc')),
   ],
+  ...['etc', 'run', 'usr/local/lib', 'usr/lib'].map(prefix => [
+    `module install command in ${prefix}`,
+    async tree => {
+      const directory = join(tree, prefix, 'modprobe.d')
+      await mkdir(directory, { recursive: true })
+      await writeFile(
+        join(directory, 'recovery.conf'),
+        ['  install fde_fixture \\', ' /bin/sh -i', ''].join('\n'),
+      )
+    },
+    /invokes external commands/,
+  ]),
+  [
+    'module removal command',
+    tree =>
+      writeFile(
+        join(tree, 'usr/lib/modprobe.d/recovery.conf'),
+        'remove fde_fixture /bin/sh -i\n',
+      ),
+    /invokes external commands/,
+  ],
+  [
+    'malformed module configuration',
+    tree =>
+      writeFile(
+        join(tree, 'usr/lib/modprobe.d/recovery.conf'),
+        'unknown fde_fixture value\n',
+      ),
+    /Cannot audit module configuration/,
+  ],
+  ...['modules.softdep', 'modules.weakdep'].map(name => [
+    `module command in ${name}`,
+    async tree => {
+      const directory = join(tree, 'usr/lib/modules')
+      const [version] = await readdir(directory)
+      await writeFile(
+        join(directory, version, name),
+        'install fde_fixture /bin/sh -i\n',
+      )
+    },
+    /invokes external commands/,
+  ]),
+  [
+    'symlink module configuration',
+    tree =>
+      symlink('/etc/passwd', join(tree, 'usr/lib/modprobe.d/recovery.conf')),
+  ],
+  [
+    'symlink module metadata',
+    async tree => {
+      const directory = join(tree, 'usr/lib/modules')
+      const [version] = await readdir(directory)
+      await symlink('/etc/passwd', join(directory, version, 'modules.softdep'))
+    },
+  ],
+  [
+    'multiple kernel versions',
+    tree => mkdir(join(tree, 'usr/lib/modules/unselected-kernel')),
+  ],
+  [
+    'environment-selected query bypass',
+    async (tree, t) => {
+      const before = process.env.MODPROBE_OPTIONS
+      t.after(() => {
+        if (before === undefined) delete process.env.MODPROBE_OPTIONS
+        else process.env.MODPROBE_OPTIONS = before
+      })
+      process.env.MODPROBE_OPTIONS = '--version'
+      await writeFile(
+        join(tree, 'usr/lib/modprobe.d/recovery.conf'),
+        'install fde_fixture /bin/sh -i\n',
+      )
+    },
+    /invokes external commands/,
+  ],
 ]) {
   test(`${name} fails before any transformation`, async t => {
     const { tree } = await copyFixture(t)
-    await mutate(tree)
+    await mutate(tree, t)
     const before = await snapshot(tree)
-    await assert.rejects(harden(tree))
+    await assert.rejects(harden(tree), error)
     assert.deepEqual(await snapshot(tree), before)
   })
 }
