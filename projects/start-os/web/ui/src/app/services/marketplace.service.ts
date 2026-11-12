@@ -9,6 +9,7 @@ import {
   packageResponse,
   packagesResponse,
   packageSignerPolicy,
+  satisfiesWithAliases,
 } from '@start9labs/marketplace'
 import { Exver, registryUrl, sameUrl } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
@@ -198,7 +199,14 @@ export class MarketplaceService extends AbstractMarketplaceService {
     provides: string,
     range: string,
   ): Observable<MarketplacePkg[]> {
-    return this.fetchPackages$(url, provides, range)
+    // Registries before 1.6.0 ignore `provides`.
+    return this.fetchPackages$(url, provides, range).pipe(
+      map(packages =>
+        packages.filter(pkg =>
+          satisfiesWithAliases(this.exver, pkg, range, provides),
+        ),
+      ),
+    )
   }
 
   private fetchPackages$(

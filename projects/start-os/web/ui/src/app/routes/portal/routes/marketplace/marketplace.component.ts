@@ -13,6 +13,7 @@ import { ErrorService, i18nPipe, registryUrl } from '@start9labs/shared'
 import {
   catchError,
   combineLatest,
+  distinctUntilChanged,
   map,
   of,
   startWith,
@@ -106,14 +107,16 @@ export default class Marketplace {
     )
     .subscribe()
 
+  // Tile navigation does not restart provider discovery.
   protected readonly registry = toSignal(
     combineLatest([
-      this.marketplaceService.currentRegistry$,
-      inject(ActivatedRoute).queryParamMap,
+      this.marketplaceService.currentRegistry$.pipe(distinctUntilChanged()),
+      inject(ActivatedRoute).queryParamMap.pipe(
+        map(params => [params.get('provides'), params.get('requireRange')]),
+        distinctUntilChanged(([a, b], [c, d]) => a === c && b === d),
+      ),
     ]).pipe(
-      switchMap(([registry, params]) => {
-        const provides = params.get('provides')
-        const range = params.get('requireRange')
+      switchMap(([registry, [provides, range]]) => {
         return provides && range
           ? this.marketplaceService
               .fetchProviders$(registry.url, provides, range)

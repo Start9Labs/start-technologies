@@ -102,6 +102,9 @@ fn uninit_target(data_ver: &str, prev: &Manifest, next: &Manifest) -> Result<Exi
     }
 }
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Default)]
 pub struct ServiceMap(SyncMutex<OrdMap<PackageId, Arc<RwLock<Option<ServiceRef>>>>>);
 impl ServiceMap {
@@ -128,6 +131,10 @@ impl ServiceMap {
         self.entry(id).write_owned().await
     }
 
+    fn try_get_mut(&self, id: &PackageId) -> Option<OwnedRwLockWriteGuard<Option<ServiceRef>>> {
+        self.entry(id).try_write_owned().ok()
+    }
+
     #[instrument(skip_all)]
     pub async fn init(&self, ctx: &RpcContext) -> Result<(), Error> {
         let ids = ctx.db.peek().await.as_public().as_package_data().keys()?;
@@ -150,31 +157,38 @@ impl ServiceMap {
         disposition: LoadDisposition,
     ) -> Result<(), Error> {
         let mut service = self.get_mut(id).await;
-        self.load_locked(ctx, id, disposition, &mut service).await?;
+        let result = self.load_locked(ctx, id, disposition, &mut service).await;
         drop(service);
-        self.recheck_dependency_tasks(ctx, id).await
+        result.and(self.recheck_dependency_tasks(ctx, id).await)
     }
 
-    pub(crate) async fn reconcile_dependencies(
+    /// Returns false when a busy service must be retried.
+    pub(crate) async fn try_reconcile_dependencies(
         &self,
         ctx: &RpcContext,
         id: &PackageId,
-    ) -> Result<(), Error> {
-        let mut service = self.get_mut(id).await;
+    ) -> Result<bool, Error> {
+        let Some(mut service) = self.try_get_mut(id) else {
+            return Ok(false);
+        };
         let reload = ctx
             .db
             .mutate(|db| crate::dependencies::providers::refresh_bindings(db, id))
             .await
             .result?;
-        if reload {
+        let result = if reload {
             self.load_locked(ctx, id, LoadDisposition::Retry, &mut service)
-                .await?;
-        }
+                .await
+        } else {
+            Ok(())
+        };
         drop(service);
         if reload {
-            self.recheck_dependency_tasks(ctx, id).await?;
+            result.and(self.recheck_dependency_tasks(ctx, id).await)?;
+        } else {
+            result?;
         }
-        Ok(())
+        Ok(true)
     }
 
     pub(crate) async fn recheck_dependency_tasks(
@@ -196,6 +210,7 @@ impl ServiceMap {
         Ok(())
     }
 
+    /// Exit-RPC errors are reported after replacement finishes.
     async fn load_locked(
         &self,
         ctx: &RpcContext,
@@ -203,8 +218,9 @@ impl ServiceMap {
         disposition: LoadDisposition,
         service: &mut Option<ServiceRef>,
     ) -> Result<(), Error> {
+        let mut shutdown_err = Ok(());
         if let Some(service) = service.take() {
-            service.shutdown(None).await?;
+            shutdown_err = service.shutdown(None).await;
         }
         ctx.db
             .mutate(|db| crate::dependencies::providers::initialize_bindings(db, id))
@@ -238,7 +254,7 @@ impl ServiceMap {
                     .result?;
             }
         }
-        Ok(())
+        shutdown_err
     }
 
     #[instrument(skip_all)]

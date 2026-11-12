@@ -10,17 +10,7 @@ import { Dependencies } from '../dependencies'
 import { VersionGraph } from '../version/VersionGraph'
 import sdkPackage from '@start9labs/start-sdk/package.json'
 
-/**
- * Retypes every key the SDK does not define, so declaring one is a compile
- * error at that key rather than a field that silently does nothing. The
- * replacement is a string literal rather than `never` purely so the error names
- * what went wrong.
- *
- * TypeScript applies its excess-property check only when a fresh object literal
- * meets a non-generic target, and `Manifest` is inferred from the argument — so
- * without this an unknown field joins the inferred type, typechecks, and is
- * then dropped on the way to the built manifest.
- */
+/** Rejects unknown fields that generic excess-property checks would otherwise accept. */
 type NoExtraKeys<Manifest> = {
   [K in keyof Manifest]: K extends keyof SDKManifest
     ? Manifest[K]
@@ -68,6 +58,14 @@ export function buildManifest<
   manifest: SDKManifest & Manifest,
   dependencies: Dependencies<DependencyIds>,
 ): Manifest & T.Manifest {
+  const claimedPackages = Object.keys(
+    versions.current.options.satisfiesPackages,
+  )
+  if (claimedPackages.includes(manifest.id)) {
+    throw new Error(
+      `Use .satisfies(version) for ${manifest.id}'s same-package aliases`,
+    )
+  }
   const images = Object.entries(manifest.images).reduce(
     (images, [k, v]) => {
       v.arch = v.arch ?? ['aarch64', 'x86_64', 'riscv64']
@@ -80,7 +78,7 @@ export function buildManifest<
   )
   let osVersion = manifest.osVersion ?? OSVersion
   if (
-    Object.keys(versions.current.options.satisfiesPackages).length &&
+    claimedPackages.length &&
     ExverVersion.parse(osVersion).compare(ExverVersion.parse('0.4.3')) ===
       'less'
   ) {

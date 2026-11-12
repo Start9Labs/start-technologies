@@ -171,6 +171,25 @@ test('dependency status observes the selected provider and reacts to rebinding, 
   assert.equal((await f.read()).consumer.bitcoin, null)
 })
 
+test('missing and incompatible installations have distinct dependency errors', async t => {
+  const consumer = dependent('consumer', null)
+  consumer.dependencyBindings.bitcoin.candidates = {}
+  const packages = { consumer }
+  const f = errors(t, packages)
+  assert.deepEqual((await f.read()).consumer.bitcoin, { type: 'notInstalled' })
+  for (const [state, type] of [
+    ['installing', 'notInstalled'],
+    ['installed', 'noCompatibleProvider'],
+    ['updating', 'noCompatibleProvider'],
+    ['removing', 'notInstalled'],
+  ]) {
+    packages.bitcoin = pkg('bitcoin')
+    packages.bitcoin.stateInfo.state = state
+    f.source.next(packages)
+    assert.deepEqual((await f.read()).consumer.bitcoin, { type })
+  }
+})
+
 test('provider updates retain the active dependency contract', async t => {
   const consumer = dependent()
   const alternate = pkg('alternate')
@@ -369,6 +388,15 @@ test('provider selector persists owner-scoped preferences, clears Automatic, and
     () => new ServiceDependenciesComponent(),
   )
   component.pkg = signal(owner)
+  const alternate = pkg('alternate')
+  alternate.stateInfo.manifest.title = 'Alternate provider'
+  component.services = signal({ alternate })
+  assert.equal(
+    component.stringify('alternate'),
+    'Alternate provider (alternate)',
+  )
+  assert.equal(component.stringify('unavailable'), 'unavailable')
+  assert.equal(component.stringify(''), 'Automatic')
   const control = { reset: value => resets.push(value) }
   await component.select('bitcoin', 'alternate', control)
   await component.select('bitcoin', '', control)

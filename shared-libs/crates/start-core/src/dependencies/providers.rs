@@ -213,19 +213,34 @@ fn identities(
 }
 
 /// Binding identities change after the old container exits, including its mounts and callbacks.
-pub async fn reconcile(ctx: &RpcContext) -> Result<(), Error> {
+/// Returns whether a busy service still needs reconciliation.
+pub async fn reconcile(ctx: &RpcContext) -> Result<bool, Error> {
     let packages = ctx.db.peek().await.as_public().as_package_data().de()?;
+    let mut retry = false;
     for (id, package) in &packages.0 {
-        if !matches!(package.state_info, PackageState::Installed(_)) {
+        if !refreshable(package) || bindings_for(&packages, package) == package.dependency_bindings
+        {
             continue;
         }
-        let desired = bindings_for(&packages, package);
-        if desired == package.dependency_bindings {
-            continue;
+        if let Some(completed) = ctx
+            .services
+            .try_reconcile_dependencies(ctx, id)
+            .await
+            .log_err()
+        {
+            retry |= !completed;
         }
-        ctx.services.reconcile_dependencies(ctx, id).await?;
     }
-    Ok(())
+    Ok(retry)
+}
+
+/// Bindings remain unchanged during backups and updates.
+fn refreshable(package: &PackageDataEntry) -> bool {
+    matches!(package.state_info, PackageState::Installed(_))
+        && !matches!(
+            package.status_info.desired,
+            DesiredStatus::BackingUp { .. } | DesiredStatus::Updating { .. }
+        )
 }
 
 pub(crate) fn refresh_bindings(db: &mut DatabaseModel, owner: &PackageId) -> Result<bool, Error> {
@@ -233,12 +248,7 @@ pub(crate) fn refresh_bindings(db: &mut DatabaseModel, owner: &PackageId) -> Res
     let Some(package) = packages.0.get(owner) else {
         return Ok(false);
     };
-    if !matches!(package.state_info, PackageState::Installed(_))
-        || matches!(
-            package.status_info.desired,
-            DesiredStatus::BackingUp { .. } | DesiredStatus::Updating { .. }
-        )
-    {
+    if !refreshable(package) {
         return Ok(false);
     }
     let desired = bindings_for(&packages, package);
@@ -394,6 +404,69 @@ mod tests {
     fn resolve(packages: &AllPackageData) -> DependencyBinding {
         bindings_for(packages, &packages.0["consumer"])["target"].clone()
     }
+    #[test]
+    fn lifecycle_operations_defer_binding_changes_until_completion() {
+        let consumer = "consumer".parse().unwrap();
+        let mut initial = db(packages());
+        initialize_bindings(&mut initial, &consumer).unwrap();
+        let binding = initial
+            .as_public()
+            .as_package_data()
+            .as_idx(&consumer)
+            .unwrap()
+            .as_dependency_bindings()
+            .de()
+            .unwrap();
+        for desired in [
+            DesiredStatus::Stopped.backing_up(),
+            DesiredStatus::Stopped.updating(),
+        ] {
+            let mut packages = initial.as_public().as_package_data().de().unwrap();
+            packages.0.remove("provider");
+            packages.0.get_mut("consumer").unwrap().status_info.desired = desired;
+            assert!(!refreshable(&packages.0["consumer"]));
+            let mut db = db(packages);
+            assert!(!refresh_bindings(&mut db, &consumer).unwrap());
+            assert_eq!(
+                db.as_public()
+                    .as_package_data()
+                    .as_idx(&consumer)
+                    .unwrap()
+                    .as_dependency_bindings()
+                    .de()
+                    .unwrap(),
+                binding
+            );
+            db.as_public_mut()
+                .as_package_data_mut()
+                .as_idx_mut(&consumer)
+                .unwrap()
+                .as_status_info_mut()
+                .as_desired_mut()
+                .ser(&DesiredStatus::Stopped)
+                .unwrap();
+            assert!(refreshable(
+                &db.as_public()
+                    .as_package_data()
+                    .as_idx(&consumer)
+                    .unwrap()
+                    .de()
+                    .unwrap()
+            ));
+            assert!(refresh_bindings(&mut db, &consumer).unwrap());
+            assert_eq!(
+                db.as_public()
+                    .as_package_data()
+                    .as_idx(&consumer)
+                    .unwrap()
+                    .as_dependency_bindings()
+                    .de()
+                    .unwrap(),
+                binding
+            );
+        }
+    }
+
     #[test]
     fn initialization_materializes_legacy_collections_without_losing_saved_intent() {
         let mut value = serde_json::to_value(packages()).unwrap();

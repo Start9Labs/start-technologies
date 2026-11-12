@@ -95,7 +95,12 @@ export class DepErrorService {
     if (!binding.providerId && Object.keys(binding.candidates).length > 1) {
       return { type: 'selectionRequired' }
     }
-    if (!binding.providerId) return { type: 'noCompatibleProvider' }
+    if (!binding.providerId) {
+      const installed = pkgs[depId]?.stateInfo.state
+      return installed === 'installed' || installed === 'updating'
+        ? { type: 'noCompatibleProvider' }
+        : { type: 'notInstalled' }
+    }
     const providerId = dependencyProvider(pkg, depId)
     const dep = providerId ? pkgs[providerId] : undefined
     if (

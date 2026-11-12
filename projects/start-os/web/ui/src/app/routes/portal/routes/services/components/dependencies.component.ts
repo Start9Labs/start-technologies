@@ -29,11 +29,19 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
       @let providerId = binding?.providerId;
       @let provider = providerId ? services[providerId] : undefined;
       @let manifest = provider ? (provider | toManifest) : null;
+      @let needsSelection = errors()[d.key]?.type === 'selectionRequired';
       <a
         tuiCell
-        [routerLink]="providerId ? ['..', providerId] : ['/marketplace']"
+        [routerLink]="
+          needsSelection
+            ? null
+            : providerId
+              ? ['..', providerId]
+              : ['/marketplace']
+        "
+        [attr.aria-disabled]="needsSelection || null"
         [queryParams]="
-          providerId
+          providerId || needsSelection
             ? {}
             : {
                 provides: d.key,
@@ -78,7 +86,9 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
             <span tuiSubtitle>{{ 'Loading' | i18n }}</span>
           }
         </span>
-        <tui-icon icon="@tui.arrow-right" />
+        @if (!needsSelection) {
+          <tui-icon icon="@tui.arrow-right" />
+        }
       </a>
       @if (binding) {
         <tui-textfield
@@ -103,13 +113,14 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
               track candidate.key
             ) {
               <button tuiOption [value]="candidate.key">
-                {{ candidate.key }} · {{ candidate.value.join(', ') }}
+                {{ stringify(candidate.key) }} ·
+                {{ candidate.value.join(', ') }}
               </button>
             }
             @let preferred = pkg().dependencySelections?.[d.key];
             @if (preferred && !binding.candidates[preferred]) {
               <button tuiOption [value]="preferred" [disabled]="true">
-                {{ preferred }} ({{ 'Unavailable' | i18n }})
+                {{ stringify(preferred) }} ({{ 'Unavailable' | i18n }})
               </button>
             }
           </tui-data-list>
@@ -155,8 +166,11 @@ export class ServiceDependenciesComponent {
   private readonly tasks = inject(TaskService)
   private readonly i18n = inject(i18nPipe)
   protected readonly saving = signal(false)
-  protected readonly stringify = (id: string) =>
-    id || this.i18n.transform('Automatic')
+  protected readonly stringify = (id: string) => {
+    if (!id) return this.i18n.transform('Automatic')
+    const provider = this.services()[id]
+    return provider ? `${getManifest(provider).title} (${id})` : id
+  }
 
   public readonly pkg = input.required<PackageDataEntry>()
   public readonly services = input.required<Record<string, PackageDataEntry>>()

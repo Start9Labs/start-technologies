@@ -484,11 +484,13 @@ impl RpcContext {
             loop {
                 watch.peek_and_mark_seen().ok();
                 let Some(seed) = weak.upgrade() else { break };
-                crate::dependencies::providers::reconcile(&Self(seed))
+                let retry = crate::dependencies::providers::reconcile(&Self(seed))
                     .await
-                    .log_err();
-                if watch.changed().await.is_err() {
-                    break;
+                    .log_err()
+                    .unwrap_or(false);
+                tokio::select! {
+                    result = watch.changed() => if result.is_err() { break },
+                    _ = tokio::time::sleep(Duration::from_secs(1)), if retry => {}
                 }
             }
         });

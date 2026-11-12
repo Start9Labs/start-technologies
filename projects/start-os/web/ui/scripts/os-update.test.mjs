@@ -141,6 +141,7 @@ boundaries.set(
     'trust.ts',
     'key-identity.ts',
     'types.ts',
+    'util/compatible-versions.ts',
     'services/abstract-marketplace.service.ts',
   ]
     .map(
@@ -152,7 +153,10 @@ boundaries.set(
 )
 loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
-const { Router } = await import('@angular/router')
+const { Router, ActivatedRoute, convertToParamMap } =
+  await import('@angular/router')
+const { Exver: ProductionExver } =
+  await import('../../../../../shared-libs/ts-modules/shared/src/services/exver.service.ts')
 const { RefreshAlertComponent } =
   await import('src/app/components/refresh-alert.component')
 const { PatchDB } = await import('patch-db-client')
@@ -2595,7 +2599,7 @@ test('provider discovery queries every registry package using the logical alias 
       },
     },
   }
-  service.exver = { getFlavor: () => null }
+  service.exver = new ProductionExver()
   const packages = await firstValueFrom(
     service.fetchProviders$('registry', 'bitcoin', '>=26.0.0'),
   )
@@ -2612,4 +2616,124 @@ test('provider discovery queries every registry package using the logical alias 
   assert.equal(packages[0].id, 'alternate')
   assert.equal(packages[0].version, '1.0.0:0')
   assert.deepEqual(packages[0].satisfiesPackages, { bitcoin: ['26.0.0:0'] })
+})
+
+test('provider discovery rejects unrelated releases returned by legacy registries', async () => {
+  const service = Object.create(MarketplaceService.prototype)
+  const record = (version, metadata = {}) => ({
+    categories: [],
+    otherVersions: {},
+    best: { [version]: { title: 'Package', satisfies: [], ...metadata } },
+  })
+  service.api = {
+    rpc: {
+      registry: {
+        package: {
+          get: async () => ({
+            alternate: record('1.0.0:0', {
+              satisfiesPackages: { bitcoin: ['26.0.0:0'] },
+            }),
+            unrelated: record('99.0.0:0', { satisfies: ['26.0.0:0'] }),
+            bitcoin: record('27.0.0:0'),
+            wrongClaim: record('99.0.0:0', {
+              satisfiesPackages: { other: ['26.0.0:0'] },
+            }),
+          }),
+        },
+      },
+    },
+  }
+  service.exver = new ProductionExver()
+  const packages = await firstValueFrom(
+    service.fetchProviders$('registry', 'bitcoin', '>=26.0.0'),
+  )
+  assert.deepEqual(
+    packages.map(pkg => pkg.id),
+    ['alternate', 'bitcoin'],
+  )
+})
+
+test('provider marketplace preserves its request and list across tile navigation', async t => {
+  const { default: Marketplace } =
+    await import('../src/app/routes/portal/routes/marketplace/marketplace.component.ts')
+  const { StorageService } = await import('src/app/services/storage.service')
+  const params = new BehaviorSubject(
+    convertToParamMap({
+      registry: 'registry',
+      provides: 'bitcoin',
+      requireRange: '>=26.0.0',
+    }),
+  )
+  const registry = new BehaviorSubject({
+    url: 'registry',
+    info: {},
+    packages: [],
+  })
+  const calls = []
+  const replies = []
+  const injector = createEnvironmentInjector([
+    {
+      provide: MarketplaceService,
+      useValue: {
+        currentRegistry$: registry,
+        currentRegistryUrl$: {
+          next: url =>
+            registry.next(
+              registry.value.url === url
+                ? registry.value
+                : { ...registry.value, url },
+            ),
+        },
+        fetchProviders$: (...args) => {
+          calls.push(args)
+          const reply = new Subject()
+          replies.push(reply)
+          return reply
+        },
+      },
+    },
+    { provide: ActivatedRoute, useValue: { queryParamMap: params } },
+    {
+      provide: Router,
+      useValue: { navigate: () => assert.fail('unexpected navigation') },
+    },
+    { provide: ConfigService, useValue: { defaultRegistry: 'registry' } },
+    { provide: StorageService, useValue: { get: () => null } },
+    {
+      provide: ErrorService,
+      useValue: { handleError: error => assert.fail(String(error)) },
+    },
+  ])
+  t.after(() => injector.destroy())
+  const component = runInInjectionContext(injector, () => new Marketplace())
+  assert.equal(component.registry(), undefined)
+  replies[0].next([{ id: 'alternate' }])
+  const loaded = component.registry()
+  for (const tile of [{ id: 'alternate', flavor: 'default' }, {}]) {
+    params.next(
+      convertToParamMap({
+        registry: 'registry',
+        provides: 'bitcoin',
+        requireRange: '>=26.0.0',
+        ...tile,
+      }),
+    )
+    assert.equal(calls.length, 1)
+    assert.equal(component.registry(), loaded)
+  }
+  params.next(
+    convertToParamMap({
+      registry: 'registry',
+      provides: 'bitcoin',
+      requireRange: '>=27.0.0',
+    }),
+  )
+  assert.equal(calls.length, 2)
+  assert.equal(component.registry(), undefined)
+  replies[1].next([])
+  assert.deepEqual(component.registry().packages, [])
+  assert.deepEqual(calls, [
+    ['registry', 'bitcoin', '>=26.0.0'],
+    ['registry', 'bitcoin', '>=27.0.0'],
+  ])
 })

@@ -7,6 +7,7 @@ use exver::VersionRange;
 use patch_db::ModelExt;
 use rust_i18n::t;
 
+use crate::db::model::DatabaseModel;
 use crate::db::model::package::{
     CurrentDependencies, CurrentDependencyInfo, CurrentDependencyKind, ManifestPreference,
     TaskEntry,
@@ -540,12 +541,24 @@ pub async fn check_dependencies(
     CheckDependenciesParam { package_ids }: CheckDependenciesParam,
 ) -> Result<Vec<CheckDependenciesResult>, Error> {
     let context = context.deref()?;
-    let db = context.seed.ctx.db.peek().await;
+    check_dependency_results(
+        &context.seed.ctx.db.peek().await,
+        &context.seed.id,
+        package_ids,
+    )
+}
+
+/// Includes incompatible same-ID versions for diagnostics, never resource resolution.
+fn check_dependency_results(
+    db: &DatabaseModel,
+    owner: &PackageId,
+    package_ids: Option<Vec<PackageId>>,
+) -> Result<Vec<CheckDependenciesResult>, Error> {
     let pde = db
         .as_public()
         .as_package_data()
-        .as_idx(&context.seed.id)
-        .or_not_found(&context.seed.id)?;
+        .as_idx(owner)
+        .or_not_found(owner)?;
     let current_dependencies = pde.as_current_dependencies().de()?;
     let tasks = pde.as_tasks().de()?;
     let package_dependency_info: Vec<_> = package_ids
@@ -565,9 +578,17 @@ pub async fn check_dependencies(
             .filter(|(_, v)| v.task.package_id == package_id)
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        let provider_id = find_package(&db, &context.seed.id, &package_id)?;
+        let provider_id = find_package(db, owner, &package_id)?;
+        let incompatible = provider_id.is_none()
+            && pde
+                .as_dependency_bindings()
+                .as_idx(&package_id)
+                .map(|binding| binding.as_candidates().de())
+                .transpose()?
+                .map_or(true, |candidates| candidates.is_empty());
         let package = provider_id
             .as_ref()
+            .or(incompatible.then_some(&package_id))
             .and_then(|id| db.as_public().as_package_data().as_idx(id));
         let Some(package) = package else {
             results.push(CheckDependenciesResult {
@@ -583,18 +604,19 @@ pub async fn check_dependencies(
             continue;
         };
         let manifest = package.as_state_info().as_manifest(ManifestPreference::Old);
-        let (installed_version, satisfies) = if provider_id.as_ref() == Some(&package_id) {
-            (
+        let (installed_version, satisfies) = match &provider_id {
+            Some(provider) if provider != &package_id => {
+                let binding = pde
+                    .as_dependency_bindings()
+                    .as_idx(&package_id)
+                    .or_not_found(&package_id)?
+                    .de()?;
+                dependency_release_versions(binding.versions)
+            }
+            _ => (
                 Some(manifest.as_version().de()?.into_version().into()),
                 manifest.as_metadata().as_satisfies().de()?,
-            )
-        } else {
-            let binding = pde
-                .as_dependency_bindings()
-                .as_idx(&package_id)
-                .or_not_found(&package_id)?
-                .de()?;
-            dependency_release_versions(binding.versions)
+            ),
         };
         let is_running = package
             .as_status_info()
@@ -681,6 +703,86 @@ pub async fn get_service_manifest(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn checks_distinguish_incompatible_absent_ambiguous_and_selected_releases() {
+        use crate::dependencies::providers::DependencyBinding;
+        let owner = "consumer".parse().unwrap();
+        let target = "target".parse().unwrap();
+        let mut db = DatabaseModel::from(imbl_value::json!({"public":{"packageData":{
+            "consumer":{"currentDependencies":{"target":{"kind":"exists","versionRange":">=2.0.0:0"}},"tasks":{},
+                "dependencyBindings":{"target":{"providerId":null,"versions":[],"candidates":{}}}},
+            "target":{"stateInfo":{"state":"installed","manifest":{"id":"target","version":"1.0.0:0","satisfies":[]}},"statusInfo":{"started":null,"health":{}}},
+            "alternate":{"stateInfo":{"state":"installed","manifest":{"id":"alternate","version":"99.0.0:0","satisfies":[],"satisfiesPackages":{"target":["2.0.0:0"]}}},"statusInfo":{"started":null,"health":{}}},
+            "other":{"stateInfo":{"state":"installed","manifest":{"id":"other","version":"99.0.0:0","satisfies":[],"satisfiesPackages":{"target":["2.0.0:0"]}}},"statusInfo":{"started":null,"health":{}}}
+        }}}));
+        let result = check_dependency_results(&db, &owner, None)
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(result.installed_version, Some("1.0.0:0".parse().unwrap()));
+        assert!(result.provider_id.is_none());
+        assert_eq!(
+            resolve_package(&db, &owner, &target).unwrap_err().kind,
+            ErrorKind::NotFound
+        );
+        let mut binding = DependencyBinding {
+            candidates: ["alternate", "other"]
+                .into_iter()
+                .map(|id| (id.parse().unwrap(), ["2.0.0:0".parse().unwrap()].into()))
+                .collect(),
+            ..Default::default()
+        };
+        db.as_public_mut()
+            .as_package_data_mut()
+            .as_idx_mut(&owner)
+            .unwrap()
+            .as_dependency_bindings_mut()
+            .as_idx_mut(&target)
+            .unwrap()
+            .ser(&binding)
+            .unwrap();
+        assert!(
+            check_dependency_results(&db, &owner, None).unwrap()[0]
+                .installed_version
+                .is_none()
+        );
+        binding.provider_id = Some("alternate".parse().unwrap());
+        binding.versions = ["2.0.0:0".parse().unwrap()].into();
+        db.as_public_mut()
+            .as_package_data_mut()
+            .as_idx_mut(&owner)
+            .unwrap()
+            .as_dependency_bindings_mut()
+            .as_idx_mut(&target)
+            .unwrap()
+            .ser(&binding)
+            .unwrap();
+        let result = check_dependency_results(&db, &owner, None)
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(result.installed_version, Some("2.0.0:0".parse().unwrap()));
+        assert_eq!(result.provider_id, Some("alternate".parse().unwrap()));
+        db.as_public_mut()
+            .as_package_data_mut()
+            .as_idx_mut(&owner)
+            .unwrap()
+            .as_dependency_bindings_mut()
+            .as_idx_mut(&target)
+            .unwrap()
+            .ser(&DependencyBinding::default())
+            .unwrap();
+        db.as_public_mut()
+            .as_package_data_mut()
+            .remove(&target)
+            .unwrap();
+        assert!(
+            check_dependency_results(&db, &owner, None).unwrap()[0]
+                .installed_version
+                .is_none()
+        );
+    }
 
     #[test]
     fn dependency_release_reports_the_logical_versions_without_a_provider_primary() {

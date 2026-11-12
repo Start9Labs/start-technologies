@@ -121,6 +121,23 @@ test('the manifest publishes current compatibility claims, not historical claims
   ).toBe('0.5.0')
 })
 
+test('package-qualified claims reject the manifest own ID', () => {
+  const graph = VersionGraph.of({
+    current: versions.current.satisfies('test', '2.0.0:0'),
+    other: [],
+  })
+  expect(() => buildManifest(graph, manifest(), Dependencies.of())).toThrow(
+    'Use .satisfies(version)',
+  )
+  const samePackage = VersionGraph.of({
+    current: versions.current.satisfies('2.0.0:0'),
+    other: [],
+  })
+  expect(
+    buildManifest(samePackage, manifest(), Dependencies.of()).satisfies,
+  ).toEqual(['2.0.0:0'])
+})
+
 test('images emulate missing architectures by default', () => {
   const built = buildManifest(versions, manifest(), Dependencies.of())
 
