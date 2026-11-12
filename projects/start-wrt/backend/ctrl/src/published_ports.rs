@@ -82,17 +82,7 @@ pub(crate) fn may_affect_v6_rules(mac: &str) -> bool {
     }
 }
 
-// ── Types ──────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitVariants)]
-#[serde(rename_all = "lowercase")]
-pub enum Protocol {
-    Tcp,
-    Udp,
-    #[serde(rename = "tcp+udp")]
-    TcpUdp,
-}
-rpc_toolkit::reflect_ts!(Protocol);
+pub use startos::net::port_map::Protocol;
 
 #[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitVariants)]
 #[serde(rename_all = "lowercase")]
@@ -321,15 +311,12 @@ fn port_profile<'a>(
         .or_else(|| zones.get(port.dest_zone.as_deref()?).map(String::as_str))
 }
 
-// ── Helpers ──────────────────────────────────────────────
-
-/// Convert our Protocol enum to UCI proto string
 fn protocol_to_uci(proto: &Protocol) -> Vec<String> {
-    match proto {
-        Protocol::Tcp => vec!["tcp".into()],
-        Protocol::Udp => vec!["udp".into()],
-        Protocol::TcpUdp => vec!["tcp".into(), "udp".into()],
-    }
+    proto
+        .transports()
+        .iter()
+        .map(|transport| transport.as_str().into())
+        .collect()
 }
 
 /// Check whether an IPv6 address is a Global Unicast Address (2000::/3 —
@@ -1377,16 +1364,11 @@ fn active_sni_conflicting_ranges(
             let range = crate::port_control::parse_port_range(
                 port.ipv4_public_port.as_deref().unwrap_or(&port.ports),
             );
-            [TransportProtocol::Tcp, TransportProtocol::Udp]
-                .into_iter()
-                .filter_map(move |protocol| {
-                    let included = match port.protocol {
-                        Protocol::Tcp => protocol == TransportProtocol::Tcp,
-                        Protocol::Udp => protocol == TransportProtocol::Udp,
-                        Protocol::TcpUdp => true,
-                    };
-                    range.filter(|_| included).map(|range| (protocol, range))
-                })
+            port.protocol
+                .transports()
+                .iter()
+                .copied()
+                .filter_map(move |protocol| range.map(|range| (protocol, range)))
         })
         .collect()
 }
@@ -1403,12 +1385,12 @@ fn wan_port_collisions(
             let range = crate::port_control::parse_port_range(
                 p.ipv4_public_port.as_deref().unwrap_or(&p.ports),
             )?;
-            let (tcp, udp) = match p.protocol {
-                Protocol::Tcp => (true, false),
-                Protocol::Udp => (false, true),
-                Protocol::TcpUdp => (true, true),
-            };
-            let overlaps = crate::port_control::wan_reserved_overlaps(firewall, range, tcp, udp);
+            let overlaps = crate::port_control::wan_reserved_overlaps(
+                firewall,
+                range,
+                p.protocol.contains(TransportProtocol::Tcp),
+                p.protocol.contains(TransportProtocol::Udp),
+            );
             (!overlaps.is_empty()).then(|| {
                 let (hostname_routes, router_services): (Vec<_>, Vec<_>) = overlaps
                     .into_iter()
