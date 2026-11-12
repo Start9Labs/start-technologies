@@ -171,8 +171,17 @@ async fn actual_log_cli_uses_startup_admission_and_the_process_terminal() {
     let temp = tempfile::tempdir().unwrap();
     let key = temp.path().join("malformed.pem");
     tokio::fs::write(&key, "not a key").await.unwrap();
+    let backlog = (0..64)
+        .map(|n| ENTRY.replace("last entry", &format!("backlog-{n:03}")))
+        .map(|entry| format!("'{entry}'"))
+        .collect::<Vec<_>>()
+        .join(" ");
     for failed in [false, true] {
-        let (host, _server, _) = serve(script(failed)).await;
+        let (host, _server, _) = serve(format!(
+            "printf '%s\\n' {backlog}; exit {}",
+            if failed { 7 } else { 0 }
+        ))
+        .await;
         let output = tokio::time::timeout(
             Duration::from_secs(15),
             tokio::process::Command::new(&binary)
@@ -200,8 +209,9 @@ async fn actual_log_cli_uses_startup_admission_and_the_process_terminal() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        assert!(String::from_utf8_lossy(&output.stdout).contains("last entry"));
-        assert!(String::from_utf8_lossy(&output.stdout).contains("next entry"));
+        for n in 0..64 {
+            assert!(String::from_utf8_lossy(&output.stdout).contains(&format!("backlog-{n:03}")));
+        }
         if failed {
             assert_eq!(output.status.code(), Some(ErrorKind::Journald as i32));
         }

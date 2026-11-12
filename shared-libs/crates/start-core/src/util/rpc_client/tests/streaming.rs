@@ -30,7 +30,7 @@ async fn event(
 }
 
 #[tokio::test]
-async fn full_queue_preserves_initial_metadata_items_and_reserved_terminal_result() {
+async fn buffered_items_preserve_initial_metadata_and_reserved_terminal_result() {
     let (client, mut requests, mut responses) = channel();
     let (id, mut stream) = start(&client, &mut requests, &mut responses).await;
     let capacity = rpc_toolkit::WebSocketOptions::default()
@@ -81,24 +81,19 @@ async fn terminal_application_error_drains_accepted_items_and_does_not_poison_th
 }
 
 #[tokio::test]
-async fn slow_consumer_cancels_its_stream_without_blocking_a_sibling() {
+async fn unread_burst_beyond_the_server_item_queue_is_retained_without_blocking_a_sibling() {
     let (client, mut requests, mut responses) = channel();
     let (id, mut stream) = start(&client, &mut requests, &mut responses).await;
-    for n in 0..=rpc_toolkit::WebSocketOptions::default()
+    let burst = 4 * rpc_toolkit::WebSocketOptions::default()
         .stream_buffer_capacity
-        .get()
-    {
+        .get();
+    for n in 0..burst {
         event(&mut responses, &id, json!(n), false).await;
     }
-    let close: Value = serde_json::from_str(&requests.next().await.unwrap()).unwrap();
-    assert_eq!(close["close"], id);
-    assert_eq!(
-        stream.items.next().await.unwrap_err().code,
-        rpc_toolkit::RPCSTREAM_CANCELLED_ERROR.code
-    );
     let request = client.request(method("sibling"), json!({}));
     let server = async {
         let request: Value = serde_json::from_str(&requests.next().await.unwrap()).unwrap();
+        assert!(request.get("close").is_none(), "{request}");
         responses
             .send(Ok(
                 json!({"jsonrpc":"2.0","id":request["id"],"result":"kept"}).to_string(),
@@ -108,6 +103,9 @@ async fn slow_consumer_cancels_its_stream_without_blocking_a_sibling() {
     };
     let (value, ()) = tokio::join!(request, server);
     assert_eq!(value.unwrap(), json!("kept"));
+    for n in 0..burst {
+        assert_eq!(stream.items.next().await.unwrap(), Some(n as u64));
+    }
 }
 
 #[tokio::test]

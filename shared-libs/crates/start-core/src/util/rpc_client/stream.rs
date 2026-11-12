@@ -16,7 +16,7 @@ pub(super) enum ResponseSlot {
 
 pub(super) struct StreamSlot {
     initial: Option<oneshot::Sender<Result<rpc_toolkit::RpcResponse, RpcError>>>,
-    events: mpsc::Sender<QueuedItem>,
+    events: mpsc::UnboundedSender<QueuedItem>,
     terminal: Option<oneshot::Sender<Completion>>,
     budget: Arc<Semaphore>,
 }
@@ -69,8 +69,9 @@ pub struct RpcResponseStream<Initial, Item, Final> {
 }
 
 /// Dropping the receiver cancels its request, including before the first item.
+/// Queued events share a byte budget including per-item storage, independent of item count.
 pub struct RpcResponseItems<Item, Final> {
-    events: mpsc::Receiver<QueuedItem>,
+    events: mpsc::UnboundedReceiver<QueuedItem>,
     terminal: oneshot::Receiver<Completion>,
     outcome: Option<Completion>,
     finished: bool,
@@ -86,9 +87,8 @@ impl StreamSlot {
         oneshot::Receiver<Result<rpc_toolkit::RpcResponse, RpcError>>,
         RpcResponseItems<Item, Final>,
     ) {
-        let options = rpc_toolkit::WebSocketOptions::default();
         let (initial, result) = oneshot::channel();
-        let (events, receiver) = mpsc::channel(options.stream_buffer_capacity.get());
+        let (events, receiver) = mpsc::unbounded_channel();
         let (terminal, completed) = oneshot::channel();
         (
             Self {
@@ -147,13 +147,13 @@ impl StreamSlot {
                 return SlotAction::Cancel;
             }
         };
-        let bytes = u32::try_from(bytes)
+        let bytes = u32::try_from(bytes.saturating_add(std::mem::size_of::<QueuedItem>()))
             .ok()
             .and_then(|bytes| self.budget.clone().try_acquire_many_owned(bytes).ok());
         if let Some(bytes) = bytes {
             if self
                 .events
-                .try_send(QueuedItem {
+                .send(QueuedItem {
                     value,
                     _bytes: bytes,
                 })
