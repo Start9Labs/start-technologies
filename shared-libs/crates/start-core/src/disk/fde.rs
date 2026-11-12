@@ -1,13 +1,17 @@
 //! Password-only access to both encrypted data LVs; TPM authorization belongs to the TLS identity.
-//! Enrollment changes passphrases and replaces raw header backups in config without rotating volume
-//! keys. Obsolete headers rely on Btrfs discard and NVMe DLFEAT=001b; this is neither general secure
-//! erasure nor rollback protection. The caller owns enrollment eligibility, durable transition state,
-//! account updates, and serialization with import and other password changes. Initial enrollment
-//! requires UEFI, TPM2, and Secure Boot. Enrolled callers must supply the administrator password
-//! explicitly, never retry with `DEFAULT_PASSWORD`.
+//! Enrollment replaces passwords and config header backups without rotating volume keys. Obsolete
+//! headers rely on Btrfs discard and NVMe DLFEAT=001b, not general secure erasure or rollback protection.
+//! Initial enrollment requires UEFI, TPM2, and Secure Boot. The caller owns eligibility, account state,
+//! durable intent and exclusive keyslot ownership from planning until completion or abort. Persist
+//! intent and target hash before installation; commit the new account hash and administrator slots
+//! after both target slots verify; retire old slots afterward. Abort precedes that account commit.
+//! A different target requires completed abort and a fresh plan. Enrolled callers never retry the
+//! default password. Captured volume keys belong exclusively to a protected volatile OS-boot-lifetime
+//! cache that survives daemon restarts, is unavailable after reboot, and never enters persistent
+//! storage, backups, PatchDB, bootstrap state, logs, or an additional management keyslot.
 
 use std::collections::BTreeSet;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
@@ -16,6 +20,7 @@ use color_eyre::eyre::eyre;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
+use zeroize::Zeroizing;
 
 use super::main::DEFAULT_PASSWORD;
 use crate::util::io::{delete_dir, delete_file, open_file, rename};
@@ -24,29 +29,96 @@ use crate::{Error, ErrorKind, ResultExt};
 
 pub const HEADER_BACKUP_DIR: &str = "/media/startos/config/luks";
 
-/// Nonsecret retirement intent to persist with the new account hash before retiring keys.
-/// The caller must prevent keyslot reuse until retirement completes and the intent is cleared.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PasswordRetirementPlan {
-    volumes: [VolumeRetirement; 2],
+struct VolumeId {
+    mapper_name: String,
+    uuid: String,
+}
+
+/// Nonsecret authority identifying administrator slots, not unrelated manually enrolled keys.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminKeyslots {
+    volumes: [VolumeSlots; 2],
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct VolumeRetirement {
-    mapper_name: String,
-    uuid: String,
+struct VolumeSlots {
+    id: VolumeId,
     slots: BTreeSet<u32>,
+}
+
+/// Persist before any keyslot mutation, paired with the caller's target account hash.
+/// The caller prevents slot reuse and different-target installation until completion or abort.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PasswordChangePlan {
+    admin: AdminKeyslots,
+    base_slots: [BTreeSet<u32>; 2],
+    target_slots: [u32; 2],
+}
+
+impl PasswordChangePlan {
+    /// Account authority to commit after installation verifies both target slots.
+    pub fn new_admin_slots(&self) -> AdminKeyslots {
+        AdminKeyslots {
+            volumes: std::array::from_fn(|i| VolumeSlots {
+                id: self.admin.volumes[i].id.clone(),
+                slots: BTreeSet::from([self.target_slots[i]]),
+            }),
+        }
+    }
+}
+
+/// Opaque, zeroizing volume keys for the caller's protected volatile OS-boot-lifetime cache.
+/// Capturing these keys does not authorize persisting them or provisioning a management keyslot.
+pub struct VolumeKeys {
+    volumes: [VolumeKey; 2],
+}
+
+struct VolumeKey {
+    id: VolumeId,
+    bytes: Zeroizing<Vec<u8>>,
+}
+
+/// Authentication material for one key installation, independent of the caller's workflow.
+pub enum KeyCredential<'a> {
+    Password(&'a str),
+    VolumeKeys(&'a VolumeKeys),
+}
+
+impl KeyCredential<'_> {
+    fn option(&self) -> &'static str {
+        match self {
+            Self::Password(_) => "--key-file",
+            Self::VolumeKeys(_) => "--volume-key-file",
+        }
+    }
+
+    fn bytes(&self, index: usize, id: &VolumeId) -> Result<&[u8], Error> {
+        match self {
+            Self::Password(password) => Ok(password.as_bytes()),
+            Self::VolumeKeys(keys) => {
+                let key = &keys.volumes[index];
+                if &key.id != id {
+                    return Err(metadata_error());
+                }
+                Ok(&key.bytes)
+            }
+        }
+    }
 }
 
 struct LuksMetadata {
     uuid: String,
     slots: BTreeSet<u32>,
+    slot_count: u32,
 }
 
-/// An activated, encrypted legacy pool with `main` and `package-data` LVs.
-/// `_UNENC` pools require a separate data-encryption migration before using this API.
+/// An activated encrypted pool with main and package-data LVs.
+/// Unencrypted pools require a separate data-encryption migration.
 pub struct LuksPool {
     devices: [PathBuf; 2],
     mapper_names: [String; 2],
@@ -80,100 +152,323 @@ impl LuksPool {
         })
     }
 
-    /// Installs and verifies the new password on both LVs, preserving existing keys.
-    /// Persist the returned plan with the account update; retirement then needs only the new password.
-    /// Retries accept partial installation and an already-retired old password wherever the new one
-    /// works. A replacement must differ and cannot be empty or `DEFAULT_PASSWORD`.
-    pub async fn prepare_password(
-        &self,
-        old: &str,
-        new: &str,
-    ) -> Result<PasswordRetirementPlan, Error> {
-        validate_change(old, new)?;
-        let (old_key, _old_cleanup) = self.password_file(old)?;
-        let (new_key, _new_cleanup) = self.password_file(new)?;
-        let mut installed = [false; 2];
-        for (i, device) in self.devices.iter().enumerate() {
-            installed[i] = self.accepts(device, &new_key, None).await?;
-            if !installed[i] {
-                require_password(self.accepts(device, &old_key, None).await?)?;
-            }
-        }
+    /// Identifies matching administrator slots while the unlock password is available.
+    pub async fn identify_admin_slots(&self, password: &str) -> Result<AdminKeyslots, Error> {
+        let (key, _cleanup) = self.password_file(password)?;
+        self.identify_key_slots(&key).await
+    }
+
+    async fn identify_key_slots(&self, key: &Path) -> Result<AdminKeyslots, Error> {
         let mut volumes = Vec::new();
-        for (device, mapper_name) in self.devices.iter().zip(&self.mapper_names) {
+        for (i, device) in self.devices.iter().enumerate() {
             let metadata = self.metadata(device).await?;
             let mut slots = BTreeSet::new();
             for slot in metadata.slots {
-                if self.accepts(device, &old_key, Some(slot)).await? {
+                if self.accepts(device, key, Some(slot)).await? {
                     slots.insert(slot);
                 }
             }
-            volumes.push(VolumeRetirement {
-                mapper_name: mapper_name.clone(),
-                uuid: metadata.uuid,
+            require_password(!slots.is_empty())?;
+            volumes.push(VolumeSlots {
+                id: VolumeId {
+                    mapper_name: self.mapper_names[i].clone(),
+                    uuid: metadata.uuid,
+                },
                 slots,
             });
         }
-        let plan = PasswordRetirementPlan {
+        Ok(AdminKeyslots {
             volumes: volumes.try_into().ok().unwrap(),
-        };
-        for (device, installed) in self.devices.iter().zip(installed) {
-            if !installed {
-                let status = cryptsetup_status(
-                    Command::new(&self.cryptsetup)
-                        .args(["luksAddKey", "--batch-mode", "--key-file"])
-                        .arg(&old_key)
-                        .arg(device)
-                        .arg(&new_key),
-                )
-                .await?;
-                require_success("luksAddKey", status)?;
-            }
-        }
-        self.retirement_slots(&plan, &new_key).await?;
-        Ok(plan)
+        })
     }
 
-    /// Requires the plan and new account hash to be durably committed before retiring old keys.
-    /// Resumes using only the new password, including after partial key retirement or publication.
-    /// Completion means the planned slots are absent and config contains durable replacement headers.
-    pub async fn retire_password(
+    /// Captures administrator authority and actual volume keys during password unlock.
+    /// The caller retains keys only in protected volatile storage for this OS boot.
+    pub async fn capture_unlock_keys(
         &self,
-        plan: &PasswordRetirementPlan,
+        password: &str,
+    ) -> Result<(AdminKeyslots, VolumeKeys), Error> {
+        let (password, _cleanup) = self.password_file(password)?;
+        let admin = self.identify_key_slots(&password).await?;
+        let mut volumes = Vec::new();
+        for (i, device) in self.devices.iter().enumerate() {
+            let (output, _cleanup) = self.secret_file(&[])?;
+            delete_file(&output).await?;
+            let status = cryptsetup_status(
+                Command::new(&self.cryptsetup)
+                    .args([
+                        "luksDump",
+                        "--batch-mode",
+                        "--dump-volume-key",
+                        "--volume-key-file",
+                    ])
+                    .arg(&output)
+                    .arg("--key-file")
+                    .arg(&password)
+                    .arg(device),
+            )
+            .await?;
+            require_success("luksDump --dump-volume-key", status)?;
+            let mut bytes = Zeroizing::new(Vec::new());
+            std::fs::File::open(&output)
+                .with_kind(ErrorKind::Filesystem)?
+                .read_to_end(&mut bytes)
+                .with_kind(ErrorKind::Filesystem)?;
+            if bytes.is_empty() {
+                return Err(metadata_error());
+            }
+            volumes.push(VolumeKey {
+                id: admin.volumes[i].id.clone(),
+                bytes,
+            });
+        }
+        Ok((
+            admin,
+            VolumeKeys {
+                volumes: volumes.try_into().ok().unwrap(),
+            },
+        ))
+    }
+
+    /// Reads a complete base inventory and reserves free target IDs without mutating either LV.
+    /// Persist this plan and target hash before installation; retain the exclusive owner until cleared.
+    pub async fn plan_password_change(
+        &self,
+        admin: &AdminKeyslots,
+    ) -> Result<PasswordChangePlan, Error> {
+        let mut base_slots = [BTreeSet::new(), BTreeSet::new()];
+        let mut target_slots = [0; 2];
+        for (i, volume) in admin.volumes.iter().enumerate() {
+            let metadata = self.bound_metadata(i, &volume.id).await?;
+            if volume.slots.is_empty() || !volume.slots.is_subset(&metadata.slots) {
+                return Err(metadata_error());
+            }
+            target_slots[i] = (0..metadata.slot_count)
+                .find(|slot| !metadata.slots.contains(slot))
+                .ok_or_else(metadata_error)?;
+            base_slots[i] = metadata.slots;
+        }
+        Ok(PasswordChangePlan {
+            admin: admin.clone(),
+            base_slots,
+            target_slots,
+        })
+    }
+
+    /// Installs the persisted plan's same target password, preserving every base slot.
+    /// A different target requires successful abort before planning another installation.
+    pub async fn install_password(
+        &self,
+        plan: &PasswordChangePlan,
         new: &str,
+        credential: KeyCredential<'_>,
     ) -> Result<(), Error> {
         validate_new_password(new)?;
-        let (new_key, _new_cleanup) = self.password_file(new)?;
-        let slots = self.retirement_slots(plan, &new_key).await?;
-        for (device, slots) in self.devices.iter().zip(slots) {
-            for slot in slots {
-                let status = cryptsetup_status(
-                    Command::new(&self.cryptsetup)
-                        .args(["luksKillSlot", "--batch-mode", "--key-file"])
-                        .arg(&new_key)
-                        .arg(device)
-                        .arg(slot.to_string()),
+        if let KeyCredential::Password(old) = &credential {
+            validate_change(old, new)?;
+        }
+        let (new_key, _cleanup) = self.password_file(new)?;
+        let metadata = self.change_metadata(plan).await?;
+        let mut credentials = Vec::new();
+        for (i, metadata) in metadata.iter().enumerate() {
+            if !plan.base_slots[i].is_subset(&metadata.slots) {
+                return Err(metadata_error());
+            }
+            let key = self.secret_file(credential.bytes(i, &plan.admin.volumes[i].id)?)?;
+            require_password(
+                self.test_key(&self.devices[i], &key.0, None, credential.option())
+                    .await?,
+            )?;
+            for slot in &plan.admin.volumes[i].slots {
+                if self
+                    .accepts(&self.devices[i], &new_key, Some(*slot))
+                    .await?
+                {
+                    return Err(metadata_error());
+                }
+            }
+            if metadata.slots.contains(&plan.target_slots[i]) {
+                require_password(
+                    self.accepts(&self.devices[i], &new_key, Some(plan.target_slots[i]))
+                        .await?,
+                )?;
+            }
+            credentials.push(key);
+        }
+        for (i, metadata) in metadata.iter().enumerate() {
+            if !metadata.slots.contains(&plan.target_slots[i]) {
+                self.add_and_verify(
+                    &self.devices[i],
+                    plan.target_slots[i],
+                    &new_key,
+                    &credentials[i].0,
+                    credential.option(),
                 )
                 .await?;
-                require_success("luksKillSlot", status)?;
             }
         }
-        for (device, volume) in self.devices.iter().zip(&plan.volumes) {
-            if !self
-                .metadata(device)
-                .await?
-                .slots
-                .is_disjoint(&volume.slots)
-            {
+        self.verify_targets(plan, &new_key).await
+    }
+
+    async fn add_and_verify(
+        &self,
+        device: &Path,
+        slot: u32,
+        new_key: &Path,
+        credential: &Path,
+        option: &str,
+    ) -> Result<(), Error> {
+        let status = cryptsetup_status(
+            Command::new(&self.cryptsetup)
+                .args(["luksAddKey", "--batch-mode", "--key-slot"])
+                .arg(slot.to_string())
+                .arg(option)
+                .arg(credential)
+                .arg(device)
+                .arg(new_key),
+        )
+        .await?;
+        require_success("luksAddKey", status)?;
+        require_password(self.accepts(device, new_key, Some(slot)).await?)
+    }
+
+    /// Aborts an uncommitted installation using captured volume keys, preserving all base slots.
+    /// Account commit or administrator-slot retirement makes abort invalid.
+    pub async fn abort_password_change(
+        &self,
+        plan: &PasswordChangePlan,
+        keys: &VolumeKeys,
+    ) -> Result<(), Error> {
+        let credential = KeyCredential::VolumeKeys(keys);
+        let metadata = self.change_metadata(plan).await?;
+        let mut credentials = Vec::new();
+        for (i, metadata) in metadata.iter().enumerate() {
+            if !plan.base_slots[i].is_subset(&metadata.slots) {
+                return Err(metadata_error());
+            }
+            let key = self.secret_file(credential.bytes(i, &plan.admin.volumes[i].id)?)?;
+            require_password(
+                self.test_key(&self.devices[i], &key.0, None, credential.option())
+                    .await?,
+            )?;
+            credentials.push(key);
+        }
+        for (i, metadata) in metadata.iter().enumerate() {
+            if metadata.slots.contains(&plan.target_slots[i]) {
+                self.kill_slot(
+                    &self.devices[i],
+                    plan.target_slots[i],
+                    &credentials[i].0,
+                    credential.option(),
+                )
+                .await?;
+            }
+        }
+        for (i, metadata) in self.change_metadata(plan).await?.iter().enumerate() {
+            if metadata.slots != plan.base_slots[i] {
                 return Err(metadata_error());
             }
         }
-        self.verify_key(&new_key).await?;
-        for (device, mapper_name) in self.devices.iter().zip(&self.mapper_names) {
+        self.publish_headers().await
+    }
+
+    /// Retires old administrator slots after durable account commit, using only the new password.
+    /// Skips absent old slots on retry and preserves every unrelated base slot.
+    pub async fn retire_password(&self, plan: &PasswordChangePlan, new: &str) -> Result<(), Error> {
+        validate_new_password(new)?;
+        let (key, _cleanup) = self.password_file(new)?;
+        let metadata = self.change_metadata(plan).await?;
+        self.verify_targets(plan, &key).await?;
+        for (i, metadata) in metadata.iter().enumerate() {
+            let manual: BTreeSet<_> = plan.base_slots[i]
+                .difference(&plan.admin.volumes[i].slots)
+                .copied()
+                .collect();
+            if !manual.is_subset(&metadata.slots) {
+                return Err(metadata_error());
+            }
+            for slot in plan.admin.volumes[i].slots.intersection(&metadata.slots) {
+                if self.accepts(&self.devices[i], &key, Some(*slot)).await? {
+                    return Err(metadata_error());
+                }
+            }
+        }
+        for (i, metadata) in metadata.iter().enumerate() {
+            for slot in plan.admin.volumes[i].slots.intersection(&metadata.slots) {
+                self.kill_slot(&self.devices[i], *slot, &key, "--key-file")
+                    .await?;
+            }
+        }
+        for (i, metadata) in self.change_metadata(plan).await?.iter().enumerate() {
+            let mut expected: BTreeSet<_> = plan.base_slots[i]
+                .difference(&plan.admin.volumes[i].slots)
+                .copied()
+                .collect();
+            expected.insert(plan.target_slots[i]);
+            if metadata.slots != expected {
+                return Err(metadata_error());
+            }
+        }
+        self.verify_targets(plan, &key).await?;
+        self.publish_headers().await
+    }
+
+    async fn kill_slot(
+        &self,
+        device: &Path,
+        slot: u32,
+        key: &Path,
+        option: &str,
+    ) -> Result<(), Error> {
+        let status = cryptsetup_status(
+            Command::new(&self.cryptsetup)
+                .args(["luksKillSlot", "--batch-mode"])
+                .arg(option)
+                .arg(key)
+                .arg(device)
+                .arg(slot.to_string()),
+        )
+        .await?;
+        require_success("luksKillSlot", status)
+    }
+
+    async fn verify_targets(&self, plan: &PasswordChangePlan, key: &Path) -> Result<(), Error> {
+        for (i, device) in self.devices.iter().enumerate() {
+            require_password(
+                self.accepts(device, key, Some(plan.target_slots[i]))
+                    .await?,
+            )?;
+        }
+        Ok(())
+    }
+
+    async fn change_metadata(&self, plan: &PasswordChangePlan) -> Result<[LuksMetadata; 2], Error> {
+        let mut result = Vec::new();
+        for (i, volume) in plan.admin.volumes.iter().enumerate() {
+            let metadata = self.bound_metadata(i, &volume.id).await?;
+            if volume.slots.is_empty()
+                || !volume.slots.is_subset(&plan.base_slots[i])
+                || plan.base_slots[i].contains(&plan.target_slots[i])
+                || plan.target_slots[i] >= metadata.slot_count
+            {
+                return Err(metadata_error());
+            }
+            let mut allowed = plan.base_slots[i].clone();
+            allowed.insert(plan.target_slots[i]);
+            if !metadata.slots.is_subset(&allowed) {
+                return Err(metadata_error());
+            }
+            result.push(metadata);
+        }
+        Ok(result.try_into().ok().unwrap())
+    }
+
+    async fn publish_headers(&self) -> Result<(), Error> {
+        for (device, name) in self.devices.iter().zip(&self.mapper_names) {
             replace_header_backup_with(
                 &self.cryptsetup,
                 device,
-                mapper_name,
+                name,
                 &self.config_dir.join("luks"),
             )
             .await?;
@@ -190,44 +485,24 @@ impl LuksPool {
         Ok(())
     }
 
-    /// Tests both LVs without creating device mappings or trying a fallback password.
+    /// Tests both LVs without creating mappings or trying a fallback password.
     pub async fn verify_password(&self, password: &str) -> Result<(), Error> {
         let (key, _cleanup) = self.password_file(password)?;
-        self.verify_key(&key).await
+        for device in &self.devices {
+            require_password(self.accepts(device, &key, None).await?)?;
+        }
+        Ok(())
     }
 
-    async fn retirement_slots(
-        &self,
-        plan: &PasswordRetirementPlan,
-        key: &Path,
-    ) -> Result<[BTreeSet<u32>; 2], Error> {
-        let mut pending = [BTreeSet::new(), BTreeSet::new()];
-        for (i, volume) in plan.volumes.iter().enumerate() {
-            if volume.mapper_name != self.mapper_names[i] {
-                return Err(metadata_error());
-            }
-            let device = &self.devices[i];
-            let metadata = self.metadata(device).await?;
-            if volume.uuid != metadata.uuid {
-                return Err(metadata_error());
-            }
-            let mut retained = false;
-            for slot in &metadata.slots {
-                if self.accepts(device, key, Some(*slot)).await? {
-                    if volume.slots.contains(slot) {
-                        return Err(metadata_error());
-                    }
-                    retained = true;
-                }
-            }
-            require_password(retained)?;
-            pending[i] = volume
-                .slots
-                .intersection(&metadata.slots)
-                .copied()
-                .collect();
+    async fn bound_metadata(&self, index: usize, id: &VolumeId) -> Result<LuksMetadata, Error> {
+        if id.mapper_name != self.mapper_names[index] {
+            return Err(metadata_error());
         }
-        Ok(pending)
+        let metadata = self.metadata(&self.devices[index]).await?;
+        if id.uuid != metadata.uuid {
+            return Err(metadata_error());
+        }
+        Ok(metadata)
     }
 
     async fn metadata(&self, device: &Path) -> Result<LuksMetadata, Error> {
@@ -245,11 +520,11 @@ impl LuksPool {
             })
         };
         let uuid = field("UUID")
-            .filter(|value| !value.is_empty())
+            .filter(|s| !s.is_empty())
             .ok_or_else(metadata_error)?
             .to_owned();
-        let slots = match field("Version") {
-            Some("1") => luks1_slots(dump)?,
+        let (slots, slot_count) = match field("Version") {
+            Some("1") => (luks1_slots(dump)?, 8),
             Some("2") => {
                 let json = Command::new(&self.cryptsetup)
                     .env("LC_ALL", "C")
@@ -257,14 +532,22 @@ impl LuksPool {
                     .arg(device)
                     .invoke(ErrorKind::DiskManagement)
                     .await?;
-                luks2_slots(&json)?
+                (luks2_slots(&json)?, 32)
             }
             _ => return Err(metadata_error()),
         };
-        Ok(LuksMetadata { uuid, slots })
+        Ok(LuksMetadata {
+            uuid,
+            slots,
+            slot_count,
+        })
     }
 
     fn password_file(&self, password: &str) -> Result<(PathBuf, GeneralBoxedGuard), Error> {
+        self.secret_file(password.as_bytes())
+    }
+
+    fn secret_file(&self, bytes: &[u8]) -> Result<(PathBuf, GeneralBoxedGuard), Error> {
         let path = self
             .runtime_dir
             .join(format!("startos-luks-{}", new_guid()));
@@ -280,23 +563,26 @@ impl LuksPool {
                 let _ = std::fs::remove_file(path);
             }
         });
-        file.write_all(password.as_bytes())
-            .with_kind(ErrorKind::Filesystem)?;
+        file.write_all(bytes).with_kind(ErrorKind::Filesystem)?;
         file.flush().with_kind(ErrorKind::Filesystem)?;
         Ok((path, cleanup))
     }
 
-    async fn verify_key(&self, key: &Path) -> Result<(), Error> {
-        for device in &self.devices {
-            require_password(self.accepts(device, key, None).await?)?;
-        }
-        Ok(())
+    async fn accepts(&self, device: &Path, key: &Path, slot: Option<u32>) -> Result<bool, Error> {
+        self.test_key(device, key, slot, "--key-file").await
     }
 
-    async fn accepts(&self, device: &Path, key: &Path, slot: Option<u32>) -> Result<bool, Error> {
+    async fn test_key(
+        &self,
+        device: &Path,
+        key: &Path,
+        slot: Option<u32>,
+        option: &str,
+    ) -> Result<bool, Error> {
         let mut command = Command::new(&self.cryptsetup);
         command
-            .args(["open", "--test-passphrase", "--batch-mode", "--key-file"])
+            .args(["open", "--test-passphrase", "--batch-mode"])
+            .arg(option)
             .arg(key);
         if let Some(slot) = slot {
             command.arg("--key-slot").arg(slot.to_string());
@@ -304,7 +590,6 @@ impl LuksPool {
         let status = cryptsetup_status(command.arg(device)).await?;
         match status.code() {
             Some(0) => Ok(true),
-            // cryptsetup reports rejected passphrases with exit code 2.
             Some(2) => Ok(false),
             _ => {
                 require_success("open --test-passphrase", status)?;
@@ -482,6 +767,8 @@ mod tests {
 
     const OLD: &str = DEFAULT_PASSWORD;
     const NEW: &str = "administrator\ncredential-🔒";
+    const OTHER: &str = "different-administrator-credential";
+    const MANUAL: &str = "manual-unrelated-credential";
     const GUID: &str = "STARTOS_TEST";
     const FIXTURE: &str = r##"#!/bin/bash
 set -eu
@@ -494,15 +781,16 @@ if [[ $tool != cryptsetup ]]; then
     [[ ! -f "$root/fail-$tool" ]] || exit "$(cat "$root/fail-$tool")"
     exit 0
 fi
-op=$1
-shift
-key= header= device= slot= json=0
+op=$1; shift
+key= auth= volume= header= device= slot= json=0 dump=0
 while (($#)); do
     case $1 in
-        --key-file) key=$2; shift 2 ;;
+        --key-file) auth=$2; shift 2 ;;
+        --volume-key-file) volume=$2; shift 2 ;;
         --header-backup-file) header=$2; shift 2 ;;
         --key-slot) slot=$2; shift 2 ;;
         --dump-json-metadata) json=1; shift ;;
+        --dump-volume-key) dump=1; shift ;;
         --*) shift ;;
         *)
             if [[ -z $device ]]; then device=$1
@@ -512,41 +800,48 @@ while (($#)); do
     esac
 done
 name=${device##*/}
-if [[ -n $key ]]; then
-    [[ $(stat -c %a "$key") = 600 ]]
-    if cmp -s "$key" "$root/old-secret"; then credential=old
-    elif cmp -s "$key" "$root/new-secret"; then credential=new
-    else credential=unknown; fi
-    # Deliberately hostile subprocess output must never reach errors or logs.
-    cat "$key" >&2
+classify() {
+    [[ $(stat -c %a "$1") = 600 ]]
+    cat "$1" >&2
+    credential=unknown
+    for kind in old new alternate manual; do
+        if cmp -s "$1" "$root/$kind-secret"; then credential=$kind; fi
+    done
+}
+valid=0
+if [[ -n $auth ]]; then
+    classify "$auth"
+    [[ ! -s "$root/$name.$credential" ]] || valid=1
+fi
+if [[ -n $volume && $dump = 0 ]]; then
+    [[ $(stat -c %a "$volume") = 600 ]]
+    cat "$volume" >&2
+    if cmp -s "$volume" "$root/$name.volume"; then valid=1; credential=volume; fi
 fi
 fail="$root/fail-$op-$name"
+[[ ! -f $fail ]] || exit "$(cat "$fail")"
 case $op in
     open)
-        [[ ! -f $fail ]] || exit "$(cat "$fail")"
-        printf 'test %s %s\n' "$name" "$credential" >> "$root/events"
-        if [[ -z $slot ]]; then
-            [[ -s "$root/$name.$credential" ]] && exit 0
-        elif [[ -f "$root/$name.$credential" ]]; then
-            grep -Fxq "$slot" "$root/$name.$credential" && exit 0
-        fi
-        exit 2 ;;
+        [[ $valid = 1 ]] || exit 2
+        [[ $credential != volume ]] || exit 0
+        if [[ -n $slot ]]; then grep -Fxq "$slot" "$root/$name.$credential" || exit 2; fi ;;
     luksDump)
-        [[ ! -f $fail ]] || exit "$(cat "$fail")"
+        if [[ $dump = 1 ]]; then
+            [[ $valid = 1 && ! -e $volume ]]
+            cat "$root/$name.volume" > "$volume"
+            chmod 600 "$volume"
+            exit 0
+        fi
         if [[ -f "$root/$name.metadata" ]]; then cat "$root/$name.metadata"; exit 0; fi
-        slots=$(cat "$root/$name.old" "$root/$name.new" 2>/dev/null | sort -nu) || true
+        slots=$(cat "$root/$name.old" "$root/$name.new" "$root/$name.alternate" "$root/$name.manual" | sort -nu)
         if [[ $json = 1 ]]; then
-            printf '{"keyslots":{'
-            separator=
-            for id in $slots; do
-                printf '%s"%s":{"type":"luks2"}' "$separator" "$id"
-                separator=,
-            done
+            printf '{"keyslots":{'; separator=
+            for id in $slots; do printf '%s"%s":{"type":"luks2"}' "$separator" "$id"; separator=,; done
             printf '}}\n'
         else
             version=2
             [[ ! -f "$root/$name.version" ]] || version=$(cat "$root/$name.version")
-            printf 'LUKS header information for %s\nVersion: %s\nUUID: fixture-%s\n' "$name" "$version" "$name"
+            printf 'Version: %s\nUUID: fixture-%s\n' "$version" "$name"
             if [[ $version = 1 ]]; then
                 for id in {0..7}; do
                     state=DISABLED
@@ -556,24 +851,22 @@ case $op in
             fi
         fi ;;
     luksAddKey)
-        [[ ! -f $fail ]] || exit "$(cat "$fail")"
-        [[ -s "$root/$name.old" && $credential = new ]]
+        [[ $valid = 1 && -n $slot ]]
+        ! cat "$root/$name.old" "$root/$name.new" "$root/$name.alternate" "$root/$name.manual" | grep -Fxq "$slot"
         [[ ! -f "$root/skip-add-$name" ]] || exit 0
-        printf '4\n' > "$root/$name.new" ;;
+        classify "$key"
+        [[ $credential != unknown ]]
+        printf '%s\n' "$slot" >> "$root/$name.$credential" ;;
     luksKillSlot)
-        [[ ! -f $fail ]] || exit "$(cat "$fail")"
-        [[ $credential = new && -s "$root/$name.new" ]]
-        for credential in old new; do
+        [[ $valid = 1 ]]
+        [[ ! -f "$root/skip-kill-$name" ]] || exit 0
+        for credential in old new alternate manual; do
             grep -Fxv "$slot" "$root/$name.$credential" > "$root/remaining" || true
             mv "$root/remaining" "$root/$name.$credential"
         done ;;
     luksHeaderBackup)
-        published="$root/config/luks/${GUID:-STARTOS_TEST}_$name.luks.bak"
-        if [[ -f $published ]]; then
-            printf 'previous %s %s\n' "$name" "$(cat "$published")" >> "$root/events"
-        fi
         printf 'partial' > "$header"
-        [[ ! -f $fail ]] || exit "$(cat "$fail")"
+        [[ ! -f "$root/fail-header-$name" ]] || exit 5
         printf 'header:%s\n' "$name" > "$header" ;;
     *) exit 9 ;;
 esac
@@ -583,7 +876,6 @@ esac
         dir: tempfile::TempDir,
         pool: LuksPool,
     }
-
     impl Fixture {
         fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
@@ -593,8 +885,14 @@ esac
                 std::fs::write(&path, FIXTURE).unwrap();
                 std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
             }
-            std::fs::write(root.join("old-secret"), OLD).unwrap();
-            std::fs::write(root.join("new-secret"), NEW).unwrap();
+            for (name, secret) in [
+                ("old", OLD),
+                ("new", NEW),
+                ("alternate", OTHER),
+                ("manual", MANUAL),
+            ] {
+                std::fs::write(root.join(format!("{name}-secret")), secret).unwrap();
+            }
             std::fs::create_dir(root.join("keys")).unwrap();
             std::fs::create_dir_all(root.join("config/luks")).unwrap();
             let mut pool = LuksPool::new(GUID, root.join("config")).unwrap();
@@ -603,8 +901,24 @@ esac
             pool.fstrim = root.join("fstrim");
             pool.runtime_dir = root.join("keys");
             for name in ["main", "package-data"] {
-                std::fs::write(root.join(format!("{name}.old")), "0\n").unwrap();
-                std::fs::write(root.join(format!("{name}.new")), "").unwrap();
+                for kind in ["old", "new", "alternate", "manual"] {
+                    std::fs::write(
+                        root.join(format!("{name}.{kind}")),
+                        if kind == "old" {
+                            "0\n"
+                        } else if kind == "manual" {
+                            "5\n"
+                        } else {
+                            ""
+                        },
+                    )
+                    .unwrap();
+                }
+                std::fs::write(
+                    root.join(format!("{name}.volume")),
+                    format!("volume-key-sensitive-{name}"),
+                )
+                .unwrap();
                 std::fs::write(
                     root.join(format!("config/luks/{GUID}_{name}.luks.bak")),
                     "obsolete",
@@ -613,35 +927,46 @@ esac
             }
             Self { dir, pool }
         }
-
-        fn write(&self, path: &str, data: &str) {
-            std::fs::write(self.dir.path().join(path), data).unwrap();
+        fn write(&self, name: &str, data: &str) {
+            std::fs::write(self.dir.path().join(name), data).unwrap();
         }
-
-        fn remove(&self, path: &str) {
-            std::fs::remove_file(self.dir.path().join(path)).unwrap();
+        fn remove(&self, name: &str) {
+            std::fs::remove_file(self.dir.path().join(name)).unwrap();
         }
-
         fn events(&self) -> String {
             std::fs::read_to_string(self.dir.path().join("events")).unwrap_or_default()
         }
-
+        async fn plan(&self) -> PasswordChangePlan {
+            let admin = self.pool.identify_admin_slots(OLD).await.unwrap();
+            self.pool.plan_password_change(&admin).await.unwrap()
+        }
+        async fn installed(&self) -> PasswordChangePlan {
+            let plan = self.plan().await;
+            self.pool
+                .install_password(&plan, NEW, KeyCredential::Password(OLD))
+                .await
+                .unwrap();
+            plan
+        }
         fn assert_clean(&self) {
             assert_eq!(
                 std::fs::read_dir(&self.pool.runtime_dir).unwrap().count(),
                 0
             );
-            let headers = self.pool.config_dir.join("luks");
-            assert_eq!(std::fs::read_dir(headers).unwrap().count(), 2);
+            assert_eq!(
+                std::fs::read_dir(self.pool.config_dir.join("luks"))
+                    .unwrap()
+                    .count(),
+                2
+            );
             let events = self.events();
-            assert!(!events.contains(OLD));
-            assert!(!events.contains(NEW));
+            for secret in [OLD, NEW, OTHER, MANUAL, "volume-key-sensitive"] {
+                assert!(!events.contains(secret));
+            }
         }
-
         fn assert_no_mutation(&self) {
-            let events = self.events();
-            for operation in ["luksAddKey", "luksKillSlot", "luksHeaderBackup", "fstrim"] {
-                assert!(!events.contains(operation), "{events}");
+            for op in ["luksAddKey", "luksKillSlot", "luksHeaderBackup", "fstrim"] {
+                assert!(!self.events().contains(op));
             }
             self.assert_clean();
         }
@@ -652,277 +977,338 @@ esac
         for guid in ["STARTOS_TEST_UNENC", "STARTOS_TEST/../other", "other"] {
             assert!(LuksPool::new(guid, "/config").is_err());
         }
-        assert!(LuksPool::new("EMBASSY_TEST", "/config").is_ok());
     }
 
     #[tokio::test]
-    async fn enrollment_orders_validation_installation_retirement_headers_and_trim() {
+    async fn planning_is_nonsecret_and_precedes_every_mutation() {
         let fixture = Fixture::new();
         fixture.write("main.version", "1");
-        let plan = fixture.pool.prepare_password(OLD, NEW).await.unwrap();
-        assert_eq!(plan.volumes[0].slots, BTreeSet::from([0]));
-        assert_eq!(plan.volumes[1].slots, BTreeSet::from([0]));
-        let events = fixture.events();
-        assert!(events.find("test package-data old").unwrap() < events.find("luksAddKey").unwrap());
-        assert_eq!(events.matches("luksAddKey").count(), 2);
-        assert!(!events.contains("luksKillSlot"));
-        assert!(!events.contains("luksHeaderBackup"));
-        fixture.assert_clean();
-        fixture.pool.retire_password(&plan, NEW).await.unwrap();
-        fixture.pool.verify_password(NEW).await.unwrap();
-        assert!(fixture.pool.verify_password(OLD).await.is_err());
-        let events = fixture.events();
-        assert!(events.rfind("luksKillSlot").unwrap() < events.find("luksHeaderBackup").unwrap());
-        assert!(events.rfind("luksHeaderBackup").unwrap() < events.find("sync -f").unwrap());
-        assert!(events.find("sync -f").unwrap() < events.find("fstrim ").unwrap());
-        for name in ["main", "package-data"] {
-            let path = fixture
-                .pool
-                .config_dir
-                .join(format!("luks/{GUID}_{name}.luks.bak"));
-            assert_eq!(
-                std::fs::read_to_string(&path).unwrap(),
-                format!("header:{name}\n")
-            );
-            assert_eq!(std::fs::metadata(path).unwrap().mode() & 0o777, 0o600);
+        let plan = fixture.plan().await;
+        assert_eq!(
+            plan.base_slots,
+            [BTreeSet::from([0, 5]), BTreeSet::from([0, 5])]
+        );
+        assert_eq!(plan.target_slots, [1, 1]);
+        let json = serde_json::to_string(&plan).unwrap();
+        for secret in [OLD, NEW, "volume-key-sensitive"] {
+            assert!(!json.contains(secret));
         }
-        fixture.assert_clean();
-    }
-
-    #[tokio::test]
-    async fn bad_credentials_are_rejected_before_any_mutation() {
-        let fixture = Fixture::new();
-        fixture.write("package-data.old", "");
-        assert!(fixture.pool.prepare_password(OLD, NEW).await.is_err());
+        assert_eq!(plan, serde_json::from_str(&json).unwrap());
         fixture.assert_no_mutation();
     }
 
     #[tokio::test]
-    async fn second_volume_failure_resumes_without_adding_duplicate_keys() {
+    async fn captured_volume_keys_install_without_old_plaintext_and_preserve_manual_slots() {
         let fixture = Fixture::new();
-        fixture.write("fail-luksAddKey-package-data", "5");
-        let error = fixture.pool.prepare_password(OLD, NEW).await.unwrap_err();
-        assert!(!format!("{error:?}").contains(NEW));
-        assert!(!fixture.events().contains("luksKillSlot"));
-        fixture.assert_clean();
-        fixture.remove("fail-luksAddKey-package-data");
-        let plan = fixture.pool.prepare_password(OLD, NEW).await.unwrap();
-        let events = fixture.events();
-        assert_eq!(
-            events
-                .lines()
-                .filter(|l| l.contains("luksAddKey") && l.contains("/main "))
-                .count(),
-            1
-        );
+        let (admin, keys) = fixture.pool.capture_unlock_keys(OLD).await.unwrap();
+        let plan = fixture.pool.plan_password_change(&admin).await.unwrap();
+        fixture.remove("old-secret");
+        fixture
+            .pool
+            .install_password(&plan, NEW, KeyCredential::VolumeKeys(&keys))
+            .await
+            .unwrap();
         fixture.pool.retire_password(&plan, NEW).await.unwrap();
+        assert_eq!(
+            fixture.pool.identify_admin_slots(NEW).await.unwrap(),
+            plan.new_admin_slots()
+        );
+        fixture.pool.verify_password(MANUAL).await.unwrap();
+        assert!(fixture.pool.verify_password(OLD).await.is_err());
         fixture.assert_clean();
     }
 
     #[tokio::test]
-    async fn persisted_plan_resumes_partial_retirement_without_old_password() {
+    async fn partial_a_install_requires_abort_before_different_b_and_preserves_base() {
+        let fixture = Fixture::new();
+        let (admin, keys) = fixture.pool.capture_unlock_keys(OLD).await.unwrap();
+        let plan = fixture.pool.plan_password_change(&admin).await.unwrap();
+        fixture.write("fail-luksAddKey-package-data", "5");
+        assert!(
+            fixture
+                .pool
+                .install_password(&plan, NEW, KeyCredential::VolumeKeys(&keys))
+                .await
+                .is_err()
+        );
+        fixture.remove("fail-luksAddKey-package-data");
+        assert!(
+            fixture
+                .pool
+                .install_password(&plan, OTHER, KeyCredential::VolumeKeys(&keys))
+                .await
+                .is_err()
+        );
+        fixture
+            .pool
+            .abort_password_change(&plan, &keys)
+            .await
+            .unwrap();
+        fixture
+            .pool
+            .abort_password_change(&plan, &keys)
+            .await
+            .unwrap();
+        assert!(fixture.pool.verify_password(NEW).await.is_err());
+        fixture.pool.verify_password(OLD).await.unwrap();
+        fixture.pool.verify_password(MANUAL).await.unwrap();
+        let plan_b = fixture.pool.plan_password_change(&admin).await.unwrap();
+        fixture
+            .pool
+            .install_password(&plan_b, OTHER, KeyCredential::VolumeKeys(&keys))
+            .await
+            .unwrap();
+        fixture.pool.verify_password(OLD).await.unwrap();
+        fixture.pool.retire_password(&plan_b, OTHER).await.unwrap();
+        assert!(fixture.pool.verify_password(NEW).await.is_err());
+        fixture.pool.verify_password(OTHER).await.unwrap();
+        fixture.pool.verify_password(MANUAL).await.unwrap();
+        fixture.assert_clean();
+    }
+
+    #[tokio::test]
+    async fn serialized_intent_resumes_partial_retirement_using_only_new_password() {
         let fixture = Fixture::new();
         fixture.write("package-data.version", "1");
-        let plan = fixture.pool.prepare_password(OLD, NEW).await.unwrap();
-        let persisted = serde_json::to_vec(&plan).unwrap();
-        let serialized = std::str::from_utf8(&persisted).unwrap();
-        assert!(!serialized.contains(OLD));
-        assert!(!serialized.contains(NEW));
+        let plan = fixture.installed().await;
+        let json = serde_json::to_vec(&plan).unwrap();
         drop(plan);
         fixture.remove("old-secret");
-        let plan = serde_json::from_slice(&persisted).unwrap();
+        let plan = serde_json::from_slice(&json).unwrap();
         fixture.write("fail-luksKillSlot-package-data", "5");
         assert!(fixture.pool.retire_password(&plan, NEW).await.is_err());
         assert!(!fixture.events().contains("luksHeaderBackup"));
-        fixture.assert_clean();
         fixture.remove("fail-luksKillSlot-package-data");
         fixture.pool.retire_password(&plan, NEW).await.unwrap();
         fixture.pool.retire_password(&plan, NEW).await.unwrap();
-        assert_eq!(fixture.events().matches("luksAddKey").count(), 2);
         assert_eq!(fixture.events().matches("luksKillSlot").count(), 3);
+        fixture.pool.verify_password(MANUAL).await.unwrap();
         fixture.assert_clean();
     }
 
     #[tokio::test]
-    async fn old_key_already_retired_on_one_volume_does_not_block_installing_the_other() {
+    async fn retries_same_installation_do_not_reuse_or_duplicate_slots() {
         let fixture = Fixture::new();
-        fixture.write("main.new", "4\n");
-        fixture.write("main.old", "");
-        let plan = fixture.pool.prepare_password(OLD, NEW).await.unwrap();
-        assert_eq!(fixture.events().matches("luksAddKey").count(), 1);
-        fixture.pool.retire_password(&plan, NEW).await.unwrap();
+        let plan = fixture.plan().await;
+        fixture.write("fail-luksAddKey-package-data", "5");
+        assert!(
+            fixture
+                .pool
+                .install_password(&plan, NEW, KeyCredential::Password(OLD))
+                .await
+                .is_err()
+        );
+        fixture.remove("fail-luksAddKey-package-data");
+        fixture
+            .pool
+            .install_password(&plan, NEW, KeyCredential::Password(OLD))
+            .await
+            .unwrap();
+        fixture
+            .pool
+            .install_password(&plan, NEW, KeyCredential::Password(OLD))
+            .await
+            .unwrap();
+        assert_eq!(fixture.events().matches("luksAddKey").count(), 3);
         fixture.assert_clean();
     }
 
     #[tokio::test]
-    async fn all_old_matching_slots_are_retired() {
+    async fn all_credentials_and_volume_bindings_validate_before_any_install() {
         let fixture = Fixture::new();
-        fixture.write("main.old", "0\n2\n");
-        let plan = fixture.pool.prepare_password(OLD, NEW).await.unwrap();
-        fixture.pool.retire_password(&plan, NEW).await.unwrap();
-        assert_eq!(fixture.events().matches("luksKillSlot").count(), 3);
-        fixture.assert_clean();
-    }
-
-    #[tokio::test]
-    async fn operational_probe_failure_is_not_a_password_mismatch() {
-        let fixture = Fixture::new();
-        fixture.write("fail-open-package-data", "4");
-        let error = fixture.pool.prepare_password(OLD, NEW).await.unwrap_err();
-        assert_eq!(error.kind, ErrorKind::DiskManagement);
-        assert!(!format!("{error:?}").contains(NEW));
-        assert!(!format!("{error:?}").contains(OLD));
+        let plan = fixture.plan().await;
+        fixture.write("package-data.old", "");
+        fixture.write("events", "");
+        assert!(
+            fixture
+                .pool
+                .install_password(&plan, NEW, KeyCredential::Password(OLD))
+                .await
+                .is_err()
+        );
+        fixture.assert_no_mutation();
+        fixture.write("package-data.old", "0\n");
+        let (_, mut keys) = fixture.pool.capture_unlock_keys(OLD).await.unwrap();
+        keys.volumes.swap(0, 1);
+        fixture.write("events", "");
+        assert!(
+            fixture
+                .pool
+                .install_password(&plan, NEW, KeyCredential::VolumeKeys(&keys))
+                .await
+                .is_err()
+        );
         fixture.assert_no_mutation();
     }
 
     #[tokio::test]
-    async fn invalid_new_password_does_not_start_subprocesses() {
+    async fn both_target_slots_must_verify_before_retirement_and_current_keys_are_never_deleted() {
         let fixture = Fixture::new();
-        let plan = fixture.pool.prepare_password(OLD, NEW).await.unwrap();
-        fixture.write("events", "");
-        for new in ["", DEFAULT_PASSWORD] {
-            assert!(fixture.pool.prepare_password(OLD, new).await.is_err());
-            assert!(fixture.pool.retire_password(&plan, new).await.is_err());
-        }
-        assert!(fixture.pool.prepare_password(NEW, NEW).await.is_err());
-        assert!(fixture.events().is_empty());
-        fixture.assert_clean();
-    }
-
-    #[tokio::test]
-    async fn failed_header_copy_preserves_old_file_and_resumes_after_retirement() {
-        let fixture = Fixture::new();
-        let plan = fixture.pool.prepare_password(OLD, NEW).await.unwrap();
-        let path = fixture
-            .pool
-            .config_dir
-            .join(format!("luks/{GUID}_package-data.luks.bak"));
-        let old_inode = std::fs::metadata(&path).unwrap().ino();
-        fixture.write("fail-luksHeaderBackup-package-data", "5");
-        assert!(fixture.pool.retire_password(&plan, NEW).await.is_err());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "obsolete");
-        assert_eq!(std::fs::metadata(&path).unwrap().ino(), old_inode);
-        assert!(!fixture.events().contains("sync -f"));
-        assert!(!fixture.events().contains("fstrim "));
-        fixture.assert_clean();
-        fixture.remove("fail-luksHeaderBackup-package-data");
-        fixture.pool.retire_password(&plan, NEW).await.unwrap();
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            "header:package-data\n"
-        );
-        assert_ne!(std::fs::metadata(&path).unwrap().ino(), old_inode);
-        assert!(fixture.events().contains("previous package-data obsolete"));
-        fixture.assert_clean();
-    }
-
-    #[tokio::test]
-    async fn interrupted_header_staging_is_removed_before_completion() {
-        let fixture = Fixture::new();
-        let plan = fixture.pool.prepare_password(OLD, NEW).await.unwrap();
-        let luks = fixture.pool.config_dir.join("luks");
-        for name in ["main", "package-data"] {
-            fixture.write(
-                &format!("config/luks/.{GUID}_{name}.luks.bak.tmp"),
-                "obsolete header",
-            );
-            let staging = luks.join(format!(".{GUID}_{name}.luks.bak.staging"));
-            std::fs::create_dir(&staging).unwrap();
-            std::fs::write(staging.join("header"), "obsolete header").unwrap();
-        }
-        fixture.pool.retire_password(&plan, NEW).await.unwrap();
-        fixture.assert_clean();
-    }
-
-    #[tokio::test]
-    async fn successful_add_is_verified_before_preparation_completes() {
-        let fixture = Fixture::new();
-        fixture.write("skip-add-package-data", "");
-        assert!(fixture.pool.prepare_password(OLD, NEW).await.is_err());
-        assert!(!fixture.events().contains("luksKillSlot"));
-        assert!(!fixture.events().contains("luksHeaderBackup"));
-        fixture.assert_clean();
-    }
-
-    #[tokio::test]
-    async fn enrolled_administrator_password_changes_without_default_password() {
-        let fixture = Fixture::new();
-        let old = "previous-administrator-credential";
-        fixture.write("old-secret", old);
-        let plan = fixture.pool.prepare_password(old, NEW).await.unwrap();
-        fixture.pool.retire_password(&plan, NEW).await.unwrap();
-        fixture.pool.verify_password(NEW).await.unwrap();
-        assert!(fixture.pool.verify_password(old).await.is_err());
-        assert!(!fixture.events().contains(old));
-        fixture.assert_clean();
-    }
-
-    #[tokio::test]
-    async fn retirement_validates_both_volumes_before_deleting_slots() {
-        let fixture = Fixture::new();
-        let plan = fixture.pool.prepare_password(OLD, NEW).await.unwrap();
+        let mut plan = fixture.installed().await;
         fixture.write("package-data.new", "");
         fixture.write("events", "");
         assert!(fixture.pool.retire_password(&plan, NEW).await.is_err());
         fixture.assert_no_mutation();
+        fixture.write("package-data.new", "1\n0\n");
+        assert!(fixture.pool.retire_password(&plan, NEW).await.is_err());
+        fixture.assert_no_mutation();
+        fixture.write("package-data.new", "1\n");
+        plan.target_slots[0] = 0;
+        assert!(fixture.pool.retire_password(&plan, NEW).await.is_err());
+        fixture.assert_no_mutation();
     }
 
     #[tokio::test]
-    async fn retirement_rejects_a_plan_targeting_any_current_password_slot() {
+    async fn abort_refuses_missing_base_slots_and_resumes_second_volume_failure() {
         let fixture = Fixture::new();
-        let mut plan = fixture.pool.prepare_password(OLD, NEW).await.unwrap();
-        fixture.write("package-data.new", "4\n5\n");
-        plan.volumes[1].slots.insert(4);
+        let (_, keys) = fixture.pool.capture_unlock_keys(OLD).await.unwrap();
+        let plan = fixture.installed().await;
+        fixture.write("main.old", "");
         fixture.write("events", "");
-        assert!(fixture.pool.retire_password(&plan, NEW).await.is_err());
-        fixture.assert_no_mutation();
-        fixture.pool.verify_password(NEW).await.unwrap();
-        assert_eq!(
-            std::fs::read_to_string(fixture.dir.path().join("main.old")).unwrap(),
-            "0\n"
+        assert!(
+            fixture
+                .pool
+                .abort_password_change(&plan, &keys)
+                .await
+                .is_err()
         );
+        fixture.assert_no_mutation();
+        fixture.write("main.old", "0\n");
+        fixture.write("fail-luksKillSlot-package-data", "5");
+        assert!(
+            fixture
+                .pool
+                .abort_password_change(&plan, &keys)
+                .await
+                .is_err()
+        );
+        fixture.remove("fail-luksKillSlot-package-data");
+        fixture
+            .pool
+            .abort_password_change(&plan, &keys)
+            .await
+            .unwrap();
+        fixture.pool.verify_password(OLD).await.unwrap();
+        fixture.pool.verify_password(MANUAL).await.unwrap();
+        fixture.assert_clean();
     }
 
     #[tokio::test]
-    async fn retirement_rejects_a_plan_for_a_different_luks_device() {
+    async fn command_success_without_mutation_does_not_claim_completion() {
         let fixture = Fixture::new();
-        let mut plan = fixture.pool.prepare_password(OLD, NEW).await.unwrap();
-        plan.volumes[1].uuid = "another-device".into();
+        let plan = fixture.plan().await;
+        fixture.write("skip-add-package-data", "");
+        assert!(
+            fixture
+                .pool
+                .install_password(&plan, NEW, KeyCredential::Password(OLD))
+                .await
+                .is_err()
+        );
+        fixture.remove("skip-add-package-data");
+        fixture
+            .pool
+            .install_password(&plan, NEW, KeyCredential::Password(OLD))
+            .await
+            .unwrap();
+        fixture.write("skip-kill-package-data", "");
+        assert!(fixture.pool.retire_password(&plan, NEW).await.is_err());
+        assert!(!fixture.events().contains("luksHeaderBackup"));
+        fixture.assert_clean();
+    }
+
+    #[tokio::test]
+    async fn stale_inventory_identity_or_unexpected_slot_reuse_is_rejected() {
+        let fixture = Fixture::new();
+        let mut plan = fixture.plan().await;
+        plan.admin.volumes[1].id.uuid = "other-device".into();
         fixture.write("events", "");
-        assert!(fixture.pool.retire_password(&plan, NEW).await.is_err());
+        assert!(
+            fixture
+                .pool
+                .install_password(&plan, NEW, KeyCredential::Password(OLD))
+                .await
+                .is_err()
+        );
         fixture.assert_no_mutation();
-        plan.volumes[0].mapper_name = "another-pool_main".into();
-        assert!(fixture.pool.retire_password(&plan, NEW).await.is_err());
+        plan.admin.volumes[1].id.uuid = "fixture-package-data".into();
+        fixture.write("main.manual", "5\n6\n");
+        assert!(
+            fixture
+                .pool
+                .install_password(&plan, NEW, KeyCredential::Password(OLD))
+                .await
+                .is_err()
+        );
         fixture.assert_no_mutation();
     }
 
     #[tokio::test]
-    async fn malformed_metadata_fails_before_installation() {
+    async fn invalid_new_password_and_probe_errors_are_not_mutations_or_secret_leaks() {
         let fixture = Fixture::new();
-        fixture.write("package-data.metadata", "not a LUKS dump");
-        assert!(fixture.pool.prepare_password(OLD, NEW).await.is_err());
+        let plan = fixture.plan().await;
+        fixture.write("events", "");
+        for new in ["", OLD] {
+            assert!(
+                fixture
+                    .pool
+                    .install_password(&plan, new, KeyCredential::Password(OLD))
+                    .await
+                    .is_err()
+            );
+            assert!(fixture.pool.retire_password(&plan, new).await.is_err());
+        }
+        fixture.write("fail-open-package-data", "4");
+        let error = fixture
+            .pool
+            .install_password(&plan, NEW, KeyCredential::Password(OLD))
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::DiskManagement);
+        for secret in [OLD, NEW] {
+            assert!(!format!("{error:?}").contains(secret));
+        }
         fixture.assert_no_mutation();
+    }
+
+    #[tokio::test]
+    async fn headers_replace_atomically_and_sync_trim_failures_remain_retryable() {
+        let fixture = Fixture::new();
+        let plan = fixture.installed().await;
+        let path = fixture
+            .pool
+            .config_dir
+            .join(format!("luks/{GUID}_package-data.luks.bak"));
+        let inode = std::fs::metadata(&path).unwrap().ino();
+        fixture.write("fail-header-package-data", "");
+        assert!(fixture.pool.retire_password(&plan, NEW).await.is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "obsolete");
+        assert_eq!(std::fs::metadata(&path).unwrap().ino(), inode);
+        fixture.remove("fail-header-package-data");
+        for tool in ["sync", "fstrim"] {
+            fixture.write(&format!("fail-{tool}"), "1");
+            assert!(fixture.pool.retire_password(&plan, NEW).await.is_err());
+            fixture.remove(&format!("fail-{tool}"));
+        }
+        fixture.pool.retire_password(&plan, NEW).await.unwrap();
+        assert_ne!(std::fs::metadata(&path).unwrap().ino(), inode);
+        assert_eq!(std::fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
+        let events = fixture.events();
+        assert!(events.rfind("luksKillSlot").unwrap() < events.find("luksHeaderBackup").unwrap());
+        assert!(events.find("sync -f").unwrap() < events.find("fstrim ").unwrap());
+        fixture.assert_clean();
     }
 
     #[test]
-    fn luks_metadata_parsers_preserve_noncontiguous_enabled_slot_ids() {
-        let dump = "LUKS header information for /dev/example\nVersion:        1\nUUID: example\nKey Slot 0: DISABLED\nKey Slot 1: ENABLED\n        Iterations: 123\nKey Slot 2: DISABLED\nKey Slot 3: DISABLED\nKey Slot 4: DISABLED\nKey Slot 5: DISABLED\nKey Slot 6: DISABLED\nKey Slot 7: ENABLED\n";
+    fn metadata_parsers_preserve_enabled_slot_ids_and_reject_malformed_metadata() {
+        let dump = "Key Slot 0: DISABLED\nKey Slot 1: ENABLED\nKey Slot 2: DISABLED\nKey Slot 3: DISABLED\nKey Slot 4: DISABLED\nKey Slot 5: DISABLED\nKey Slot 6: DISABLED\nKey Slot 7: ENABLED\n";
         assert_eq!(luks1_slots(dump).unwrap(), BTreeSet::from([1, 7]));
-        assert_eq!(luks2_slots(br#"{"keyslots":{"1":{"type":"luks2"},"31":{"type":"luks2"}},"tokens":{},"segments":{}}"#).unwrap(), BTreeSet::from([1, 31]));
-        for malformed in [
-            "Key Slot 0: ENABLED",
-            "Key Slot 8: ENABLED",
-            "Key Slot 0: UNKNOWN",
-        ] {
-            assert!(luks1_slots(malformed).is_err());
-        }
-        for malformed in [
-            b"{}".as_slice(),
-            br#"{"keyslots":{"invalid":{}}}"#,
-            br#"{"keyslots":{"01":{}}}"#,
-        ] {
-            assert!(luks2_slots(malformed).is_err());
-        }
+        assert_eq!(
+            luks2_slots(br#"{"keyslots":{"1":{},"31":{}}}"#).unwrap(),
+            BTreeSet::from([1, 31])
+        );
+        assert!(luks1_slots("Key Slot 0: ENABLED").is_err());
+        assert!(luks2_slots(br#"{"keyslots":{"bad":{}}}"#).is_err());
     }
 
     #[tokio::test]
@@ -938,62 +1324,105 @@ esac
             pool.runtime_dir = root.to_owned();
             pool.fstrim = "true".into();
             let (old_key, old_cleanup) = pool.password_file(OLD).unwrap();
-            for (device, name) in pool.devices.iter().zip(&pool.mapper_names) {
+            let (manual_key, manual_cleanup) = pool.password_file(MANUAL).unwrap();
+            for device in &pool.devices {
                 std::fs::File::create(device)
                     .unwrap()
                     .set_len(32 * 1024 * 1024)
                     .unwrap();
-                Command::new("cryptsetup")
-                    .args([
-                        "luksFormat",
-                        "--batch-mode",
-                        "--type",
-                        format,
-                        "--pbkdf",
-                        "pbkdf2",
-                        "--pbkdf-force-iterations",
-                        "1000",
-                        "--key-file",
-                    ])
-                    .arg(&old_key)
-                    .arg(device)
-                    .invoke(ErrorKind::DiskManagement)
+                require_success(
+                    "luksFormat",
+                    cryptsetup_status(
+                        Command::new("cryptsetup")
+                            .args([
+                                "luksFormat",
+                                "--batch-mode",
+                                "--type",
+                                format,
+                                "--pbkdf",
+                                "pbkdf2",
+                                "--pbkdf-force-iterations",
+                                "1000",
+                                "--key-file",
+                            ])
+                            .arg(&old_key)
+                            .arg(device),
+                    )
                     .await
-                    .unwrap();
-                replace_header_backup(device, name, &config.join("luks"))
+                    .unwrap(),
+                )
+                .unwrap();
+                pool.add_and_verify(device, 5, &manual_key, &old_key, "--key-file")
                     .await
                     .unwrap();
             }
-            let plan = pool.prepare_password(OLD, NEW).await.unwrap();
-            assert_eq!(plan.volumes[0].slots, BTreeSet::from([0]));
-            assert_eq!(plan.volumes[1].slots, BTreeSet::from([0]));
-            let persisted = serde_json::to_vec(&plan).unwrap();
-            drop(plan);
+            drop(manual_cleanup);
             drop(old_cleanup);
-            assert!(!old_key.exists());
-            let (new_key, new_cleanup) = pool.password_file(NEW).unwrap();
-            let status = cryptsetup_status(
-                Command::new("cryptsetup")
-                    .args(["luksKillSlot", "--batch-mode", "--key-file"])
-                    .arg(&new_key)
-                    .arg(&pool.devices[0])
-                    .arg("0"),
-            )
-            .await
-            .unwrap();
-            assert!(status.success());
-            drop(new_cleanup);
-            let plan = serde_json::from_slice(&persisted).unwrap();
-            pool.retire_password(&plan, NEW).await.unwrap();
-            pool.retire_password(&plan, NEW).await.unwrap();
-            pool.verify_password(NEW).await.unwrap();
-            let (new_key, _new_cleanup) = pool.password_file(NEW).unwrap();
-            let (old_key, _old_cleanup) = pool.password_file(OLD).unwrap();
+            let (admin, keys) = pool.capture_unlock_keys(OLD).await.unwrap();
+            let fingerprints = keys.volumes.each_ref().map(|key| blake3::hash(&key.bytes));
+            assert_eq!(admin.volumes[0].slots, BTreeSet::from([0]));
+            let plan_a = pool.plan_password_change(&admin).await.unwrap();
+            let wrapper = root.join("cryptsetup-fixture");
+            std::fs::write(&wrapper, format!("#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{0}/arguments'\ncase \"$*\" in *package-data*) if [ \"$1\" = luksAddKey ] && [ -e '{0}/fail-add' ]; then exit 5; fi; if [ \"$1\" = luksKillSlot ] && [ -e '{0}/fail-kill' ]; then exit 5; fi;; esac\nexec /usr/sbin/cryptsetup \"$@\"\n", root.display())).unwrap();
+            std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
+            pool.cryptsetup = wrapper;
+            std::fs::write(root.join("fail-add"), "").unwrap();
+            assert!(
+                pool.install_password(&plan_a, NEW, KeyCredential::VolumeKeys(&keys))
+                    .await
+                    .is_err()
+            );
+            std::fs::remove_file(root.join("fail-add")).unwrap();
+            assert!(
+                pool.install_password(&plan_a, OTHER, KeyCredential::VolumeKeys(&keys))
+                    .await
+                    .is_err()
+            );
+            pool.abort_password_change(&plan_a, &keys).await.unwrap();
+            pool.abort_password_change(&plan_a, &keys).await.unwrap();
+            assert!(pool.verify_password(NEW).await.is_err());
+            pool.verify_password(OLD).await.unwrap();
+            pool.verify_password(MANUAL).await.unwrap();
+            let plan_b = pool.plan_password_change(&admin).await.unwrap();
+            pool.install_password(&plan_b, OTHER, KeyCredential::VolumeKeys(&keys))
+                .await
+                .unwrap();
+            pool.verify_password(OLD).await.unwrap();
+            let persisted = serde_json::to_vec(&plan_b).unwrap();
+            let new_admin = plan_b.new_admin_slots();
+            drop(plan_b);
+            drop(keys);
+            let plan_b = serde_json::from_slice(&persisted).unwrap();
+            std::fs::write(root.join("fail-kill"), "").unwrap();
+            assert!(pool.retire_password(&plan_b, OTHER).await.is_err());
+            std::fs::remove_file(root.join("fail-kill")).unwrap();
+            pool.retire_password(&plan_b, OTHER).await.unwrap();
+            pool.retire_password(&plan_b, OTHER).await.unwrap();
+            pool.verify_password(OTHER).await.unwrap();
+            pool.verify_password(MANUAL).await.unwrap();
+            assert!(pool.verify_password(OLD).await.is_err());
+            assert!(pool.verify_password(NEW).await.is_err());
+            let (observed, recaptured) = pool.capture_unlock_keys(OTHER).await.unwrap();
+            assert_eq!(observed, new_admin);
+            assert!(
+                recaptured
+                    .volumes
+                    .iter()
+                    .zip(fingerprints)
+                    .all(|(key, fingerprint)| blake3::hash(&key.bytes) == fingerprint)
+            );
+            let arguments = std::fs::read_to_string(root.join("arguments")).unwrap();
+            for secret in [OLD, NEW, OTHER, MANUAL] {
+                assert!(!arguments.contains(secret));
+            }
             for (device, name) in pool.devices.iter().zip(&pool.mapper_names) {
-                assert!(!pool.accepts(device, &old_key, None).await.unwrap());
+                assert_eq!(
+                    pool.metadata(device).await.unwrap().slots,
+                    BTreeSet::from([1, 5])
+                );
                 let header = config.join(format!("luks/{name}.luks.bak"));
-                assert_eq!(std::fs::metadata(&header).unwrap().mode() & 0o777, 0o600);
-                for (key, expected) in [(&new_key, 0), (&old_key, 2)] {
+                for (password, expected) in [(OTHER, 0), (OLD, 2), (MANUAL, 0), (NEW, 2)] {
+                    let (key, _cleanup) = pool.password_file(password).unwrap();
                     let status = cryptsetup_status(
                         Command::new("cryptsetup")
                             .args(["open", "--test-passphrase", "--batch-mode", "--header"])
@@ -1007,23 +1436,13 @@ esac
                     assert_eq!(status.code(), Some(expected), "{format}: {name}");
                 }
             }
-        }
-    }
-
-    #[tokio::test]
-    async fn sync_and_trim_failures_require_retry_before_completion() {
-        for tool in ["sync", "fstrim"] {
-            let fixture = Fixture::new();
-            let plan = fixture.pool.prepare_password(OLD, NEW).await.unwrap();
-            fixture.write(&format!("fail-{tool}"), "1");
-            assert!(fixture.pool.retire_password(&plan, NEW).await.is_err());
-            if tool == "sync" {
-                assert!(!fixture.events().contains("fstrim "));
-            }
-            fixture.remove(&format!("fail-{tool}"));
-            fixture.pool.retire_password(&plan, NEW).await.unwrap();
-            assert_eq!(fixture.events().matches("luksKillSlot").count(), 2);
-            fixture.assert_clean();
+            assert!(!std::fs::read_dir(root).unwrap().any(|entry| {
+                entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("startos-luks-")
+            }));
         }
     }
 }
