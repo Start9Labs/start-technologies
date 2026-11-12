@@ -196,7 +196,6 @@ async fn os_asset_ingestion_defaults_old_requests_and_verifies_signatures_atomic
         ctx.clone(),
         AddVersionParams {
             version: "0.4.0.5".parse().unwrap(),
-            headline: "Update".into(),
             release_notes: "Notes".parse().unwrap(),
             source_version: ">=0.4.0".parse().unwrap(),
             git_hash: None,

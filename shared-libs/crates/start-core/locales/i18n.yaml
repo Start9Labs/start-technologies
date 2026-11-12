@@ -5777,13 +5777,6 @@ help.arg.tunnel-name:
   fr_FR: "Nom du tunnel"
   pl_PL: "Nazwa tunelu"
 
-help.arg.version-headline:
-  en_US: "Short headline for the version"
-  de_DE: "Kurze Überschrift für die Version"
-  es_ES: "Título corto para la versión"
-  fr_FR: "Titre court pour la version"
-  pl_PL: "Krótki nagłówek dla wersji"
-
 help.arg.wifi-enabled:
   en_US: "Enable or disable WiFi"
   de_DE: "WLAN aktivieren oder deaktivieren"

@@ -2354,7 +2354,6 @@ export const AddTunnelParams: z.ZodObject<{
 })
 export const AddVersionParams: z.ZodObject<{
   version: z.ZodString
-  headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
   gitHash: z.ZodCodec<
@@ -2368,7 +2367,6 @@ export const AddVersionParams: z.ZodObject<{
   security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   version: z.string(),
-  headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
   gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
@@ -3710,7 +3708,6 @@ export const Notification: z.ZodObject<{
   id: 'Notification',
 })
 export const OsVersionInfo: z.ZodObject<{
-  headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
   /**
@@ -3738,7 +3735,6 @@ export const OsVersionInfo: z.ZodObject<{
     ReturnType<typeof RegistryAsset<typeof Blake3Commitment>>
   >
 }> = /* @__PURE__ */ object({
-  headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
   /**
