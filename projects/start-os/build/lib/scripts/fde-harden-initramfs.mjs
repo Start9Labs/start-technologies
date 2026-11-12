@@ -6,10 +6,11 @@ import {
   readdir,
   readFile,
   readlink,
+  realpath,
   rm,
   writeFile,
 } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
@@ -217,7 +218,56 @@ async function rejectAlternateRules(root) {
     throw Error('Unsupported initramfs lib alias')
 }
 
-/** Requires the build query and copied runtime to use the same libkmod. */
+function nativeAuditOutput(executable, args) {
+  const query = spawnSync(executable, args, {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH, LC_ALL: 'C' },
+    maxBuffer: 16 * 1024 * 1024,
+  })
+  if (query.error || query.status !== 0 || query.stderr)
+    throw Error(
+      `Cannot audit module configuration: ${query.error ?? query.stderr}`,
+    )
+  return query.stdout
+}
+
+async function requireCopiedProvider(root, target, source) {
+  const base = await realpath(root)
+  const path = await realpath(join(base, target))
+  const within = relative(base, path)
+  if (within === '..' || within.startsWith('../') || isAbsolute(within))
+    throw Error(`Module provider escapes the generated tree: ${target}`)
+  if (!(await lstat(path)).isFile())
+    throw Error(`Unsupported module provider: ${target}`)
+  if (!(await readFile(path)).equals(await readFile(source)))
+    throw Error(
+      `Copied module provider differs from the native query: ${target}`,
+    )
+}
+
+async function admittedModuleProviders(root) {
+  const executable = nativeAuditOutput('/bin/sh', [
+    '-c',
+    'command -v modprobe',
+  ]).trim()
+  const architecture = nativeAuditOutput('dpkg', [
+    '--print-architecture',
+  ]).trim()
+  const libraries = nativeAuditOutput('dpkg-query', [
+    '-L',
+    `libkmod2:${architecture}`,
+  ])
+    .split('\n')
+    .filter(path => path.endsWith('/libkmod.so.2'))
+  if (libraries.length !== 1)
+    throw Error('Cannot identify the native libkmod query provider')
+  const library = libraries[0]
+  await requireCopiedProvider(root, 'usr/sbin/modprobe', executable)
+  await requireCopiedProvider(root, library.slice(1), library)
+  return { executable, library }
+}
+
+/** Native query providers and candidate files must stay stable through hardening. */
 async function auditModuleConfiguration(root) {
   const moduleRoot = await checkedDirectory(root, 'usr/lib/modules')
   const versions = await readdir(moduleRoot, { withFileTypes: true })
@@ -245,25 +295,22 @@ async function auditModuleConfiguration(root) {
       if (error.code !== 'ENOENT') throw error
     }
   }
-  const query = spawnSync(
-    'modprobe',
-    [
-      '--showconfig',
-      `--dirname=${resolve(root)}`,
-      `--set-version=${version}`,
-      ...directories.flatMap(directory => ['--config', join(root, directory)]),
-    ],
-    {
-      encoding: 'utf8',
-      env: { PATH: process.env.PATH, LC_ALL: 'C' },
-      maxBuffer: 16 * 1024 * 1024,
-    },
-  )
-  if (query.error || query.status !== 0 || query.stderr)
-    throw Error(
-      `Cannot audit module configuration: ${query.error ?? query.stderr}`,
-    )
-  if (/^(install|remove) /m.test(query.stdout))
+  const { executable, library } = await admittedModuleProviders(root)
+  const paths = directories.map(directory => join(root, directory))
+  const configuration = nativeAuditOutput(executable, [
+    '--showconfig',
+    `--dirname=${resolve(root)}`,
+    `--set-version=${version}`,
+    ...paths.flatMap(directory => ['--config', directory]),
+  ])
+  const sharedConfiguration = nativeAuditOutput('python3', [
+    '-I',
+    fileURLToPath(new URL('./fde-module-config.py', import.meta.url)),
+    library,
+    join(moduleRoot, version),
+    ...paths,
+  ])
+  if (/^(install|remove) /m.test(`${configuration}\n${sharedConfiguration}`))
     throw Error(
       'Pre-verification module configuration invokes external commands',
     )

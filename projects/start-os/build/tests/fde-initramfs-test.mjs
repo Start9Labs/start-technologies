@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
 import {
   cp,
+  glob,
   lstat,
   mkdir,
   mkdtemp,
@@ -56,6 +57,14 @@ async function copyFixture(t) {
   const tree = join(temp, 'tree')
   await cp(fixture, tree, { recursive: true, verbatimSymlinks: true })
   return { temp, tree }
+}
+
+async function copiedKmodLibrary(tree) {
+  const paths = await Array.fromAsync(
+    glob('usr/lib/**/libkmod.so.2', { cwd: tree }),
+  )
+  assert.equal(paths.length, 1)
+  return join(tree, paths[0])
 }
 
 async function assertStops(temp, prefix, operation, shell, rebootStatus = 0) {
@@ -396,6 +405,57 @@ for (const [name, mutate, error] of [
     tree => mkdir(join(tree, 'usr/lib/modules/unselected-kernel')),
   ],
   [
+    'missing runtime modprobe',
+    tree => rm(join(tree, 'usr/sbin/modprobe')),
+    /ENOENT/,
+  ],
+  [
+    'changed runtime modprobe',
+    tree => writeFile(join(tree, 'usr/sbin/modprobe'), 'changed'),
+    /Copied module provider differs/,
+  ],
+  [
+    'missing runtime libkmod',
+    async tree => rm(await copiedKmodLibrary(tree)),
+    /ENOENT/,
+  ],
+  [
+    'changed runtime libkmod',
+    async tree => writeFile(await copiedKmodLibrary(tree), 'changed'),
+    /Copied module provider differs/,
+  ],
+  [
+    'runtime library link to host provider',
+    async tree => {
+      const path = await copiedKmodLibrary(tree)
+      const source = spawnSync('dpkg-query', ['-L', 'libkmod2'], {
+        encoding: 'utf8',
+      })
+        .stdout.split('\n')
+        .find(path => path.endsWith('/libkmod.so.2'))
+      assert.ok(source)
+      await rm(path)
+      await symlink(source, path)
+    },
+    /Module provider escapes/,
+  ],
+  [
+    'environment-suppressed parser errors',
+    async (tree, t) => {
+      const before = process.env.KMOD_LOG
+      t.after(() => {
+        if (before === undefined) delete process.env.KMOD_LOG
+        else process.env.KMOD_LOG = before
+      })
+      process.env.KMOD_LOG = '0'
+      await writeFile(
+        join(tree, 'usr/lib/modprobe.d/recovery.conf'),
+        'unknown fde_fixture value\n',
+      )
+    },
+    /Cannot audit module configuration/,
+  ],
+  [
     'environment-selected query bypass',
     async (tree, t) => {
       const before = process.env.MODPROBE_OPTIONS
@@ -420,6 +480,48 @@ for (const [name, mutate, error] of [
     assert.deepEqual(await snapshot(tree), before)
   })
 }
+
+test('shared libkmod reports commands without executing or probing modules', async t => {
+  const { temp, tree } = await copyFixture(t)
+  const source = spawnSync('dpkg-query', ['-L', 'libkmod2'], {
+    encoding: 'utf8',
+  })
+    .stdout.split('\n')
+    .find(path => path.endsWith('/libkmod.so.2'))
+  assert.ok(source)
+  const sentinel = join(temp, 'command-executed')
+  const configs = join(tree, 'usr/lib/modprobe.d')
+  await writeFile(
+    join(configs, 'commands.conf'),
+    `install fde_fixture touch ${sentinel}\nremove another_fixture touch ${sentinel}\n`,
+  )
+  const [version] = await readdir(join(tree, 'usr/lib/modules'))
+  const args = [
+    '-I',
+    fileURLToPath(
+      new URL('../lib/scripts/fde-module-config.py', import.meta.url),
+    ),
+    source,
+    join(tree, 'usr/lib/modules', version),
+    configs,
+  ]
+  const options = {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH, LC_ALL: 'C' },
+  }
+  const result = spawnSync('python3', args, options)
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(result.stderr, '')
+  assert.deepEqual(result.stdout.trim().split('\n'), [
+    'install fde_fixture',
+    'remove another_fixture',
+  ])
+  await assert.rejects(lstat(sentinel), { code: 'ENOENT' })
+  await writeFile(join(configs, 'commands.conf'), 'unknown fde_fixture value\n')
+  const malformed = spawnSync('python3', args, options)
+  assert.match(malformed.stderr, /unknown/)
+  await assert.rejects(lstat(sentinel), { code: 'ENOENT' })
+})
 
 for (const shell of shells) {
   for (const status of [0, 1])
