@@ -13,6 +13,7 @@ import {
   pauseFor,
   registryUrl,
   sameUrl,
+  withAbortSignal,
   RPCErrorDetails,
   SetLanguageParams,
 } from '@start9labs/shared'
@@ -21,6 +22,7 @@ import {
   createRpcClient,
   createRpcStreamClient,
   RpcHandlers,
+  type RpcStreamOptions,
   T,
   tableTransport,
   utils,
@@ -42,6 +44,7 @@ import {
   from,
   interval,
   map,
+  Observable,
   shareReplay,
   startWith,
   Subject,
@@ -234,13 +237,7 @@ export class MockApiService extends ApiService implements StartupApiService {
       return this.handlers['server.logs']!(params)
     },
     'init.subscribe': () => this.initSubscription(),
-    'init.logs.follow': async () => {
-      await pauseFor(2000)
-      return {
-        startCursor: 'start-cursor',
-        guid: 'logs-guid',
-      }
-    },
+    'init.logs.follow': () => this.logFollow(),
     'server.time': async params => {
       await pauseFor(2000)
       return {
@@ -268,20 +265,8 @@ export class MockApiService extends ApiService implements StartupApiService {
         endCursor: 'end-cursor',
       }
     },
-    'server.logs.follow': async params => {
-      await pauseFor(2000)
-      return {
-        startCursor: 'start-cursor',
-        guid: 'logs-guid',
-      }
-    },
-    'server.kernel-logs.follow': async params => {
-      await pauseFor(2000)
-      return {
-        startCursor: 'start-cursor',
-        guid: 'logs-guid',
-      }
-    },
+    'server.logs.follow': () => this.logFollow(),
+    'server.kernel-logs.follow': () => this.logFollow(),
     'server.metrics.follow': async params => {
       await pauseFor(2000)
       return {
@@ -1089,13 +1074,7 @@ export class MockApiService extends ApiService implements StartupApiService {
         endCursor: 'end-cursor',
       }
     },
-    'package.logs.follow': async params => {
-      await pauseFor(2000)
-      return {
-        startCursor: 'start-cursor',
-        guid: 'logs-guid',
-      }
-    },
+    'package.logs.follow': () => this.logFollow(),
     'package.install': async params => {
       await pauseFor(2000)
 
@@ -1738,6 +1717,8 @@ export class MockApiService extends ApiService implements StartupApiService {
   >({
     stream: async (method, params, options) => {
       switch (method) {
+        case 'init.logs.follow':
+          return this.logFollowStream(options)
         case 'init.subscribe':
           return this.initSubscriptionStream(options)
         case 'diagnostic.update':
@@ -1747,6 +1728,31 @@ export class MockApiService extends ApiService implements StartupApiService {
       }
     },
   })
+
+  private async logFollow(signal?: AbortSignal) {
+    await pauseFor(2000, signal)
+    return { startCursor: 'start-cursor', guid: 'logs-guid' }
+  }
+
+  private async logFollowStream(options?: RpcStreamOptions) {
+    const initial = await this.logFollow(options?.signal)
+    options?.signal?.throwIfAborted()
+    return {
+      initial: { ...initial, guid: null },
+      items: this.logEntries(options?.signal),
+    }
+  }
+
+  private async *logEntries(
+    signal?: AbortSignal,
+  ): AsyncGenerator<T.LogEntry, null> {
+    for (let index = 0; index <= 100; index++) {
+      await pauseFor(50, signal)
+      if (index === 100) throw new Error('Mock log stream interrupted')
+      yield Mock.ServerLogs[0]!
+    }
+    return null
+  }
 
   async uploadFile(
     guid: string,
@@ -1788,25 +1794,21 @@ export class MockApiService extends ApiService implements StartupApiService {
     return icons[id] || FALLBACK_ICON
   }
 
-  // websocket
-
   openWebsocket$<T>(
     guid: string,
     config: WebsocketConfig<T> = {},
-  ): WebSocketSubject<T> {
+  ): Observable<T> {
     if (guid === 'db-guid') {
       return this.mockWsSource$.pipe<any>(
         shareReplay({ bufferSize: 1, refCount: true }),
       ) as WebSocketSubject<T>
     } else if (guid === 'logs-guid') {
-      return interval(50).pipe<any>(
-        map((_, index) => {
-          // mock fire open observer
+      return withAbortSignal(signal => this.logEntries(signal)).pipe(
+        map((entry, index) => {
           if (index === 0) config.openObserver?.next(new Event(''))
-          if (index === 100) throw new Error('HAAHHA')
-          return Mock.ServerLogs[0]
+          return entry
         }),
-      ) as WebSocketSubject<T>
+      ) as Observable<T>
     } else if (guid === 'init-progress-guid') {
       return from(this.initProgress()).pipe(
         startWith(PROGRESS),

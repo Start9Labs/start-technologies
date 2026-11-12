@@ -10,8 +10,8 @@ import { InitializingProgress } from './service'
   template: '<app-initializing [progress]="initialization.progress()" />',
   providers: [
     InitializingProgress,
-    provideSetupLogsService(StartupApiService, api =>
-      api.rpc.init.logs.follow({}),
+    provideSetupLogsService(StartupApiService, (api, options) =>
+      api.streams.init.logs.follow({}, options),
     ),
   ],
   styles: ':host { height: 100%; }',

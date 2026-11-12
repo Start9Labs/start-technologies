@@ -7,7 +7,6 @@ import {
   concatWith,
   defer,
   filter,
-  finalize,
   from,
   startWith,
   switchMap,
@@ -18,6 +17,7 @@ import type { AuthKeyService } from './auth-key.service'
 import type { RpcSocketService } from './rpc-socket.service'
 import type { ServerIdentityService } from './server-identity.service'
 import { rpcRequestBody } from './rpc-request'
+import { withAbortSignal } from '../util/with-abort'
 
 type LegacySubscription = { dump: Dump<unknown>; guid: string }
 
@@ -27,8 +27,7 @@ export function databaseSubscription<T>(
   authKeys: AuthKeyService,
   identity: ServerIdentityService,
 ): Observable<Update<T>> {
-  return defer(() => {
-    const abort = new AbortController()
+  return withAbortSignal(signal => {
     const client = createRpcStreamClient<RpcStreamClient<RPC.StartOS>>({
       stream: async (method, params, options) => {
         const body = rpcRequestBody({
@@ -47,14 +46,11 @@ export function databaseSubscription<T>(
     })
     return from(
       (async function* () {
-        const { initial, items } = await client.db.subscribe(
-          {},
-          { signal: abort.signal },
-        )
+        const { initial, items } = await client.db.subscribe({}, { signal })
         yield initial as Dump<T>
         for await (const revision of items) yield revision as Revision
       })(),
-    ).pipe(finalize(() => abort.abort()))
+    )
   })
 }
 

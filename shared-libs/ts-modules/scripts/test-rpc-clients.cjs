@@ -11,6 +11,7 @@ const {
   BehaviorSubject,
   Observable,
   filter,
+  firstValueFrom,
   map,
   of,
   throwError,
@@ -104,7 +105,8 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       ...tokens,
       ...load('shared-libs/ts-modules/shared/src/util/misc.util.ts'),
       ...load('shared-libs/ts-modules/shared/src/util/format-progress.ts'),
-      pauseFor: async () => {},
+      ...load('shared-libs/ts-modules/shared/src/util/with-abort.ts'),
+      pauseFor: async (_, signal) => signal?.throwIfAborted(),
       getErrorMessage: load(
         'shared-libs/ts-modules/shared/src/services/error.service.ts',
       ).getErrorMessage,
@@ -761,6 +763,81 @@ test('setup mock ordinary and typed status share their progress and terminal own
   const abort = new AbortController()
   abort.abort()
   await assert.rejects(mock.setupStatusStream({ signal: abort.signal }), {
+    name: 'AbortError',
+  })
+})
+
+test('setup mock log interfaces share initiating data and cancel their producer', async () => {
+  const { load } = harness(new Map(), { AbortController })
+  const mock = Object.create(
+    load(
+      'projects/start-os/web/setup-wizard/src/app/services/mock-api.service.ts',
+    ).MockApiService.prototype,
+  )
+  const ordinary = await mock.logFollow()
+  const abort = new AbortController()
+  const typed = await mock.logFollowStream({ signal: abort.signal })
+  assert.equal(typed.initial.startCursor, ordinary.startCursor)
+  assert.equal(ordinary.guid, 'logs-guid')
+  assert.equal(typed.initial.guid, null)
+  assert.equal((await typed.items.next()).value.message, 'fake log entry')
+  assert.equal(
+    (await firstValueFrom(mock.openWebsocket$('logs-guid'))).message,
+    'fake log entry',
+  )
+  abort.abort()
+  await assert.rejects(typed.items.next(), { name: 'AbortError' })
+  await assert.rejects(mock.logFollowStream({ signal: abort.signal }), {
+    name: 'AbortError',
+  })
+})
+
+test('UI mock log interfaces share their bounded failure producer without duplicating entries', async () => {
+  const entry = {
+    timestamp: '2026-11-12T00:00:00Z',
+    message: 'entry',
+    bootId: 'boot',
+  }
+  const { load } = harness(
+    new Map([
+      ['./api.fixures', { Mock: { ServerLogs: [entry] } }],
+      ['./mock-patch', mockPatchFixture({})],
+      ['./md-sample.md', ''],
+    ]),
+    { AbortController, Event },
+  )
+  const mock = Object.create(
+    load(
+      'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+    ).MockApiService.prototype,
+  )
+  const ordinary = await mock.logFollow()
+  const abort = new AbortController()
+  const typed = await mock.logFollowStream({ signal: abort.signal })
+  assert.equal(typed.initial.startCursor, ordinary.startCursor)
+  assert.equal(ordinary.guid, 'logs-guid')
+  assert.equal(typed.initial.guid, null)
+  let opened = 0
+  assert.equal(
+    await firstValueFrom(
+      mock.openWebsocket$('logs-guid', {
+        openObserver: {
+          next() {
+            opened++
+          },
+        },
+      }),
+    ),
+    entry,
+  )
+  assert.equal(opened, 1)
+  for (let i = 0; i < 100; i++)
+    assert.equal((await typed.items.next()).value, entry)
+  await assert.rejects(typed.items.next(), /Mock log stream interrupted/)
+  const pending = await mock.logFollowStream({ signal: abort.signal })
+  abort.abort()
+  await assert.rejects(pending.items.next(), { name: 'AbortError' })
+  await assert.rejects(mock.logFollowStream({ signal: abort.signal }), {
     name: 'AbortError',
   })
 })

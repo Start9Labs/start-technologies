@@ -17,7 +17,7 @@ resolved; it owns the fallback and exposes `loading` until the image loads or fa
 avatar's `[tuiSkeleton]`; `FALLBACK_ICON`),
 `SafeLinksDirective`, pipes (`convertBytes`, `empty`, `compareExver`, `leafProgress`,
 `markdown`), `RELATIVE_URL` token, `HttpError`/`RpcError`, disk/RPC/http types,
-utils (`convertAnsi`, `formatProgress`, `getPkgId`, `pauseFor`, `@debounce`, `sameUrl`,
+utils (`convertAnsi`, `formatProgress`, `getPkgId`, `pauseFor`, `withAbortSignal`, `@debounce`, `sameUrl`,
 `isValidHttpUrl`, `registryUrl`, `hostnameValidator`, `hostnameValidationErrors`,
 `randomHostname`, keyboards/languages data,
 `defaultRegistries`/`knownRegistries`).

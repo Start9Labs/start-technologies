@@ -1,5 +1,10 @@
 import { Injectable } from '@angular/core'
-import { DiskInfo, pauseFor, StartOSDiskInfo } from '@start9labs/shared'
+import {
+  DiskInfo,
+  pauseFor,
+  StartOSDiskInfo,
+  withAbortSignal,
+} from '@start9labs/shared'
 import {
   createRpcClient,
   createRpcStreamClient,
@@ -8,7 +13,7 @@ import {
   T,
   tableTransport,
 } from '@start9labs/start-core'
-import { from, interval, map, Observable } from 'rxjs'
+import { from, Observable } from 'rxjs'
 import { InstallOsParams, InstallOsRes } from '../types'
 import { Api, ApiClient, ApiService, Params, Result } from './api.service'
 
@@ -123,13 +128,7 @@ export class MockApiService extends ApiService {
         guid: 'progress-guid',
       }
     },
-    'setup.logs.follow': async () => {
-      await pauseFor(500)
-      return {
-        startCursor: 'fakestartcursor',
-        guid: 'logs-guid',
-      }
-    },
+    'setup.logs.follow': () => this.logFollow(),
     'setup.complete': async () => {
       await pauseFor(500)
       return {
@@ -156,11 +155,43 @@ export class MockApiService extends ApiService {
     ApiService['streams']
   >({
     stream: async (method, _, options) => {
-      if (method !== 'setup.status')
-        throw new Error(`No mock stream for ${method}`)
-      return this.setupStatusStream(options)
+      switch (method) {
+        case 'setup.status':
+          return this.setupStatusStream(options)
+        case 'setup.logs.follow':
+          return this.logFollowStream(options)
+        default:
+          throw new Error(`No mock stream for ${method}`)
+      }
     },
   })
+
+  private async logFollow(signal?: AbortSignal) {
+    await pauseFor(500, signal)
+    return { startCursor: 'fakestartcursor', guid: 'logs-guid' }
+  }
+
+  private async logFollowStream(options?: RpcStreamOptions) {
+    const initial = await this.logFollow(options?.signal)
+    options?.signal?.throwIfAborted()
+    return {
+      initial: { ...initial, guid: null },
+      items: this.logEntries(options?.signal),
+    }
+  }
+
+  private async *logEntries(
+    signal?: AbortSignal,
+  ): AsyncGenerator<T.LogEntry, null> {
+    while (true) {
+      await pauseFor(500, signal)
+      yield {
+        timestamp: new Date().toISOString(),
+        message: 'fake log entry',
+        bootId: 'boot-id',
+      }
+    }
+  }
 
   private async setupStatus(
     signal?: AbortSignal,
@@ -213,13 +244,7 @@ export class MockApiService extends ApiService {
 
   openWebsocket$<T>(guid: string): Observable<T> {
     if (guid === 'logs-guid') {
-      return interval(500).pipe(
-        map(() => ({
-          timestamp: new Date().toISOString(),
-          message: 'fake log entry',
-          bootId: 'boot-id',
-        })),
-      ) as Observable<T>
+      return withAbortSignal(signal => this.logEntries(signal)) as Observable<T>
     } else if (guid === 'progress-guid') {
       return from(this.setupProgress()) as Observable<T>
     } else {
