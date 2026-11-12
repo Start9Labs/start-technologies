@@ -3715,6 +3715,10 @@
         "BindOptions": {
           "type": "object",
           "properties": {
+            "transport": {
+              "description": "Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.",
+              "$ref": "#/$defs/Transport"
+            },
             "preferredExternalPort": {
               "type": "integer",
               "minimum": -9007199254740991,
@@ -3731,8 +3735,19 @@
               "description": "HTTP request policy shared by every exposed leg of this binding."
             }
           },
-          "required": ["preferredExternalPort", "addSsl", "secure", "proxy"],
+          "required": [
+            "transport",
+            "preferredExternalPort",
+            "addSsl",
+            "secure",
+            "proxy"
+          ],
           "additionalProperties": true
+        },
+        "Transport": {
+          "type": "string",
+          "enum": ["tcp", "udp", "both"],
+          "description": "Transports forwarded by a binding. Omitted declarations retain TCP and UDP."
         },
         "AddSslOptions": {
           "type": "object",
@@ -9884,6 +9899,10 @@
         "BindOptions": {
           "type": "object",
           "properties": {
+            "transport": {
+              "description": "Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.",
+              "$ref": "#/$defs/Transport"
+            },
             "preferredExternalPort": {
               "type": "integer",
               "minimum": -9007199254740991,
@@ -9900,8 +9919,19 @@
               "description": "HTTP request policy shared by every exposed leg of this binding."
             }
           },
-          "required": ["preferredExternalPort", "addSsl", "secure", "proxy"],
+          "required": [
+            "transport",
+            "preferredExternalPort",
+            "addSsl",
+            "secure",
+            "proxy"
+          ],
           "additionalProperties": true
+        },
+        "Transport": {
+          "type": "string",
+          "enum": ["tcp", "udp", "both"],
+          "description": "Transports forwarded by a binding. Omitted declarations retain TCP and UDP."
         },
         "AddSslOptions": {
           "type": "object",
