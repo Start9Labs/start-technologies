@@ -116,6 +116,7 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       ...load('shared-libs/ts-modules/shared/src/types/rpc.types.ts'),
       ...load('shared-libs/ts-modules/shared/src/services/rpc-request.ts'),
       ...load('shared-libs/ts-modules/shared/src/services/rpc-response.ts'),
+      ...load('shared-libs/ts-modules/shared/src/services/local-rpc.ts'),
       ...load(
         'shared-libs/ts-modules/shared/src/services/database-subscription.ts',
       ),
@@ -168,6 +169,7 @@ function harness(moduleOverrides = new Map(), globals = {}) {
         Buffer,
         URL,
         TextEncoder,
+        AbortSignal,
         structuredClone,
         ...globals,
       },
@@ -345,20 +347,15 @@ for (const [name, file, className, deauthMethod] of [
     assert.equal(typeof Client, 'function')
     const client = new Client()
     let settled = false
-    const options = {
-      method: 'auth.logout',
-      params: {},
-      headers: { existing: 'preserved' },
-    }
-    const pending = client.rpcRequest(options).then(value => {
+    const options = { timeout: 10000 }
+    const pending = client.rpc.auth.logout({}, options).then(value => {
       settled = true
       return value
     })
     await new Promise(resolve => setImmediate(resolve))
     assert.equal(settled, false)
     assert.equal(calls[0].lease, lease)
-    assert.equal(calls[0].options.headers.existing, 'preserved')
-    assert.equal(calls[0].options.headers.signature, undefined)
+    assert.equal(calls[0].options.timeout, 10000)
     assert.equal(JSON.parse(calls[0].request).signature, undefined)
     cache.next({ id: 2 })
     await new Promise(resolve => setImmediate(resolve))
@@ -367,11 +364,11 @@ for (const [name, file, className, deauthMethod] of [
     assert.equal(await pending, null)
     patchSequence = 999
     assert.equal(
-      await client.rpcRequest(options, 'https://foreign.test/rpc'),
+      await client.echo({ message: 'foreign' }, 'https://foreign.test/rpc'),
       null,
     )
     assert.equal(calls[1].lease, undefined)
-    assert.equal(calls[1].options, options)
+    assert.equal(JSON.parse(calls[1].request).method, 'echo')
     assert.equal(JSON.parse(calls[1].request).signature, undefined)
     assert.equal(calls[1].url, 'https://foreign.test/rpc')
     cache.complete()
@@ -399,7 +396,7 @@ for (const [name, file, className, deauthMethod] of [
     })
     const client = new (load(file)[className])()
     await assert.rejects(
-      client.rpcRequest({ method: 'auth.logout', params: {} }),
+      client.rpc.auth.logout({}),
       error =>
         error.code === 34 &&
         error.message === 'RPC ERROR: unauthorized\n\nsession expired',
@@ -408,28 +405,58 @@ for (const [name, file, className, deauthMethod] of [
   })
 }
 
-test('StartOS derives the method path and forwards results untouched', async () => {
-  const { load } = harness()
-  const client = Object.create(
-    load(
-      'projects/start-os/web/ui/src/app/services/api/embassy-live-api.service.ts',
-    ).LiveApiService.prototype,
+test('unsigned foreign echo rejection cannot invalidate local authentication', async () => {
+  const { dependencies, tokens, load } = harness()
+  let rejected = 0
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ id: 0 }))
+  dependencies.set(tokens.AuthService, {
+    setUnverified() {
+      rejected++
+    },
+  })
+  dependencies.set(tokens.AuthKeyService, {
+    lease() {
+      assert.fail('foreign calls do not acquire local keys')
+    },
+  })
+  dependencies.set(tokens.HttpService, {
+    rpcMessage: async () => ({
+      body: {
+        error: { code: 34, message: 'foreign rejection', data: null },
+        meta: { patchSequence: 999 },
+      },
+    }),
+  })
+  const client = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-live-api.service.ts',
+  ).LiveApiService)()
+  await assert.rejects(
+    client.echo({ message: 'probe' }, 'http://foreign.test/rpc'),
+    error => error.code === 34,
   )
+  assert.equal(rejected, 0)
+  assert.equal(dependencies.get(tokens.PATCH_CACHE).observed, false)
+})
+
+test('StartOS derives the method path and forwards results untouched', async () => {
+  const { dependencies, tokens, load } = harness()
   const value = { serverInfo: { id: 'server' }, packageData: {} }
   const dump = { guid: 'subscription', dump: { id: 3, value } }
   const action = { version: '1', title: 'Done', message: null, result: null }
   const requests = []
   let response = dump
-  client.rpcRequest = async options => {
-    requests.push(options)
-    return response
-  }
-  const rpc = load(
-    'shared-libs/ts-modules/start-core/lib/rpcClient.ts',
-  ).createRpcClient({
-    call: (method, params, options) =>
-      client.rpcRequest({ method, params, ...options }),
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ id: 0 }))
+  dependencies.set(tokens.AuthService, { setUnverified() {} })
+  dependencies.set(tokens.AuthKeyService, { lease: async () => null })
+  dependencies.set(tokens.HttpService, {
+    rpcMessage: async (body, options) => {
+      requests.push({ ...JSON.parse(body), ...options })
+      return { body: { result: response } }
+    },
   })
+  const rpc = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-live-api.service.ts',
+  ).LiveApiService)().rpc
   assert.equal(await rpc.db.subscribe({}), dump)
   assert.equal(requests[0].method, 'db.subscribe')
   assert.equal(Object.keys(requests[0].params).length, 0)
@@ -447,6 +474,178 @@ test('StartOS derives the method path and forwards results untouched', async () 
   assert.equal(requests[2].method, 'package.action.get-input')
   await rpc.server.logs({ limit: 1 }, { timeout: 10000 })
   assert.equal(requests[3].timeout, 10000)
+})
+
+function normalStreamFixture() {
+  const { dependencies, tokens, load } = harness(new Map(), {
+    ReadableStream,
+    DOMException,
+  })
+  const cache = new BehaviorSubject({ id: 0 }),
+    frames = new (require('rxjs').Subject)(),
+    lifetime = new AbortController()
+  const { rpcResponseStream } = load(
+    'shared-libs/ts-modules/shared/src/services/rpc-stream.ts',
+  )
+  const calls = [],
+    logout = []
+  dependencies.set(tokens.PATCH_CACHE, cache)
+  dependencies.set(tokens.AuthService, {
+    setUnverified() {
+      logout.push(true)
+      lifetime.abort()
+    },
+  })
+  dependencies.set(tokens.AuthKeyService, {
+    lease: async () => ({ key: {}, signal: lifetime.signal }),
+  })
+  dependencies.set(tokens.HttpService, {
+    rpcMessage() {
+      assert.fail('typed never downgrades')
+    },
+  })
+  dependencies.set(tokens.RpcSocketService, {
+    stream(body, lease, options) {
+      calls.push({ body, lease, options })
+      return rpcResponseStream(frames, options)
+    },
+  })
+  const api = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-live-api.service.ts',
+  ).LiveApiService)()
+  const send = value =>
+    frames.next({ value, bytes: JSON.stringify(value).length })
+  const version = load(
+    'shared-libs/ts-modules/start-core/lib/osBindings/session-profile.ts',
+  ).SESSION_PROFILE.transport.rpcStreamVersion
+  return { api, frames, cache, calls, lifetime, logout, send, version }
+}
+const streamFlush = () => new Promise(setImmediate)
+
+test('normal generated streams fence initial metadata and preserve pre-first-next disposal', async () => {
+  const f = normalStreamFixture()
+  let settled = false
+  const pending = f.api.streams.server.logs
+    .follow({ limit: 400 })
+    .then(value => {
+      settled = true
+      return value
+    })
+  await streamFlush()
+  f.send({
+    jsonrpc: '2.0',
+    id: 'a',
+    result: { startCursor: 'cursor', guid: null },
+    meta: { patchSequence: 3 },
+  })
+  await streamFlush()
+  assert.equal(settled, false)
+  assert.equal(f.cache.observed, true)
+  f.cache.next({ id: 3 })
+  const stream = await pending
+  assert.equal(stream.initial.startCursor, 'cursor')
+  assert.equal(stream.meta.patchSequence, 3)
+  assert.equal(JSON.parse(f.calls[0].body).method, 'server.logs.follow')
+  assert.equal(f.frames.observed, true)
+  await stream.items.return(null)
+  assert.equal(f.frames.observed, false)
+  assert.equal(f.cache.observed, false)
+})
+
+for (const reason of ['view disposal', 'logout'])
+  test(`normal stream ${reason} cancels blocked initial fences without late adoption`, async () => {
+    const f = normalStreamFixture(),
+      user = new AbortController()
+    const pending = f.api.streams.server.logs.follow(
+      {},
+      { signal: user.signal },
+    )
+    await streamFlush()
+    f.send({
+      jsonrpc: '2.0',
+      id: 'a',
+      result: { guid: null },
+      meta: { patchSequence: 999 },
+    })
+    await streamFlush()
+    if (reason === 'logout') f.lifetime.abort()
+    else user.abort()
+    await assert.rejects(pending, { name: 'AbortError' })
+    assert.equal(f.cache.observed, false)
+    assert.equal(f.frames.observed, false)
+  })
+
+for (const stage of ['initial', 'terminal'])
+  test(`normal stream ${stage} code34 uses the existing authentication owner`, async () => {
+    const f = normalStreamFixture(),
+      pending = f.api.streams.server.logs.follow({})
+    await streamFlush()
+    if (stage === 'initial') {
+      f.send({
+        jsonrpc: '2.0',
+        id: 'a',
+        error: { code: 34, message: 'revoked', data: null },
+      })
+      await assert.rejects(pending, error => error.code === 34)
+    } else {
+      f.send({ jsonrpc: '2.0', id: 'a', result: { guid: null } })
+      const stream = await pending
+      f.send({ rpcstream: f.version, id: 'a', end: false, result: 'accepted' })
+      f.send({
+        rpcstream: f.version,
+        id: 'a',
+        end: true,
+        error: { code: 34, message: 'revoked', data: null },
+      })
+      assert.equal((await stream.items.next()).value, 'accepted')
+      assert.equal(f.logout.length, 0)
+      await assert.rejects(stream.items.next(), error => error.code === 34)
+    }
+    assert.equal(f.logout.length, 1)
+    assert.equal(f.frames.observed, false)
+  })
+
+for (const stage of ['initial', 'terminal'])
+  test(`canceled normal stream ${stage} rejection cannot invalidate a replacement identity`, async () => {
+    const f = normalStreamFixture(),
+      pending = f.api.streams.server.logs.follow({})
+    await streamFlush()
+    let result = pending
+    if (stage === 'initial') {
+      f.send({
+        jsonrpc: '2.0',
+        id: 'a',
+        error: { code: 34, message: 'old identity', data: null },
+      })
+    } else {
+      f.send({ jsonrpc: '2.0', id: 'a', result: { guid: null } })
+      const response = await pending
+      result = response.items.next()
+      f.send({
+        rpcstream: f.version,
+        end: true,
+        error: { code: 34, message: 'old identity', data: null },
+      })
+    }
+    f.lifetime.abort()
+    await assert.rejects(result, { name: 'AbortError' })
+    assert.equal(f.logout.length, 0)
+  })
+
+test('normal stream cache failure releases an acquired iterator before exposing the error', async () => {
+  const f = normalStreamFixture(),
+    pending = f.api.streams.server.logs.follow({})
+  await streamFlush()
+  f.send({
+    jsonrpc: '2.0',
+    id: 'a',
+    result: { guid: null },
+    meta: { patchSequence: 999 },
+  })
+  await streamFlush()
+  f.cache.error(new Error('cache stopped'))
+  await assert.rejects(pending, /cache stopped/)
+  assert.equal(f.frames.observed, false)
 })
 
 test('shared transport classification accepts numeric zero, not RPC or cancellation codes', () => {

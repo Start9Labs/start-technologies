@@ -1712,12 +1712,15 @@ export class MockApiService extends ApiService implements StartupApiService {
     'kiosk.disable': () => this.toggleKiosk(false),
   }
   readonly rpc = createRpcClient<ApiClient>(tableTransport<Api>(this.handlers))
-  readonly streams: StartupApiService['streams'] = createRpcStreamClient<
-    StartupApiService['streams']
+  readonly streams = createRpcStreamClient<
+    ApiService['streams'] & StartupApiService['streams']
   >({
     stream: async (method, params, options) => {
       switch (method) {
         case 'init.logs.follow':
+        case 'server.logs.follow':
+        case 'server.kernel-logs.follow':
+        case 'package.logs.follow':
           return this.logFollowStream(options)
         case 'init.subscribe':
           return this.initSubscriptionStream(options)

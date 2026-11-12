@@ -4,18 +4,19 @@ import { blake3 } from '@noble/hashes/blake3'
 import {
   AuthKeyService,
   databaseSubscription,
+  authenticatedRpcTransport,
+  localRpcRequest,
+  rpcResponseResult,
   HttpOptions,
   HttpService,
-  isRpcError,
   RpcError,
-  RPCOptions,
-  RPCResponse,
   RpcSocketService,
   ServerIdentityService,
   rpcRequestBody,
   waitForPatchSequence,
 } from '@start9labs/shared'
-import { createRpcClient } from '@start9labs/start-core'
+import { createRpcClient, createRpcStreamClient } from '@start9labs/start-core'
+import type { RpcStreamOptions } from '@start9labs/start-core'
 import { Dump, Update } from 'patch-db-client'
 import { catchError } from 'rxjs'
 import type { Observable } from 'rxjs'
@@ -34,13 +35,31 @@ export class LiveApiService extends ApiService {
   private readonly auth = inject(AuthService)
   private readonly authKeys = inject(AuthKeyService)
   private readonly cache$ = inject<Observable<Dump<DataModel>>>(PATCH_CACHE)
+  private readonly streamTransport = authenticatedRpcTransport(
+    this.sockets,
+    this.authKeys,
+    this.identity,
+  )
   readonly rpc = createRpcClient<ApiClient>({
     call: (method, params, options) =>
-      this.rpcRequest({
-        method,
-        params: params as Record<string, unknown>,
-        ...options,
-      }),
+      localRpcRequest(
+        this.http,
+        this.sockets,
+        this.authKeys,
+        this.identity,
+        this.cache$,
+        {
+          method,
+          params: params as Record<string, unknown>,
+          ...options,
+        },
+      ).catch(error => this.raiseError(error)),
+  })
+  readonly streams = createRpcStreamClient<ApiService['streams']>({
+    stream: (method, params, options) =>
+      this.rpcStream(method, params, options).catch(error =>
+        this.raiseError(error),
+      ),
   })
 
   constructor() {
@@ -133,38 +152,39 @@ export class LiveApiService extends ApiService {
   }
 
   async echo(params: Params<'echo'>, url: string): Promise<string> {
-    return this.rpcRequest<string>({ method: 'echo', params }, url)
+    const options = { method: 'echo', params }
+    const response = await this.http.rpcMessage<string>(
+      rpcRequestBody(options),
+      {},
+      url,
+    )
+    return rpcResponseResult(response.body)
   }
 
   async toggleKiosk(enable: boolean): Promise<null> {
-    return this.rpcRequest({
-      method: enable ? 'kiosk.enable' : 'kiosk.disable',
-      params: {},
-    })
+    return enable ? this.rpc.kiosk.enable({}) : this.rpc.kiosk.disable({})
   }
 
-  private async rpcRequest<T>(
-    options: RPCOptions<Record<string, unknown>, string>,
-    urlOverride?: string,
-  ): Promise<T> {
-    const request = rpcRequestBody(options)
-    const lease = urlOverride ? null : await this.authKeys.lease()
-    const body = lease
-      ? await this.sockets.message<T>(
-          request,
-          { ...options, openObserver: this.identity.openObserver },
-          lease,
-        )
-      : (await this.http.rpcMessage<T>(request, options, urlOverride)).body
-
-    const result = this.responseResult(body)
-    if (!urlOverride) await waitForPatchSequence(this.cache$, body.meta)
-    return result
-  }
-
-  private responseResult<T>(body: RPCResponse<T>): T {
-    if (isRpcError(body)) this.raiseError(new RpcError(body.error))
-    return body.result
+  private async rpcStream(
+    method: string,
+    params: unknown,
+    options?: RpcStreamOptions,
+  ) {
+    const response = await this.streamTransport.stream(method, params, options)
+    try {
+      await waitForPatchSequence(this.cache$, response.meta, response.signal)
+      response.signal.throwIfAborted()
+    } catch (error) {
+      await response.items.return(undefined)
+      throw error
+    }
+    const next = response.items.next.bind(response.items)
+    response.items.next = (...args) =>
+      next(...args).catch(error => {
+        response.signal.throwIfAborted()
+        this.raiseError(error)
+      })
+    return response
   }
 
   private raiseError(error: unknown): never {

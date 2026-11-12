@@ -23,7 +23,8 @@ loadTypeScript(
     export { RpcError } from '${new URL('classes/rpc-error.ts', shared)}';
     export { isRpcError } from '${new URL('types/rpc.types.ts', shared)}';
     export { rpcRequestBody, rpcWebSocketUrl } from '${new URL('services/rpc-request.ts', shared)}';
-    export { waitForPatchSequence } from '${new URL('services/rpc-response.ts', shared)}';
+    export { rpcResponseResult, waitForPatchSequence } from '${new URL('services/rpc-response.ts', shared)}';
+    export { authenticatedRpcTransport, localRpcRequest } from '${new URL('services/local-rpc.ts', shared)}';
     export { databaseSubscription, legacyDatabaseSubscription, bufferDatabaseRevisions } from '${new URL('services/database-subscription.ts', shared)}';
   `,
     ],

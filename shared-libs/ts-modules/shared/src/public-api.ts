@@ -40,7 +40,11 @@ export * from './services/exver.service'
 export * from './services/error.service'
 export * from './services/http.service'
 export * from './services/rpc-request'
-export { waitForPatchSequence } from './services/rpc-response'
+export {
+  rpcResponseResult,
+  waitForPatchSequence,
+} from './services/rpc-response'
+export * from './services/local-rpc'
 export * from './services/setup-logs.service'
 export * from './services/task.service'
 

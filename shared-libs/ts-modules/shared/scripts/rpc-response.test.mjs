@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import '@angular/compiler'
 import { BehaviorSubject } from 'rxjs'
-import {
-  withLegacyPatchSequence,
-  waitForPatchSequence,
-} from '../src/services/rpc-response.ts'
+import './typescript-loader.mjs'
+const { withLegacyPatchSequence, waitForPatchSequence } =
+  await import('../src/services/rpc-response.ts')
 
 test('patch sequence fences preserve zero and skip absent metadata', async () => {
   const cache = new BehaviorSubject({ id: 0 })

@@ -60,17 +60,20 @@ promise-based**; components call `await this.api.method(params)` and never touch
   history. Per-operation open observation also covers healthy session reuse and authorization
   rejection. Callers select that contract explicitly; an unauthenticated mode response cannot
   downgrade a normal caller. Mock mode reuses the existing API fixture. RPC-level errors use
-  `isRpcError(body)` → `RpcError`; normal code-34 rejection forces logout. Local replies wait
-  for `meta.patchSequence` through the shared fence; foreign replies never wait on the local
-  cache. HTTP compatibility projects older `x-patch-sequence` headers only when JSON metadata
+  `isRpcError(body)` → `RpcError`; local code-34 rejection forces logout; foreign probe rejection never invalidates local authentication. `localRpcRequest` owns OS/Tunnel local capture/dispatch, envelope errors and cancellable
+  `meta.patchSequence` fences; foreign replies never wait on the local cache.
+  `authenticatedRpcTransport` shares device-key stream admission with database observation; server authorization remains live.
+  Normal generated streams wait for their initiating fences and preserve iterator disposal;
+  identity replacement or caller disposal releases blocked fences. HTTP compatibility projects older `x-patch-sequence` headers only when JSON metadata
   is absent. Resource requests retain HTTP/header signatures. PatchDB uses the generated
   `RpcStreamClient` through the same socket owner: initial dump, typed revisions, terminal outcome.
   The initial dump establishes its own fence; never wait on that cache before delivering it.
   The source owns one AbortSignal through key lookup, initialization and iteration, and retains
   its existing 250ms batching/retry policy. Per-request queues bound both item count and bytes;
   slow consumers cancel only their own request. Terminal outcomes drain accepted items;
-  physical loss discards them. Remaining GUID streams (logs/metrics) retain their existing
-  source-owned buffering/retry until their operation contracts are migrated.
+  physical loss discards them. Portal and startup logs consume typed items through their existing
+  status/history/batching/retry owners; a successful portal terminal invalidates the ongoing view.
+  Metrics GUID observations retain their source-owned buffering/retry until their operation contract is migrated.
 - **start-wrt retains its RPC/reconnect workflow owners**: all browser RPC composes shared encrypted
   transport, with unpersisted anonymous admission before device enrollment. The caller omits
   normal-product peer-history observation for missing-key bootstrap. `admissionLease` carries

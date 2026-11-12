@@ -1,7 +1,8 @@
 # Shared libraries — @start9labs/\*
 
 `@start9labs/shared` (monorepo apps): `HttpService` (HTTP JSON-RPC/resources),
-`RpcSocketService` (encrypted local RPC/continuations), `AuthKeyService` (device-key and
+`RpcSocketService` (encrypted local RPC/continuations), `localRpcRequest` (OS/Tunnel local replies/fences),
+`authenticatedRpcTransport` (device-key typed-stream admission), `AuthKeyService` (device-key and
 unenrolled admission leases), `ServerIdentityService` (normal-product verified-peer observers),
 `rpcWebSocketUrl` (shared RPC/continuation endpoint selection),
 `databaseSubscription` / `databaseSource` (admitted database updates, batching and terminal invalidation; product sources own auth/recovery), `ErrorService` +

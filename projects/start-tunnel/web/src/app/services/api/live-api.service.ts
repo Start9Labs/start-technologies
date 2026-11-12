@@ -3,14 +3,11 @@ import {
   AuthKeyService,
   databaseSubscription,
   HttpService,
-  isRpcError,
   RpcError,
+  localRpcRequest,
   RPCOptions,
-  RPCResponse,
   RpcSocketService,
   ServerIdentityService,
-  rpcRequestBody,
-  waitForPatchSequence,
 } from '@start9labs/shared'
 import { createRpcClient } from '@start9labs/start-core'
 import { catchError } from 'rxjs'
@@ -38,10 +35,6 @@ export class LiveApiService extends ApiService {
       }),
   })
 
-  constructor() {
-    super()
-  }
-
   openWebsocket$<T>(guid: string): Observable<T> {
     return this.sockets.open<T>(guid, {
       openObserver: this.identity.openObserver,
@@ -56,28 +49,15 @@ export class LiveApiService extends ApiService {
     ).pipe(catchError(error => this.raiseError(error)))
   }
 
-  private async rpcRequest<T>(
-    options: RPCOptions<Record<string, unknown>, string>,
-    urlOverride?: string,
-  ): Promise<T> {
-    const request = rpcRequestBody(options)
-    const lease = urlOverride ? null : await this.authKeys.lease()
-    const body = lease
-      ? await this.sockets.message<T>(
-          request,
-          { ...options, openObserver: this.identity.openObserver },
-          lease,
-        )
-      : (await this.http.rpcMessage<T>(request, options, urlOverride)).body
-
-    const result = this.responseResult(body)
-    if (!urlOverride) await waitForPatchSequence(this.cache$, body.meta)
-    return result
-  }
-
-  private responseResult<T>(body: RPCResponse<T>): T {
-    if (isRpcError(body)) this.raiseError(new RpcError(body.error))
-    return body.result
+  private rpcRequest<T>(options: RPCOptions): Promise<T> {
+    return localRpcRequest<T>(
+      this.http,
+      this.sockets,
+      this.authKeys,
+      this.identity,
+      this.cache$,
+      options,
+    ).catch(error => this.raiseError(error))
   }
 
   private raiseError(error: unknown): never {

@@ -16,7 +16,7 @@ import type { Observable, OperatorFunction } from 'rxjs'
 import type { AuthKeyService } from './auth-key.service'
 import type { RpcSocketService } from './rpc-socket.service'
 import type { ServerIdentityService } from './server-identity.service'
-import { rpcRequestBody } from './rpc-request'
+import { authenticatedRpcTransport } from './local-rpc'
 import { withAbortSignal } from '../util/with-abort'
 
 type LegacySubscription = { dump: Dump<unknown>; guid: string }
@@ -28,22 +28,9 @@ export function databaseSubscription<T>(
   identity: ServerIdentityService,
 ): Observable<Update<T>> {
   return withAbortSignal(signal => {
-    const client = createRpcStreamClient<RpcStreamClient<RPC.StartOS>>({
-      stream: async (method, params, options) => {
-        const body = rpcRequestBody({
-          method,
-          params: params as Record<string, unknown>,
-        })
-        const lease = await authKeys.lease()
-        options?.signal?.throwIfAborted()
-        if (!lease)
-          throw new Error('Database subscriptions require an authenticated key')
-        return sockets.stream(body, lease, {
-          ...options,
-          openObserver: identity.openObserver,
-        })
-      },
-    })
+    const client = createRpcStreamClient<RpcStreamClient<RPC.StartOS>>(
+      authenticatedRpcTransport(sockets, authKeys, identity),
+    )
     return from(
       (async function* () {
         const { initial, items } = await client.db.subscribe({}, { signal })

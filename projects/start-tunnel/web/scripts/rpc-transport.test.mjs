@@ -24,7 +24,8 @@ const boundaries = new Map([
     export { RpcError } from '${new URL('classes/rpc-error.ts', shared)}';
     export { isRpcError } from '${new URL('types/rpc.types.ts', shared)}';
     export { rpcRequestBody } from '${new URL('services/rpc-request.ts', shared)}';
-    export { waitForPatchSequence } from '${new URL('services/rpc-response.ts', shared)}';
+    export { rpcResponseResult, waitForPatchSequence } from '${new URL('services/rpc-response.ts', shared)}';
+    export { localRpcRequest } from '${new URL('services/local-rpc.ts', shared)}';
     export { databaseSubscription, legacyDatabaseSubscription, bufferDatabaseRevisions } from '${new URL('services/database-subscription.ts', shared)}';
   `,
   ],
@@ -163,27 +164,6 @@ test('absence of a device key preserves public HTTP bootstrap without encrypted 
   }
   assert.equal(await request(options), 'public')
   assert.equal(instance.rejected, 0)
-})
-
-test('foreign overrides receive no local identity and cannot wait on the local cache', async () => {
-  const { instance } = api()
-  instance.authKeys.lease = () => {
-    throw new Error('local identity accessed')
-  }
-  instance.http.rpcMessage = async (body, options, url) => {
-    assert.equal(url, 'https://foreign.test/rpc')
-    assert.deepEqual(JSON.parse(body), { method: 'echo', params: {} })
-    return { body: { result: 'remote', meta: { patchSequence: 999 } } }
-  }
-  assert.equal(
-    await LiveApiService.prototype.rpcRequest.call(
-      instance,
-      { method: 'echo', params: {} },
-      'https://foreign.test/rpc',
-    ),
-    'remote',
-  )
-  assert.equal(instance.cache$.observed, false)
 })
 
 test('RPC parameters are captured before waiting for the device identity', async () => {
