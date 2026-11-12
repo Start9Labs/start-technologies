@@ -76,6 +76,24 @@ function reviewedHook(name, bytes) {
     context = replaceOnce(context, timestamps[0][0], 'CHANGELOG_TS=0')
   }
   requireReviewedContext(Buffer.from(context), hooks[name][0], `hook ${name}`)
+  if (name === 'zz-busybox') {
+    return replaceOnce(
+      original,
+      'ln "$DESTDIR/bin/busybox" "$DESTDIR/$alias"',
+      'ln -rs "$DESTDIR/bin/busybox" "$DESTDIR/$alias"',
+    )
+  }
+  if (name === 'klibc-utils') {
+    return replaceOnce(
+      replaceOnce(
+        original,
+        'for src in /usr/lib/klibc/bin/*; do',
+        'set -e\n. /usr/share/initramfs-tools/hook-functions\n\nfor src in /usr/lib/klibc/bin/*; do',
+      ),
+      'cp -pL "$src" "${DESTDIR}/bin"',
+      'copy_file binary "$src" || [ "$?" = 1 ]\n\t\t\tln -rs "${DESTDIR}${src}" "${DESTDIR}/bin/$command"',
+    )
+  }
   if (name === 'intel_microcode') {
     return replaceOnce(
       replaceOnce(
@@ -110,6 +128,7 @@ function reviewedHook(name, bytes) {
  * The caller keeps source helpers/configuration and candidate files stable through generation.
  * Unknown hooks reject; credential/resume/keymap/FUSE hooks do not enter the FDE profile.
  * Hooks execute in their admitted source namespace; ordering/firmware/archives remain native.
+ * BusyBox/klibc command aliases are symlinks; regular providers retain their source paths.
  */
 export async function prepareNativeHooks(sourceRoot, targetDirectory) {
   const source = await realpath(

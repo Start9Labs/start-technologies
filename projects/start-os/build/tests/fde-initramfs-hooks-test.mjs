@@ -64,6 +64,28 @@ test('reviewed native hooks are copied privately without changing their installe
   assert.ok(!names.includes('fuse'))
 })
 
+test('provider layout adaptations preserve native prerequisite dispatch', async t => {
+  const { root, target } = await context(t)
+  await prepareNativeHooks(root, target)
+  for (const BUSYBOX of ['y', 'n']) {
+    const options = {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, BUSYBOX, BUSYBOXDIR: '/bin' },
+    }
+    for (const name of ['zz-busybox', 'klibc-utils']) {
+      const original = spawnSync(
+        'sh',
+        [hookPath(root, name), 'prereqs'],
+        options,
+      )
+      const adapted = spawnSync('sh', [join(target, name), 'prereqs'], options)
+      assert.equal(original.status, 0, original.stderr)
+      assert.equal(adapted.status, 0, adapted.stderr)
+      assert.equal(adapted.stdout, original.stdout)
+    }
+  }
+})
+
 test('absent microcode packages and configuration preserve native defaults', async t => {
   const { root, target } = await context(t)
   for (const name of ['intel_microcode', 'amd64_microcode'])
