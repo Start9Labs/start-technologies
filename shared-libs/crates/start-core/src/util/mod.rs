@@ -104,6 +104,8 @@ pub trait Invoke<'a> {
         input: Option<&'ext mut Input>,
     ) -> Self::Extended<'ext>;
     fn capture<'ext: 'a>(&'ext mut self, capture: bool) -> Self::Extended<'ext>;
+    /// Streams stderr to the console while retaining failure diagnostics.
+    fn forward_stderr<'ext: 'a>(&'ext mut self, forward: bool) -> Self::Extended<'ext>;
     /// Streams final stdout with bounded buffering and collects stderr, regardless of capture.
     /// Flushes on success; leaves shutdown of the borrowed writer to the caller.
     fn output_to<'ext: 'a, Output: AsyncWrite + Unpin + Send>(
@@ -122,6 +124,7 @@ pub struct ExtendedCommand<'a> {
     input: Option<&'a mut (dyn AsyncRead + Unpin + Send)>,
     pipe: VecDeque<&'a mut tokio::process::Command>,
     capture: bool,
+    forward_stderr: bool,
     output: Option<&'a mut (dyn AsyncWrite + Unpin + Send)>,
 }
 impl<'a> From<&'a mut tokio::process::Command> for ExtendedCommand<'a> {
@@ -132,6 +135,7 @@ impl<'a> From<&'a mut tokio::process::Command> for ExtendedCommand<'a> {
             input: None,
             pipe: VecDeque::new(),
             capture: true,
+            forward_stderr: false,
             output: None,
         }
     }
@@ -184,6 +188,11 @@ impl<'a> Invoke<'a> for tokio::process::Command {
         cmd.capture = capture;
         cmd
     }
+    fn forward_stderr<'ext: 'a>(&'ext mut self, forward: bool) -> Self::Extended<'ext> {
+        let mut cmd = ExtendedCommand::from(self);
+        cmd.forward_stderr = forward;
+        cmd
+    }
     fn output_to<'ext: 'a, Output: AsyncWrite + Unpin + Send>(
         &'ext mut self,
         output: &'ext mut Output,
@@ -229,6 +238,10 @@ impl<'a> Invoke<'a> for ExtendedCommand<'a> {
         self.capture = capture;
         self
     }
+    fn forward_stderr<'ext: 'a>(&'ext mut self, forward: bool) -> Self::Extended<'ext> {
+        self.forward_stderr = forward;
+        self
+    }
     fn output_to<'ext: 'a, Output: AsyncWrite + Unpin + Send>(
         &'ext mut self,
         output: &'ext mut Output,
@@ -252,7 +265,28 @@ async fn wait_command(
     input: Option<&mut (dyn AsyncRead + Unpin + Send + '_)>,
     error_kind: ErrorKind,
     cmd_str: &str,
+    forward_stderr: bool,
 ) -> Result<std::process::Output, Error> {
+    let stderr = if forward_stderr {
+        child.stderr.take()
+    } else {
+        None
+    };
+    let forward = async move {
+        let mut captured = Vec::new();
+        if let Some(mut stderr) = stderr {
+            let mut buffer = [0; 8192];
+            loop {
+                let len = stderr.read(&mut buffer).await?;
+                if len == 0 {
+                    break;
+                }
+                std::io::Write::write_all(&mut rpc_toolkit::output::stderr(), &buffer[..len])?;
+                captured.extend_from_slice(&buffer[..len]);
+            }
+        }
+        Ok::<_, Error>(captured)
+    };
     let stdin = child.stdin.take();
     let feed = async move {
         if let (Some(mut stdin), Some(input)) = (stdin, input) {
@@ -268,7 +302,10 @@ async fn wait_command(
             .await
             .with_ctx(|_| (error_kind, cmd_str))
     };
-    let (_, output) = tokio::try_join!(feed, wait)?;
+    let (_, mut output, stderr) = tokio::try_join!(feed, wait, forward)?;
+    if forward_stderr {
+        output.stderr = stderr;
+    }
     Ok(output)
 }
 
@@ -323,20 +360,35 @@ impl ExtendedCommand<'_> {
                 .into_owned();
             if self.capture || self.output.is_some() {
                 self.cmd.stdout(Stdio::piped());
+            }
+            if self.capture || self.output.is_some() || self.forward_stderr {
                 self.cmd.stderr(Stdio::piped());
             }
             let mut child = self.cmd.spawn().with_ctx(|_| (error_kind, &cmd_str))?;
             if let Some(output) = self.output.as_mut() {
                 let stdout = child.stdout.take();
                 let (res, _) = tokio::try_join!(
-                    wait_command(child, self.input.take(), error_kind, &cmd_str),
+                    wait_command(
+                        child,
+                        self.input.take(),
+                        error_kind,
+                        &cmd_str,
+                        self.forward_stderr
+                    ),
                     copy_command_output(stdout, &mut **output),
                 )?;
                 check_command_output(res, error_kind, &cmd_str)?;
                 output.flush().await?;
                 Ok(Vec::new())
             } else {
-                let res = wait_command(child, self.input.take(), error_kind, &cmd_str).await?;
+                let res = wait_command(
+                    child,
+                    self.input.take(),
+                    error_kind,
+                    &cmd_str,
+                    self.forward_stderr,
+                )
+                .await?;
                 check_command_output(res, error_kind, &cmd_str)
             }
         } else {
@@ -357,7 +409,7 @@ impl ExtendedCommand<'_> {
                 if self.capture || self.output.is_some() || !last {
                     cmd.stdout(Stdio::piped());
                 }
-                if self.capture || self.output.is_some() {
+                if self.capture || self.output.is_some() || self.forward_stderr {
                     cmd.stderr(Stdio::piped());
                 }
                 if prev.is_some() {
@@ -371,11 +423,18 @@ impl ExtendedCommand<'_> {
                         .take()
                         .map(|i| Box::new(BufReader::new(i)) as Box<dyn AsyncRead + Unpin + Send>),
                 );
+                let forward_stderr = self.forward_stderr;
                 futures.push(
                     async move {
                         let mut input = input;
-                        let res =
-                            wait_command(child, input.as_deref_mut(), error_kind, &cmd_str).await?;
+                        let res = wait_command(
+                            child,
+                            input.as_deref_mut(),
+                            error_kind,
+                            &cmd_str,
+                            forward_stderr,
+                        )
+                        .await?;
                         check_command_output(res, error_kind, &cmd_str)?;
                         Ok(())
                     }
