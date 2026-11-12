@@ -22,6 +22,8 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::disk::mount::filesystem::block_dev::BlockDev;
+use crate::disk::mount::filesystem::{FileSystem, ReadOnly};
+use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::merkle_archive::source::DynFileSource;
@@ -179,6 +181,27 @@ impl VerityImage {
         result
     }
 
+    /// Mounts a fully read mapping as read-only SquashFS; the guard owns both resources.
+    pub async fn mount(
+        &self,
+        data: &Path,
+        tree: &Path,
+        name: &str,
+        mountpoint: &Path,
+    ) -> Result<VerityMount, Error> {
+        let device = self.open(data, tree, name).await?;
+        match MountGuard::mount(&SquashfsDevice(device), mountpoint, ReadOnly).await {
+            Ok(mount) => Ok(VerityMount {
+                mount,
+                mapping: Some(name.to_owned()),
+            }),
+            Err(error) => {
+                Self::close(name).await.log_err();
+                Err(error)
+            }
+        }
+    }
+
     /// Requires every mount using the mapping to be unmounted first.
     pub async fn close(name: &str) -> Result<(), Error> {
         verity_command()
@@ -188,6 +211,64 @@ impl VerityImage {
             .invoke(ErrorKind::Filesystem)
             .await?;
         Ok(())
+    }
+}
+
+struct SquashfsDevice(BlockDev<PathBuf>);
+
+impl FileSystem for SquashfsDevice {
+    fn mount_type(&self) -> Option<impl AsRef<str>> {
+        Some("squashfs")
+    }
+
+    async fn source(&self) -> Result<Option<impl AsRef<Path>>, Error> {
+        self.0.source().await
+    }
+
+    async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
+        self.0.source_hash().await
+    }
+}
+
+/// A read-only mount retaining its verified mapping until successful unmount.
+/// Failed teardown retains mapping protection.
+#[derive(Debug)]
+pub struct VerityMount {
+    mount: MountGuard,
+    mapping: Option<String>,
+}
+
+impl VerityMount {
+    /// Transfers mount and mapping lifetime to the caller without removing protection.
+    pub fn persist(mut self) -> PathBuf {
+        self.mapping.take();
+        self.mount.take().persist()
+    }
+}
+
+impl GenericMountGuard for VerityMount {
+    fn path(&self) -> &Path {
+        self.mount.path()
+    }
+
+    async fn unmount(mut self) -> Result<(), Error> {
+        let name = self.mapping.take().unwrap();
+        self.mount.take().unmount(false).await?;
+        VerityImage::close(&name).await
+    }
+}
+
+impl Drop for VerityMount {
+    fn drop(&mut self) {
+        if let Some(name) = self.mapping.take() {
+            let mount = self.mount.take();
+            tokio::spawn(async move {
+                match mount.unmount(false).await {
+                    Ok(()) => VerityImage::close(&name).await.log_err(),
+                    Err(error) => Err::<(), _>(error).log_err(),
+                };
+            });
+        }
     }
 }
 
@@ -1116,6 +1197,95 @@ mod tests {
         drop(lower2_verity);
         drop(lower1_verity);
         drop(public_verity);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires CAP_SYS_ADMIN and loop devices"]
+    async fn verity_mount_retains_protection_through_handoff_and_cleans_failures() {
+        let temp = tempfile::tempdir_in("/dev/shm").unwrap();
+        let source = temp.path().join("source");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("setting"), b"verified setting").unwrap();
+        let image = temp.path().join("image");
+        let mut file = create_file_mod(&image, 0o600).await.unwrap();
+        Squashfs::from_directory(&source)
+            .await
+            .unwrap()
+            .serialize(&mut file)
+            .await
+            .unwrap();
+        file.sync_all().await.unwrap();
+        let tree = temp.path().join("tree");
+        let verity = VerityImage::format(&image, &tree).await.unwrap();
+        let name = format!("verity-mount-{}", Guid::new());
+        let device = PathBuf::from(format!("/dev/mapper/{name}"));
+        let at = temp.path().join("mount");
+        let mount = verity.mount(&image, &tree, &name, &at).await.unwrap();
+        assert_eq!(
+            fs::read(mount.path().join("setting")).unwrap(),
+            b"verified setting"
+        );
+        assert!(fs::write(mount.path().join("setting"), b"changed").is_err());
+        mount.unmount().await.unwrap();
+        assert!(!device.exists());
+
+        let mount = verity.mount(&image, &tree, &name, &at).await.unwrap();
+        assert_eq!(mount.persist(), at);
+        assert!(device.exists());
+        assert!(VerityImage::close(&name).await.is_err());
+        assert_eq!(fs::read(at.join("setting")).unwrap(), b"verified setting");
+        tokio::process::Command::new("umount")
+            .arg(&at)
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+        VerityImage::close(&name).await.unwrap();
+        assert!(!device.exists());
+
+        let mount = verity.mount(&image, &tree, &name, &at).await.unwrap();
+        let dependent = temp.path().join("dependent");
+        fs::create_dir(&dependent).unwrap();
+        tokio::process::Command::new("mount")
+            .arg("--bind")
+            .arg(&at)
+            .arg(&dependent)
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+        assert!(mount.unmount().await.is_err());
+        assert!(device.exists());
+        assert_eq!(
+            fs::read(dependent.join("setting")).unwrap(),
+            b"verified setting"
+        );
+        tokio::process::Command::new("umount")
+            .arg(&dependent)
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+        VerityImage::close(&name).await.unwrap();
+        assert!(!device.exists());
+
+        let not_directory = temp.path().join("not-directory");
+        fs::write(&not_directory, b"occupied").unwrap();
+        assert!(
+            verity
+                .mount(&image, &tree, &name, &not_directory)
+                .await
+                .is_err()
+        );
+        assert!(!device.exists());
+        fs::write(&image, image_bytes(b"not SquashFS")).unwrap();
+        let other_tree = temp.path().join("other-tree");
+        let not_squashfs = VerityImage::format(&image, &other_tree).await.unwrap();
+        assert!(
+            not_squashfs
+                .mount(&image, &other_tree, &name, &at)
+                .await
+                .is_err()
+        );
+        assert!(!device.exists());
     }
 
     #[cfg(target_os = "linux")]

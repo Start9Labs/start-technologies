@@ -69,6 +69,11 @@ impl MountGuard {
             slot: None,
         })
     }
+    /// Transfers unmount responsibility to the caller, retaining the kernel mount.
+    pub fn persist(mut self) -> PathBuf {
+        self.mounted = false;
+        std::mem::take(&mut self.mountpoint)
+    }
     fn as_unmounted(&self) -> Self {
         Self {
             mountpoint: self.mountpoint.clone(),
@@ -179,7 +184,7 @@ pub struct TmpMountGuard {
     guard: Arc<MountGuard>,
 }
 impl TmpMountGuard {
-    /// DRAGONS: if you try to mount something as ro and rw at the same time, the ro mount will be upgraded to rw.
+    /// Concurrent writable requests upgrade the shared read-only mount.
     #[instrument(skip_all)]
     pub async fn mount(filesystem: &impl FileSystem, mount_type: MountType) -> Result<Self, Error> {
         let mountpoint = tmp_mountpoint(filesystem).await?;
@@ -191,7 +196,6 @@ impl TmpMountGuard {
         let mut slot = slot_handle.lock().await;
         let (prev_mt, weak_slot) = &mut *slot;
         if let Some(guard) = weak_slot.upgrade() {
-            // upgrade to rw
             if *prev_mt == ReadOnly && mount_type != ReadOnly {
                 tokio::process::Command::new("mount")
                     .arg("-o")

@@ -36,7 +36,7 @@ Activation makes the compatible rootfs, overlay and policy generation durable be
 
 `fde::boot::Descriptor` pins one rootfs filename and the manifest/policy verification keys inside the signed initramfs. Unsigned configuration cannot replace those keys or choose a non-FDE boot mode. Complete generations live under `config/fde/generations`; their public policy files remain outside the hashed configuration image to avoid a filesystem-policy hash cycle.
 
-Selection reuses `os_overlay::verified_generations` ordering and admits the newest candidate whose authenticated policy matches the observed boot plus its anticipated filesystem event. A newer signed filesystem without a matching boot authorization does not displace an older compatible generation. Selection alone cannot release credentials: the early-boot owner must open and fully read both signed verity mappings before extending PCR15, and retain those mappings through dependent mounts.
+Selection reuses `os_overlay::verified_generations` ordering and admits the newest candidate whose authenticated policy matches the observed boot plus its anticipated filesystem event. A newer signed filesystem without a matching boot authorization does not displace an older compatible generation. `Descriptor::mount` opens and fully reads both signed verity mappings and mounts them as read-only SquashFS. `MountedGeneration::measure` checks the live boot again before extending PCR15. Mount guards remove mappings after successful unmount, or transfer both resources to the boot owner for handoff. Selection alone cannot release credentials; dependent mounts must end before their mappings close.
 
 ## Persistent overlay
 

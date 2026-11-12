@@ -12,7 +12,8 @@ use openssl::pkey::{PKey, Public};
 use serde::{Deserialize, Serialize};
 
 use super::tpm::{self, MeasurementProfile};
-use crate::os_overlay::{self, Manifest, PreparedGeneration, VerifiedGeneration};
+use crate::disk::mount::guard::GenericMountGuard;
+use crate::os_overlay::{self, Manifest, PreparedGeneration, VerifiedGeneration, VerityMount};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::util::io::write_file_private_atomic;
@@ -144,6 +145,50 @@ impl Descriptor {
         }
         Ok(None)
     }
+
+    /// Opens and fully reads both signed mappings before exposing read-only mounts.
+    /// The mount directory is private to the boot owner; dependent mounts must end first.
+    pub async fn mount(
+        &self,
+        images: &Path,
+        config: &Path,
+        mountpoint: &Path,
+    ) -> Result<Option<MountedGeneration>, Error> {
+        let Some(generation) = self.select(images, config).await? else {
+            return Ok(None);
+        };
+        let rootfs = generation
+            .manifest()
+            .rootfs_verity
+            .mount(
+                &self.rootfs_path(images)?,
+                &generation.path().join(os_overlay::ROOTFS_VERITY_FILE),
+                &format!("startos-fde-root-{}", Guid::new()),
+                &mountpoint.join("rootfs"),
+            )
+            .await?;
+        let overlay = generation
+            .manifest()
+            .overlay_verity
+            .mount(
+                &generation.generation.overlay_path(),
+                &generation.path().join(os_overlay::OVERLAY_VERITY_FILE),
+                &format!("startos-fde-config-{}", Guid::new()),
+                &mountpoint.join("overlay"),
+            )
+            .await;
+        match overlay {
+            Ok(overlay) => Ok(Some(MountedGeneration {
+                generation,
+                rootfs,
+                overlay,
+            })),
+            Err(error) => {
+                rootfs.unmount().await.log_err();
+                Err(error)
+            }
+        }
+    }
 }
 
 /// Authenticated selection at verification time, not a live mount or unseal permission.
@@ -164,6 +209,56 @@ impl Generation {
 
     pub fn profile(&self) -> &MeasurementProfile {
         &self.profile
+    }
+}
+
+/// Fully read read-only filesystems retaining verity protection through handoff.
+#[derive(Debug)]
+pub struct MountedGeneration {
+    generation: Generation,
+    rootfs: VerityMount,
+    overlay: VerityMount,
+}
+
+impl MountedGeneration {
+    pub fn generation(&self) -> &Generation {
+        &self.generation
+    }
+
+    pub fn rootfs(&self) -> &Path {
+        self.rootfs.path()
+    }
+
+    pub fn overlay(&self) -> &Path {
+        self.overlay.path()
+    }
+
+    /// Extends PCR15 after checking that the live boot still matches this authorization.
+    pub async fn measure(&self) -> Result<(), Error> {
+        let manifest = self.generation.manifest();
+        let expected = tpm::read_measurements()
+            .await?
+            .with_filesystems(&manifest.rootfs_sha256, &manifest.overlay_sha256)?;
+        if expected != self.generation.profile.measurements {
+            return Err(invalid());
+        }
+        tpm::measure_filesystems(&tpm::filesystem_event(
+            &manifest.rootfs_sha256,
+            &manifest.overlay_sha256,
+        ))
+        .await
+    }
+
+    /// Transfers protected mount lifetime to the boot owner; dependent mounts must end first.
+    pub fn persist(self) -> (PathBuf, PathBuf) {
+        (self.rootfs.persist(), self.overlay.persist())
+    }
+
+    pub async fn unmount(self) -> Result<(), Error> {
+        let overlay = self.overlay.unmount().await;
+        let rootfs = self.rootfs.unmount().await;
+        overlay?;
+        rootfs
     }
 }
 
@@ -234,6 +329,151 @@ mod tests {
             .unwrap()
             .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(value))
             .unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    fn boot_mappings() -> Vec<std::ffi::OsString> {
+        let mut names = std::fs::read_dir("/dev/mapper")
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| name.as_encoded_bytes().starts_with(b"startos-fde-"))
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn mounted_fixture() -> (
+        tempfile::TempDir,
+        MountedGeneration,
+        tpm::SealedKey,
+        PKey<Public>,
+    ) {
+        let temp = tempfile::tempdir_in("/dev/shm").unwrap();
+        let images = temp.path().join("images");
+        let config = temp.path().join("config");
+        let base = temp.path().join("base");
+        std::fs::create_dir(&images).unwrap();
+        std::fs::create_dir(&base).unwrap();
+        std::fs::write(base.join("setting"), b"public default").unwrap();
+        let rootfs = images.join("image.rootfs");
+        let mut file = crate::util::io::create_file_mod(&rootfs, 0o600)
+            .await
+            .unwrap();
+        crate::util::squashfs::Squashfs::from_directory(&base)
+            .await
+            .unwrap()
+            .serialize(&mut file)
+            .await
+            .unwrap();
+        file.sync_all().await.unwrap();
+        let overlay_key = crate::util::crypto::gen_nistp256().unwrap();
+        let authority = crate::util::crypto::gen_nistp256().unwrap();
+        let descriptor = Descriptor::new(
+            "image.rootfs".into(),
+            public(&overlay_key),
+            public(&authority),
+        )
+        .unwrap();
+        let prepared = prepare(&config, &rootfs, &overlay_key, b"configuration override").await;
+        let expected = tpm::read_measurements()
+            .await
+            .unwrap()
+            .with_filesystems(
+                &prepared.manifest().rootfs_sha256,
+                &prepared.manifest().overlay_sha256,
+            )
+            .unwrap();
+        let profile = MeasurementProfile::sign(expected, &authority)
+            .await
+            .unwrap();
+        descriptor.stage_profile(&prepared, &profile).await.unwrap();
+        prepared.publish().await.unwrap();
+        let sealed = tpm::seal(&[42; 32], &authority).await.unwrap();
+        let mountpoint = temp.path().join("mounted");
+        std::fs::create_dir(&mountpoint).unwrap();
+        let before = boot_mappings();
+        std::fs::write(mountpoint.join("overlay"), b"occupied").unwrap();
+        assert!(
+            descriptor
+                .mount(&images, &config, &mountpoint)
+                .await
+                .is_err()
+        );
+        assert_eq!(boot_mappings(), before);
+        assert!(
+            !crate::disk::mount::util::is_mountpoint(&mountpoint.join("rootfs"))
+                .await
+                .unwrap()
+        );
+        assert_eq!(tpm::read_measurements().await.unwrap().files, [0; 32]);
+        std::fs::remove_file(mountpoint.join("overlay")).unwrap();
+        let mounted = descriptor
+            .mount(&images, &config, &mountpoint)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            std::fs::read(mounted.rootfs().join("setting")).unwrap(),
+            b"public default"
+        );
+        assert_eq!(
+            std::fs::read(mounted.overlay().join("setting")).unwrap(),
+            b"configuration override"
+        );
+        assert!(std::fs::write(mounted.overlay().join("setting"), b"mutable").is_err());
+        (temp, mounted, sealed, public(&authority))
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires exclusively owned software TPM, tpm2-tools, kernel verity and mounts"]
+    async fn software_tpm_mounted_generation_measures_before_unseal_and_closes() {
+        let (_temp, mounted, sealed, authority) = mounted_fixture().await;
+        assert!(
+            tpm::unseal(
+                &sealed,
+                &mounted.generation().profile().authorization,
+                &authority
+            )
+            .await
+            .is_err()
+        );
+        mounted.measure().await.unwrap();
+        assert_eq!(
+            tpm::read_measurements().await.unwrap(),
+            mounted.generation().profile().measurements
+        );
+        assert_eq!(
+            &*tpm::unseal(
+                &sealed,
+                &mounted.generation().profile().authorization,
+                &authority
+            )
+            .await
+            .unwrap(),
+            &[42; 32]
+        );
+        assert!(mounted.measure().await.is_err());
+        mounted.unmount().await.unwrap();
+        assert!(boot_mappings().is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires exclusively owned software TPM, tpm2-tools, kernel verity and mounts"]
+    async fn software_tpm_mounted_generation_rejects_boot_change_before_measurement() {
+        use crate::util::Invoke;
+        let (_temp, mounted, _sealed, _authority) = mounted_fixture().await;
+        tokio::process::Command::new("tpm2_pcrextend")
+            .arg(format!("4:sha256={}", hex::encode([1; 32])))
+            .invoke(ErrorKind::Bios)
+            .await
+            .unwrap();
+        assert!(mounted.measure().await.is_err());
+        assert_eq!(tpm::read_measurements().await.unwrap().files, [0; 32]);
+        mounted.unmount().await.unwrap();
+        assert!(boot_mappings().is_empty());
     }
 
     #[tokio::test]
