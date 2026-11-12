@@ -63,7 +63,13 @@ export function diskSpec(i18n: i18nPipe, drives: Disk[]) {
                     ...Object.fromEntries(
                       drive.partitions.map(p => [
                         p.logicalname,
-                        `${getPartitionName(p)} · ${convertBytes(p.capacity)}`,
+                        [
+                          getPartitionName(p),
+                          convertBytes(p.capacity),
+                          ...(Object.keys(p.startOs).length || p.legacyBackup
+                            ? [i18n.transform('Contains a StartOS backup')]
+                            : []),
+                        ].join(' · '),
                       ]),
                     ),
                     [FORMAT]: i18n.transform('Erase and format this drive'),

@@ -452,7 +452,7 @@ Enable or disable a specific address binding for a service.
 
 ## Backups
 
-Create backups and manage registered local-folder, drive-folder and network-share targets. Register local and drive targets in **System → Backups**, then obtain their IDs with `start-cli backup target list`. Direct `disk-<logicalname>` IDs are replaced by registered IDs; existing `cifs-N` IDs remain valid.
+Create backups and manage registered local-folder, drive-folder and network-share targets. Register local and drive targets in **System → Backup Targets**, then obtain their IDs with `start-cli backup target list`. Direct `disk-<logicalname>` IDs are replaced by registered IDs; existing `cifs-N` IDs remain valid.
 
 Target info/mount and package restore read the backup password from `BACKUP_PASSWORD` or prompt for it. CIFS add/update read `CIFS_PASSWORD` or prompt; an empty password selects guest access.
 

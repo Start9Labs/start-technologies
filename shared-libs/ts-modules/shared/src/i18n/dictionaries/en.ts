@@ -282,7 +282,6 @@ export const ENGLISH: Record<string, number> = {
   'Edit contact info': 306,
   'Contact Emails': 307,
   'Needed to obtain a certificate from a Certificate Authority': 308,
-  'Toggle all': 309,
   'Done': 310,
   'Master password needed': 311,
   'Enter your master password to encrypt this backup.': 312,
@@ -942,10 +941,9 @@ export const ENGLISH: Record<string, number> = {
   'Permanently delete this local volume folder and all its contents?': 1127,
   'Manage shared volumes': 1128,
   'Unavailable': 1129,
-  'Volume source unavailable': 1130,
   'Restore creates a new local volume and leaves existing data untouched.': 1131,
   'Select backup items': 1132,
-  'Enter the master password that was used to encrypt this backup.': 1133,
+  'Enter the master password that was used to encrypt this backup. Next, you will choose which services and shared volumes to restore. Nothing on this server changes until then.': 1133,
   'No Access': 1134,
   'External drive': 1135,
   'Remove this volume and all service access? Data on the external drive or CIFS share will not be deleted.': 1136,
@@ -976,7 +974,6 @@ export const ENGLISH: Record<string, number> = {
   'Leave blank to keep the current value.': 1163,
   'Shared Volume': 1164,
   'Never': 1165,
-  'Targets': 1166,
   'Backup Target': 1167,
   'Last backup': 1168,
   'No backup targets': 1169,
@@ -993,12 +990,9 @@ export const ENGLISH: Record<string, number> = {
   'Remove this backup target? Backups on the external drive or CIFS share will not be deleted.': 1180,
   'Target ID': 1181,
   'Create backup': 1182,
-  'Restore': 1183,
-  'History': 1186,
   'Target': 1187,
   'Report': 1188,
   'No backups yet': 1189,
-  'Add a backup target first.': 1190,
   'No backups found on your backup targets.': 1191,
   'Started': 1192,
   'Completed with errors': 1193,
@@ -1018,7 +1012,13 @@ export const ENGLISH: Record<string, number> = {
   'Delete permanently': 1207,
   'Shared Volumes': 1208,
   'Read': 1209,
-  'Find': 1210,
-  'Searching for backups': 1211,
-  'No unregistered backups were found on connected drives.': 1212,
+  'Drive label': 1213, // as in, the name stored on a disk's filesystem
+  'Select target': 1214, // as in, choose a backup destination
+  'Contains a StartOS backup': 1215,
+  'Select backup': 1216, // as in, choose a backup to restore
+  'Restore from backup': 1217,
+  'Backup Targets': 1218,
+  'Create': 1219, // as in, create a backup
+  'Restore': 1220, // as in, restore from a backup
+  'Go to Backup Targets': 1221,
 }

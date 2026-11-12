@@ -1,12 +1,18 @@
 import { inject, Injectable } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { DialogService, TaskService } from '@start9labs/shared'
+import {
+  DialogService,
+  ErrorService,
+  HttpError,
+  TaskService,
+} from '@start9labs/shared'
 import { T, Version } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import { firstValueFrom } from 'rxjs'
 
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
+import { isStale } from 'src/app/routes/portal/routes/system/routes/volumes/types'
 
 @Injectable({ providedIn: 'root' })
 export class BackupService {
@@ -14,6 +20,7 @@ export class BackupService {
   private readonly dialogs = inject(DialogService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly tasks = inject(TaskService)
+  private readonly errors = inject(ErrorService)
 
   public readonly targets = toSignal(this.patch.watch$('backupTargets'), {
     initialValue: {} as DataModel['backupTargets'],
@@ -25,6 +32,18 @@ export class BackupService {
     this.patch.watch$('serverInfo', 'statusInfo', 'backupConversions'),
     { initialValue: {} as T.ServerStatus['backupConversions'] },
   )
+
+  async recheckStale() {
+    await Promise.all(
+      Object.entries(this.targets())
+        .filter(([, { checkedAt }]) => isStale(checkedAt))
+        .map(([id]) =>
+          this.api.rpc.backup.target
+            .inspect({ id })
+            .catch(error => this.errors.handleError(error as HttpError)),
+        ),
+    )
+  }
 
   hasAnyBackup({ startOs }: Pick<T.BackupTarget, 'startOs'>): boolean {
     return Object.values(startOs).some(

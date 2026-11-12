@@ -88,8 +88,9 @@ import { DELETE_LOCAL } from './delete-local'
                 [tuiHint]="types[volume.source.kind].label | i18n"
                 [tuiHintShowDelay]="128"
               />
+              <span class="mobile-path">{{ path(volume.source) }}</span>
             </td>
-            <td>{{ path(volume.source) }}</td>
+            <td class="path">{{ path(volume.source) }}</td>
             <td
               [class.g-positive]="volume.availability === 'available'"
               [class.g-negative]="volume.availability === 'unavailable'"
@@ -177,6 +178,11 @@ import { DELETE_LOCAL } from './delete-local'
       vertical-align: text-bottom;
     }
 
+    .mobile-path {
+      display: none;
+      margin-inline-start: 0.375rem;
+    }
+
     :host-context(tui-root._mobile) {
       .g-card > header > [docsLink] {
         display: none;
@@ -197,8 +203,16 @@ import { DELETE_LOCAL } from './delete-local'
 
       td:last-child:not([colspan]) {
         grid-column: 2;
-        grid-row: 1 / span 5;
+        grid-row: 1 / span 4;
         align-self: center;
+      }
+
+      td.path {
+        display: none;
+      }
+
+      .mobile-path {
+        display: inline;
       }
     }
   `,

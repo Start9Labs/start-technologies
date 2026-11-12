@@ -1409,6 +1409,8 @@ const { AddSourceService } =
   await import('src/app/routes/portal/routes/system/routes/volumes/add')
 const { default: Backups } =
   await import('src/app/routes/portal/routes/system/routes/backups/index')
+const { default: BackupTargets } =
+  await import('src/app/routes/portal/routes/system/routes/backups/targets')
 const { BackupService } =
   await import('src/app/routes/portal/routes/system/routes/backups/backup.service')
 const { BACKUP_PICKER } =
@@ -1983,6 +1985,16 @@ test('the external drive form follows the attached drives', async t => {
   assert.ok(model.spec())
 })
 
+test('the external drive form marks partitions that contain a StartOS backup', async t => {
+  const f = volumeFixture(t, {}, [])
+  const model = f.make(DriveVolumeForm)
+  f.attach(VolumeMock.Disks)
+  await tick()
+  const { values } = model.spec().drive.variants['/dev/sdc'].spec.partition
+  assert.match(values['/dev/sdc1'], / · Contains a StartOS backup$/)
+  assert.doesNotMatch(values['/dev/sdc2'], /StartOS backup/)
+})
+
 function editingDriveForm(t, partition = '/dev/sdc1') {
   const f = volumeFixture(t)
   const model = f.make(DriveVolumeForm)
@@ -2232,45 +2244,20 @@ test('local volume deletion requires the typed-name dialog and external removal 
   }
 })
 
-test('the backups page re-checks only targets whose last check is stale', async t => {
-  const f = volumeFixture(t)
-  f.make(Backups)
-  await tick()
-  assert.deepEqual(
-    f.requests.filter(r => r.kind === 'inspect-target'),
-    [{ kind: 'inspect-target', params: { id: 'nasTarget' } }],
-  )
-})
-
-test('Find discovers backup targets and reports an empty search without masking failures', async t => {
-  const f = volumeFixture(t)
-  const failure = new Error('discovery failed')
-  f.results.push([volumeA], [], failure)
-  f.api.rpc.backup.target.find = async params => {
-    f.requests.push({ kind: 'find', params })
-    const result = f.results.shift()
-    if (result instanceof Error) throw result
-    return result
-  }
-  const model = f.make(Backups)
-  await model.find()
-  assert.deepEqual(f.alerts, [])
-  await model.find()
-  assert.deepEqual(f.alerts, [
-    {
-      message: 'No unregistered backups were found on connected drives.',
-      options: { label: 'Backups' },
-    },
-  ])
-  await model.find()
-  assert.deepEqual(f.errors, [failure])
-  assert.equal(f.alerts.length, 1)
-  assert.deepEqual(f.taskCalls, Array(3).fill('Searching for backups'))
-  assert.deepEqual(
-    f.requests.filter(request => request.kind === 'find'),
-    Array(3).fill({ kind: 'find', params: {} }),
-  )
-})
+for (const [page, Page] of [
+  ['backups', () => Backups],
+  ['backup targets', () => BackupTargets],
+]) {
+  test(`the ${page} page re-checks only targets whose last check is stale`, async t => {
+    const f = volumeFixture(t)
+    f.make(Page())
+    await tick()
+    assert.deepEqual(
+      f.requests.filter(r => r.kind === 'inspect-target'),
+      [{ kind: 'inspect-target', params: { id: 'nasTarget' } }],
+    )
+  })
+}
 
 test('backup history loads its page and pagination writes only non-default query params', async t => {
   const f = volumeFixture(t)
@@ -2318,7 +2305,7 @@ test('backup history results distinguish success, item errors and failure', asyn
 
 test('local backup target deletion requires the typed-name dialog and external removal a plain confirm', async t => {
   const f = volumeFixture(t)
-  const model = f.make(Backups)
+  const model = f.make(BackupTargets)
   const targets = f.make(BackupService).targets()
   f.decisions.push(false)
   await model.remove('localTarget', targets.localTarget)
@@ -2378,25 +2365,22 @@ test('failed volume deletion refreshes pending local cleanup after catalog remov
   assert.deepEqual(f.taskCalls, ['Deleting'])
 })
 
-test('volume-only backup selection includes unavailable sources and sends an explicit empty service selection', async t => {
+test('volume-only backup selection skips unavailable sources and sends an explicit empty service selection', async t => {
   const f = volumeFixture(t)
   const model = f.make(BackupsBackupComponent)
   assert.equal(model.hasSelection(), false)
-  model.toggleSelectAll()
+  model.toggleGroup(model.volumes(), true)
   assert.equal(model.hasSelection(), true)
-  assert.equal(model.items().find(item => item.id === volumeB).disabled, false)
+  assert.equal(model.items().find(item => item.id === volumeB).disabled, true)
   await model.createBackup('password')
   assert.deepEqual(f.requests[0].params.packageIds, [])
-  assert.deepEqual(
-    new Set(f.requests[0].params.sharedVolumeIds),
-    new Set([volumeA, volumeB]),
-  )
+  assert.deepEqual(f.requests[0].params.sharedVolumeIds, [volumeA])
   assert.equal(f.completed, 1)
-  model.toggleSelectAll()
+  model.toggleGroup(model.volumes(), false)
   assert.equal(model.hasSelection(), false)
 })
 
-test('backup toggle-all omits installing services without omitting volumes', t => {
+test('group select-all omits installing services and unavailable volumes', t => {
   const f = volumeFixture(t, {
     installed: {
       stateInfo: {
@@ -2414,7 +2398,9 @@ test('backup toggle-all omits installing services without omitting volumes', t =
     },
   })
   const model = f.make(BackupsBackupComponent)
-  model.toggleSelectAll()
+  model.toggleGroup(model.volumes(), true)
+  model.toggleGroup(model.packages(), true)
+  assert.deepEqual(model.groupState(model.volumes()), true)
   assert.deepEqual(
     new Set(
       model
@@ -2422,7 +2408,7 @@ test('backup toggle-all omits installing services without omitting volumes', t =
         .filter(item => item.checked)
         .map(item => item.id),
     ),
-    new Set(['installed', volumeA, volumeB]),
+    new Set(['installed', volumeA]),
   )
 })
 
@@ -2708,7 +2694,7 @@ test('production mocks support inspection, independent failed backups and new-lo
   const stored = {
     kind: 'disk',
     logicalname: Mock.driveLink('/dev/sdz1'),
-    label: null,
+    drive: null,
   }
   assert.deepEqual(cache.value.value.sharedVolumes[disk].source, {
     ...stored,

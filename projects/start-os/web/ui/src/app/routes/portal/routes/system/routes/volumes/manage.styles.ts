@@ -1,16 +1,4 @@
 export const SOURCE_MANAGE_STYLES = `
-  .context {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-block-end: 1.5rem;
-    font-weight: bold;
-
-    tui-icon {
-      font-size: 1.25rem;
-    }
-  }
-
   footer {
     position: sticky;
     bottom: 0;

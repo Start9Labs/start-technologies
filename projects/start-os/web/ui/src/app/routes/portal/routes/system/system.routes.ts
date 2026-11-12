@@ -39,6 +39,12 @@ export default [
         loadComponent: () => import('./routes/volumes'),
       },
       {
+        path: 'backup-targets',
+        title: titleResolver,
+        data: { title: 'Backup Targets' },
+        loadComponent: () => import('./routes/backups/targets'),
+      },
+      {
         path: 'backups',
         title: titleResolver,
         data: { title: 'Backups' },

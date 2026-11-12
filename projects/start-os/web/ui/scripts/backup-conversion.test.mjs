@@ -12,13 +12,15 @@ loadTypeScript(
       '@start9labs/shared',
       `
     export class DialogService {}
+    export class ErrorService {}
     export class TaskService {}
   `,
     ],
     ['src/app/services/api/embassy-api.service', 'export class ApiService {}'],
   ]),
 )
-const { DialogService, TaskService } = await import('@start9labs/shared')
+const { DialogService, ErrorService, TaskService } =
+  await import('@start9labs/shared')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
 const { BackupService } =
   await import('../src/app/routes/portal/routes/system/routes/backups/backup.service.ts')
@@ -92,6 +94,7 @@ function fixture(t, { confirm = of(true), password = of('secret') } = {}) {
         },
       },
     },
+    { provide: ErrorService, useValue: { handleError: () => {} } },
     {
       provide: TaskService,
       useValue: {

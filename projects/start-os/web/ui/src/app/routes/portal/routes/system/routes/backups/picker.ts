@@ -1,7 +1,9 @@
 import { DatePipe, KeyValuePipe } from '@angular/common'
 import { Component, computed, inject } from '@angular/core'
+import { RouterLink } from '@angular/router'
 import { ConvertBytesPipe, i18nPipe } from '@start9labs/shared'
 import {
+  TuiButton,
   TuiCell,
   TuiDialogContext,
   TuiHint,
@@ -9,6 +11,7 @@ import {
   TuiTitle,
 } from '@taiga-ui/core'
 import { TuiBadge } from '@taiga-ui/kit'
+import { TuiHeader } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 
 import {
@@ -16,6 +19,7 @@ import {
   volumeName,
   volumePath,
 } from 'src/app/routes/portal/routes/system/routes/volumes/types'
+import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { BackupService } from './backup.service'
 
 export type PickerMode = 'create' | 'restore'
@@ -27,6 +31,17 @@ export interface Picked {
 
 @Component({
   template: `
+    <header tuiHeader>
+      <hgroup tuiTitle>
+        @if (context.data === 'create') {
+          <h2 [id]="context.id">{{ 'Create backup' | i18n }}</h2>
+          <p tuiSubtitle>{{ 'Select target' | i18n }}</p>
+        } @else {
+          <h2 [id]="context.id">{{ 'Restore from backup' | i18n }}</h2>
+          <p tuiSubtitle>{{ 'Select backup' | i18n }}</p>
+        }
+      </hgroup>
+    </header>
     @if (context.data === 'create') {
       @for (entry of service.targets() | keyvalue: null; track entry.key) {
         @let target = entry.value;
@@ -70,7 +85,17 @@ export interface Picked {
           <tui-icon icon="@tui.chevron-right" />
         </button>
       } @empty {
-        <p>{{ 'Add a backup target first.' | i18n }}</p>
+        <app-placeholder icon="@tui.hard-drive">
+          {{ 'No backup targets' | i18n }}
+          <a
+            tuiButton
+            size="s"
+            routerLink="/system/backup-targets"
+            (click)="context.$implicit.complete()"
+          >
+            {{ 'Go to Backup Targets' | i18n }}
+          </a>
+        </app-placeholder>
       }
     } @else {
       @for (backup of backups(); track backup.targetId + backup.serverId) {
@@ -123,7 +148,17 @@ export interface Picked {
           <tui-icon icon="@tui.chevron-right" />
         </button>
       } @empty {
-        <p>{{ 'No backups found on your backup targets.' | i18n }}</p>
+        <app-placeholder icon="@tui.hard-drive">
+          {{ 'No backups found on your backup targets.' | i18n }}
+          <a
+            tuiButton
+            size="s"
+            routerLink="/system/backup-targets"
+            (click)="context.$implicit.complete()"
+          >
+            {{ 'Go to Backup Targets' | i18n }}
+          </a>
+        </app-placeholder>
       }
     }
   `,
@@ -162,6 +197,9 @@ export interface Picked {
     }
   `,
   imports: [
+    RouterLink,
+    TuiButton,
+    PlaceholderComponent,
     DatePipe,
     KeyValuePipe,
     ConvertBytesPipe,
@@ -170,6 +208,7 @@ export interface Picked {
     TuiIcon,
     TuiTitle,
     TuiHint,
+    TuiHeader,
     i18nPipe,
   ],
 })
