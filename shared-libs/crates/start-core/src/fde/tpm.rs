@@ -13,7 +13,14 @@ use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::{TmpDir, write_file_private_atomic};
 
-const PCR_SELECTION: &str = "sha256:0,2,7,11,15";
+const PCR_REGISTERS: [u8; 7] = [0, 2, 4, 7, 11, 14, 15];
+
+fn pcr_selection() -> String {
+    format!(
+        "sha256:{}",
+        PCR_REGISTERS.map(|pcr| pcr.to_string()).join(",")
+    )
+}
 const POLICY_REF: &[u8] = b"StartOS FDE bootstrap policy v1";
 const PRIMARY_TEMPLATE: &str = "ecc256:null:aes128cfb";
 const PRIMARY_ATTRIBUTES: &str =
@@ -34,23 +41,61 @@ pub struct Authorization {
     pub signature: Vec<u8>,
 }
 
-/// Firmware, option ROMs, Secure Boot policy, UKI and verified filesystems.
+/// Firmware, option ROMs, loaded applications, Secure Boot, UKI, MOK policy and verified filesystems.
+/// The authority must authorize the direct firmware → shim → UKI route, excluding command interpreters.
 #[derive(Clone, Debug)]
 pub struct BootMeasurements {
     pub firmware: [u8; 32],
     pub option_roms: [u8; 32],
+    pub applications: [u8; 32],
     pub secure_boot: [u8; 32],
     pub uki: [u8; 32],
+    pub shim_policy: [u8; 32],
     pub files: [u8; 32],
 }
 
 impl BootMeasurements {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        if bytes.len() != PCR_REGISTERS.len() * 32 {
+            return Err(Error::new(
+                eyre!("{}", t!("fde.tpm.invalid-policy")),
+                ErrorKind::Bios,
+            ));
+        }
+        let values: [[u8; 32]; PCR_REGISTERS.len()] = bytes
+            .chunks_exact(32)
+            .map(|chunk| chunk.try_into().unwrap())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        let [
+            firmware,
+            option_roms,
+            applications,
+            secure_boot,
+            uki,
+            shim_policy,
+            files,
+        ] = values;
+        Ok(Self {
+            firmware,
+            option_roms,
+            applications,
+            secure_boot,
+            uki,
+            shim_policy,
+            files,
+        })
+    }
+
     fn bytes(&self) -> Vec<u8> {
         [
             &self.firmware[..],
             &self.option_roms[..],
+            &self.applications[..],
             &self.secure_boot[..],
             &self.uki[..],
+            &self.shim_policy[..],
             &self.files[..],
         ]
         .concat()
@@ -189,7 +234,7 @@ pub async fn authorize(
                 "-g",
                 "sha256",
                 "-l",
-                PCR_SELECTION,
+                &pcr_selection(),
                 "-f",
                 "pcrs.bin",
                 "-L",
@@ -378,7 +423,10 @@ pub async fn unseal(
         .await?;
     let result = async {
         workspace
-            .run("tpm2_policypcr", &["-S", "policy.ctx", "-l", PCR_SELECTION])
+            .run(
+                "tpm2_policypcr",
+                &["-S", "policy.ctx", "-l", &pcr_selection()],
+            )
             .await?;
         workspace
             .run(
@@ -429,22 +477,10 @@ pub async fn unseal(
 pub async fn read_measurements() -> Result<BootMeasurements, Error> {
     let workspace = Workspace::new().await?;
     workspace
-        .run("tpm2_pcrread", &["-o", "pcrs.bin", PCR_SELECTION])
+        .run("tpm2_pcrread", &["-o", "pcrs.bin", &pcr_selection()])
         .await?;
     let bytes = workspace.read("pcrs.bin").await?;
-    if bytes.len() != 160 {
-        return Err(Error::new(
-            eyre!("{}", t!("fde.tpm.invalid-policy")),
-            ErrorKind::Bios,
-        ));
-    }
-    Ok(BootMeasurements {
-        firmware: bytes[..32].try_into().unwrap(),
-        option_roms: bytes[32..64].try_into().unwrap(),
-        secure_boot: bytes[64..96].try_into().unwrap(),
-        uki: bytes[96..128].try_into().unwrap(),
-        files: bytes[128..160].try_into().unwrap(),
-    })
+    BootMeasurements::from_bytes(&bytes)
 }
 
 pub async fn measure_filesystems(event: &[u8; 32]) -> Result<(), Error> {
@@ -467,6 +503,22 @@ pub async fn measure_filesystems(event: &[u8; 32]) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn measurement_file_binds_loaded_applications_before_secure_boot() {
+        let bytes = [0u8, 2, 4, 7, 11, 14, 15].map(|pcr| [pcr; 32]).concat();
+        let measurements = BootMeasurements::from_bytes(&bytes).unwrap();
+        assert_eq!(measurements.applications, [4; 32]);
+        assert_eq!(measurements.secure_boot, [7; 32]);
+        assert_eq!(measurements.uki, [11; 32]);
+        assert_eq!(measurements.shim_policy, [14; 32]);
+        assert_eq!(measurements.files, [15; 32]);
+        assert_eq!(measurements.bytes(), bytes);
+        assert!(BootMeasurements::from_bytes(&bytes[..bytes.len() - 1]).is_err());
+        let mut extra = bytes;
+        extra.push(0);
+        assert!(BootMeasurements::from_bytes(&extra).is_err());
+    }
 
     #[test]
     fn rootfs_and_overlay_both_change_the_filesystem_measurement() {
@@ -512,7 +564,7 @@ mod tests {
             key.as_slice(),
         );
         let workspace = Workspace::new().await.unwrap();
-        for register in [0, 2, 7, 11, 15] {
+        for register in PCR_REGISTERS {
             workspace
                 .run(
                     "tpm2_pcrextend",
