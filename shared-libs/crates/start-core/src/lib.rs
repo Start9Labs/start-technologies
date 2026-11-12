@@ -72,6 +72,7 @@ pub mod middleware;
 pub mod net;
 pub mod notifications;
 pub mod os_install;
+pub mod os_overlay;
 pub mod prelude;
 pub mod progress;
 pub mod registries;

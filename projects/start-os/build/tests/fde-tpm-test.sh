@@ -4,10 +4,12 @@ set -euo pipefail
 binary=$(realpath "${1:?path to the start-core unit-test executable}")
 directory=$(cd "$(dirname "$0")" && pwd)
 image=startos-fde-tpm-test
-docker build -t "$image" -f "$directory/fde-tpm.Dockerfile" "$directory"
+docker build --load -t "$image" -f "$directory/fde-tpm.Dockerfile" "$directory"
 docker run --rm --network none \
     --mount "type=bind,source=$binary,target=/fde-tests,readonly" \
     "$image" sh -eu -c '
+        test=fde::tpm::tests::software_tpm_unseals_only_the_authorized_boot_state
+        /fde-tests --list | grep -Fx "$test: test"
         mkdir -m 700 /tmp/tpm
         swtpm socket --tpm2 --tpmstate dir=/tmp/tpm \
             --server type=unixio,path=/tmp/tpm/socket \
@@ -29,6 +31,5 @@ docker run --rm --network none \
             fi
             sleep 0.05
         done
-        exec /fde-tests --ignored --exact \
-            fde::tpm::tests::software_tpm_unseals_only_the_authorized_boot_state --nocapture
+        exec /fde-tests --ignored --exact "$test" --nocapture
     '
