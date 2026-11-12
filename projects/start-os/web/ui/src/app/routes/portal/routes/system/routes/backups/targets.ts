@@ -255,6 +255,12 @@ const TARGET_SOURCES: SourcePickerData = {
         align-self: center;
       }
 
+      td:last-child:not([colspan]):has(> :nth-child(2)) {
+        grid-column: 1 / -1;
+        grid-row: auto;
+        white-space: normal;
+      }
+
       td.path {
         display: none;
       }
