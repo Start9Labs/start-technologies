@@ -10,7 +10,7 @@ use axum::extract::ws::{WebSocket as AxumWebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use clap::builder::ValueParserFactory;
 use futures::future::BoxFuture;
-use futures::{Future, FutureExt, Stream};
+use futures::{Future, FutureExt, Stream, TryStreamExt};
 use imbl_value::InternedString;
 use tokio::sync::{Mutex as AsyncMutex, broadcast};
 
@@ -21,6 +21,23 @@ use crate::util::future::TimedResource;
 
 pub type WebSocket = crate::util::net::WebSocket<rpc_toolkit::BoxWebSocket>;
 use crate::util::{FromStrParser, new_guid};
+
+pub(crate) async fn forward_json_stream<T: serde::Serialize>(
+    socket: &mut WebSocket,
+    mut source: impl Stream<Item = Result<T, Error>> + Unpin,
+) -> Result<&'static str, Error> {
+    loop {
+        tokio::select! {
+            item = source.try_next() => {
+                let Some(item) = item? else { return Ok("complete") };
+                socket.send(axum::extract::ws::Message::Text(serde_json::to_string(&item).with_kind(ErrorKind::Serialization)?.into())).await.with_kind(ErrorKind::Network)?;
+            }
+            message = socket.recv() => {
+                if message.transpose().with_kind(ErrorKind::Network)?.is_none() { return Ok("complete") }
+            }
+        }
+    }
+}
 
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, VisitFields,

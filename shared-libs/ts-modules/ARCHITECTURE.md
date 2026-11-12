@@ -82,7 +82,7 @@ readonly packages = toSignal(this.patch.watch$('packageData'))
 
 1. **PatchDB** — Generated typed `db.subscribe`, managed by `PatchDbSource`; ordinary GUID replies remain compatible.
 2. **Logs** — Portal and init/setup use generated typed follow operations; `LogsPipe` owns portal status/history and `SetupLogsService` owns startup accumulation. Portal batches at 1s, startup at 500ms. Shared `withAbortSignal` owns acquisition/iteration disposal for logs and database observations; each existing source retains its own read-only retry policy. Successful portal termination invalidates its ongoing observation and enters availability recovery. Ordinary/typed mock adapters share initiating and entry producers. Diagnostic historical logs remain finite RPC reads.
-3. **Metrics** — `server.metrics.follow` GUID observations, shared while authenticated consumers observe them. The final unsubscribe releases the socket/recovery wait; logout abandons pending reply adoption and stops recovery until verified again. Ordinary initiating promises remain in flight after unsubscription; late replies cannot open a continuation.
+3. **Metrics** — Typed `server.metrics.follow` returns its shared sensor-cache snapshot, same-ID Metrics items and unit terminal; ordinary GUID replies remain compatible. `MetricsService` shares observation while authenticated consumers remain. Final unsubscribe/logout aborts acquisition and iteration and releases recovery; fresh observation/login gets a fresh snapshot. Network errors retain ConnectionService recovery; normal termination retains read-only resubscription. Mock ordinary/typed adapters share their snapshot/item producers.
 
 ## Navigation & Routing
 

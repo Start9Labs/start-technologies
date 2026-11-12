@@ -323,8 +323,10 @@ uci set startwrt.system.registry=<beta url>; uci commit startwrt`) — now soak 
    ./scripts/manage-release.sh release start-wrt
    ```
 
-   This runs pre-check → pull the images from the beta registry (signature-verified) → tag →
-   create the GitHub release → promote beta → production → sign. See `manage-release.sh --help`
+   This runs pre-check → pull the images from the beta registry (signature-verified) → draft the
+   GitHub release with the picked, edited, and translated notes (needs the `claude` CLI unless
+   `NO_TRANSLATE=1`) → tag → publish the GitHub release → set those notes and promote beta →
+   production → sign. See `manage-release.sh --help`
    for the individual subcommands (`pull-gha`, `register`, `index`, `sign`, `cosign`, …) and env
    vars (`STARTWRT_SOURCE_REGISTRY`, `STARTWRT_TARGET_REGISTRY`, `STARTWRT_COMPAT_FLOOR`,
    `FORCE=1` to re-run an idempotent release).

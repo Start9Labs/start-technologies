@@ -47,6 +47,7 @@ use crate::trusted_keys::{self, TrustContext};
 use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::AtomicFile;
+use crate::version::release_notes::{UpdateNotes, save_update_notes};
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
@@ -312,10 +313,7 @@ async fn maybe_do_update(
         )
         .await?,
     )?;
-    let Some((target_version, asset)) = available
-        .pop_last()
-        .and_then(|(v, mut info)| info.squashfs.remove(&**PLATFORM).map(|a| (v, a)))
-    else {
+    let Some((target_version, asset, notes)) = available.pop_last().and_then(target_asset) else {
         return Ok(None);
     };
     if !target_version.satisfies(&target) {
@@ -385,6 +383,7 @@ async fn maybe_do_update(
         let res = do_update(
             ctx.client.get(),
             asset,
+            notes,
             UpdateProgressHandles {
                 progress,
                 prune_phase,
@@ -458,10 +457,22 @@ pub(crate) struct UpdateProgressHandles {
     pub finalize_phase: PhaseProgressTrackerHandle,
 }
 
+pub(crate) fn target_asset(
+    (version, mut info): (Version, OsVersionInfo),
+) -> Option<(Version, RegistryAsset<Blake3Commitment>, UpdateNotes)> {
+    let asset = info.squashfs.remove(&**PLATFORM)?;
+    let notes = UpdateNotes {
+        version: version.clone(),
+        release_notes: info.release_notes,
+    };
+    Some((version, asset, notes))
+}
+
 #[instrument(skip_all)]
 pub(crate) async fn do_update(
     client: Client,
     asset: RegistryAsset<Blake3Commitment>,
+    notes: UpdateNotes,
     UpdateProgressHandles {
         progress,
         mut prune_phase,
@@ -515,6 +526,7 @@ pub(crate) async fn do_update(
         .arg(&path)
         .invoke(ErrorKind::Grub)
         .await?;
+    save_update_notes(&notes).await.log_err();
     finalize_phase.complete();
 
     progress.complete();

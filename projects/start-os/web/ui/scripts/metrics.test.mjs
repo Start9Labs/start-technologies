@@ -4,9 +4,16 @@ import '@angular/compiler'
 import { Injector } from '@angular/core'
 import { BehaviorSubject, Subject } from 'rxjs'
 import { loadTypeScript } from './typescript-loader.mjs'
-
+const shared = new URL(
+  '../../../../../shared-libs/ts-modules/shared/src/',
+  import.meta.url,
+)
 loadTypeScript(
   new Map([
+    [
+      '@start9labs/shared',
+      `export { withAbortSignal } from '${new URL('util/with-abort.ts', shared)}'`,
+    ],
     ['src/app/services/api/embassy-api.service', 'export class ApiService {}'],
     ['src/app/services/auth.service', 'export class AuthService {}'],
     [
@@ -23,10 +30,15 @@ const { MetricsService } =
   await import('../src/app/routes/portal/routes/metrics/metrics.service.ts')
 const { Metrics } =
   await import('../../../../../shared-libs/ts-modules/start-core/lib/osBindings/types.schemas.ts')
+const { rpcResponseStream } = await import(
+  new URL('services/rpc-stream.ts', shared)
+)
+const { SESSION_PROFILE } =
+  await import('@start9labs/start-core/osBindings/session-profile')
 const flush = () => new Promise(setImmediate)
-const percent = { value: '0', unit: '%' }
-const mib = { value: '0', unit: 'MiB' }
-const gib = { value: '0', unit: 'GB' }
+const percent = { value: '0', unit: '%' },
+  mib = { value: '0', unit: 'MiB' },
+  gib = { value: '0', unit: 'GB' }
 const sample = Metrics.parse({
   general: { temperature: null },
   memory: {
@@ -47,28 +59,21 @@ const sample = Metrics.parse({
   },
   disk: { percentageUsed: percent, used: gib, available: gib, capacity: gib },
 })
-
 function fixture(t) {
-  const authenticated = new BehaviorSubject(true)
-  const connection = new BehaviorSubject(false)
-  const requests = [],
-    sockets = []
+  const authenticated = new BehaviorSubject(true),
+    connection = new BehaviorSubject(false),
+    requests = []
   const api = {
-    rpc: {
+    streams: {
       server: {
         metrics: {
-          follow: () => {
-            const pending = Promise.withResolvers()
-            requests.push(pending)
-            return pending.promise
+          follow: (_, options) => {
+            const frames = new Subject()
+            requests.push({ frames, signal: options.signal })
+            return rpcResponseStream(frames, options)
           },
         },
       },
-    },
-    openWebsocket$: guid => {
-      const frames = new Subject()
-      sockets.push({ guid, frames })
-      return frames
     },
   }
   const injector = Injector.create({
@@ -79,58 +84,81 @@ function fixture(t) {
       { provide: ConnectionService, useValue: connection },
     ],
   })
-  const service = injector.get(MetricsService)
-  const subscriptions = []
+  const service = injector.get(MetricsService),
+    subscriptions = []
   t.after(() => {
-    for (const sub of subscriptions) sub.unsubscribe()
+    subscriptions.forEach(sub => sub.unsubscribe())
     injector.destroy()
   })
   const observe = () => {
-    const values = []
-    const sub = service.subscribe(value => values.push(value))
+    const values = [],
+      sub = service.subscribe(value => values.push(value))
     subscriptions.push(sub)
     return { values, sub }
   }
+  const send = (index, value) =>
+    requests[index].frames.next({ value, bytes: JSON.stringify(value).length })
   const resolve = async index => {
-    const guid = 'A'.repeat(31) + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[index]
-    requests[index].resolve({ guid, metrics: sample })
+    send(index, { jsonrpc: '2.0', result: { guid: null, metrics: sample } })
     await flush()
-    return guid
   }
-  return { authenticated, connection, requests, sockets, observe, resolve }
+  const item = (index, metrics) =>
+    send(index, {
+      rpcstream: SESSION_PROFILE.transport.rpcStreamVersion,
+      end: false,
+      result: metrics,
+    })
+  const finish = index =>
+    send(index, {
+      rpcstream: SESSION_PROFILE.transport.rpcStreamVersion,
+      end: true,
+      result: null,
+    })
+  return {
+    authenticated,
+    connection,
+    requests,
+    observe,
+    resolve,
+    item,
+    finish,
+    send,
+  }
 }
 
-test('metrics shares one live source and releases it when the last consumer leaves', async t => {
-  const f = fixture(t)
-  const a = f.observe(),
+test('metrics shares one typed source and cancels it when the last consumer leaves', async t => {
+  const f = fixture(t),
+    a = f.observe(),
     b = f.observe()
   assert.equal(f.requests.length, 1)
   await f.resolve(0)
-  assert.equal(f.sockets.length, 1)
-  assert.equal(f.sockets[0].frames.observers.length, 1)
+  assert.equal(f.requests[0].frames.observers.length, 1)
   assert.deepEqual(a.values, [sample])
   assert.deepEqual(b.values, [sample])
   a.sub.unsubscribe()
-  assert.equal(f.sockets[0].frames.observers.length, 1)
+  assert.equal(f.requests[0].frames.observers.length, 1)
   b.sub.unsubscribe()
-  assert.equal(f.sockets[0].frames.observers.length, 0)
+  assert.equal(f.requests[0].frames.observers.length, 0)
+  assert.equal(f.requests[0].signal.aborted, true)
   assert.equal(f.authenticated.observers.length, 0)
 })
 
-test('metrics disposal before the initial reply cannot adopt its late GUID', async t => {
-  const f = fixture(t)
-  const a = f.observe()
+test('metrics disposal before initialization cancels its source and cannot adopt late data', async t => {
+  const f = fixture(t),
+    a = f.observe()
   a.sub.unsubscribe()
   await f.resolve(0)
-  assert.equal(f.sockets.length, 0)
+  assert.equal(f.requests[0].frames.observers.length, 0)
+  assert.equal(f.requests[0].signal.aborted, true)
   assert.deepEqual(a.values, [])
 })
 
 test('metrics disposal cancels recovery and connectivity cannot reopen it', async t => {
-  const f = fixture(t)
-  const a = f.observe()
+  const f = fixture(t),
+    a = f.observe()
   await f.resolve(0)
-  f.sockets[0].frames.error({ code: 0, message: 'lost' })
+  f.requests[0].frames.error({ code: 0, message: 'lost' })
+  await flush()
   assert.equal(f.connection.observers.length, 1)
   a.sub.unsubscribe()
   assert.equal(f.connection.observers.length, 0)
@@ -147,25 +175,27 @@ test('metrics observes only verified authentication and login acquires a fresh s
   f.authenticated.next(true)
   await f.resolve(0)
   f.authenticated.next(false)
-  assert.equal(f.sockets[0].frames.observers.length, 0)
+  assert.equal(f.requests[0].frames.observers.length, 0)
+  assert.equal(f.requests[0].signal.aborted, true)
   f.connection.next(true)
   await flush()
   assert.equal(f.requests.length, 1)
   f.authenticated.next(true)
   await f.resolve(1)
   assert.deepEqual(a.values, [sample, sample])
-  assert.notEqual(f.sockets[0].guid, f.sockets[1].guid)
+  assert.notEqual(f.requests[0].signal, f.requests[1].signal)
 })
 
-test('metrics logout abandons pending initialization and recovery', async t => {
-  const f = fixture(t)
-  const a = f.observe()
+test('metrics logout cancels pending initialization and recovery', async t => {
+  const f = fixture(t),
+    a = f.observe()
   f.authenticated.next(false)
   await f.resolve(0)
-  assert.equal(f.sockets.length, 0)
+  assert.equal(f.requests[0].frames.observers.length, 0)
   f.authenticated.next(true)
   await f.resolve(1)
-  f.sockets[0].frames.error({ code: 0, message: 'lost' })
+  f.requests[1].frames.error({ code: 0, message: 'lost' })
+  await flush()
   assert.equal(f.connection.observers.length, 1)
   f.authenticated.next(false)
   assert.equal(f.connection.observers.length, 0)
@@ -175,22 +205,22 @@ test('metrics logout abandons pending initialization and recovery', async t => {
   assert.deepEqual(a.values, [sample])
 })
 
-test('metrics reopens on existing connectivity recovery, not on a lost source replay', async t => {
-  const f = fixture(t)
-  const a = f.observe()
+test('metrics reopens on existing connectivity recovery without replaying a lost source', async t => {
+  const f = fixture(t),
+    a = f.observe()
   await f.resolve(0)
-  f.sockets[0].frames.error({ code: 0, message: 'lost' })
+  f.requests[0].frames.error({ code: 0, message: 'lost' })
   await flush()
   assert.equal(f.requests.length, 1)
   f.connection.next(true)
   await f.resolve(1)
   assert.deepEqual(a.values, [sample, sample])
-  assert.notEqual(f.sockets[0].guid, f.sockets[1].guid)
+  assert.notEqual(f.requests[0].signal, f.requests[1].signal)
 })
 
-test('metrics starts fresh after observer disposal without replaying the previous session snapshot', async t => {
-  const f = fixture(t)
-  const a = f.observe()
+test('metrics starts fresh after disposal without replaying a previous-session snapshot', async t => {
+  const f = fixture(t),
+    a = f.observe()
   await f.resolve(0)
   a.sub.unsubscribe()
   const b = f.observe()
@@ -198,4 +228,37 @@ test('metrics starts fresh after observer disposal without replaying the previou
   assert.equal(f.requests.length, 2)
   await f.resolve(1)
   assert.deepEqual(b.values, [sample])
+})
+
+test('metrics publishes typed items after the initial snapshot and drains before normal-end recovery', async t => {
+  const f = fixture(t),
+    a = f.observe()
+  await f.resolve(0)
+  const update = structuredClone(sample)
+  update.cpu.percentageUsed.value = '42'
+  f.item(0, update)
+  f.finish(0)
+  await flush()
+  assert.deepEqual(a.values, [sample, update])
+  assert.equal(f.requests.length, 2)
+  assert.equal(f.requests[0].signal.aborted, true)
+  await f.resolve(1)
+  assert.deepEqual(a.values, [sample, update, sample])
+})
+
+test('metrics initial application errors use existing recovery and disposal cancels the wait', async t => {
+  const f = fixture(t),
+    a = f.observe()
+  f.send(0, {
+    jsonrpc: '2.0',
+    error: { code: 6, message: 'No Metrics Found', data: null },
+  })
+  await flush()
+  assert.equal(f.connection.observers.length, 1)
+  assert.equal(f.requests[0].signal.aborted, true)
+  a.sub.unsubscribe()
+  f.connection.next(true)
+  await flush()
+  assert.equal(f.requests.length, 1)
+  assert.deepEqual(a.values, [])
 })

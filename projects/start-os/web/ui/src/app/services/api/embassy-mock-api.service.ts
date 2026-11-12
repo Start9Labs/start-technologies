@@ -267,13 +267,7 @@ export class MockApiService extends ApiService implements StartupApiService {
     },
     'server.logs.follow': () => this.logFollow(),
     'server.kernel-logs.follow': () => this.logFollow(),
-    'server.metrics.follow': async params => {
-      await pauseFor(2000)
-      return {
-        guid: 'metrics-guid',
-        metrics: Mock.getMetrics(),
-      }
-    },
+    'server.metrics.follow': () => this.metricsFollow(),
     'server.device-info': async () => ({
       os: {
         version: mockPatchData.serverInfo.version,
@@ -1722,6 +1716,8 @@ export class MockApiService extends ApiService implements StartupApiService {
         case 'server.kernel-logs.follow':
         case 'package.logs.follow':
           return this.logFollowStream(options)
+        case 'server.metrics.follow':
+          return this.metricsFollowStream(options)
         case 'init.subscribe':
           return this.initSubscriptionStream(options)
         case 'diagnostic.update':
@@ -1731,6 +1727,29 @@ export class MockApiService extends ApiService implements StartupApiService {
       }
     },
   })
+
+  private async metricsFollow(signal?: AbortSignal) {
+    await pauseFor(2000, signal)
+    return { guid: 'metrics-guid', metrics: Mock.getMetrics() }
+  }
+
+  private async metricsFollowStream(options?: RpcStreamOptions) {
+    const initial = await this.metricsFollow(options?.signal)
+    options?.signal?.throwIfAborted()
+    return {
+      initial: { ...initial, guid: null },
+      items: this.metricsEntries(options?.signal),
+    }
+  }
+
+  private async *metricsEntries(
+    signal?: AbortSignal,
+  ): AsyncGenerator<T.Metrics, null> {
+    while (true) {
+      await pauseFor(1000, signal)
+      yield Mock.getMetrics()
+    }
+  }
 
   private async logFollow(signal?: AbortSignal) {
     await pauseFor(2000, signal)
@@ -1830,9 +1849,9 @@ export class MockApiService extends ApiService implements StartupApiService {
         ),
       ) as WebSocketSubject<T>
     } else if (guid === 'metrics-guid') {
-      return interval(1000).pipe(
-        map(() => Mock.getMetrics()),
-      ) as WebSocketSubject<T>
+      return withAbortSignal(signal =>
+        this.metricsEntries(signal),
+      ) as Observable<T>
     } else {
       throw new Error('invalid guid type')
     }

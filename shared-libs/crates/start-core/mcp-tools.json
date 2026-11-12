@@ -11407,7 +11407,10 @@
         "MetricsFollowResponse": {
           "type": "object",
           "properties": {
-            "guid": { "$ref": "#/$defs/Guid" },
+            "guid": {
+              "description": "Present for ordinary replies; typed observations use same-ID events.",
+              "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+            },
             "metrics": { "$ref": "#/$defs/Metrics" }
           },
           "required": ["guid", "metrics"],
@@ -11525,7 +11528,10 @@
       },
       "type": "object",
       "properties": {
-        "guid": { "$ref": "#/$defs/Guid" },
+        "guid": {
+          "description": "Present for ordinary replies; typed observations use same-ID events.",
+          "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+        },
         "metrics": { "$ref": "#/$defs/Metrics" }
       },
       "required": ["guid", "metrics"],

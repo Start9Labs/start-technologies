@@ -5271,9 +5271,24 @@ export const DiskInfo: z.ZodObject<{
   id: 'DiskInfo',
 })
 export const MetricsFollowResponse: z.ZodObject<{
-  guid: typeof Guid
+  /**
+   * Present for ordinary replies; typed observations use same-ID events.
+   */
+  guid: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
   metrics: typeof Metrics
-}> = /* @__PURE__ */ object({ guid: Guid, metrics: Metrics }).meta({
+}> = /* @__PURE__ */ object({
+  /**
+   * Present for ordinary replies; typed observations use same-ID events.
+   */
+  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Present for ordinary replies; typed observations use same-ID events.',
+  }),
+  metrics: Metrics,
+}).meta({
   id: 'MetricsFollowResponse',
 })
 export const NetworkGatewayInfo: z.ZodObject<{
@@ -7888,7 +7903,7 @@ export const Api = {
                 MetricsFollowParams,
               ),
               _RETURN: /* @__PURE__ */ MetricsFollowResponse,
-              _ITEM: /* @__PURE__ */ z.never(),
+              _ITEM: /* @__PURE__ */ Metrics,
               _FINAL: /* @__PURE__ */ z.null(),
             },
           },

@@ -21,7 +21,7 @@ use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, ProgressUnits};
 use crate::registry::os::index::OsVersionInfo;
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
-use crate::update::{UpdateProgressHandles, UpdateSystemRes, do_update};
+use crate::update::{UpdateProgressHandles, UpdateSystemRes, do_update, target_asset};
 use crate::version::{Current, VersionT};
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
@@ -120,10 +120,7 @@ async fn run_update(
 
     let current_version = Current::default().semver();
     let mut available = get_versions(&client, registry, &current_version, &target_range).await?;
-    let Some((target_version, asset)) = available
-        .pop_last()
-        .and_then(|(v, mut info)| info.squashfs.remove(&**PLATFORM).map(|a| (v, a)))
-    else {
+    let Some((target_version, asset, notes)) = available.pop_last().and_then(target_asset) else {
         if let Some(stream) = rpc_stream {
             let _ = stream.close(Ok::<_, Error>(()));
         }
@@ -160,6 +157,7 @@ async fn run_update(
         let res = do_update(
             client,
             asset,
+            notes,
             UpdateProgressHandles {
                 progress: tracker_for_task,
                 prune_phase,

@@ -1,9 +1,11 @@
-import { inject, Injectable } from '@angular/core'
+import { inject, Service } from '@angular/core'
+import { withAbortSignal } from '@start9labs/shared'
 import {
   catchError,
   defer,
   EMPTY,
   filter,
+  from,
   ignoreElements,
   Observable,
   repeat,
@@ -18,9 +20,7 @@ import { ConnectionService } from 'src/app/services/connection.service'
 import { AuthService } from 'src/app/services/auth.service'
 
 /** Shares live metrics while authenticated consumers observe them. */
-@Injectable({
-  providedIn: 'root',
-})
+@Service()
 export class MetricsService extends Observable<T.Metrics> {
   private readonly connection = inject(ConnectionService)
   private readonly api = inject(ApiService)
@@ -28,10 +28,15 @@ export class MetricsService extends Observable<T.Metrics> {
   private readonly metrics$ = inject(AuthService).isVerified$.pipe(
     switchMap(verified =>
       verified
-        ? defer(() => this.api.rpc.server.metrics.follow({})).pipe(
-            switchMap(({ guid, metrics }) =>
-              this.api.openWebsocket$<T.Metrics>(guid).pipe(startWith(metrics)),
+        ? withAbortSignal(signal =>
+            defer(() =>
+              this.api.streams.server.metrics.follow({}, { signal }),
+            ).pipe(
+              switchMap(({ initial, items }) =>
+                from(items).pipe(startWith(initial.metrics)),
+              ),
             ),
+          ).pipe(
             catchError(() =>
               this.connection.pipe(filter(Boolean), take(1), ignoreElements()),
             ),

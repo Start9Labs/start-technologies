@@ -5,9 +5,9 @@ use std::time::Duration;
 use chrono::Utc;
 use clap::Parser;
 use color_eyre::eyre::eyre;
-use futures::FutureExt;
+use futures::{FutureExt, StreamExt};
 use imbl_value::InternedString;
-use rpc_toolkit::{Context, Empty, HandlerExt, ParentHandler, from_fn_async};
+use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::process::Command;
 use tokio::sync::broadcast::Receiver;
@@ -35,6 +35,9 @@ use crate::{MAIN_DATA, PACKAGE_DATA};
 mod disk_health;
 pub(crate) mod log_level;
 pub(crate) mod trust_ca;
+
+#[cfg(test)]
+mod metrics_tests;
 
 pub fn experimental<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
@@ -627,7 +630,6 @@ pub struct Metrics {
 rpc_toolkit::reflect_ts!(Metrics);
 rpc_toolkit::ts_export!(Metrics, namespaces = [""]);
 
-// #[command(display(display_serializable))]
 pub async fn metrics(ctx: RpcContext) -> Result<Metrics, Error> {
     ctx.metrics_cache.read().or_not_found("No Metrics Found")
 }
@@ -635,7 +637,8 @@ pub async fn metrics(ctx: RpcContext) -> Result<Metrics, Error> {
 #[derive(Deserialize, Serialize, Clone, Debug, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct MetricsFollowResponse {
-    pub guid: Guid,
+    /// Present for ordinary replies; typed observations use same-ID events.
+    pub guid: Option<Guid>,
     pub metrics: Metrics,
 }
 
@@ -654,53 +657,62 @@ pub struct MetricsFollowParams {
 
 rpc_toolkit::reflect_ts!(MetricsFollowParams);
 
-pub async fn metrics_follow(
-    ctx: RpcContext,
-    MetricsFollowParams { signer }: MetricsFollowParams,
-) -> Result<MetricsFollowResponse, Error> {
-    let mut local_cache = ctx.metrics_cache.clone();
-    let metrics = local_cache
-        .peek_and_mark_seen(|m| m.clone())
+/// Observes the existing sensor cache without owning its producer lifetime.
+fn observe_metrics(
+    mut cache: Watch<Option<Metrics>>,
+) -> Result<
+    (
+        Metrics,
+        impl futures::Stream<Item = Result<Metrics, Error>> + Unpin,
+    ),
+    Error,
+> {
+    let metrics = cache
+        .read_and_mark_seen()
         .or_not_found("No Metrics Found")?;
+    let updates = cache.filter_map(futures::future::ready).map(Ok);
+    Ok((metrics, updates))
+}
+
+pub async fn metrics_follow(
+    HandlerArgs {
+        context: ctx,
+        params: MetricsFollowParams { signer },
+        rpc_stream,
+        ..
+    }: HandlerArgs<RpcContext, MetricsFollowParams, Empty, Metrics>,
+) -> Result<MetricsFollowResponse, Error> {
+    let (metrics, updates) = observe_metrics(ctx.metrics_cache.clone())?;
+    if let Some(stream) = rpc_stream {
+        ctx.open_authed_continuations
+            .forward_stream(signer, stream, updates);
+        return Ok(MetricsFollowResponse {
+            guid: None,
+            metrics,
+        });
+    }
     let guid = Guid::new();
     ctx.rpc_continuations
         .add(
             guid.clone(),
             RpcContinuation::ws_authed(
-                ctx.clone(),
+                &ctx,
                 signer,
                 WebSocketPolicy::Authenticated,
                 ctx.secure_session().cloned(),
                 |mut ws| async move {
-                    let res = async {
-                        loop {
-                            use axum::extract::ws::Message;
-                            tokio::select! {
-                                _ = local_cache.changed() => {
-                                    ws.send(Message::Text(
-                                        local_cache
-                                            .peek(|m| serde_json::to_string(&m))
-                                            .with_kind(ErrorKind::Serialization)?
-                                            .into(),
-                                    )).await.with_kind(ErrorKind::Network)?;
-                                }
-                                msg = ws.recv() => {
-                                    if msg.transpose().with_kind(crate::ErrorKind::Network)?.is_none() {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        Ok::<_, Error>("complete")
-                    }
-                    .await;
-                    ws.close_result(res).await.log_err();
+                    let result =
+                        crate::rpc_continuations::forward_json_stream(&mut ws, updates).await;
+                    ws.close_result(result).await.log_err();
                 },
                 Duration::from_secs(30),
             ),
         )
         .await;
-    Ok(MetricsFollowResponse { guid, metrics })
+    Ok(MetricsFollowResponse {
+        guid: Some(guid),
+        metrics,
+    })
 }
 
 pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(

@@ -5,7 +5,6 @@ use std::process::Stdio;
 use std::str::FromStr;
 use std::time::{Duration, UNIX_EPOCH};
 
-use axum::extract::ws;
 use chrono::{DateTime, Utc};
 use clap::builder::ValueParserFactory;
 use clap::{Args, FromArgMatches, Parser};
@@ -108,20 +107,8 @@ impl Stream for LogStream {
 }
 
 #[instrument(skip_all)]
-async fn forward_log_socket(mut socket: WebSocket, mut entries: LogEntries) {
-    let result = async {
-        loop {
-            tokio::select! {
-                entry = entries.try_next() => {
-                    let Some(entry) = entry? else { return Ok::<_, Error>("complete") };
-                    socket.send(ws::Message::Text(serde_json::to_string(&entry).with_kind(ErrorKind::Serialization)?.into())).await.with_kind(ErrorKind::Network)?;
-                }
-                message = socket.recv() => {
-                    if message.transpose().with_kind(ErrorKind::Network)?.is_none() { return Ok("complete") }
-                }
-            }
-        }
-    }.await;
+async fn forward_log_socket(mut socket: WebSocket, entries: LogEntries) {
+    let result = crate::rpc_continuations::forward_json_stream(&mut socket, entries).await;
     if let Err(error) = socket.close_result(result).await {
         if !crate::util::net::is_ws_reset_without_close(&error) {
             tracing::error!(

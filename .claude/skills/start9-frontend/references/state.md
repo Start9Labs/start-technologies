@@ -73,7 +73,9 @@ promise-based**; components call `await this.api.method(params)` and never touch
   slow consumers cancel only their own request. Terminal outcomes drain accepted items;
   physical loss discards them. Portal and startup logs consume typed items through their existing
   status/history/batching/retry owners; a successful portal terminal invalidates the ongoing view.
-  Metrics GUID observations retain their source-owned buffering/retry until their operation contract is migrated.
+  Metrics uses generated typed follow with an initial snapshot and items from its existing sensor
+  cache. AuthService gates ref-counted observation; final unsubscribe/logout cancels acquisition,
+  iteration and recovery. Existing error recovery and normal-end read-only repeat remain.
 - **start-wrt retains its RPC/reconnect workflow owners**: all browser RPC composes shared encrypted
   transport, with unpersisted anonymous admission before device enrollment. The caller omits
   normal-product peer-history observation for missing-key bootstrap. `admissionLease` carries

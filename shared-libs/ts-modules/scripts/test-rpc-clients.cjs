@@ -1041,6 +1041,75 @@ test('UI mock log interfaces share their bounded failure producer without duplic
   })
 })
 
+test('UI ordinary and typed metrics reuse snapshot and item producers with cancellation', async () => {
+  const percent = { value: '0', unit: '%' },
+    mib = { value: '0', unit: 'MiB' },
+    gb = { value: '0', unit: 'GB' }
+  const metrics = {
+    general: { temperature: null },
+    memory: {
+      percentageUsed: percent,
+      total: mib,
+      available: mib,
+      used: mib,
+      zramTotal: mib,
+      zramAvailable: mib,
+      zramUsed: mib,
+    },
+    cpu: {
+      percentageUsed: percent,
+      idle: percent,
+      userSpace: percent,
+      kernelSpace: percent,
+      wait: percent,
+    },
+    disk: { percentageUsed: percent, used: gb, available: gb, capacity: gb },
+  }
+  let reads = 0
+  const { load } = harness(
+    new Map([
+      [
+        './api.fixures',
+        {
+          Mock: {
+            getMetrics() {
+              reads++
+              return metrics
+            },
+          },
+        },
+      ],
+      ['./mock-patch', mockPatchFixture({})],
+      ['./md-sample.md', ''],
+    ]),
+    { AbortController },
+  )
+  const mock = Object.create(
+    load(
+      'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+    ).MockApiService.prototype,
+  )
+  const ordinary = await mock.metricsFollow()
+  const abort = new AbortController(),
+    typed = await mock.metricsFollowStream({ signal: abort.signal })
+  assert.equal(ordinary.guid, 'metrics-guid')
+  assert.equal(typed.initial.guid, null)
+  assert.equal(typed.initial.metrics, metrics)
+  assert.equal(ordinary.metrics, metrics)
+  assert.equal(reads, 2)
+  assert.equal((await typed.items.next()).value, metrics)
+  assert.equal(
+    await firstValueFrom(mock.openWebsocket$('metrics-guid')),
+    metrics,
+  )
+  assert.equal(reads, 4)
+  abort.abort()
+  await assert.rejects(typed.items.next(), { name: 'AbortError' })
+  await assert.rejects(mock.metricsFollowStream({ signal: abort.signal }), {
+    name: 'AbortError',
+  })
+})
+
 test('Setup sends unwrapped secrets through encrypted admission and preserves the installation timeout', async () => {
   const { dependencies, tokens, load } = harness()
   const calls = []
