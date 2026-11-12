@@ -12,7 +12,8 @@ use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard, WeakMountGuard
 use crate::prelude::*;
 use crate::shared_volumes::mounts::{PreparedSource, confined_relative};
 use crate::shared_volumes::{
-    SharedVolumeCredentials, SharedVolumeId, SharedVolumeInspection, SharedVolumeSource, local_path,
+    SharedVolumeCredentials, SharedVolumeDrive, SharedVolumeId, SharedVolumeInspection,
+    SharedVolumeSource, local_path,
 };
 
 pub async fn create_local_directory(path: &Path) -> Result<(), Error> {
@@ -72,8 +73,8 @@ impl SourceDefinition {
         mut source: SharedVolumeSource,
         credentials: Option<SharedVolumeCredentials>,
     ) -> Self {
-        if let SharedVolumeSource::Disk { label, .. } = &mut source {
-            *label = None;
+        if let SharedVolumeSource::Disk { drive, .. } = &mut source {
+            *drive = None;
         }
         Self {
             source,
@@ -343,19 +344,19 @@ pub(crate) async fn prepare_disk_source_from_inventory(
     path: PathBuf,
 ) -> Result<SharedVolumeSource, Error> {
     let logicalname = tokio::fs::canonicalize(logicalname).await?;
-    let (partition, label) = external_partition(disks, &logicalname)?;
+    let (partition, drive) = external_partition(disks, &logicalname)?;
     crate::disk::format::refuse_system_drive(
         &ctx.os_partitions,
         &crate::disk::format::parent_drive(&partition).await?,
     )
     .await?;
-    prepare_external_source(partition, path, label).await
+    prepare_external_source(partition, path, Some(drive)).await
 }
 
 pub(super) fn external_partition(
     disks: &[crate::disk::util::DiskInfo],
     logicalname: &Path,
-) -> Result<(PathBuf, Option<String>), Error> {
+) -> Result<(PathBuf, SharedVolumeDrive), Error> {
     disks
         .iter()
         .flat_map(|disk| {
@@ -367,17 +368,14 @@ pub(super) fn external_partition(
             partition.logicalname == logicalname || partition.stable_path == logicalname
         })
         .map(|(disk, partition)| {
-            let model = [disk.vendor.as_deref(), disk.model.as_deref()]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" ");
             (
                 partition.logicalname.clone(),
-                partition
-                    .label
-                    .clone()
-                    .or((!model.is_empty()).then_some(model)),
+                SharedVolumeDrive {
+                    vendor: disk.vendor.clone(),
+                    model: disk.model.clone(),
+                    label: partition.label.clone(),
+                    capacity: disk.capacity,
+                },
             )
         })
         .ok_or_else(|| {
@@ -391,7 +389,7 @@ pub(super) fn external_partition(
 pub(super) async fn prepare_external_source(
     device: PathBuf,
     path: PathBuf,
-    label: Option<String>,
+    drive: Option<SharedVolumeDrive>,
 ) -> Result<SharedVolumeSource, Error> {
     let path = confined_relative(&path)?;
     let logicalname = BlockDev::new(device).persistent_path().await?;
@@ -427,7 +425,7 @@ pub(super) async fn prepare_external_source(
     Ok(SharedVolumeSource::Disk {
         logicalname,
         path,
-        label,
+        drive,
     })
 }
 

@@ -339,8 +339,8 @@ fn find_registration_preserves_existing_targets_and_can_rediscover_removed_backu
         .ser(&"Renamed".to_owned())
         .unwrap();
     let mut relabeled = root.clone();
-    if let SharedVolumeSource::Disk { label, .. } = &mut relabeled {
-        *label = Some("New label".into());
+    if let SharedVolumeSource::Disk { drive, .. } = &mut relabeled {
+        drive.get_or_insert_default().label = Some("New label".into());
     }
     assert!(
         register_found(&mut db, vec![("New label".into(), relabeled)])

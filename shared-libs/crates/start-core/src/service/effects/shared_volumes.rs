@@ -274,7 +274,9 @@ pub async fn mount_shared_volume(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared_volumes::{SharedVolumeCredentials, SharedVolumeGrant, SharedVolumeSource};
+    use crate::shared_volumes::{
+        SharedVolumeCredentials, SharedVolumeDrive, SharedVolumeGrant, SharedVolumeSource,
+    };
 
     #[test]
     fn consumers_are_notified_only_when_their_mount_inputs_change() {
@@ -393,12 +395,15 @@ mod tests {
         catalog.get_mut(&mine).unwrap().source = SharedVolumeSource::Disk {
             logicalname: "/dev/disk/by-uuid/photos".into(),
             path: "music".into(),
-            label: Some("Photos".into()),
+            drive: Some(SharedVolumeDrive {
+                label: Some("Photos".into()),
+                ..Default::default()
+            }),
         };
         let inputs = mount_inputs(&package, &database(&catalog)).unwrap();
-        if let SharedVolumeSource::Disk { label, .. } = &mut catalog.get_mut(&mine).unwrap().source
+        if let SharedVolumeSource::Disk { drive, .. } = &mut catalog.get_mut(&mine).unwrap().source
         {
-            *label = Some("Renamed drive".into());
+            drive.get_or_insert_default().label = Some("Renamed drive".into());
         }
         assert!(!mount_inputs_changed(
             &inputs,

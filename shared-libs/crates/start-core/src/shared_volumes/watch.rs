@@ -362,7 +362,7 @@ mod tests {
         let disk = SharedVolumeSource::Disk {
             logicalname: "/dev/disk/by-uuid/data".into(),
             path: "media".into(),
-            label: None,
+            drive: None,
         };
         assert_eq!(
             inspection_event(Some(&Event::Network), &cifs),

@@ -82,9 +82,9 @@ pub enum SharedVolumeSource {
         logicalname: PathBuf,
         #[serde(default)]
         path: PathBuf,
-        /// The partition label or drive model when the volume was created, for display.
+        /// The drive as reported when the source was created, for display.
         #[serde(default)]
-        label: Option<String>,
+        drive: Option<SharedVolumeDrive>,
     },
     Cifs {
         hostname: String,
@@ -95,6 +95,35 @@ pub enum SharedVolumeSource {
 }
 
 rpc_toolkit::reflect_ts!(SharedVolumeSource);
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedVolumeDrive {
+    pub vendor: Option<String>,
+    pub model: Option<String>,
+    pub label: Option<String>,
+    pub capacity: u64,
+}
+
+rpc_toolkit::reflect_ts!(SharedVolumeDrive);
+
+impl SharedVolumeDrive {
+    /// The partition label, else the vendor and model.
+    pub fn display_name(&self) -> Option<String> {
+        self.label
+            .as_ref()
+            .filter(|label| !label.trim().is_empty())
+            .cloned()
+            .or_else(|| {
+                let model = [self.vendor.as_deref(), self.model.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                (!model.is_empty()).then_some(model)
+            })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]

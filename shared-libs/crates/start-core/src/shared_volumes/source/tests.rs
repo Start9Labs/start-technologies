@@ -594,13 +594,20 @@ fn only_partitions_from_backup_discovery_can_be_registered() {
     for path in ["/dev/sdz1", "/dev/disk/by-path/external-part1"] {
         assert_eq!(
             external_partition(&disks, Path::new(path)).unwrap(),
-            (PathBuf::from("/dev/sdz1"), Some("Photos".to_owned()))
+            (
+                PathBuf::from("/dev/sdz1"),
+                SharedVolumeDrive {
+                    vendor: Some("Samsung".to_owned()),
+                    model: Some("T7".to_owned()),
+                    label: Some("Photos".to_owned()),
+                    capacity: 4096,
+                }
+            )
         );
     }
-    assert_eq!(
-        external_partition(&disks, Path::new("/dev/sdz2")).unwrap(),
-        (PathBuf::from("/dev/sdz2"), Some("Samsung T7".to_owned()))
-    );
+    let (partition, drive) = external_partition(&disks, Path::new("/dev/sdz2")).unwrap();
+    assert_eq!(partition, PathBuf::from("/dev/sdz2"));
+    assert_eq!(drive.display_name(), Some("Samsung T7".to_owned()));
     for path in ["/", "/dev/sdz", "/dev/system-root", "/dev/missing"] {
         assert!(external_partition(&disks, Path::new(path)).is_err());
     }

@@ -17,7 +17,8 @@ use crate::prelude::*;
 use crate::shared_volumes::mounts::PreparedSource;
 use crate::shared_volumes::source::{self, PreparedFilesystem, SourceDefinition};
 use crate::shared_volumes::{
-    CreateSharedVolumeParams, CreateSharedVolumeSource, SharedVolumeInspection, SharedVolumeSource,
+    CreateSharedVolumeParams, CreateSharedVolumeSource, SharedVolumeDrive, SharedVolumeInspection,
+    SharedVolumeSource,
 };
 
 /// A registered backup destination and its last source observation.
@@ -187,10 +188,9 @@ pub async fn find(ctx: RpcContext) -> Result<Vec<BackupTargetId>, Error> {
         )
         .await?;
         let name = match &source {
-            SharedVolumeSource::Disk { label, .. } => label
+            SharedVolumeSource::Disk { drive, .. } => drive
                 .as_ref()
-                .filter(|name| !name.trim().is_empty())
-                .cloned()
+                .and_then(SharedVolumeDrive::display_name)
                 .unwrap_or_else(|| partition.logicalname.display().to_string()),
             _ => unreachable!(),
         };

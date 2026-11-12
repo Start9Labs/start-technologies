@@ -399,12 +399,12 @@ mod tests {
         let source = |path: &str| SharedVolumeSource::Disk {
             logicalname: alias.clone(),
             path: path.into(),
-            label: None,
+            drive: None,
         };
         let target = |logicalname, path: &str| SharedVolumeSource::Disk {
             logicalname,
             path: path.into(),
-            label: None,
+            drive: None,
         };
         for (source_path, target_path, overlaps) in [
             ("", "", true),
