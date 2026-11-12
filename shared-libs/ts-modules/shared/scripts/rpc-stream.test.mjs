@@ -25,14 +25,13 @@ const initial = { jsonrpc: '2.0', result: null }
 const event = result => ({ rpcstream: version, result, end: false })
 const terminal = result => ({ rpcstream: version, result, end: true })
 
-test('reserved terminal delivery drains a full item queue and returns its distinct final result', async () => {
+test('reserved terminal delivery drains a queued backlog and returns its distinct final result', async () => {
   const f = fixture()
   f.push(initial)
-  for (let n = 0; n < SESSION_PROFILE.transport.maxQueuedStreamEvents; n++)
-    f.push(event(n))
+  for (let n = 0; n < 64; n++) f.push(event(n))
   f.push(terminal({ outcome: 'finished' }))
   const { items } = await f.pending
-  for (let n = 0; n < SESSION_PROFILE.transport.maxQueuedStreamEvents; n++)
+  for (let n = 0; n < 64; n++)
     assert.deepEqual(await items.next(), { done: false, value: n })
   assert.deepEqual(await items.next(), {
     done: true,

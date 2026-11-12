@@ -43,7 +43,6 @@ export const SESSION_PROFILE = {
     maxHandshakeRecordBytes: 1024,
     maxHandshakeDepth: 16,
     rpcStreamVersion: '1.0',
-    maxQueuedStreamEvents: 16,
     rpcStreamCancelledCode: -32800,
     handshakeTimeoutMs: 30000,
     writeTimeoutMs: 15000,

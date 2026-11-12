@@ -2,5 +2,5 @@
 release-notes: false
 ---
 
-- Refresh bundled registry access, OS-version-aware subscription, RPC response synchronization, typed initialization/setup progress, log and metrics follow, checked log boot selectors, setup password/recovery input types, and terminal command argument compatibility.
+- Refresh bundled transport profiles, registry access, OS-version-aware subscription, RPC response synchronization, typed initialization/setup progress, log and metrics follow, checked log boot selectors, setup password/recovery input types, and terminal command argument compatibility.
 - Provide opaque, unpersisted request-proof signing for startup admission without WebCrypto enrollment.

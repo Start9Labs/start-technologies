@@ -82,6 +82,7 @@ sessions. It returns initiating data/metadata separately from the typed item rec
 `items.next()` propagates terminal errors and `items.finish()` returns the real successful
 terminal value. Receiver/future drop cancels its ID, including during initialization.
 Native queues share the 64 MiB response budget across serialized UTF-8 bytes and per-item storage, with a separate terminal slot. Backlog bursts do not fail solely on item count, and the reader never waits for a consumer.
+Browser queues retain backlogs behind initiating PatchDB fences within the serialized UTF-8 response budget, without a scheduler-dependent item cap.
 Application terminals drain accepted items; physical loss discards unfinished queues.
 Canceled IDs remain in the bounded stream slots until their close frames are written.
 The existing owned reader polls cancellation writes concurrently with incoming traffic;

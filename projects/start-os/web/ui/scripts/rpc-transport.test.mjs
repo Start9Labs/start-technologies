@@ -437,6 +437,55 @@ test('database streams emit their initiating dump without awaiting its cache fen
   )
 })
 
+test('normal log backlog survives a held initial fence without blocking a sibling', async context => {
+  const f = fixture(context)
+  const messages = new Subject()
+  const { rpcResponseStream } = await import(
+    new URL('services/rpc-stream.ts', shared)
+  )
+  f.sockets.stream = (body, identity, options) => {
+    assert.equal(JSON.parse(body).method, 'server.logs.follow')
+    return rpcResponseStream(messages, options)
+  }
+  const push = value =>
+    messages.next({
+      value,
+      bytes: new TextEncoder().encode(JSON.stringify(value)).byteLength,
+    })
+  let adopted = false
+  const pending = f.api.streams.server.logs.follow({}).then(response => {
+    adopted = true
+    return response
+  })
+  await flush()
+  push({
+    jsonrpc: '2.0',
+    result: { guid: null, startCursor: 'start' },
+    meta: { patchSequence: 7 },
+  })
+  await flush()
+  assert.equal(adopted, false)
+  const entries = Array.from({ length: 64 }, (_, n) => ({
+    message: `backlog-${n}`,
+    cursor: `cursor-${n}`,
+    timestamp: '2026-11-12T00:00:00Z',
+  }))
+  for (const result of entries) push({ rpcstream: '1.0', result, end: false })
+  assert.equal(await f.api.rpc.echo({ message: 'sibling' }), 'encrypted')
+  assert.equal(adopted, false)
+  assert.equal(f.cache.value.id, 0)
+  assert.equal(messages.observers.length, 1)
+  f.cache.next({ id: 7, value: {} })
+  const response = await pending
+  assert.equal(adopted, true)
+  for (const entry of entries)
+    assert.deepEqual(await response.items.next(), { done: false, value: entry })
+  push({ rpcstream: '1.0', result: null, end: true })
+  assert.deepEqual(await response.items.next(), { done: true, value: null })
+  assert.equal(messages.observers.length, 0)
+  assert.equal(f.rejected(), 0)
+})
+
 test('encrypted mutations still wait for the local committed sequence', async context => {
   const f = fixture(context)
   f.sockets.message = async () => ({

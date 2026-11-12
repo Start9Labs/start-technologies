@@ -21,7 +21,11 @@ type StreamResponse = (
   end: boolean
 }
 
-export type RpcFrame = { value: unknown; bytes: number }
+export type RpcFrame = {
+  value: unknown
+  /** Complete encoded UTF-8 message length. */
+  bytes: number
+}
 export type SocketResponseStream<R, I, F> = RpcResponseStream<R, I, F> & {
   meta?: RPCResponse<R>['meta']
 }
@@ -44,7 +48,10 @@ export function isRpcResponse(
   return 'jsonrpc' in value && value.jsonrpc === '2.0'
 }
 
-/** Owns one request's bounded queue; terminals drain accepted items, transport loss discards them. */
+/**
+ * Bounds queued UTF-8 bytes while initiation fences or consumers pause.
+ * Terminals drain accepted items; transport loss discards them.
+ */
 export async function rpcResponseStream<R, I, F>(
   source: Observable<RpcFrame>,
   options: RpcStreamOptions = {},
@@ -62,14 +69,11 @@ export async function rpcResponseStream<R, I, F>(
   let terminal: { result: F } | { error: unknown } | undefined
   let queuedBytes = 0
   let controller!: ReadableStreamDefaultController<RpcFrame>
-  const readable = new ReadableStream<RpcFrame>(
-    {
-      start(value) {
-        controller = value
-      },
+  const readable = new ReadableStream<RpcFrame>({
+    start(value) {
+      controller = value
     },
-    { highWaterMark: SESSION_PROFILE.transport.maxQueuedStreamEvents },
-  )
+  })
   const detach = () => {
     subscription.unsubscribe()
     options.signal?.removeEventListener('abort', aborted)
@@ -122,8 +126,8 @@ export async function rpcResponseStream<R, I, F>(
         } else if (isRpcError(value)) {
           fail(new RpcError(value.error))
         } else if (
-          (controller.desiredSize ?? 0) <= 0 ||
-          queuedBytes + frame.bytes > SESSION_PROFILE.transport.maxIncomingBytes
+          queuedBytes + frame.bytes >
+          SESSION_PROFILE.transport.maxIncomingBytes
         ) {
           fail(
             new RpcError({

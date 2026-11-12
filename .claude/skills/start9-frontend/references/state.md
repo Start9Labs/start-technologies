@@ -69,8 +69,8 @@ promise-based**; components call `await this.api.method(params)` and never touch
   `RpcStreamClient` through the same socket owner: initial dump, typed revisions, terminal outcome.
   The initial dump establishes its own fence; never wait on that cache before delivering it.
   The source owns one AbortSignal through key lookup, initialization and iteration, and retains
-  its existing 250ms batching/retry policy. Per-request queues bound both item count and bytes;
-  slow consumers cancel only their own request. Terminal outcomes drain accepted items;
+  its existing 250ms batching/retry policy. Per-request queues bound serialized UTF-8 bytes,
+  including backlogs held behind initial fences; exceeding the budget cancels that request. Terminal outcomes drain accepted items;
   physical loss discards them. Portal and startup logs consume typed items through their existing
   status/history/batching/retry owners; a successful portal terminal invalidates the ongoing view.
   Metrics uses generated typed follow with an initial snapshot and items from its existing sensor

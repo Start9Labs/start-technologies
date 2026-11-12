@@ -305,7 +305,7 @@ test('transport loss cancels two established streams, pending initialization and
   assert.equal((await fresh).name, 'AbortError')
 })
 
-test('a slow stream fails at the bounded queue while its sibling completes', async context => {
+test('an unread burst survives while its sibling completes', async context => {
   const { service, lease } = await streamFixture(context)
   const pending = service.stream(body, lease)
   const sibling = service.message(body, {}, lease)
@@ -314,8 +314,43 @@ test('a slow stream fails at the bounded queue while its sibling completes', asy
   const [stream, call] = socket.writes
   socket.receive({ jsonrpc: '2.0', id: stream.id, result: null })
   const { items } = await pending
-  for (let n = 0; n <= SESSION_PROFILE.transport.maxQueuedStreamEvents; n++)
+  for (let n = 0; n < 64; n++)
     socket.receive({ rpcstream: version, id: stream.id, result: n, end: false })
+  socket.receive({ jsonrpc: '2.0', id: call.id, result: 'unblocked' })
+  assert.equal((await sibling).result, 'unblocked')
+  assert.equal(socket.closed, 0)
+  assert.equal(
+    socket.writes.some(value => value.close === stream.id),
+    false,
+  )
+  for (let n = 0; n < 64; n++)
+    assert.deepEqual(await items.next(), { done: false, value: n })
+  socket.receive({
+    rpcstream: version,
+    id: stream.id,
+    result: 'complete',
+    end: true,
+  })
+  assert.deepEqual(await items.next(), { done: true, value: 'complete' })
+})
+
+test('a stream beyond its byte budget fails while its sibling completes', async context => {
+  const { service, lease } = await streamFixture(context)
+  const pending = service.stream(body, lease)
+  const sibling = service.message(body, {}, lease)
+  await tick()
+  const socket = LogicalSocket.instances[0]
+  const [stream, call] = socket.writes
+  socket.receive({ jsonrpc: '2.0', id: stream.id, result: null })
+  const { items } = await pending
+  const text = '😀'.repeat(SESSION_PROFILE.transport.maxIncomingBytes / 8)
+  for (let n = 0; n < 2; n++)
+    socket.receive({
+      rpcstream: version,
+      id: stream.id,
+      result: text,
+      end: false,
+    })
   await assert.rejects(
     items.next(),
     error => error.code === SESSION_PROFILE.transport.rpcStreamCancelledCode,
