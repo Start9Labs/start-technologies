@@ -376,6 +376,9 @@ mod tests {
         std::fs::create_dir(&images).unwrap();
         std::fs::create_dir(&base).unwrap();
         std::fs::write(base.join("setting"), b"public default").unwrap();
+        std::fs::write(base.join("public-only"), b"base content").unwrap();
+        std::fs::create_dir_all(config.join("overlay")).unwrap();
+        std::fs::write(config.join("overlay/unsigned"), b"old mutable state").unwrap();
         let rootfs = images.join("image.rootfs");
         let mut file = crate::util::io::create_file_mod(&rootfs, 0o600)
             .await
@@ -510,7 +513,8 @@ mod tests {
         let descriptor_path = Path::new(super::super::initramfs::DESCRIPTOR_FILE);
         std::fs::create_dir_all(descriptor_path.parent().unwrap()).unwrap();
         std::fs::copy(temp.path().join("descriptor.json"), descriptor_path).unwrap();
-        super::super::initramfs::prepare(&temp.path().join("images"), &temp.path().join("config"))
+        let root = temp.path().join("running-root");
+        super::super::initramfs::prepare(temp.path(), &root)
             .await
             .unwrap();
         let runtime = Path::new(super::super::initramfs::RUNTIME);
@@ -537,6 +541,85 @@ mod tests {
             std::fs::read(handoff.overlay.join("setting")).unwrap(),
             b"configuration override"
         );
+        let working = root.join("media/startos/config/overlay");
+        assert_eq!(
+            std::fs::read(root.join("setting")).unwrap(),
+            b"configuration override"
+        );
+        assert_eq!(
+            std::fs::read(root.join("public-only")).unwrap(),
+            b"base content"
+        );
+        assert!(!root.join("unsigned").exists());
+        assert!(!working.join("unsigned").exists());
+        assert!(!working.join("public-only").exists());
+        assert_eq!(
+            std::fs::read(working.join("setting")).unwrap(),
+            b"configuration override"
+        );
+        std::fs::remove_file(working.join("setting")).unwrap();
+        std::fs::write(working.join("new-setting"), b"working edit").unwrap();
+        assert_eq!(
+            std::fs::read(root.join("setting")).unwrap(),
+            b"configuration override"
+        );
+        assert!(!root.join("new-setting").exists());
+        assert!(std::fs::write(root.join("media/startos/current/setting"), b"changed").is_err());
+        assert!(
+            std::fs::write(root.join("media/startos/root/readonly-check"), b"changed").is_err()
+        );
+        std::fs::write(temp.path().join("volume-still-writable"), b"yes").unwrap();
+        let writer = std::fs::OpenOptions::new()
+            .write(true)
+            .open(working.join("new-setting"))
+            .unwrap();
+        let readonly = nix::mount::MsFlags::MS_REMOUNT | nix::mount::MsFlags::MS_RDONLY;
+        assert_eq!(
+            nix::mount::mount(None::<&str>, &working, None::<&str>, readonly, None::<&str>),
+            Err(nix::errno::Errno::EBUSY)
+        );
+        drop(writer);
+        nix::mount::mount(None::<&str>, &working, None::<&str>, readonly, None::<&str>).unwrap();
+        assert!(std::fs::write(working.join("new-setting"), b"blocked").is_err());
+        let signing_key = crate::util::crypto::gen_nistp256().unwrap();
+        let snapshot = PreparedGeneration::prepare_working(
+            &handoff.overlay,
+            &handoff.working_upper,
+            &temp.path().join("images/image.rootfs"),
+            &generation_store(&temp.path().join("config")),
+            &signing_key,
+        )
+        .await
+        .unwrap();
+        let manifest = snapshot.manifest().clone();
+        let published = snapshot.publish().await.unwrap();
+        let next = manifest
+            .overlay_verity
+            .mount(
+                &published.join(os_overlay::OVERLAY_FILE),
+                &published.join(os_overlay::OVERLAY_VERITY_FILE),
+                &format!("snapshot-{}", Guid::new()),
+                &temp.path().join("snapshot-view"),
+            )
+            .await
+            .unwrap();
+        assert!(!next.path().join("setting").exists());
+        assert!(!next.path().join("public-only").exists());
+        assert_eq!(
+            std::fs::read(next.path().join("new-setting")).unwrap(),
+            b"working edit"
+        );
+        assert_eq!(
+            std::fs::read(root.join("setting")).unwrap(),
+            b"configuration override"
+        );
+        next.unmount().await.unwrap();
+        std::fs::write(root.join("setting"), b"running edit").unwrap();
+        assert!(!working.join("setting").exists());
+        assert_eq!(
+            std::fs::read(handoff.overlay.join("setting")).unwrap(),
+            b"configuration override"
+        );
         assert_eq!(unsafe { libc::prctl(libc::PR_GET_DUMPABLE, 0, 0, 0, 0) }, 0);
         let options = tokio::process::Command::new("findmnt")
             .args(["-n", "-o", "OPTIONS", "--target"])
@@ -552,13 +635,13 @@ mod tests {
                 .any(|option| option == "noswap")
         );
         assert!(
-            super::super::initramfs::prepare(
-                &temp.path().join("images"),
-                &temp.path().join("config")
-            )
-            .await
-            .is_err()
+            super::super::initramfs::prepare(temp.path(), &root)
+                .await
+                .is_err()
         );
+        crate::disk::mount::util::unmount_all_under(&root, false)
+            .await
+            .unwrap();
         for path in [&handoff.overlay, &handoff.rootfs] {
             tokio::process::Command::new("umount")
                 .arg(path)
@@ -589,12 +672,9 @@ mod tests {
         std::fs::create_dir_all(descriptor_path.parent().unwrap()).unwrap();
         std::fs::write(descriptor_path, b"invalid descriptor").unwrap();
         assert!(
-            super::super::initramfs::prepare(
-                &temp.path().join("images"),
-                &temp.path().join("config")
-            )
-            .await
-            .is_err()
+            super::super::initramfs::prepare(temp.path(), &temp.path().join("running-root"))
+                .await
+                .is_err()
         );
         assert!(boot_mappings().is_empty());
         assert!(
@@ -602,6 +682,39 @@ mod tests {
                 .join(super::super::initramfs::HANDOFF_FILE)
                 .exists()
         );
+        assert_eq!(tpm::read_measurements().await.unwrap().files, [0; 32]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires isolated initramfs-like root, software TPM, kernel verity and mounts"]
+    async fn software_tpm_root_composition_failure_unwinds_before_measurement() {
+        let (temp, mounted, _sealed, _authority) = mounted_fixture().await;
+        mounted.unmount().await.unwrap();
+        let descriptor_path = Path::new(super::super::initramfs::DESCRIPTOR_FILE);
+        std::fs::create_dir_all(descriptor_path.parent().unwrap()).unwrap();
+        std::fs::copy(temp.path().join("descriptor.json"), descriptor_path).unwrap();
+        let overlay = temp.path().join("config/overlay");
+        std::fs::remove_dir_all(&overlay).unwrap();
+        std::fs::write(&overlay, b"occupied").unwrap();
+        let root = temp.path().join("running-root");
+        assert!(
+            super::super::initramfs::prepare(temp.path(), &root)
+                .await
+                .is_err()
+        );
+        assert!(
+            !crate::disk::mount::util::is_mountpoint(&root)
+                .await
+                .unwrap()
+        );
+        assert!(boot_mappings().is_empty());
+        assert!(
+            !Path::new(super::super::initramfs::RUNTIME)
+                .join(super::super::initramfs::HANDOFF_FILE)
+                .exists()
+        );
+        assert_eq!(std::fs::read(overlay).unwrap(), b"occupied");
         assert_eq!(tpm::read_measurements().await.unwrap().files, [0; 32]);
     }
 

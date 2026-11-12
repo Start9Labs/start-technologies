@@ -6,9 +6,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use super::boot::{Descriptor, MountedGeneration};
+use super::boot::Descriptor;
 use super::credentials::Credentials;
 use super::memory::InitramfsMemory;
+use super::root::RootComposition;
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::filesystem::private_tmpfs::PrivateTmpfs;
 use crate::disk::mount::guard::MountGuard;
@@ -25,19 +26,22 @@ pub const HANDOFF_FILE: &str = "handoff.json";
 pub struct BootHandoff {
     pub rootfs: PathBuf,
     pub overlay: PathBuf,
+    pub working_upper: PathBuf,
     pub credentials: Credentials,
 }
 
 async fn prepare_mounted(
-    images: &Path,
-    config: &Path,
+    volume: &Path,
+    root: &Path,
     runtime: &Path,
-) -> Result<(MountedGeneration, BootHandoff), Error> {
+) -> Result<(RootComposition, BootHandoff), Error> {
+    let images = volume.join("images");
+    let config = volume.join("config");
     let memory = InitramfsMemory::protect(runtime)?;
     let descriptor: Descriptor = serde_json::from_str(&read_file_to_string(DESCRIPTOR_FILE).await?)
         .with_kind(ErrorKind::Deserialization)?;
     let mounted = descriptor
-        .mount(images, config, runtime)
+        .mount(&images, &config, runtime)
         .await?
         .ok_or_else(|| {
             Error::new(
@@ -45,11 +49,13 @@ async fn prepare_mounted(
                 ErrorKind::InvalidSignature,
             )
         })?;
-    match mounted.release_bootstrap(&memory, runtime).await {
+    let mounted = RootComposition::mount(mounted, volume, &images, &config, root, runtime).await?;
+    match mounted.verified().release_bootstrap(&memory, runtime).await {
         Ok(credentials) => {
             let handoff = BootHandoff {
-                rootfs: mounted.rootfs().to_owned(),
-                overlay: mounted.overlay().to_owned(),
+                rootfs: mounted.verified().rootfs().to_owned(),
+                overlay: mounted.verified().overlay().to_owned(),
+                working_upper: mounted.working_upper().to_owned(),
                 credentials,
             };
             Ok((mounted, handoff))
@@ -61,9 +67,9 @@ async fn prepare_mounted(
     }
 }
 
-/// Publishes bootstrap identities after verification; failures cannot select ordinary boot.
+/// Composes the running and working roots before publishing bootstrap identities.
 /// The FDE initramfs must terminate on error without entering an interactive shell.
-pub async fn prepare(images: &Path, config: &Path) -> Result<(), Error> {
+pub async fn prepare(volume: &Path, root: &Path) -> Result<(), Error> {
     let runtime = Path::new(RUNTIME);
     std::fs::DirBuilder::new().mode(0o700).create(runtime)?;
     let ram = MountGuard::mount(&PrivateTmpfs::new(), runtime, ReadWrite).await?;
@@ -74,7 +80,7 @@ pub async fn prepare(images: &Path, config: &Path) -> Result<(), Error> {
             return Err(error);
         }
     };
-    let prepared = prepare_mounted(images, config, runtime).await;
+    let prepared = prepare_mounted(volume, root, runtime).await;
     let workspace_result = workspace.unmount(false).await;
     let result = match (prepared, workspace_result) {
         (Ok((mounted, handoff)), Ok(())) => {

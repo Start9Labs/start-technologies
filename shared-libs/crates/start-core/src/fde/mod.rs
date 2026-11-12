@@ -10,4 +10,5 @@ pub mod credentials;
 pub mod initramfs;
 pub mod loader;
 pub mod memory;
+mod root;
 pub mod tpm;

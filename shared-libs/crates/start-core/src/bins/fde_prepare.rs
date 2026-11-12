@@ -6,23 +6,23 @@ use crate::prelude::*;
 
 fn arguments(mut args: VecDeque<OsString>) -> Result<(PathBuf, PathBuf), Error> {
     args.pop_front();
-    let (Some(images), Some(config), None) = (args.pop_front(), args.pop_front(), args.pop_front())
+    let (Some(volume), Some(root), None) = (args.pop_front(), args.pop_front(), args.pop_front())
     else {
         return Err(Error::new(
             eyre!(t!("error.invalid-request")),
             ErrorKind::InvalidRequest,
         ));
     };
-    Ok((images.into(), config.into()))
+    Ok((volume.into(), root.into()))
 }
 
 pub fn main(args: VecDeque<OsString>) {
-    let result = arguments(args).and_then(|(images, config)| {
+    let result = arguments(args).and_then(|(volume, root)| {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .with_kind(ErrorKind::Unknown)?
-            .block_on(crate::fde::initramfs::prepare(&images, &config))
+            .block_on(crate::fde::initramfs::prepare(&volume, &root))
     });
     if let Err(error) = result {
         eprintln!("{error}");

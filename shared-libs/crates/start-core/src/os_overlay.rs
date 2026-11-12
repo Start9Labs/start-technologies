@@ -22,6 +22,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::disk::mount::filesystem::block_dev::BlockDev;
+use crate::disk::mount::filesystem::overlayfs::OverlayFs;
 use crate::disk::mount::filesystem::{FileSystem, ReadOnly};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
 use crate::prelude::*;
@@ -42,6 +43,21 @@ pub const SIGNATURE_FILE: &str = "manifest.sig";
 pub const ROOTFS_VERITY_FILE: &str = "rootfs.verity";
 pub const OVERLAY_VERITY_FILE: &str = "overlay.verity";
 pub const VERITY_BLOCK_SIZE: u64 = 4096;
+
+/// The lower must contain configuration alone, never public-root defaults.
+/// Supports complete raw-upper snapshots without overlayfs metadata extensions.
+/// Read-only remounts must pass flags without filesystem options.
+pub(crate) fn working_filesystem(
+    lower: &Path,
+    upper: &Path,
+    work: &Path,
+) -> OverlayFs<PathBuf, PathBuf, PathBuf> {
+    OverlayFs::new(vec![lower.to_owned()], upper.to_owned(), work.to_owned()).with_options([
+        "index=off",
+        "metacopy=off",
+        "redirect_dir=off",
+    ])
+}
 
 /// dm-verity format 1, SHA-256, 4096-byte data/hash blocks, empty salt, no superblock.
 ///
@@ -974,22 +990,13 @@ mod tests {
         use crate::disk::mount::guard::MountGuard;
 
         async fn mount_view(
-            lower: &[&Path],
-            upper: &Path,
-            work: &Path,
+            filesystem: &impl FileSystem,
             view: &Path,
         ) -> crate::util::GeneralBoxedGuard {
-            for path in [upper, work, view] {
-                fs::create_dir(path).unwrap();
-            }
-            let lower = lower
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join(":");
-            tokio::process::Command::new("mount").args(["-t", "overlay", "overlay", "-o"])
-                .arg(format!("lowerdir={lower},upperdir={},workdir={},index=off,metacopy=off,redirect_dir=off", upper.display(), work.display()))
-                .arg(view).invoke(ErrorKind::Filesystem).await.unwrap();
+            filesystem
+                .mount(view, crate::disk::mount::filesystem::ReadWrite)
+                .await
+                .unwrap();
             let view = view.to_owned();
             crate::util::GeneralBoxedGuard::new(move || {
                 let _ = std::process::Command::new("umount").arg(view).output();
@@ -1107,15 +1114,21 @@ mod tests {
         .await;
         let running1 = temp.path().join("root1");
         let running1_guard = mount_view(
-            &[&lower1, &base_mount],
-            &temp.path().join("runtime-upper1"),
-            &temp.path().join("runtime-work1"),
+            &OverlayFs::new(
+                vec![&lower1, &base_mount],
+                temp.path().join("runtime-upper1"),
+                temp.path().join("runtime-work1"),
+            ),
             &running1,
         )
         .await;
         let upper1 = temp.path().join("upper1");
         let view1 = temp.path().join("view1");
-        let view1_guard = mount_view(&[&lower1], &upper1, &temp.path().join("work1"), &view1).await;
+        let view1_guard = mount_view(
+            &working_filesystem(&lower1, &upper1, &temp.path().join("work1")),
+            &view1,
+        )
+        .await;
         fs::remove_file(view1.join("override")).unwrap();
         fs::set_permissions(view1.join("opaque"), fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(view1.join("added"), b"first commit").unwrap();
@@ -1137,9 +1150,11 @@ mod tests {
         .await;
         let running2 = temp.path().join("root2");
         let running2_guard = mount_view(
-            &[&lower2, &base_mount],
-            &temp.path().join("runtime-upper2"),
-            &temp.path().join("runtime-work2"),
+            &OverlayFs::new(
+                vec![&lower2, &base_mount],
+                temp.path().join("runtime-upper2"),
+                temp.path().join("runtime-work2"),
+            ),
             &running2,
         )
         .await;
@@ -1154,7 +1169,11 @@ mod tests {
         );
         let upper2 = temp.path().join("upper2");
         let view2 = temp.path().join("view2");
-        let view2_guard = mount_view(&[&lower2], &upper2, &temp.path().join("work2"), &view2).await;
+        let view2_guard = mount_view(
+            &working_filesystem(&lower2, &upper2, &temp.path().join("work2")),
+            &view2,
+        )
+        .await;
         fs::write(view2.join("added"), b"second commit").unwrap();
         fs::set_permissions(view2.join("opaque"), fs::Permissions::from_mode(0o750)).unwrap();
         let prepared = PreparedGeneration::prepare_working(&lower2, &upper2, &rootfs, &store, &key)
@@ -1172,9 +1191,11 @@ mod tests {
         .await;
         let running3 = temp.path().join("root3");
         let running3_guard = mount_view(
-            &[&lower3, &base_mount],
-            &temp.path().join("runtime-upper3"),
-            &temp.path().join("runtime-work3"),
+            &OverlayFs::new(
+                vec![&lower3, &base_mount],
+                temp.path().join("runtime-upper3"),
+                temp.path().join("runtime-work3"),
+            ),
             &running3,
         )
         .await;

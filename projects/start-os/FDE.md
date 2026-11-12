@@ -38,13 +38,15 @@ Activation makes the compatible rootfs, overlay and policy generation durable be
 
 Selection reuses `os_overlay::verified_generations` ordering and admits the newest candidate whose authenticated policy matches the observed boot plus its anticipated filesystem event. A newer signed filesystem without a matching boot authorization does not displace an older compatible generation. `Descriptor::mount` opens and fully reads both signed verity mappings and mounts them as read-only SquashFS. `MountedGeneration::measure` checks the live boot again before extending PCR15. Mount guards remove mappings after successful unmount, or transfer both resources to the boot owner for handoff. Selection alone cannot release credentials; dependent mounts must end before their mappings close.
 
-`startbox start-fde-prepare` is an internal preparation entrypoint for the authenticated FDE initramfs. It reads the descriptor from the containing image, not disk configuration; guarded release measures both protected filesystems before decrypting the bootstrap snapshot. Its caller must terminate on error without ordinary-boot fallback or an interactive shell. The normal initramfs does not invoke it.
+`startbox start-fde-prepare` takes the OS-volume mount and target root mountpoint. It reads the descriptor from the authenticated FDE initramfs, not disk configuration; guarded release composes the running and working roots before measuring the protected filesystems and decrypting the bootstrap snapshot. Its caller must terminate on error without ordinary-boot fallback or an interactive shell. The normal initramfs does not invoke it.
 
 The preparation helper excludes active swap and piped core handlers, disables its own dumpability and inherits a zero core limit into TPM tools. These conditions must remain stable until release finishes. Runtime identities and TPM workspaces use private `noswap` tmpfs mounts; the private handoff remains RAM-only after helper exit. This initramfs protection does not establish the separate OS-boot-lifetime volume-key cache or protect later daemon handling by itself.
 
 ## Persistent overlay
 
 The persistent overlay is an independently signed squashfs. Boot uses immutable verified rootfs and overlay images with a temporary writable root layer. `/media/startos/config/overlay` exposes a separate editable view of the overlay squashfs with its own RAM-backed upper layer; editing that view must not mutate an active lower layer of the running root.
+
+The running root layers the immutable configuration over the immutable public image, with a separate RAM upper for runtime writes. The configuration-only working mount lives inside the running root's config bind. `BootHandoff::working_upper` records its raw upper path for snapshot preparation. All composed mounts end before verified lower mappings close.
 
 OS operations commit after editing; administrators may make manual edits and explicitly commit. Writers must quiesce while commit captures the working view. A commit publishes a complete, durable signed generation before attempting to remove older generations. Cleanup failure does not undo successful publication. Unpublished staging generations are not boot candidates.
 

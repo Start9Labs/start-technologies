@@ -9,7 +9,8 @@ for test in \
     fde::boot::tests::software_tpm_mounted_generation_measures_before_unseal_and_closes \
     fde::boot::tests::software_tpm_mounted_generation_rejects_boot_change_before_measurement \
     fde::boot::tests::software_tpm_initramfs_prepares_protected_bootstrap_handoff \
-    fde::boot::tests::software_tpm_initramfs_failure_publishes_no_handoff; do
+    fde::boot::tests::software_tpm_initramfs_failure_publishes_no_handoff \
+    fde::boot::tests::software_tpm_root_composition_failure_unwinds_before_measurement; do
     docker run --rm --privileged --network none --tmpfs /var/tmp:rw,nosuid,nodev,mode=0700 \
         --mount "type=bind,source=$binary,target=/fde-tests,readonly" \
         "$image" fde-tpm-run /fde-tests "$test"

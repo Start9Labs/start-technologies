@@ -16,11 +16,22 @@ pub struct OverlayFs<P0: AsRef<Path>, P1: AsRef<Path>, P2: AsRef<Path>> {
     lower: Vec<P0>,
     upper: P1,
     work: P2,
+    options: Vec<String>,
 }
 impl<P0: AsRef<Path>, P1: AsRef<Path>, P2: AsRef<Path>> OverlayFs<P0, P1, P2> {
-    /// layers are top to bottom
+    /// Lower layers have descending priority.
     pub fn new(lower: Vec<P0>, upper: P1, work: P2) -> Self {
-        Self { lower, upper, work }
+        Self {
+            lower,
+            upper,
+            work,
+            options: Vec::new(),
+        }
+    }
+
+    pub fn with_options(mut self, options: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.options = options.into_iter().map(Into::into).collect();
+        self
     }
 }
 impl<P0: AsRef<Path> + Send + Sync, P1: AsRef<Path> + Send + Sync, P2: AsRef<Path> + Send + Sync>
@@ -41,6 +52,12 @@ impl<P0: AsRef<Path> + Send + Sync, P1: AsRef<Path> + Send + Sync, P2: AsRef<Pat
             Box::new(lazy_format!("upperdir={}", self.upper.as_ref().display())),
             Box::new(lazy_format!("workdir={}", self.work.as_ref().display())),
         ]
+        .into_iter()
+        .chain(
+            self.options
+                .iter()
+                .map(|option| Box::new(option) as Box<dyn Display>),
+        )
     }
     async fn pre_mount(&self, mountpoint: &Path, _: MountType) -> Result<(), Error> {
         tokio::fs::create_dir_all(self.upper.as_ref()).await?;
@@ -94,7 +111,53 @@ impl<P0: AsRef<Path> + Send + Sync, P1: AsRef<Path> + Send + Sync, P2: AsRef<Pat
                 .as_bytes(),
         );
         sha.update(b"\0");
+        for option in &self.options {
+            sha.update(option.as_bytes());
+            sha.update(b"\0");
+        }
         Ok(sha.finalize())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn mount_identity_includes_extra_options_without_changing_default_options() {
+        let temp = tempfile::tempdir().unwrap();
+        let normal = OverlayFs::new(
+            vec![temp.path()],
+            temp.path().join("upper"),
+            temp.path().join("work"),
+        );
+        let indexed = OverlayFs::new(
+            vec![temp.path()],
+            temp.path().join("upper"),
+            temp.path().join("work"),
+        )
+        .with_options(["index=off"]);
+        let metadata = OverlayFs::new(
+            vec![temp.path()],
+            temp.path().join("upper"),
+            temp.path().join("work"),
+        )
+        .with_options(["metacopy=off"]);
+        assert_eq!(normal.mount_options().into_iter().count(), 3);
+        assert!(
+            indexed
+                .mount_options()
+                .into_iter()
+                .any(|option| option.to_string() == "index=off")
+        );
+        assert_ne!(
+            normal.source_hash().await.unwrap(),
+            indexed.source_hash().await.unwrap()
+        );
+        assert_ne!(
+            indexed.source_hash().await.unwrap(),
+            metadata.source_hash().await.unwrap()
+        );
     }
 }
 
