@@ -513,7 +513,7 @@ impl TunnelContext {
         } else {
             label
         };
-        let (previous, mapping) = self
+        let (previous, (owner, mapping)) = self
             .db
             .mutate(|db| {
                 db.as_port_forwards_mut().mutate(|pf| {
@@ -521,20 +521,18 @@ impl TunnelContext {
                         Error::new(eyre!(t!("tunnel.api.route-not-found")), ErrorKind::NotFound)
                     })?;
                     let previous = entry.clone();
-                    let mapping = claim_sni_fallback(entry, target, auto, &default_label)?;
-                    Ok((previous, mapping))
+                    let claimed = claim_sni_fallback(entry, target, auto, &default_label)?;
+                    Ok((previous, claimed))
                 })
             })
             .await
             .result
             .map_err(|_| crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN)?;
         if mapping.enabled {
-            if let Err(code) = self.sni.register_fallback_protocol(
-                MappingProtocol::TcpUdp,
-                *source.ip(),
-                source.port(),
-                target,
-            ) {
+            if let Err(code) =
+                self.sni
+                    .register_fallback_protocol(owner, *source.ip(), source.port(), target)
+            {
                 self.restore_persisted_forward(source, Some(previous)).await;
                 return Err(code);
             }
@@ -545,7 +543,7 @@ impl TunnelContext {
                     self,
                     LeaseKey::SniFallback {
                         source,
-                        protocol: MappingProtocol::TcpUdp,
+                        protocol: owner,
                     },
                     lt,
                 );
@@ -762,22 +760,24 @@ fn claim_sni_fallback(
     target: SocketAddrV4,
     auto: bool,
     default_label: &Option<String>,
-) -> Result<crate::tunnel::db::SniRoute, Error> {
+) -> Result<(MappingProtocol, crate::tunnel::db::SniRoute), Error> {
+    let mut owner = MappingProtocol::TcpUdp;
     if let Some((protocol, route)) = entry.overlapping_route(MappingProtocol::TcpUdp, None) {
-        if protocol != MappingProtocol::TcpUdp || route_conflicts(route, target, auto) {
+        let legacy_renewal = protocol != MappingProtocol::TcpUdp && route.target == target;
+        if !legacy_renewal
+            && (protocol != MappingProtocol::TcpUdp || route_conflicts(route, target, auto))
+        {
             return Err(Error::new(
                 eyre!(t!("tunnel.forward.fallback-conflict")),
                 ErrorKind::InvalidRequest,
             ));
         }
         if auto && manual_route_matches(route, target) {
-            return Ok(route.clone());
+            return Ok((protocol, route.clone()));
         }
+        owner = protocol;
     }
-    let fallback = &mut entry
-        .bindings_mut(MappingProtocol::TcpUdp)
-        .unwrap()
-        .fallback;
+    let fallback = &mut entry.bindings_mut(owner).unwrap().fallback;
     let (label, enabled, auto) = sni_route_fields(fallback.as_ref(), auto, default_label);
     let mapping = crate::tunnel::db::SniRoute {
         target,
@@ -786,7 +786,7 @@ fn claim_sni_fallback(
         auto,
     };
     *fallback = Some(mapping.clone());
-    Ok(mapping)
+    Ok((owner, mapping))
 }
 
 fn restore_forward_entry(forwards: &mut PortForwards, source: SocketAddrV4, forward: PortForward) {
@@ -1495,7 +1495,8 @@ mod tests {
     fn combined_fallback_is_one_owned_record_and_rejects_split_fallbacks() {
         let target = "10.59.0.2:443".parse().unwrap();
         let mut entry = PortForward::empty_sni();
-        let mapping = claim_sni_fallback(&mut entry, target, false, &None).unwrap();
+        let (owner, mapping) = claim_sni_fallback(&mut entry, target, false, &None).unwrap();
+        assert_eq!(owner, MappingProtocol::TcpUdp);
         assert!(!mapping.auto);
         assert_eq!(entry.sni_routes().count(), 1);
         entry
@@ -1505,18 +1506,35 @@ mod tests {
             .as_mut()
             .unwrap()
             .enabled = false;
-        let mapping =
+        let (_, mapping) =
             claim_sni_fallback(&mut entry, target, true, &Some("automatic".into())).unwrap();
         assert!(mapping.label.is_none());
         assert!(!mapping.enabled);
         assert!(!mapping.auto);
+        let other_device = "10.59.0.3:443".parse().unwrap();
         for transport in TransportProtocol::ALL {
             let mut entry = PortForward::empty_sni();
             entry.bindings_mut(transport).unwrap().fallback = Some(mapping.clone());
             let previous = serde_json::to_value(&entry).unwrap();
-            assert!(claim_sni_fallback(&mut entry, target, false, &None).is_err());
+            assert!(claim_sni_fallback(&mut entry, other_device, false, &None).is_err());
             assert_eq!(serde_json::to_value(&entry).unwrap(), previous);
         }
+    }
+
+    #[test]
+    fn legacy_single_transport_fallback_renews_under_its_owner() {
+        let target = "10.59.0.2:443".parse().unwrap();
+        let mut entry: PortForward = serde_json::from_value(serde_json::json!({
+            "kind": "sni",
+            "routes": {},
+            "fallback": { "target": "10.59.0.2:443", "label": "Automatic", "enabled": true, "auto": true }
+        }))
+        .unwrap();
+        let (owner, mapping) =
+            claim_sni_fallback(&mut entry, target, true, &Some("Automatic".into())).unwrap();
+        assert_eq!(owner, MappingProtocol::Tcp);
+        assert!(mapping.auto);
+        assert!(entry.bindings(MappingProtocol::TcpUdp).unwrap().fallback.is_none());
     }
 
     #[tokio::test]
