@@ -38,6 +38,7 @@ import {
   getOwnHost,
 } from '@start9labs/start-core/util/GetHostInfo'
 import { GetStatus } from '@start9labs/start-core/util/GetStatus'
+import { GetHttpProxyAttachments } from '@start9labs/start-core/util/GetHttpProxyAttachments'
 import * as patterns from '@start9labs/start-core/util/patterns'
 import { Backups } from './backup/Backups'
 import { Dependencies, Dependency } from './dependencies'
@@ -1086,6 +1087,16 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       Value,
       Variants,
       plugin: {
+        httpProxy: this.ifPluginEnabled('http-proxy-v0' as const, {
+          /** Replaces this provider's published profiles; settings remain package-owned. */
+          setProfiles: (
+            effects: T.Effects,
+            profiles: T.HttpProxyProfileInput[],
+          ) => effects.plugin.httpProxy.setProfiles({ profiles }),
+          /** The reader supports `once`, `const`, `watch`, `onChange`, and `waitFor`. */
+          getAttachments: (effects: T.Effects) =>
+            new GetHttpProxyAttachments(effects),
+        }),
         url: this.ifPluginEnabled('url-v0' as const, {
           register: (
             effects: T.Effects,

@@ -56,6 +56,7 @@ function hostWith(
     net: { assignedPort: 80, assignedSslPort: 443 },
     addresses: binding,
     interfaces: {},
+    proxyChain: [],
   } as BindInfo
   const host = {
     bindings: { 80: bindInfo },

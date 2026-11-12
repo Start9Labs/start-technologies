@@ -272,6 +272,21 @@ export type Effects = {
   }): Promise<null>
 
   plugin: {
+    httpProxy: {
+      /** Publishes the provider's complete selectable profile list. */
+      setProfiles(
+        options: RPC.RpcParamType<
+          RPC.Effects,
+          'plugin.http-proxy.set-profiles'
+        >,
+      ): Promise<null>
+      /** Reads assignments; the callback signals that a fresh read is needed. */
+      getAttachments(options: {
+        callback?: () => void
+      }): Promise<
+        RPC.RpcReturnType<RPC.Effects, 'plugin.http-proxy.get-attachments'>
+      >
+    }
     url: {
       register(options: { tableAction: ActionId }): Promise<null>
       exportUrl(options: {

@@ -44,6 +44,7 @@ type Request = {
     eventId?: string
     prefill?: Partial<Input> | null
     input?: Input
+    callback?: number | null
   }
 }
 
@@ -94,6 +95,30 @@ function attachAction(ran: jest.Mock) {
     },
   )
 }
+
+test('HTTP proxy effects publish profiles and register attachment callbacks', async () => {
+  const requests = mockHostTransport(async request =>
+    request.method.endsWith('get-attachments') ? [] : null,
+  )
+  const callbacks = new CallbackHolder()
+  const effects = makeEffects({ eventId: null, callbacks })
+  const profiles = [
+    { id: 'standard', name: 'Standard', protocols: ['http1' as const] },
+  ]
+  await effects.plugin.httpProxy.setProfiles({ profiles })
+  const changed = jest.fn()
+  expect(
+    await effects.plugin.httpProxy.getAttachments({ callback: changed }),
+  ).toEqual([])
+  expect(requests[0].method).toBe('plugin.http-proxy.set-profiles')
+  expect(requests[0].params).toEqual({ profiles })
+  expect(requests[1].method).toBe('plugin.http-proxy.get-attachments')
+  const callback = requests[1].params.callback
+  expect(typeof callback).toBe('number')
+  await callbacks.callCallback(callback!, [])
+  expect(changed).toHaveBeenCalledTimes(1)
+  callbacks.leaveContext()
+})
 
 describe('makeEffects event ID serialization', () => {
   let requests: Request[]
