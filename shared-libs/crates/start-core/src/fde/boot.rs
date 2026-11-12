@@ -18,6 +18,7 @@ use crate::disk::mount::guard::GenericMountGuard;
 use crate::os_overlay::{self, Manifest, PreparedGeneration, VerifiedGeneration, VerityMount};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
+use crate::util::future::complete_owned_operation;
 use crate::util::io::write_file_private_atomic;
 use crate::util::serde::Der64;
 
@@ -150,7 +151,28 @@ impl Descriptor {
 
     /// Mounts authenticated public build providers independently of live TPM state.
     /// Source admission grants neither bootstrap release nor configuration-provider authority.
+    /// Cancellation retains setup; the caller reserves mountpoints through abandoned-result cleanup.
     pub async fn mount_source(
+        &self,
+        images: &Path,
+        config: &Path,
+        mountpoint: &Path,
+    ) -> Result<Option<super::source::BuildSource>, Error> {
+        let (descriptor, images, config, mountpoint) = (
+            self.clone(),
+            images.to_owned(),
+            config.to_owned(),
+            mountpoint.to_owned(),
+        );
+        complete_owned_operation(async move {
+            descriptor
+                .mount_source_inner(&images, &config, &mountpoint)
+                .await
+        })
+        .await
+    }
+
+    async fn mount_source_inner(
         &self,
         images: &Path,
         config: &Path,
@@ -500,9 +522,15 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
-    #[tokio::test]
-    #[ignore = "requires software TPM, kernel verity/mounts and a genuine FDE_SOURCE_IMAGE"]
-    async fn verified_build_source_uses_public_providers_and_packaged_runtime_read_only() {
+    struct SourceFixture {
+        temp: tempfile::TempDir,
+        descriptor: Descriptor,
+        prepared: PreparedGeneration,
+        authority: PKey<openssl::pkey::Private>,
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn source_fixture() -> SourceFixture {
         let image =
             std::env::var_os("FDE_SOURCE_IMAGE").expect("Provide genuine OS SquashFS image");
         let temp = tempfile::tempdir_in("/var/tmp").unwrap();
@@ -512,17 +540,106 @@ mod tests {
         std::fs::create_dir(&images).unwrap();
         std::fs::create_dir_all(raw.join("usr/bin")).unwrap();
         std::fs::write(raw.join("usr/bin/node"), b"configuration provider override").unwrap();
-        let rootfs = images.join("image.rootfs");
+        let rootfs_name = "image.rootfs";
+        let rootfs = images.join(rootfs_name);
         std::fs::copy(&image, &rootfs).unwrap();
         let key = crate::util::crypto::gen_nistp256().unwrap();
         let authority = crate::util::crypto::gen_nistp256().unwrap();
         let descriptor =
-            Descriptor::new("image.rootfs".into(), public(&key), public(&authority)).unwrap();
+            Descriptor::new(rootfs_name.into(), public(&key), public(&authority)).unwrap();
         std::fs::create_dir_all(generation_store(&config)).unwrap();
         let prepared =
             PreparedGeneration::import_raw(&raw, &rootfs, &generation_store(&config), &key)
                 .await
                 .unwrap();
+        SourceFixture {
+            temp,
+            descriptor,
+            prepared,
+            authority,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires genuine FDE_SOURCE_IMAGE and FDE_SOURCE_MOUNT_GATE with native mount gate on PATH"]
+    async fn cancelled_source_admission_reclaims_completed_native_runtime_mount() {
+        let SourceFixture {
+            temp,
+            descriptor,
+            prepared,
+            ..
+        } = source_fixture().await;
+        prepared.publish().await.unwrap();
+        let gate = PathBuf::from(
+            std::env::var_os("FDE_SOURCE_MOUNT_GATE").expect("Provide native mount gate directory"),
+        );
+        let images = temp.path().join("images");
+        let config = temp.path().join("config");
+        let mounted_at = temp.path().join("cancelled-source");
+        let runtime = mounted_at.join("runtime");
+        std::fs::write(gate.join("target"), runtime.as_os_str().as_encoded_bytes()).unwrap();
+        tokio::process::Command::new("mkfifo")
+            .arg(gate.join("release"))
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+        let before = boot_mappings();
+        let pending =
+            tokio::spawn(
+                async move { descriptor.mount_source(&images, &config, &mounted_at).await },
+            );
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            while !gate.join("entered").exists() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            crate::disk::mount::util::is_mountpoint(&runtime)
+                .await
+                .unwrap()
+        );
+        pending.abort();
+        assert!(matches!(pending.await, Err(error) if error.is_cancelled()));
+        tokio::fs::write(gate.join("release"), b"\n").await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            loop {
+                if boot_mappings() == before
+                    && !crate::disk::mount::util::is_mountpoint(&runtime)
+                        .await
+                        .unwrap()
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        for name in ["source", "runtime", "rootfs"] {
+            assert!(
+                !crate::disk::mount::util::is_mountpoint(runtime.parent().unwrap().join(name))
+                    .await
+                    .unwrap()
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires software TPM, kernel verity/mounts and a genuine FDE_SOURCE_IMAGE"]
+    async fn verified_build_source_uses_public_providers_and_packaged_runtime_read_only() {
+        let SourceFixture {
+            temp,
+            descriptor,
+            prepared,
+            authority,
+        } = source_fixture().await;
+        let images = temp.path().join("images");
+        let config = temp.path().join("config");
+        let rootfs = descriptor.rootfs_path(&images).unwrap();
         let expected = tpm::read_measurements()
             .await
             .unwrap()
