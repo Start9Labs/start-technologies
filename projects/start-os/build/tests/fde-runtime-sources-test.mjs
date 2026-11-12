@@ -20,7 +20,7 @@ import test from 'node:test'
 import {
   admitInitramfsSources,
   admitRuntimeSources,
-} from '../lib/scripts/fde-harden-initramfs.mjs'
+} from '../lib/scripts/fde-initramfs-control.mjs'
 import { instrumentProducer } from '../lib/scripts/fde-initramfs-producer.mjs'
 
 const fixture = resolve(process.argv[2] ?? '')
@@ -279,7 +279,7 @@ test('the native entrypoint gates its first source operation on original-provide
   assert.ok(first > 0 && end > first)
   const callback = join(temp, 'admit.mjs')
   const module = fileURLToPath(
-    new URL('../lib/scripts/fde-harden-initramfs.mjs', import.meta.url),
+    new URL('../lib/scripts/fde-initramfs-control.mjs', import.meta.url),
   )
   await writeFile(
     callback,

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { resolve } from 'node:path'
 
-import { admitInitramfsSources } from './fde-harden-initramfs.mjs'
+import { admitInitramfsSources } from './fde-initramfs-control.mjs'
 
 if (process.argv.length !== 3)
   throw Error(

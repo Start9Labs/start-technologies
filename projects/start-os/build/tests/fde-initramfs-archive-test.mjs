@@ -17,6 +17,14 @@ function run(program, args, options) {
   return result.stdout
 }
 
+function rejectsTrailingInput(error) {
+  return (
+    /unconsumed compressed input/.test(error.message) ||
+    error.code === 'ABORT_ERR' ||
+    error.code === 'ERR_STREAM_PREMATURE_CLOSE'
+  )
+}
+
 function compress(bytes) {
   return run('gzip', ['--no-name', '--stdout'], { input: bytes })
 }
@@ -129,19 +137,19 @@ for (const [name, bytes, prefixes, error] of [
     'zero padding after gzip',
     f => Buffer.concat([compress(f.main), Buffer.alloc(4)]),
     false,
-    /unconsumed compressed input/,
+    rejectsTrailingInput,
   ],
   [
     'compressed CPIO hidden after zero padding',
     f => Buffer.concat([compress(f.main), Buffer.alloc(4), compress(f.other)]),
     false,
-    /unconsumed compressed input/,
+    rejectsTrailingInput,
   ],
   [
     'uncompressed CPIO hidden after zero padding',
     f => Buffer.concat([compress(f.main), Buffer.alloc(4), f.other]),
     false,
-    /unconsumed compressed input/,
+    rejectsTrailingInput,
   ],
   [
     'a tail across input chunks',

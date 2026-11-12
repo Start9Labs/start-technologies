@@ -19,7 +19,7 @@ import { once } from 'node:events'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { harden } from '../lib/scripts/fde-harden-initramfs.mjs'
+import { harden } from '../lib/scripts/fde-initramfs-control.mjs'
 import { replaceOnce } from '../lib/scripts/fde-reviewed-source.mjs'
 
 const fixture = resolve(process.argv[2] ?? '')
