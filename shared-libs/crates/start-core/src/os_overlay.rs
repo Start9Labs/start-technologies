@@ -302,7 +302,7 @@ async fn digest_file(path: &Path) -> Result<[u8; 32], Error> {
     Ok(writer.finish().0.finalize().into())
 }
 
-async fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>, Error> {
+pub(crate) async fn read_generation_file(path: &Path, max: usize) -> Result<Vec<u8>, Error> {
     let mut bytes = Vec::new();
     regular_file(path)
         .await?
@@ -315,16 +315,22 @@ async fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>, Error> {
     Ok(bytes)
 }
 
+pub(crate) async fn read_manifest(path: &Path, key: &PKeyRef<Public>) -> Result<Manifest, Error> {
+    let manifest = Manifest::from_bytes(
+        &read_generation_file(&path.join(MANIFEST_FILE), MANIFEST_LEN).await?,
+    )?;
+    let signature = read_generation_file(&path.join(SIGNATURE_FILE), 72).await?;
+    manifest.verify(&signature, key)?;
+    Ok(manifest)
+}
+
 async fn verify_generation(
     path: &Path,
     rootfs: &Path,
     rootfs_sha256: &[u8; 32],
     key: &PKeyRef<Public>,
 ) -> Result<Manifest, Error> {
-    let manifest =
-        Manifest::from_bytes(&read_bounded(&path.join(MANIFEST_FILE), MANIFEST_LEN).await?)?;
-    let signature = read_bounded(&path.join(SIGNATURE_FILE), 72).await?;
-    manifest.verify(&signature, key)?;
+    let manifest = read_manifest(path, key).await?;
     if &manifest.rootfs_sha256 != rootfs_sha256
         || manifest.overlay_sha256 != digest_file(&path.join(OVERLAY_FILE)).await?
     {
@@ -535,10 +541,23 @@ pub async fn select_latest(
     rootfs: &Path,
     key: &PKeyRef<Public>,
 ) -> Result<Option<VerifiedGeneration>, Error> {
+    Ok(verified_generations(store, rootfs, key)
+        .await?
+        .into_iter()
+        .next())
+}
+
+/// Returns complete authenticated generations, newest first with deterministic ties.
+/// Returned paths require the same lifetime protection as `select_latest`.
+pub async fn verified_generations(
+    store: &Path,
+    rootfs: &Path,
+    key: &PKeyRef<Public>,
+) -> Result<Vec<VerifiedGeneration>, Error> {
     require_p256(key)?;
     let rootfs_sha256 = digest_file(rootfs).await?;
     let mut entries = tokio::fs::read_dir(store).await?;
-    let mut selected: Option<(SystemTime, VerifiedGeneration)> = None;
+    let mut verified = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
         if !is_generation(&entry.file_name()) || !entry.file_type().await?.is_dir() {
             continue;
@@ -548,14 +567,15 @@ pub async fn select_latest(
             continue;
         };
         let timestamp = entry.metadata().await?.modified()?;
-        if selected
-            .as_ref()
-            .is_none_or(|(time, generation)| (timestamp, &path) > (*time, &generation.path))
-        {
-            selected = Some((timestamp, VerifiedGeneration { path, manifest }));
-        }
+        verified.push((timestamp, VerifiedGeneration { path, manifest }));
     }
-    Ok(selected.map(|(_, generation)| generation))
+    verified.sort_by(|(left_time, left), (right_time, right)| {
+        (right_time, &right.path).cmp(&(left_time, &left.path))
+    });
+    Ok(verified
+        .into_iter()
+        .map(|(_, generation)| generation)
+        .collect())
 }
 
 /// Removes other published generation directories after a durable publication.
@@ -794,6 +814,15 @@ mod tests {
                 .unwrap()
                 .path,
             newest
+        );
+        assert_eq!(
+            verified_generations(&store, &rootfs, &public)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|generation| generation.path)
+                .collect::<Vec<_>>(),
+            vec![newest.clone(), older.clone()]
         );
         prune(&store, &[older.clone(), newest.clone()])
             .await

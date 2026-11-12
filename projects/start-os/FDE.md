@@ -32,6 +32,12 @@ The helper creates a UKI and a `.pcr11` companion in a private staging generatio
 
 Activation makes the compatible rootfs, overlay and policy generation durable before replacing the complete EFI image on the ESP. Old dependencies remain until activation is durable. The old UKI may select only overlays with a compatible rootfs and an authorization for that boot/filesystem combination. FAT replacement does not guarantee boot availability across a power cut; signature and TPM failures remain fail-closed. The supported profile excludes external stub inputs by requiring empty PCRs 12 and 13 when authorizing. This excludes external parameters, credentials, configuration/system extensions, nondefault UKI profiles and addons; public boot metadata cannot authorize them.
 
+## Boot selection
+
+`fde::boot::Descriptor` pins one rootfs filename and the manifest/policy verification keys inside the signed initramfs. Unsigned configuration cannot replace those keys or choose a non-FDE boot mode. Complete generations live under `config/fde/generations`; their public policy files remain outside the hashed configuration image to avoid a filesystem-policy hash cycle.
+
+Selection reuses `os_overlay::verified_generations` ordering and admits the newest candidate whose authenticated policy matches the observed boot plus its anticipated filesystem event. A newer signed filesystem without a matching boot authorization does not displace an older compatible generation. Selection alone cannot release credentials: the early-boot owner must open and fully read both signed verity mappings before extending PCR15, and retain those mappings through dependent mounts.
+
 ## Persistent overlay
 
 The persistent overlay is an independently signed squashfs. Boot uses immutable verified rootfs and overlay images with a temporary writable root layer. `/media/startos/config/overlay` exposes a separate editable view of the overlay squashfs with its own RAM-backed upper layer; editing that view must not mutate an active lower layer of the running root.

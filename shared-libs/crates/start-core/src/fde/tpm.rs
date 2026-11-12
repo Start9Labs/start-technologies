@@ -79,7 +79,7 @@ macro_rules! boot_measurements {
 
         /// Measurement inputs for the direct firmware → shim → UKI profile.
         /// PCRs 12 and 13 must be empty; external stub inputs are excluded.
-        #[derive(Clone, Debug, Serialize, Deserialize)]
+        #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
         #[serde(rename_all = "camelCase", deny_unknown_fields)]
         pub struct BootMeasurements {
             $(pub $field: [u8; 32]),+
@@ -140,6 +140,26 @@ pub(crate) fn extend_pcr(pcr: &[u8; 32], event: &[u8; 32]) -> [u8; 32] {
 
 pub fn filesystem_pcr(event: &[u8; 32]) -> [u8; 32] {
     extend_pcr(&[0; 32], event)
+}
+
+fn require_unmeasured_filesystems(pcr: &[u8; 32]) -> Result<(), Error> {
+    if pcr != &[0; 32] {
+        return Err(Error::new(
+            eyre!("{}", t!("fde.tpm.pcr-already-used")),
+            ErrorKind::Bios,
+        ));
+    }
+    Ok(())
+}
+
+impl BootMeasurements {
+    /// Predicts the first filesystem measurement without extending PCR 15.
+    pub fn with_filesystems(&self, rootfs: &[u8; 32], overlay: &[u8; 32]) -> Result<Self, Error> {
+        require_unmeasured_filesystems(&self.files)?;
+        let mut measurements = self.clone();
+        measurements.files = filesystem_pcr(&filesystem_event(rootfs, overlay));
+        Ok(measurements)
+    }
 }
 
 struct Workspace(TmpDir);
@@ -302,15 +322,18 @@ pub async fn authorize(
     Ok(Authorization { policy, signature })
 }
 
+/// Malformed signatures are invalid; verifier initialization errors propagate.
 pub fn verify_authorization(
     authorization: &Authorization,
     authority: &PKey<Public>,
 ) -> Result<bool, Error> {
     let mut verifier = Verifier::new(MessageDigest::sha256(), authority)?;
-    Ok(verifier.verify_oneshot(
-        &authorization.signature,
-        &authorization_message(&authorization.policy),
-    )?)
+    Ok(verifier
+        .verify_oneshot(
+            &authorization.signature,
+            &authorization_message(&authorization.policy),
+        )
+        .unwrap_or(false))
 }
 
 /// Creates a TPM-bound object with policy-only authorization and encrypted input.
@@ -530,12 +553,7 @@ pub async fn read_measurements() -> Result<BootMeasurements, Error> {
 
 pub async fn measure_filesystems(event: &[u8; 32]) -> Result<(), Error> {
     let workspace = Workspace::new().await?;
-    if read_measurements().await?.files != [0; 32] {
-        return Err(Error::new(
-            eyre!("{}", t!("fde.tpm.pcr-already-used")),
-            ErrorKind::Bios,
-        ));
-    }
+    require_unmeasured_filesystems(&read_measurements().await?.files)?;
     workspace
         .run(
             "tpm2_pcrextend",
@@ -591,6 +609,17 @@ mod tests {
     }
 
     #[test]
+    fn filesystem_prediction_preserves_the_boot_and_rejects_repeated_measurement() {
+        let mut current = BootMeasurements::from_bytes(&vec![0; PCR_REGISTERS.len() * 32]).unwrap();
+        current.applications = [4; 32];
+        let predicted = current.with_filesystems(&[1; 32], &[2; 32]).unwrap();
+        assert_eq!(current.files, [0; 32]);
+        assert_eq!(predicted.applications, current.applications);
+        assert_ne!(predicted.files, current.files);
+        assert!(predicted.with_filesystems(&[1; 32], &[2; 32]).is_err());
+    }
+
+    #[test]
     fn pcr_extension_matches_the_sha256_known_vector() {
         let expected: [u8; 32] =
             hex::decode("f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b")
@@ -624,6 +653,15 @@ mod tests {
         authorization.policy[0] ^= 1;
         assert!(!verify_authorization(&authorization, &public_key(&key).unwrap()).unwrap());
         authorization.policy[0] ^= 1;
+        for signature in [Vec::new(), vec![0], vec![0x30, 0], vec![0xff; 72]] {
+            assert!(
+                !verify_authorization(
+                    &Authorization { policy, signature },
+                    &public_key(&key).unwrap()
+                )
+                .unwrap()
+            );
+        }
         let other_key = crate::net::ssl::gen_nistp256().unwrap();
         assert!(!verify_authorization(&authorization, &public_key(&other_key).unwrap()).unwrap());
         for reference in [
