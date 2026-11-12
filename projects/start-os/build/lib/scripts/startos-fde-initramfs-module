@@ -7,6 +7,7 @@ mount_premount()
 
 local_mount_root()
 {
+	local tpm_device=/dev/tpmrm0
 	local_top
 	[ -n "${ROOT}" ] || panic 'Missing OS volume'
 	local_device_setup "${ROOT}" 'OS volume'
@@ -15,5 +16,7 @@ local_mount_root()
 	local_premount
 	mkdir /startos
 	mount -t btrfs -o subvolid=5 "${ROOT}" /startos
-	/usr/bin/startbox start-fde-prepare /startos "${rootmnt}"
+	# TPM nodes need not have udev database entries.
+	udevadm wait --initialized=no --timeout=30 "${tpm_device}" || panic 'TPM2 device unavailable'
+	TPM2TOOLS_TCTI="device:${tpm_device}" /usr/bin/startbox start-fde-prepare /startos "${rootmnt}"
 }

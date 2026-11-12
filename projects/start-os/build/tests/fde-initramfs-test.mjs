@@ -20,6 +20,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { harden } from '../lib/scripts/fde-harden-initramfs.mjs'
+import { replaceOnce } from '../lib/scripts/fde-reviewed-source.mjs'
 
 const fixture = resolve(process.argv[2] ?? '')
 assert.ok(
@@ -536,7 +537,78 @@ test('shared libkmod reports commands without executing or probing modules', asy
   await assert.rejects(lstat(sentinel), { code: 'ENOENT' })
 })
 
+test('native device wait rejects an absent device with a zero timeout', async () => {
+  const device = `/dev/fde-absent-tpm-${process.pid}`
+  await assert.rejects(lstat(device), { code: 'ENOENT' })
+  const result = spawnSync(
+    'udevadm',
+    ['wait', '--initialized=no', '--timeout=0', device],
+    { encoding: 'utf8' },
+  )
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /Timed out/)
+})
+
 for (const shell of shells) {
+  for (const status of [0, 1])
+    test(`${shell.name}: TPM readiness ${status ? 'failure stops release' : 'pins only the preparation command transport'}`, async t => {
+      const { temp, tree } = await copyFixture(t)
+      await harden(tree)
+      const module = await readFile(join(tree, 'scripts/startos-fde'), 'utf8')
+      const declaration = module.match(/\tlocal tpm_device=.*\n/)
+      assert.ok(declaration)
+      const start = module.indexOf('\tudevadm wait ')
+      const end = module.lastIndexOf('\n}')
+      assert.ok(start > 0 && end > start)
+      const environment = join(temp, 'command-environment')
+      const parent = join(temp, 'parent-environment')
+      const requests = join(temp, 'udev-request')
+      const observation = replaceOnce(
+        module.slice(start, end),
+        '/usr/bin/startbox start-fde-prepare /startos "${rootmnt}"',
+        `env > '${environment}'`,
+      )
+      const result = spawnSync(
+        shell.program,
+        [
+          ...shell.args,
+          '-ec',
+          `
+udevadm() { printf '%s\\n' "$@" > '${requests}'; return ${status}; }
+panic() { exit 37; }
+prepare() {
+${declaration[0]}${observation}
+}
+prepare
+printf '%s' "$TPM2TOOLS_TCTI" > '${parent}'
+`,
+        ],
+        {
+          encoding: 'utf8',
+          env: { PATH: process.env.PATH, TPM2TOOLS_TCTI: 'cmd:untrusted' },
+        },
+      )
+      assert.deepEqual((await readFile(requests, 'utf8')).trim().split('\n'), [
+        'wait',
+        '--initialized=no',
+        '--timeout=30',
+        '/dev/tpmrm0',
+      ])
+      if (status) {
+        assert.equal(result.status, 37, result.stderr)
+        await assert.rejects(lstat(environment), { code: 'ENOENT' })
+        await assert.rejects(lstat(parent), { code: 'ENOENT' })
+      } else {
+        assert.equal(result.status, 0, result.stderr)
+        assert.ok(
+          (await readFile(environment, 'utf8'))
+            .split('\n')
+            .includes('TPM2TOOLS_TCTI=device:/dev/tpmrm0'),
+        )
+        assert.equal(await readFile(parent, 'utf8'), 'cmd:untrusted')
+      }
+    })
+
   for (const status of [0, 1])
     test(`${shell.name}: panic cannot fall through when reboot returns ${status}`, async t => {
       const { temp, tree } = await copyFixture(t)

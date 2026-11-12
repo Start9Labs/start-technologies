@@ -8,6 +8,7 @@ set -eu
 . /usr/share/initramfs-tools/hook-functions
 
 # The generation owner installs this hook only in its private configuration.
+manual_add_modules '=drivers/char/tpm'
 copy_exec /usr/bin/startbox
 copy_exec /usr/sbin/veritysetup
 copy_exec /usr/bin/tpm2

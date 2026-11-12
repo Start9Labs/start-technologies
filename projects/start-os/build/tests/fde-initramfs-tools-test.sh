@@ -26,10 +26,14 @@ for dir in bin sbin lib lib64; do
     ln -s "usr/$dir" "$root/$dir"
 done
 export verbose=n
+export __MODULES_TO_ADD=/tmp/fde-native-modules
+: > "$__MODULES_TO_ADD"
 
 before=$(sha256sum /usr/bin/startbox /usr/share/initramfs-tools/hook-functions)
 test -z "$(sh /fde-tools-hook prereqs)"
+test ! -s "$__MODULES_TO_ADD"
 sh /fde-tools-hook
+test "$(< "$__MODULES_TO_ADD")" = '=drivers/char/tpm'
 ldconfig -r "$root"
 test "$(sha256sum /usr/bin/startbox /usr/share/initramfs-tools/hook-functions)" = "$before"
 cmp /usr/bin/startbox "$root/usr/bin/startbox"
@@ -57,7 +61,7 @@ grep -Fq 'Verification of data area failed' /tmp/tamper.stderr
 chroot "$root" /usr/bin/tpm2_unseal --version
 
 status=0
-chroot "$root" /usr/bin/tpm2_getcap -T device:/dev/fde-no-such-tpm properties-fixed \
+TPM2TOOLS_TCTI=device:/dev/fde-no-such-tpm chroot "$root" /usr/bin/tpm2_getcap properties-fixed \
     > /tmp/device.stdout 2> /tmp/device.stderr || status=$?
 test "$status" != 0
 grep -Fq 'Failed to open specified TCTI device file /dev/fde-no-such-tpm' /tmp/device.stderr
@@ -76,7 +80,7 @@ provider=$(find "$root/usr/lib" -type f -name 'libtss2-tcti-device.so.*' -print)
 test -n "$provider"
 mv "$provider" "$provider.absent"
 status=0
-chroot "$root" /usr/bin/tpm2_getcap -T device:/dev/fde-no-such-tpm properties-fixed \
+TPM2TOOLS_TCTI=device:/dev/fde-no-such-tpm chroot "$root" /usr/bin/tpm2_getcap properties-fixed \
     > /tmp/missing.stdout 2> /tmp/missing.stderr || status=$?
 test "$status" != 0
 if grep -Fq 'Failed to open specified TCTI device file' /tmp/missing.stderr; then
