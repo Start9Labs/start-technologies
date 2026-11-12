@@ -38,7 +38,7 @@ export function provideSetupLogsService<Api extends LogsApi>(
 
 export class SetupLogsService extends Observable<readonly string[]> {
   private readonly log$ = defer(() => this.follow()).pipe(
-    switchMap(({ guid }) => this.websocket(guid)),
+    switchMap(({ guid }) => this.websocket(guid!)),
     bufferTime(500),
     filter(logs => !!logs.length),
     map(convertAnsi),

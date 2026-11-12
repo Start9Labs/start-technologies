@@ -244,7 +244,7 @@ pub(crate) fn local_ui_identity(extensions: &http::Extensions) -> Result<Interne
 }
 
 /// Serves requests addressed to an IP address, `localhost`, or a `.local` name.
-fn local_hosts_only(router: Router) -> Router {
+pub(crate) fn local_hosts_only(router: Router) -> Router {
     router.layer(axum::middleware::from_fn(
         |mut request: Request, next: axum::middleware::Next| async move {
             let name = request_authority(&request)

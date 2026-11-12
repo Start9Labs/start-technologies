@@ -18,8 +18,19 @@ use crate::util::net::tungstenite::native_messages;
 #[cfg(test)]
 mod tests;
 
-/// Selects continuation transport from the originating RPC context.
+/// Selects RPC and continuation transport from the originating context.
 pub trait CliWebSocketContext {
+    fn stream_cli<
+        Item: serde::de::DeserializeOwned + Send + 'static,
+        Final: serde::de::DeserializeOwned + Send + 'static,
+    >(
+        ctx: &CliContext,
+        method: &str,
+        params: Value,
+    ) -> impl Future<
+        Output = Result<crate::util::rpc_client::RpcResponseStream<Value, Item, Final>, Error>,
+    > + Send;
+
     fn connect_cli(
         ctx: &CliContext,
         guid: Guid,
@@ -27,6 +38,17 @@ pub trait CliWebSocketContext {
 }
 
 impl CliWebSocketContext for RpcContext {
+    async fn stream_cli<
+        Item: serde::de::DeserializeOwned + Send + 'static,
+        Final: serde::de::DeserializeOwned + Send + 'static,
+    >(
+        ctx: &CliContext,
+        method: &str,
+        params: Value,
+    ) -> Result<crate::util::rpc_client::RpcResponseStream<Value, Item, Final>, Error> {
+        ctx.call_remote_stream(method, params).await
+    }
+
     async fn connect_cli(ctx: &CliContext, guid: Guid) -> Result<BoxWebSocket, Error> {
         let url = ctx.continuation_url(&guid)?;
         let mut headers = HeaderMap::new();
@@ -51,18 +73,55 @@ impl CliWebSocketContext for RpcContext {
 }
 
 impl CliWebSocketContext for InitContext {
+    async fn stream_cli<
+        Item: serde::de::DeserializeOwned + Send + 'static,
+        Final: serde::de::DeserializeOwned + Send + 'static,
+    >(
+        ctx: &CliContext,
+        method: &str,
+        params: Value,
+    ) -> Result<crate::util::rpc_client::RpcResponseStream<Value, Item, Final>, Error> {
+        ctx.call_startup_stream(method, params, HeaderMap::new())
+            .await
+            .map_err(Error::from)
+    }
+
     async fn connect_cli(ctx: &CliContext, guid: Guid) -> Result<BoxWebSocket, Error> {
         ctx.startup_continuation(guid).await
     }
 }
 
 impl CliWebSocketContext for DiagnosticContext {
+    async fn stream_cli<
+        Item: serde::de::DeserializeOwned + Send + 'static,
+        Final: serde::de::DeserializeOwned + Send + 'static,
+    >(
+        ctx: &CliContext,
+        method: &str,
+        params: Value,
+    ) -> Result<crate::util::rpc_client::RpcResponseStream<Value, Item, Final>, Error> {
+        ctx.call_diagnostic_stream(method, params).await
+    }
+
     async fn connect_cli(ctx: &CliContext, guid: Guid) -> Result<BoxWebSocket, Error> {
         ctx.startup_continuation(guid).await
     }
 }
 
 impl CliWebSocketContext for SetupContext {
+    async fn stream_cli<
+        Item: serde::de::DeserializeOwned + Send + 'static,
+        Final: serde::de::DeserializeOwned + Send + 'static,
+    >(
+        ctx: &CliContext,
+        method: &str,
+        params: Value,
+    ) -> Result<crate::util::rpc_client::RpcResponseStream<Value, Item, Final>, Error> {
+        ctx.call_startup_stream(method, params, HeaderMap::new())
+            .await
+            .map_err(Error::from)
+    }
+
     async fn connect_cli(ctx: &CliContext, guid: Guid) -> Result<BoxWebSocket, Error> {
         ctx.startup_continuation(guid).await
     }

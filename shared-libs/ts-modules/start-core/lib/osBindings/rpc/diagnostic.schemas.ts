@@ -315,10 +315,22 @@ export const LogFollowResponse: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
-  guid: typeof Guid
+  /**
+   * Present for ordinary replies; typed observations use same-ID events.
+   */
+  guid: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
 }> = /* @__PURE__ */ object({
   startCursor: wire(z.string().nullable().optional(), z.string().nullable()),
-  guid: Guid,
+  /**
+   * Present for ordinary replies; typed observations use same-ID events.
+   */
+  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Present for ordinary replies; typed observations use same-ID events.',
+  }),
 }).meta({
   id: 'LogFollowResponse',
 })
@@ -662,7 +674,7 @@ export const Api = {
                 empty,
               ),
               _RETURN: /* @__PURE__ */ LogFollowResponse,
-              _ITEM: /* @__PURE__ */ z.never(),
+              _ITEM: /* @__PURE__ */ LogEntry,
               _FINAL: /* @__PURE__ */ z.null(),
             },
           },
@@ -729,7 +741,7 @@ export const Api = {
                 empty,
               ),
               _RETURN: /* @__PURE__ */ LogFollowResponse,
-              _ITEM: /* @__PURE__ */ z.never(),
+              _ITEM: /* @__PURE__ */ LogEntry,
               _FINAL: /* @__PURE__ */ z.null(),
             },
           },

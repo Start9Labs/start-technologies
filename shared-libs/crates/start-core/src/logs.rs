@@ -16,7 +16,8 @@ use itertools::Itertools;
 use rpc_toolkit::ts::TS;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{
-    CallRemote, Context, Empty, HandlerArgs, HandlerExt, HandlerFor, ParentHandler, from_fn_async,
+    CallRemote, Context, Empty, HandlerArgs, HandlerExt, HandlerFor, ParentHandler, RpcStream,
+    from_fn_async,
 };
 use serde::de::{self, DeserializeOwned};
 use serde::{Deserialize, Serialize};
@@ -29,14 +30,18 @@ use crate::PackageId;
 use crate::context::{CliContext, RpcContext};
 use crate::error::ResultExt;
 use crate::prelude::*;
-use crate::rpc_continuations::{
-    Guid, RpcContinuation, RpcContinuations, WebSocket, WebSocketPolicy,
-};
+use crate::rpc_continuations::{Guid, WebSocket, WebSocketPolicy};
 use crate::util::serde::Reversible;
 use crate::util::{FromStrParser, Invoke};
 
+mod context;
+pub use self::context::LogContext;
+use self::context::LogEntries;
+
 #[cfg(test)]
 mod result_tests;
+#[cfg(test)]
+mod stream_tests;
 
 /// Reports the followed process's failure after draining its output.
 #[pin_project::pin_project]
@@ -103,45 +108,77 @@ impl Stream for LogStream {
 }
 
 #[instrument(skip_all)]
-async fn ws_handler(
-    first_entry: Option<LogEntry>,
-    mut logs: LogStream,
-    mut stream: WebSocket,
-) -> Result<(), Error> {
-    if let Some(first_entry) = first_entry {
-        stream
-            .send(ws::Message::Text(
-                serde_json::to_string(&first_entry)
-                    .with_kind(ErrorKind::Serialization)?
-                    .into(),
-            ))
-            .await
-            .with_kind(ErrorKind::Network)?;
-    }
-
-    loop {
-        tokio::select! {
-            entry = logs.try_next() => {
-                if let Some(entry) = entry? {
-                    let (_, log_entry) = entry.log_entry()?;
-                    stream
-                        .send(ws::Message::Text(
-                            serde_json::to_string(&log_entry)
-                                .with_kind(ErrorKind::Serialization)?
-                                .into(),
-                        ))
-                        .await
-                        .with_kind(ErrorKind::Network)?;
-                } else {
-                    return stream.normal_close("complete").await;
+async fn forward_log_socket(mut socket: WebSocket, mut entries: LogEntries) {
+    let result = async {
+        loop {
+            tokio::select! {
+                entry = entries.try_next() => {
+                    let Some(entry) = entry? else { return Ok::<_, Error>("complete") };
+                    socket.send(ws::Message::Text(serde_json::to_string(&entry).with_kind(ErrorKind::Serialization)?.into())).await.with_kind(ErrorKind::Network)?;
                 }
-            },
-            msg = stream.recv() => {
-                if msg.transpose().with_kind(crate::ErrorKind::Network)?.is_none() {
-                    return Ok(())
+                message = socket.recv() => {
+                    if message.transpose().with_kind(ErrorKind::Network)?.is_none() { return Ok("complete") }
                 }
             }
         }
+    }.await;
+    if let Err(error) = socket.close_result(result).await {
+        if !crate::util::net::is_ws_reset_without_close(&error) {
+            tracing::error!(
+                "{}",
+                t!("logs.error-in-log-stream", error = error.to_string())
+            );
+        }
+    }
+}
+
+struct PreparedLogFollow {
+    start_cursor: Option<String>,
+    entries: LogEntries,
+}
+
+impl PreparedLogFollow {
+    async fn new(mut source: LogStream) -> Result<Self, Error> {
+        let first = tokio::time::timeout(Duration::from_secs(1), source.try_next())
+            .await
+            .ok()
+            .transpose()?
+            .flatten()
+            .map(JournalctlEntry::log_entry)
+            .transpose()?;
+        let start_cursor = first.as_ref().map(|(cursor, _)| cursor.clone());
+        let entries = futures::stream::iter(first.map(|(_, entry)| Ok(entry)))
+            .chain(
+                source
+                    .map(|entry| entry.and_then(|entry| entry.log_entry().map(|(_, entry)| entry))),
+            )
+            .boxed();
+        Ok(Self {
+            start_cursor,
+            entries,
+        })
+    }
+
+    async fn subscribe(
+        self,
+        context: impl LogContext,
+        signer: Option<InternedString>,
+        policy: WebSocketPolicy,
+        stream: Option<RpcStream<LogEntry>>,
+    ) -> Result<LogFollowResponse, Error> {
+        let guid = if let Some(stream) = stream {
+            context.forward_logs(signer, stream, self.entries);
+            None
+        } else {
+            let guid = Guid::new();
+            let continuation = context.log_continuation(signer, policy, self.entries);
+            context.as_ref().add(guid.clone(), continuation).await;
+            Some(guid)
+        };
+        Ok(LogFollowResponse {
+            start_cursor: self.start_cursor,
+            guid,
+        })
     }
 }
 
@@ -161,7 +198,8 @@ rpc_toolkit::ts_export!(LogResponse, namespaces = [""]);
 #[serde(rename_all = "camelCase")]
 pub struct LogFollowResponse {
     start_cursor: Option<String>,
-    guid: Guid,
+    /// Present for ordinary replies; typed observations use same-ID events.
+    guid: Option<Guid>,
 }
 
 rpc_toolkit::reflect_ts!(LogFollowResponse);
@@ -406,6 +444,10 @@ pub struct LogsParams<Extra: FromArgMatches + Args = Empty> {
     )]
     #[serde(default)]
     before: bool,
+    #[arg(skip)]
+    #[visit(ts(skip))]
+    #[serde(rename = "__Auth_signer")]
+    signer: Option<InternedString>,
 }
 
 rpc_toolkit::reflect_ts!(impl [Extra: FromArgMatches + Args] for LogsParams<Extra> where [Extra: rpc_toolkit::ts::TS]);
@@ -426,7 +468,7 @@ pub struct CliLogsParams<Extra: FromArgMatches + Args = Empty> {
 
 #[allow(private_bounds)]
 pub fn logs<
-    C: Context + AsRef<RpcContinuations> + SessionContext,
+    C: LogContext,
     Extra: FromArgMatches + Serialize + DeserializeOwned + Args + TS + Send + Sync + 'static,
 >(
     source: impl for<'a> LogSourceFn<'a, C, Extra>,
@@ -463,15 +505,15 @@ where
         .join(".");
 
     if follow {
-        let res = from_value::<LogFollowResponse>(
-            ctx.call_remote::<RemoteContext>(&method, to_value(&rpc_params)?)
-                .await?,
-        )?;
-
-        let mut stream = ctx.ws_continuation::<RemoteContext>(res.guid).await?;
-        while let Some(log) = crate::util::net::tungstenite::next_text(&mut stream).await? {
-            println!("{}", serde_json::from_str::<LogEntry>(&log)?);
+        let response =
+            RemoteContext::stream_cli::<LogEntry, ()>(&ctx, &method, to_value(&rpc_params)?)
+                .await?;
+        let _: LogFollowResponse = from_value(response.initial)?;
+        let mut entries = response.items;
+        while let Some(entry) = entries.next().await? {
+            println!("{}", entry);
         }
+        entries.finish().await?;
     } else {
         let res = from_value::<LogResponse>(
             ctx.call_remote::<RemoteContext>(&method, to_value(&rpc_params)?)
@@ -525,6 +567,7 @@ where
                           cursor,
                           boot,
                           before,
+                          ..
                       },
                   ..
               }: HandlerArgs<C, LogsParams<Extra>>| {
@@ -543,10 +586,7 @@ where
     )
 }
 
-fn logs_follow<
-    C: Context + AsRef<RpcContinuations> + SessionContext,
-    Extra: FromArgMatches + Args + Send + Sync + 'static,
->(
+fn logs_follow<C: LogContext, Extra: FromArgMatches + Args + Send + Sync + 'static>(
     f: impl for<'a> LogSourceFn<'a, C, Extra>,
     policy: WebSocketPolicy,
 ) -> impl HandlerFor<
@@ -555,6 +595,8 @@ fn logs_follow<
     InheritedParams = LogsParams<Extra>,
     Ok = LogFollowResponse,
     Err = Error,
+    Item = LogEntry,
+    Final = (),
 > + rpc_toolkit::ts::HandlerTSBindings {
     from_fn_async(
         move |HandlerArgs {
@@ -565,18 +607,31 @@ fn logs_follow<
                           cursor,
                           limit,
                           boot,
+                          signer,
                           ..
                       },
+                  rpc_stream,
                   ..
-              }: HandlerArgs<C, Empty, LogsParams<Extra>>| {
+              }: HandlerArgs<C, Empty, LogsParams<Extra>, LogEntry>| {
             let f = f.clone();
             async move {
                 let src = f.call(&context, extra).await?;
-                follow_logs(context, src, cursor, limit, boot.map(String::from), policy).await
+                follow_logs(
+                    context,
+                    src,
+                    cursor,
+                    limit,
+                    boot.map(String::from),
+                    policy,
+                    signer,
+                    rpc_stream,
+                )
+                .await
             }
         },
     )
     .with_metadata(crate::mcp::MCP, Value::Bool(false))
+    .with_metadata("get_signer", Value::Bool(true))
 }
 
 async fn get_package_id(
@@ -722,55 +777,26 @@ pub async fn fetch_logs(
 }
 
 #[instrument(skip_all)]
-pub async fn follow_logs<Context: AsRef<RpcContinuations> + SessionContext>(
+pub async fn follow_logs<Context: LogContext>(
     ctx: Context,
     id: LogSource,
     cursor: Option<String>,
     limit: Option<usize>,
     boot: Option<String>,
     policy: WebSocketPolicy,
+    signer: Option<InternedString>,
+    rpc_stream: Option<RpcStream<LogEntry>>,
 ) -> Result<LogFollowResponse, Error> {
     let limit = if cursor.is_some() {
         None
     } else {
         Some(limit.unwrap_or(50))
     };
-    let mut stream = journalctl(id, limit, cursor.as_deref(), boot.as_deref(), false, true).await?;
-
-    let mut start_cursor = None;
-    let mut first_entry = None;
-
-    if let Some(first) = tokio::time::timeout(Duration::from_secs(1), stream.try_next())
+    let source = journalctl(id, limit, cursor.as_deref(), boot.as_deref(), false, true).await?;
+    PreparedLogFollow::new(source)
+        .await?
+        .subscribe(ctx, signer, policy, rpc_stream)
         .await
-        .ok()
-        .transpose()?
-        .flatten()
-    {
-        let (cursor, entry) = first.log_entry()?;
-        start_cursor = Some(cursor);
-        first_entry = Some(entry);
-    }
-
-    let guid = Guid::new();
-    ctx.as_ref()
-        .add(
-            guid.clone(),
-            RpcContinuation::ws(
-                policy,
-                ctx.secure_session().cloned(),
-                move |socket| async move {
-                    if let Err(e) = ws_handler(first_entry, stream, socket).await {
-                        tracing::error!(
-                            "{}",
-                            t!("logs.error-in-log-stream", error = e.to_string())
-                        );
-                    }
-                },
-                Duration::from_secs(30),
-            ),
-        )
-        .await;
-    Ok(LogFollowResponse { start_cursor, guid })
 }
 
 #[cfg(all(test, feature = "ts"))]

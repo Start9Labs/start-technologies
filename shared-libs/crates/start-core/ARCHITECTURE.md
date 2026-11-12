@@ -96,7 +96,7 @@ Successful observation permits the wizard's separate `setup.complete` finalizati
 
 ## Log observation
 
-`logs.rs::LogStream` owns the followed journal process and drains its entries before checking its actual exit result through the shared `Invoke` output validator. Stdout EOF alone does not finish the observation; dropping it kills the owned child. Snapshot reads retain their checked finite invocation. `BootIdentifier` accepts string IDs or signed 32-bit integral indices; decoding and generated numeric constraints use that type's bounds.
+`logs.rs::LogStream` owns the followed journal process and drains its entries before checking its actual exit result through the shared `Invoke` output validator. Existing log-follow methods return same-ID `LogEntry` items and a unit terminal when streaming is requested; ordinary replies retain a real GUID and typed replies use `guid: null`. Prepared observation preserves the first entry and cursor for both adapters. `logs/context.rs::LogContext` binds forwarding/continuation creation to existing authority owners: normal logs use `OpenAuthedContinuations` for live revocation, startup logs retain their public contexts without an enrollment store. Native follow drains items and requires the actual terminal through `CliWebSocketContext`'s existing normal/diagnostic/startup transport selection; non-follow reads remain ordinary. Stdout EOF alone does not finish the observation; dropping it kills the owned child. Snapshot reads retain their checked finite invocation. `BootIdentifier` accepts string IDs or signed 32-bit integral indices; decoding and generated numeric constraints use that type's bounds.
 
 ## Action file transfers
 

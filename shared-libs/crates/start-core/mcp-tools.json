@@ -4767,7 +4767,10 @@
           "type": "object",
           "properties": {
             "startCursor": { "type": ["string", "null"] },
-            "guid": { "$ref": "#/$defs/Guid" }
+            "guid": {
+              "description": "Present for ordinary replies; typed observations use same-ID events.",
+              "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+            }
           },
           "required": ["startCursor", "guid"],
           "additionalProperties": true
@@ -4777,7 +4780,10 @@
       "type": "object",
       "properties": {
         "startCursor": { "type": ["string", "null"] },
-        "guid": { "$ref": "#/$defs/Guid" }
+        "guid": {
+          "description": "Present for ordinary replies; typed observations use same-ID events.",
+          "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+        }
       },
       "required": ["startCursor", "guid"],
       "additionalProperties": true
@@ -11067,7 +11073,10 @@
           "type": "object",
           "properties": {
             "startCursor": { "type": ["string", "null"] },
-            "guid": { "$ref": "#/$defs/Guid" }
+            "guid": {
+              "description": "Present for ordinary replies; typed observations use same-ID events.",
+              "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+            }
           },
           "required": ["startCursor", "guid"],
           "additionalProperties": true
@@ -11077,7 +11086,10 @@
       "type": "object",
       "properties": {
         "startCursor": { "type": ["string", "null"] },
-        "guid": { "$ref": "#/$defs/Guid" }
+        "guid": {
+          "description": "Present for ordinary replies; typed observations use same-ID events.",
+          "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+        }
       },
       "required": ["startCursor", "guid"],
       "additionalProperties": true
@@ -11197,7 +11209,10 @@
           "type": "object",
           "properties": {
             "startCursor": { "type": ["string", "null"] },
-            "guid": { "$ref": "#/$defs/Guid" }
+            "guid": {
+              "description": "Present for ordinary replies; typed observations use same-ID events.",
+              "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+            }
           },
           "required": ["startCursor", "guid"],
           "additionalProperties": true
@@ -11207,7 +11222,10 @@
       "type": "object",
       "properties": {
         "startCursor": { "type": ["string", "null"] },
-        "guid": { "$ref": "#/$defs/Guid" }
+        "guid": {
+          "description": "Present for ordinary replies; typed observations use same-ID events.",
+          "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+        }
       },
       "required": ["startCursor", "guid"],
       "additionalProperties": true

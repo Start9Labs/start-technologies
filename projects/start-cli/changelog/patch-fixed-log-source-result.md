@@ -2,4 +2,4 @@
 release-notes: false
 ---
 
-- Report failed log followers as errors.
+- Follow typed log entries through their actual completion or error, preserving startup admission and ordinary log snapshots.

@@ -51,7 +51,7 @@ export class LogsPipe implements PipeTransform {
           }
         }),
         switchMap(r =>
-          this.api.openWebsocket$<T.LogEntry>(r.guid, {
+          this.api.openWebsocket$<T.LogEntry>(r.guid!, {
             openObserver: {
               next: () => this.logs.status$.next('connected'),
             },
@@ -72,7 +72,7 @@ export class LogsPipe implements PipeTransform {
               this.logs.status$.next(v ? 'reconnecting' : 'disconnected'),
             ),
             filter(Boolean),
-            delay(1000), // @TODO Alex why delay here?
+            delay(1000),
             take(1),
             ignoreElements(),
           ),

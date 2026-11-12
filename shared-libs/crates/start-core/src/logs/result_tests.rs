@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use super::*;
 
-const ENTRY: &str = r#"{"__REALTIME_TIMESTAMP":"1000000","MESSAGE":"last entry","__CURSOR":"cursor-a","_BOOT_ID":"boot-a"}"#;
+pub(super) const ENTRY: &str = r#"{"__REALTIME_TIMESTAMP":"1000000","MESSAGE":"last entry","__CURSOR":"cursor-a","_BOOT_ID":"boot-a"}"#;
 
-fn child(script: &str) -> Child {
+pub(super) fn child(script: &str) -> Child {
     Command::new("/bin/sh")
         .args(["-c", script])
         .kill_on_drop(true)

@@ -21,7 +21,7 @@ use crate::disk::util::{get_available, get_used};
 use crate::logs::{LogSource, LogsParams, SYSTEM_UNIT};
 use crate::prelude::*;
 use crate::registry::device_info::DeviceInfo;
-use crate::rpc_continuations::{Guid, RpcContinuation, RpcContinuations, WebSocketPolicy};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::shutdown::Shutdown;
 use crate::util::Invoke;
 use crate::util::cpupower::{
@@ -362,16 +362,14 @@ fn format_ram(bytes: u64) -> String {
     }
 }
 
-pub fn logs<C: Context + AsRef<RpcContinuations> + SessionContext>(
-    policy: WebSocketPolicy,
-) -> ParentHandler<C, LogsParams> {
+pub fn logs<C: crate::logs::LogContext>(policy: WebSocketPolicy) -> ParentHandler<C, LogsParams> {
     crate::logs::logs(
         |_: &C, _| async { Ok(LogSource::Unit(SYSTEM_UNIT)) },
         policy,
     )
 }
 
-pub fn kernel_logs<C: Context + AsRef<RpcContinuations> + SessionContext>(
+pub fn kernel_logs<C: crate::logs::LogContext>(
     policy: WebSocketPolicy,
 ) -> ParentHandler<C, LogsParams> {
     crate::logs::logs(|_: &C, _| async { Ok(LogSource::Kernel) }, policy)
