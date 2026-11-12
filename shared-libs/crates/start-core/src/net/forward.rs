@@ -191,14 +191,30 @@ struct ForwardMapping {
     /// becomes one nft rule for the range (port-preserving when the bases match,
     /// else an offset verdict map).
     count: u16,
+    /// Bounds hairpin SNAT to the target subnet.
     target_prefix: u8,
     src_filter: Option<IpNet>,
     rc: Weak<()>,
 }
 
+impl ForwardMapping {
+    fn matches(
+        &self,
+        target: SocketAddrV4,
+        count: u16,
+        target_prefix: u8,
+        src_filter: Option<&IpNet>,
+    ) -> bool {
+        self.target == target
+            && self.count == count
+            && self.target_prefix == target_prefix
+            && self.src_filter.as_ref() == src_filter
+    }
+}
+
 #[derive(Default)]
 struct PortForwardState {
-    mappings: BTreeMap<SocketAddrV4, ForwardMapping>, // source -> target
+    mappings: BTreeMap<SocketAddrV4, ForwardMapping>,
 }
 
 impl PortForwardState {
@@ -211,10 +227,7 @@ impl PortForwardState {
         src_filter: Option<IpNet>,
     ) -> Result<Arc<()>, Error> {
         if let Some(existing) = self.mappings.get_mut(&source) {
-            if existing.target == target
-                && existing.count == count
-                && existing.src_filter == src_filter
-            {
+            if existing.matches(target, count, target_prefix, src_filter.as_ref()) {
                 if let Some(existing_rc) = existing.rc.upgrade() {
                     return Ok(existing_rc);
                 } else {
@@ -1249,6 +1262,24 @@ pub(crate) async fn unforward6(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forward_reuse_requires_the_current_target_subnet() {
+        let target = "10.59.0.2:443".parse().unwrap();
+        let mapping = ForwardMapping {
+            source: "203.0.113.1:443".parse().unwrap(),
+            target,
+            count: 1,
+            target_prefix: 24,
+            src_filter: None,
+            rc: Weak::new(),
+        };
+        assert!(mapping.matches(target, 1, 24, None));
+        assert!(!mapping.matches(target, 1, 32, None));
+        assert!(!mapping.matches("10.59.0.3:443".parse().unwrap(), 1, 24, None));
+        assert!(!mapping.matches(target, 2, 24, None));
+        assert!(!mapping.matches(target, 1, 24, Some(&"192.0.2.0/24".parse().unwrap())));
+    }
 
     #[test]
     fn try_alloc_range_basic() {
