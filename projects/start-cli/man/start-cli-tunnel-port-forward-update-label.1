@@ -10,7 +10,7 @@ Update the label of a port forward
 .SH OPTIONS
 .TP
 \fB\-\-protocol\fR \fI<PROTOCOL>\fR [default: tcp]
-Transport for hostname routes and fallbacks; plain DNAT forwards use both transports
+Logical protocol selection; tcp+udp shares one mapping. Plain DNAT forwards use both transports.
 .br
 
 .br
@@ -20,10 +20,12 @@ Transport for hostname routes and fallbacks; plain DNAT forwards use both transp
 tcp
 .IP \(bu 2
 udp
+.IP \(bu 2
+tcp+udp
 .RE
 .TP
 \fB\-\-hostname\fR \fI<HOSTNAME>\fR
-Selects a hostname; omitted labels this transport’s fallback or a plain forward
+Omitted labels the selected fallback or a plain forward
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

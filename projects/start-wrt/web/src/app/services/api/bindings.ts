@@ -194,7 +194,15 @@ export type PeerSetDnsInjectionArgsInput = z.input<
 >
 export type ProfileId = z.output<typeof schemas.ProfileId>
 export type ProfileIdOptInput = z.input<typeof schemas.ProfileIdOpt>
+
+/**
+ * Transports owned together by one port mapping.
+ */
 export type Protocol = z.output<typeof schemas.Protocol>
+
+/**
+ * Transports owned together by one port mapping.
+ */
 export type ProtocolInput = z.input<typeof schemas.Protocol>
 export type PublishedPortStatus = z.output<typeof schemas.PublishedPortStatus>
 export type RemoveUsbPortRequestInput = z.input<
@@ -226,7 +234,7 @@ export type SshKeyResponse = z.output<typeof schemas.SshKeyResponse>
 export type SystemInfoResponse = z.output<typeof schemas.SystemInfoResponse>
 
 /**
- * Transport identity for independently owned port mappings.
+ * Transport of a gateway request or dataplane listener.
  */
 export type TransportProtocol = z.output<typeof schemas.TransportProtocol>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>

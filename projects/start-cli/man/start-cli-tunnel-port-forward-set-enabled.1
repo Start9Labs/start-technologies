@@ -10,7 +10,7 @@ Enable or disable a port forward
 .SH OPTIONS
 .TP
 \fB\-\-protocol\fR \fI<PROTOCOL>\fR [default: tcp]
-Transport for hostname routes and fallbacks; plain DNAT forwards use both transports
+Logical protocol selection; tcp+udp shares one mapping. Plain DNAT forwards use both transports.
 .br
 
 .br
@@ -20,13 +20,15 @@ Transport for hostname routes and fallbacks; plain DNAT forwards use both transp
 tcp
 .IP \(bu 2
 udp
+.IP \(bu 2
+tcp+udp
 .RE
 .TP
 \fB\-\-enabled\fR
 
 .TP
 \fB\-\-hostname\fR \fI<HOSTNAME>\fR
-Selects a hostname; omitted toggles this transport’s fallback or a plain forward
+Omitted toggles the selected fallback or a plain forward
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

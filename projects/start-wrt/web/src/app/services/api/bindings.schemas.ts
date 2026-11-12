@@ -1004,12 +1004,17 @@ export const ProfileIdOpt: z.ZodObject<{
 }).meta({
   id: 'ProfileIdOpt',
 })
+
+/**
+ * Transports owned together by one port mapping.
+ */
 export const Protocol: z.ZodEnum<{
   tcp: 'tcp'
   udp: 'udp'
   'tcp+udp': 'tcp+udp'
 }> = /* @__PURE__ */ z.enum(['tcp', 'udp', 'tcp+udp']).meta({
   id: 'Protocol',
+  description: 'Transports owned together by one port mapping.',
 })
 export const PublishedPortStatus: z.ZodEnum<{
   active: 'active'
@@ -1243,12 +1248,12 @@ export const SystemInfoResponse: z.ZodObject<{
 })
 
 /**
- * Transport identity for independently owned port mappings.
+ * Transport of a gateway request or dataplane listener.
  */
 export const TransportProtocol: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp' }> =
   /* @__PURE__ */ z.enum(['tcp', 'udp']).meta({
     id: 'TransportProtocol',
-    description: 'Transport identity for independently owned port mappings.',
+    description: 'Transport of a gateway request or dataplane listener.',
   })
 export const UpdateSystemParams: z.ZodObject<{
   registry: z.ZodCodec<

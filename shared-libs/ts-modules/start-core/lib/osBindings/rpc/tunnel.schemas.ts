@@ -758,7 +758,7 @@ export const RemoveKeyParams: z.ZodObject<{ key: typeof AnyVerifyingKey }> =
   })
 export const RemovePortForwardParams: z.ZodObject<{
   /**
-   * Omitted selects both transports for whole-forward removal, otherwise TCP.
+   * Omitted removes the whole forward, or selects TCP for hostname/fallback removal.
    */
   protocol: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof Protocol>>,
@@ -775,11 +775,11 @@ export const RemovePortForwardParams: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   /**
-   * Omitted selects both transports for whole-forward removal, otherwise TCP.
+   * Omitted removes the whole forward, or selects TCP for hostname/fallback removal.
    */
   protocol: wire(Protocol.nullable().optional(), Protocol.nullable()).meta({
     description:
-      'Omitted selects both transports for whole-forward removal, otherwise TCP.',
+      'Omitted removes the whole forward, or selects TCP for hostname/fallback removal.',
   }),
   fallback: wire(z.boolean().optional(), z.boolean()),
   source: z.string(),
@@ -809,7 +809,7 @@ export const SetPortForwardEnabledParams: z.ZodObject<{
   source: z.ZodString
   enabled: z.ZodBoolean
   /**
-   * Selects a hostname; omitted toggles this transport’s fallback or a plain forward.
+   * Omitted toggles the selected fallback or a plain forward.
    */
   hostname: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -820,11 +820,10 @@ export const SetPortForwardEnabledParams: z.ZodObject<{
   source: z.string(),
   enabled: z.boolean(),
   /**
-   * Selects a hostname; omitted toggles this transport’s fallback or a plain forward.
+   * Omitted toggles the selected fallback or a plain forward.
    */
   hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Selects a hostname; omitted toggles this transport’s fallback or a plain forward.',
+    description: 'Omitted toggles the selected fallback or a plain forward.',
   }),
 }).meta({
   id: 'SetPortForwardEnabledParams',
@@ -875,7 +874,7 @@ export const UpdatePortForwardLabelParams: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   /**
-   * Selects a hostname; omitted labels this transport’s fallback or a plain forward.
+   * Omitted labels the selected fallback or a plain forward.
    */
   hostname: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -886,11 +885,10 @@ export const UpdatePortForwardLabelParams: z.ZodObject<{
   source: z.string(),
   label: wire(z.string().nullable().optional(), z.string().nullable()),
   /**
-   * Selects a hostname; omitted labels this transport’s fallback or a plain forward.
+   * Omitted labels the selected fallback or a plain forward.
    */
   hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Selects a hostname; omitted labels this transport’s fallback or a plain forward.',
+    description: 'Omitted labels the selected fallback or a plain forward.',
   }),
 }).meta({
   id: 'UpdatePortForwardLabelParams',
