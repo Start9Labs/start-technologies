@@ -178,7 +178,7 @@ impl GatewayBackend for TunnelContext {
         lifetime: Option<u32>,
     ) -> Result<(), u16> {
         let _guard = self.forward_write_lock.lock().await;
-        crate::tunnel::forward::pinhole::add_pinhole_locked(
+        let pinhole = crate::tunnel::forward::pinhole::add_pinhole_locked(
             self,
             gua,
             external_port,
@@ -192,12 +192,14 @@ impl GatewayBackend for TunnelContext {
             tracing::warn!("PCP v6 pinhole {gua}:{external_port} failed: {e}");
             0u16
         })?;
-        if let Some(lt) = lifetime {
-            lease::stamp(
-                self,
-                LeaseKey::Pinhole(SocketAddrV6::new(gua, external_port, 0, 0)),
-                lt,
-            );
+        if pinhole.auto {
+            if let Some(lt) = lifetime {
+                lease::stamp(
+                    self,
+                    LeaseKey::Pinhole(SocketAddrV6::new(gua, external_port, 0, 0)),
+                    lt,
+                );
+            }
         }
         Ok(())
     }

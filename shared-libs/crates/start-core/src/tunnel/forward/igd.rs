@@ -323,6 +323,7 @@ pub(super) async fn apply_peer_forward_range(
             target: existing,
             count: existing_count,
             enabled,
+            auto,
             ..
         }) => {
             if existing != target || existing_count != count {
@@ -355,8 +356,10 @@ pub(super) async fn apply_peer_forward_range(
                     m.insert(source, rc);
                 });
             }
-            if let Some(lt) = lifetime {
-                lease::stamp(ctx, LeaseKey::Dnat(source), lt);
+            if auto {
+                if let Some(lt) = lifetime {
+                    lease::stamp(ctx, LeaseKey::Dnat(source), lt);
+                }
             }
             return Ok(());
         }
