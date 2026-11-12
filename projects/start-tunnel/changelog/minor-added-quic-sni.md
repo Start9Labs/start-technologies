@@ -2,5 +2,7 @@
 release-notes: true
 ---
 
-- Publish QUIC services by hostname over UDP, independently of TLS-over-TCP mappings on the same public address and port. Select TCP, UDP, or both when adding a hostname manually. Manage each transport's destination, label, enabled state, and automatic lease separately; existing hostname mappings remain TCP, and whole-forward removal without a transport selector removes both transports.
+- Publish QUIC services by hostname over UDP. Choose TCP, UDP, or one TCP/UDP mapping with a shared destination, label, enabled state, owner, and automatic lease. Separate TCP-only and UDP-only mappings can use different devices for the same hostname and public port. Existing hostname mappings remain TCP; whole-forward removal without a protocol selector removes all selections.
+- Preserve destination ownership when WAN addresses change, without splitting combined mappings or transferring automatic leases to manual entries.
+- Refresh published-port hairpinning when the target subnet changes.
 - Keep renewed automatic port mappings when renewal races their expiry cleanup.

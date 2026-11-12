@@ -5085,11 +5085,11 @@ help.arg.tunnel-forward-fallback:
   pl_PL: "Usuń tylko domyślny cel bez nazwy hosta dla wybranego protokołu"
 
 help.arg.tunnel-forward-protocol:
-  en_US: "Transport for hostname routes and fallbacks; plain DNAT forwards use both transports"
-  de_DE: "Transportprotokoll für Hostnamen-Routen und Fallbacks; einfache DNAT-Weiterleitungen verwenden beide Protokolle"
-  es_ES: "Protocolo para rutas por nombre y destinos predeterminados; los reenvíos DNAT simples usan ambos protocolos"
-  fr_FR: "Protocole des routes par nom et des destinations de repli ; les redirections DNAT simples utilisent les deux protocoles"
-  pl_PL: "Protokół tras według nazwy hosta i celów domyślnych; zwykłe przekierowania DNAT używają obu protokołów"
+  en_US: "Logical protocol selection; tcp+udp shares one mapping. Plain DNAT forwards use both transports."
+  de_DE: "Logische Protokollauswahl; tcp+udp verwendet eine gemeinsame Zuordnung. Einfache DNAT-Weiterleitungen verwenden beide Protokolle."
+  es_ES: "Selección lógica de protocolo; tcp+udp comparte una asignación. Los reenvíos DNAT simples usan ambos protocolos."
+  fr_FR: "Sélection logique du protocole ; tcp+udp partage une correspondance. Les redirections DNAT simples utilisent les deux protocoles."
+  pl_PL: "Logiczny wybór protokołu; tcp+udp współdzieli jedno mapowanie. Zwykłe przekierowania DNAT używają obu protokołów."
 
 help.arg.tunnel-forward-remove-protocol:
   en_US: "Limit removal to TCP or UDP. Omit to remove the whole forward; hostname or fallback selection defaults to TCP"

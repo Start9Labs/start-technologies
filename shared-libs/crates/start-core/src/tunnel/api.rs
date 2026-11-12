@@ -1470,7 +1470,7 @@ pub async fn add_forward(
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct RemovePortForwardParams {
-    /// Omitted selects both transports for whole-forward removal, otherwise TCP.
+    /// Omitted removes the whole forward, or selects TCP for hostname/fallback removal.
     #[arg(long, value_enum, help = "help.arg.tunnel-forward-remove-protocol")]
     #[serde(default)]
     protocol: Option<Protocol>,
@@ -1581,7 +1581,7 @@ pub struct UpdatePortForwardLabelParams {
 
     source: SocketAddrV4,
     label: Option<String>,
-    /// Selects a hostname; omitted labels this transport’s fallback or a plain forward.
+    /// Omitted labels the selected fallback or a plain forward.
     #[arg(long)]
     #[serde(default)]
     hostname: Option<String>,
@@ -1652,7 +1652,7 @@ pub struct SetPortForwardEnabledParams {
     source: SocketAddrV4,
     #[arg(long)]
     enabled: bool,
-    /// Selects a hostname; omitted toggles this transport’s fallback or a plain forward.
+    /// Omitted toggles the selected fallback or a plain forward.
     #[arg(long)]
     #[serde(default)]
     hostname: Option<String>,
