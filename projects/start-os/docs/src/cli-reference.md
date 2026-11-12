@@ -1115,7 +1115,7 @@ List all OS versions.
 
 - `--format` — Output format
 
-### `start-cli registry os version add <VERSION> <HEADLINE> <RELEASE_NOTES> <SOURCE_VERSION>`
+### `start-cli registry os version add <VERSION> <RELEASE_NOTES> <SOURCE_VERSION>`
 
 Register a new OS version.
 

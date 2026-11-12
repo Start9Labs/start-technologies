@@ -6199,7 +6199,6 @@
         "OsVersionInfo": {
           "type": "object",
           "properties": {
-            "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "sourceVersion": { "type": "string" },
             "gitHash": {
@@ -6273,7 +6272,6 @@
             }
           },
           "required": [
-            "headline",
             "releaseNotes",
             "sourceVersion",
             "gitHash",
@@ -7700,7 +7698,6 @@
         "OsVersionInfo": {
           "type": "object",
           "properties": {
-            "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "sourceVersion": { "type": "string" },
             "gitHash": {
@@ -7774,7 +7771,6 @@
             }
           },
           "required": [
-            "headline",
             "releaseNotes",
             "sourceVersion",
             "gitHash",
@@ -7839,7 +7835,6 @@
           "type": "object",
           "properties": {
             "version": { "type": "string" },
-            "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "sourceVersion": { "type": "string" },
             "gitHash": {
@@ -7850,7 +7845,7 @@
             },
             "security": { "type": "boolean" }
           },
-          "required": ["version", "headline", "releaseNotes", "sourceVersion"],
+          "required": ["version", "releaseNotes", "sourceVersion"],
           "additionalProperties": true
         },
         "LocaleString": {
@@ -7922,7 +7917,6 @@
         "OsVersionInfo": {
           "type": "object",
           "properties": {
-            "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "sourceVersion": { "type": "string" },
             "gitHash": {
@@ -7996,7 +7990,6 @@
             }
           },
           "required": [
-            "headline",
             "releaseNotes",
             "sourceVersion",
             "gitHash",

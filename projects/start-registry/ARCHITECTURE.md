@@ -112,8 +112,9 @@ maps. Current clients receive the complete map and select locally with `Localize
 Existing English-only records deserialize unchanged without a migration.
 
 `os.version.add` replaces the entire `LocaleString`; promotion preserves it unchanged.
-The existing third positional CLI argument accepts prose or a JSON locale map. The
-`<RELEASE_NOTES_OR_JSON>` help marker lets publishers reject stale CLIs before writes.
+The second positional CLI argument accepts prose or a JSON locale map. Publishers
+require the `<RELEASE_NOTES_OR_JSON>` help marker and reject CLIs requiring `<HEADLINE>`
+before writes.
 Registries must be upgraded before publishing maps.
 
 `DeviceInfoMiddleware` projects English notes in responses for StartOS before 0.4.0.5

@@ -320,7 +320,6 @@ mod tests {
         );
         let initial = to_value(&renamed).unwrap();
         let mut info = release();
-        info.headline = "Unrelated headline".into();
         info.release_notes = "Long release notes".repeat(1000).parse().unwrap();
         info.squashfs
             .get_mut("x86_64")

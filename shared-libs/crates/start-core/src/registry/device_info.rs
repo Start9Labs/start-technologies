@@ -679,7 +679,7 @@ mod tests {
         let stored = json!({
             "0.4.0.5": {
                 "releaseNotes": { "pl_PL": "Polskie informacje", "en_US": "English notes" },
-                "headline": "A release",
+                "security": true,
             },
             "0.4.0.4": { "releaseNotes": "Legacy notes" },
         });
@@ -702,7 +702,7 @@ mod tests {
                 versions["0.4.0.5"]["releaseNotes"].as_str(),
                 Some("English notes")
             );
-            assert_eq!(versions["0.4.0.5"]["headline"].as_str(), Some("A release"));
+            assert_eq!(versions["0.4.0.5"]["security"].as_bool(), Some(true));
             assert_eq!(
                 versions["0.4.0.4"]["releaseNotes"].as_str(),
                 Some("Legacy notes")
