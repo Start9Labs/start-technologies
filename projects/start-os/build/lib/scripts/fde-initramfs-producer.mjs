@@ -18,12 +18,20 @@ export function capturedStreams(directory) {
   }
 }
 
+export function requireNativeHookFunctions(bytes) {
+  requireReviewedContext(
+    bytes,
+    '8329c405b5af7cbae6c7409de334b0663add53b97eb7f7d608750808d86b1c93',
+    'hook-functions',
+  )
+}
+
 /**
  * Adapts reviewed native ordering/packaging without installing a provider patch.
  * The caller owns stable providers, the generated tree and a private capture directory.
  * FDE_NATIVE_HOOKS is the private directory admitted by prepareNativeHooks.
  * CONFDIR and its additional hooks also belong to this private generation.
- * FDE_ADMIT_RUNTIME checks original runtime sources before native configuration sourcing.
+ * FDE_ADMIT_SOURCES admits original runtime/configuration sources and native hook-functions.
  * Helpers and firmware also need admission before execution.
  * FDE_PREPARE must audit/harden the tree and native early stream before success.
  * FDE_CAPTURE_DIR holds the captured streams, outside the generated tree.
@@ -35,11 +43,7 @@ export function instrumentProducer(mkinitramfs, hookFunctions) {
     '16780cbe540fa1a9d7b1faad173b1fd74bdd4de3e56e773d10462d9ce77161bf',
     'mkinitramfs',
   )
-  requireReviewedContext(
-    hookFunctions,
-    '8329c405b5af7cbae6c7409de334b0663add53b97eb7f7d608750808d86b1c93',
-    'hook-functions',
-  )
+  requireNativeHookFunctions(hookFunctions)
   let output = replaceOnce(
     mkinitramfs.toString(),
     'run_scripts /usr/share/initramfs-tools/hooks',
@@ -48,7 +52,7 @@ export function instrumentProducer(mkinitramfs, hookFunctions) {
   output = replaceOnce(
     output,
     '. /usr/share/initramfs-tools/scripts/functions',
-    ': "${FDE_ADMIT_RUNTIME:?Missing runtime source admission}"\n"${FDE_ADMIT_RUNTIME}" "${CONFDIR}" || exit 1\n\n. /usr/share/initramfs-tools/scripts/functions',
+    ': "${FDE_ADMIT_SOURCES:?Missing source admission}"\n"${FDE_ADMIT_SOURCES}" "${CONFDIR}" || exit 1\n\n. /usr/share/initramfs-tools/scripts/functions',
   )
   const preparation = `: "\${FDE_PREPARE:?Missing FDE preparation program}"
 : "\${FDE_CAPTURE_DIR:?Missing private FDE capture directory}"

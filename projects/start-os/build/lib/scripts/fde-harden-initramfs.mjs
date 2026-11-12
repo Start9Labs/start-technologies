@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
 import { replaceOnce, requireReviewedContext } from './fde-reviewed-source.mjs'
+import { requireNativeHookFunctions } from './fde-initramfs-producer.mjs'
 
 const inputs = {
   init: [
@@ -162,6 +163,13 @@ const inputs = {
   ],
 }
 
+const sourceHookConfigurations = {
+  'usr/share/initramfs-tools/conf-hooks.d/busybox':
+    '0d86ad66470b73e020ca349e66262c6cbab1f2f1d0c88836ca28f8e4b8e6828b',
+  'usr/share/initramfs-tools/conf-hooks.d/cryptsetup':
+    '52278458942c4e152127b687dba7bf1ca96b03d8fa692fa4f479a4ff0d87bdb1',
+}
+
 export const bootModules = ['overlay', 'btrfs', 'dm_verity', 'loop', 'squashfs']
 
 function requireReviewedInput(path, bytes) {
@@ -169,7 +177,11 @@ function requireReviewedInput(path, bytes) {
     if (!/^DPKG_ARCH=[a-z0-9-]+\n$/.test(bytes.toString()))
       throw Error('Unsupported architecture configuration')
   } else {
-    requireReviewedContext(bytes, inputs[path]?.[0], path)
+    requireReviewedContext(
+      bytes,
+      inputs[path]?.[0] ?? sourceHookConfigurations[path],
+      path,
+    )
   }
 }
 
@@ -210,8 +222,25 @@ async function filesUnder(root, relative) {
   return entries
 }
 
+async function optionalFilesUnder(root, directory) {
+  try {
+    await lstat(join(root, directory))
+  } catch (error) {
+    if (error.code === 'ENOENT') return []
+    throw error
+  }
+  return filesUnder(root, directory)
+}
+
+async function readOriginalSource(root, path) {
+  await checkedDirectory(root, dirname(path))
+  if (!(await lstat(join(root, path))).isFile())
+    throw Error(`Unsupported source file type: ${path}`)
+  return readFile(join(root, path))
+}
+
 async function admitRuntimeDirectory(root, directory) {
-  const paths = await filesUnder(root, directory)
+  const paths = await optionalFilesUnder(root, directory)
   for (const path of paths) {
     const key = `scripts/${path.slice(directory.length + 1)}`
     if (inputs[key]?.[1] === 'order')
@@ -227,13 +256,36 @@ export async function admitRuntimeSources(sourceRoot, configDirectory) {
   const providers = await admitRuntimeDirectory(sourceRoot, shared)
   if (!providers.includes(`${shared}/functions`))
     throw Error('Missing native runtime functions source')
-  try {
-    await lstat(join(configDirectory, 'scripts'))
-  } catch (error) {
-    if (error.code === 'ENOENT') return
-    throw error
-  }
   await admitRuntimeDirectory(configDirectory, 'scripts')
+}
+
+/** The caller excludes writers to admitted sources until native consumption ends. */
+export async function admitInitramfsSources(sourceRoot, configDirectory) {
+  await admitRuntimeSources(sourceRoot, configDirectory)
+  requireNativeHookFunctions(
+    await readOriginalSource(
+      sourceRoot,
+      'usr/share/initramfs-tools/hook-functions',
+    ),
+  )
+  requireReviewedInput(
+    'conf/initramfs.conf',
+    await readOriginalSource(configDirectory, 'initramfs.conf'),
+  )
+  for (const [root, directory, prefix] of [
+    [sourceRoot, 'usr/share/initramfs-tools/conf.d', 'conf/conf.d'],
+    [configDirectory, 'conf.d', 'conf/conf.d'],
+    [
+      sourceRoot,
+      'usr/share/initramfs-tools/conf-hooks.d',
+      'usr/share/initramfs-tools/conf-hooks.d',
+    ],
+  ]) {
+    for (const path of await optionalFilesUnder(root, directory)) {
+      const key = `${prefix}/${path.slice(directory.length + 1)}`
+      requireReviewedInput(key, await readFile(join(root, path)))
+    }
+  }
 }
 
 async function rejectAlternateRules(root) {
