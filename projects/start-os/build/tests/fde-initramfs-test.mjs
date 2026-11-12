@@ -23,7 +23,7 @@ import { harden } from '../lib/scripts/fde-harden-initramfs.mjs'
 const fixture = resolve(process.argv[2] ?? '')
 assert.ok(
   process.argv[2] && process.argv[3],
-  'Provide the reviewed generated fixture tree and BusyBox executable',
+  'Provide reviewed generated scripts/configuration and packaged udev rules in one fixture tree, plus BusyBox',
 )
 const shells = [
   { name: 'dash', program: 'sh', args: [] },
@@ -120,6 +120,36 @@ test('reviewed control plane hardens without mutating its ordinary source', asyn
     assert.ok(!order.includes('keymap'))
     assert.ok(!order.includes('resume'))
   }
+  const rules = join(tree, 'usr/lib/udev/rules.d')
+  const defaults = await readFile(join(rules, '50-udev-default.rules'), 'utf8')
+  const names = await readFile(
+    join(rules, '73-special-net-names.rules'),
+    'utf8',
+  )
+  assert.ok(!defaults.includes('REMOVE_CMD'))
+  assert.ok(defaults.includes('ACTION=="remove", GOTO="default_end"'))
+  assert.ok(!names.includes('/bin/sh'))
+  assert.ok(!names.includes('ibmveth'))
+  assert.ok(names.includes('NAME="idrac"'))
+  assert.ok(names.includes('NAME="ibmimm"'))
+  for (const name of [
+    '50-firmware.rules',
+    '60-block.rules',
+    '60-persistent-storage.rules',
+    '75-net-description.rules',
+    '80-net-setup-link.rules',
+    '80-drivers.rules',
+  ])
+    assert.deepEqual(
+      await readFile(join(rules, name)),
+      await readFile(join(fixture, 'usr/lib/udev/rules.d', name)),
+    )
+  const verification = spawnSync(
+    'udevadm',
+    ['verify', '--resolve-names=never', '--no-style', `--root=${tree}`],
+    { encoding: 'utf8' },
+  )
+  assert.equal(verification.status, 0, verification.stderr)
   for (const shell of shells)
     assert.equal(
       spawnSync(shell.program, [...shell.args, '-n', join(tree, 'init')])
@@ -145,6 +175,34 @@ test('the executable entrypoint hardens when invoked through a symlink', async t
     (await readFile(join(tree, 'init'), 'utf8')).includes(
       "trap 'fde_fail' EXIT",
     ),
+  )
+})
+
+test('canonical usr merge and absent optional package rules are supported', async t => {
+  const { tree } = await copyFixture(t)
+  await symlink('usr/lib', join(tree, 'lib'))
+  for (const directory of [
+    'etc/udev/rules.d',
+    'run/udev/rules.d',
+    'usr/local/lib/udev/rules.d',
+  ])
+    await mkdir(join(tree, directory), { recursive: true })
+  for (const name of [
+    '55-dm.rules',
+    '60-persistent-storage-dm.rules',
+    '64-btrfs.rules',
+    '64-btrfs-dm.rules',
+    '64-btrfs-zoned.rules',
+  ])
+    await rm(join(tree, 'usr/lib/udev/rules.d', name), { force: true })
+  await harden(tree)
+  assert.ok(
+    (
+      await readFile(
+        join(tree, 'lib/udev/rules.d/50-udev-default.rules'),
+        'utf8',
+      )
+    ).includes('default_end'),
   )
 })
 
@@ -181,6 +239,67 @@ for (const [name, mutate] of [
   [
     'executable architecture',
     tree => writeFile(join(tree, 'conf/arch.conf'), 'DPKG_ARCH=amd64; sh -i\n'),
+  ],
+  [
+    'changed udev rule',
+    tree =>
+      writeFile(
+        join(tree, 'usr/lib/udev/rules.d/50-udev-default.rules'),
+        'RUN+="/bin/sh -i"\n',
+      ),
+  ],
+  [
+    'unreviewed udev rule',
+    tree =>
+      writeFile(
+        join(tree, 'usr/lib/udev/rules.d/99-recovery.rules'),
+        'RUN+="/bin/sh -i"\n',
+      ),
+  ],
+  [
+    'changed optional package rule',
+    tree =>
+      writeFile(
+        join(tree, 'usr/lib/udev/rules.d/55-dm.rules'),
+        'RUN+="/bin/sh -i"\n',
+      ),
+  ],
+  [
+    'missing required udev rule',
+    tree => rm(join(tree, 'usr/lib/udev/rules.d/60-persistent-storage.rules')),
+  ],
+  [
+    'symlink udev rule',
+    async tree => {
+      const path = join(tree, 'usr/lib/udev/rules.d/80-drivers.rules')
+      await rm(path)
+      await symlink('/bin/sh', path)
+    },
+  ],
+  [
+    'symlink rule ancestor',
+    async tree => {
+      const library = join(tree, 'usr/lib')
+      await rm(library, { recursive: true })
+      await symlink('/usr/lib', library)
+    },
+  ],
+  ['unexpected lib alias', tree => symlink('/usr/lib', join(tree, 'lib'))],
+  ['independent lib directory', tree => mkdir(join(tree, 'lib'))],
+  ...['etc', 'run', 'usr/local/lib'].map(prefix => [
+    `alternate ${prefix} rules`,
+    async tree => {
+      const directory = join(tree, prefix, 'udev/rules.d')
+      await mkdir(directory, { recursive: true })
+      await writeFile(
+        join(directory, '50-udev-default.rules'),
+        'RUN+="/bin/sh -i"\n',
+      )
+    },
+  ]),
+  [
+    'symlink alternate rules ancestor',
+    tree => symlink('/etc', join(tree, 'etc')),
   ],
 ]) {
   test(`${name} fails before any transformation`, async t => {

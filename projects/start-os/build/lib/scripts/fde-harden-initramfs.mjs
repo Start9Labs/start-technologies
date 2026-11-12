@@ -2,7 +2,14 @@
 
 // The caller owns a private generated tree and discards it on failure.
 import { createHash } from 'node:crypto'
-import { lstat, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import {
+  lstat,
+  readdir,
+  readFile,
+  readlink,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -84,6 +91,63 @@ const inputs = {
     '4066749d0106de5e2d230b91dadcfd56fc7866661222e94b47b600683ddea538',
     'keep',
   ],
+  'usr/lib/udev/rules.d/50-firmware.rules': [
+    '37895a6ae81ab0e8753eb97a7c11b7cf578549e06fbbf2d6b192d109bc2cd9a3',
+    'keep',
+  ],
+  'usr/lib/udev/rules.d/50-udev-default.rules': [
+    '2fc7f00aa36ea57400d14b9a765b7d26f39a004f9bf666f69283d9aa5aaa34d2',
+    'patch',
+  ],
+  'usr/lib/udev/rules.d/55-dm.rules': [
+    '106ec258d978828312aca9c5730a674811542e74f403d9971c07ff3195d857e5',
+    'keep',
+    false,
+  ],
+  'usr/lib/udev/rules.d/60-block.rules': [
+    '93ecc4fab045601b0eb16ef1d74eb82cd1d618fffb3de4bd6076b533f72b406a',
+    'keep',
+  ],
+  'usr/lib/udev/rules.d/60-persistent-storage.rules': [
+    '6ea07cd61b4a221ea219baee6a0f4ca1524f2920a172485b05cbdbecac0d7b9c',
+    'keep',
+  ],
+  'usr/lib/udev/rules.d/60-persistent-storage-dm.rules': [
+    'a19445a6c7d2b79858510c38b3409a5a419d40f5d3f78b009be08c8551a52fbc',
+    'keep',
+    false,
+  ],
+  'usr/lib/udev/rules.d/64-btrfs.rules': [
+    'a4bc67740cd0988415907b0fdb5e9cd955be2626b5095b55c7eed4aa4e99bb53',
+    'keep',
+    false,
+  ],
+  'usr/lib/udev/rules.d/64-btrfs-dm.rules': [
+    'ba9da67a41dce05c3b9606dac86fd514e41635b0280371df1f46046a3ae485ee',
+    'keep',
+    false,
+  ],
+  'usr/lib/udev/rules.d/64-btrfs-zoned.rules': [
+    'dfa477a4af0399a5da49fcb1ffc6c5fbb4da6bf2ba69cbab91aef77c07fb2e90',
+    'keep',
+    false,
+  ],
+  'usr/lib/udev/rules.d/73-special-net-names.rules': [
+    'fcbf4bbd63bec2c63f9b9d11b90cac3a137f37cf69692033108426d44a8e6cea',
+    'patch',
+  ],
+  'usr/lib/udev/rules.d/75-net-description.rules': [
+    '877959a4597e1e9d30158773b7977f44b136c88a65225c7abe3cd52f4ecd096f',
+    'keep',
+  ],
+  'usr/lib/udev/rules.d/80-net-setup-link.rules': [
+    '7056ebc8ef611d0f61b2ac01e20fa8cca035f957e58fd60600e3eec9bab927c2',
+    'keep',
+  ],
+  'usr/lib/udev/rules.d/80-drivers.rules': [
+    '0941cea0be8d3564556b5787a87cf55971fd3e46e19c56ad68a4205e8ad3a560',
+    'keep',
+  ],
 }
 
 export const bootModules = ['overlay', 'btrfs', 'dm_verity', 'loop', 'squashfs']
@@ -109,8 +173,12 @@ function replaceRange(text, first, last, replacement) {
 }
 
 async function filesUnder(root, relative) {
-  if (!(await lstat(join(root, relative))).isDirectory())
-    throw Error(`Unsupported generated directory: ${relative}`)
+  let parent = root
+  for (const part of relative.split('/')) {
+    parent = join(parent, part)
+    if (!(await lstat(parent)).isDirectory())
+      throw Error(`Unsupported generated directory: ${relative}`)
+  }
   const entries = []
   for (const entry of await readdir(join(root, relative), {
     withFileTypes: true,
@@ -123,12 +191,40 @@ async function filesUnder(root, relative) {
   return entries
 }
 
-/** Hardens the reviewed initramfs-tools control plane, not the complete executable closure. */
+async function rejectAlternateRules(root) {
+  for (const directory of [
+    'etc/udev/rules.d',
+    'run/udev/rules.d',
+    'usr/local/lib/udev/rules.d',
+  ]) {
+    try {
+      if ((await filesUnder(root, directory)).length)
+        throw Error(`Unsupported alternate udev rules: ${directory}`)
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+  }
+  let lib
+  try {
+    lib = await lstat(join(root, 'lib'))
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
+  if (
+    lib &&
+    (!lib.isSymbolicLink() || (await readlink(join(root, 'lib'))) !== 'usr/lib')
+  )
+    throw Error('Unsupported initramfs lib alias')
+}
+
+/** Hardens reviewed scripts and udev rules, not the complete executable closure. */
 export async function harden(root) {
+  await rejectAlternateRules(root)
   const files = [
     'init',
     ...(await filesUnder(root, 'scripts')),
     ...(await filesUnder(root, 'conf')),
+    ...(await filesUnder(root, 'usr/lib/udev/rules.d')),
   ]
   const original = new Map()
   for (const path of files) {
@@ -146,8 +242,9 @@ export async function harden(root) {
     }
     original.set(path, bytes.toString())
   }
-  for (const path of Object.keys(inputs)) {
-    if (!original.has(path)) throw Error(`Missing generated context: ${path}`)
+  for (const [path, [, , required = true]] of Object.entries(inputs)) {
+    if (required && !original.has(path))
+      throw Error(`Missing generated context: ${path}`)
   }
   if (!original.has('conf/arch.conf'))
     throw Error('Missing architecture configuration')
@@ -219,6 +316,17 @@ export async function harden(root) {
       order.replaceAll('[ -e /conf/param.conf ] && . /conf/param.conf\n', ''),
     )
   }
+  const defaults = 'usr/lib/udev/rules.d/50-udev-default.rules'
+  output.set(
+    defaults,
+    replaceOnce(
+      output.get(defaults),
+      '# run a command on remove events\nACTION=="remove", ENV{REMOVE_CMD}!="", RUN+="$env{REMOVE_CMD}"\n',
+      '',
+    ),
+  )
+  const names = 'usr/lib/udev/rules.d/73-special-net-names.rules'
+  output.set(names, output.get(names).split('# ibmveth devices')[0])
   output.set('conf/modules', bootModules.join('\n') + '\n')
   const here = dirname(fileURLToPath(import.meta.url))
   output.set(
@@ -230,6 +338,7 @@ export async function harden(root) {
     await readFile(join(here, 'startos-fde-initramfs-module'), 'utf8'),
   )
   for (const [path, text] of output) {
+    if (path.startsWith('usr/lib/udev/rules.d/')) continue
     const syntax = spawnSync('sh', ['-n'], { input: text, encoding: 'utf8' })
     if (syntax.status !== 0)
       throw Error(`Invalid hardened shell: ${path}: ${syntax.stderr}`)
