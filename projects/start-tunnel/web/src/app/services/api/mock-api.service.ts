@@ -250,8 +250,7 @@ export class MockApiService extends ApiService {
             ? structuredClone(existing)
             : {
                 kind: 'sni',
-                routes: {},
-                fallback: null,
+                tcp: { routes: {}, fallback: null },
                 udp: { routes: {}, fallback: null },
                 both: { routes: {}, fallback },
               }
@@ -292,15 +291,11 @@ export class MockApiService extends ApiService {
           },
         ])
       } else if (existing?.kind === 'sni' && (params.count ?? 1) === 1) {
-        if (
-          FORWARD_PROTOCOLS.some(
-            protocol =>
-              protocol !== 'tcp+udp' &&
-              sniBindings(existing, protocol).fallback,
-          )
-        )
-          throw new Error('Port already mapped')
-        const bindings = sniBindings(existing, 'tcp+udp')
+        const owner =
+          FORWARD_PROTOCOLS.find(protocol =>
+            sniRoute(existing, protocol, null),
+          ) ?? 'tcp+udp'
+        const bindings = sniBindings(existing, owner)
         if (
           bindings.fallback &&
           bindings.fallback.target !== params.target &&

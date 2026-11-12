@@ -1308,19 +1308,14 @@ export const PortForward: z.ZodUnion<
          */
         kind: z.ZodLiteral<'sni'>
       }>,
-      z.ZodIntersection<
-        z.ZodObject<{
-          udp: z.ZodCodec<z.ZodOptional<typeof SniBindings>, typeof SniBindings>
-          /**
-           * One shared owner, target, label and enabled state for TCP/UDP.
-           */
-          both: z.ZodCodec<
-            z.ZodOptional<typeof SniBindings>,
-            typeof SniBindings
-          >
-        }>,
-        typeof SniBindings
-      >
+      z.ZodObject<{
+        tcp: typeof SniBindings
+        udp: typeof SniBindings
+        /**
+         * One shared owner, target, label and enabled state for TCP/UDP.
+         */
+        both: typeof SniBindings
+      }>
     >,
   ]
 > = /* @__PURE__ */ z
@@ -1357,21 +1352,17 @@ export const PortForward: z.ZodUnion<
             'Logical mappings for a hostname or fallback own disjoint transport sets.',
         }),
       }),
-      z.intersection(
-        object({
-          udp: wire(SniBindings.optional(), SniBindings),
-          /**
-           * One shared owner, target, label and enabled state for TCP/UDP.
-           */
-          both: wire(SniBindings.optional(), SniBindings).meta({
-            description:
-              'One shared owner, target, label and enabled state for TCP/UDP.',
-          }),
+      object({
+        tcp: SniBindings,
+        udp: SniBindings,
+        /**
+         * One shared owner, target, label and enabled state for TCP/UDP.
+         */
+        both: SniBindings.meta({
+          description:
+            'One shared owner, target, label and enabled state for TCP/UDP.',
         }),
-        SniBindings.meta({
-          description: 'Legacy routes and fallback belong to TCP.',
-        }),
-      ),
+      }),
     ),
   ])
   .meta({

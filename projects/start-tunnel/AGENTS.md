@@ -47,6 +47,7 @@ Rust file is `src/main.rs`.
 make start-tunnel                                   # build tunnelbox (UI + daemon)
 cargo build -p start-tunnel --bin tunnelbox   # cargo only (UI must be prebuilt)
 cargo check -p start-tunnel                    # fast type-check
+npm run check:tunnel                         # web typecheck + forwarding-contract tests
 npm run build:tunnel                          # build just the Angular UI (no make target; make start-tunnel chains it)
 make start-tunnel-deb                                # build the .deb
 make start-core-test                                 # backend tests (tunnel logic lives in start-core)

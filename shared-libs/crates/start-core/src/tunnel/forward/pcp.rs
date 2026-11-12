@@ -1520,14 +1520,18 @@ mod tests {
     }
 
     #[test]
-    fn legacy_tcp_fallback_renews_and_repoints_without_adding_udp_or_changing_ownership() {
+    fn migrated_tcp_fallback_renews_and_repoints_without_adding_udp_or_changing_ownership() {
         let target = "10.59.0.2:443".parse().unwrap();
         for auto in [false, true] {
             for enabled in [false, true] {
-                let mut entry: PortForward = serde_json::from_value(serde_json::json!({
-                    "kind": "sni", "routes": {},
-                    "fallback": { "target": target, "label": null, "enabled": enabled, "auto": auto }
-                })).unwrap();
+                let mut entry = PortForward::empty_sni();
+                entry.bindings_mut(MappingProtocol::Tcp).unwrap().fallback =
+                    Some(crate::tunnel::db::SniRoute {
+                        target,
+                        label: None,
+                        enabled,
+                        auto,
+                    });
                 let previous = serde_json::to_value(&entry).unwrap();
                 let default_label = if auto { None } else { Some("Automatic".into()) };
                 let (owner, mapping) =

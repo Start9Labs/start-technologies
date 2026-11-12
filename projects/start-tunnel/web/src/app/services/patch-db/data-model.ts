@@ -121,31 +121,33 @@ export const mockTunnelData: TunnelData = {
         },
         fallback: null,
       },
-      routes: {
-        'cloud.example.com': {
-          target: '10.59.0.2:443',
-          label: 'Nextcloud',
-          enabled: true,
-          auto: true,
+      tcp: {
+        routes: {
+          'cloud.example.com': {
+            target: '10.59.0.2:443',
+            label: 'Nextcloud',
+            enabled: true,
+            auto: true,
+          },
+          'photos.example.com': {
+            target: '10.59.0.2:443',
+            label: 'Immich',
+            enabled: true,
+            auto: true,
+          },
+          'blog.example.com': {
+            target: '10.59.0.4:443',
+            label: 'Blog',
+            enabled: true,
+            auto: false,
+          },
         },
-        'photos.example.com': {
+        fallback: {
           target: '10.59.0.2:443',
-          label: 'Immich',
-          enabled: true,
-          auto: true,
-        },
-        'blog.example.com': {
-          target: '10.59.0.4:443',
-          label: 'Blog',
+          label: 'Server One (fallback)',
           enabled: true,
           auto: false,
         },
-      },
-      fallback: {
-        target: '10.59.0.2:443',
-        label: 'Server One (fallback)',
-        enabled: true,
-        auto: false,
       },
     },
     '203.0.113.42:8333': {

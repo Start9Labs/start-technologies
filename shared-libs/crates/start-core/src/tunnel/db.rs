@@ -162,13 +162,9 @@ pub enum PortForward {
     },
     /// Logical mappings for a hostname or fallback own disjoint transport sets.
     Sni {
-        /// Legacy routes and fallback belong to TCP.
-        #[serde(flatten)]
         tcp: SniBindings,
-        #[serde(default)]
         udp: SniBindings,
         /// One shared owner, target, label and enabled state for TCP/UDP.
-        #[serde(default)]
         both: SniBindings,
     },
 }
@@ -490,7 +486,7 @@ impl PortForwards {
             })
     }
 
-    /// Whether a TCP mapping reserves the address against the HTTP redirect.
+    /// TCP intent, including disabled mappings, reserves the address against HTTP redirects.
     pub fn occupied(&self, addr: SocketAddrV4) -> bool {
         // Only the nearest forward starting at or before `addr` can cover it
         // (forwards on one IP never overlap).
@@ -809,13 +805,17 @@ fn sni_and_dnat_persistence_round_trip() {
         },
         "5.6.7.8:443": {
             "kind": "sni",
-            "routes": {
-                "id.example.com": {
-                    "target": "10.59.0.2:443",
-                    "label": null,
-                    "enabled": true
+            "tcp": {
+                "routes": {
+                    "id.example.com": {
+                        "target": "10.59.0.2:443",
+                        "label": null,
+                        "enabled": true
+                    }
                 }
-            }
+            },
+            "udp": {},
+            "both": {}
         }
     });
     let map: PortForwards = serde_json::from_value(mixed).unwrap();
@@ -836,18 +836,20 @@ fn sni_and_dnat_persistence_round_trip() {
 }
 
 #[test]
-fn sni_fallback_serde_backward_compat() {
-    // Legacy SNI JSON (written before the `fallback` field existed) must
-    // deserialize with `fallback: None` — this is why no migration is needed.
-    let legacy = serde_json::json!({
+fn sni_bucket_fallback_defaults_to_none() {
+    let value = serde_json::json!({
         "kind": "sni",
-        "routes": {
-            "id.example.com": {
-                "target": "10.59.0.2:443", "label": null, "enabled": true, "auto": true
+        "tcp": {
+            "routes": {
+                "id.example.com": {
+                    "target": "10.59.0.2:443", "label": null, "enabled": true, "auto": true
+                }
             }
-        }
+        },
+        "udp": {},
+        "both": {}
     });
-    let pf: PortForward = serde_json::from_value(legacy).unwrap();
+    let pf: PortForward = serde_json::from_value(value).unwrap();
     match pf {
         PortForward::Sni {
             tcp: SniBindings { fallback, .. },
@@ -856,7 +858,6 @@ fn sni_fallback_serde_backward_compat() {
         other => panic!("expected Sni, got {other:?}"),
     }
 
-    // A fallback round-trips through serde.
     let with_fb = PortForward::Sni {
         both: Default::default(),
         tcp: crate::tunnel::db::SniBindings {
@@ -1045,24 +1046,7 @@ fn pinhole_overlap_detection() {
 }
 
 #[test]
-fn legacy_named_routes_remain_tcp_and_dnat_conversion_has_one_combined_fallback() {
-    let legacy: PortForward = serde_json::from_value(serde_json::json!({
-        "kind": "sni",
-        "routes": { "service.example.com": { "target": "10.59.0.2:443", "label": "TLS", "enabled": false } },
-        "fallback": { "target": "10.59.0.3:443", "label": "catch-all", "auto": true }
-    })).unwrap();
-    let tcp = legacy.bindings(TransportProtocol::Tcp).unwrap();
-    assert_eq!(
-        tcp.routes["service.example.com"].label.as_deref(),
-        Some("TLS")
-    );
-    assert!(!tcp.routes["service.example.com"].enabled);
-    assert!(tcp.fallback.as_ref().unwrap().auto);
-    assert!(legacy.bindings(TransportProtocol::Udp).unwrap().is_empty());
-    let encoded = serde_json::to_value(&legacy).unwrap();
-    assert!(encoded.get("tcp").is_none());
-    assert!(encoded["routes"].get("service.example.com").is_some());
-
+fn dnat_conversion_has_one_combined_fallback() {
     let mut dnat = PortForward::Dnat {
         target: "10.59.0.4:8443".parse().unwrap(),
         label: Some("plain mapping".into()),
@@ -1087,6 +1071,43 @@ fn legacy_named_routes_remain_tcp_and_dnat_conversion_has_one_combined_fallback(
     assert!(!dnat.sni_is_empty());
     dnat.bindings_mut(Protocol::TcpUdp).unwrap().fallback = None;
     assert!(dnat.sni_is_empty());
+}
+
+#[test]
+fn sni_wire_shape_has_three_uniform_required_buckets() {
+    for (protocol, key) in [
+        (Protocol::Tcp, "tcp"),
+        (Protocol::Udp, "udp"),
+        (Protocol::TcpUdp, "both"),
+    ] {
+        let mut entry = PortForward::empty_sni();
+        entry.bindings_mut(protocol).unwrap().routes.insert(
+            "service.example.com".into(),
+            SniRoute {
+                target: "10.59.0.2:443".parse().unwrap(),
+                label: None,
+                enabled: false,
+                auto: true,
+            },
+        );
+        let encoded = serde_json::to_value(&entry).unwrap();
+        assert!(encoded.get("routes").is_none());
+        assert!(encoded.get("fallback").is_none());
+        assert_eq!(
+            encoded[key]["routes"]["service.example.com"]["enabled"],
+            false
+        );
+        assert_eq!(encoded[key]["routes"]["service.example.com"]["auto"], true);
+        let decoded: PortForward = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), encoded);
+        for bucket in ["tcp", "udp", "both"] {
+            let mut missing = encoded.clone();
+            missing.as_object_mut().unwrap().remove(bucket);
+            assert!(serde_json::from_value::<PortForward>(missing).is_err());
+        }
+    }
+    let legacy = serde_json::json!({"kind": "sni", "routes": {}, "fallback": null});
+    assert!(serde_json::from_value::<PortForward>(legacy).is_err());
 }
 
 #[test]
