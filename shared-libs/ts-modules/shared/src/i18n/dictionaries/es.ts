@@ -962,7 +962,7 @@ export default {
   1111: 'Ver en el Mercado',
   1112: 'Esta implementación alternativa cumple el requisito',
   1113: 'Cadena de proxy HTTP',
-  1114: 'Se aplica a todas las direcciones e interfaces de este enlace.',
+  1114: 'Se aplica a todas las direcciones e interfaces de esta puerta de enlace y este enlace.',
   1115: 'Los servicios de proxy pueden leer y modificar el tráfico, incluidas las credenciales.',
   1116: 'Los proxies no disponibles bloquean el tráfico. Aplicar cambios desconecta a los clientes existentes.',
   1117: 'No hay etapas de proxy',
@@ -971,4 +971,6 @@ export default {
   1120: 'Perfil no disponible',
   1121: 'Subir',
   1122: 'Bajar',
+  1123: 'Solo público',
+  1124: 'Los clientes privados omiten esta cadena.',
 } satisfies i18n

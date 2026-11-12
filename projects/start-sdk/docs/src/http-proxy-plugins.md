@@ -1,6 +1,6 @@
 # HTTP Proxy Plugins
 
-An HTTP proxy plugin processes requests and responses in front of another service. StartOS lets the user select and order provider-owned profiles on an HTTP-proxied binding; providers can challenge clients, inspect bodies, and modify responses.
+An HTTP proxy plugin processes requests and responses in front of another service. StartOS lets the user select and order provider-owned profiles independently for each gateway of an HTTP-proxied binding; providers can challenge clients, inspect bodies, and modify responses.
 
 ## Declare and publish profiles
 
@@ -35,6 +35,7 @@ Each attachment contains:
 ```typescript
 {
   binding: { packageId, hostId, internalPort },
+  gateway: { kind: 'network', gatewayId },
   profileId,
   ingress: { transport: 'unix', path: ingressPath },
   next: { transport: 'unix', path: continuationPath },
@@ -42,7 +43,9 @@ Each attachment contains:
 }
 ```
 
-Within this provider, the identity is `(binding.packageId, binding.hostId, binding.internalPort, profileId)`. Reordering preserves that identity. The same provider can occur with different profiles on one binding; each provider/profile pair occurs once. Derive process/configuration keys from that tuple rather than the attachment's position.
+`gateway` is either `{ kind: 'network', gatewayId }` or `{ kind: 'url-plugin', packageId }`. The URL-plugin package ID identifies the service container originating traffic, not the protected application or this HTTP proxy provider.
+
+Within this provider, the identity is `(binding.packageId, binding.hostId, binding.internalPort, gateway.kind, gateway ID, profileId)`. The gateway ID is `gatewayId` for network gateways and `packageId` for URL plugins. Reordering and changing **Public only** preserve that identity. The same provider/profile can be selected independently on multiple gateways, with separate sockets. Different profiles from the same provider can appear in one chain; each provider/profile pair occurs once within it. Derive process/configuration keys from that tuple rather than the attachment's position.
 
 ## Socket ownership and readiness
 
@@ -57,11 +60,11 @@ For each attachment:
 
 Use the supplied paths verbatim. Socket paths are runtime values, not persisted configuration. `next` routes to the next selected stage, or to the protected application's original binding, including its upstream TLS validation. Preserve the incoming request's authority and trusted forwarded headers when forwarding. StartOS applies the binding's authentication and forwarded-header policy before the first stage.
 
-If a provider stops, a selected profile disappears, or a socket cannot be reached, the chain fails closed with HTTP 503. StartOS retains the user's selection. It neither skips a stage nor replays the request against the application. Chain changes disconnect existing connections, including upgraded WebSocket connections.
+If a provider stops, a selected profile disappears, or a socket cannot be reached, the chain fails closed with HTTP 503. StartOS retains the user's selection. It neither skips a stage nor replays the request against the application. Policy changes disconnect existing connections on the binding, including its other gateways and upgraded WebSocket connections.
 
 ## Anubis adapter settings
 
-For an [Anubis Unix-socket listener](https://github.com/TecharoHQ/anubis/blob/main/docs/docs/admin/installation.mdx), configure one instance per attachment with these environment values:
+For an [Anubis Unix-socket listener](https://github.com/TecharoHQ/anubis/blob/main/docs/docs/admin/installation.mdx), configure one instance per attachment with these environment values. A profile selected on both a network gateway and Tor needs two instances, each using its own supplied socket pair:
 
 | Variable                | Value                                  |
 | ----------------------- | -------------------------------------- |
@@ -71,11 +74,15 @@ For an [Anubis Unix-socket listener](https://github.com/TecharoHQ/anubis/blob/ma
 | `CUSTOM_REAL_IP_HEADER` | `X-Forwarded-For`                      |
 | `XFF_STRIP_PRIVATE`     | `false` when protecting LAN clients    |
 
-StartOS strips client-supplied `X-Forwarded-*`, `Forwarded`, and `X-Real-IP` headers at ingress. With the protected binding's `addXForwardedHeaders` enabled, `X-Forwarded-For` supplies the client address. Make this a requirement for profiles whose policy depends on client IP; a binding with header generation disabled supplies no client-IP header. Anubis's private-IP filtering is provider policy: keep LAN addresses when those clients need challenges too.
+StartOS strips client-supplied `X-Forwarded-*`, `Forwarded`, and `X-Real-IP` headers at ingress. With the protected binding's `addXForwardedHeaders` enabled, `X-Forwarded-For` supplies the client address. Make this a requirement for profiles whose policy depends on client IP; a binding with header generation disabled supplies no client-IP header. Anubis's private-IP filtering is provider policy: keep LAN addresses when those clients need challenges too. StartOS's network-gateway **Public only** option is separate: private clients bypass the entire chain before Anubis is involved. URL gateways have no such option; their chain handles traffic delivered by the URL-plugin container.
 
-## Binding scope and trust
+## Gateway scope and trust
 
-The selected chain covers every managed address and exported interface sharing the binding, including paths such as `/admin`. Package rebinding preserves the selection. To disable HTTP proxying on a binding with a chain, the user must first clear the chain. Direct service-to-service connections to container ports follow the package's own access policy.
+Users configure each binding × gateway policy through **HTTP proxy chain** in that gateway table's header. A chain covers every managed address and exported interface sharing that binding on that gateway, including paths such as `/admin`. Package rebinding preserves all gateway policies. To disable HTTP proxying, the user must first clear every nonempty chain; saved empty policies do not prevent it.
+
+Network policies default to `publicOnly: false`. With **Public only** enabled, clients classified as private by StartOS bypass both the stages and their ALPN restrictions, even while a provider is unavailable. StartOS uses its connection-origin classification, including on-link globally routable clients, rather than the requested hostname or an RFC1918-only test.
+
+URL-plugin policies select traffic from the actual originating service container and require `publicOnly: false`. They are not inferred from URL spelling or forwarded headers. Traffic from a URL plugin without a configured chain does not fall back to the physical network gateway's policy. Direct service-to-service connections to container ports follow the package's own access policy and do not enter these gateway chains.
 
 > [!WARNING]
-> A selected provider can read and modify traffic, including credentials and cookies. Configure authentication and policy for every route the binding serves. Stopping or uninstalling a provider leaves its protected bindings blocked until the user repairs or removes the selection.
+> A selected provider can read and modify traffic, including credentials and cookies. Configure authentication and policy for every route the binding serves. Stopping or uninstalling a provider blocks traffic selected for its chains until the user repairs or removes the selection.

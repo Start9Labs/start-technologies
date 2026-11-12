@@ -963,7 +963,7 @@ export const ENGLISH: Record<string, number> = {
   'View in Marketplace': 1111,
   'This alternative implementation meets the requirement': 1112,
   'HTTP proxy chain': 1113,
-  'Applies to every address and interface on this binding.': 1114,
+  'Applies to every address and interface on this gateway and binding.': 1114,
   'Proxy services can read and modify traffic, including credentials.': 1115,
   'Unavailable proxies block traffic. Applying changes disconnects existing clients.': 1116,
   'No proxy stages': 1117,
@@ -972,4 +972,6 @@ export const ENGLISH: Record<string, number> = {
   'Profile unavailable': 1120,
   'Move up': 1121,
   'Move down': 1122,
+  'Public only': 1123,
+  'Private clients bypass this chain.': 1124,
 }

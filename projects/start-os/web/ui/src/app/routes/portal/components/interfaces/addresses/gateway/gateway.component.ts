@@ -6,7 +6,8 @@ import {
   TaskService,
 } from '@start9labs/shared'
 import { ISB, utils } from '@start9labs/start-core'
-import { TuiButton, TuiIcon } from '@taiga-ui/core'
+import { TuiButton, TuiIcon, TuiTitle } from '@taiga-ui/core'
+import { TuiHeader } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
 import { firstValueFrom } from 'rxjs'
 import {
@@ -25,6 +26,7 @@ import {
   GatewayAddressGroup,
   MappedServiceInterface,
 } from '../../interface.service'
+import { HttpProxyChainButton } from '../../proxy-chain'
 import { DomainHealthService } from './domain-health.service'
 import { DOMAIN_TYPE_PICKER, DomainType } from './domain-type-picker.component'
 import { GatewayItemComponent } from './item.component'
@@ -32,7 +34,7 @@ import { GatewayItemComponent } from './item.component'
 @Component({
   selector: 'section[gatewayGroup]',
   template: `
-    <header>
+    <header tuiHeader="body-l">
       @switch (gatewayGroup().deviceType) {
         @case ('ethernet') {
           <tui-icon icon="@tui.ethernet-port" />
@@ -44,15 +46,29 @@ import { GatewayItemComponent } from './item.component'
           <tui-icon icon="@tui.shield" />
         }
       }
-      {{ gatewayGroup().gatewayName }}
-      <button
-        tuiButton
-        iconStart="@tui.plus"
-        [style.margin-inline-start]="'auto'"
-        (click)="openDomainTypePicker()"
-      >
-        {{ 'Add Domain' | i18n }}
-      </button>
+      <span tuiTitle>{{ gatewayGroup().gatewayName }}</span>
+      <aside tuiAccessories>
+        @if (value(); as iface) {
+          @if (iface.binding?.options?.proxy) {
+            <button
+              [httpProxyChain]="{
+                kind: 'network',
+                gatewayId: gatewayGroup().gatewayId,
+              }"
+              [gatewayName]="gatewayGroup().gatewayName"
+              [address]="iface.addressInfo"
+              [packageId]="packageId()"
+            ></button>
+          }
+        }
+        <button
+          tuiButton
+          iconStart="@tui.plus"
+          (click)="openDomainTypePicker()"
+        >
+          {{ 'Add Domain' | i18n }}
+        </button>
+      </aside>
     </header>
     <table [appTable]="header()">
       @for (address of gatewayGroup().addresses; track $index) {
@@ -74,27 +90,22 @@ import { GatewayItemComponent } from './item.component'
     </table>
   `,
   styles: `
-    :host ::ng-deep {
-      th:first-child {
-        width: 5rem;
-      }
-    }
-
-    @media (max-width: 450px) {
-      header button {
-        font-size: 0;
-        gap: 0;
-      }
+    :host-context(tui-root._mobile) header button {
+      font-size: 0;
+      gap: 0;
     }
   `,
   host: { class: 'g-card' },
   imports: [
     TuiButton,
     TuiIcon,
+    TuiHeader,
+    TuiTitle,
     TableComponent,
     PlaceholderComponent,
     i18nPipe,
     GatewayItemComponent,
+    HttpProxyChainButton,
   ],
 })
 export class GatewayComponent {

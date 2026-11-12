@@ -1,6 +1,7 @@
 import { Component, inject, input } from '@angular/core'
 import { i18nPipe } from '@start9labs/shared'
-import { TuiButton } from '@taiga-ui/core'
+import { TuiButton, TuiTitle } from '@taiga-ui/core'
+import { TuiHeader } from '@taiga-ui/layout'
 import { TuiAvatar } from '@taiga-ui/kit'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
@@ -10,28 +11,39 @@ import {
   MappedServiceInterface,
   PluginAddressGroup,
 } from '../../interface.service'
+import { HttpProxyChainButton } from '../../proxy-chain'
 import { PluginItemComponent } from './item.component'
 
 @Component({
   selector: 'section[pluginGroup]',
   template: `
-    <header>
+    <header tuiHeader="body-l">
       @if (pluginGroup().pluginPkgInfo; as pkgInfo) {
         <span tuiAvatar size="xs">
           <img [pkgIcon]="pkgInfo.id" />
         </span>
       }
-      {{ pluginGroup().pluginName }}
-      @if (pluginGroup().tableAction; as action) {
-        <button
-          tuiButton
-          iconStart="@tui.plus"
-          [style.margin-inline-start]="'auto'"
-          (click)="runTableAction()"
-        >
-          {{ action.metadata.name }}
-        </button>
-      }
+      <span tuiTitle>{{ pluginGroup().pluginName }}</span>
+      <aside tuiAccessories>
+        @if (value(); as iface) {
+          @if (iface.binding?.options?.proxy) {
+            <button
+              [httpProxyChain]="{
+                kind: 'url-plugin',
+                packageId: pluginGroup().pluginId,
+              }"
+              [gatewayName]="pluginGroup().pluginName"
+              [address]="iface.addressInfo"
+              [packageId]="packageId()"
+            ></button>
+          }
+        }
+        @if (pluginGroup().tableAction; as action) {
+          <button tuiButton iconStart="@tui.plus" (click)="runTableAction()">
+            {{ action.metadata.name }}
+          </button>
+        }
+      </aside>
     </header>
     <table [appTable]="['Protocol', 'URL', null]">
       @for (address of pluginGroup().addresses; track $index) {
@@ -54,32 +66,23 @@ import { PluginItemComponent } from './item.component'
     </table>
   `,
   styles: `
-    :host ::ng-deep {
-      th:first-child {
-        width: 5rem;
-      }
-
-      td:first-child {
-        white-space: nowrap;
-      }
-    }
-
-    @media (max-width: 450px) {
-      header button {
-        font-size: 0;
-        gap: 0;
-      }
+    :host-context(tui-root._mobile) header button {
+      font-size: 0;
+      gap: 0;
     }
   `,
   host: { class: 'g-card' },
   imports: [
     TuiButton,
+    TuiHeader,
+    TuiTitle,
     TableComponent,
     PlaceholderComponent,
     i18nPipe,
     PluginItemComponent,
     TuiAvatar,
     PkgIconDirective,
+    HttpProxyChainButton,
   ],
 })
 export class PluginAddressesComponent {

@@ -81,6 +81,7 @@ export default class StartOsUiComponent {
 
     return {
       ...this.iface,
+      binding: network.host.bindings[this.iface.addressInfo.internalPort],
       gatewayGroups: this.interfaceService.getGatewayGroups(
         this.iface,
         network.host,

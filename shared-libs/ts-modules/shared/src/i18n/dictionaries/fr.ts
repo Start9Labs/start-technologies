@@ -962,7 +962,7 @@ export default {
   1111: 'Voir dans la bibliothèque de services',
   1112: 'Cette implémentation alternative remplit la condition requise',
   1113: 'Chaîne de proxy HTTP',
-  1114: 'S’applique à toutes les adresses et interfaces de cette liaison.',
+  1114: 'S’applique à toutes les adresses et interfaces de cette passerelle et de cette liaison.',
   1115: 'Les services de proxy peuvent lire et modifier le trafic, y compris les identifiants.',
   1116: 'Les proxys indisponibles bloquent le trafic. L’application des modifications déconnecte les clients existants.',
   1117: 'Aucune étape de proxy',
@@ -971,4 +971,6 @@ export default {
   1120: 'Profil indisponible',
   1121: 'Monter',
   1122: 'Descendre',
+  1123: 'Public uniquement',
+  1124: 'Les clients privés contournent cette chaîne.',
 } satisfies i18n

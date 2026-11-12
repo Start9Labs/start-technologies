@@ -1579,26 +1579,13 @@ export class MockApiService extends ApiService {
 
       return null
     },
-    'package.host.binding.set-http-proxy-chain': async params => {
-      this.mockRevision([
-        {
-          op: PatchOp.ADD,
-          path: `${this.mockHostPath(params.package, params.host)}/bindings/${params.internalPort}/proxyChain`,
-          value: params.chain,
-        },
-      ])
-      return null
-    },
-    'server.host.binding.set-http-proxy-chain': async params => {
-      this.mockRevision([
-        {
-          op: PatchOp.ADD,
-          path: `/serverInfo/network/host/bindings/${params.internalPort}/proxyChain`,
-          value: params.chain,
-        },
-      ])
-      return null
-    },
+    'package.host.binding.set-http-proxy-chain': async params =>
+      this.mockSetProxyChain(
+        this.mockHostPath(params.package, params.host),
+        params,
+      ),
+    'server.host.binding.set-http-proxy-chain': async params =>
+      this.mockSetProxyChain('/serverInfo/network/host', params),
     'package.host.binding.set-address-enabled': async params => {
       await pauseFor(2000)
 
@@ -2672,6 +2659,27 @@ export class MockApiService extends ApiService {
     progress.complete()
     job.progress = progress.snapshot()
     await this.publishConversions()
+  }
+
+  private async mockSetProxyChain(
+    host: string,
+    { internalPort, policy }: T.SetHttpProxyChainParamsInput,
+  ): Promise<null> {
+    const path = `${host}/bindings/${internalPort}/proxyChains`
+    const previous = this.mockData(path) as T.HttpProxyChain[]
+    await this.mockRevision([
+      {
+        op: PatchOp.ADD,
+        path,
+        value: [
+          ...previous.filter(
+            entry => !utils.deepEqual(entry.gateway, policy.gateway),
+          ),
+          { ...policy, publicOnly: policy.publicOnly ?? false },
+        ],
+      },
+    ])
+    return null
   }
 
   private mockData(path: string): any {

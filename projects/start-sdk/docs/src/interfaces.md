@@ -237,7 +237,7 @@ An `addSsl` binding on any port can carry a Let's Encrypt certificate — issuan
 
 ## HTTP proxy chains
 
-Users can attach installed [HTTP proxy plugins](http-proxy-plugins.md) to an HTTP-proxied binding. The ordered chain applies to all its addresses and exported interfaces, including interfaces with different paths. Rebinding preserves the user's selection; disabling HTTP proxying requires clearing an attached chain first. Keep authentication on the binding or application authoritative for every route.
+Users can attach installed [HTTP proxy plugins](http-proxy-plugins.md) independently to each gateway of an HTTP-proxied binding. Each ordered chain applies to that gateway's addresses and exported interfaces sharing the binding, including different paths. Network gateways offer a **Public only** option; private clients then bypass the chain and its HTTP-version restrictions. URL-plugin gateways are identified by the originating service container and have no Public-only option. Rebinding preserves every gateway's settings; disabling HTTP proxying requires clearing every nonempty chain first. Keep authentication on the binding or application authoritative for every route.
 
 ## Interface Options
 

@@ -962,7 +962,7 @@ export default {
   1111: 'Zobacz w sklepie',
   1112: 'Ta alternatywna implementacja spełnia wymaganie',
   1113: 'Łańcuch proxy HTTP',
-  1114: 'Dotyczy wszystkich adresów i interfejsów tego powiązania.',
+  1114: 'Dotyczy wszystkich adresów i interfejsów tej bramy i tego powiązania.',
   1115: 'Usługi proxy mogą odczytywać i modyfikować ruch, w tym dane uwierzytelniające.',
   1116: 'Niedostępne proxy blokują ruch. Zastosowanie zmian rozłącza istniejących klientów.',
   1117: 'Brak etapów proxy',
@@ -971,4 +971,6 @@ export default {
   1120: 'Profil niedostępny',
   1121: 'Przesuń w górę',
   1122: 'Przesuń w dół',
+  1123: 'Tylko publiczni klienci',
+  1124: 'Prywatni klienci omijają ten łańcuch.',
 } satisfies i18n

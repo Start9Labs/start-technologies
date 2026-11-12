@@ -962,7 +962,7 @@ export default {
   1111: 'Im Marktplatz anzeigen',
   1112: 'Diese alternative Implementierung erfüllt die Anforderung',
   1113: 'HTTP-Proxy-Kette',
-  1114: 'Gilt für jede Adresse und Schnittstelle dieser Bindung.',
+  1114: 'Gilt für jede Adresse und Schnittstelle dieses Gateways und dieser Bindung.',
   1115: 'Proxy-Dienste können Datenverkehr einschließlich Zugangsdaten lesen und ändern.',
   1116: 'Nicht verfügbare Proxys blockieren den Datenverkehr. Änderungen trennen bestehende Client-Verbindungen.',
   1117: 'Keine Proxy-Stufen',
@@ -971,4 +971,6 @@ export default {
   1120: 'Profil nicht verfügbar',
   1121: 'Nach oben',
   1122: 'Nach unten',
+  1123: 'Nur öffentliche Clients',
+  1124: 'Private Clients umgehen diese Kette.',
 } satisfies i18n

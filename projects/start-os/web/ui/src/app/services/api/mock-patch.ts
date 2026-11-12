@@ -290,7 +290,7 @@ export const mockPatchData: DataModel = {
               proxy: null,
             },
             interfaces: {},
-            proxyChain: [],
+            proxyChains: [],
           },
         },
         bindingRanges: {},
@@ -902,7 +902,7 @@ export const mockPatchData: DataModel = {
                 secure: null,
                 proxy: { type: 'http', addXForwardedHeaders: true, auth: null },
               },
-              proxyChain: [],
+              proxyChains: [],
               interfaces: {
                 ui: {
                   id: 'ui',
@@ -1110,7 +1110,7 @@ export const mockPatchData: DataModel = {
                 secure: { ssl: false },
                 proxy: null,
               },
-              proxyChain: [],
+              proxyChains: [],
               interfaces: {
                 rpc: {
                   preferredLauncherAddress: null,
@@ -1158,7 +1158,7 @@ export const mockPatchData: DataModel = {
                 secure: { ssl: false },
                 proxy: null,
               },
-              proxyChain: [],
+              proxyChains: [],
               interfaces: {
                 p2p: {
                   preferredLauncherAddress: null,

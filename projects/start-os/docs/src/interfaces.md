@@ -26,14 +26,18 @@ Open the **Interfaces** tab to see every interface the service exposes. Each int
 
 ### HTTP Proxy Chains
 
-For an HTTP-proxied interface, **HTTP proxy chain** lets you put installed proxy services, such as bot protection or a web application firewall, in front of the application. Configure profiles through the proxy service's actions, choose **Add proxy**, select a profile, and use the arrows to order the stages. **Save** applies the chain; **Cancel** discards edits. Remove every stage and save to clear it.
+For an HTTP-proxied interface, choose **HTTP proxy chain** in a gateway table's header to put installed proxy services, such as bot protection or a web application firewall, in front of the application. Configure profiles through the proxy service's actions, choose **Add proxy** in the dialog, select a profile, and use the arrows to order the stages. **Save** applies the settings; **Cancel** discards edits. Remove every stage and save to clear the chain.
 
-The chain applies to every address and interface sharing the same binding, including different URL paths. Requests pass through the stages in order. A provider can appear with different profiles, but the same provider/profile pair appears once.
+Each binding has a separate chain for each gateway. Its chain covers every address and interface sharing that binding on that gateway, including different URL paths. Changing one gateway leaves the others' settings unchanged. Requests pass through the stages in order. A provider can appear with different profiles, but the same provider/profile pair appears once within a chain.
 
-Unavailable selections remain visible and block traffic with HTTP 503. Start or configure the provider, restore the missing profile, or remove its stage to restore access. Saving a changed chain disconnects existing clients, including WebSockets. A profile's supported HTTP versions can also limit which clients can connect.
+On a network gateway, **Public only** defaults off. When enabled, clients StartOS classifies as private bypass that chain and its HTTP-version restrictions, even when a selected provider is unavailable. This classification includes on-link clients with globally routable addresses; it is not determined by the URL they use.
+
+URL-plugin gateways, such as Tor, have their own chains and no **Public only** switch. StartOS identifies that gateway from the service container delivering the connection, not an onion hostname or forwarded header. Traffic from a URL plugin with no chain does not fall back to a network gateway's chain. Direct connections to an application's container port bypass these gateway chains.
+
+Unavailable stages remain visible and return HTTP 503 for traffic to which the chain applies. Saved gateway settings remain editable even if the gateway or URL plugin disappears. Start or configure the provider, restore the missing profile, or remove its stage to restore access. Applying changed settings disconnects existing clients on the binding, including clients on its other gateways and upgraded WebSockets. A selected profile's supported HTTP versions can also limit which clients can connect.
 
 > [!WARNING]
-> Proxy services can read and modify requests and responses, including credentials and cookies. Select providers you trust. Stopping or uninstalling one blocks the bindings that use it until you repair or remove the selection.
+> Proxy services can read and modify requests and responses, including credentials and cookies. Select providers you trust. Stopping or uninstalling one blocks traffic selected for its chain until you repair or remove the selection.
 
 ### Gateway Tables
 
