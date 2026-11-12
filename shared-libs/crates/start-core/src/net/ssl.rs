@@ -11,7 +11,6 @@ use imbl_value::InternedString;
 use libc::time_t;
 use openssl::asn1::{Asn1Integer, Asn1Time, Asn1TimeRef};
 use openssl::bn::{BigNum, MsbOption};
-use openssl::ec::{EcGroup, EcKey};
 use openssl::error::ErrorStack;
 use openssl::hash::MessageDigest;
 use openssl::pkey::{PKey, Private};
@@ -43,6 +42,7 @@ use crate::net::tls::{TlsHandler, TlsHandlerAction};
 use crate::net::utils::is_global_ip;
 use crate::net::web_server::{Accept, ExtractVisitor, TcpMetadata, extract};
 use crate::prelude::*;
+pub use crate::util::crypto::gen_nistp256;
 use crate::util::serde::{Der64, HandlerExtSerde, Pem};
 
 pub(crate) fn x509_sha256_fingerprint(cert: &X509Ref) -> Result<String, ErrorStack> {
@@ -345,11 +345,6 @@ pub async fn root_ca_start_time() -> SystemTime {
     }
 }
 
-const EC_CURVE_NAME: nid::Nid = nid::Nid::X9_62_PRIME256V1;
-lazy_static::lazy_static! {
-    static ref EC_GROUP: EcGroup = EcGroup::from_curve_name(EC_CURVE_NAME).unwrap();
-}
-
 pub async fn export_key(key: &PKey<Private>, target: &Path) -> Result<(), Error> {
     tokio::fs::write(target, key.private_key_to_pem_pkcs8()?)
         .map(|res| res.with_ctx(|_| (ErrorKind::Filesystem, target.display().to_string())))
@@ -375,11 +370,6 @@ fn rand_serial() -> Result<Asn1Integer, Error> {
     let asn1 = Asn1Integer::from_bn(&bn)?;
     Ok(asn1)
 }
-#[instrument(skip_all)]
-pub fn gen_nistp256() -> Result<PKey<Private>, Error> {
-    Ok(PKey::from_ec_key(EcKey::generate(EC_GROUP.as_ref())?)?)
-}
-
 /// Appends a hashed `subjectKeyIdentifier` and an `authorityKeyIdentifier` carrying
 /// only that key identifier, the form CA/B Forum BR 7.1.2.1.3 requires on a root.
 fn append_self_signed_key_identifiers(
@@ -1105,8 +1095,6 @@ mod cert_validity_tests {
         builder.build()
     }
 
-    /// The renewal window: too old to serve without trying to renew, still
-    /// good enough to serve while that renewal is failing.
     #[test]
     fn the_renewal_window_is_unexpired_but_due_for_renewal() {
         let fresh = cert_expiring_in(60);

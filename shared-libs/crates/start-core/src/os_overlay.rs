@@ -15,9 +15,7 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use openssl::ec::{EcGroup, EcKey};
 use openssl::hash::MessageDigest;
-use openssl::nid::Nid;
 use openssl::pkey::{HasPublic, PKey, PKeyRef, Private, Public};
 use openssl::sign::{Signer, Verifier};
 use sha2::{Digest, Sha256};
@@ -26,6 +24,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::merkle_archive::source::DynFileSource;
+pub use crate::util::crypto::gen_nistp256 as generate_signing_key;
 use crate::util::io::{create_file_mod, open_file};
 use crate::util::squashfs::Squashfs;
 use crate::util::{HashWriter, Invoke};
@@ -155,21 +154,11 @@ fn require_p256<T: HasPublic>(key: &PKeyRef<T>) -> Result<(), Error> {
         .with_kind(ErrorKind::OpenSsl)?
         .group()
         .curve_name()
-        != Some(Nid::X9_62_PRIME256V1)
+        != Some(crate::util::crypto::NIST_P256_CURVE)
     {
         return Err(invalid_signature());
     }
     Ok(())
-}
-
-/// Generates a dedicated P-256 overlay signing key.
-///
-/// OpenSSL's `private_key_to_pem_pkcs8` and `public_key_to_pem` export the key;
-/// the caller owns private-key secrecy, persistence and trust provisioning.
-pub fn generate_signing_key() -> Result<PKey<Private>, Error> {
-    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).with_kind(ErrorKind::OpenSsl)?;
-    PKey::from_ec_key(EcKey::generate(&group).with_kind(ErrorKind::OpenSsl)?)
-        .with_kind(ErrorKind::OpenSsl)
 }
 
 impl Manifest {
@@ -537,6 +526,9 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
     use std::time::Duration;
+
+    use openssl::ec::{EcGroup, EcKey};
+    use openssl::nid::Nid;
 
     use super::*;
 
