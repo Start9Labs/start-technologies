@@ -31,11 +31,9 @@ use visit_rs::Visit;
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
-use crate::db::model::public::{AcmeSettings, NetworkInterfaceInfo};
-use crate::db::{DbAccessByKey, DbAccessMut};
+use crate::db::model::public::NetworkInterfaceInfo;
 use crate::net::acme::{
-    ACME_TLS_ALPN_NAME, AcmeCertStore, AcmeProvider, AcmeTlsAlpnCache, AcmeTlsHandler,
-    GetAcmeProvider, ReportOrderFailure,
+    ACME_TLS_ALPN_NAME, AcmeProvider, AcmeTlsHandler, GetAcmeProvider, ReportOrderFailure,
 };
 use crate::net::forward::START9_BRIDGE_V6_SUBNET;
 use crate::net::gateway::{
@@ -44,7 +42,7 @@ use crate::net::gateway::{
 use crate::net::host::binding::ProxyOptions;
 use crate::net::http::ForwardedHeaders;
 use crate::net::port_map::{PortMapController, candidate_gateways};
-use crate::net::ssl::{CertBranding, CertStore, RootCaTlsHandler};
+use crate::net::ssl::{CertBranding, RootCaTlsHandler};
 use crate::net::tls::{TlsHandler, TlsHandlerAction, TlsListener, TlsMetadata};
 use crate::net::utils::{
     bind_mio_listener, gua_ips, ipv6_is_link_local, ipv6_is_local, is_private_client,
@@ -263,11 +261,12 @@ struct PassthroughHandle {
 }
 
 pub struct VHostController {
-    db: TypedPatchDb<Database>,
-    interfaces: Arc<NetworkInterfaceController>,
-    crypto_provider: Arc<CryptoProvider>,
-    acme_cache: AcmeTlsAlpnCache,
-    branding: CertBranding,
+    interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+    make_server: Box<
+        dyn Fn(VHostBindListener, Watch<VHostBindRequirements>) -> VHostServer<VHostBindListener>
+            + Send
+            + Sync,
+    >,
     max_proxy_conns_per_target: usize,
     servers: SyncMutex<BTreeMap<u16, VHostServer<VHostBindListener>>>,
     passthrough_handles: SyncMutex<BTreeMap<(InternedString, u16), PassthroughHandle>>,
@@ -291,19 +290,32 @@ impl VHostController {
         max_proxy_conns_per_target: usize,
         port_map: PortMapController,
     ) -> Self {
-        let controller = Self {
-            db,
-            interfaces,
+        let acme_cache = Arc::new(SyncMutex::new(BTreeMap::new()));
+        let report_failure = report_acme_failure(db.clone());
+        let tls_crypto_provider = crypto_provider.clone();
+        let controller = Self::with_tls_handlers(
+            interfaces.watcher.subscribe(),
             crypto_provider,
-            acme_cache: Arc::new(SyncMutex::new(BTreeMap::new())),
-            branding,
             max_proxy_conns_per_target,
-            servers: SyncMutex::new(BTreeMap::new()),
-            passthrough_handles: SyncMutex::new(BTreeMap::new()),
             port_map,
-            port_mappings: SyncMutex::new(BTreeMap::new()),
-            challenge_binds: SyncMutex::new(BTreeMap::new()),
-        };
+            move |get_provider| {
+                (
+                    Arc::new(AcmeTlsHandler {
+                        db: db.clone(),
+                        acme_cache: acme_cache.clone(),
+                        crypto_provider: tls_crypto_provider.clone(),
+                        get_provider,
+                        in_progress: Watch::new(BTreeMap::new()),
+                        report_failure: Some(report_failure.clone()),
+                    }),
+                    RootCaTlsHandler {
+                        db: db.clone(),
+                        crypto_provider: tls_crypto_provider.clone(),
+                        branding: branding.clone(),
+                    },
+                )
+            },
+        );
         for pt in passthroughs {
             if let Err(e) = controller.add_passthrough(
                 pt.hostname,
@@ -336,49 +348,54 @@ impl VHostController {
         })
     }
 
-    /// Once per name until a certificate lands: the address refuses
-    /// connections meanwhile, and nothing else would say why.
-    fn report_acme_failure(&self) -> ReportOrderFailure {
-        let db = self.db.clone();
-        Arc::new(move |sans, error| {
-            let db = db.clone();
-            async move {
-                let domain = sans.iter().map(|s| &**s).collect::<Vec<_>>().join(", ");
-                db.mutate(|db| {
-                    crate::notifications::notify(
-                        db,
-                        None,
-                        NotificationLevel::Warning,
-                        t!("acme.order-failed-title", domain = domain).to_string(),
-                        t!("acme.order-failed-message", domain = domain, error = error).to_string(),
-                        (),
-                    )
-                })
-                .await
-                .result
-                .log_err();
-            }
-            .boxed()
-        })
+    /// Shares target authorization, origin metadata and port-map ownership with normal serving.
+    /// The caller retains the interface watcher and reconciles every owner, including withdrawal.
+    pub fn with_tls_handlers<Acme, RootCa>(
+        interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+        crypto_provider: Arc<CryptoProvider>,
+        max_proxy_conns_per_target: usize,
+        port_map: PortMapController,
+        tls_handlers: impl Fn(GetVHostAcmeProvider<VHostBindListener>) -> (Acme, RootCa)
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self
+    where
+        Acme: for<'a> TlsHandler<'a, VHostBindListener> + Clone + Send + 'static,
+        RootCa: for<'a> TlsHandler<'a, VHostBindListener> + Clone + Send + 'static,
+    {
+        Self {
+            interfaces,
+            make_server: Box::new(move |listener, bind_reqs| {
+                VHostServer::with_tls_handlers(
+                    listener,
+                    bind_reqs,
+                    crypto_provider.clone(),
+                    &tls_handlers,
+                )
+            }),
+            max_proxy_conns_per_target,
+            servers: SyncMutex::new(BTreeMap::new()),
+            passthrough_handles: SyncMutex::new(BTreeMap::new()),
+            port_map,
+            port_mappings: SyncMutex::new(BTreeMap::new()),
+            challenge_binds: SyncMutex::new(BTreeMap::new()),
+        }
     }
 
     fn create_server(&self, port: u16) -> VHostServer<VHostBindListener> {
         let bind_reqs = Watch::new(VHostBindRequirements::default());
-        let listener = VHostBindListener::new(&self.interfaces, port, bind_reqs.clone_unseen());
-        VHostServer::new(
-            listener,
-            bind_reqs,
-            self.db.clone(),
-            self.crypto_provider.clone(),
-            self.branding.clone(),
-            self.acme_cache.clone(),
-            self.report_acme_failure(),
-        )
+        let listener = VHostBindListener::new(
+            self.interfaces.clone_unseen(),
+            port,
+            bind_reqs.clone_unseen(),
+        );
+        (self.make_server)(listener, bind_reqs)
     }
 
     pub fn plaintext_proxy(&self, port: u16, target: ProxyTarget) -> PlainHttpProxy {
         PlainHttpProxy::new(
-            &self.interfaces,
+            self.interfaces.clone_unseen(),
             port,
             target,
             self.max_proxy_conns_per_target,
@@ -495,7 +512,7 @@ impl VHostController {
         owner: HostMapOwner,
         targets: &BTreeMap<VHostKey, ProxyTarget>,
     ) {
-        let ip_info = self.interfaces.watcher.ip_info();
+        let ip_info = self.interfaces.read();
         self.sync_port_maps(owner.clone(), desired_port_maps(targets, &ip_info));
         self.sync_challenge_binds(owner, challenge_bind_reqs(targets));
     }
@@ -560,6 +577,29 @@ impl VHostController {
             }
         }
     }
+}
+
+fn report_acme_failure(db: TypedPatchDb<Database>) -> ReportOrderFailure {
+    Arc::new(move |sans, error| {
+        let db = db.clone();
+        async move {
+            let domain = sans.iter().map(|s| &**s).collect::<Vec<_>>().join(", ");
+            db.mutate(|db| {
+                crate::notifications::notify(
+                    db,
+                    None,
+                    NotificationLevel::Warning,
+                    t!("acme.order-failed-title", domain = domain).to_string(),
+                    t!("acme.order-failed-message", domain = domain, error = error).to_string(),
+                    (),
+                )
+            })
+            .await
+            .result
+            .log_err();
+        }
+        .boxed()
+    })
 }
 
 /// `(hostname, external port, is the public leg)`. A name reachable both ways
@@ -774,12 +814,12 @@ pub struct VHostBindListener {
 
 impl VHostBindListener {
     fn new(
-        interfaces: &NetworkInterfaceController,
+        ip_info: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
         port: u16,
         bind_reqs: Watch<VHostBindRequirements>,
     ) -> Self {
         Self {
-            ip_info: interfaces.watcher.subscribe(),
+            ip_info,
             port,
             bind_reqs,
             listeners: BTreeMap::new(),
@@ -1715,7 +1755,7 @@ impl fmt::Debug for PlainHttpProxy {
 
 impl PlainHttpProxy {
     pub fn new(
-        interfaces: &NetworkInterfaceController,
+        interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
         port: u16,
         target: ProxyTarget,
         max_connections: usize,
@@ -2036,27 +2076,13 @@ where
     }
 }
 
-struct VHostListener<M, A>(
-    TlsListener<
-        A,
-        VHostTlsHandler<Arc<AcmeTlsHandler<M, GetVHostAcmeProvider<A>>>, RootCaTlsHandler<M>, A>,
-    >,
-)
+struct VHostListener<Acme, RootCa, A>(TlsListener<A, VHostTlsHandler<Acme, RootCa, A>>)
 where
-    for<'a> M: HasModel<Model = Model<M>>
-        + DbAccessMut<CertStore>
-        + DbAccessMut<AcmeCertStore>
-        + DbAccessByKey<AcmeSettings, Key<'a> = &'a AcmeProvider>
-        + Send
-        + Sync
-        + 'static,
     A: Accept + 'static,
-    <A as Accept>::Metadata: Visit<ExtractVisitor<TcpMetadata>>
-        + Visit<ExtractVisitor<GatewayInfo>>
-        + Clone
-        + Send
-        + Sync
-        + 'static;
+    A::Metadata:
+        Visit<ExtractVisitor<TcpMetadata>> + Visit<ExtractVisitor<GatewayInfo>> + Send + Sync,
+    Acme: for<'a> TlsHandler<'a, A> + Send,
+    RootCa: for<'a> TlsHandler<'a, A> + Send;
 struct VHostListenerMetadata<A: Accept> {
     inner: TlsMetadata<A::Metadata>,
     preprocessed: Preprocessed<A>,
@@ -2069,15 +2095,10 @@ impl<A: Accept> fmt::Debug for VHostListenerMetadata<A> {
             .finish()
     }
 }
-impl<M, A> Accept for VHostListener<M, A>
+impl<Acme, RootCa, A> Accept for VHostListener<Acme, RootCa, A>
 where
-    for<'a> M: HasModel<Model = Model<M>>
-        + DbAccessMut<CertStore>
-        + DbAccessMut<AcmeCertStore>
-        + DbAccessByKey<AcmeSettings, Key<'a> = &'a AcmeProvider>
-        + Send
-        + Sync
-        + 'static,
+    Acme: for<'a> TlsHandler<'a, A> + Clone + Send + 'static,
+    RootCa: for<'a> TlsHandler<'a, A> + Clone + Send + 'static,
     A: Accept + 'static,
     <A as Accept>::Metadata: Visit<ExtractVisitor<TcpMetadata>>
         + Visit<ExtractVisitor<GatewayInfo>>
@@ -2107,15 +2128,10 @@ where
         )))
     }
 }
-impl<M, A> VHostListener<M, A>
+impl<Acme, RootCa, A> VHostListener<Acme, RootCa, A>
 where
-    for<'a> M: HasModel<Model = Model<M>>
-        + DbAccessMut<CertStore>
-        + DbAccessMut<AcmeCertStore>
-        + DbAccessByKey<AcmeSettings, Key<'a> = &'a AcmeProvider>
-        + Send
-        + Sync
-        + 'static,
+    Acme: for<'a> TlsHandler<'a, A> + Clone + Send + 'static,
+    RootCa: for<'a> TlsHandler<'a, A> + Clone + Send + 'static,
     A: Accept + 'static,
     <A as Accept>::Metadata: Visit<ExtractVisitor<TcpMetadata>>
         + Visit<ExtractVisitor<GatewayInfo>>
@@ -2143,23 +2159,15 @@ struct VHostServer<A: Accept + 'static> {
 
 impl<A: Accept> VHostServer<A> {
     #[instrument(skip_all)]
-    fn new<M: HasModel>(
+    fn with_tls_handlers<Acme, RootCa>(
         listener: A,
         bind_reqs: Watch<VHostBindRequirements>,
-        db: TypedPatchDb<M>,
         crypto_provider: Arc<CryptoProvider>,
-        branding: CertBranding,
-        acme_cache: AcmeTlsAlpnCache,
-        report_acme_failure: ReportOrderFailure,
+        tls_handlers: impl FnOnce(GetVHostAcmeProvider<A>) -> (Acme, RootCa),
     ) -> Self
     where
-        for<'a> M: HasModel<Model = Model<M>>
-            + DbAccessMut<CertStore>
-            + DbAccessMut<AcmeCertStore>
-            + DbAccessByKey<AcmeSettings, Key<'a> = &'a AcmeProvider>
-            + Send
-            + Sync
-            + 'static,
+        Acme: for<'a> TlsHandler<'a, A> + Clone + Send + 'static,
+        RootCa: for<'a> TlsHandler<'a, A> + Clone + Send + 'static,
         A: Accept + Send + 'static,
         <A as Accept>::Metadata: Visit<ExtractVisitor<TcpMetadata>>
             + Visit<ExtractVisitor<GatewayInfo>>
@@ -2169,6 +2177,7 @@ impl<A: Accept> VHostServer<A> {
             + 'static,
     {
         let mapping = Watch::new(BTreeMap::new());
+        let (acme, root_ca) = tls_handlers(GetVHostAcmeProvider(mapping.clone()));
         Self {
             mapping: mapping.clone(),
             bind_reqs,
@@ -2177,19 +2186,8 @@ impl<A: Accept> VHostServer<A> {
                 let mut listener = VHostListener(TlsListener::new(
                     listener,
                     VHostTlsHandler {
-                        acme: Arc::new(AcmeTlsHandler {
-                            db: db.clone(),
-                            acme_cache,
-                            crypto_provider: crypto_provider.clone(),
-                            get_provider: GetVHostAcmeProvider(mapping.clone()),
-                            in_progress: Watch::new(BTreeMap::new()),
-                            report_failure: Some(report_acme_failure),
-                        }),
-                        root_ca: RootCaTlsHandler {
-                            db,
-                            crypto_provider: crypto_provider.clone(),
-                            branding,
-                        },
+                        acme,
+                        root_ca,
                         crypto_provider,
                         mapping,
                         preprocessed: None,
@@ -3258,6 +3256,159 @@ mod upstream_alpn_tests {
         .unwrap();
     }
 
+    #[derive(Clone)]
+    struct InjectedTlsHandler(Option<ServerConfig>);
+
+    impl<'a> TlsHandler<'a, VHostBindListener> for InjectedTlsHandler {
+        async fn get_config(
+            &'a mut self,
+            _: &'a ClientHello<'a>,
+            _: &'a NetworkInterfaceListenerAcceptMetadata,
+        ) -> Option<TlsHandlerAction> {
+            self.0.clone().map(TlsHandlerAction::Tls)
+        }
+    }
+
+    async fn connect_runtime(addr: SocketAddr) -> TcpStream {
+        loop {
+            match TcpStream::connect(addr).await {
+                Ok(stream) => return stream,
+                Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn injected_vhost_runtime_serves_trusted_tls_tracks_interfaces_and_cleans_up_targets() {
+        use tokio_rustls::rustls::pki_types::CertificateDer;
+        use tokio_rustls::rustls::{ClientConfig, RootCertStore};
+
+        use crate::net::ssl::{
+            LocalCaTlsHandler, LocalIssuer, LocalIssuerCache, gen_nistp256, make_int_cert,
+            make_root_cert,
+        };
+        use crate::util::serde::{Der64, Pem};
+
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let backend = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+            let probe = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+            let old_addr = probe.local_addr().unwrap();
+            let new_addr = SocketAddr::new(Ipv4Addr::new(127, 0, 0, 2).into(), old_addr.port());
+            drop(probe);
+            let gateway_id: GatewayId = "lo".parse().unwrap();
+            let iface = |subnet: IpNet| NetworkInterfaceInfo {
+                ip_info: Some(Arc::new(crate::db::model::public::IpInfo {
+                    subnets: [subnet].into_iter().collect(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            let interfaces = Watch::new(OrdMap::from(vec![(
+                gateway_id.clone(),
+                iface("127.0.0.1/8".parse().unwrap()),
+            )]));
+            let branding = CertBranding::start_os("unlock-test");
+            let root_key = gen_nistp256().unwrap();
+            let root = make_root_cert(&root_key, &branding, std::time::SystemTime::now()).unwrap();
+            let intermediate_key = gen_nistp256().unwrap();
+            let intermediate_cert =
+                make_int_cert((&root_key, &root), &intermediate_key, &branding).unwrap();
+            let issuer = LocalIssuerCache::new(LocalIssuer {
+                intermediate_key: Der64(intermediate_key),
+                intermediate_cert: Pem(intermediate_cert),
+                root_cert: Pem(root.clone()),
+            });
+            let crypto = provider();
+            let handler_crypto = crypto.clone();
+            let runtime = VHostController::with_tls_handlers(
+                interfaces.clone_unseen(),
+                crypto.clone(),
+                4,
+                PortMapController::new(interfaces.clone_unseen()),
+                move |_| {
+                    (
+                        InjectedTlsHandler(None),
+                        LocalCaTlsHandler {
+                            db: issuer.clone(),
+                            crypto_provider: handler_crypto.clone(),
+                            branding: branding.clone(),
+                        },
+                    )
+                },
+            );
+            let mut target = target(backend.local_addr().unwrap(), None, None);
+            target.private = BTreeSet::from([old_addr.ip(), new_addr.ip()]);
+            target.proxy = None;
+            let owner = runtime
+                .add(None, old_addr.port(), DynVHostTarget::new(target.clone()))
+                .unwrap();
+            let mut roots = RootCertStore::empty();
+            roots
+                .add(CertificateDer::from(root.to_der().unwrap()))
+                .unwrap();
+            let connector = TlsConnector::from(Arc::new(
+                ClientConfig::builder_with_provider(crypto)
+                    .with_safe_default_protocol_versions()
+                    .unwrap()
+                    .with_root_certificates(roots)
+                    .with_no_client_auth(),
+            ));
+            let name = ServerName::IpAddress(Ipv4Addr::LOCALHOST.into());
+            let mut client = connector
+                .connect(name.clone(), connect_runtime(old_addr).await)
+                .await
+                .unwrap();
+            let (mut upstream, _) = backend.accept().await.unwrap();
+            client.write_all(b"a").await.unwrap();
+            client.flush().await.unwrap();
+            let mut byte = [0];
+            upstream.read_exact(&mut byte).await.unwrap();
+            assert_eq!(&byte, b"a");
+            let mut extensions = http::Extensions::new();
+            extensions.insert(TcpMetadata {
+                local_addr: upstream.local_addr().unwrap(),
+                peer_addr: upstream.peer_addr().unwrap(),
+            });
+            let origin = crate::net::request_origin::RequestOrigin::from_extensions(&extensions);
+            assert_eq!(origin.gateway, Some(gateway_id.clone()));
+            assert_eq!(origin.local_ip, Some(old_addr.ip()));
+            assert_eq!(origin.peer_ip, Some(Ipv4Addr::LOCALHOST.into()));
+            assert!(!origin.public);
+
+            interfaces.send_replace(OrdMap::from(vec![(
+                gateway_id,
+                iface("127.0.0.2/8".parse().unwrap()),
+            )]));
+            let _new_client = connector
+                .connect(
+                    ServerName::IpAddress(new_addr.ip().into()),
+                    connect_runtime(new_addr).await,
+                )
+                .await
+                .unwrap();
+            assert!(TcpStream::connect(old_addr).await.is_err());
+            drop(owner);
+            runtime.gc(None, old_addr.port());
+            assert!(runtime.servers.peek(|servers| servers.is_empty()));
+            assert!(client.read_exact(&mut byte).await.is_err());
+        })
+        .await
+        .expect("injected runtime completes within 10s");
+    }
+
+    #[derive(Clone)]
+    struct UnusedTlsHandler;
+
+    impl<'a> TlsHandler<'a, VHostBindListener> for UnusedTlsHandler {
+        async fn get_config(
+            &'a mut self,
+            _: &'a ClientHello<'a>,
+            _: &'a NetworkInterfaceListenerAcceptMetadata,
+        ) -> Option<TlsHandlerAction> {
+            panic!("passthrough must not resolve a certificate")
+        }
+    }
+
     #[tokio::test]
     async fn disabling_an_address_disconnects_its_stream_and_gates_new_arrivals() {
         tokio::time::timeout(Duration::from_secs(10), async {
@@ -3310,21 +3461,9 @@ mod upstream_alpn_tests {
                 ]),
                 retry: None,
             };
-            let temp = tempfile::tempdir().unwrap();
-            let db = TypedPatchDb::<Database>::load_unchecked(
-                patch_db::PatchDb::open(temp.path().join("db"))
-                    .await
-                    .unwrap(),
-            );
-            let server = VHostServer::new(
-                listener,
-                bind_reqs,
-                db,
-                provider(),
-                CertBranding::start_os("loopback"),
-                Arc::new(SyncMutex::new(BTreeMap::new())),
-                Arc::new(|_, _| async {}.boxed()),
-            );
+            let server = VHostServer::with_tls_handlers(listener, bind_reqs, provider(), |_| {
+                (UnusedTlsHandler, UnusedTlsHandler)
+            });
             server.set_challenge_bind_reqs(VHostBindRequirements {
                 private_ips: BTreeSet::from([old_addr.ip(), new_addr.ip()]),
                 ..Default::default()

@@ -545,6 +545,259 @@ struct HostBinds {
     gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>)>,
 }
 
+fn add_private_dns(
+    private_dns: &mut BTreeMap<InternedString, BTreeSet<GatewayId>>,
+    addresses: &BTreeSet<&HostnameInfo>,
+    net_ifaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+) {
+    for addr_info in addresses {
+        if let HostnameMetadata::PrivateDomain { gateways } = &addr_info.metadata {
+            let live: BTreeSet<GatewayId> = gateways
+                .iter()
+                .filter(|gw| {
+                    net_ifaces
+                        .get(*gw)
+                        .map_or(false, |info| info.ip_info.is_some())
+                })
+                .cloned()
+                .collect();
+            if !live.is_empty() {
+                private_dns
+                    .entry(addr_info.hostname.clone())
+                    .or_default()
+                    .extend(live);
+            }
+        }
+    }
+}
+
+/// Datapath intent compiled from a host's enabled, derived addresses.
+#[derive(Debug, Default)]
+pub struct HostExposurePlan {
+    pub forwards: BTreeMap<u16, (SocketAddrV4, u16, ForwardRequirements)>,
+    pub vhosts: BTreeMap<VHostKey, ProxyTarget>,
+    pub http_ports: BTreeSet<u16>,
+    pub private_dns: BTreeMap<InternedString, BTreeSet<GatewayId>>,
+    pub gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>)>,
+}
+
+/// Requires addresses derived with live gateways and the authoritative `AvailablePorts`.
+/// Callers retain separate ownership of listener, forwarding, DNS and port-map reconciliation.
+pub fn plan_host_exposure(
+    host: &Host,
+    net_ifaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    ip: Ipv4Addr,
+    ipv6: Option<Ipv6Addr>,
+    upstream_client_config: impl Fn(&Option<UpstreamCertValidation>) -> Arc<TlsClientConfig>,
+) -> HostExposurePlan {
+    let mut forwards: BTreeMap<u16, (SocketAddrV4, u16, ForwardRequirements)> = BTreeMap::new();
+    let mut vhosts: BTreeMap<VHostKey, ProxyTarget> = BTreeMap::new();
+    let mut http_ports = BTreeSet::new();
+    let mut private_dns: BTreeMap<InternedString, BTreeSet<GatewayId>> = BTreeMap::new();
+    let mut gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>)> =
+        BTreeMap::new();
+    let host_addresses: Vec<_> = host.addresses().collect();
+
+    for (port, bind) in host.bindings.iter() {
+        if !bind.enabled {
+            continue;
+        }
+        if bind.net.assigned_port.is_none() && bind.net.assigned_ssl_port.is_none() {
+            continue;
+        }
+        let enabled_addresses = bind.enabled_addresses();
+        let addr: SocketAddr = (ip, *port).into();
+        let addr_v6 = ipv6.map(|ip| SocketAddrV6::new(ip, *port, 0, 0));
+
+        add_private_dns(&mut private_dns, &enabled_addresses, net_ifaces);
+
+        let connect_ssl: Option<Arc<TlsClientConfig>> = bind
+            .options
+            .rewrap()
+            .map(|ssl| upstream_client_config(&ssl.upstream_cert_validation));
+        let target = binding_proxy_target(&bind.options, addr, addr_v6, connect_ssl);
+
+        if let Some(assigned_ssl_port) = bind.net.assigned_ssl_port {
+            let server_private_ips = ssl_vhost_private_ips(enabled_addresses.iter().copied());
+
+            let server_public_v4 = ssl_vhost_public_v4(enabled_addresses.iter().copied());
+            let server_public_v6: BTreeSet<Ipv6Addr> = enabled_addresses
+                .iter()
+                .filter(|a| a.public && a.ssl)
+                .filter_map(|a| a.gua().map(|g| *g.ip()))
+                .collect();
+
+            if !server_private_ips.is_empty()
+                || !server_public_v4.is_empty()
+                || !server_public_v6.is_empty()
+            {
+                vhosts.insert(
+                    (None, assigned_ssl_port, true),
+                    ProxyTarget {
+                        public_v4: server_public_v4,
+                        public_v6: server_public_v6,
+                        public_v6_gateways: BTreeSet::new(),
+                        private: server_private_ips,
+                        acme: None,
+                        ..target.clone()
+                    },
+                );
+            }
+
+            let passthrough = bind.options.add_ssl.is_none();
+            add_named_vhosts(
+                &mut vhosts,
+                &enabled_addresses,
+                assigned_ssl_port,
+                net_ifaces,
+                |addr_info, public| ProxyTarget {
+                    public_v4: BTreeSet::new(),
+                    public_v6: BTreeSet::new(),
+                    public_v6_gateways: BTreeSet::new(),
+                    private: BTreeSet::new(),
+                    acme: if passthrough || !public {
+                        None
+                    } else {
+                        host_addresses
+                            .iter()
+                            .find(|a| a.address == addr_info.hostname)
+                            .and_then(|a| a.public.as_ref())
+                            .and_then(|p| p.acme.clone())
+                    },
+                    ..target.clone()
+                },
+            );
+        }
+
+        if let Some(external) = bind.net.assigned_port {
+            let fwd_public: BTreeSet<GatewayId> = enabled_addresses
+                .iter()
+                .filter(|a| a.public && a.port == Some(external))
+                .flat_map(|a| a.metadata.gateways())
+                .cloned()
+                .collect();
+            for a in enabled_addresses
+                .iter()
+                .filter(|a| a.public && a.port == Some(external))
+            {
+                tracing::debug!(
+                    "port {external}: WAN address {} (ip={}) on gateway(s) {:?}",
+                    a.hostname,
+                    a.metadata.is_ip(),
+                    a.metadata.gateways().collect::<Vec<_>>(),
+                );
+            }
+            let fwd_private = forwarded_lan_ips(
+                enabled_addresses
+                    .iter()
+                    .copied()
+                    .filter(|a| a.port == Some(external)),
+                net_ifaces,
+            );
+            let requirements = ForwardRequirements {
+                public_gateways: fwd_public,
+                private_ips: fwd_private,
+                secure: bind.options.secure.is_some(),
+            };
+            if bind.options.proxy.is_some() {
+                http_ports.insert(external);
+                vhosts.insert(
+                    (None, external, true),
+                    plaintext_http_target(
+                        target,
+                        external,
+                        &enabled_addresses,
+                        net_ifaces,
+                        &requirements,
+                    ),
+                );
+                continue;
+            }
+            if !ip.is_loopback() {
+                forwards.insert(
+                    external,
+                    (SocketAddrV4::new(ip, *port), 1, requirements.clone()),
+                );
+            }
+
+            if let Some(container_v6) = ipv6 {
+                for a in enabled_addresses.iter() {
+                    let Some(gua) = a.gua().filter(|g| g.port() == external) else {
+                        continue;
+                    };
+                    let secure_exposure = requirements.secure;
+                    let src_filter = if a.public && secure_exposure {
+                        None
+                    } else {
+                        if !secure_exposure
+                            && !a
+                                .metadata
+                                .gateways()
+                                .filter_map(|gw| net_ifaces.get(gw))
+                                .any(|info| requirements.allows_gateway(info))
+                        {
+                            continue;
+                        }
+                        match a
+                            .metadata
+                            .gateways()
+                            .filter_map(|gw| net_ifaces.get(gw))
+                            .filter_map(|info| info.ip_info.as_ref())
+                            .flat_map(|ip| ip.subnets.iter())
+                            .find(|s| s.contains(&IpAddr::V6(*gua.ip())))
+                            .copied()
+                        {
+                            Some(subnet) => Some(subnet),
+                            None => continue,
+                        }
+                    };
+                    gua_forwards.insert((*gua.ip(), gua.port()), (container_v6, *port, src_filter));
+                }
+            }
+        }
+    }
+
+    for (&internal_start, range) in host.binding_ranges.iter() {
+        if !range.enabled {
+            continue;
+        }
+        let enabled_addresses = range.enabled_addresses();
+
+        add_private_dns(&mut private_dns, &enabled_addresses, net_ifaces);
+
+        let public_gateways: BTreeSet<GatewayId> = enabled_addresses
+            .iter()
+            .filter(|a| a.public)
+            .flat_map(|a| a.metadata.gateways())
+            .cloned()
+            .collect();
+        let private_ips = forwarded_lan_ips(enabled_addresses.iter().copied(), net_ifaces);
+        if public_gateways.is_empty() && private_ips.is_empty() {
+            continue;
+        }
+        forwards.insert(
+            range.external_start_port,
+            (
+                SocketAddrV4::new(ip, internal_start),
+                range.number_of_ports,
+                ForwardRequirements {
+                    public_gateways,
+                    private_ips,
+                    secure: true,
+                },
+            ),
+        );
+    }
+
+    HostExposurePlan {
+        forwards,
+        vhosts,
+        http_ports,
+        private_dns,
+        gua_forwards,
+    }
+}
+
 pub struct NetServiceData {
     id: Option<PackageId>,
     ip: Ipv4Addr,
@@ -566,316 +819,17 @@ impl NetServiceData {
     }
 
     async fn update(&mut self, ctrl: &NetController, id: HostId, host: Host) -> Result<(), Error> {
-        let mut forwards: BTreeMap<u16, (SocketAddrV4, u16, ForwardRequirements)> = BTreeMap::new();
-        let mut vhosts: BTreeMap<VHostKey, ProxyTarget> = BTreeMap::new();
-        let mut http_ports = BTreeSet::new();
-        let mut private_dns: BTreeMap<InternedString, BTreeSet<GatewayId>> = BTreeMap::new();
-        // Non-SSL v6 DNAT forwards to the container — net_controller's concern (no
-        // vhost owns them), but the forward controller opens their upstream pinhole
-        // together with the DNAT (see the reconcile below).
-        let mut gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>)> =
-            BTreeMap::new();
-        let binds = self.binds.entry(id.clone()).or_default();
-
         let net_ifaces = ctrl.net_iface.watcher.ip_info();
-        let host_addresses: Vec<_> = host.addresses().collect();
-
-        // ── Build controller entries from enabled addresses ──
-        for (port, bind) in host.bindings.iter() {
-            if !bind.enabled {
-                continue;
-            }
-            if bind.net.assigned_port.is_none() && bind.net.assigned_ssl_port.is_none() {
-                continue;
-            }
-            // A binding with no exported interface is internal-only: it forwards
-            // to lo / lxcbr0 but never to a gateway (see `enabled_addresses`).
-            let enabled_addresses = bind.enabled_addresses();
-            let addr: SocketAddr = (self.ip, *port).into();
-            // The container's bridge v6, for the source-preserving leg of a v6 client.
-            let addr_v6 = self.ipv6.map(|ip| SocketAddrV6::new(ip, *port, 0, 0));
-
-            // Key private DNS by its live gateways so the resolver only answers
-            // locally over those gateways — works even when also public (split DNS).
-            for addr_info in &enabled_addresses {
-                if let HostnameMetadata::PrivateDomain { gateways } = &addr_info.metadata {
-                    let live: BTreeSet<GatewayId> = gateways
-                        .iter()
-                        .filter(|gw| {
-                            net_ifaces
-                                .get(*gw)
-                                .map_or(false, |info| info.ip_info.is_some())
-                        })
-                        .cloned()
-                        .collect();
-                    if !live.is_empty() {
-                        private_dns
-                            .entry(addr_info.hostname.clone())
-                            .or_default()
-                            .extend(live);
-                    }
-                }
-            }
-
-            let connect_ssl: Option<Arc<TlsClientConfig>> = bind
-                .options
-                .rewrap()
-                .map(|ssl| ctrl.upstream_client_config(&ssl.upstream_cert_validation));
-            let target = binding_proxy_target(&bind.options, addr, addr_v6, connect_ssl);
-
-            // `*` vhost: every assigned_ssl_port is answered by a listener of
-            // ours — terminating (add_ssl), or an SNI-agnostic passthrough when
-            // the container serves its own TLS.
-            if let Some(assigned_ssl_port) = bind.net.assigned_ssl_port {
-                // A GUA set to LAN+WAN is WAN, so it lands in the public set.
-                let server_private_ips = ssl_vhost_private_ips(enabled_addresses.iter().copied());
-
-                // Public gateways, split by family: a bare public IPv4 (WAN IP)
-                // and a LAN+WAN GUA are independently toggleable, and the vhost
-                // must accept (and forward) each family only where that family
-                // is actually public — so a GUA-only-public gateway never
-                // accepts or forwards bare IPv4. The controller derives the IPv4
-                // `*` pinhole from `public_v4`; the GUA needs no NAT.
-                let server_public_v4 = ssl_vhost_public_v4(enabled_addresses.iter().copied());
-                // Per-IP (per-GUA), not per-gateway: one gateway can carry
-                // several GUAs that are independently Local vs Public, so only
-                // the specific enabled-public GUAs accept WAN. Scoped to the SSL
-                // exposure (`a.ssl`), since this `*` vhost answers TLS on the
-                // ssl port — a GUA public only on a non-SSL port is served by the
-                // v6 DNAT forward, not this vhost.
-                let server_public_v6: BTreeSet<Ipv6Addr> = enabled_addresses
-                    .iter()
-                    .filter(|a| a.public && a.ssl)
-                    .filter_map(|a| a.gua().map(|g| *g.ip()))
-                    .collect();
-
-                if !server_private_ips.is_empty()
-                    || !server_public_v4.is_empty()
-                    || !server_public_v6.is_empty()
-                {
-                    vhosts.insert(
-                        (None, assigned_ssl_port, true),
-                        ProxyTarget {
-                            public_v4: server_public_v4,
-                            public_v6: server_public_v6,
-                            public_v6_gateways: BTreeSet::new(),
-                            private: server_private_ips,
-                            acme: None,
-                            ..target.clone()
-                        },
-                    );
-                }
-
-                // Named vhosts: group by (hostname, ssl_port), merge public/private
-                // sets. Terminating when we hold the TLS (add_ssl); an SNI
-                // passthrough to the container's own TLS otherwise. Either way the
-                // entry carries its own gateways, so a public domain accepts WAN
-                // even where the bare IP is disabled.
-                //
-                // The mDNS name and a plugin's names are registered here like any
-                // other: the vhost controller serves a name only if it has an
-                // entry, and this is where the set of names a host answers to is
-                // decided. Neither is public, so neither contributes an upstream
-                // port map. Every name accepts the bridge, where other services
-                // and a plugin's provider reach it.
-                let passthrough = bind.options.add_ssl.is_none();
-                add_named_vhosts(
-                    &mut vhosts,
-                    &enabled_addresses,
-                    assigned_ssl_port,
-                    &net_ifaces,
-                    |addr_info, public| ProxyTarget {
-                        public_v4: BTreeSet::new(),
-                        public_v6: BTreeSet::new(),
-                        public_v6_gateways: BTreeSet::new(),
-                        private: BTreeSet::new(),
-                        // The public leg's alone, so a name served both ways
-                        // keeps its LAN side. A passthrough never intermediates
-                        // ACME — the backend is the ACME client.
-                        acme: if passthrough || !public {
-                            None
-                        } else {
-                            host_addresses
-                                .iter()
-                                .find(|a| a.address == addr_info.hostname)
-                                .and_then(|a| a.public.as_ref())
-                                .and_then(|p| p.acme.clone())
-                        },
-                        ..target.clone()
-                    },
-                );
-            }
-
-            if let Some(external) = bind.net.assigned_port {
-                // Only addresses at this port drive its forward (a vhost's port has its own).
-                let fwd_public: BTreeSet<GatewayId> = enabled_addresses
-                    .iter()
-                    .filter(|a| a.public && a.port == Some(external))
-                    .flat_map(|a| a.metadata.gateways())
-                    .cloned()
-                    .collect();
-                // Declare which address makes each gateway public, so a stray
-                // auto-port-map can be traced back to the exposure driving it.
-                for a in enabled_addresses
-                    .iter()
-                    .filter(|a| a.public && a.port == Some(external))
-                {
-                    tracing::debug!(
-                        "port {external}: WAN address {} (ip={}) on gateway(s) {:?}",
-                        a.hostname,
-                        a.metadata.is_ip(),
-                        a.metadata.gateways().collect::<Vec<_>>(),
-                    );
-                }
-                let fwd_private = forwarded_lan_ips(
-                    enabled_addresses
-                        .iter()
-                        .copied()
-                        .filter(|a| a.port == Some(external)),
-                    &net_ifaces,
-                );
-                let requirements = ForwardRequirements {
-                    public_gateways: fwd_public,
-                    private_ips: fwd_private,
-                    secure: bind.options.secure.is_some(),
-                };
-                if bind.options.proxy.is_some() {
-                    http_ports.insert(external);
-                    vhosts.insert(
-                        (None, external, true),
-                        plaintext_http_target(
-                            target,
-                            external,
-                            &enabled_addresses,
-                            &net_ifaces,
-                            &requirements,
-                        ),
-                    );
-                    continue;
-                }
-                // Loopback DNAT is martian-dropped on ingress.
-                if !self.ip.is_loopback() {
-                    forwards.insert(
-                        external,
-                        (SocketAddrV4::new(self.ip, *port), 1, requirements.clone()),
-                    );
-                }
-
-                // No listener of ours answers here, so DNAT the host's
-                // GUA:external to the container's v6:internal. A LAN-only GUA is
-                // source-restricted to its on-link subnet; a LAN+WAN GUA is
-                // unrestricted. Fail closed: skip a LAN-only GUA whose subnet we
-                // can't determine rather than expose it unrestricted.
-                if let Some(container_v6) = self.ipv6 {
-                    for a in enabled_addresses.iter() {
-                        // A vhost's port is its listener's; DNAT only this one.
-                        let Some(gua) = a.gua().filter(|g| g.port() == external) else {
-                            continue;
-                        };
-                        // Secure only when the underlying protocol is itself secure —
-                        // this is the plaintext port, so we never terminate TLS here.
-                        // The WAN is never secure, so an insecure exposure that
-                        // requested public serves the LAN instead.
-                        let secure_exposure = requirements.secure;
-                        let src_filter = if a.public && secure_exposure {
-                            None
-                        } else {
-                            // LAN: insecure reaches it only over a secure gateway (IPv4 parity).
-                            if !secure_exposure
-                                && !a
-                                    .metadata
-                                    .gateways()
-                                    .filter_map(|gw| net_ifaces.get(gw))
-                                    .any(|info| requirements.allows_gateway(info))
-                            {
-                                continue;
-                            }
-                            match a
-                                .metadata
-                                .gateways()
-                                .filter_map(|gw| net_ifaces.get(gw))
-                                .filter_map(|info| info.ip_info.as_ref())
-                                .flat_map(|ip| ip.subnets.iter())
-                                .find(|s| s.contains(&IpAddr::V6(*gua.ip())))
-                                .copied()
-                            {
-                                Some(subnet) => Some(subnet),
-                                None => continue,
-                            }
-                        };
-                        // A public bare GUA on a non-TLS port is DNAT'd to the
-                        // container — no vhost owns a non-TLS port. The forward
-                        // controller opens its upstream pinhole together with the
-                        // DNAT (see the reconcile below).
-                        gua_forwards
-                            .insert((*gua.ip(), gua.port()), (container_v6, *port, src_filter));
-                    }
-                }
-            }
-        }
-
-        // Port-range bindings: forward each enabled range the same way as a
-        // single-port non-SSL binding — `private_ips` from enabled private
-        // (LAN) addresses, `public_gateways` from enabled public (WAN)
-        // addresses — but with `count = number_of_ports`. Outbound-only
-        // gateways never get range addresses synthesized, so they never appear
-        // here. Private domains register their resolver entries like single-port.
-        //
-        // `secure: true` is intentional: ranges carry no Security option (no
-        // SSL/vhost), so without it the forward.rs security gate
-        // (`!reqs.secure && !info.secure()`) would drop every range on a gateway
-        // the operator has not marked secure.
-        for (&internal_start, range) in host.binding_ranges.iter() {
-            if !range.enabled {
-                continue;
-            }
-            // A range with no exported interface is internal-only: it forwards
-            // to lo / lxcbr0 but never to a gateway (see `enabled_addresses`).
-            let enabled_addresses = range.enabled_addresses();
-
-            for addr_info in &enabled_addresses {
-                if let HostnameMetadata::PrivateDomain { gateways } = &addr_info.metadata {
-                    let live: BTreeSet<GatewayId> = gateways
-                        .iter()
-                        .filter(|gw| {
-                            net_ifaces
-                                .get(*gw)
-                                .map_or(false, |info| info.ip_info.is_some())
-                        })
-                        .cloned()
-                        .collect();
-                    if !live.is_empty() {
-                        private_dns
-                            .entry(addr_info.hostname.clone())
-                            .or_default()
-                            .extend(live);
-                    }
-                }
-            }
-
-            let public_gateways: BTreeSet<GatewayId> = enabled_addresses
-                .iter()
-                .filter(|a| a.public)
-                .flat_map(|a| a.metadata.gateways())
-                .cloned()
-                .collect();
-            let private_ips = forwarded_lan_ips(enabled_addresses.iter().copied(), &net_ifaces);
-            if public_gateways.is_empty() && private_ips.is_empty() {
-                continue;
-            }
-            forwards.insert(
-                range.external_start_port,
-                (
-                    SocketAddrV4::new(self.ip, internal_start),
-                    range.number_of_ports,
-                    ForwardRequirements {
-                        public_gateways,
-                        private_ips,
-                        secure: true,
-                    },
-                ),
-            );
-        }
+        let HostExposurePlan {
+            mut forwards,
+            mut vhosts,
+            http_ports,
+            private_dns,
+            gua_forwards,
+        } = plan_host_exposure(&host, &net_ifaces, self.ip, self.ipv6, |mode| {
+            ctrl.upstream_client_config(mode)
+        });
+        let binds = self.binds.entry(id.clone()).or_default();
 
         // The vhost controller owns every upstream port map for its ports — the
         // IPv6 GUA pinholes (bare `*` and public-domain vhosts) and their v6 80->443
@@ -1756,6 +1710,198 @@ mod tests {
             secure: secure_ssl.map(|ssl| Security { ssl }),
             proxy: None,
         }
+    }
+
+    fn exposure_fixture() -> (
+        Host,
+        crate::net::forward::AvailablePorts,
+        OrdMap<GatewayId, NetworkInterfaceInfo>,
+    ) {
+        use crate::db::model::public::NetworkInterfaceType;
+        use crate::net::host::address::PublicDomainConfig;
+
+        let gateway: GatewayId = "eth0".parse().unwrap();
+        let interfaces = OrdMap::from(vec![
+            (
+                gateway.clone(),
+                NetworkInterfaceInfo {
+                    ip_info: Some(Arc::new(IpInfo {
+                        device_type: Some(NetworkInterfaceType::Ethernet),
+                        subnets: ["192.0.2.10/24", "2001:db8::10/64", "2001:db8::11/64"]
+                            .into_iter()
+                            .map(|ip| ip.parse::<IpNet>().unwrap())
+                            .collect(),
+                        wan_ip: Some("198.51.100.2".parse().unwrap()),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                },
+            ),
+            (
+                "wg-offline".parse().unwrap(),
+                NetworkInterfaceInfo::default(),
+            ),
+        ]);
+        let mut ports = crate::net::forward::AvailablePorts::new();
+        let mut host = Model::<Host>::new(&Host::new()).unwrap();
+        let mut options = bind_options(true, None, None);
+        options.preferred_external_port = 8080;
+        options.add_ssl.as_mut().unwrap().preferred_external_port = 8443;
+        host.add_binding(&mut ports, 80, options, true).unwrap();
+        let mut host = host.de().unwrap();
+        let iface_id: ServiceInterfaceId = "admin-ui".parse().unwrap();
+        host.bindings.get_mut(&80).unwrap().interfaces.insert(
+            iface_id.clone(),
+            ServiceInterface {
+                id: iface_id,
+                name: "StartOS UI".into(),
+                description: String::new(),
+                masked: false,
+                address_info: AddressInfo {
+                    username: None,
+                    host_id: HostId::admin(),
+                    internal_port: 80,
+                    scheme: Some("http".into()),
+                    ssl_scheme: Some("https".into()),
+                    suffix: String::new(),
+                },
+                interface_type: ServiceInterfaceType::Ui,
+                preferred_launcher_address: None,
+            },
+        );
+        host.public_domains.insert(
+            "server.example".into(),
+            PublicDomainConfig {
+                gateway: gateway.clone(),
+                acme: Some("letsencrypt".parse().unwrap()),
+            },
+        );
+        host.private_domains.insert(
+            "server.example".into(),
+            BTreeSet::from([gateway, "wg-offline".parse().unwrap()]),
+        );
+        (host, ports, interfaces)
+    }
+
+    fn derive_exposure_host(
+        host: &Host,
+        ports: &crate::net::forward::AvailablePorts,
+        interfaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    ) -> Host {
+        let mut model = Model::<Host>::new(host).unwrap();
+        model
+            .update_addresses(
+                &ServerHostname::new("server".into()).unwrap(),
+                interfaces,
+                ports,
+            )
+            .unwrap();
+        model.de().unwrap()
+    }
+
+    #[test]
+    fn exposure_plan_keeps_named_public_policy_separate_from_exact_bare_gua_and_private_dns() {
+        let (mut host, ports, mut interfaces) = exposure_fixture();
+        let bind = host.bindings.get_mut(&80).unwrap();
+        bind.addresses
+            .gua_wan
+            .insert("[2001:db8::10]:8443".parse().unwrap());
+        bind.addresses
+            .enabled
+            .insert("[2001:db8::10]:8443".parse().unwrap());
+        let mut host = derive_exposure_host(&host, &ports, &interfaces);
+        host.bindings
+            .get_mut(&80)
+            .unwrap()
+            .addresses
+            .disabled
+            .remove(&("server.example".into(), 8443));
+        let host = derive_exposure_host(&host, &ports, &interfaces);
+        let plan = plan_host_exposure(&host, &interfaces, Ipv4Addr::LOCALHOST, None, |_| {
+            panic!("plaintext backend")
+        });
+        let bare = &plan.vhosts[&(None, 8443, true)];
+        assert!(bare.public_v4.is_empty());
+        assert_eq!(
+            bare.public_v6,
+            BTreeSet::from(["2001:db8::10".parse().unwrap()])
+        );
+        assert!(bare.private.contains(&"2001:db8::11".parse().unwrap()));
+        assert_eq!(bare.addr, "127.0.0.1:80".parse().unwrap());
+        assert!(!bare.preserve_source_ip);
+        let named = &plan.vhosts[&(Some("server.example".into()), 8443, true)];
+        assert_eq!(named.public_v4, BTreeSet::from(["eth0".parse().unwrap()]));
+        assert_eq!(
+            named.public_v6,
+            BTreeSet::from([
+                "2001:db8::10".parse().unwrap(),
+                "2001:db8::11".parse().unwrap(),
+            ])
+        );
+        assert_eq!(named.acme, Some("letsencrypt".parse().unwrap()));
+        let private = &plan.vhosts[&(Some("server.example".into()), 8443, false)];
+        assert!(private.acme.is_none());
+        assert!(private.public_v4.is_empty());
+        assert!(private.private.contains(&"192.0.2.10".parse().unwrap()));
+        assert_eq!(
+            plan.private_dns["server.example"],
+            BTreeSet::from(["eth0".parse().unwrap()])
+        );
+        assert!(plan.forwards.is_empty());
+        assert!(plan.gua_forwards.is_empty());
+
+        Arc::make_mut(
+            interfaces
+                .get_mut(&"eth0".parse::<GatewayId>().unwrap())
+                .unwrap()
+                .ip_info
+                .as_mut()
+                .unwrap(),
+        )
+        .subnets = [
+            "192.0.2.20/24".parse::<IpNet>().unwrap(),
+            "2001:db8::20/64".parse::<IpNet>().unwrap(),
+        ]
+        .into_iter()
+        .collect();
+        let host = derive_exposure_host(&host, &ports, &interfaces);
+        let plan = plan_host_exposure(&host, &interfaces, Ipv4Addr::LOCALHOST, None, |_| {
+            panic!("plaintext backend")
+        });
+        assert!(
+            plan.vhosts
+                .values()
+                .all(|t| !t.public_v6.contains(&"2001:db8::10".parse().unwrap()))
+        );
+        assert_eq!(
+            plan.vhosts[&(Some("server.example".into()), 8443, true)].public_v6,
+            BTreeSet::from(["2001:db8::20".parse().unwrap()])
+        );
+    }
+
+    #[test]
+    fn exposure_plan_withdraws_disabled_bindings_and_unexported_gateway_exposure() {
+        let (host, ports, interfaces) = exposure_fixture();
+        let mut host = derive_exposure_host(&host, &ports, &interfaces);
+        host.bindings.get_mut(&80).unwrap().interfaces.clear();
+        let plan = plan_host_exposure(&host, &interfaces, Ipv4Addr::LOCALHOST, None, |_| {
+            panic!("plaintext backend")
+        });
+        assert!(plan.vhosts.is_empty());
+        assert!(plan.private_dns.is_empty());
+        host.bindings.get_mut(&80).unwrap().enabled = false;
+        let plan = plan_host_exposure(
+            &host,
+            &interfaces,
+            "10.0.3.2".parse().unwrap(),
+            Some("fd00::2".parse().unwrap()),
+            |_| panic!("disabled backend"),
+        );
+        assert!(plan.vhosts.is_empty());
+        assert!(plan.forwards.is_empty());
+        assert!(plan.gua_forwards.is_empty());
+        assert!(plan.http_ports.is_empty());
+        assert!(plan.private_dns.is_empty());
     }
 
     #[test]

@@ -4,8 +4,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::db::model::DatabaseModel;
 use crate::hostname::ServerHostname;
-use crate::net::ssl::CertificateIdentity;
+use crate::net::acme::{AcmeProvider, BootstrapAcme};
+use crate::net::ssl::{CertificateIdentity, LocalIssuer};
 use crate::prelude::*;
 use crate::util::io::{delete_file, write_file_private_atomic};
 
@@ -17,12 +19,28 @@ const RUNTIME_PROFILES: &str = "/run/NetworkManager/system-connections";
 pub struct Credentials {
     pub disk_guid: InternedString,
     pub hostname: ServerHostname,
-    /// The caller supplies leaf identities, never CA signing keys.
     pub identities: BTreeMap<JsonKey<BTreeSet<InternedString>>, CertificateIdentity>,
+    #[serde(default)]
+    pub local_issuer: Option<LocalIssuer>,
+    #[serde(default)]
+    pub acme: BootstrapAcme,
     pub network_profiles: BTreeMap<String, String>,
 }
 
 impl Credentials {
+    /// The caller supplies enabled ACME bindings for the bootstrap host.
+    pub fn capture_tls(
+        &mut self,
+        db: &DatabaseModel,
+        providers: BTreeMap<JsonKey<BTreeSet<InternedString>>, AcmeProvider>,
+    ) -> Result<(), Error> {
+        let issuer = db.as_private().as_key_store().as_local_certs().issuer()?;
+        let acme = BootstrapAcme::capture(db, providers)?;
+        self.local_issuer = Some(issuer);
+        self.acme = acme;
+        Ok(())
+    }
+
     pub fn encrypt(&self, key: &[u8; 32]) -> Result<Vec<u8>, Error> {
         let plaintext =
             Zeroizing::new(serde_json::to_vec(self).with_kind(ErrorKind::Serialization)?);
@@ -94,6 +112,8 @@ mod tests {
             disk_guid: InternedString::intern("STARTOS_TEST"),
             hostname: ServerHostname::new_from_input(InternedString::intern("fde-test")).unwrap(),
             identities: BTreeMap::new(),
+            local_issuer: None,
+            acme: BootstrapAcme::default(),
             network_profiles: [(
                 "private.nmconnection".to_owned(),
                 "[wireguard]\nprivate-key=test-secret\n".to_owned(),
@@ -120,9 +140,11 @@ mod tests {
     }
 
     #[test]
-    fn leaf_identity_survives_bootstrap_encryption() {
+    fn leaf_identity_and_issuer_survive_bootstrap_encryption_without_root_signing_key() {
         use std::sync::Arc;
         use std::time::SystemTime;
+
+        use patch_db::ModelExt;
 
         use crate::account::AccountInfo;
         use crate::net::ssl::{CertBranding, CertStore, SANInfo, gen_nistp256, make_leaf_cert};
@@ -132,6 +154,17 @@ mod tests {
         let account = AccountInfo::new("test-password", SystemTime::now(), None).unwrap();
         let branding = CertBranding::start_os(original.hostname.as_ref());
         let store = CertStore::new(&account, &branding).unwrap();
+        let database = Model::<crate::db::model::Database>::from_value(imbl_value::json!({
+            "private": {"keyStore": {"localCerts": store, "acme": crate::net::acme::AcmeCertStore::new()}},
+            "public": {"serverInfo": {"network": {"acme": {}}}},
+        }));
+        original.capture_tls(&database, BTreeMap::new()).unwrap();
+        let root_key = serde_json::to_string(&store.root_key).unwrap();
+        assert!(
+            !serde_json::to_string(&original)
+                .unwrap()
+                .contains(&root_key)
+        );
         let leaf_key = gen_nistp256().unwrap();
         let names = [original.hostname.local_domain_name()]
             .into_iter()
@@ -151,6 +184,17 @@ mod tests {
         );
         let key = super::super::bootstrap::generate_key().unwrap();
         let restored = Credentials::decrypt(&original.encrypt(&key).unwrap(), &key).unwrap();
+        assert_eq!(
+            restored
+                .local_issuer
+                .as_ref()
+                .unwrap()
+                .intermediate_key
+                .0
+                .private_key_to_pkcs8()
+                .unwrap(),
+            store.int_key.0.private_key_to_pkcs8().unwrap(),
+        );
         let identity = restored.identities.values().next().unwrap();
         assert_eq!(
             identity.key.0.public_key_to_der().unwrap(),
