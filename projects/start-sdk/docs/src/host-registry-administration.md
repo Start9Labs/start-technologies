@@ -62,6 +62,16 @@ For package add and add-mirror, the CLI submits verified endorsements from `<S9P
 
 Supplemental keys do not become registered signers, proposed trust keys, or authorized uploaders. Publishing authorization remains tied to the registered uploader.
 
+### Promoting a package
+
+Copy a version's indexed assets to another registry with `start-cli registry package promote <PACKAGE_ID> <VERSION> --from <SOURCE> --to <DESTINATION>`. Both endpoints accept URLs or named `registry:` profiles, using the same configuration as `-r`. For example, with profiles named `alpha` and `production`:
+
+```sh
+start-cli registry package promote myservice 1.2.0:0 --from alpha --to production
+```
+
+At least one endpoint is required; an omitted endpoint uses the configured registry selected by `-r` or the `default` profile. `start-cli registry os promote <VERSION>` accepts the same endpoint options for OS versions.
+
 ### Removing a package
 
 Remove a specific version:

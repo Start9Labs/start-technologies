@@ -39,218 +39,6 @@ export const ActionResultV0: z.ZodObject<{
 }).meta({
   id: 'ActionResultV0',
 })
-export const ActionResultValue: z.ZodUnion<
-  readonly [
-    z.ZodIntersection<
-      z.ZodObject<{ type: z.ZodLiteral<'single'> }>,
-      z.ZodObject<{
-        /**
-         * The actual string value to display. The UI renders it as a single-line field —
-         * multi-line text belongs in a `multiline` value.
-         */
-        value: z.ZodString
-        /**
-         * (optional) Whether or not to include a copy to clipboard icon to copy the value
-         */
-        copyable: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Whether or not to also display the value as a QR code
-         */
-        qr: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
-         */
-        masked: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
-         */
-        launchable: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-      }>
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ type: z.ZodLiteral<'multiline'> }>,
-      z.ZodObject<{
-        /**
-         * The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
-         */
-        value: z.ZodString
-        /**
-         * (optional) Whether or not to include a copy to clipboard icon to copy the value
-         */
-        copyable: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Whether or not to also display the value as a QR code
-         */
-        qr: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
-         */
-        masked: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
-         */
-        filename: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodString>>,
-          z.ZodNullable<z.ZodString>
-        >
-      }>
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ type: z.ZodLiteral<'group'> }>,
-      z.ZodObject<{
-        /**
-         * An new group of nested values, experienced by the user as an accordion dropdown
-         */
-        value: z.ZodArray<typeof ActionResultMember>
-      }>
-    >,
-  ]
-> = /* @__PURE__ */ z
-  .union([
-    z.intersection(
-      object({ type: z.literal('single') }),
-      object({
-        /**
-         * The actual string value to display. The UI renders it as a single-line field —
-         * multi-line text belongs in a `multiline` value.
-         */
-        value: z.string().meta({
-          description:
-            'The actual string value to display. The UI renders it as a single-line field —\nmulti-line text belongs in a `multiline` value.',
-        }),
-        /**
-         * (optional) Whether or not to include a copy to clipboard icon to copy the value
-         */
-        copyable: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to include a copy to clipboard icon to copy the value',
-        }),
-        /**
-         * (optional) Whether or not to also display the value as a QR code
-         */
-        qr: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to also display the value as a QR code',
-        }),
-        /**
-         * (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
-         */
-        masked: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information',
-        }),
-        /**
-         * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
-         */
-        launchable: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL',
-        }),
-      }),
-    ),
-    z.intersection(
-      object({ type: z.literal('multiline') }),
-      object({
-        /**
-         * The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
-         */
-        value: z.string().meta({
-          description:
-            'The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks',
-        }),
-        /**
-         * (optional) Whether or not to include a copy to clipboard icon to copy the value
-         */
-        copyable: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to include a copy to clipboard icon to copy the value',
-        }),
-        /**
-         * (optional) Whether or not to also display the value as a QR code
-         */
-        qr: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to also display the value as a QR code',
-        }),
-        /**
-         * (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
-         */
-        masked: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information',
-        }),
-        /**
-         * (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
-         */
-        filename: wire(
-          z.string().nullable().optional(),
-          z.string().nullable(),
-        ).meta({
-          description:
-            '(optional) Also offer the value as a download under this file name, such as "diagnostics.txt"',
-        }),
-      }),
-    ),
-    z.intersection(
-      object({ type: z.literal('group') }),
-      object({
-        /**
-         * An new group of nested values, experienced by the user as an accordion dropdown
-         */
-        get value(): z.ZodArray<typeof ActionResultMember> {
-          return z.array(ActionResultMember).meta({
-            description:
-              'An new group of nested values, experienced by the user as an accordion dropdown',
-          })
-        },
-      }),
-    ),
-  ])
-  .meta({
-    id: 'ActionResultValue',
-  })
 
 /**
  * Keys an import added, and keys it found already present.
@@ -942,6 +730,20 @@ export const LogEntry: z.ZodObject<{
 }).meta({
   id: 'LogEntry',
 })
+
+/**
+ * Verbosity accepted by the server's runtime logging control.
+ */
+export const LogLevel: z.ZodEnum<{
+  error: 'error'
+  warn: 'warn'
+  info: 'info'
+  debug: 'debug'
+  trace: 'trace'
+}> = /* @__PURE__ */ z.enum(['error', 'warn', 'info', 'debug', 'trace']).meta({
+  id: 'LogLevel',
+  description: "Verbosity accepted by the server's runtime logging control.",
+})
 export const LogoutParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'LogoutParams',
 })
@@ -1431,10 +1233,6 @@ export const TrustedCa: z.ZodObject<{
 }).meta({
   id: 'TrustedCa',
 })
-export const TrustedOsUpdateSigner: z.ZodObject<{ label: z.ZodString }> =
-  /* @__PURE__ */ object({ label: z.string() }).meta({
-    id: 'TrustedOsUpdateSigner',
-  })
 export const TrustedRegistryParams: z.ZodObject<{ url: z.ZodString }> =
   /* @__PURE__ */ object({ url: z.string() }).meta({
     id: 'TrustedRegistryParams',
@@ -1566,93 +1364,250 @@ export const ActionInput: z.ZodObject<{
 }).meta({
   id: 'ActionInput',
 })
-export const ActionResultMember: z.ZodIntersection<
-  z.ZodObject<{
-    /**
-     * A human-readable name or title of the value, such as "Last Active" or "Login Password"
-     */
-    name: z.ZodString
-    /**
-     * (optional) A description of the value, such as an explaining why it exists or how to use it
-     */
-    description: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
-  }>,
-  typeof ActionResultValue
+export const ActionResultValue: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'file'> }>,
+      z.ZodObject<{
+        /**
+         * The capability prepared by this action's prepare-download effect.
+         */
+        value: typeof Guid
+        /**
+         * Removes the exported file after completion, failure, cancellation, or expiry.
+         */
+        delete: z.ZodBoolean
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'single'> }>,
+      z.ZodObject<{
+        /**
+         * The actual string value to display. The UI renders it as a single-line field —
+         * multi-line text belongs in a `multiline` value.
+         */
+        value: z.ZodString
+        /**
+         * (optional) Whether or not to include a copy to clipboard icon to copy the value
+         */
+        copyable: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Whether or not to also display the value as a QR code
+         */
+        qr: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
+         */
+        masked: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
+         */
+        launchable: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'multiline'> }>,
+      z.ZodObject<{
+        /**
+         * The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
+         */
+        value: z.ZodString
+        /**
+         * (optional) Whether or not to include a copy to clipboard icon to copy the value
+         */
+        copyable: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Whether or not to also display the value as a QR code
+         */
+        qr: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
+         */
+        masked: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
+         */
+        filename: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodString>>,
+          z.ZodNullable<z.ZodString>
+        >
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'group'> }>,
+      z.ZodObject<{
+        /**
+         * An new group of nested values, experienced by the user as an accordion dropdown
+         */
+        value: z.ZodArray<typeof ActionResultMember>
+      }>
+    >,
+  ]
 > = /* @__PURE__ */ z
-  .intersection(
-    object({
-      /**
-       * A human-readable name or title of the value, such as "Last Active" or "Login Password"
-       */
-      name: z.string().meta({
-        description:
-          'A human-readable name or title of the value, such as "Last Active" or "Login Password"',
+  .union([
+    z.intersection(
+      object({ type: z.literal('file') }),
+      object({
+        /**
+         * The capability prepared by this action's prepare-download effect.
+         */
+        value: Guid.meta({
+          description:
+            "The capability prepared by this action's prepare-download effect.",
+        }),
+        /**
+         * Removes the exported file after completion, failure, cancellation, or expiry.
+         */
+        delete: z.boolean().meta({
+          description:
+            'Removes the exported file after completion, failure, cancellation, or expiry.',
+        }),
       }),
-      /**
-       * (optional) A description of the value, such as an explaining why it exists or how to use it
-       */
-      description: wire(
-        z.string().nullable().optional(),
-        z.string().nullable(),
-      ).meta({
-        description:
-          '(optional) A description of the value, such as an explaining why it exists or how to use it',
+    ),
+    z.intersection(
+      object({ type: z.literal('single') }),
+      object({
+        /**
+         * The actual string value to display. The UI renders it as a single-line field —
+         * multi-line text belongs in a `multiline` value.
+         */
+        value: z.string().meta({
+          description:
+            'The actual string value to display. The UI renders it as a single-line field —\nmulti-line text belongs in a `multiline` value.',
+        }),
+        /**
+         * (optional) Whether or not to include a copy to clipboard icon to copy the value
+         */
+        copyable: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to include a copy to clipboard icon to copy the value',
+        }),
+        /**
+         * (optional) Whether or not to also display the value as a QR code
+         */
+        qr: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to also display the value as a QR code',
+        }),
+        /**
+         * (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
+         */
+        masked: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information',
+        }),
+        /**
+         * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
+         */
+        launchable: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL',
+        }),
       }),
-    }),
-    ActionResultValue,
-  )
+    ),
+    z.intersection(
+      object({ type: z.literal('multiline') }),
+      object({
+        /**
+         * The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
+         */
+        value: z.string().meta({
+          description:
+            'The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks',
+        }),
+        /**
+         * (optional) Whether or not to include a copy to clipboard icon to copy the value
+         */
+        copyable: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to include a copy to clipboard icon to copy the value',
+        }),
+        /**
+         * (optional) Whether or not to also display the value as a QR code
+         */
+        qr: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to also display the value as a QR code',
+        }),
+        /**
+         * (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
+         */
+        masked: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information',
+        }),
+        /**
+         * (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
+         */
+        filename: wire(
+          z.string().nullable().optional(),
+          z.string().nullable(),
+        ).meta({
+          description:
+            '(optional) Also offer the value as a download under this file name, such as "diagnostics.txt"',
+        }),
+      }),
+    ),
+    z.intersection(
+      object({ type: z.literal('group') }),
+      object({
+        /**
+         * An new group of nested values, experienced by the user as an accordion dropdown
+         */
+        get value(): z.ZodArray<typeof ActionResultMember> {
+          return z.array(ActionResultMember).meta({
+            description:
+              'An new group of nested values, experienced by the user as an accordion dropdown',
+          })
+        },
+      }),
+    ),
+  ])
   .meta({
-    id: 'ActionResultMember',
+    id: 'ActionResultValue',
   })
-export const ActionResultV1: z.ZodObject<{
-  /**
-   * Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
-   */
-  title: z.ZodString
-  /**
-   * (optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.
-   */
-  message: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * (optional) Structured data to present inside the modal
-   */
-  result: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof ActionResultValue>>,
-    z.ZodNullable<typeof ActionResultValue>
-  >
-}> = /* @__PURE__ */ object({
-  /**
-   * Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
-   */
-  title: z.string().meta({
-    description:
-      'Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense',
-  }),
-  /**
-   * (optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.
-   */
-  message: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      '(optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.',
-  }),
-  /**
-   * (optional) Structured data to present inside the modal
-   */
-  result: wire(
-    ActionResultValue.nullable().optional(),
-    ActionResultValue.nullable(),
-  ).meta({
-    description: '(optional) Structured data to present inside the modal',
-  }),
-}).meta({
-  id: 'ActionResultV1',
-})
 export const AddAdminParams: z.ZodObject<{ signer: typeof Guid }> =
   /* @__PURE__ */ object({ signer: Guid }).meta({
     id: 'AddAdminParams',
@@ -1662,12 +1617,20 @@ export const AddAssetParams: z.ZodObject<{
   platform: z.ZodString
   url: z.ZodString
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
   commitment: typeof Blake3Commitment
 }> = /* @__PURE__ */ object({
   version: z.string(),
   platform: z.string(),
   url: z.string(),
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
   commitment: Blake3Commitment,
 }).meta({
   id: 'AddAssetParams',
@@ -2880,11 +2843,6 @@ export const OsInfo: z.ZodObject<{
 }).meta({
   id: 'OsInfo',
 })
-export const OsUpdateSignerKeyParams: z.ZodObject<{
-  key: typeof AnyVerifyingKey
-}> = /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
-  id: 'OsUpdateSignerKeyParams',
-})
 export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: typeof LocaleString
@@ -3100,6 +3058,21 @@ export const RebuildParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'RebuildParams',
   })
+export const RegistryIdentity: z.ZodObject<{
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  icon: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof DataUrl>>,
+    z.ZodNullable<typeof DataUrl>
+  >
+}> = /* @__PURE__ */ object({
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
+}).meta({
+  id: 'RegistryIdentity',
+})
 export const RemoveAcmeParams: z.ZodObject<{ provider: typeof AcmeProvider }> =
   /* @__PURE__ */ object({ provider: AcmeProvider }).meta({
     id: 'RemoveAcmeParams',
@@ -3258,11 +3231,25 @@ export const SetIconParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ icon: DataUrl.nullable() }).meta({
   id: 'SetIconParams',
 })
-export const SetOsUpdateSignerParams: z.ZodObject<{
-  key: typeof AnyVerifyingKey
-  label: z.ZodString
-}> = /* @__PURE__ */ object({ key: AnyVerifyingKey, label: z.string() }).meta({
-  id: 'SetOsUpdateSignerParams',
+
+/**
+ * Sets verbosity for StartOS backend code in the running daemon.
+ */
+export const SetLogLevelParams: z.ZodObject<{
+  /**
+   * Applies to start-core/start-os until the daemon restarts.
+   */
+  level: typeof LogLevel
+}> = /* @__PURE__ */ object({
+  /**
+   * Applies to start-core/start-os until the daemon restarts.
+   */
+  level: LogLevel.meta({
+    description: 'Applies to start-core/start-os until the daemon restarts.',
+  }),
+}).meta({
+  id: 'SetLogLevelParams',
+  description: 'Sets verbosity for StartOS backend code in the running daemon.',
 })
 export const SetOutboundGatewayParams: z.ZodObject<{
   package: typeof PackageId
@@ -3535,25 +3522,93 @@ export const WifiListOut: z.ZodObject<{
 }).meta({
   id: 'WifiListOut',
 })
-export const ActionResult: z.ZodUnion<
-  readonly [
-    z.ZodIntersection<
-      z.ZodObject<{ version: z.ZodLiteral<'0'> }>,
-      typeof ActionResultV0
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ version: z.ZodLiteral<'1'> }>,
-      typeof ActionResultV1
-    >,
-  ]
+export const ActionResultMember: z.ZodIntersection<
+  z.ZodObject<{
+    /**
+     * A human-readable name or title of the value, such as "Last Active" or "Login Password"
+     */
+    name: z.ZodString
+    /**
+     * (optional) A description of the value, such as an explaining why it exists or how to use it
+     */
+    description: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+  }>,
+  typeof ActionResultValue
 > = /* @__PURE__ */ z
-  .union([
-    z.intersection(object({ version: z.literal('0') }), ActionResultV0),
-    z.intersection(object({ version: z.literal('1') }), ActionResultV1),
-  ])
+  .intersection(
+    object({
+      /**
+       * A human-readable name or title of the value, such as "Last Active" or "Login Password"
+       */
+      name: z.string().meta({
+        description:
+          'A human-readable name or title of the value, such as "Last Active" or "Login Password"',
+      }),
+      /**
+       * (optional) A description of the value, such as an explaining why it exists or how to use it
+       */
+      description: wire(
+        z.string().nullable().optional(),
+        z.string().nullable(),
+      ).meta({
+        description:
+          '(optional) A description of the value, such as an explaining why it exists or how to use it',
+      }),
+    }),
+    ActionResultValue,
+  )
   .meta({
-    id: 'ActionResult',
+    id: 'ActionResultMember',
   })
+export const ActionResultV1: z.ZodObject<{
+  /**
+   * Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
+   */
+  title: z.ZodString
+  /**
+   * (optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.
+   */
+  message: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * (optional) Structured data to present inside the modal
+   */
+  result: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof ActionResultValue>>,
+    z.ZodNullable<typeof ActionResultValue>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
+   */
+  title: z.string().meta({
+    description:
+      'Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense',
+  }),
+  /**
+   * (optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.
+   */
+  message: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      '(optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.',
+  }),
+  /**
+   * (optional) Structured data to present inside the modal
+   */
+  result: wire(
+    ActionResultValue.nullable().optional(),
+    ActionResultValue.nullable(),
+  ).meta({
+    description: '(optional) Structured data to present inside the modal',
+  }),
+}).meta({
+  id: 'ActionResultV1',
+})
 export const AddPublicDomainRes: z.ZodObject<{
   dns: typeof QueryDnsRes
   port: typeof CheckPortRes
@@ -4225,6 +4280,94 @@ export const SideloadParams: z.ZodObject<{
 }).meta({
   id: 'SideloadParams',
 })
+
+/**
+ * Signing-key material and independent package and OS-update trust.
+ */
+export const TrustedKey: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * `manual`, or the base URL of the registry that first offered the key.
+   */
+  origin: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+  /**
+   * Registry identity recorded when this key was first imported.
+   */
+  originRegistry: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof RegistryIdentity>>,
+    z.ZodNullable<typeof RegistryIdentity>
+  >
+  publicKey: typeof AnyVerifyingKey
+  /**
+   * Original GPG exports; signing trust is determined by `public_key`.
+   */
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
+  /**
+   * Contact details registries publish for the key's signer.
+   */
+  contact: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof ContactInfo>>,
+    z.ZodArray<typeof ContactInfo>
+  >
+  addedAt: z.ZodString
+  /**
+   * False while a connected registry offers the key.
+   */
+  removable: z.ZodBoolean
+  marketplace: z.ZodBoolean
+  os: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * `manual`, or the base URL of the registry that first offered the key.
+   */
+  origin: wire(z.string().optional(), z.string()).meta({
+    description:
+      '`manual`, or the base URL of the registry that first offered the key.',
+  }),
+  /**
+   * Registry identity recorded when this key was first imported.
+   */
+  originRegistry: wire(
+    RegistryIdentity.nullable().optional(),
+    RegistryIdentity.nullable(),
+  ).meta({
+    description: 'Registry identity recorded when this key was first imported.',
+  }),
+  publicKey: AnyVerifyingKey,
+  /**
+   * Original GPG exports; signing trust is determined by `public_key`.
+   */
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ).meta({
+    description:
+      'Original GPG exports; signing trust is determined by `public_key`.',
+  }),
+  /**
+   * Contact details registries publish for the key's signer.
+   */
+  contact: wire(z.array(ContactInfo).optional(), z.array(ContactInfo)).meta({
+    description: "Contact details registries publish for the key's signer.",
+  }),
+  addedAt: z.string(),
+  /**
+   * False while a connected registry offers the key.
+   */
+  removable: z.boolean().meta({
+    description: 'False while a connected registry offers the key.',
+  }),
+  marketplace: z.boolean(),
+  os: z.boolean(),
+}).meta({
+  id: 'TrustedKey',
+  description:
+    'Signing-key material and independent package and OS-update trust.',
+})
 export const UpdateSystemParams: z.ZodObject<{
   registry: z.ZodString
   /**
@@ -4288,6 +4431,25 @@ export const WifiListInfo: z.ZodObject<{
 }).meta({
   id: 'WifiListInfo',
 })
+export const ActionResult: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{ version: z.ZodLiteral<'0'> }>,
+      typeof ActionResultV0
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ version: z.ZodLiteral<'1'> }>,
+      typeof ActionResultV1
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.intersection(object({ version: z.literal('0') }), ActionResultV0),
+    z.intersection(object({ version: z.literal('1') }), ActionResultV1),
+  ])
+  .meta({
+    id: 'ActionResult',
+  })
 export const AddSslOptions: z.ZodCodec<
   z.ZodObject<{
     preferredExternalPort: z.ZodInt
@@ -6707,6 +6869,74 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
         },
+        registries: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            add: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                ConnectRegistryParams,
+              ),
+              _RETURN: /* @__PURE__ */ z.array(z.string()),
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
+              _RETURN: /* @__PURE__ */ z.record(
+                z.string(),
+                z.string().nullable(),
+              ),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                TrustedRegistryParams,
+              ),
+              _RETURN: /* @__PURE__ */ z.array(z.string()),
+            },
+            'set-os': {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                TrustedRegistryParams,
+              ),
+              _RETURN: /* @__PURE__ */ z.array(z.string()),
+            },
+          },
+        },
         restart: {
           _PARAMS: /* @__PURE__ */ ShutdownParams,
           _RETURN: /* @__PURE__ */ z.null(),
@@ -6725,6 +6955,10 @@ export const Api = {
         },
         'set-language': {
           _PARAMS: /* @__PURE__ */ SetLanguageParams,
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        'set-log-level': {
+          _PARAMS: /* @__PURE__ */ SetLogLevelParams,
           _RETURN: /* @__PURE__ */ z.null(),
         },
         'set-smtp': {
@@ -6773,51 +7007,6 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {
             add: {
-              _PARAMS: /* @__PURE__ */ AddTrustedKeyParams,
-              _RETURN: /* @__PURE__ */ AddTrustedKeyRes,
-            },
-            'connect-registry': {
-              _PARAMS: /* @__PURE__ */ ConnectRegistryParams,
-              _RETURN: /* @__PURE__ */ z.array(z.string()),
-            },
-            remove: {
-              _PARAMS: /* @__PURE__ */ RemoveTrustedKeyParams,
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'remove-many': {
-              _PARAMS: /* @__PURE__ */ RemoveTrustedKeysParams,
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'remove-registry': {
-              _PARAMS: /* @__PURE__ */ TrustedRegistryParams,
-              _RETURN: /* @__PURE__ */ z.array(z.string()),
-            },
-            'set-os-registry': {
-              _PARAMS: /* @__PURE__ */ TrustedRegistryParams,
-              _RETURN: /* @__PURE__ */ z.array(z.string()),
-            },
-            update: {
-              _PARAMS: /* @__PURE__ */ UpdateTrustedKeyParams,
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-          },
-        },
-        update: {
-          _PARAMS: /* @__PURE__ */ UpdateSystemParams,
-          _RETURN: /* @__PURE__ */ UpdateSystemRes,
-        },
-        'update-firmware': {
-          _PARAMS: /* @__PURE__ */ empty,
-          _RETURN: /* @__PURE__ */ RequiresReboot,
-        },
-        'update-signers': {
-          _PARAMS: /* @__PURE__ */ empty,
-          _CHILDREN: {
-            add: {
-              _PARAMS: /* @__PURE__ */ SetOsUpdateSignerParams,
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            get: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
                   object({
@@ -6828,9 +7017,9 @@ export const Api = {
                   }),
                   empty,
                 ),
-                OsUpdateSignerKeyParams,
+                AddTrustedKeyParams,
               ),
-              _RETURN: /* @__PURE__ */ TrustedOsUpdateSigner,
+              _RETURN: /* @__PURE__ */ AddTrustedKeyRes,
             },
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -6845,20 +7034,29 @@ export const Api = {
                 ),
                 empty,
               ),
-              _RETURN: /* @__PURE__ */ z.record(
-                z.string(),
-                TrustedOsUpdateSigner,
-              ),
+              _RETURN: /* @__PURE__ */ z.record(z.string(), TrustedKey),
             },
             remove: {
-              _PARAMS: /* @__PURE__ */ OsUpdateSignerKeyParams,
+              _PARAMS: /* @__PURE__ */ RemoveTrustedKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            'remove-many': {
+              _PARAMS: /* @__PURE__ */ RemoveTrustedKeysParams,
               _RETURN: /* @__PURE__ */ z.null(),
             },
             update: {
-              _PARAMS: /* @__PURE__ */ SetOsUpdateSignerParams,
+              _PARAMS: /* @__PURE__ */ UpdateTrustedKeyParams,
               _RETURN: /* @__PURE__ */ z.null(),
             },
           },
+        },
+        update: {
+          _PARAMS: /* @__PURE__ */ UpdateSystemParams,
+          _RETURN: /* @__PURE__ */ UpdateSystemRes,
+        },
+        'update-firmware': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _RETURN: /* @__PURE__ */ RequiresReboot,
         },
       },
     },

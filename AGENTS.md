@@ -143,6 +143,10 @@ make -k generated-artifacts-check # regenerate and check man pages, TS bindings,
 cd shared-libs/crates/start-core && cargo test <test_name> --features=test
 ```
 
+Release-tooling tests (`make release-notes-test`, also included in `make test`) require
+`apt-utils`, `dpkg-dev`, and `gnupg`. CI installs them through the shared
+`.github/actions/setup-release-tests` action.
+
 Preserve level-3 optimization in development and test profiles. Unoptimized builds have hit binary-size limits and async stack overflows; lowering optimization requires verification of both constraints.
 
 Each product's `AGENTS.md` covers its own scoped tests.
@@ -380,7 +384,6 @@ Already enforced or checked elsewhere (listed here for completeness; documented 
 - **Exported Rust types → `make start-core-ts-bindings` → SDK rebuild → web/container-runtime.** See [ARCHITECTURE.md](ARCHITECTURE.md#cross-layer-verification); editing `osBindings/*.ts` alone is not enough.
 - **CLI subcommands and their help strings → `make manpages`.** The committed pages under `projects/*/man/` are generated from the clap definitions in `start-core`; `Generated Artifacts` regenerates both these and the TS bindings and fails on any drift.
 - **User-facing strings ↔ all five locale dictionaries** (`en_US`/`de_DE`/`es_ES`/`fr_FR`/`pl_PL`) — compile-checked for `start-core`; `npm run check:i18n` for the web libs.
-- **`patchdb-ui-seed.json` ↔ `patchdb-ui-seed.beta.json`** — keep both seeds in sync (see [`projects/start-os/AGENTS.md`](projects/start-os/AGENTS.md)).
 - **A product's version bump ↔ its fragments.** The manifest owns the version; fragments record the impact of the changes being released.
 - **Root `package.json` ↔ `projects/start-os/Cargo.toml`'s label ↔ `version::Current`** — the three spellings of the StartOS version. `manage-release.sh pre-check start-os` fails on a stale label, and `version::tests::current_matches_manifest` fails if `Current` drifts from `package.json`.
 - **StartOS install/update docs' GitHub release link ↔ the OS release.** `projects/start-os/docs/src/installing-startos.md` and `update-040.md` pin the release URL to the shipping version — a repo-wide `releases/latest` resolves to whichever product released most recently (e.g. StartTunnel), not StartOS. `manage-release.sh pre-check start-os` fails if a doc still links to `releases/latest` or pins a stale version, so bump these links with the release.

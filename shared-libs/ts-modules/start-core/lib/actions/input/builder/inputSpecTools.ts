@@ -1,5 +1,5 @@
 import { InputSpec, LazyBuild } from './inputSpec'
-import { AsRequired, FileInfo, Value } from './value'
+import { AsRequired, FileInfo, FileInputOptions, Value } from './value'
 import { List } from './list'
 import { UnionRes, UnionResStaticValidatedAs, Variants } from './variants'
 import {
@@ -195,16 +195,7 @@ export interface BoundValue<OuterType> {
   ): Value<(keyof Values & string)[], (keyof Values & string)[], OuterType>
 
   dynamicFile<Required extends boolean>(
-    a: LazyBuild<
-      {
-        name: string
-        description?: string | null
-        warning?: string | null
-        extensions: string[]
-        required: Required
-      },
-      OuterType
-    >,
+    a: LazyBuild<FileInputOptions<Required>, OuterType>,
   ): Value<AsRequired<FileInfo, Required>, FileInfo | null, OuterType>
 
   dynamicUnion<

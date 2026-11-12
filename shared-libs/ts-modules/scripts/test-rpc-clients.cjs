@@ -35,11 +35,13 @@ function harness(moduleOverrides = new Map()) {
       'HttpService',
       'AuthKeyService',
       'AuthService',
+      'ConfigService',
       'StaleUiService',
       'PATCH_CACHE',
       'RELATIVE_URL',
     ].map(name => [name, Symbol(name)]),
   )
+  dependencies.set(tokens.ConfigService, { gitHash: '' })
   const modules = new Map()
   const angular = {
     DOCUMENT: tokens.DOCUMENT,
@@ -89,6 +91,8 @@ function harness(moduleOverrides = new Map()) {
         return { AuthService: tokens.AuthService }
       if (request.endsWith('http.service'))
         return { HttpService: tokens.HttpService }
+      if (request.endsWith('config.service'))
+        return { ConfigService: tokens.ConfigService }
       if (request.endsWith('stale-ui.service'))
         return { StaleUiService: tokens.StaleUiService }
       if (request.endsWith('patch-db-source'))
@@ -421,11 +425,10 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
     'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
   ]
   const data = {
-    ui: {
-      registries: { 'https://registry.test/': 'Registry' },
-      startosRegistry: 'https://registry.test/',
-    },
+    ui: {},
     serverInfo: {
+      registries: { 'https://registry.test/': 'Registry' },
+      osRegistry: 'https://registry.test/',
       registryKeys: { 'https://registry.test/': [ids[1]] },
       trustedKeys: Object.fromEntries(
         ids.map((id, index) => [
@@ -508,8 +511,13 @@ test('StartOS DNS mock updates the selected gateway using live gateway state', a
         './mock-patch',
         {
           mockPatchData: {
-            ui: { registries: {} },
-            serverInfo: { trustedKeys: {}, registryKeys: {} },
+            ui: {},
+            serverInfo: {
+              registries: {},
+              osRegistry: 'https://registry.test/',
+              trustedKeys: {},
+              registryKeys: {},
+            },
           },
         },
       ],

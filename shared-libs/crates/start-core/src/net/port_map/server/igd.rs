@@ -497,6 +497,7 @@ async fn add_mapping<B: GatewayBackend + ?Sized>(
         return fault(402, "Invalid Args");
     }
     if !backend.is_known_client(peer).await {
+        backend.refused_mapping(peer, external_port, 1).await;
         return fault(606, "Action not authorized");
     }
     let Some(source_ip) = backend.external_ipv4(peer).await else {
@@ -586,6 +587,7 @@ async fn add_hostname_mapping<B: GatewayBackend + ?Sized>(
         return fault(801, upnp_error_text(801));
     }
     if !backend.is_known_client(peer).await {
+        backend.refused_mapping(peer, external_port, 1).await;
         return fault(606, "Action not authorized");
     }
     let Some(source_ip) = backend.external_ipv4(peer).await else {
@@ -1125,6 +1127,7 @@ mod tests {
         known: bool,
         calls: Mutex<Vec<(SocketAddrV4, SocketAddrV4, Vec<String>, Option<u32>)>>,
         remove_calls: Mutex<Vec<(SocketAddrV4, SocketAddrV4, Vec<String>)>>,
+        refused: Mutex<Vec<(Ipv4Addr, u16, u16)>>,
     }
     impl HostnameStub {
         fn new(known: bool) -> Self {
@@ -1133,6 +1136,7 @@ mod tests {
                 known,
                 calls: Mutex::new(Vec::new()),
                 remove_calls: Mutex::new(Vec::new()),
+                refused: Mutex::new(Vec::new()),
             }
         }
     }
@@ -1163,6 +1167,18 @@ mod tests {
         fn is_known_client(&self, _: Ipv4Addr) -> impl Future<Output = bool> + Send {
             let known = self.known;
             async move { known }
+        }
+        fn refused_mapping(
+            &self,
+            peer: Ipv4Addr,
+            external_port: u16,
+            count: u16,
+        ) -> impl Future<Output = ()> + Send {
+            self.refused
+                .lock()
+                .unwrap()
+                .push((peer, external_port, count));
+            async {}
         }
         fn sni(&self) -> Option<&Arc<SniDemux>> {
             Some(&self.sni)
@@ -1480,6 +1496,23 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert!(body_text(resp).await.contains("<errorCode>606</errorCode>"));
         assert!(stub.calls.lock().unwrap().is_empty());
+        assert_eq!(*stub.refused.lock().unwrap(), vec![(PEER, 44300, 1)]);
+    }
+
+    #[tokio::test]
+    async fn an_unknown_peer_adding_a_port_is_reported() {
+        let stub = HostnameStub::new(false);
+        let resp = control(&stub, PEER, &add_port_body()).await;
+        assert!(body_text(resp).await.contains("<errorCode>606</errorCode>"));
+        assert_eq!(*stub.refused.lock().unwrap(), vec![(PEER, 443, 1)]);
+
+        let resp = control(&stub, PEER, &delete_hostname_body("git.example.com")).await;
+        assert!(body_text(resp).await.contains("<errorCode>606</errorCode>"));
+        assert_eq!(
+            stub.refused.lock().unwrap().len(),
+            1,
+            "a delete opens nothing"
+        );
     }
 
     #[tokio::test]

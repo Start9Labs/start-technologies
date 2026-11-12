@@ -85,10 +85,12 @@ mod v0_4_1;
 mod v0_4_1_1;
 mod v0_4_1_2;
 mod v0_4_1_3;
+mod v0_4_2;
+mod v0_4_2_1;
 #[cfg(test)]
 pub(crate) use v0_4_1_2::retired_alpha_keys;
 
-pub type Current = v0_4_1_3::Version; // VERSION_BUMP
+pub type Current = v0_4_2_1::Version; // VERSION_BUMP
 
 impl Current {
     #[instrument(skip(self, db))]
@@ -237,7 +239,9 @@ enum Version {
     V0_4_1(Wrapper<v0_4_1::Version>),
     V0_4_1_1(Wrapper<v0_4_1_1::Version>),
     V0_4_1_2(Wrapper<v0_4_1_2::Version>),
-    V0_4_1_3(Wrapper<v0_4_1_3::Version>), // VERSION_BUMP
+    V0_4_1_3(Wrapper<v0_4_1_3::Version>),
+    V0_4_2(Wrapper<v0_4_2::Version>),
+    V0_4_2_1(Wrapper<v0_4_2_1::Version>), // VERSION_BUMP
     Other(exver::Version),
 }
 
@@ -324,7 +328,9 @@ impl Version {
             Self::V0_4_1(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_1_1(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_1_2(v) => DynVersion(Box::new(v.0)),
-            Self::V0_4_1_3(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
+            Self::V0_4_1_3(v) => DynVersion(Box::new(v.0)),
+            Self::V0_4_2(v) => DynVersion(Box::new(v.0)),
+            Self::V0_4_2_1(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
             Self::Other(v) => {
                 return Err(Error::new(
                     eyre!("unknown version {v}"),
@@ -403,7 +409,9 @@ impl Version {
             Version::V0_4_1(Wrapper(x)) => x.semver(),
             Version::V0_4_1_1(Wrapper(x)) => x.semver(),
             Version::V0_4_1_2(Wrapper(x)) => x.semver(),
-            Version::V0_4_1_3(Wrapper(x)) => x.semver(), // VERSION_BUMP
+            Version::V0_4_1_3(Wrapper(x)) => x.semver(),
+            Version::V0_4_2(Wrapper(x)) => x.semver(),
+            Version::V0_4_2_1(Wrapper(x)) => x.semver(), // VERSION_BUMP
             Version::Other(x) => x.clone(),
         }
     }
@@ -878,8 +886,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn maintenance_revisions_migrate_and_roll_back_without_changing_service_data() {
-        for (from, to, revision) in [("0.4.0.3", "0.4.0.4", 0), ("0.4.0.4", "0.4.0.5", 3)] {
+    async fn releases_migrate_and_roll_back_without_changing_service_data() {
+        for (from, to, revision) in [
+            ("0.4.0.3", "0.4.0.4", 0),
+            ("0.4.0.4", "0.4.0.5", 3),
+            ("0.4.1.2", "0.4.1.3", 0),
+            ("0.4.1.3", "0.4.2", 0),
+            ("0.4.2", "0.4.2.1", 2),
+        ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
                 .as_version_t()
@@ -894,7 +908,7 @@ mod tests {
                 "packageVersionCompat": ">=0.3.0 <0.5.0",
                 "postInitMigrationTodos": {},
                 "latestMigrationRevision": 0,
-            }, "packageData": { "service": { "setting": "preserved", "outboundDns": null } } } });
+            }, "ui": {}, "packageData": { "service": { "setting": "preserved", "outboundDns": null } } } });
             let packages = db["public"]["packageData"].clone();
             let pre_ups = PreUps::load(&previous, &current).await.unwrap();
             migrate_from_unchecked(&previous, &current, pre_ups, &mut db).unwrap();
@@ -920,6 +934,49 @@ mod tests {
             assert_eq!(db["public"]["serverInfo"]["version"], json!(from));
             assert_eq!(db["public"]["packageData"], packages);
         }
+    }
+
+    #[tokio::test]
+    async fn registry_repair_runs_on_an_existing_alpha_version_once() {
+        let version = Version::from_exver_version(v0_4_2_1::Version.semver())
+            .as_version_t()
+            .unwrap();
+        let mut db = json!({ "public": {
+            "serverInfo": {
+                "version": "0.4.2.1",
+                "packageVersionCompat": ">=0.3.0 <0.5.0",
+                "postInitMigrationTodos": {},
+                "latestMigrationRevision": 0,
+            },
+            "ui": { "registries": {}, "snakeHighScore": 42 },
+        } });
+        let upgrade = Upgrade::load(
+            &version,
+            &version,
+            applied_migration_revision(&mut db).unwrap(),
+        )
+        .await
+        .unwrap();
+        upgrade.apply(&version, &version, &mut db).unwrap();
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 2);
+        assert_eq!(
+            db["public"]["serverInfo"]["registries"],
+            json!({
+                "https://registry.start9.com/": "Start9 Registry",
+                "https://community-registry.start9.com/": "Community Registry",
+            })
+        );
+        assert_eq!(db["public"]["ui"]["snakeHighScore"], json!(42));
+        let repaired = db.clone();
+        let upgrade = Upgrade::load(
+            &version,
+            &version,
+            applied_migration_revision(&mut db).unwrap(),
+        )
+        .await
+        .unwrap();
+        upgrade.apply(&version, &version, &mut db).unwrap();
+        assert_eq!(db, repaired);
     }
 
     #[tokio::test]

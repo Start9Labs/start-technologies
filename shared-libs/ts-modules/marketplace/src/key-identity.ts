@@ -31,7 +31,7 @@ export function keyType({
   return gpgExports.length ? 'GPG' : 'PEM'
 }
 
-/** GPG user IDs, or the email addresses registries publish for a plain key. */
+/** GPG user IDs and registry contact email addresses. */
 export function keyIdentities(key: IdentityKey): string[] {
   const canonical = auth.normalizeDer64(key.publicKey)
   const userIds = key.gpgExports.flatMap(
@@ -39,13 +39,12 @@ export function keyIdentities(key: IdentityKey): string[] {
   )
 
   return [
-    ...new Set(
-      userIds.length
-        ? userIds
-        : key.contact.flatMap(contact =>
-            'email' in contact ? [contact.email] : [],
-          ),
-    ),
+    ...new Set([
+      ...userIds,
+      ...key.contact.flatMap(contact =>
+        'email' in contact ? [contact.email] : [],
+      ),
+    ]),
   ]
 }
 

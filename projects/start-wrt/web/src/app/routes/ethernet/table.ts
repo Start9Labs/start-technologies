@@ -5,8 +5,10 @@ import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import { TuiTable, TuiTableDirective } from '@taiga-ui/addon-table'
 import {
   TuiAppearance,
+  TuiButton,
   TuiDataList,
   TuiDropdown,
+  TuiHint,
   TuiLink,
 } from '@taiga-ui/core'
 import {
@@ -20,7 +22,7 @@ import { firstValueFrom } from 'rxjs'
 import { Placeholder } from 'src/app/components/placeholder'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { fill } from 'src/app/i18n/validation-errors'
-import { publishedPortDeletionMessage } from 'src/app/services/published-port-deletion'
+import { leavingProfileMessage } from 'src/app/services/leaving-profile'
 
 import { EthernetPortView, EthernetService } from './service'
 
@@ -33,6 +35,7 @@ import { EthernetPortView, EthernetService } from './service'
         <th tuiTh [sorter]="'profileName' | tuiSorter">
           {{ 'Security Profile' | i18n }}
         </th>
+        <th tuiTh></th>
       </tr>
     </thead>
     <tbody>
@@ -42,6 +45,11 @@ import { EthernetPortView, EthernetService } from './service'
             {{ item.name }}
             @if (item.wan) {
               <span tuiBadge size="s" appearance="primary">WAN</span>
+            }
+            @if (item.usb?.active === false) {
+              <span tuiBadge size="s" appearance="neutral">
+                {{ 'Not connected' | i18n }}
+              </span>
             }
           </td>
           <td tuiTd>
@@ -76,10 +84,30 @@ import { EthernetPortView, EthernetService } from './service'
               </button>
             }
           </td>
+          <td tuiTd>
+            @if (item.usb; as usb) {
+              <button
+                tuiIconButton
+                type="button"
+                size="xs"
+                appearance="icon"
+                iconStart="@tui.trash"
+                [disabled]="usb.present"
+                [tuiHint]="
+                  usb.present
+                    ? ('Unplug the adapter to remove this port' | i18n)
+                    : null
+                "
+                (click)="onRemove(item)"
+              >
+                {{ 'Remove' | i18n }}
+              </button>
+            }
+          </td>
         </tr>
       } @empty {
         <tr>
-          <td tuiTd colspan="2">
+          <td tuiTd colspan="3">
             <app-placeholder icon="@tui.inbox">
               {{ 'No ports detected' | i18n }}
             </app-placeholder>
@@ -98,17 +126,24 @@ import { EthernetPortView, EthernetService } from './service'
         vertical-align: baseline;
         margin: 0 0.125rem;
       }
+
+      [tuiTd]:last-child {
+        padding-block: 0;
+        text-align: end;
+      }
     }
   `,
   hostDirectives: [TuiTableDirective],
   host: { class: 'g-table' },
   imports: [
     TuiTable,
+    TuiButton,
     TuiLink,
     TuiButtonSelect,
     FormsModule,
     TuiDataList,
     TuiDropdown,
+    TuiHint,
     TuiChevron,
     TuiBadge,
     RouterLink,
@@ -124,6 +159,26 @@ export class EthernetTable {
 
   readonly ethernetTable = input<EthernetPortView[]>([])
 
+  async onRemove(item: EthernetPortView) {
+    const confirmed = await firstValueFrom(
+      this.dialogs.open<boolean>(TUI_CONFIRM, {
+        label: this.i18n.transform('Remove USB port?'),
+        data: {
+          content: fill(
+            this.i18n.transform(
+              'Removing {port} briefly restarts the network. The port appears again, in the Admin profile, the next time a USB Ethernet adapter is plugged into it.',
+            ),
+            { port: item.name },
+          ),
+          yes: this.i18n.transform('Remove'),
+          no: this.i18n.transform('Cancel'),
+        },
+      }),
+    ).catch(() => false)
+
+    if (confirmed) this.service.removeUsbPort(item.name)
+  }
+
   async onProfileChange(item: EthernetPortView, fullname: string) {
     const previousName = item.profile?.fullname ?? 'Admin'
     if (fullname === previousName) return
@@ -133,9 +188,9 @@ export class EthernetTable {
     item.profile = profile
     const items = [...this.ethernetTable()]
 
-    let pending
+    let leaving
     try {
-      pending = await this.service.previewPorts(items)
+      leaving = await this.service.previewPorts(items)
     } catch {
       this.service.refresh()
       return
@@ -147,20 +202,13 @@ export class EthernetTable {
       ),
       { port: item.name, profile: fullname },
     )
-    const deletion = publishedPortDeletionMessage(
-      this.i18n.transform(
-        'This change breaks the following published port(s), so they will be deleted: {list}.',
-      ),
-      pending,
-    )
+    const kept = leavingProfileMessage(this.i18n, leaving)
     const confirmed = await firstValueFrom(
       this.dialogs.open<boolean>(TUI_CONFIRM, {
         label: this.i18n.transform('Change Security Profile?'),
         data: {
-          content: deletion ? `${move} ${deletion}` : move,
-          yes: this.i18n.transform(
-            pending.length ? 'Delete & Continue' : 'Change Profile',
-          ),
+          content: kept ? `${move} ${kept}` : move,
+          yes: this.i18n.transform('Change Profile'),
           no: this.i18n.transform('Cancel'),
         },
       }),

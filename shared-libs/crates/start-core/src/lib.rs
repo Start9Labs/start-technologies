@@ -73,6 +73,7 @@ pub mod notifications;
 pub mod os_install;
 pub mod prelude;
 pub mod progress;
+pub mod registries;
 pub mod registry;
 pub mod rpc_continuations;
 pub mod s9pk;
@@ -357,6 +358,13 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .with_about("about.display-os-logs"),
         )
         .subcommand(
+            "set-log-level",
+            from_fn(system::log_level::set_log_level)
+                .no_display()
+                .with_about("about.set-log-level")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
             "kernel-logs",
             system::kernel_logs::<RpcContext>().with_about("about.display-kernel-logs"),
         )
@@ -418,10 +426,13 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .with_about("about.check-update-startos"),
         )
         .subcommand(
-            "update-signers",
-            update::signers::api::<C>().with_about("about.commands-os-update-signers"),
+            "registries",
+            registries::api::<C>().with_about("about.commands-registries"),
         )
-        .subcommand("trusted-keys", trusted_keys::api::<C>().no_cli())
+        .subcommand(
+            "trusted-keys",
+            trusted_keys::api::<C>().with_about("about.commands-trusted-keys"),
+        )
         .subcommand(
             "update-firmware",
             from_fn_async(|_: RpcContext| async {
