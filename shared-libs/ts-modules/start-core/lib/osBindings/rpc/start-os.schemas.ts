@@ -1216,6 +1216,16 @@ export const TimeInfo: z.ZodObject<{ now: z.ZodString; uptime: z.ZodInt }> =
   /* @__PURE__ */ object({ now: z.string(), uptime: z.int() }).meta({
     id: 'TimeInfo',
   })
+
+/**
+ * Transports forwarded by a binding. Omitted declarations retain TCP and UDP.
+ */
+export const Transport: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp'; both: 'both' }> =
+  /* @__PURE__ */ z.enum(['tcp', 'udp', 'both']).meta({
+    id: 'Transport',
+    description:
+      'Transports forwarded by a binding. Omitted declarations retain TCP and UDP.',
+  })
 export const TrustCaParams: z.ZodObject<{ cert: typeof literal_0 }> =
   /* @__PURE__ */ object({ cert: literal_0 }).meta({
     id: 'TrustCaParams',
@@ -4873,6 +4883,7 @@ export const PackageInfo: z.ZodObject<{
   id: 'PackageInfo',
 })
 export const CompatibleBindOptions: z.ZodObject<{
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
   preferredExternalPort: z.ZodInt
   addSsl: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>,
@@ -4887,6 +4898,7 @@ export const CompatibleBindOptions: z.ZodObject<{
     z.ZodNullable<typeof ProxyOptions>
   >
 }> = /* @__PURE__ */ object({
+  transport: wire(Transport.optional(), Transport),
   preferredExternalPort: z.int(),
   addSsl: wire(
     LegacyProxySslOptions.nullable().optional(),
@@ -4926,6 +4938,10 @@ export const PackageIndex: z.ZodObject<{
 export const BindOptions: z.ZodCodec<
   typeof CompatibleBindOptions,
   z.ZodObject<{
+    /**
+     * Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
+     */
+    transport: typeof Transport
     preferredExternalPort: z.ZodInt
     addSsl: z.ZodNullable<typeof AddSslOptions>
     secure: z.ZodNullable<typeof Security>
@@ -4937,6 +4953,13 @@ export const BindOptions: z.ZodCodec<
 > = /* @__PURE__ */ wire(
   CompatibleBindOptions,
   object({
+    /**
+     * Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
+     */
+    transport: Transport.meta({
+      description:
+        'Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.',
+    }),
     preferredExternalPort: z.int(),
     addSsl: AddSslOptions.nullable(),
     secure: Security.nullable(),

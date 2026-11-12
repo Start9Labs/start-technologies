@@ -42,6 +42,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::NameProfileFirewallSections,
     Migration::BindLuciToLoopback,
     Migration::DisableFlowOffloading,
+    Migration::SplitAutomaticForwardTransports,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -79,6 +80,7 @@ enum Migration {
     BindLuciToLoopback,
     /// Earlier releases offloaded established forwarded connections.
     DisableFlowOffloading,
+    SplitAutomaticForwardTransports,
 }
 
 impl Migration {
@@ -99,6 +101,11 @@ impl Migration {
             Migration::NameProfileFirewallSections => name_profile_firewall_sections(root).await,
             Migration::BindLuciToLoopback => bind_luci_to_loopback(root).await,
             Migration::DisableFlowOffloading => disable_flow_offloading(root).await,
+            Migration::SplitAutomaticForwardTransports => {
+                crate::port_control::split_legacy_forwards_uci(&uci_root(root))
+                    .await
+                    .map(|_| ())
+            }
         }
     }
 
@@ -134,6 +141,7 @@ impl Migration {
             Migration::DisableFlowOffloading => {
                 "stop offloading established connections, which stalled traffic to Wi-Fi devices from other profiles"
             }
+            Migration::SplitAutomaticForwardTransports => "track automatic TCP and UDP mappings independently",
         }
     }
 }
@@ -1066,7 +1074,7 @@ config forwarding
     #[tokio::test]
     async fn flow_offloading_an_earlier_release_enabled_is_cleared() {
         let offloaded = format!("{SHIPPED_FIREWALL_DEFAULTS}\toption flow_offloading '1'\n");
-        let before = format!("{}\n", MIGRATIONS.len() - 1);
+        let before = "14\n";
         let dir = router(Some(&before), true);
         write(&dir, "etc/config/firewall", &offloaded);
         run(dir.path()).await.unwrap();

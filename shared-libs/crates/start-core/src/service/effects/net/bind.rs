@@ -42,6 +42,8 @@ pub struct BindRangeParams {
     pub internal_start_port: u16,
     pub external_start_port: u16,
     pub number_of_ports: u16,
+    #[serde(default)]
+    pub transport: crate::net::transport::Transport,
 }
 
 rpc_toolkit::reflect_ts!(BindRangeParams);
@@ -54,6 +56,7 @@ pub async fn bind_range(
         internal_start_port,
         external_start_port,
         number_of_ports,
+        transport,
     }: BindRangeParams,
 ) -> Result<(), Error> {
     if number_of_ports < 2 {
@@ -78,8 +81,35 @@ pub async fn bind_range(
             internal_start_port,
             external_start_port,
             number_of_ports,
+            transport,
         )
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::net::transport::Transport;
+
+    #[test]
+    fn range_transport_is_optional_and_round_trips() {
+        let mut input = serde_json::json!({
+            "id": "relay", "internalStartPort": 42000,
+            "externalStartPort": 43000, "numberOfPorts": 10,
+        });
+        let params: BindRangeParams = serde_json::from_value(input.clone()).unwrap();
+        assert_eq!(params.transport, Transport::Both);
+        for (wire, transport) in [
+            ("tcp", Transport::Tcp),
+            ("udp", Transport::Udp),
+            ("both", Transport::Both),
+        ] {
+            input["transport"] = wire.into();
+            let params: BindRangeParams = serde_json::from_value(input.clone()).unwrap();
+            assert_eq!(params.transport, transport);
+            assert_eq!(serde_json::to_value(params).unwrap()["transport"], wire);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]

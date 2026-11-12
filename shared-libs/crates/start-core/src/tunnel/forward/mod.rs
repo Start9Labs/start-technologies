@@ -2,6 +2,8 @@
 //! resolution ([`igd`]), the PCP [`GatewayBackend`](crate::net::port_map::server::GatewayBackend)
 //! implementation ([`pcp`]), and the SNI demultiplexer ([`sni`]).
 
+use crate::tunnel::forward::address::{ForwardAddress, PinholeAddress};
+pub mod address;
 pub mod igd;
 pub mod lease;
 pub mod pcp;
@@ -9,7 +11,7 @@ pub mod pinhole;
 pub mod sni;
 
 use std::collections::BTreeSet;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
 
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
@@ -32,7 +34,8 @@ pub async fn clear_for_peer(
     let (dnat_sources, sni_routes, sni_fallbacks) =
         select_peer_forwards(&forwards.0, peer, auto_only);
     for source in dnat_sources {
-        ctx.remove_peer_forward_by_source(source, peer, false).await;
+        ctx.remove_peer_forward_by_source(source.address, peer, false, source.transport)
+            .await;
     }
     for (source, target, host) in sni_routes {
         ctx.remove_sni_routes(source, target, &[host], false).await;
@@ -57,7 +60,7 @@ pub async fn clear_for_peer(
         .map(|prefix| host_v6(prefix, peer))
         .collect();
     if !peer_guas.is_empty() {
-        let keys: Vec<SocketAddrV6> = ctx
+        let keys: Vec<PinholeAddress> = ctx
             .db
             .peek()
             .await
@@ -69,7 +72,7 @@ pub async fn clear_for_peer(
             .map(|(key, _)| *key)
             .collect();
         for key in keys {
-            pinhole::remove_pinhole(ctx, *key.ip(), key.port(), false).await;
+            pinhole::remove_pinhole(ctx, *key.ip(), key.port(), false, key.transport).await;
         }
     }
     Ok(())
@@ -79,11 +82,11 @@ pub async fn clear_for_peer(
 /// fallbacks (`source`, `target`) held by `peer` — everything, or just the
 /// automatic entries when `auto_only`.
 fn select_peer_forwards(
-    forwards: &std::collections::BTreeMap<SocketAddrV4, PortForward>,
+    forwards: &std::collections::BTreeMap<ForwardAddress, PortForward>,
     peer: Ipv4Addr,
     auto_only: bool,
 ) -> (
-    Vec<SocketAddrV4>,
+    Vec<ForwardAddress>,
     Vec<(SocketAddrV4, SocketAddrV4, String)>,
     Vec<(SocketAddrV4, SocketAddrV4)>,
 ) {
@@ -100,12 +103,12 @@ fn select_peer_forwards(
             PortForward::Sni { routes, fallback } => {
                 for (host, route) in routes {
                     if route.target.ip() == &peer && (!auto_only || route.auto) {
-                        sni_routes.push((*source, route.target, host.clone()));
+                        sni_routes.push((source.address, route.target, host.clone()));
                     }
                 }
                 if let Some(f) = fallback {
                     if f.target.ip() == &peer && (!auto_only || f.auto) {
-                        sni_fallbacks.push((*source, f.target));
+                        sni_fallbacks.push((source.address, f.target));
                     }
                 }
             }
@@ -138,7 +141,7 @@ mod tests {
     fn select_respects_auto_only_and_target() {
         let peer: Ipv4Addr = "10.59.0.2".parse().unwrap();
         let other: Ipv4Addr = "10.59.0.3".parse().unwrap();
-        let mut fwds: BTreeMap<SocketAddrV4, PortForward> = BTreeMap::new();
+        let mut fwds: BTreeMap<ForwardAddress, PortForward> = BTreeMap::new();
         fwds.insert("1.2.3.4:443".parse().unwrap(), dnat("10.59.0.2:443", true));
         fwds.insert(
             "1.2.3.4:8443".parse().unwrap(),

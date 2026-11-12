@@ -314,6 +314,11 @@ export type Ssid = z.output<typeof schemas.Ssid>
 export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type TermSizeInput = z.input<typeof schemas.TermSize>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
+
+/**
+ * Transports forwarded by a binding. Omitted declarations retain TCP and UDP.
+ */
+export type Transport = z.output<typeof schemas.Transport>
 export type TrustCaParamsInput = z.input<typeof schemas.TrustCaParams>
 export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedCa = z.output<typeof schemas.TrustedCa>

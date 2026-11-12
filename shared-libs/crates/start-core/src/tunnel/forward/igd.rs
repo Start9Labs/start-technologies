@@ -28,9 +28,11 @@ use crate::net::port_map::server::igd::{
     format_uuid, handle_control, header_value, render_root_desc, serve_static, ssdp_response,
     st_matches,
 };
+use crate::net::transport::TransportProtocol;
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::{PortForward, PortForwards};
+use crate::tunnel::forward::address::ForwardAddress;
 use crate::tunnel::forward::lease::{self, LeaseKey};
 use crate::tunnel::wg::WIREGUARD_INTERFACE_NAME;
 
@@ -254,7 +256,7 @@ async fn control(
 /// whether it did.
 fn remap_auto_dnat(
     forwards: &mut PortForwards,
-    source: SocketAddrV4,
+    source: ForwardAddress,
     target: SocketAddrV4,
     count: u16,
 ) -> bool {
@@ -287,12 +289,17 @@ pub(super) async fn apply_peer_forward_range(
     count: u16,
     protocol_label: &str,
     lifetime: Option<u32>,
+    transport: TransportProtocol,
 ) -> Result<(), u16> {
     let _guard = ctx.forward_write_lock.lock().await;
+    let source = ForwardAddress::new(source, transport.into());
     // Port 80 is reserved for the tunnel's HTTP→HTTPS redirect; never
     // automatically create a forward that would take it (PCP/UPnP alike).
     let lo = source.port();
-    if lo <= 80 && 80 <= lo.saturating_add(count.saturating_sub(1)) {
+    if transport == TransportProtocol::Tcp
+        && lo <= 80
+        && 80 <= lo.saturating_add(count.saturating_sub(1))
+    {
         return Err(718); // ConflictInMappingEntry — port 80 owned by the redirect
     }
     let web = ctx
@@ -302,10 +309,27 @@ pub(super) async fn apply_peer_forward_range(
         .as_webserver()
         .de()
         .map_err(|_| 501u16)?;
-    if web.reserves_plain_forward(source, count) {
+    if transport == TransportProtocol::Tcp && web.reserves_plain_forward(source.address, count) {
         return Err(718);
     }
-    match current_forward(ctx, source).await {
+    let existing = current_forward(ctx, source).await;
+    if let Some(PortForward::Dnat {
+        target: existing_target,
+        count: existing_count,
+        auto: false,
+        ..
+    }) = current_forward(ctx, source.address.into()).await
+    {
+        return if existing_target == target && existing_count == count {
+            Ok(())
+        } else {
+            Err(718)
+        };
+    }
+    let existing = existing.or(current_forward(ctx, source.address.into())
+        .await
+        .filter(|e| matches!(e, PortForward::Sni { .. }) && transport == TransportProtocol::Tcp));
+    match existing {
         // The external port is SNI-demuxed. A single hostname-less MAP becomes the
         // port's fallback (a bare public IP sharing the port with named domains);
         // `persist_fallback_forward` stamps its own SniFallback lease. A range
@@ -315,7 +339,7 @@ pub(super) async fn apply_peer_forward_range(
                 return Err(718); // ConflictInMappingEntry
             }
             return ctx
-                .persist_fallback_forward_locked(source, target, lifetime, true, None)
+                .persist_fallback_forward_locked(source.address, target, lifetime, true, None)
                 .await
                 .map_err(|_| 718u16);
         }
@@ -348,7 +372,14 @@ pub(super) async fn apply_peer_forward_range(
                 let prefix = prefix_for(ctx, target.ip()).await;
                 let rc = ctx
                     .forward
-                    .add_forward_range(source, target, count, prefix, None)
+                    .add_forward_range(
+                        source.address,
+                        target,
+                        count,
+                        prefix,
+                        None,
+                        source.transport,
+                    )
                     .await
                     .map_err(|_| 501u16)?;
                 ctx.active_forwards.mutate(|m| {
@@ -397,7 +428,14 @@ pub(super) async fn apply_peer_forward_range(
     let prefix = prefix_for(ctx, target.ip()).await;
     let rc = match ctx
         .forward
-        .add_forward_range(source, target, count, prefix, None)
+        .add_forward_range(
+            source.address,
+            target,
+            count,
+            prefix,
+            None,
+            source.transport,
+        )
         .await
     {
         Ok(rc) => rc,
@@ -426,7 +464,7 @@ pub(super) async fn apply_peer_forward_range(
 
 pub(super) async fn current_forward(
     ctx: &TunnelContext,
-    source: SocketAddrV4,
+    source: ForwardAddress,
 ) -> Option<PortForward> {
     ctx.db
         .peek()

@@ -21,6 +21,7 @@ use crate::net::port_map::pcp::hostname::{
     RESULT_HOSTNAME_TAKEN, RESULT_UNSUPP_HOSTNAME, validate_hostname,
 };
 use crate::net::port_map::server::{GatewayBackend, MAX_LIFETIME_SECONDS, MappingEntry};
+use crate::net::transport::TransportProtocol;
 
 pub const SSDP_MULTICAST: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
 pub const SSDP_PORT: u16 = 1900;
@@ -399,6 +400,14 @@ fn soap_protocol(body: &str) -> Option<&'static str> {
     }
 }
 
+fn soap_transport(body: &str) -> Option<TransportProtocol> {
+    match soap_protocol(body)? {
+        "TCP" => Some(TransportProtocol::Tcp),
+        "UDP" => Some(TransportProtocol::Udp),
+        _ => unreachable!(),
+    }
+}
+
 fn mapping_response(action: &str, entry: &MappingEntry) -> Response {
     ok(
         action,
@@ -517,7 +526,13 @@ async fn add_mapping<B: GatewayBackend + ?Sized>(
         Some(secs) => Some(secs.min(IGD_MAX_LEASE_SECONDS)),
     };
 
-    match backend.add_forward(source, target, 1, peer, lifetime).await {
+    let Some(transport) = soap_transport(body) else {
+        return fault(402, "Invalid Args");
+    };
+    match backend
+        .add_forward(source, target, 1, peer, lifetime, transport)
+        .await
+    {
         Ok(()) if any => ok(
             "AddAnyPortMapping",
             &format!("<NewReservedPort>{external_port}</NewReservedPort>"),
@@ -541,7 +556,13 @@ async fn delete_mapping<B: GatewayBackend + ?Sized>(
     let source = SocketAddrV4::new(source_ip, external_port);
 
     // Owner-scoped so a peer can't delete (or probe for) another's mapping.
-    if backend.remove_forward_by_source(source, peer).await {
+    let Some(transport) = soap_transport(body) else {
+        return fault(402, "Invalid Args");
+    };
+    if backend
+        .remove_forward_by_source(source, peer, transport)
+        .await
+    {
         ok("DeletePortMapping", "")
     } else {
         fault(714, "NoSuchEntryInArray")
@@ -893,6 +914,7 @@ mod tests {
             _: u16,
             _: Ipv4Addr,
             _: Option<u32>,
+            _: TransportProtocol,
         ) -> impl std::future::Future<Output = Result<(), u16>> + Send {
             async { Ok(()) }
         }
@@ -900,6 +922,7 @@ mod tests {
             &self,
             _: Ipv4Addr,
             _: u16,
+            _: TransportProtocol,
         ) -> impl std::future::Future<Output = ()> + Send {
             async {}
         }
@@ -907,6 +930,7 @@ mod tests {
             &self,
             _: SocketAddrV4,
             _: Ipv4Addr,
+            _: TransportProtocol,
         ) -> impl std::future::Future<Output = bool> + Send {
             async { false }
         }
@@ -934,6 +958,7 @@ mod tests {
             _: u16,
             _: Ipv4Addr,
             _: Option<u32>,
+            _: TransportProtocol,
         ) -> impl std::future::Future<Output = Result<(), u16>> + Send {
             async { Ok(()) }
         }
@@ -941,6 +966,7 @@ mod tests {
             &self,
             _: Ipv4Addr,
             _: u16,
+            _: TransportProtocol,
         ) -> impl std::future::Future<Output = ()> + Send {
             async {}
         }
@@ -948,6 +974,7 @@ mod tests {
             &self,
             _: SocketAddrV4,
             _: Ipv4Addr,
+            _: TransportProtocol,
         ) -> impl std::future::Future<Output = bool> + Send {
             async { false }
         }
@@ -1148,16 +1175,23 @@ mod tests {
             _: u16,
             _: Ipv4Addr,
             _: Option<u32>,
+            _: TransportProtocol,
         ) -> impl Future<Output = Result<(), u16>> + Send {
             async { Ok(()) }
         }
-        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
+        fn remove_forward(
+            &self,
+            _: Ipv4Addr,
+            _: u16,
+            _: TransportProtocol,
+        ) -> impl Future<Output = ()> + Send {
             async {}
         }
         fn remove_forward_by_source(
             &self,
             _: SocketAddrV4,
             _: Ipv4Addr,
+            _: TransportProtocol,
         ) -> impl Future<Output = bool> + Send {
             async { false }
         }
@@ -1601,16 +1635,23 @@ mod tests {
                 _: u16,
                 _: Ipv4Addr,
                 _: Option<u32>,
+                _: TransportProtocol,
             ) -> impl Future<Output = Result<(), u16>> + Send {
                 async { Ok(()) }
             }
-            fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
+            fn remove_forward(
+                &self,
+                _: Ipv4Addr,
+                _: u16,
+                _: TransportProtocol,
+            ) -> impl Future<Output = ()> + Send {
                 async {}
             }
             fn remove_forward_by_source(
                 &self,
                 _: SocketAddrV4,
                 _: Ipv4Addr,
+                _: TransportProtocol,
             ) -> impl Future<Output = bool> + Send {
                 async { false }
             }

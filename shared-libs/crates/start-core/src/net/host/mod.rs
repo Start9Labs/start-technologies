@@ -718,6 +718,7 @@ impl Model<Host> {
         external_start_port: u16,
         number_of_ports: u16,
         privileged: bool,
+        transport: crate::net::transport::Transport,
     ) -> Result<(), Error> {
         if number_of_ports < 2 {
             return Err(Error::new(
@@ -782,6 +783,7 @@ impl Model<Host> {
                 internal_start_port,
                 RangeBindInfo {
                     enabled: true,
+                    transport,
                     external_start_port,
                     number_of_ports,
                     addresses,
@@ -1036,6 +1038,7 @@ mod tests {
 
     fn plain(preferred_external_port: u16) -> BindOptions {
         BindOptions {
+            transport: Default::default(),
             preferred_external_port,
             add_ssl: None,
             secure: Some(crate::net::host::binding::Security { ssl: false }),
@@ -1180,7 +1183,7 @@ mod tests {
             .unwrap();
 
         let err = host
-            .add_binding_range(&mut ports, 28331, 40000, 4, false)
+            .add_binding_range(&mut ports, 28331, 40000, 4, false, Default::default())
             .unwrap_err();
         assert_eq!(err.kind, ErrorKind::InvalidRequest);
         assert!(host.as_binding_ranges().de().unwrap().is_empty());
@@ -1199,7 +1202,7 @@ mod tests {
             .mutate(|b| Ok(b.values_mut().for_each(|i| i.disable())))
             .unwrap();
 
-        host.add_binding_range(&mut ports, 28332, 40000, 2, false)
+        host.add_binding_range(&mut ports, 28332, 40000, 2, false, Default::default())
             .unwrap();
         assert!(host.as_binding_ranges().de().unwrap().contains_key(&28332));
     }
@@ -1208,7 +1211,7 @@ mod tests {
     fn a_port_inside_an_enabled_range_may_not_be_bound_singly() {
         let mut ports = AvailablePorts::new();
         let mut host = host();
-        host.add_binding_range(&mut ports, 42000, 42000, 500, false)
+        host.add_binding_range(&mut ports, 42000, 42000, 500, false, Default::default())
             .unwrap();
 
         let err = host
@@ -1225,22 +1228,66 @@ mod tests {
         let mut host = host();
         host.add_binding(&mut ports, 3478, plain(3478), false)
             .unwrap();
-        host.add_binding_range(&mut ports, 42000, 42000, 500, false)
+        host.add_binding_range(&mut ports, 42000, 42000, 500, false, Default::default())
             .unwrap();
-        host.add_binding_range(&mut ports, 42000, 42000, 500, false)
+        host.add_binding_range(&mut ports, 42000, 42000, 500, false, Default::default())
             .unwrap();
 
         let err = host
-            .add_binding_range(&mut ports, 42499, 50000, 2, false)
+            .add_binding_range(&mut ports, 42499, 50000, 2, false, Default::default())
             .unwrap_err();
         assert_eq!(err.kind, ErrorKind::InvalidRequest);
+    }
+
+    #[test]
+    fn transport_only_rebind_preserves_range_allocation_and_address_choices() {
+        use crate::net::transport::Transport;
+
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding_range(&mut ports, 42000, 43000, 10, false, Transport::Both)
+            .unwrap();
+        host.as_binding_ranges_mut()
+            .mutate(|ranges| {
+                ranges
+                    .get_mut(&42000)
+                    .unwrap()
+                    .addresses
+                    .disabled
+                    .insert(("relay.example.com".into(), 43000));
+                Ok(())
+            })
+            .unwrap();
+        let before = host
+            .as_binding_ranges()
+            .de()
+            .unwrap()
+            .remove(&42000)
+            .unwrap();
+        for transport in [Transport::Tcp, Transport::Udp, Transport::Both] {
+            host.add_binding_range(&mut ports, 42000, 43000, 10, false, transport)
+                .unwrap();
+            let after = host
+                .as_binding_ranges()
+                .de()
+                .unwrap()
+                .remove(&42000)
+                .unwrap();
+            assert_eq!(after.transport, transport);
+            assert_eq!(after.external_start_port, before.external_start_port);
+            assert_eq!(
+                serde_json::to_value(&after.addresses).unwrap(),
+                serde_json::to_value(&before.addresses).unwrap()
+            );
+            assert!(ports.try_alloc(43000, false, false).is_none());
+        }
     }
 
     #[test]
     fn a_range_may_not_run_off_the_end_of_the_port_space() {
         let mut ports = AvailablePorts::new();
         let err = host()
-            .add_binding_range(&mut ports, 65535, 40000, 2, false)
+            .add_binding_range(&mut ports, 65535, 40000, 2, false, Default::default())
             .unwrap_err();
         assert_eq!(err.kind, ErrorKind::InvalidRequest);
     }

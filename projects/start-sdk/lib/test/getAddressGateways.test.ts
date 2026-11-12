@@ -39,6 +39,7 @@ const host = (
     3478: {
       enabled: true,
       options: {
+        transport: 'both',
         preferredExternalPort: 3478,
         addSsl: null,
         secure: null,
@@ -70,6 +71,7 @@ const host = (
     ? {
         42000: {
           enabled: true,
+          transport: 'both',
           externalStartPort: 42000,
           numberOfPorts: 500,
           addresses: range,

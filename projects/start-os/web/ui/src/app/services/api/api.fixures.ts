@@ -2728,6 +2728,7 @@ PersistentKeepalive = 25`
               ],
             },
             options: {
+              transport: 'both',
               addSsl: null,
               preferredExternalPort: 443,
               secure: { ssl: true },
@@ -2775,6 +2776,7 @@ PersistentKeepalive = 25`
               available: [],
             },
             options: {
+              transport: 'both',
               addSsl: null,
               preferredExternalPort: 8332,
               secure: { ssl: false },
@@ -2822,6 +2824,7 @@ PersistentKeepalive = 25`
               available: [],
             },
             options: {
+              transport: 'both',
               addSsl: null,
               preferredExternalPort: 8333,
               secure: { ssl: false },

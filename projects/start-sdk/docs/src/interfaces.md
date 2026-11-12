@@ -214,6 +214,7 @@ The handler then re-runs when the new value lands, updating the interface in pla
 | Option                          | Type                                                                       | Description                                                                                                                                                                         |
 | ------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `protocol`                      | `'http'` \| `'https'` \| `'ws'` \| `'wss'` \| `'ssh'` \| `'dns'` \| `null` | Protocol defaults and URL scheme. Use `null` to configure the binding explicitly.                                                                                                   |
+| `transport`                     | `'tcp'` \| `'udp'` \| `'both'`                                             | Direct-forward transports. Defaults to `'both'` when omitted. HTTP proxy and TLS listeners use TCP; UDP-only declarations reject those options.                                     |
 | `preferredExternalPort`         | `number`                                                                   | The preferred external port for the original protocol.                                                                                                                              |
 | `addSsl`                        | `object` \| `null`                                                         | TLS termination options, independent of HTTP proxying. HTTP-family protocols add TLS by default; `null` skips the wrapper.                                                          |
 | `addSsl.alpn`                   | `string[]` \| `null`                                                       | The ALPN protocols StartOS answers a client with, from those it asked for. `null` answers with whatever it asked for. Defaults to `['http/1.1']` for `http`/`ws`, otherwise `null`. |
@@ -378,6 +379,7 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
     internalStartPort: 49152,
     externalStartPort: 49152, // may differ; the forward maps by offset
     numberOfPorts: 100, // 2–500 contiguous ports
+    transport: 'udp',
   })
 
   await range.export(
@@ -391,7 +393,7 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
 })
 ```
 
-A range binds **TCP + UDP** together and exposes **exactly one** `api` service interface spanning the whole range. The interface is deliberately restricted compared to `createInterface`: it is always `type: 'api'` and has **no** `masked`, `username`, `path`, `query`, or `schemeOverride`. The one extra option is an optional `scheme` — a transport prefix for protocols addressed as `scheme://host:port`, e.g. `tcp` for bitcoin ZMQ:
+A range binds **TCP + UDP** by default; set `transport: 'tcp'` or `transport: 'udp'` to forward one transport, or `transport: 'both'` to select both explicitly. This declaration is independent of the interface's URL scheme. A range exposes **exactly one** `api` service interface spanning the whole range. The interface is deliberately restricted compared to `createInterface`: it is always `type: 'api'` and has **no** `masked`, `username`, `path`, `query`, or `schemeOverride`. The one extra option is an optional `scheme` — a transport prefix for protocols addressed as `scheme://host:port`, e.g. `tcp` for bitcoin ZMQ:
 
 ```typescript
 const zmq = sdk.MultiHost.of(effects, 'zmq')

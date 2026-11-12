@@ -74,6 +74,7 @@ impl Public {
                                 BindInfo {
                                     enabled: false,
                                     options: BindOptions {
+                                        transport: Default::default(),
                                         preferred_external_port: 80,
                                         add_ssl: Some(AddSslOptions {
                                             preferred_external_port: 443,

@@ -15,6 +15,48 @@ function fixture() {
   return { bind, host }
 }
 
+describe('MultiHost binding transports', () => {
+  test.each(['tcp', 'udp', 'both'] as const)(
+    'forwards %s for known and explicit application protocols',
+    async transport => {
+      for (const options of [
+        { protocol: 'dns', transport },
+        { protocol: null, preferredExternalPort: 5353, transport },
+      ] as const) {
+        const { host, bind } = fixture()
+        await host.bindPort(5353, options)
+        expect(bind).toHaveBeenCalledWith(
+          expect.objectContaining({ transport }),
+        )
+      }
+    },
+  )
+
+  test.each(['tcp', 'udp', 'both', undefined] as const)(
+    'forwards range transport %s without overriding an omitted declaration',
+    async transport => {
+      const bindRange = jest.fn(async () => null)
+      const host = new MultiHost({
+        effects: { bindRange } as unknown as Effects,
+        id: 'relay',
+      })
+      await host.bindPortRange({
+        internalStartPort: 42000,
+        externalStartPort: 43000,
+        numberOfPorts: 10,
+        transport,
+      })
+      expect(bindRange).toHaveBeenCalledWith({
+        id: 'relay',
+        internalStartPort: 42000,
+        externalStartPort: 43000,
+        numberOfPorts: 10,
+        transport,
+      })
+    },
+  )
+})
+
 describe('MultiHost.bindPort HTTP proxy configuration', () => {
   test.each([
     ['http', 80, null, ['http/1.1']],

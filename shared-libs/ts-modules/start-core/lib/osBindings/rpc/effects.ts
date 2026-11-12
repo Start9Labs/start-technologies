@@ -155,6 +155,16 @@ export type TaskInputRepr = z.output<typeof schemas.TaskInputRepr>
 export type TaskInputReprInput = z.input<typeof schemas.TaskInputRepr>
 export type TaskSeverity = z.output<typeof schemas.TaskSeverity>
 export type TaskSeverityInput = z.input<typeof schemas.TaskSeverity>
+
+/**
+ * Transports forwarded by a binding. Omitted declarations retain TCP and UDP.
+ */
+export type Transport = z.output<typeof schemas.Transport>
+
+/**
+ * Transports forwarded by a binding. Omitted declarations retain TCP and UDP.
+ */
+export type TransportInput = z.input<typeof schemas.Transport>
 export type UploadLimits = z.output<typeof schemas.UploadLimits>
 export type UploadLimitsInput = z.input<typeof schemas.UploadLimits>
 
@@ -408,12 +418,8 @@ export type LegacyProxySslOptionsInput = z.input<
 >
 
 /**
- * Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).
- *
- * Keyed by `internal_start_port` in [`BindingRanges`]. The range covers
- * `internal_start_port..(internal_start_port + number_of_ports)` and is
- * forwarded through a single iptables rule per protocol per gateway,
- * preserving the destination port number.
+ * A contiguous binding keyed by its internal start port in [`BindingRanges`].
+ * External ports map to internal ports by offset.
  */
 export type RangeBindInfo = z.output<typeof schemas.RangeBindInfo>
 export type BindingRanges = z.output<typeof schemas.BindingRanges>

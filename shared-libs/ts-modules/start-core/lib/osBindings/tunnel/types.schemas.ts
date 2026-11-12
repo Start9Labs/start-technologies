@@ -307,6 +307,15 @@ export const DnsSource: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['gateway', 'static', 'public-fallback']).meta({
   id: 'DnsSource',
 })
+
+/**
+ * Transport-qualified keys use `tcp@socket` or `udp@socket`; socket-only keys retain both.
+ */
+export const ForwardAddress: z.ZodString = /* @__PURE__ */ z.string().meta({
+  id: 'ForwardAddress',
+  description:
+    'Transport-qualified keys use `tcp@socket` or `udp@socket`; socket-only keys retain both.',
+})
 export const GatewayId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'GatewayId',
 })
@@ -461,33 +470,6 @@ export const RemoveDnsRecordParams: z.ZodObject<{
 }).meta({
   id: 'RemoveDnsRecordParams',
 })
-export const RemovePinholeParams: z.ZodObject<{
-  gua: z.ZodString
-  externalPort: z.ZodInt
-}> = /* @__PURE__ */ object({ gua: z.string(), externalPort: z.int() }).meta({
-  id: 'RemovePinholeParams',
-})
-export const RemovePortForwardParams: z.ZodObject<{
-  source: z.ZodString
-  /**
-   * Remove a single SNI route on `source`; omit to remove the whole forward.
-   */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  source: z.string(),
-  /**
-   * Remove a single SNI route on `source`; omit to remove the whole forward.
-   */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Remove a single SNI route on `source`; omit to remove the whole forward.',
-  }),
-}).meta({
-  id: 'RemovePortForwardParams',
-})
 export const Session: z.ZodObject<{
   /**
    * A friendly name for the key, if one was assigned at enrollment (e.g.
@@ -576,40 +558,6 @@ export const SetPasswordParams: z.ZodObject<{ password: z.ZodString }> =
   /* @__PURE__ */ object({ password: z.string() }).meta({
     id: 'SetPasswordParams',
   })
-export const SetPinholeEnabledParams: z.ZodObject<{
-  gua: z.ZodString
-  externalPort: z.ZodInt
-  enabled: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  gua: z.string(),
-  externalPort: z.int(),
-  enabled: z.boolean(),
-}).meta({
-  id: 'SetPinholeEnabledParams',
-})
-export const SetPortForwardEnabledParams: z.ZodObject<{
-  source: z.ZodString
-  enabled: z.ZodBoolean
-  /**
-   * Toggle a single SNI route on `source`; omit for a DNAT forward.
-   */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  source: z.string(),
-  enabled: z.boolean(),
-  /**
-   * Toggle a single SNI route on `source`; omit for a DNAT forward.
-   */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Toggle a single SNI route on `source`; omit for a DNAT forward.',
-  }),
-}).meta({
-  id: 'SetPortForwardEnabledParams',
-})
 export const SetSubnetIpv6Params: z.ZodObject<{
   /**
    * The routed IPv6 prefix delegated to this subnet (e.g. a /64 from Hetzner,
@@ -699,6 +647,16 @@ export const SubnetParams: z.ZodObject<{ subnet: z.ZodString }> =
   /* @__PURE__ */ object({ subnet: z.string() }).meta({
     id: 'SubnetParams',
   })
+
+/**
+ * Transports forwarded by a binding. Omitted declarations retain TCP and UDP.
+ */
+export const Transport: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp'; both: 'both' }> =
+  /* @__PURE__ */ z.enum(['tcp', 'udp', 'both']).meta({
+    id: 'Transport',
+    description:
+      'Transports forwarded by a binding. Omitted declarations retain TCP and UDP.',
+  })
 export const TunnelCertData: z.ZodObject<{
   key: typeof literal_0
   cert: typeof literal_0
@@ -745,46 +703,6 @@ export const TunnelUpdateResult: z.ZodObject<{
   }),
 }).meta({
   id: 'TunnelUpdateResult',
-})
-export const UpdatePinholeLabelParams: z.ZodObject<{
-  gua: z.ZodString
-  externalPort: z.ZodInt
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  gua: z.string(),
-  externalPort: z.int(),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'UpdatePinholeLabelParams',
-})
-export const UpdatePortForwardLabelParams: z.ZodObject<{
-  source: z.ZodString
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * Label a single SNI route on `source`; omit to label the DNAT forward.
-   */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  source: z.string(),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
-  /**
-   * Label a single SNI route on `source`; omit to label the DNAT forward.
-   */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Label a single SNI route on `source`; omit to label the DNAT forward.',
-  }),
-}).meta({
-  id: 'UpdatePortForwardLabelParams',
 })
 
 /**
@@ -1071,6 +989,38 @@ export const RemoveKeyParams: z.ZodObject<{ key: typeof AnyVerifyingKey }> =
   /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
     id: 'RemoveKeyParams',
   })
+export const RemovePinholeParams: z.ZodObject<{
+  gua: z.ZodString
+  externalPort: z.ZodInt
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
+}> = /* @__PURE__ */ object({
+  gua: z.string(),
+  externalPort: z.int(),
+  transport: wire(Transport.optional(), Transport),
+}).meta({
+  id: 'RemovePinholeParams',
+})
+export const RemovePortForwardParams: z.ZodObject<{
+  source: typeof ForwardAddress
+  /**
+   * Remove a single SNI route on `source`; omit to remove the whole forward.
+   */
+  hostname: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  source: ForwardAddress,
+  /**
+   * Remove a single SNI route on `source`; omit to remove the whole forward.
+   */
+  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'Remove a single SNI route on `source`; omit to remove the whole forward.',
+  }),
+}).meta({
+  id: 'RemovePortForwardParams',
+})
 export const SetDeviceKindParams: z.ZodObject<{
   subnet: z.ZodString
   ip: z.ZodString
@@ -1081,6 +1031,42 @@ export const SetDeviceKindParams: z.ZodObject<{
   kind: WgClientKind,
 }).meta({
   id: 'SetDeviceKindParams',
+})
+export const SetPinholeEnabledParams: z.ZodObject<{
+  gua: z.ZodString
+  externalPort: z.ZodInt
+  enabled: z.ZodBoolean
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
+}> = /* @__PURE__ */ object({
+  gua: z.string(),
+  externalPort: z.int(),
+  enabled: z.boolean(),
+  transport: wire(Transport.optional(), Transport),
+}).meta({
+  id: 'SetPinholeEnabledParams',
+})
+export const SetPortForwardEnabledParams: z.ZodObject<{
+  source: typeof ForwardAddress
+  enabled: z.ZodBoolean
+  /**
+   * Toggle a single SNI route on `source`; omit for a DNAT forward.
+   */
+  hostname: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  source: ForwardAddress,
+  enabled: z.boolean(),
+  /**
+   * Toggle a single SNI route on `source`; omit for a DNAT forward.
+   */
+  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'Toggle a single SNI route on `source`; omit for a DNAT forward.',
+  }),
+}).meta({
+  id: 'SetPortForwardEnabledParams',
 })
 export const SetSubnetDnsParams: z.ZodObject<{
   mode: typeof DnsMode
@@ -1113,6 +1099,48 @@ export const SetSubnetDnsParams: z.ZodObject<{
   }),
 }).meta({
   id: 'SetSubnetDnsParams',
+})
+export const UpdatePinholeLabelParams: z.ZodObject<{
+  gua: z.ZodString
+  externalPort: z.ZodInt
+  label: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
+}> = /* @__PURE__ */ object({
+  gua: z.string(),
+  externalPort: z.int(),
+  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  transport: wire(Transport.optional(), Transport),
+}).meta({
+  id: 'UpdatePinholeLabelParams',
+})
+export const UpdatePortForwardLabelParams: z.ZodObject<{
+  source: typeof ForwardAddress
+  label: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * Label a single SNI route on `source`; omit to label the DNAT forward.
+   */
+  hostname: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  source: ForwardAddress,
+  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * Label a single SNI route on `source`; omit to label the DNAT forward.
+   */
+  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'Label a single SNI route on `source`; omit to label the DNAT forward.',
+  }),
+}).meta({
+  id: 'UpdatePortForwardLabelParams',
 })
 export const WebserverInfo: z.ZodObject<{
   enabled: z.ZodBoolean

@@ -71,7 +71,10 @@ impl WebserverInfo {
                 PortForward::Dnat { enabled, .. } => *enabled,
                 PortForward::Sni { fallback, .. } => fallback.as_ref().is_some_and(|f| f.enabled),
             };
-            if enabled && self.reserves_plain_forward(*source, forward.port_span()) {
+            if enabled
+                && forward.transport(*source) != crate::net::transport::Transport::Udp
+                && self.reserves_plain_forward(source.address, forward.port_span())
+            {
                 return Err(Error::new(
                     eyre!(t!("tunnel.web.listen-port-forwarded")),
                     ErrorKind::InvalidRequest,

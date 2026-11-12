@@ -466,6 +466,16 @@ export type TaskSeverity = z.output<typeof schemas.TaskSeverity>
 export type TaskSeverityInput = z.input<typeof schemas.TaskSeverity>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TimeInfoInput = z.input<typeof schemas.TimeInfo>
+
+/**
+ * Transports forwarded by a binding. Omitted declarations retain TCP and UDP.
+ */
+export type Transport = z.output<typeof schemas.Transport>
+
+/**
+ * Transports forwarded by a binding. Omitted declarations retain TCP and UDP.
+ */
+export type TransportInput = z.input<typeof schemas.Transport>
 export type TrustContext = z.output<typeof schemas.TrustContext>
 export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedOsUpdateSigner = z.output<
@@ -1328,22 +1338,14 @@ export type PackageInfo = z.output<typeof schemas.PackageInfo>
 export type PackageInfoInput = z.input<typeof schemas.PackageInfo>
 
 /**
- * Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).
- *
- * Keyed by `internal_start_port` in [`BindingRanges`]. The range covers
- * `internal_start_port..(internal_start_port + number_of_ports)` and is
- * forwarded through a single iptables rule per protocol per gateway,
- * preserving the destination port number.
+ * A contiguous binding keyed by its internal start port in [`BindingRanges`].
+ * External ports map to internal ports by offset.
  */
 export type RangeBindInfo = z.output<typeof schemas.RangeBindInfo>
 
 /**
- * Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).
- *
- * Keyed by `internal_start_port` in [`BindingRanges`]. The range covers
- * `internal_start_port..(internal_start_port + number_of_ports)` and is
- * forwarded through a single iptables rule per protocol per gateway,
- * preserving the destination port number.
+ * A contiguous binding keyed by its internal start port in [`BindingRanges`].
+ * External ports map to internal ports by offset.
  */
 export type RangeBindInfoInput = z.input<typeof schemas.RangeBindInfo>
 export type BindingRanges = z.output<typeof schemas.BindingRanges>

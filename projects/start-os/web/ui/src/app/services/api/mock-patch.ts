@@ -259,6 +259,7 @@ export const mockPatchData: DataModel = {
               ],
             },
             options: {
+              transport: 'both',
               preferredExternalPort: 80,
               addSsl: {
                 upstreamCertValidation: null,
@@ -860,6 +861,7 @@ export const mockPatchData: DataModel = {
                 ],
               },
               options: {
+                transport: 'both',
                 preferredExternalPort: 42443,
                 addSsl: {
                   upstreamCertValidation: null,
@@ -926,6 +928,7 @@ export const mockPatchData: DataModel = {
           bindingRanges: {
             49152: {
               enabled: true,
+              transport: 'both',
               externalStartPort: 49152,
               numberOfPorts: 100,
               // Same per-address model as a single-port binding, IPv4-only and
@@ -1071,6 +1074,7 @@ export const mockPatchData: DataModel = {
                 ],
               },
               options: {
+                transport: 'both',
                 addSsl: null,
                 preferredExternalPort: 48332,
                 secure: { ssl: false },
@@ -1118,6 +1122,7 @@ export const mockPatchData: DataModel = {
                 available: [],
               },
               options: {
+                transport: 'both',
                 addSsl: null,
                 preferredExternalPort: 48333,
                 secure: { ssl: false },

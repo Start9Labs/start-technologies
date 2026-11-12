@@ -106,6 +106,11 @@ export type DnsModeInput = z.input<typeof schemas.DnsMode>
 export type DnsRecordEntry = z.output<typeof schemas.DnsRecordEntry>
 export type Dump = z.output<typeof schemas.Dump>
 export type DumpParamsInput = z.input<typeof schemas.DumpParams>
+
+/**
+ * Transport-qualified keys use `tcp@socket` or `udp@socket`; socket-only keys retain both.
+ */
+export type ForwardAddressInput = z.input<typeof schemas.ForwardAddress>
 export type GenerateCertParamsInput = z.input<typeof schemas.GenerateCertParams>
 export type Guid = z.output<typeof schemas.Guid>
 
@@ -125,12 +130,6 @@ export type RemoveDeviceParamsInput = z.input<typeof schemas.RemoveDeviceParams>
 export type RemoveDnsRecordParamsInput = z.input<
   typeof schemas.RemoveDnsRecordParams
 >
-export type RemovePinholeParamsInput = z.input<
-  typeof schemas.RemovePinholeParams
->
-export type RemovePortForwardParamsInput = z.input<
-  typeof schemas.RemovePortForwardParams
->
 export type Session = z.output<typeof schemas.Session>
 export type SetAutoPortForwardParamsInput = z.input<
   typeof schemas.SetAutoPortForwardParams
@@ -144,12 +143,6 @@ export type SetHttpRedirectEnabledParamsInput = z.input<
 >
 export type SetListenParamsInput = z.input<typeof schemas.SetListenParams>
 export type SetPasswordParamsInput = z.input<typeof schemas.SetPasswordParams>
-export type SetPinholeEnabledParamsInput = z.input<
-  typeof schemas.SetPinholeEnabledParams
->
-export type SetPortForwardEnabledParamsInput = z.input<
-  typeof schemas.SetPortForwardEnabledParams
->
 export type SetSubnetIpv6ParamsInput = z.input<
   typeof schemas.SetSubnetIpv6Params
 >
@@ -157,14 +150,13 @@ export type SetSubnetWanParamsInput = z.input<typeof schemas.SetSubnetWanParams>
 export type ShowConfigParamsInput = z.input<typeof schemas.ShowConfigParams>
 export type SubnetParamsInput = z.input<typeof schemas.SubnetParams>
 export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
+
+/**
+ * Transports forwarded by a binding. Omitted declarations retain TCP and UDP.
+ */
+export type TransportInput = z.input<typeof schemas.Transport>
 export type TunnelCertDataInput = z.input<typeof schemas.TunnelCertData>
 export type TunnelUpdateResult = z.output<typeof schemas.TunnelUpdateResult>
-export type UpdatePinholeLabelParamsInput = z.input<
-  typeof schemas.UpdatePinholeLabelParams
->
-export type UpdatePortForwardLabelParamsInput = z.input<
-  typeof schemas.UpdatePortForwardLabelParams
->
 
 /**
  * A WireGuard client's role. A `Server` is a StartOS box that may configure the
@@ -194,11 +186,29 @@ export type AuthKeys = z.output<typeof schemas.AuthKeys>
 export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 export type RemoveKeyParamsInput = z.input<typeof schemas.RemoveKeyParams>
+export type RemovePinholeParamsInput = z.input<
+  typeof schemas.RemovePinholeParams
+>
+export type RemovePortForwardParamsInput = z.input<
+  typeof schemas.RemovePortForwardParams
+>
 export type SetDeviceKindParamsInput = z.input<
   typeof schemas.SetDeviceKindParams
 >
+export type SetPinholeEnabledParamsInput = z.input<
+  typeof schemas.SetPinholeEnabledParams
+>
+export type SetPortForwardEnabledParamsInput = z.input<
+  typeof schemas.SetPortForwardEnabledParams
+>
 export type SetSubnetDnsParamsInput = z.input<typeof schemas.SetSubnetDnsParams>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
+export type UpdatePinholeLabelParamsInput = z.input<
+  typeof schemas.UpdatePinholeLabelParams
+>
+export type UpdatePortForwardLabelParamsInput = z.input<
+  typeof schemas.UpdatePortForwardLabelParams
+>
 export type WgConfig = z.output<typeof schemas.WgConfig>
 
 /**

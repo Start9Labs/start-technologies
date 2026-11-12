@@ -75,6 +75,8 @@ export type Scheme = string | null
 type BindOptionsByKnownProtocol = {
   protocol: keyof typeof knownProtocols
   preferredExternalPort?: BindOptions['preferredExternalPort']
+  /** Forward TCP, UDP, or both. Defaults to both. */
+  transport?: BindOptions['transport']
   addSsl?: Partial<AddSslOptions> | null
   proxy?: BindOptions['proxy']
 }
@@ -101,6 +103,8 @@ const hasStringProtocol = (v: unknown): v is { protocol: string } =>
 export const MAX_BIND_PORT_RANGE_SIZE = 500
 
 export type BindPortRangeOptions = {
+  /** Forward TCP, UDP, or both. Defaults to both. */
+  transport?: BindOptions['transport']
   /** First internal (container-side) port in the range. */
   internalStartPort: number
   /**
@@ -154,7 +158,7 @@ export class MultiHost {
   }
 
   /**
-   * Bind a contiguous range of UDP+TCP ports to this host.
+   * Bind a contiguous port range using the selected transports, defaulting to both.
    *
    * Intended for real-time / WebRTC servers (coturn, RTP, SIP) and other
    * pooled-port protocols (bitcoin ZMQ, FTP data) that need a public port
@@ -191,7 +195,8 @@ export class MultiHost {
    * ```
    */
   async bindPortRange(options: BindPortRangeOptions): Promise<RangeOrigin> {
-    const { internalStartPort, externalStartPort, numberOfPorts } = options
+    const { internalStartPort, externalStartPort, numberOfPorts, transport } =
+      options
     if (!Number.isInteger(numberOfPorts) || numberOfPorts < 2) {
       throw new Error(
         `numberOfPorts must be an integer >= 2; use bindPort for a single port`,
@@ -223,6 +228,7 @@ export class MultiHost {
       internalStartPort,
       externalStartPort,
       numberOfPorts,
+      transport,
     })
 
     return new RangeOrigin(
@@ -341,6 +347,7 @@ export class MultiHost {
       id: this.options.id,
       internalPort,
       preferredExternalPort,
+      transport: options.transport,
       addSsl,
       secure,
       proxy,
