@@ -148,6 +148,8 @@ test('reviewed control plane hardens without mutating its ordinary source', asyn
     '75-net-description.rules',
     '80-net-setup-link.rules',
     '80-drivers.rules',
+    '71-seat.rules',
+    '95-dm-notify.rules',
   ])
     assert.deepEqual(
       await readFile(join(rules, name)),
@@ -201,6 +203,8 @@ test('canonical usr merge and absent optional package rules are supported', asyn
     '64-btrfs.rules',
     '64-btrfs-dm.rules',
     '64-btrfs-zoned.rules',
+    '71-seat.rules',
+    '95-dm-notify.rules',
   ])
     await rm(join(tree, 'usr/lib/udev/rules.d', name), { force: true })
   await harden(tree)
@@ -287,6 +291,15 @@ for (const [name, mutate, error] of [
         'RUN+="/bin/sh -i"\n',
       ),
   ],
+  ...['71-seat.rules', '95-dm-notify.rules'].map(name => [
+    `changed native-hook rule ${name}`,
+    tree =>
+      writeFile(
+        join(tree, 'usr/lib/udev/rules.d', name),
+        'RUN+="/bin/sh -i"\n',
+      ),
+    /Unsupported/,
+  ]),
   [
     'changed optional package rule',
     tree =>

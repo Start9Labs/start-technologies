@@ -134,6 +134,11 @@ const inputs = {
     'keep',
     false,
   ],
+  'usr/lib/udev/rules.d/71-seat.rules': [
+    'b57a64ab6c973d0b734dea808e6caf9a49b40739c7c7649784d09bd6d90c36d3',
+    'keep',
+    false,
+  ],
   'usr/lib/udev/rules.d/73-special-net-names.rules': [
     'fcbf4bbd63bec2c63f9b9d11b90cac3a137f37cf69692033108426d44a8e6cea',
     'patch',
@@ -149,6 +154,11 @@ const inputs = {
   'usr/lib/udev/rules.d/80-drivers.rules': [
     '0941cea0be8d3564556b5787a87cf55971fd3e46e19c56ad68a4205e8ad3a560',
     'keep',
+  ],
+  'usr/lib/udev/rules.d/95-dm-notify.rules': [
+    'd24e725fc78306ff2355eb91e4eebcc7dc9388d54dc27d20d6fe6f695054d536',
+    'keep',
+    false,
   ],
 }
 
