@@ -808,21 +808,27 @@ async fn actual_gpg_cli_authenticates_without_exporting_the_identity() {
             }
         }),
     );
-    let app = app.route(
-        "/rpc/v1",
-        post(
-            |headers: HeaderMap, axum::Json(body): axum::Json<serde_json::Value>| async move {
-                assert!(
-                    headers
-                        .get(crate::middleware::auth::signature::AUTH_SIG_HEADER)
-                        .is_none()
-                );
-                assert_eq!(body["method"], "state");
-                axum::Json(serde_json::json!({"jsonrpc":"2.0","id":0,"result":"initializing"}))
-            },
-        ),
-    );
     let (url, _task) = server(app).await;
+    let dns = Arc::new(crate::net::dns::DnsController::new(
+        crate::util::sync::Watch::new(Default::default()),
+    ));
+    let startup =
+        crate::context::InitContext::init(&crate::context::config::ServerConfig::default(), dns)
+            .await
+            .unwrap();
+    let observed = calls.clone();
+    let startup = crate::net::static_server::ui_router(startup).layer(axum::middleware::from_fn(
+        move |request: axum::extract::Request, next: axum::middleware::Next| {
+            let observed = observed.clone();
+            async move {
+                if request.method() == http::Method::POST {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                }
+                next.run(request).await
+            }
+        },
+    ));
+    let (startup_url, _startup_task) = server(startup).await;
     let output = Command::new(&cli_bin)
         .current_dir(temp.path())
         .env("HOME", temp.path())
@@ -882,7 +888,7 @@ async fn actual_gpg_cli_authenticates_without_exporting_the_identity() {
             "--id-key-gpg",
             "missing-key@example.invalid",
             "--host",
-            url.as_str(),
+            startup_url.as_str(),
             "state",
         ])
         .output()
