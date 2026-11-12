@@ -898,6 +898,7 @@ pub(crate) async fn cli_reset_password(
     Ok(())
 }
 
+/// An authorized session replaces the password without the old plaintext.
 #[instrument(skip_all)]
 pub async fn reset_password_impl(
     ctx: RpcContext,

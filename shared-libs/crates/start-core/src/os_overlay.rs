@@ -21,6 +21,7 @@ use openssl::sign::{Signer, Verifier};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::merkle_archive::source::DynFileSource;
@@ -111,8 +112,7 @@ impl VerityImage {
         Ok(image)
     }
 
-    /// Checks the complete data image and hash tree against this signed root.
-    pub async fn verify(&self, data: &Path, tree: &Path) -> Result<(), Error> {
+    async fn check_images(&self, data: &Path, tree: &Path) -> Result<(), Error> {
         let len = regular_file(data).await?.metadata().await?.len();
         if self.data_blocks == 0 || self.data_blocks.checked_mul(VERITY_BLOCK_SIZE) != Some(len) {
             return Err(invalid_signature());
@@ -120,6 +120,12 @@ impl VerityImage {
         if regular_file(tree).await?.metadata().await?.len() < VERITY_BLOCK_SIZE {
             return Err(invalid_signature());
         }
+        Ok(())
+    }
+
+    /// Checks the complete data image and hash tree against this signed root.
+    pub async fn verify(&self, data: &Path, tree: &Path) -> Result<(), Error> {
+        self.check_images(data, tree).await?;
         let mut command = verity_command();
         command
             .arg("verify")
@@ -128,6 +134,59 @@ impl VerityImage {
             .arg(hex::encode(self.root_hash));
         verity_options(&mut command, self.data_blocks);
         command.invoke(ErrorKind::InvalidSignature).await?;
+        Ok(())
+    }
+
+    /// Opens and fully reads a read-only mapping against the signed verity root.
+    /// Later corruption returns I/O errors. The caller owns the name until all mounts
+    /// are unmounted and must close it; failed initial reads close their new mapping.
+    pub async fn open(
+        &self,
+        data: &Path,
+        tree: &Path,
+        name: &str,
+    ) -> Result<BlockDev<PathBuf>, Error> {
+        if Path::new(name).file_name().and_then(|name| name.to_str()) != Some(name) {
+            return Err(Error::new(
+                eyre!(t!("error.invalid-request")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        self.check_images(data, tree).await?;
+        let mut command = verity_command();
+        command.arg("open");
+        verity_options(&mut command, self.data_blocks);
+        command
+            .arg("--")
+            .arg(data)
+            .arg(name)
+            .arg(tree)
+            .arg(hex::encode(self.root_hash));
+        command.invoke(ErrorKind::Filesystem).await?;
+        let device = Path::new("/dev/mapper").join(name);
+        let result = async {
+            let read =
+                tokio::io::copy(&mut open_file(&device).await?, &mut tokio::io::sink()).await?;
+            if Some(read) != self.data_blocks.checked_mul(VERITY_BLOCK_SIZE) {
+                return Err(invalid_signature());
+            }
+            Ok(BlockDev::new(device))
+        }
+        .await;
+        if result.is_err() {
+            Self::close(name).await.log_err();
+        }
+        result
+    }
+
+    /// Requires every mount using the mapping to be unmounted first.
+    pub async fn close(name: &str) -> Result<(), Error> {
+        verity_command()
+            .arg("close")
+            .arg("--")
+            .arg(name)
+            .invoke(ErrorKind::Filesystem)
+            .await?;
         Ok(())
     }
 }
@@ -802,7 +861,6 @@ mod tests {
     #[ignore = "requires CAP_SYS_ADMIN, CAP_MKNOD and loop devices"]
     async fn mounted_squashfs_overlay_honors_whiteouts_and_opaque_directories() {
         use crate::disk::mount::filesystem::ReadOnly;
-        use crate::disk::mount::filesystem::block_dev::BlockDev;
         use crate::disk::mount::guard::MountGuard;
 
         async fn mount_view(
@@ -835,25 +893,14 @@ mod tests {
             at: &Path,
         ) -> (MountGuard, crate::util::GeneralBoxedGuard) {
             let name = format!("overlay-test-{}", Guid::new());
-            let mut command = verity_command();
-            command
-                .arg("open")
-                .arg(image)
-                .arg(&name)
-                .arg(tree)
-                .arg(hex::encode(verity.root_hash));
-            verity_options(&mut command, verity.data_blocks);
-            command.invoke(ErrorKind::Filesystem).await.unwrap();
-            let device = PathBuf::from(format!("/dev/mapper/{name}"));
+            let device = verity.open(image, tree, &name).await.unwrap();
             let mapping = crate::util::GeneralBoxedGuard::new(move || {
                 let _ = std::process::Command::new("veritysetup")
                     .arg("close")
                     .arg(name)
                     .output();
             });
-            let mount = MountGuard::mount(&BlockDev::new(device), at, ReadOnly)
-                .await
-                .unwrap();
+            let mount = MountGuard::mount(&device, at, ReadOnly).await.unwrap();
             (mount, mapping)
         }
 
@@ -1040,6 +1087,42 @@ mod tests {
         drop(lower2_verity);
         drop(lower1_verity);
         drop(public_verity);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires CAP_SYS_ADMIN and loop devices"]
+    async fn verity_mapping_reads_all_blocks_and_closes_failed_opens() {
+        use crate::disk::mount::filesystem::FileSystem;
+
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("data");
+        let tree = temp.path().join("tree");
+        let original = image_bytes(b"fully verified image");
+        fs::write(&data, &original).unwrap();
+        let verity = VerityImage::format(&data, &tree).await.unwrap();
+        let name = format!("overlay-test-{}", Guid::new());
+        let device = PathBuf::from(format!("/dev/mapper/{name}"));
+        let mut corrupt = original.clone();
+        corrupt[VERITY_BLOCK_SIZE as usize] ^= 1;
+        fs::write(&data, &corrupt).unwrap();
+        assert!(verity.open(&data, &tree, &name).await.is_err());
+        assert!(!device.exists());
+
+        fs::write(&data, &original).unwrap();
+        let mapping = verity.open(&data, &tree, &name).await.unwrap();
+        assert_eq!(mapping.source().await.unwrap().unwrap().as_ref(), device);
+        fs::write(&data, &corrupt).unwrap();
+        let mut command = tokio::process::Command::new("dd");
+        command.arg(format!("if={}", device.display())).args([
+            "of=/dev/null",
+            "bs=4096",
+            "iflag=direct",
+            "status=none",
+        ]);
+        assert!(command.invoke(ErrorKind::Filesystem).await.is_err());
+        VerityImage::close(&name).await.unwrap();
+        assert!(!device.exists());
     }
 
     async fn squashfs_tools_available() -> bool {

@@ -32,7 +32,7 @@ The persistent overlay is an independently signed squashfs. Boot uses immutable 
 
 OS operations commit after editing; administrators may make manual edits and explicitly commit. Writers must quiesce while commit captures the working view. A commit publishes a complete, durable signed generation before attempting to remove older generations. Cleanup failure does not undo successful publication. Unpublished staging generations are not boot candidates.
 
-`start_core::os_overlay` prepares, signs and durably publishes complete generations using the native SquashFS writer. Working-view export shares the filesystem merger used for OCI layers; RAM-upper deletion removes a configuration override, while untouched raw-lower whiteouts and opaque markers retain their rootfs deletion semantics. Working mounts disable `index`, `metacopy` and `redirect_dir`.
+`start_core::os_overlay` prepares, signs and durably publishes complete generations using the native SquashFS writer. Working-view export shares the filesystem merger used for OCI layers; RAM-upper deletion removes a configuration override, while untouched raw-lower whiteouts and opaque markers retain their rootfs deletion semantics. Working mounts disable `index`, `metacopy` and `redirect_dir`. `VerityImage::open` reads every block through the new mapping before returning it, closes failed initial mappings, and rejects later corruption with I/O errors. The boot owner retains mappings until their dependent mounts are gone.
 
 Boot chooses the newest complete, signature-valid, content-verified generation by timestamp. This is not anti-rollback protection: an attacker can delete newer generations. No signed generation counter or TPM-backed freshness floor is required.
 
