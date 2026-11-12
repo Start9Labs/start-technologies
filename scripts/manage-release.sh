@@ -2027,7 +2027,7 @@ Subcommands:
                      checked; tab rewords one; security fragments are always
                      included), edit the compiled notes in $VISUAL/$EDITOR
                      (default: sensible-editor), translate them into every
-                     locale with the claude CLI and review those, then draft (or
+                     locale with the claude CLI, then draft (or
                      update) the GitHub release at the commit being tagged with
                      the notes, an expandable changelog, the full-history
                      attachment, and the prettier-formatted notes for every
