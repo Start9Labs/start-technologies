@@ -62,6 +62,7 @@ pub mod serde;
 pub mod squashfs;
 pub mod sync;
 pub mod tui;
+pub(crate) mod unix_socket;
 pub mod version;
 pub mod writeback;
 

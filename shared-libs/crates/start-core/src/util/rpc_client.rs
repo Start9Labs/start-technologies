@@ -10,13 +10,16 @@ use rpc_toolkit::yajrc::{self, Id, RpcError, RpcMethod, RpcRequest, RpcResponse}
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio::runtime::Handle;
-use tokio::sync::{Mutex, OnceCell, oneshot};
+use tokio::sync::{Mutex, oneshot};
 
 use crate::util::future::NonDetachingJoinHandle;
-use crate::util::io::TmpDir;
+use crate::util::unix_socket::connect_nofollow;
 use crate::{Error, ErrorKind, ResultExt};
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "rpc_client_tests.rs"]
+mod tests;
 
 type DynWrite = Box<dyn AsyncWrite + Unpin + Send + Sync + 'static>;
 type ResponseMap = BTreeMap<Id, oneshot::Sender<Result<Value, RpcError>>>;
@@ -175,34 +178,18 @@ pub struct UnixRpcClient {
     >,
 }
 impl UnixRpcClient {
+    /// Rejects leaf symlinks. Ancestors must remain outside container control.
     pub fn new(path: PathBuf) -> Self {
-        let tmpdir = Arc::new(OnceCell::new());
         let rt = Handle::current();
         let id = Arc::new(AtomicUsize::new(0));
         Self {
             pool: Pool::new(
                 0,
                 Box::new(move || {
-                    let mut path = path.clone();
+                    let path = path.clone();
                     let id = id.clone();
-                    let tmpdir = tmpdir.clone();
                     NonDetachingJoinHandle::from(rt.spawn(async move {
-                        if path.as_os_str().len() >= 108
-                        // libc::sockaddr_un.sun_path.len()
-                        {
-                            let new_path = tmpdir
-                                .get_or_try_init(|| TmpDir::new())
-                                .await
-                                .map_err(|e| {
-                                    std::io::Error::new(std::io::ErrorKind::Other, e.source)
-                                })?
-                                .join("link.sock");
-                            if tokio::fs::metadata(&new_path).await.is_err() {
-                                tokio::fs::symlink(&path, &new_path).await?;
-                            }
-                            path = new_path;
-                        }
-                        let (r, w) = UnixStream::connect(&path).await?.into_split();
+                        let (r, w) = connect_nofollow(&path).await?.into_split();
                         Ok(RpcClient::new(w, r, id))
                     }))
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))

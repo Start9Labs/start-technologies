@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::net::{TcpStream, UnixListener, UnixStream};
+use tokio::net::{TcpStream, UnixListener};
 use tokio_rustls::TlsConnector;
 use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::rustls::pki_types::ServerName;
@@ -18,10 +18,11 @@ use crate::disk::mount::filesystem::syscall::{AttachedMount, DetachedMount, open
 use crate::disk::mount::guard::GenericMountGuard;
 use crate::net::vhost::{ConnRegistry, MAX_PROXY_CONNS_PER_TARGET, ProxyContext, ProxyTarget};
 use crate::net::web_server::AcceptStream;
-use crate::util::directory::{create_directory_beneath, descriptor_path, open_directory_nofollow};
+use crate::util::directory::{create_directory_beneath, open_directory_nofollow};
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::{BackTrackingIO, TmpDir};
 use crate::util::sync::Watch;
+use crate::util::unix_socket::connect_nofollow as connect_ingress;
 
 #[cfg(test)]
 #[path = "runtime_tests.rs"]
@@ -181,29 +182,6 @@ fn selected_profiles(
             })
         })
         .collect()
-}
-
-/// Provider-controlled symlinks must never redirect startd's ingress connections.
-#[cfg(target_os = "linux")]
-async fn connect_ingress(path: &Path) -> std::io::Result<UnixStream> {
-    use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
-
-    let socket = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)?;
-    if !socket.metadata()?.file_type().is_socket() {
-        return Err(std::io::Error::other("HTTP proxy ingress is not a socket"));
-    }
-    UnixStream::connect(descriptor_path(socket.as_fd())).await
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn connect_ingress(_path: &Path) -> std::io::Result<UnixStream> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "HTTP proxy sockets require Linux",
-    ))
 }
 
 #[derive(Debug)]
