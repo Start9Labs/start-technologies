@@ -516,14 +516,22 @@ pub async fn unseal(
         workspace
             .restrict_to_unseal("policy.ctx", "runtime.policy")
             .await?;
-        let bytes = Zeroizing::new(
-            workspace
-                .run(
-                    "tpm2_unseal",
-                    &["-c", "sealed.ctx", "-p", "session:policy.ctx"],
-                )
-                .await?,
-        );
+        workspace.write("unsealed.key", &[]).await?;
+        workspace
+            .run(
+                "tpm2_unseal",
+                &[
+                    "-c",
+                    "sealed.ctx",
+                    "-p",
+                    "session:policy.ctx",
+                    "-o",
+                    "unsealed.key",
+                ],
+            )
+            .await?;
+        let bytes = Zeroizing::new(workspace.read("unsealed.key").await?);
+        tokio::fs::remove_file(workspace.path().join("unsealed.key")).await?;
         let mut key = Zeroizing::new([0; 32]);
         if bytes.len() != key.len() {
             return Err(Error::new(
