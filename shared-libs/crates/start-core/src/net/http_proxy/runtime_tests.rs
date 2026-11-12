@@ -420,13 +420,40 @@ async fn challenge_response_short_circuits_the_chain() {
     }).await.expect("challenge stalled");
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn ingress_connections_refuse_provider_symlinks() {
-    let dir = TmpDir::new().await.unwrap();
-    let host_socket = dir.join("host.sock");
-    let _host = UnixListener::bind(&host_socket).unwrap();
-    let planted = dir.join("planted.sock");
-    std::os::unix::fs::symlink(&host_socket, &planted).unwrap();
-    assert!(connect_ingress(&planted).await.is_err());
-    connect_ingress(&host_socket).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let dir = TmpDir::new().await.unwrap();
+        let host_socket = dir.join("host.sock");
+        let _host = UnixListener::bind(&host_socket).unwrap();
+        let planted = dir.join("planted.sock");
+        std::os::unix::fs::symlink(&host_socket, &planted).unwrap();
+        assert!(connect_ingress(&planted).await.is_err());
+        connect_ingress(&host_socket).await.unwrap();
+        let target = ChainTarget {
+            head: Some(planted.clone()),
+            protocols: HttpProxyProtocol::all(),
+            cancel: CancellationToken::new(),
+        };
+        let (frontend, continuation) = tokio::io::duplex(4096);
+        let _relay: NonDetachingJoinHandle<_> = tokio::spawn(async move {
+            NextHop::Unix(planted)
+                .relay(Box::pin(continuation))
+                .await
+                .unwrap();
+        })
+        .into();
+        let streams: [AcceptStream; 2] = [target.connect().await, Box::pin(frontend)];
+        for stream in streams {
+            let (mut client, connection) =
+                hyper::client::conn::http1::handshake(TokioIo::new(stream))
+                    .await
+                    .unwrap();
+            let _driver: NonDetachingJoinHandle<_> = tokio::spawn(connection).into();
+            assert_eq!(client.send_request(request()).await.unwrap().status(), 503);
+        }
+    })
+    .await
+    .expect("symlink rejection stalled");
 }

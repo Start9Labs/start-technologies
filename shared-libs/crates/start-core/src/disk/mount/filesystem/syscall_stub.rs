@@ -8,6 +8,7 @@
 use std::os::fd::{BorrowedFd, OwnedFd};
 use std::path::Path;
 
+use crate::disk::mount::guard::GenericMountGuard;
 use crate::prelude::*;
 
 fn unsupported<T>() -> Result<T, Error> {
@@ -40,8 +41,23 @@ impl DetachedMount {
     pub fn attach(self, _mountpoint: &Path) -> Result<(), Error> {
         unsupported()
     }
+    pub fn attach_at(self, _directory: BorrowedFd<'_>) -> Result<AttachedMount, Error> {
+        unsupported()
+    }
     pub fn attach_beneath(self, _mountpoint: &Path) -> Result<(), Error> {
         unsupported()
+    }
+}
+
+#[derive(Debug)]
+pub struct AttachedMount(crate::util::Never);
+
+impl GenericMountGuard for AttachedMount {
+    fn path(&self) -> &Path {
+        match self.0 {}
+    }
+    async fn unmount(self) -> Result<(), Error> {
+        match self.0 {}
     }
 }
 

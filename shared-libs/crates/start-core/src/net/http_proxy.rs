@@ -9,7 +9,7 @@ use crate::s9pk::manifest::LocaleString;
 use crate::{HostId, PackageId};
 
 mod runtime;
-pub(crate) use runtime::{ChainRoute, ChainTarget, HttpProxySockets};
+pub(crate) use runtime::{ChainRoute, ChainTarget, HttpProxyMounts, HttpProxySockets};
 
 #[cfg(test)]
 mod tests;

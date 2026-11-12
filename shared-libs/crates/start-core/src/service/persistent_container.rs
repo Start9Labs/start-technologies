@@ -90,27 +90,25 @@ impl ServiceState {
     }
 }
 
-/// Want to have a wrapper for uses like the inject where we are going to be finding the subcontainer and doing some filtering on it.
-/// As well, the imageName is also used for things like env.
+/// Owns a package image's filesystem and optional proxy socket subtree.
 pub struct Subcontainer {
     pub(super) name: InternedString,
     pub(super) image_id: ImageId,
+    pub(super) proxy_mounts: Option<crate::net::http_proxy::HttpProxyMounts>,
     pub(super) overlay: OverlayGuard<Arc<MountGuard>>,
-    pub(super) proxy_mounts: Vec<MountGuard>,
 }
 
 impl Subcontainer {
     pub(super) async fn unmount(self) -> Result<(), Error> {
         let mut errors = ErrorCollection::new();
-        for mount in self.proxy_mounts.into_iter().rev() {
-            errors.handle(mount.unmount(false).await);
+        if let Some(mounts) = self.proxy_mounts {
+            errors.handle(mounts.unmount().await);
         }
         errors.handle(self.overlay.unmount(true).await);
         errors.into_result()
     }
 }
 
-// @DRB On top of this we need to also have  the procedures to have the effects and get the results back for them, maybe lock them to the running instance?
 /// This contains the LXC container running the javascript init system
 /// that can be used via a JSON RPC Client connected to a unix domain
 /// socket served by the container
@@ -122,7 +120,7 @@ pub struct PersistentContainer {
     js_mount: MountGuard,
     volumes: BTreeMap<VolumeId, MountGuard>,
     assets: Vec<MountGuard>,
-    proxy_mounts: Vec<MountGuard>,
+    proxy_mounts: Option<crate::net::http_proxy::HttpProxyMounts>,
     pub(super) images: BTreeMap<ImageId, Arc<MountGuard>>,
     pub(super) subcontainers: Arc<Mutex<BTreeMap<Guid, Subcontainer>>>,
     pub(super) state: Arc<watch::Sender<ServiceState>>,
@@ -155,12 +153,14 @@ impl PersistentContainer {
             .plugins
             .contains(&crate::service::effects::plugin::PluginId::HttpProxyV0)
         {
-            ctx.net_controller
-                .http_proxy
-                .mount_provider(&s9pk.as_manifest().id, lxc_container.rootfs_dir())
-                .await?
+            Some(
+                ctx.net_controller
+                    .http_proxy
+                    .mount_provider(&s9pk.as_manifest().id, lxc_container.rootfs_dir())
+                    .await?,
+            )
         } else {
-            Vec::new()
+            None
         };
         let rpc_client = lxc_container.connect_rpc(Some(RPC_CONNECT_TIMEOUT)).await?;
         let js_mount = MountGuard::mount(
@@ -515,8 +515,8 @@ impl PersistentContainer {
             for (_, overlay) in std::mem::take(&mut *subcontainers.lock().await) {
                 errs.handle(overlay.unmount().await);
             }
-            for mount in proxy_mounts.into_iter().rev() {
-                errs.handle(mount.unmount(false).await);
+            if let Some(mounts) = proxy_mounts {
+                errs.handle(mounts.unmount().await);
             }
             for (_, images) in images {
                 errs.handle(images.unmount().await);

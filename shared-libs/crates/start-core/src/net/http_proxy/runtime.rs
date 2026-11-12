@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
+use std::os::fd::AsFd;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,11 +14,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::db::model::Database;
-use crate::disk::mount::filesystem::bind::Bind;
-use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
-use crate::disk::mount::guard::MountGuard;
+use crate::disk::mount::filesystem::syscall::{AttachedMount, DetachedMount, open_tree_clone};
+use crate::disk::mount::guard::GenericMountGuard;
 use crate::net::vhost::{ConnRegistry, MAX_PROXY_CONNS_PER_TARGET, ProxyContext, ProxyTarget};
 use crate::net::web_server::AcceptStream;
+use crate::util::directory::{create_directory_beneath, descriptor_path, open_directory_nofollow};
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::{BackTrackingIO, TmpDir};
 use crate::util::sync::Watch;
@@ -88,20 +89,54 @@ impl HttpProxySockets {
         Ok(root)
     }
 
+    /// Image path replacements cannot redirect these mounts or their teardown.
     pub async fn mount_provider(
         &self,
         provider: &PackageId,
         rootfs: &Path,
-    ) -> Result<Vec<MountGuard>, Error> {
+    ) -> Result<HttpProxyMounts, Error> {
         let root = self.prepare_provider(provider).await?;
         let ingress = root.join("in");
         std::os::unix::fs::chown(&ingress, Some(100000), Some(100000))?;
         tokio::fs::set_permissions(&ingress, std::fs::Permissions::from_mode(0o770)).await?;
-        let target = rootfs.join(CONTAINER_SOCKET_DIR.trim_start_matches('/'));
-        let outer = MountGuard::mount(&Bind::new(&root), &target, ReadOnly).await?;
-        let writable = MountGuard::mount(&Bind::new(ingress), target.join("in"), ReadWrite).await?;
-        Ok(vec![outer, writable])
+        let rootfs = open_directory_nofollow(rootfs)?;
+        let target = create_directory_beneath(
+            &rootfs,
+            Path::new(CONTAINER_SOCKET_DIR.trim_start_matches('/')),
+        )?;
+        let outer = bind_directory_at(&root, &target, true)?;
+        let mounted_root = std::fs::File::open(outer.path())?;
+        let ingress_target = create_directory_beneath(&mounted_root, Path::new("in"))?;
+        let writable = bind_directory_at(&ingress, &ingress_target, false)?;
+        Ok(HttpProxyMounts {
+            ingress: writable,
+            outer,
+        })
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct HttpProxyMounts {
+    // Field order detaches the child before its parent.
+    ingress: AttachedMount,
+    outer: AttachedMount,
+}
+
+impl HttpProxyMounts {
+    pub async fn unmount(self) -> Result<(), Error> {
+        self.ingress.unmount().await?;
+        self.outer.unmount().await
+    }
+}
+
+fn bind_directory_at(
+    source: &Path,
+    directory: &std::fs::File,
+    readonly: bool,
+) -> Result<AttachedMount, Error> {
+    let mount = DetachedMount::from_fd(open_tree_clone(source, false)?);
+    mount.set_readonly(readonly)?;
+    mount.attach_at(directory.as_fd())
 }
 
 fn provider_states(packages: &AllPackageData) -> BTreeMap<PackageId, ProviderState> {
@@ -148,9 +183,9 @@ fn selected_profiles(
         .collect()
 }
 
-/// Refuses a symlink, which the provider can plant in its writable `in` directory.
+/// Provider-controlled symlinks must never redirect startd's ingress connections.
+#[cfg(target_os = "linux")]
 async fn connect_ingress(path: &Path) -> std::io::Result<UnixStream> {
-    use std::os::fd::AsRawFd;
     use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
 
     let socket = std::fs::OpenOptions::new()
@@ -160,7 +195,15 @@ async fn connect_ingress(path: &Path) -> std::io::Result<UnixStream> {
     if !socket.metadata()?.file_type().is_socket() {
         return Err(std::io::Error::other("HTTP proxy ingress is not a socket"));
     }
-    UnixStream::connect(format!("/proc/self/fd/{}", socket.as_raw_fd())).await
+    UnixStream::connect(descriptor_path(socket.as_fd())).await
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn connect_ingress(_path: &Path) -> std::io::Result<UnixStream> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "HTTP proxy sockets require Linux",
+    ))
 }
 
 #[derive(Debug)]

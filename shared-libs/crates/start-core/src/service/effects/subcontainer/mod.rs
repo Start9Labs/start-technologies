@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use imbl_value::InternedString;
-use tokio::process::Command;
+use nix::unistd::{Gid, Uid, fchown};
 
 use crate::ImageId;
 use crate::disk::mount::filesystem::overlayfs::OverlayGuard;
@@ -9,8 +9,17 @@ use crate::disk::mount::guard::GenericMountGuard;
 use crate::rpc_continuations::Guid;
 use crate::service::effects::prelude::*;
 use crate::service::persistent_container::Subcontainer;
-use crate::util::Invoke;
-use crate::util::io::write_file_owned_atomic;
+use crate::util::directory::{create_directory_at, open_directory_nofollow};
+use crate::util::io::write_file_owned_at;
+
+fn chown_directory(directory: &std::fs::File) -> Result<(), Error> {
+    fchown(
+        directory,
+        Some(Uid::from_raw(100000)),
+        Some(Gid::from_raw(100000)),
+    )
+    .with_kind(ErrorKind::Filesystem)
+}
 
 pub const NVIDIA_OVERLAY_PATH: &str = "/var/tmp/startos/nvidia-overlay";
 pub const NVIDIA_OVERLAY_DEBIAN: &str = "/var/tmp/startos/nvidia-overlay/debian";
@@ -124,7 +133,6 @@ pub async fn create_subcontainer_fs(
         );
         tracing::info!("Mounting overlay {guid} for {image_id}");
 
-        // Determine which nvidia overlay to use based on distro detection
         let nvidia_overlay: &[&str] = if context
             .seed
             .persistent_container
@@ -134,7 +142,6 @@ pub async fn create_subcontainer_fs(
             .get(&image_id)
             .map_or(false, |i| i.nvidia_container)
         {
-            // Check if image is debian-based by looking for /etc/debian_version
             let is_debian = tokio::fs::metadata(image.path().join("etc/debian_version"))
                 .await
                 .is_ok();
@@ -159,15 +166,17 @@ pub async fn create_subcontainer_fs(
             .plugins
             .contains(&crate::service::effects::plugin::PluginId::HttpProxyV0)
         {
-            context
-                .seed
-                .ctx
-                .net_controller
-                .http_proxy
-                .mount_provider(&context.seed.id, &mountpoint)
-                .await?
+            Some(
+                context
+                    .seed
+                    .ctx
+                    .net_controller
+                    .http_proxy
+                    .mount_provider(&context.seed.id, &mountpoint)
+                    .await?,
+            )
         } else {
-            Vec::new()
+            None
         };
         let subcontainer_wrapper = Subcontainer {
             overlay,
@@ -177,34 +186,23 @@ pub async fn create_subcontainer_fs(
             image_id: image_id.clone(),
         };
 
-        Command::new("chown")
-            .arg("100000:100000")
-            .arg(&mountpoint)
-            .invoke(ErrorKind::Filesystem)
-            .await?;
-        let etc = mountpoint.join("etc");
-        match tokio::fs::create_dir(&etc).await {
-            Ok(()) => {
-                Command::new("chown")
-                    .arg("100000:100000")
-                    .arg(&etc)
-                    .invoke(ErrorKind::Filesystem)
-                    .await?;
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
-            Err(e) => {
-                return Err(e).with_ctx(|_| (ErrorKind::Filesystem, format!("mkdir {etc:?}")));
-            }
+        let root = open_directory_nofollow(&mountpoint)?;
+        chown_directory(&root)?;
+        let (etc, created) = create_directory_at(&root, c"etc")?;
+        if created {
+            chown_directory(&etc)?;
         }
-        write_file_owned_atomic(
-            mountpoint.join("etc/hostname"),
+        write_file_owned_at(
+            &etc,
+            c"hostname",
             format!("{container_guid}\n"),
             100000,
             100000,
         )
         .await?;
-        write_file_owned_atomic(
-            mountpoint.join("etc/hosts"),
+        write_file_owned_at(
+            &etc,
+            c"hosts",
             format!("127.0.0.1\tlocalhost\n127.0.1.1\t{container_guid}\n::1\tlocalhost ip6-localhost ip6-loopback\n"),
             100000,
             100000,

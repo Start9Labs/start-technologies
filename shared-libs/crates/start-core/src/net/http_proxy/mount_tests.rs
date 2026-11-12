@@ -75,15 +75,90 @@ async fn provider_mounts_isolate_continuations_in_outer_and_subcontainer_roots()
                 .invoke(crate::ErrorKind::Filesystem)
                 .await
                 .unwrap();
-            for mount in mounts.into_iter().rev() {
-                mount.unmount(false).await.unwrap();
-            }
+            mounts.unmount().await.unwrap();
             assert!(!is_mountpoint(&mounted).await.unwrap());
             assert!(!is_mountpoint(mounted.join("in")).await.unwrap());
         }
     })
     .await
     .expect("provider mount probe stalled");
+}
+
+#[tokio::test]
+#[ignore = "requires root and a private mount namespace"]
+async fn pinned_bind_mount_cannot_follow_a_replaced_target() {
+    let source = TmpDir::new().await.unwrap();
+    let rootfs = TmpDir::new().await.unwrap();
+    let outside = TmpDir::new().await.unwrap();
+    tokio::fs::write(source.join("marker"), "provider")
+        .await
+        .unwrap();
+    tokio::fs::create_dir(rootfs.join("target")).await.unwrap();
+    let target = open_directory_nofollow(&rootfs.join("target")).unwrap();
+    tokio::fs::rename(rootfs.join("target"), rootfs.join("moved"))
+        .await
+        .unwrap();
+    std::os::unix::fs::symlink(&*outside, rootfs.join("target")).unwrap();
+    let mount = bind_directory_at(&source, &target, true).unwrap();
+    assert_eq!(
+        tokio::fs::read_to_string(rootfs.join("moved/marker"))
+            .await
+            .unwrap(),
+        "provider"
+    );
+    assert!(std::fs::read_dir(&*outside).unwrap().next().is_none());
+    mount.unmount().await.unwrap();
+    assert!(!is_mountpoint(rootfs.join("moved")).await.unwrap());
+}
+
+#[tokio::test]
+#[ignore = "requires root, private mount namespace and UID/GID 100000 mapped"]
+async fn provider_mounts_reject_image_symlinks() {
+    let sockets = sockets().await;
+    let provider = "waf".parse().unwrap();
+    for component in ["media", "media/startos", "media/startos/http-proxy"] {
+        let rootfs = TmpDir::new().await.unwrap();
+        let outside = TmpDir::new().await.unwrap();
+        let planted = rootfs.join(component);
+        tokio::fs::create_dir_all(planted.parent().unwrap())
+            .await
+            .unwrap();
+        std::os::unix::fs::symlink(&*outside, &planted).unwrap();
+        assert!(sockets.mount_provider(&provider, &rootfs).await.is_err());
+        assert!(std::fs::read_dir(&*outside).unwrap().next().is_none());
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires root, private mount namespace and UID/GID 100000 mapped"]
+async fn provider_mount_cleanup_remains_pinned_when_image_directories_move() {
+    let sockets = sockets().await;
+    let provider = "waf".parse().unwrap();
+    for explicit in [true, false] {
+        let rootfs = TmpDir::new().await.unwrap();
+        let outside = TmpDir::new().await.unwrap();
+        let mounts = sockets.mount_provider(&provider, &rootfs).await.unwrap();
+        tokio::fs::rename(rootfs.join("media"), rootfs.join("moved"))
+            .await
+            .unwrap();
+        std::os::unix::fs::symlink(&*outside, rootfs.join("media")).unwrap();
+        if explicit {
+            mounts.unmount().await.unwrap();
+        } else {
+            drop(mounts);
+        }
+        assert!(
+            !is_mountpoint(rootfs.join("moved/startos/http-proxy/in"))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !is_mountpoint(rootfs.join("moved/startos/http-proxy"))
+                .await
+                .unwrap()
+        );
+        assert!(std::fs::read_dir(&*outside).unwrap().next().is_none());
+    }
 }
 
 const PROVIDER_PROBE: &str = r#"

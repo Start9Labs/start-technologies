@@ -5,7 +5,7 @@ use std::ffi::{CString, OsString};
 use std::io;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use libc::{
@@ -15,10 +15,13 @@ use libc::{
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
+use crate::disk::mount::guard::GenericMountGuard;
 use crate::prelude::*;
+use crate::util::directory::descriptor_path;
 
 // libc's musl targets omit these linux/mount.h flags.
 const MOVE_MOUNT_F_EMPTY_PATH: libc::c_uint = 0x00000004;
+const MOVE_MOUNT_T_EMPTY_PATH: libc::c_uint = 0x00000040;
 const MOVE_MOUNT_BENEATH: libc::c_uint = 0x00000200;
 
 // open_tree_attr(2) — added in Linux 6.15. libc 0.2 only defines
@@ -176,9 +179,72 @@ impl DetachedMount {
     pub fn attach(self, mountpoint: &Path) -> Result<(), Error> {
         move_mount(self.fd.as_fd(), mountpoint, 0)
     }
+    /// Attaches to a pinned directory; the returned guard detaches on drop.
+    pub fn attach_at(self, directory: BorrowedFd<'_>) -> Result<AttachedMount, Error> {
+        let empty = cstr_str("")?;
+        let result = unsafe {
+            libc::syscall(
+                libc::SYS_move_mount,
+                self.fd.as_raw_fd(),
+                empty.as_ptr(),
+                directory.as_raw_fd(),
+                empty.as_ptr(),
+                MOVE_MOUNT_F_EMPTY_PATH | MOVE_MOUNT_T_EMPTY_PATH,
+            )
+        };
+        check(result, "move_mount to directory")?;
+        Ok(AttachedMount {
+            path: descriptor_path(self.fd.as_fd()),
+            _fd: self.fd,
+            mounted: true,
+        })
+    }
     /// Insert beneath the top mount; detaching the top reveals this mount. Requires Linux 6.5+.
     pub fn attach_beneath(self, mountpoint: &Path) -> Result<(), Error> {
         move_mount(self.fd.as_fd(), mountpoint, MOVE_MOUNT_BENEATH)
+    }
+}
+
+/// Owns an attached mount independently of replacements of its target pathname.
+#[derive(Debug)]
+pub struct AttachedMount {
+    path: PathBuf,
+    _fd: OwnedFd,
+    mounted: bool,
+}
+
+impl AttachedMount {
+    fn detach(&mut self, flags: libc::c_int) -> Result<(), Error> {
+        if self.mounted {
+            let path = cstr_path(&self.path)?;
+            check(
+                unsafe { libc::umount2(path.as_ptr(), flags) } as i64,
+                "umount pinned mount",
+            )?;
+            self.mounted = false;
+        }
+        Ok(())
+    }
+}
+
+impl GenericMountGuard for AttachedMount {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+    async fn unmount(mut self) -> Result<(), Error> {
+        self.detach(if cfg!(feature = "unstable") {
+            0
+        } else {
+            libc::MNT_DETACH
+        })
+    }
+}
+
+impl Drop for AttachedMount {
+    fn drop(&mut self) {
+        if let Err(error) = self.detach(libc::MNT_DETACH) {
+            tracing::error!(?error, "Failed to detach pinned mount");
+        }
     }
 }
 
