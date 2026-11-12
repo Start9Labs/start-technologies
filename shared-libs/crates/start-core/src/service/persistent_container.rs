@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use futures::Future;
 use futures::future::ready;
-use imbl::{Vector, vector};
 use imbl_value::InternedString;
 use rpc_toolkit::{Empty, Server, ShutdownHandle};
 use serde::de::DeserializeOwned;
@@ -332,9 +331,7 @@ impl PersistentContainer {
             .create_service(s9pk.as_manifest().id.clone(), ip, ipv6)
             .await?;
         if let Some(callbacks) = ctx.callbacks.get_container_ip(&s9pk.as_manifest().id) {
-            callbacks
-                .call(vector![Value::String(Arc::new(ip.to_string()))])
-                .await?;
+            callbacks.call().await?;
         }
         Ok(Self {
             s9pk,
@@ -590,10 +587,10 @@ impl PersistentContainer {
     }
 
     #[instrument(skip_all)]
-    pub async fn callback(&self, handle: CallbackHandle, args: Vector<Value>) -> Result<(), Error> {
+    pub async fn callback(&self, handle: CallbackHandle) -> Result<(), Error> {
         let mut params = None;
         self.state.send_if_modified(|s| {
-            params = handle.params(&mut s.callbacks, args);
+            params = handle.params(&mut s.callbacks);
             params.is_some()
         });
         if let Some(params) = params {

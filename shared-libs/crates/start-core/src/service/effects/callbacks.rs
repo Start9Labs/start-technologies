@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime};
 
 use clap::Parser;
 use futures::future::join_all;
-use imbl::{OrdMap, Vector, vector};
+use imbl::OrdMap;
 use imbl_value::InternedString;
 use patch_db::TypedDbWatch;
 use serde::{Deserialize, Serialize};
@@ -64,8 +64,7 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
                                 if let Some(cbs) = this.inner.mutate(|map| {
                                     map.remove(&k).and_then(CallbackHandlers::detach_watcher)
                                 }) {
-                                    let value = watch.peek_and_mark_seen().unwrap_or_default();
-                                    if let Err(e) = cbs.call(vector![value]).await {
+                                    if let Err(e) = cbs.call().await {
                                         tracing::error!("Error in {label} callback: {e}");
                                         tracing::debug!("{e:?}");
                                     }
@@ -230,7 +229,7 @@ impl ServiceCallbacks {
                                         .remove(&(hostnames, cert, algorithm))
                                         .and_then(CallbackHandlers::detach_watcher)
                                 }) {
-                                    cbs.call(vector![]).await?;
+                                    cbs.call().await?;
                                 }
                                 Ok::<_, Error>(())
                             }
@@ -318,7 +317,7 @@ impl ServiceCallbacks {
                                     .remove(&key)
                                     .and_then(CallbackHandlers::detach_watcher)
                             }) {
-                                if let Err(e) = cbs.call(vector![]).await {
+                                if let Err(e) = cbs.call().await {
                                     tracing::error!("Error in outbound gateway callback: {e}");
                                     tracing::debug!("{e:?}");
                                 }
@@ -364,10 +363,10 @@ impl CallbackHandler {
             seed: Arc::downgrade(&service.seed),
         }
     }
-    pub async fn call(mut self, args: Vector<Value>) -> Result<(), Error> {
+    pub async fn call(mut self) -> Result<(), Error> {
         if let Some(seed) = self.seed.upgrade() {
             seed.persistent_container
-                .callback(self.handle.take(), args)
+                .callback(self.handle.take())
                 .await?;
         }
         Ok(())
@@ -393,9 +392,9 @@ impl CallbackHandlers {
         Some(Self(handlers)).filter(|cbs| !cbs.0.is_empty())
     }
 
-    pub async fn call(self, args: Vector<Value>) -> Result<(), Error> {
+    pub async fn call(self) -> Result<(), Error> {
         let mut err = ErrorCollection::new();
-        for res in join_all(self.0.into_iter().map(|cb| cb.call(args.clone()))).await {
+        for res in join_all(self.0.into_iter().map(|cb| cb.call())).await {
             err.handle(res);
         }
         err.into_result()
