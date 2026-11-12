@@ -123,6 +123,11 @@ source version without a device header. Headerless queries without a source vers
 retain the full map. Projection covers OS version queries, the OS index and the full
 index; stored notes remain unchanged.
 
+`DeviceInfoMiddleware` preserves update discovery for StartOS through 0.4.2.1
+and StartWRT by synthesizing `headline: "v<version>"` in their OS responses.
+The device header or explicit update source version selects this compatibility
+projection; headerless queries without a source version use the canonical schema.
+
 ## Persistence
 
 `RegistryContext::init` resolves `datadir` (default `/var/lib/startos`) and:

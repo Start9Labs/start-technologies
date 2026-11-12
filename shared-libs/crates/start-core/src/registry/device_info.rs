@@ -229,6 +229,7 @@ pub struct DeviceInfoMiddleware {
     legacy_os_versions: bool,
     inline_icons: bool,
     legacy_os_notes: bool,
+    legacy_os_headlines: bool,
 }
 impl DeviceInfoMiddleware {
     pub fn new() -> Self {
@@ -241,6 +242,7 @@ impl DeviceInfoMiddleware {
             legacy_os_versions: false,
             inline_icons: false,
             legacy_os_notes: false,
+            legacy_os_headlines: false,
         }
     }
 
@@ -253,6 +255,7 @@ impl DeviceInfoMiddleware {
         self.legacy_signatures = startwrt;
         self.legacy_pem = true;
         self.legacy_os_notes = false;
+        self.legacy_os_headlines = false;
         if let Some(header) = &self.device_info_header {
             let device_info = if metadata.get_device_info {
                 Some(DeviceInfo::from_header_value(header)?)
@@ -263,6 +266,8 @@ impl DeviceInfoMiddleware {
                 self.legacy_signatures |= reads_legacy_signatures(&device_info.os.version)?;
                 self.legacy_pem = startwrt || predates_0_4_0_5(&device_info.os.version)?;
                 self.legacy_os_notes = self.legacy_pem;
+                self.legacy_os_headlines =
+                    startwrt || requires_os_headline(&device_info.os.version)?;
                 self.inline_icons = reads_inline_icons(&device_info.os.version)?;
                 if metadata.get_device_info {
                     request.params["__DeviceInfo_device_info"] = to_value(&device_info)?;
@@ -275,6 +280,7 @@ impl DeviceInfoMiddleware {
                 self.legacy_signatures |= reads_legacy_signatures(&version)?;
                 self.legacy_pem = startwrt || predates_0_4_0_5(&version)?;
                 self.legacy_os_notes = self.legacy_pem;
+                self.legacy_os_headlines = startwrt || requires_os_headline(&version)?;
             }
         }
         if request.method.as_str().starts_with("db.") {
@@ -292,18 +298,35 @@ fn predates_0_4_0_5(version: &Version) -> Result<bool, Error> {
     Ok(version < &"0.4.0.5".parse::<Version>()?)
 }
 
-fn project_legacy_os_notes(method: &str, res: &mut Value) -> Result<(), Error> {
+/// StartOS through 0.4.2.1 requires `headline` to discover updates.
+fn requires_os_headline(version: &Version) -> Result<bool, Error> {
+    Ok(version <= &"0.4.2.1".parse::<Version>()?)
+}
+
+fn os_version_infos<'a>(
+    method: &str,
+    res: &'a mut Value,
+) -> impl Iterator<Item = &'a mut (InternedString, Value)> {
     let versions = match method {
-        "os.version.get" => res,
-        "os.index" => &mut res["versions"],
-        "index" => &mut res["os"]["versions"],
-        _ => return Ok(()),
+        "os.version.get" => Some(res),
+        "os.index" => Some(&mut res["versions"]),
+        "index" => Some(&mut res["os"]["versions"]),
+        _ => None,
     };
-    for (_, info) in versions
-        .as_object_mut()
+    versions
+        .and_then(|v| v.as_object_mut())
         .into_iter()
         .flat_map(|o| o.iter_mut())
-    {
+}
+
+fn project_legacy_os_headlines(method: &str, res: &mut Value) {
+    for (version, info) in os_version_infos(method, res) {
+        info["headline"] = Value::String(format!("v{version}").into());
+    }
+}
+
+fn project_legacy_os_notes(method: &str, res: &mut Value) -> Result<(), Error> {
+    for (_, info) in os_version_infos(method, res) {
         let notes: LocaleString = from_value(info["releaseNotes"].clone())?;
         info["releaseNotes"] = Value::String(notes.localized_for("en_US").into());
     }
@@ -447,6 +470,11 @@ impl Middleware<RegistryContext> for DeviceInfoMiddleware {
             if let Err(e) = project_legacy_os_notes(req.method.as_str(), res) {
                 response.result = Err(e).map_err(From::from);
             }
+        }
+        if let (true, Some(req), Ok(res)) =
+            (self.legacy_os_headlines, &self.req, &mut response.result)
+        {
+            project_legacy_os_headlines(req.method.as_str(), res);
         }
         if let (true, Ok(res)) = (self.legacy_signatures, &mut response.result) {
             crate::sign::compat::downgrade_signatures(res);
@@ -656,6 +684,75 @@ mod tests {
     }
 
     #[test]
+    fn headline_projection_covers_released_clients_and_startwrt() {
+        for (header, source, startwrt, legacy) in [
+            (None, None, false, false),
+            (None, Some("0.4.2.1"), false, true),
+            (None, Some("0.4.2.2"), false, false),
+            (
+                Some("os.version=0.4.0.4&os.compat=*&os.platform=x86_64"),
+                None,
+                false,
+                true,
+            ),
+            (
+                Some("os.version=0.4.3&os.compat=*&os.platform=x86_64"),
+                Some("0.4.0.4"),
+                false,
+                false,
+            ),
+            (None, None, true, false),
+            (None, Some("1.3.0"), true, true),
+            (
+                Some("os.version=1.3.0&os.compat=*&os.platform=spacemit,k1-x_muse-pi-pro"),
+                None,
+                true,
+                true,
+            ),
+        ] {
+            let mut middleware = DeviceInfoMiddleware::new();
+            middleware.device_info_header = header.map(HeaderValue::from_static);
+            middleware
+                .prepare_request(
+                    startwrt,
+                    Metadata {
+                        get_device_info: true,
+                    },
+                    &mut request("os.version.get", json!({ "sourceVersion": source })),
+                )
+                .unwrap();
+            assert_eq!(
+                middleware.legacy_os_headlines, legacy,
+                "{:?} {:?}",
+                header, source
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_headlines_project_every_os_response() {
+        let stored = json!({ "0.4.0.5": { "releaseNotes": "Notes" } });
+        for method in ["os.version.get", "os.index", "index"] {
+            let mut response = match method {
+                "os.version.get" => stored.clone(),
+                "os.index" => json!({ "versions": stored }),
+                _ => json!({ "os": { "versions": stored }, "package": {} }),
+            };
+            project_legacy_os_headlines(method, &mut response);
+            let versions = match method {
+                "os.version.get" => &response,
+                "os.index" => &response["versions"],
+                _ => &response["os"]["versions"],
+            };
+            assert_eq!(versions["0.4.0.5"]["headline"].as_str(), Some("v0.4.0.5"));
+        }
+        assert!(stored["0.4.0.5"].get("headline").is_none());
+        let mut unrelated = stored.clone();
+        project_legacy_os_headlines("package.index", &mut unrelated);
+        assert_eq!(unrelated, stored);
+    }
+
+    #[test]
     fn headerless_index_queries_preserve_maps_for_cli_promotion() {
         for startwrt in [false, true] {
             for method in ["index", "os.index", "os.version.get"] {
@@ -670,6 +767,7 @@ mod tests {
                     )
                     .unwrap();
                 assert!(!middleware.legacy_os_notes);
+                assert!(!middleware.legacy_os_headlines);
             }
         }
     }
