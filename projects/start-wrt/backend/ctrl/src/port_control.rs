@@ -713,10 +713,7 @@ impl PortControl {
                                 peer,
                                 internal_port + (port - external_port),
                             ),
-                            protocol: match protocol {
-                                TransportProtocol::Tcp => "TCP",
-                                TransportProtocol::Udp => "UDP",
-                            },
+                            protocol: protocol.igd_name(),
                             description: format!("Automatic port use ({kind})"),
                             lease_seconds,
                         })

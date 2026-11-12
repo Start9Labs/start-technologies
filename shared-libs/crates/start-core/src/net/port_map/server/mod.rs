@@ -374,6 +374,14 @@ fn map_response_with_port_set(
     r
 }
 
+fn map_transport(protocol: u8) -> Option<TransportProtocol> {
+    match protocol {
+        6 => Some(TransportProtocol::Tcp),
+        17 => Some(TransportProtocol::Udp),
+        _ => None,
+    }
+}
+
 /// Handle one PCP datagram from `peer`, returning the response bytes to send
 /// back (or `None` to stay silent). `epoch` is the server's seconds-since-start.
 pub async fn handle<B: GatewayBackend + ?Sized>(
@@ -546,10 +554,9 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
         };
     }
 
-    let transport = match req[36] {
-        6 => TransportProtocol::Tcp,
-        17 => TransportProtocol::Udp,
-        _ => {
+    let transport = match map_transport(req[36]) {
+        Some(transport) => transport,
+        None => {
             return Some(map_response(
                 UNSUPP_PROTOCOL,
                 req,
@@ -744,10 +751,9 @@ pub async fn handle6<B: GatewayBackend + ?Sized>(
         ));
     }
 
-    let transport = match req[36] {
-        6 => TransportProtocol::Tcp,
-        17 => TransportProtocol::Udp,
-        _ => {
+    let transport = match map_transport(req[36]) {
+        Some(transport) => transport,
+        None => {
             return Some(map_response6(
                 UNSUPP_PROTOCOL,
                 req,

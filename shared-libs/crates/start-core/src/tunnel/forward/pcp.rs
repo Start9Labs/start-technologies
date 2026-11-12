@@ -904,10 +904,7 @@ fn mapping_entries(forwards: &PortForwards, peer: Ipv4Addr) -> Vec<MappingEntry>
                     .map(|protocol| MappingEntry {
                         external_port,
                         internal: SocketAddrV4::new(peer, internal_port),
-                        protocol: match protocol {
-                            TransportProtocol::Tcp => "TCP",
-                            TransportProtocol::Udp => "UDP",
-                        },
+                        protocol: protocol.igd_name(),
                         description: description.clone(),
                         lease_seconds: 0,
                     }),

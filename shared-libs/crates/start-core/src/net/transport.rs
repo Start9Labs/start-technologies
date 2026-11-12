@@ -61,6 +61,16 @@ pub enum TransportProtocol {
 
 rpc_toolkit::reflect_ts!(TransportProtocol);
 
+impl TransportProtocol {
+    /// UPnP IGD protocol spelling.
+    pub fn igd_name(self) -> &'static str {
+        match self {
+            Self::Tcp => "TCP",
+            Self::Udp => "UDP",
+        }
+    }
+}
+
 impl From<TransportProtocol> for Transport {
     fn from(protocol: TransportProtocol) -> Self {
         match protocol {
