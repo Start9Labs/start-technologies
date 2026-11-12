@@ -324,9 +324,10 @@ impl<C: Context> Connection<C> {
                     if let Some(Some(completed)) = completed { self.complete(completed).await?; }
                 }
                 event = self.streams.next(), if !self.streams.is_empty() => {
-                    if let Some((id, (result, end))) = event {
+                    if let Some((id, (result, end, flushed))) = event {
                         if end { self.streams.remove(&id); }
                         self.send(&stream_event(id, result, end)).await?;
+                        if let Some(flushed) = flushed { let _ = flushed.send(()); }
                     }
                 }
                 _ = heartbeat.tick() => {

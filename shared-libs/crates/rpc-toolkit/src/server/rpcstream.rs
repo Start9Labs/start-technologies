@@ -86,8 +86,11 @@ impl<'de> Deserialize<'de> for RpcStreamResponse {
     }
 }
 
+type FlushReceipt = Option<oneshot::Sender<()>>;
+type Terminal = (Result<Value, RpcError>, FlushReceipt);
+
 #[cfg(feature = "websocket")]
-pub(crate) type ResponseEvents = BoxStream<'static, (Result<Value, RpcError>, bool)>;
+pub(crate) type ResponseEvents = BoxStream<'static, (Result<Value, RpcError>, bool, FlushReceipt)>;
 
 /// A single-owner producer for an opted-in WebSocket response stream.
 ///
@@ -111,7 +114,7 @@ pub(crate) type ResponseEvents = BoxStream<'static, (Result<Value, RpcError>, bo
 #[derive(Debug)]
 pub struct RpcStream<Item = crate::Never, Final = ()> {
     events: mpsc::Sender<Value>,
-    terminal: oneshot::Sender<Result<Value, RpcError>>,
+    terminal: oneshot::Sender<Terminal>,
     types: PhantomData<fn(Item) -> Final>,
 }
 
@@ -122,9 +125,10 @@ impl RpcStream {
         let (terminal, result) = oneshot::channel();
         let source = async_stream::stream! {
             while let Some(value) = receiver.recv().await {
-                yield (Ok(value), false);
+                yield (Ok(value), false, None);
             }
-            yield (result.await.unwrap_or(Err(RPCSTREAM_CANCELLED_ERROR)), true);
+            let (result, flushed) = result.await.unwrap_or((Err(RPCSTREAM_CANCELLED_ERROR), None));
+            yield (result, true, flushed);
         }
         .boxed();
         (
@@ -221,9 +225,39 @@ impl<Item, Final> RpcStream<Item, Final> {
     where
         Final: Serialize,
     {
+        self.queue_terminal(result, None)
+    }
+
+    /// Queues the terminal immediately and waits for its transport flush, not peer receipt.
+    ///
+    /// Cancellation and failed writes return `RPCSTREAM_CANCELLED_ERROR`. Await this outside
+    /// the initiating handler; its response must be sent before the terminal can drain.
+    pub fn close_and_flush<E: Into<RpcError>>(
+        self,
+        result: Result<Final, E>,
+    ) -> impl Future<Output = Result<(), RpcError>> + Send
+    where
+        Final: Serialize,
+    {
+        let (flushed, receipt) = oneshot::channel();
+        let queued = self.queue_terminal(result, Some(flushed));
+        async move {
+            queued?;
+            receipt.await.map_err(|_| RPCSTREAM_CANCELLED_ERROR)
+        }
+    }
+
+    fn queue_terminal<E: Into<RpcError>>(
+        self,
+        result: Result<Final, E>,
+        flushed: FlushReceipt,
+    ) -> Result<(), RpcError>
+    where
+        Final: Serialize,
+    {
         let result = result.map_err(Into::into).and_then(serialize);
         self.terminal
-            .send(result)
+            .send((result, flushed))
             .map_err(|_| RPCSTREAM_CANCELLED_ERROR)
     }
 
@@ -271,10 +305,68 @@ mod tests {
             events.next().await.unwrap().0.unwrap(),
             imbl_value::json!(1)
         );
-        let (result, end) = events.next().await.unwrap();
+        let (result, end, _) = events.next().await.unwrap();
         assert_eq!(result.unwrap(), imbl_value::json!("finished"));
         assert!(end);
         assert!(events.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn flush_receipt_waits_beyond_queue_acceptance_and_preserves_items() {
+        let (producer, mut events) = pair::<u64, bool>();
+        producer.send(7u64).await.unwrap();
+        let flushed = producer.close_and_flush(Ok::<_, RpcError>(true));
+        futures::pin_mut!(flushed);
+        assert!(futures::poll!(flushed.as_mut()).is_pending());
+        assert_eq!(
+            events.next().await.unwrap().0.unwrap(),
+            imbl_value::json!(7)
+        );
+        let (result, end, receipt) = events.next().await.unwrap();
+        assert_eq!(result.unwrap(), imbl_value::json!(true));
+        assert!(end);
+        assert!(futures::poll!(flushed.as_mut()).is_pending());
+        receipt.unwrap().send(()).unwrap();
+        flushed.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn losing_a_terminal_write_or_receiver_cancels_its_flush_receipt() {
+        let (producer, mut events) = pair::<u64, ()>();
+        let flushed = producer.close_and_flush(Ok::<_, RpcError>(()));
+        let (_, end, receipt) = events.next().await.unwrap();
+        assert!(end);
+        drop(receipt);
+        assert_cancelled(flushed.await.unwrap_err());
+
+        let (producer, events) = pair::<u64, ()>();
+        let flushed = producer.close_and_flush(Ok::<_, RpcError>(()));
+        drop(events);
+        assert_cancelled(flushed.await.unwrap_err());
+    }
+
+    #[tokio::test]
+    async fn terminal_flush_serializes_borrowed_non_send_values_before_suspending() {
+        fn is_send<T: Send>(value: T) -> T {
+            value
+        }
+        #[derive(Serialize)]
+        struct LocalValue<'a> {
+            text: &'a str,
+            #[serde(skip)]
+            _not_send: Rc<()>,
+        }
+        let text = "borrowed".to_owned();
+        let (producer, mut events) = pair::<(), LocalValue<'_>>();
+        let flushed = is_send(producer.close_and_flush(Ok::<_, RpcError>(LocalValue {
+            text: &text,
+            _not_send: Rc::new(()),
+        })));
+        let (result, end, receipt) = events.next().await.unwrap();
+        assert_eq!(result.unwrap(), imbl_value::json!({"text":"borrowed"}));
+        assert!(end);
+        receipt.unwrap().send(()).unwrap();
+        flushed.await.unwrap();
     }
 
     #[tokio::test]
@@ -282,10 +374,10 @@ mod tests {
         let (producer, mut events) = pair::<u64, ()>();
         producer.send(7u64).await.unwrap();
         drop(producer);
-        let (value, end) = events.next().await.unwrap();
+        let (value, end, _) = events.next().await.unwrap();
         assert_eq!(value.unwrap(), imbl_value::json!(7));
         assert!(!end);
-        let (error, end) = events.next().await.unwrap();
+        let (error, end, _) = events.next().await.unwrap();
         assert_cancelled(error.unwrap_err());
         assert!(end);
         assert!(events.next().await.is_none());
@@ -322,7 +414,7 @@ mod tests {
             events.next().await.unwrap().0.unwrap(),
             imbl_value::json!("last event")
         );
-        let (result, end) = events.next().await.unwrap();
+        let (result, end, _) = events.next().await.unwrap();
         assert_eq!(result.unwrap_err().code, 456);
         assert!(end);
         assert!(events.next().await.is_none());
@@ -355,7 +447,7 @@ mod tests {
             events.next().await.unwrap().0.unwrap(),
             imbl_value::json!(7)
         );
-        let (result, end) = events.next().await.unwrap();
+        let (result, end, _) = events.next().await.unwrap();
         assert_eq!(result.unwrap(), imbl_value::json!(true));
         assert!(end);
     }
@@ -418,7 +510,7 @@ mod tests {
             events.next().await.unwrap().0.unwrap(),
             imbl_value::json!(true)
         );
-        let (result, end) = events.next().await.unwrap();
+        let (result, end, _) = events.next().await.unwrap();
         assert_eq!(result.unwrap(), Value::Null);
         assert!(end);
         assert!(events.next().await.is_none());

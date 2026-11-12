@@ -1,5 +1,7 @@
 #![cfg(feature = "websocket")]
 
+#[path = "websocket/flush.rs"]
+mod flush;
 #[path = "websocket/upgrade.rs"]
 mod upgrade;
 

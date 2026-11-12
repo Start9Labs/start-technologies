@@ -201,8 +201,12 @@ async fn setup_or_init(
         }
         .await;
         match &result {
-            Ok(Ok(_)) => init_ctx.complete(Ok(())),
-            Err(error) => init_ctx.complete(Err(error.clone_output())),
+            Ok(Ok(_)) => init_ctx.complete_and_retire(Ok(())).await,
+            Err(error) => {
+                init_ctx
+                    .complete_and_retire(Err(error.clone_output()))
+                    .await
+            }
             Ok(Err(_)) => (),
         }
         result

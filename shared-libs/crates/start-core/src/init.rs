@@ -136,8 +136,6 @@ pub async fn run_script<P: AsRef<Path>>(path: P, mut progress: PhaseProgressTrac
             .input(Some(&mut reader))
             .invoke(ErrorKind::Unknown)
             .await?;
-        // TODO: inherit?
-
         Ok::<_, Error>(())
     }
     .await
@@ -546,15 +544,19 @@ pub async fn init_progress(
     let progress = ctx.progress.snapshot();
     let source = ctx.progress_stream();
     if let Some(stream) = rpc_stream {
+        let observer = ctx.observers.subscribe()?;
         tokio::spawn(async move {
+            let _observer = observer;
             let result = stream.forward(source).await;
-            let _ = stream.close(result);
+            let _ = stream.close_and_flush(result).await;
         });
         return Ok(InitProgressRes {
             progress,
             guid: None,
         });
     }
+    drop(ctx.observers.subscribe()?);
+    let observers = ctx.observers.clone();
     let guid = Guid::new();
     ctx.rpc_continuations
         .add(
@@ -563,7 +565,14 @@ pub async fn init_progress(
                 WebSocketPolicy::Public,
                 ctx.secure_session().cloned(),
                 |ws| async move {
-                    if let Err(e) = crate::progress::forward_progress(ws, source).await {
+                    let result = match observers.subscribe() {
+                        Ok(observer) => {
+                            let _observer = observer;
+                            crate::progress::forward_progress(ws, source).await
+                        }
+                        Err(error) => ws.close_result(Err::<String, _>(error)).await,
+                    };
+                    if let Err(e) = result {
                         if !crate::util::net::is_ws_reset_without_close(&e) {
                             tracing::error!("{}", t!("init.error-closing-websocket", error = e));
                             tracing::debug!("{e:?}");

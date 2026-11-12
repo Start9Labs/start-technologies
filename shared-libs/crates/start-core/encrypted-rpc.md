@@ -151,8 +151,19 @@ The existing actor/wrapper owns backpressure, write deadlines and producer lifet
 
 Application close results are authenticated. Physical EOF or Close cannot establish
 success, and a failed acknowledgement cannot discard an already verified result.
-Update-progress termination is not business success: OS consumers consult staged restart
-state. The generic `util/net.rs::WebSocket` retains keepalive and close ownership.
+Typed RPC terminals carry actual operation outcomes; percentages and staged restart state
+do not substitute for them. The generic `util/net.rs::WebSocket` retains keepalive and close
+ownership.
+
+Both initialization boot paths publish their actual result, then retire init observation
+before replacing the router. Accepted typed observers retain a lease through the existing
+connection actor's terminal flush or cancellation. Redeemed legacy GUIDs retain a lease
+through their existing progress/close handling; unopened GUIDs do not delay retirement.
+Retirement rejects new init subscriptions and drains accepted leases within the default RPC
+write deadline. A stalled initial batch can otherwise prevent terminal delivery before a
+write even begins. Deadline expiry permits normal epoch cancellation; no terminal is
+guaranteed across peer loss, reboot or process replacement. Outcome replay remains available
+while an init context is active, before retirement.
 
 ## Identity observations and browser caller contracts
 

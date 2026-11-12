@@ -53,35 +53,46 @@ async fn actual_init_cli_uses_startup_possession_and_the_actual_terminal() {
     tokio::fs::write(&key, "not a key").await.unwrap();
     for failed in [false, true] {
         let ctx = context().await;
-        ctx.complete(if failed {
+        let (host, mut server) = server(ui_router(ctx.clone())).await;
+        let child = tokio::process::Command::new(&binary)
+            .current_dir(temp.path())
+            .env("HOME", temp.path())
+            .args([
+                "--host",
+                &host,
+                "--id-key-path",
+                key.to_str().unwrap(),
+                "--id-key-gpg",
+                "unavailable-init-fixture",
+                "init",
+                "subscribe",
+            ])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !ctx.observers.has_observers() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        ctx.complete_and_retire(if failed {
             Err(Error::new(
                 eyre!("actual init failure"),
                 ErrorKind::Filesystem,
             ))
         } else {
             Ok(())
-        });
-        let (host, _server) = server(ui_router(ctx)).await;
-        let output = tokio::time::timeout(
-            Duration::from_secs(15),
-            tokio::process::Command::new(&binary)
-                .current_dir(temp.path())
-                .env("HOME", temp.path())
-                .args([
-                    "--host",
-                    &host,
-                    "--id-key-path",
-                    key.to_str().unwrap(),
-                    "--id-key-gpg",
-                    "unavailable-init-fixture",
-                    "init",
-                    "subscribe",
-                ])
-                .output(),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        })
+        .await;
+        server.serve_router(Router::new());
+        let output = tokio::time::timeout(Duration::from_secs(15), child.wait_with_output())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             output.status.success(),
             !failed,
@@ -92,6 +103,169 @@ async fn actual_init_cli_uses_startup_possession_and_the_actual_terminal() {
             assert_eq!(output.status.code(), Some(ErrorKind::Filesystem as i32));
         }
         assert_eq!(tokio::fs::read_to_string(&key).await.unwrap(), "not a key");
+    }
+}
+
+#[tokio::test]
+async fn initialization_terminal_is_written_before_router_replacement() {
+    for failed in [false, true] {
+        for _ in 0..8 {
+            let ctx = context().await;
+            let (host, mut server) = server(ui_router(ctx.clone())).await;
+            let cli =
+                CliContext::init(ClientConfig::try_parse_from(["test", "-H", &host]).unwrap())
+                    .unwrap();
+            let mut response = cli
+                .call_startup_stream::<crate::progress::FullProgress, ()>(
+                    "init.subscribe",
+                    imbl_value::json!({}),
+                    http::HeaderMap::new(),
+                )
+                .await
+                .unwrap();
+            assert!(
+                !response
+                    .items
+                    .next()
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .overall
+                    .is_complete()
+            );
+            let result = if failed {
+                Err(Error::new(
+                    eyre!("actual init failure"),
+                    ErrorKind::Filesystem,
+                ))
+            } else {
+                Ok(())
+            };
+            ctx.complete_and_retire(result).await;
+            server.serve_router(Router::new());
+            let outcome = async {
+                while response.items.next().await?.is_some() {}
+                response.items.finish().await
+            }
+            .await;
+            if failed {
+                assert_eq!(outcome.unwrap_err().code, ErrorKind::Filesystem as i32);
+            } else {
+                outcome.unwrap();
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn unredeemed_initialization_guid_does_not_delay_retirement_or_allow_new_observers() {
+    let ctx = context().await;
+    let (host, _server) = server(ui_router(ctx.clone())).await;
+    let cli =
+        CliContext::init(ClientConfig::try_parse_from(["test", "-H", &host]).unwrap()).unwrap();
+    let initial: crate::init::InitProgressRes = from_value(
+        cli.call_remote::<InitContext>("init.subscribe", imbl_value::json!({}))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(initial.guid.is_some());
+    let retirement = ctx.complete_and_retire(Ok(()));
+    tokio::pin!(retirement);
+    assert!(futures::poll!(retirement.as_mut()).is_ready());
+    let error = cli
+        .call_startup_stream::<crate::progress::FullProgress, ()>(
+            "init.subscribe",
+            imbl_value::json!({}),
+            http::HeaderMap::new(),
+        )
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.code, ErrorKind::Cancelled as i32);
+    assert_eq!(
+        cli.call_remote::<InitContext>("state", imbl_value::json!({}))
+            .await
+            .unwrap()
+            .as_str(),
+        Some("initializing")
+    );
+}
+
+#[tokio::test]
+async fn canceled_initialization_observer_releases_retirement() {
+    let ctx = context().await;
+    let (host, _server) = server(ui_router(ctx.clone())).await;
+    let cli =
+        CliContext::init(ClientConfig::try_parse_from(["test", "-H", &host]).unwrap()).unwrap();
+    let response = cli
+        .call_startup_stream::<crate::progress::FullProgress, ()>(
+            "init.subscribe",
+            imbl_value::json!({}),
+            http::HeaderMap::new(),
+        )
+        .await
+        .unwrap();
+    drop(response);
+    cli.call_remote::<InitContext>("state", imbl_value::json!({}))
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), ctx.complete_and_retire(Ok(())))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn redeemed_initialization_guid_drains_its_actual_close_before_retirement() {
+    for failed in [false, true] {
+        let ctx = context().await;
+        let (host, mut server) = server(ui_router(ctx.clone())).await;
+        let cli =
+            CliContext::init(ClientConfig::try_parse_from(["test", "-H", &host]).unwrap()).unwrap();
+        let initial: crate::init::InitProgressRes = from_value(
+            cli.call_remote::<InitContext>("init.subscribe", imbl_value::json!({}))
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let mut socket = cli
+            .ws_continuation::<InitContext>(initial.guid.unwrap())
+            .await
+            .unwrap();
+        crate::util::net::tungstenite::next_json::<crate::progress::FullProgress, _>(&mut socket)
+            .await
+            .unwrap();
+        let result = if failed {
+            Err(Error::new(
+                eyre!("actual legacy init failure"),
+                ErrorKind::Filesystem,
+            ))
+        } else {
+            Ok(())
+        };
+        let read_terminal = async {
+            loop {
+                match socket.next().await.unwrap().unwrap() {
+                    tokio_tungstenite::tungstenite::Message::Text(_) => (),
+                    tokio_tungstenite::tungstenite::Message::Close(Some(frame)) => {
+                        assert_eq!(u16::from(frame.code), if failed { 1011 } else { 1000 });
+                        let _ = futures::SinkExt::send(
+                            &mut socket,
+                            tokio_tungstenite::tungstenite::Message::Close(None),
+                        )
+                        .await;
+                        break;
+                    }
+                    other => panic!("expected authenticated init close, got {other:?}"),
+                }
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(ctx.complete_and_retire(result), read_terminal);
+        })
+        .await
+        .unwrap();
+        server.serve_router(Router::new());
     }
 }
 

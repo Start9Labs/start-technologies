@@ -70,7 +70,9 @@ async fn inner_main(
             .await
         }
         .await;
-        init_ctx.complete(result.as_ref().map(|_| ()).map_err(Error::clone_output));
+        init_ctx
+            .complete_and_retire(result.as_ref().map(|_| ()).map_err(Error::clone_output))
+            .await;
         let ctx = result?;
 
         server.serve_ui_for(ctx.clone());

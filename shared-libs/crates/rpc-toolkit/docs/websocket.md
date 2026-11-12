@@ -81,12 +81,18 @@ not cloneable; clone context and parameter fields separately when needed.
   one terminal result. It is synchronous and uses a reserved slot even when the
   event buffer is full. A terminal serialization failure becomes an internal
   error on the wire.
+- `close_and_flush(result).await` queues the same reserved terminal and waits for
+  the connection actor's transport flush. Cancellation, initial failure and failed writes
+  release the waiter with `RPCSTREAM_CANCELLED_ERROR`. Serialization still occurs
+  synchronously. Await outside the initiating handler: its response precedes the terminal.
 - `closed().await` resolves when the transport drops the receiver. Pending sends
   then fail with `RPCSTREAM_CANCELLED_ERROR`; producers waiting on other work can
   select on `closed()` to stop promptly.
 
 A successful send or close accepts data locally; it is not a delivery
-acknowledgment. Applications own their producer tasks and threads and must act
+acknowledgment. `close_and_flush` confirms a terminal transport flush, not peer receipt
+or application success. Its receipt stays internal; the wire protocol is unchanged.
+Applications own their producer tasks and threads and must act
 on transport closure. The runnable [example](../examples/websocket.rs) exposes
 `watch` from an async task and `watch-thread` from an ordinary thread.
 
