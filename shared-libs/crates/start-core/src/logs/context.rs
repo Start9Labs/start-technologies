@@ -13,62 +13,64 @@ use crate::rpc_continuations::{RpcContinuation, RpcContinuations, WebSocketPolic
 pub type LogEntries = BoxStream<'static, Result<LogEntry, Error>>;
 
 /// Binds log observation to its context's existing revocation and continuation owners.
-/// Enrolled contexts must cancel observations when their signer is revoked.
+/// Enrolled contexts recheck live membership after registering revocation.
 pub trait LogContext: Context + AsRef<RpcContinuations> + SessionContext {
     fn forward_logs(
         &self,
         signer: Option<InternedString>,
         stream: RpcStream<LogEntry>,
         source: LogEntries,
-    );
+    ) -> impl Future<Output = Result<(), Error>> + Send;
     fn log_continuation(
         &self,
         signer: Option<InternedString>,
         policy: WebSocketPolicy,
         source: LogEntries,
-    ) -> RpcContinuation;
+    ) -> impl Future<Output = Result<RpcContinuation, Error>> + Send;
 }
 
 impl LogContext for RpcContext {
-    fn forward_logs(
+    async fn forward_logs(
         &self,
         signer: Option<InternedString>,
         stream: RpcStream<LogEntry>,
         source: LogEntries,
-    ) {
-        self.open_authed_continuations
-            .forward_stream(signer, stream, source);
+    ) -> Result<(), Error> {
+        crate::auth::continuation_subscription(self, signer)
+            .await?
+            .forward_stream(stream, source);
+        Ok(())
     }
 
-    fn log_continuation(
+    async fn log_continuation(
         &self,
         signer: Option<InternedString>,
         policy: WebSocketPolicy,
         source: LogEntries,
-    ) -> RpcContinuation {
-        RpcContinuation::ws_authed(
-            self,
-            signer,
+    ) -> Result<RpcContinuation, Error> {
+        Ok(RpcContinuation::ws_authed(
+            crate::auth::continuation_subscription(self, signer).await?,
             policy,
             self.secure_session().cloned(),
             |socket| forward_log_socket(socket, source),
             Duration::from_secs(30),
-        )
+        ))
     }
 }
 
 macro_rules! startup_logs {
     ($($context:ty),+) => {$(
         impl LogContext for $context {
-            fn forward_logs(&self, _: Option<InternedString>, stream: RpcStream<LogEntry>, source: LogEntries) {
+            async fn forward_logs(&self, _: Option<InternedString>, stream: RpcStream<LogEntry>, source: LogEntries) -> Result<(), Error> {
                 tokio::spawn(async move {
                     let result = stream.forward(source).await;
                     let _ = stream.close(result);
                 });
+                Ok(())
             }
 
-            fn log_continuation(&self, _: Option<InternedString>, policy: WebSocketPolicy, source: LogEntries) -> RpcContinuation {
-                RpcContinuation::ws(policy, self.secure_session().cloned(), |socket| forward_log_socket(socket, source), Duration::from_secs(30))
+            async fn log_continuation(&self, _: Option<InternedString>, policy: WebSocketPolicy, source: LogEntries) -> Result<RpcContinuation, Error> {
+                Ok(RpcContinuation::ws(policy, self.secure_session().cloned(), |socket| forward_log_socket(socket, source), Duration::from_secs(30)))
             }
         }
     )+};

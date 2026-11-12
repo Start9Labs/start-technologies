@@ -1074,8 +1074,7 @@ pub async fn attach(
         .add(
             guid.clone(),
             RpcContinuation::ws_authed(
-                &ctx,
-                signer,
+                crate::auth::continuation_subscription(&ctx, signer).await?,
                 WebSocketPolicy::Authenticated,
                 ctx.secure_session().cloned(),
                 move |mut ws| async move {

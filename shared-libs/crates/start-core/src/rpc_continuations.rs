@@ -97,8 +97,35 @@ impl std::fmt::Display for Guid {
     }
 }
 
+/// An already-registered revocation listener; registration does not grant authority.
+pub struct RevocationSubscription(BoxFuture<'static, ()>);
+
+impl Future for RevocationSubscription {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.0.poll_unpin(cx)
+    }
+}
+
+impl RevocationSubscription {
+    pub(crate) fn forward_stream<V: serde::Serialize + Send + 'static>(
+        self,
+        stream: rpc_toolkit::RpcStream<V>,
+        source: impl Stream<Item = Result<V, Error>> + Send + 'static,
+    ) {
+        tokio::spawn(async move {
+            let result: Result<(), rpc_toolkit::yajrc::RpcError> = tokio::select! {
+                biased;
+                _ = self => Err(session_killed().into()),
+                result = stream.forward(source) => result,
+            };
+            let _ = stream.close(result);
+        });
+    }
+}
+
 pub struct RestFuture {
-    kill: Option<BoxFuture<'static, ()>>,
+    kill: Option<RevocationSubscription>,
     fut: BoxFuture<'static, Result<Response, Error>>,
 }
 impl Future for RestFuture {
@@ -122,7 +149,7 @@ fn session_killed() -> Error {
 }
 
 pub struct WebSocketFuture {
-    kill: Option<BoxFuture<'static, ()>>,
+    kill: Option<RevocationSubscription>,
     fut: BoxFuture<'static, ()>,
 }
 impl Future for WebSocketFuture {
@@ -154,7 +181,7 @@ pub struct WebSocketHandler {
     callback: WebSocketCallback,
     policy: WebSocketPolicy,
     secure: Option<SecureSession>,
-    kill: Option<BoxFuture<'static, ()>>,
+    kill: Option<RevocationSubscription>,
 }
 impl WebSocketHandler {
     /// The redeemed GUID must identify this handler.
@@ -237,14 +264,16 @@ impl RpcContinuation {
             timeout,
         ))
     }
-    pub fn rest_authed<Ctx, T, F, Fut>(ctx: Ctx, session: T, handler: F, timeout: Duration) -> Self
+    pub fn rest_authed<F, Fut>(
+        subscription: RevocationSubscription,
+        handler: F,
+        timeout: Duration,
+    ) -> Self
     where
-        Ctx: AsRef<OpenAuthedContinuations<T>>,
-        T: Eq + Ord,
         F: FnOnce(Request) -> Fut + Send + 'static,
         Fut: Future<Output = Result<Response, Error>> + Send + 'static,
     {
-        let kill = Some(ctx.as_ref().subscribe_to_kill(session));
+        let kill = Some(subscription);
         RpcContinuation::Rest(TimedResource::new(
             Box::new(|req| RestFuture {
                 kill,
@@ -253,21 +282,18 @@ impl RpcContinuation {
             timeout,
         ))
     }
-    pub fn ws_authed<Ctx, T, F, Fut>(
-        ctx: Ctx,
-        session: T,
+    pub fn ws_authed<F, Fut>(
+        subscription: RevocationSubscription,
         policy: WebSocketPolicy,
         secure: Option<SecureSession>,
         handler: F,
         timeout: Duration,
     ) -> Self
     where
-        Ctx: AsRef<OpenAuthedContinuations<T>>,
-        T: Eq + Ord,
         F: FnOnce(WebSocket) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        let kill = Some(ctx.as_ref().subscribe_to_kill(session));
+        let kill = Some(subscription);
         RpcContinuation::WebSocket(TimedResource::new(
             WebSocketHandler {
                 callback: Box::new(|ws| handler(ws).boxed()),
@@ -355,23 +381,8 @@ where
             channel.send(()).ok();
         }
     }
-    pub(crate) fn forward_stream<V: serde::Serialize + Send + 'static>(
-        &self,
-        session: T,
-        stream: rpc_toolkit::RpcStream<V>,
-        source: impl Stream<Item = Result<V, Error>> + Send + 'static,
-    ) {
-        let kill = self.subscribe_to_kill(session);
-        tokio::spawn(async move {
-            let result: Result<(), rpc_toolkit::yajrc::RpcError> = tokio::select! {
-                _ = kill => Err(session_killed().into()),
-                result = stream.forward(source) => result,
-            };
-            let _ = stream.close(result);
-        });
-    }
-
-    fn subscribe_to_kill(&self, session: T) -> BoxFuture<'static, ()> {
+    /// Authentication must recheck live membership after acquiring this listener.
+    pub(crate) fn subscribe_to_kill(&self, session: T) -> RevocationSubscription {
         let mut map = self.0.lock().unwrap();
         let mut recv = if let Some(send) = map.get(&session) {
             send.subscribe()
@@ -380,10 +391,12 @@ where
             map.insert(session, send);
             recv
         };
-        async move {
-            let _ = recv.recv().await;
-        }
-        .boxed()
+        RevocationSubscription(
+            async move {
+                let _ = recv.recv().await;
+            }
+            .boxed(),
+        )
     }
 }
 
@@ -544,8 +557,7 @@ pub(crate) mod websocket_tests {
     async fn authenticated_local_session_retains_bulk_frames_and_revocation() {
         let open = Arc::new(OpenAuthedContinuations::new());
         let (url, _server) = serve(RpcContinuation::ws_authed(
-            open.clone(),
-            None::<&str>,
+            open.subscribe_to_kill(None::<&str>),
             WebSocketPolicy::Authenticated,
             None,
             echo,
@@ -591,8 +603,7 @@ pub(crate) mod websocket_tests {
     async fn revocation_tracking_does_not_exempt_public_continuations_from_limits() {
         let open = Arc::new(OpenAuthedContinuations::new());
         let (url, _server) = serve(RpcContinuation::ws_authed(
-            open.clone(),
-            "public",
+            open.subscribe_to_kill("public"),
             WebSocketPolicy::Public,
             None,
             echo,
@@ -759,8 +770,7 @@ pub(crate) mod websocket_tests {
         let (pending_send, pending_recv) = oneshot::channel();
         let (dropped_send, mut dropped_recv) = oneshot::channel::<()>();
         let (url, _server) = serve(RpcContinuation::ws_authed(
-            open.clone(),
-            Some("key"),
+            open.subscribe_to_kill(Some("key")),
             WebSocketPolicy::Authenticated,
             None,
             move |mut socket| async move {

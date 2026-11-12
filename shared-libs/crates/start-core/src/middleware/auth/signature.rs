@@ -19,7 +19,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::auth::AuthKeys;
+use crate::auth::{AuthKeys, LoginContext};
 use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
 use crate::net::host::binding::BindInfo;
@@ -271,15 +271,7 @@ impl SignatureAuthorizationContext for RpcContext {
         metadata: Self::AdditionalMetadata,
     ) -> Result<Self::CheckPubkeyRes, Error> {
         check_enrolled(pubkey, metadata.login, |key| {
-            Ok(self
-                .ephemeral_auth_keys
-                .peek(|keys| keys.0.contains_key(&**key))
-                || db
-                    .as_private()
-                    .as_sessions()
-                    .as_pubkeys()
-                    .as_idx(key)
-                    .is_some())
+            self.auth_key_is_enrolled(db, key)
         })
     }
     async fn post_auth_hook(&self, key: Self::CheckPubkeyRes, _: &RpcRequest) -> Result<(), Error> {

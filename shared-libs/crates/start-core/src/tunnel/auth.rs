@@ -119,7 +119,7 @@ impl SignatureAuthorizationContext for TunnelContext {
         metadata: Self::AdditionalMetadata,
     ) -> Result<Self::CheckPubkeyRes, Error> {
         check_enrolled(pubkey, metadata.login, |key| {
-            Ok(db.as_session_pubkeys().de()?.0.contains_key(&**key))
+            self.auth_key_is_enrolled(db, key)
         })
     }
     async fn post_auth_hook(
@@ -138,6 +138,16 @@ impl LocalAuthContext for TunnelContext {
     const LOCAL_AUTH_COOKIE_OWNERSHIP: &str = "root:root";
 }
 impl LoginContext for TunnelContext {
+    fn auth_key_is_enrolled(
+        &self,
+        db: &Model<Self::Database>,
+        key: &InternedString,
+    ) -> Result<bool, Error> {
+        Ok(Self::access_auth_keys(&mut db.clone())
+            .de()?
+            .0
+            .contains_key(&**key))
+    }
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys> {
         db.as_session_pubkeys_mut()
     }

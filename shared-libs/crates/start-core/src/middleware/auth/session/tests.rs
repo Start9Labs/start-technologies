@@ -123,8 +123,7 @@ async fn revocation_cancels_the_pending_encrypted_handshake_before_callback() {
     let called = Arc::new(AtomicBool::new(false));
     let observer = called.clone();
     let (url, _server) = serve(RpcContinuation::ws_authed(
-        open.clone(),
-        "client",
+        open.subscribe_to_kill("client"),
         WebSocketPolicy::Authenticated,
         Some(scope),
         move |_| async move {

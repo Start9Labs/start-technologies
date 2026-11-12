@@ -45,7 +45,7 @@ The toolkit's connection-local context carries provenance into handlers.
 `SignatureAuthorizationContext` owns database-backed enrollment, permissions and key lifecycle.
 A valid unknown key completes admission without roles. `SignatureAuth` checks current
 enrollment, roles, expiry, revocation and hooks on every RPC, including enrollment or
-revocation on an already-open connection. Request claims cannot replace the encrypted peer. Local/bearer credentials
+revocation on an already-open connection. `auth::continuation_subscription` registers the existing revocation listener before rechecking current key, ephemeral-key or bearer-token membership. Typed, WebSocket and REST bindings consume that same listener; revocation during asynchronous preparation cannot create a fresh unrevoked continuation. `LoginContext` owns shared membership selectors, preserving each context's expiry policy and independently authenticated local credentials. No roles or database snapshot are retained by the listener. Request claims cannot replace the encrypted peer. Local/bearer credentials
 retain their separate precedence. Setup, initialization and diagnostic seeds own ephemeral
 proof identities and the shared bounded replay policy, with immutable session provenance
 on context clones. These possession identities grant no enrollment roles. Their proof names

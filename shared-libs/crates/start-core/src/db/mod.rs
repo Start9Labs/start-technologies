@@ -237,13 +237,14 @@ pub async fn subscribe(
         sync_db: ctx.sync_db.subscribe(),
     };
     if let Some(stream) = rpc_stream {
-        ctx.open_authed_continuations.forward_stream(
-            signer,
-            stream,
-            futures::stream::unfold(sub, |mut sub| async move {
-                sub.recv().await.map(|revision| (Ok(revision), sub))
-            }),
-        );
+        crate::auth::continuation_subscription(&ctx, signer)
+            .await?
+            .forward_stream(
+                stream,
+                futures::stream::unfold(sub, |mut sub| async move {
+                    sub.recv().await.map(|revision| (Ok(revision), sub))
+                }),
+            );
         return Ok(SubscribeResult::Stream(dump));
     }
     let guid = Guid::new();
@@ -251,8 +252,7 @@ pub async fn subscribe(
         .add(
             guid.clone(),
             RpcContinuation::ws_authed(
-                &ctx,
-                signer,
+                crate::auth::continuation_subscription(&ctx, signer).await?,
                 WebSocketPolicy::Authenticated,
                 ctx.secure_session().cloned(),
                 |mut ws| async move {

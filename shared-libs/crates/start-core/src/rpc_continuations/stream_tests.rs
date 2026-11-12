@@ -45,7 +45,8 @@ async fn revocation_interrupts_a_blocked_producer_without_waiting_for_initializa
                         Some((Ok(n), (n + 1, guard)))
                     }
                 });
-                open.forward_stream("key", args.rpc_stream.unwrap(), source);
+                open.subscribe_to_kill("key")
+                    .forward_stream(args.rpc_stream.unwrap(), source);
                 initialize.notified().await;
                 Ok::<_, crate::Error>(())
             }

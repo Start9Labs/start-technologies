@@ -2,4 +2,4 @@
 release-notes: true
 ---
 
-- Stop normal log observations when the observing device's access is revoked.
+- Stop authenticated observations, terminal connections and file continuations when their access is revoked, including during asynchronous initialization.

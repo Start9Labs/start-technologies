@@ -154,11 +154,13 @@ impl PreparedLogFollow {
         stream: Option<RpcStream<LogEntry>>,
     ) -> Result<LogFollowResponse, Error> {
         let guid = if let Some(stream) = stream {
-            context.forward_logs(signer, stream, self.entries);
+            context.forward_logs(signer, stream, self.entries).await?;
             None
         } else {
             let guid = Guid::new();
-            let continuation = context.log_continuation(signer, policy, self.entries);
+            let continuation = context
+                .log_continuation(signer, policy, self.entries)
+                .await?;
             context.as_ref().add(guid.clone(), continuation).await;
             Some(guid)
         };

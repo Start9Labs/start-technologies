@@ -152,8 +152,9 @@ pub async fn update_system(
         done.await.with_kind(ErrorKind::Cancelled)?
     });
     let progress = if let Some(stream) = rpc_stream {
-        ctx.open_authed_continuations
-            .forward_stream(signer, stream, source);
+        crate::auth::continuation_subscription(&ctx, signer)
+            .await?
+            .forward_stream(stream, source);
         None
     } else if progress {
         let guid = Guid::new();
@@ -161,8 +162,7 @@ pub async fn update_system(
             .add(
                 guid.clone(),
                 RpcContinuation::ws_authed(
-                    &ctx,
-                    signer,
+                    crate::auth::continuation_subscription(&ctx, signer).await?,
                     WebSocketPolicy::Authenticated,
                     ctx.secure_session().cloned(),
                     move |socket| async move {

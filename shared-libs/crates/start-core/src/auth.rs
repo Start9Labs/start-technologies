@@ -23,7 +23,7 @@ use tracing::instrument;
 use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthorizationContext};
 use crate::prelude::*;
-use crate::rpc_continuations::OpenAuthedContinuations;
+use crate::rpc_continuations::{OpenAuthedContinuations, RevocationSubscription};
 use crate::sign::{AnyVerifyingKey, Signer};
 use crate::util::crypto::EncryptedWire;
 use crate::util::io::create_file_mod;
@@ -99,6 +99,23 @@ pub trait LoginContext: SignatureAuthorizationContext {
     fn access_tokens(db: &mut Model<Self::Database>) -> Option<&mut Model<TokenSessions>> {
         None
     }
+    /// Current key membership under the context's enrollment and expiry policy.
+    fn auth_key_is_enrolled(
+        &self,
+        db: &Model<Self::Database>,
+        key: &InternedString,
+    ) -> Result<bool, Error> {
+        Ok(self
+            .ephemeral_auth_keys()
+            .is_some_and(|keys| keys.peek(|keys| keys.0.contains_key(&**key)))
+            || Self::access_auth_keys(&mut db.clone())
+                .as_idx(key)
+                .is_some())
+    }
+    /// Current bearer membership in the context's authoritative token store.
+    fn auth_token_is_enrolled(&self, db: &Model<Self::Database>, token: &InternedString) -> bool {
+        Self::access_tokens(&mut db.clone()).is_some_and(|tokens| tokens.as_idx(token).is_some())
+    }
     fn check_password(db: &Model<Self::Database>, password: &str) -> Result<(), Error>;
     /// Whether a sign-in has ended, judged by a trusted clock. Defaults to
     /// [`MAX_IDLE`] without use.
@@ -126,6 +143,29 @@ pub struct LoginAttempt {
     /// The client's address, through any relay that recorded it.
     pub peer: Option<IpAddr>,
     pub user_agent: Option<String>,
+}
+
+/// Registers revocation before rechecking live credential membership; retains no grants or snapshot.
+/// An absent subject retains the caller's independently authenticated local-credential scope.
+pub async fn continuation_subscription<C: LoginContext>(
+    context: &C,
+    subject: Option<InternedString>,
+) -> Result<RevocationSubscription, Error> {
+    let subscription = context
+        .open_authed_continuations()
+        .subscribe_to_kill(subject.clone());
+    if let Some(subject) = subject {
+        let db = context.db().peek().await;
+        if !context.auth_key_is_enrolled(&db, &subject)?
+            && !context.auth_token_is_enrolled(&db, &subject)
+        {
+            return Err(Error::new(
+                eyre!("{}", t!("middleware.auth.key-not-authorized")),
+                crate::ErrorKind::Authorization,
+            ));
+        }
+    }
+    Ok(subscription)
 }
 
 /// Removes bearer tokens and kills the continuations they opened. For call sites

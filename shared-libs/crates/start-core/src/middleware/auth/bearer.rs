@@ -71,8 +71,7 @@ impl<C: LoginContext> Middleware<C> for BearerAuth {
                     ErrorKind::Authorization,
                 )
             })?;
-            let enrolled = C::access_tokens(&mut context.db().peek().await)
-                .is_some_and(|tokens| tokens.as_idx(&session).is_some());
+            let enrolled = context.auth_token_is_enrolled(&context.db().peek().await, &session);
             if !enrolled {
                 return Err(Error::new(
                     eyre!("{}", t!("middleware.auth.key-not-authorized")),
@@ -127,6 +126,7 @@ pub(crate) mod tests {
         db: TypedPatchDb<TestDb>,
         nonces: SyncMutex<NonceCache>,
         continuations: OpenAuthedContinuations<Option<InternedString>>,
+        ephemeral: SyncMutex<AuthKeys>,
         login_attempts: SyncMutex<Vec<(LoginAttempt, bool)>>,
     }
     impl Context for TestCtx {}
@@ -167,6 +167,9 @@ pub(crate) mod tests {
         fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
             &self.0.continuations
         }
+        fn ephemeral_auth_keys(&self) -> Option<&SyncMutex<AuthKeys>> {
+            Some(&self.0.ephemeral)
+        }
         fn remove_enrolled_keys(
             db: &mut Model<TestDb>,
             keys: &BTreeSet<InternedString>,
@@ -183,7 +186,7 @@ pub(crate) mod tests {
             metadata: LoginMetadata,
         ) -> Result<(), Error> {
             check_enrolled(pubkey, metadata.login, |id| {
-                Ok(db.as_sessions().as_pubkeys().as_idx(id).is_some())
+                self.auth_key_is_enrolled(db, id)
             })
             .map(|_| ())
         }
@@ -228,6 +231,7 @@ pub(crate) mod tests {
             .unwrap(),
             nonces: SyncMutex::new(NonceCache::default()),
             continuations: OpenAuthedContinuations::new(),
+            ephemeral: SyncMutex::new(AuthKeys::default()),
             login_attempts: SyncMutex::new(Vec::new()),
         }))
     }
@@ -437,6 +441,71 @@ pub(crate) mod tests {
             .unwrap();
         let response = whoami(&server, bearer_headers(&created.token)).await;
         assert!(response["error"].is_object(), "{response}");
+    }
+
+    #[tokio::test]
+    async fn token_continuations_recheck_membership_and_keep_unbound_local_scopes() {
+        use futures::FutureExt;
+        let ctx = context().await;
+        let token = create(&ctx, "continuation").await;
+        let mut bound = crate::auth::continuation_subscription(&ctx, Some(token.id.clone()))
+            .await
+            .unwrap();
+        let mut local = crate::auth::continuation_subscription(&ctx, None)
+            .await
+            .unwrap();
+        assert!(futures::poll!(&mut bound).is_pending());
+        let continuations = &ctx.0.continuations;
+        ctx.db()
+            .mutate(|db| revoke_tokens::<TestCtx>(continuations, db, [token.id.clone()]))
+            .await
+            .result
+            .unwrap();
+        assert!(bound.now_or_never().is_some());
+        let Err(error) = crate::auth::continuation_subscription(&ctx, Some(token.id)).await else {
+            panic!("revoked token bound a continuation")
+        };
+        assert_eq!(error.kind, ErrorKind::Authorization);
+        assert!(futures::poll!(&mut local).is_pending());
+    }
+
+    #[tokio::test]
+    async fn ephemeral_key_continuations_use_the_live_key_owner() {
+        use futures::FutureExt;
+        let ctx = context().await;
+        let key = AnySigningKey::generate().verifying_key().interned_der64();
+        let now = chrono::Utc::now();
+        ctx.0.ephemeral.mutate(|keys| {
+            keys.0.insert(
+                key.clone(),
+                crate::auth::Session {
+                    name: None,
+                    logged_in: now,
+                    last_active: now,
+                    user_agent: None,
+                },
+            );
+        });
+        let bound = crate::auth::continuation_subscription(&ctx, Some(key.clone()))
+            .await
+            .unwrap();
+        assert!(
+            ctx.db()
+                .peek()
+                .await
+                .as_sessions()
+                .as_pubkeys()
+                .de()
+                .unwrap()
+                .0
+                .is_empty()
+        );
+        ctx.unenroll([key.clone()]).await.unwrap();
+        assert!(bound.now_or_never().is_some());
+        let Err(error) = crate::auth::continuation_subscription(&ctx, Some(key)).await else {
+            panic!("revoked ephemeral key bound a continuation")
+        };
+        assert_eq!(error.kind, ErrorKind::Authorization);
     }
 
     #[tokio::test]

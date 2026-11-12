@@ -684,8 +684,9 @@ pub async fn metrics_follow(
 ) -> Result<MetricsFollowResponse, Error> {
     let (metrics, updates) = observe_metrics(ctx.metrics_cache.clone())?;
     if let Some(stream) = rpc_stream {
-        ctx.open_authed_continuations
-            .forward_stream(signer, stream, updates);
+        crate::auth::continuation_subscription(&ctx, signer)
+            .await?
+            .forward_stream(stream, updates);
         return Ok(MetricsFollowResponse {
             guid: None,
             metrics,
@@ -696,8 +697,7 @@ pub async fn metrics_follow(
         .add(
             guid.clone(),
             RpcContinuation::ws_authed(
-                &ctx,
-                signer,
+                crate::auth::continuation_subscription(&ctx, signer).await?,
                 WebSocketPolicy::Authenticated,
                 ctx.secure_session().cloned(),
                 |mut ws| async move {

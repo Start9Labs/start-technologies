@@ -237,15 +237,8 @@ impl SignatureAuthorizationContext for ServerContext {
         pubkey: Option<&AnyVerifyingKey>,
         metadata: Self::AdditionalMetadata,
     ) -> Result<Self::CheckPubkeyRes, startos::Error> {
-        let now = Utc::now();
-        let clock_trusted = Path::new(TIME_VALID_PATH).exists();
         check_enrolled(pubkey, metadata.login, |key| {
-            Ok(db
-                .as_session_pubkeys()
-                .de()?
-                .0
-                .get(&**key)
-                .is_some_and(|session| !sign_in_ended(session.logged_in, now, clock_trusted)))
+            self.auth_key_is_enrolled(db, key)
         })
     }
     async fn post_auth_hook(
@@ -266,6 +259,19 @@ impl LocalAuthContext for ServerContext {
 }
 
 impl LoginContext for ServerContext {
+    fn auth_key_is_enrolled(
+        &self,
+        db: &Model<Self::Database>,
+        key: &InternedString,
+    ) -> Result<bool, startos::Error> {
+        let now = Utc::now();
+        let clock_trusted = Path::new(TIME_VALID_PATH).exists();
+        Ok(Self::access_auth_keys(&mut db.clone())
+            .de()?
+            .0
+            .get(&**key)
+            .is_some_and(|session| !sign_in_ended(session.logged_in, now, clock_trusted)))
+    }
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys> {
         db.as_session_pubkeys_mut()
     }
