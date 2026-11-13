@@ -147,7 +147,6 @@ export default {
   160: 'Ładowanie',
   161: 'Katalog już dodany',
   162: 'Weryfikowanie katalogu',
-  163: 'Czy na pewno chcesz usunąć ten katalog?',
   164: 'Dodaj niestandardowy katalog',
   165: 'Domena lub adres URL niestandardowego katalogu',
   166: 'Musi być poprawnym adresem URL',
@@ -758,7 +757,6 @@ export default {
   870: 'Opcja 2',
   872: 'OK',
   873: 'Nowy format kopii zapasowej',
-  874: 'Zapisz ten katalog',
   875: 'Spakuj usługę',
   876: 'Zdobądź serwer Start9',
   877: 'Nie można połączyć z katalogiem',
@@ -961,4 +959,6 @@ export default {
   1110: 'Maksymalny rozmiar pliku',
   1111: 'Zobacz w sklepie',
   1112: 'Ta alternatywna implementacja spełnia wymaganie',
+  1113: 'Zapisz w tej przeglądarce',
+  1114: 'Spowoduje to jedynie usunięcie rejestru z listy zapisanej w tej przeglądarce. Sam rejestr pozostanie bez zmian.',
 } satisfies i18n

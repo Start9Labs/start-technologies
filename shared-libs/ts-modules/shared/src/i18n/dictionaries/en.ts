@@ -146,7 +146,6 @@ export const ENGLISH: Record<string, number> = {
   'Loading': 160,
   'Registry already added': 161,
   'Validating registry': 162,
-  'Are you sure you want to delete this registry?': 163,
   'Add Custom Registry': 164,
   'The domain or URL of the custom registry': 165,
   'Must be a valid URL': 166,
@@ -765,7 +764,6 @@ export const ENGLISH: Record<string, number> = {
   'Option 1': 868,
   'Option 2': 870,
   'OK': 872,
-  'Save this registry': 874,
   'Package a service': 875,
   'Get a Start9 server': 876,
   'Could not reach registry': 877,
@@ -962,4 +960,6 @@ export const ENGLISH: Record<string, number> = {
   'Maximum file size': 1110,
   'View in Marketplace': 1111,
   'This alternative implementation meets the requirement': 1112,
+  'Save to this browser': 1113,
+  'This only removes the registry from the list saved in this browser. The registry itself is not affected.': 1114,
 }

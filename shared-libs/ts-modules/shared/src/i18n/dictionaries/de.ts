@@ -147,7 +147,6 @@ export default {
   160: 'Lade...',
   161: 'Register bereits hinzugefügt',
   162: 'Register wird überprüft',
-  163: 'Möchten Sie dieses Register wirklich löschen?',
   164: 'Benutzerdefiniertes Register hinzufügen',
   165: 'Die Domain oder URL des benutzerdefinierten Registers',
   166: 'Muss eine gültige URL sein',
@@ -758,7 +757,6 @@ export default {
   870: 'Option 2',
   872: 'OK',
   873: 'Neues Backup-Format',
-  874: 'Dieses Register speichern',
   875: 'Einen Dienst paketieren',
   876: 'Einen Start9-Server holen',
   877: 'Register konnte nicht erreicht werden',
@@ -961,4 +959,6 @@ export default {
   1110: 'Maximale Dateigröße',
   1111: 'Im Marktplatz anzeigen',
   1112: 'Diese alternative Implementierung erfüllt die Anforderung',
+  1113: 'In diesem Browser speichern',
+  1114: 'Dadurch wird die Registry nur aus der in diesem Browser gespeicherten Liste entfernt. Die Registry selbst bleibt unverändert.',
 } satisfies i18n

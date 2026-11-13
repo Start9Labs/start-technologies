@@ -12,6 +12,7 @@ import {
   TuiButton,
   TuiDataList,
   TuiDropdown,
+  TuiHint,
   TuiIcon,
   TuiTitle,
 } from '@taiga-ui/core'
@@ -47,6 +48,17 @@ import { StoreIconDirective } from './store-icon.directive'
       </b>
       @if (data(); as d) {
         <tui-data-list *tuiDropdown size="m">
+          @if (!manageRegistriesLink() && d.unsaved; as url) {
+            <button tuiOption (click)="saveCurrent(url)">
+              <span tuiAvatar><img [storeIcon]="url" /></span>
+              <span tuiTitle>
+                {{ fetched()?.info?.name || url }}
+                <span tuiSubtitle>{{ 'Save to this browser' | i18n }}</span>
+              </span>
+              <tui-icon icon="@tui.bookmark" />
+            </button>
+            <hr />
+          }
           <div class="g-title">
             <small>{{ 'Saved Registries' | i18n }}</small>
             @if (manageRegistriesLink()) {
@@ -87,17 +99,6 @@ import { StoreIconDirective } from './store-icon.directive'
               }
             </button>
           }
-          @if (!manageRegistriesLink() && d.unsaved; as url) {
-            <hr />
-            <button tuiOption (click)="saveCurrent(url)">
-              <span tuiAvatar><img [storeIcon]="url" /></span>
-              <span tuiTitle>
-                {{ fetched()?.info?.name || url }}
-                <span tuiSubtitle>{{ 'Save this registry' | i18n }}</span>
-              </span>
-              <tui-icon icon="@tui.bookmark" />
-            </button>
-          }
           @for (
             registry of manageRegistriesLink() ? [] : d.custom;
             track registry.url
@@ -105,22 +106,33 @@ import { StoreIconDirective } from './store-icon.directive'
             @if ($first) {
               <hr />
             }
-            <button
-              tuiOption
-              (click)="connect(registry.url)"
-              (keydown.backspace)="delete(registry.url)"
-              (keydown.delete)="delete(registry.url)"
-            >
-              <span tuiAvatar><img [storeIcon]="registry.url" /></span>
-              <span tuiTitle>
-                {{ registry.name }}
-                <span tuiSubtitle>{{ registry.url }}</span>
-              </span>
-              <tui-icon icon="@tui.trash" (click.stop)="delete(registry.url)" />
-              @if (registry.selected) {
-                <tui-icon icon="@tui.check" />
-              }
-            </button>
+            <div class="custom">
+              <button
+                tuiOption
+                (click)="connect(registry.url)"
+                (keydown.backspace)="delete(registry.url)"
+                (keydown.delete)="delete(registry.url)"
+              >
+                <span tuiAvatar><img [storeIcon]="registry.url" /></span>
+                <span tuiTitle>
+                  {{ registry.name }}
+                  <span tuiSubtitle>{{ registry.url }}</span>
+                </span>
+                @if (registry.selected) {
+                  <tui-icon icon="@tui.check" />
+                }
+              </button>
+              <button
+                tuiIconButton
+                size="xs"
+                appearance="icon"
+                iconStart="@tui.trash"
+                [tuiHint]="'Remove' | i18n"
+                (click)="delete(registry.url)"
+              >
+                {{ 'Remove' | i18n }}
+              </button>
+            </div>
           }
         </tui-data-list>
       }
@@ -152,6 +164,17 @@ import { StoreIconDirective } from './store-icon.directive'
       justify-content: space-between;
       margin: 0.5rem 0.5rem 0.25rem;
     }
+
+    .custom {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+
+      [tuiOption] {
+        flex: 1;
+        min-inline-size: 0;
+      }
+    }
   `,
   imports: [
     StoreIconDirective,
@@ -159,6 +182,7 @@ import { StoreIconDirective } from './store-icon.directive'
     TuiButton,
     TuiDropdown,
     TuiDataList,
+    TuiHint,
     TuiIcon,
     TuiTitle,
     TuiAvatar,
@@ -250,11 +274,12 @@ export class MarketplaceRegistrySelectComponent {
   delete(url: string): void {
     this.dialog
       .openConfirm({
-        label: 'Confirm',
+        label: 'Remove registry?',
         size: 's',
         data: {
-          content: 'Are you sure you want to delete this registry?',
-          yes: 'Delete',
+          content:
+            'This only removes the registry from the list saved in this browser. The registry itself is not affected.',
+          yes: 'Remove',
           no: 'Cancel',
         },
       })
@@ -262,7 +287,7 @@ export class MarketplaceRegistrySelectComponent {
       .subscribe(() =>
         this.tasks.run(
           async () => await this.marketplace.delete(url),
-          'Deleting',
+          'Removing',
         ),
       )
   }

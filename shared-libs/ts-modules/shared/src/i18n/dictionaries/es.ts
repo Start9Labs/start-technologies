@@ -147,7 +147,6 @@ export default {
   160: 'Cargando',
   161: 'Registro ya agregado',
   162: 'Validando registro',
-  163: '¿Estás seguro de que deseas eliminar este registro?',
   164: 'Agregar registro personalizado',
   165: 'El dominio o la URL del registro personalizado',
   166: 'Debe ser una URL válida',
@@ -758,7 +757,6 @@ export default {
   870: 'Opción 2',
   872: 'OK',
   873: 'Nuevo formato de copia de seguridad',
-  874: 'Guardar este registro',
   875: 'Empaquetar un servicio',
   876: 'Consigue un servidor Start9',
   877: 'No se pudo acceder al registro',
@@ -961,4 +959,6 @@ export default {
   1110: 'Tamaño máximo del archivo',
   1111: 'Ver en el Mercado',
   1112: 'Esta implementación alternativa cumple el requisito',
+  1113: 'Guardar en este navegador',
+  1114: 'Esto solo elimina el registro de la lista guardada en este navegador. El registro en sí no se ve afectado.',
 } satisfies i18n

@@ -147,7 +147,6 @@ export default {
   160: 'Chargement',
   161: 'Bibliothèque déjà ajoutée',
   162: 'Validation de la bibliothèque',
-  163: 'Voulez-vous vraiment supprimer cette bibliothèque ?',
   164: 'Ajouter une bibliothèque personnalisée',
   165: 'Le domaine ou l’URL de la bibliothèque personnalisée',
   166: 'Doit être une URL valide',
@@ -758,7 +757,6 @@ export default {
   870: 'Option 2',
   872: 'OK',
   873: 'Nouveau format de sauvegarde',
-  874: 'Enregistrer cette bibliothèque',
   875: 'Empaqueter un service',
   876: 'Obtenez un serveur Start9',
   877: 'Impossible de joindre la bibliothèque',
@@ -961,4 +959,6 @@ export default {
   1110: 'Taille maximale du fichier',
   1111: 'Voir dans la bibliothèque de services',
   1112: 'Cette implémentation alternative remplit la condition requise',
+  1113: 'Enregistrer dans ce navigateur',
+  1114: "Cela retire seulement le registre de la liste enregistrée dans ce navigateur. Le registre lui-même n'est pas affecté.",
 } satisfies i18n
