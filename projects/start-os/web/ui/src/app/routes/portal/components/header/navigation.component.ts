@@ -23,6 +23,12 @@ import { getMenu } from 'src/app/utils/system-utilities'
             <tui-badge-notification tuiSlot="top" size="s">
               {{ badge }}
             </tui-badge-notification>
+          } @else if (item.warning()) {
+            <tui-icon
+              tuiSlot="top"
+              icon="@tui.triangle-alert"
+              class="warning"
+            />
           }
           <tui-icon [icon]="item.icon" />
         </tui-badged-content>
@@ -155,6 +161,14 @@ import { getMenu } from 'src/app/utils/system-utilities'
 
     :host-context(tui-root._mobile) {
       display: none;
+    }
+
+    .link tui-icon.warning {
+      font-size: 0.75rem;
+      padding: 0.125rem;
+      border-radius: 50%;
+      color: var(--tui-status-warning);
+      background: var(--tui-background-base);
     }
   `,
   imports: [

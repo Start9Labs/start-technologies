@@ -38,7 +38,7 @@ fn backup_acceptance_rejects_a_running_conversion_before_publishing_progress() {
         let result = assure_backing_up(
             &mut db,
             &FullProgress::new(),
-            &BackupTargetId::Cifs { id: 1 },
+            &"cifs-1".parse().unwrap(),
             "server-a",
         );
         assert_eq!(result.is_err(), state == ConversionState::Running);
@@ -57,8 +57,8 @@ fn backup_acceptance_rejects_a_running_conversion_before_publishing_progress() {
 #[test]
 fn conversion_on_another_target_or_server_does_not_block_backup_acceptance() {
     for (target, server) in [
-        (BackupTargetId::Cifs { id: 2 }, "server-a"),
-        (BackupTargetId::Cifs { id: 1 }, "server-b"),
+        ("cifs-2".parse::<BackupTargetId>().unwrap(), "server-a"),
+        ("cifs-1".parse::<BackupTargetId>().unwrap(), "server-b"),
     ] {
         let mut db = database(ConversionState::Running);
         assure_backing_up(&mut db, &FullProgress::new(), &target, server).unwrap();
@@ -96,7 +96,7 @@ fn power_commitment_rejects_backups_even_when_conversion_is_running() {
         let error = assure_backing_up(
             &mut db,
             &initial_progress(),
-            &BackupTargetId::Cifs { id: 1 },
+            &"cifs-1".parse().unwrap(),
             "server-a",
         )
         .unwrap_err();
@@ -121,13 +121,7 @@ fn starts_a_backup_on_an_idle_server() {
         .ser(&Some(initial.clone()))
         .unwrap();
 
-    assure_backing_up(
-        &mut db,
-        &initial,
-        &BackupTargetId::Cifs { id: 1 },
-        "server-a",
-    )
-    .unwrap();
+    assure_backing_up(&mut db, &initial, &"cifs-1".parse().unwrap(), "server-a").unwrap();
 
     assert_eq!(db.as_value(), expected.as_value());
 }
@@ -138,7 +132,7 @@ fn refuses_an_existing_backup_without_mutating_the_database() {
     assure_backing_up(
         &mut db,
         &initial_progress(),
-        &BackupTargetId::Cifs { id: 1 },
+        &"cifs-1".parse().unwrap(),
         "server-a",
     )
     .unwrap();
@@ -147,7 +141,7 @@ fn refuses_an_existing_backup_without_mutating_the_database() {
     let error = assure_backing_up(
         &mut db,
         &FullProgress::new(),
-        &BackupTargetId::Cifs { id: 1 },
+        &"cifs-1".parse().unwrap(),
         "server-a",
     )
     .unwrap_err();
@@ -176,7 +170,7 @@ fn refuses_a_backup_once_a_power_action_has_begun() {
             let error = assure_backing_up(
                 &mut db,
                 &initial_progress(),
-                &BackupTargetId::Cifs { id: 1 },
+                &"cifs-1".parse().unwrap(),
                 "server-a",
             )
             .unwrap_err();
@@ -203,13 +197,7 @@ fn admits_a_backup_while_a_power_action_is_only_deferred() {
             .unwrap();
         let initial = initial_progress();
 
-        assure_backing_up(
-            &mut db,
-            &initial,
-            &BackupTargetId::Cifs { id: 1 },
-            "server-a",
-        )
-        .unwrap();
+        assure_backing_up(&mut db, &initial, &"cifs-1".parse().unwrap(), "server-a").unwrap();
 
         let status = db.as_public().as_server_info().as_status_info();
         assert_eq!(
@@ -220,13 +208,8 @@ fn admits_a_backup_while_a_power_action_is_only_deferred() {
         assert!(!status.as_shutting_down().de().unwrap());
         assert!(!status.as_restarting().de().unwrap());
         let before = db.as_value().clone();
-        let error = assure_backing_up(
-            &mut db,
-            &initial,
-            &BackupTargetId::Cifs { id: 1 },
-            "server-a",
-        )
-        .unwrap_err();
+        let error = assure_backing_up(&mut db, &initial, &"cifs-1".parse().unwrap(), "server-a")
+            .unwrap_err();
         assert_eq!(error.kind, ErrorKind::InvalidRequest);
         assert_eq!(
             error.display_src().to_string(),

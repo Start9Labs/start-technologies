@@ -5,7 +5,11 @@ import type {
   RpcReturnType,
 } from './osBindings/rpc/start-os'
 
-export type RpcCallOptions = { timeout?: number }
+export type RpcCallOptions = {
+  timeout?: number
+  /** HTTP transport headers; non-HTTP transports may ignore them. */
+  headers?: Record<string, string>
+}
 
 /** Carries one call to a server; the client never sees a wire format. */
 export interface RpcTransport<Options = RpcCallOptions> {
@@ -58,7 +62,6 @@ const reserved = new Set([
   ...Object.getOwnPropertyNames(Object.prototype),
   'then',
   'toJSON',
-  'inspect',
 ])
 
 const node = <Options>(

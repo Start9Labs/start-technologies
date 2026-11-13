@@ -171,6 +171,11 @@ pub struct CancellationHandle {
     handle: AbortHandle,
 }
 impl CancellationHandle {
+    /// True after the future is dropped, not when cancellation is requested.
+    pub fn is_finished(&self) -> bool {
+        *self.on_drop.0.borrow()
+    }
+
     pub fn cancel(&mut self) {
         self.handle.abort();
     }
