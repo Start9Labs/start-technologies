@@ -1,16 +1,18 @@
 # Setup
 
-The packaged `startos-registry` service is the supported way to run a registry. Install it from any registry that carries it (the Start9 registry does), complete two first-run actions, and you're ready to publish.
+The packaged `startos-registry` service is the supported way to run a registry. Install it from any registry that carries it (the Start9 registry does), name the registry and register an administrator, and you're ready to publish.
 
 ## 1. Install the service
 
 From StartOS, open the Marketplace, find **StartOS Registry**, and install. The service has no external dependencies. Once installed, start it.
 
-On first install, StartOS surfaces two setup tasks under the service. **Both must be completed before the registry is usable.**
+A fresh install starts one registry, and StartOS surfaces two setup tasks under the service: **Manage Registries** and **Manage Signers**. They don't block the service from starting, but nobody can publish to the registry until Manage Signers has registered an administrator.
 
-## 2. Configure Registry
+## 2. Name and describe the registry
 
-Run the **Configure Registry** action to set the registry's display name (max 32 characters), an optional icon, and an optional description. This is what users will see when they browse your registry from another StartOS device; the description appears above the registry's services and may use markdown.
+Run the **Manage Registries** action to name the registry (1–32 characters). This is what users see when they browse your registry from another StartOS device. The same action can add more registries to the service, each with its own catalog, signers, and addresses.
+
+Then run **Configure Registry** to set an optional icon and description for it. The description appears above the registry's services and may use markdown.
 
 Use the description to identify who runs the registry, how to contact them, what packages it carries, and what support users can expect. Include a link to your package-signing public keys and instructions for verifying them.
 
@@ -42,7 +44,9 @@ it added. Manage package trust under System → Trusted Keys; see
 
 ## 3. Add the first administrator
 
-Run **Add Administrator** to register the first admin. You'll need a PEM-encoded Ed25519 public key, a label, and contact info (email or Matrix handle). Admins can manage signers, publish packages, register OS versions, and edit categories.
+Run **Manage Signers** and add an entry to the registry's signer list. Give it a label and paste your public key into **Public Keys**: a PEM-encoded Ed25519 public key, or a complete armored GPG export of an Ed25519 key. Contacts (email addresses, Matrix usernames, or URLs) are optional. Turn on **Admin**. Admins can manage signers, publish packages, register OS versions, and edit categories.
+
+**Offer for Trust**, on the same entry, is separate from **Admin**: it offers the signer's keys to users who connect the registry. See [Offering signing keys to users](host-registry-administration.md#offering-signing-keys-to-users) before turning it on.
 
 To generate a key on your workstation:
 
@@ -51,7 +55,7 @@ start-cli init-key
 start-cli pubkey
 ```
 
-`init-key` creates an Ed25519 keypair at `~/.startos/id.key.pem` (or `/run/startos/id.key.pem` if running on a StartOS device). `pubkey` prints the public half — that's what you paste into the **Public Key** field of the Add Administrator action.
+`init-key` creates an Ed25519 keypair at `~/.startos/id.key.pem` (or `/run/startos/id.key.pem` if running on a StartOS device). `pubkey` prints the public half — that's what you paste into the **Public Keys** field in Manage Signers.
 
 Treat the private key like an SSH key: it authenticates every admin and publish action you take against the registry. Back it up.
 
@@ -72,7 +76,7 @@ registry:
   default: https://my-registry.example.com
 ```
 
-Now `start-cli registry -r default index` works, and because it's named `default` you can drop the flag entirely (`-r` uses the `default` profile when omitted). Outside a workspace, keep passing `--registry <url>` on each command.
+Because it's named `default`, `start-cli registry index` now uses it with no flag. Give any other registry its own name and select it with `-r <name>`. Don't pass `-r default`: the flag itself sets the `default` profile, so naming `default` refers back to itself and fails with a profile reference cycle. Outside a workspace, keep passing `--registry <url>` on each command.
 
 ## 5. Smoke-test
 
