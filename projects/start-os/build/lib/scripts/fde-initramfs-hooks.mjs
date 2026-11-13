@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process'
 import { constants } from 'node:fs'
 import {
   access,
@@ -17,7 +18,12 @@ import {
   resolve,
 } from 'node:path'
 
+import { promisify } from 'node:util'
+
+import { admitCopiedProviders } from './fde-initramfs-providers.mjs'
 import { replaceOnce, requireReviewedContext } from './fde-reviewed-source.mjs'
+
+const run = promisify(execFile)
 
 const hooks = {
   fsck: ['53593d50a0be41f95bb191b941857e7cfb6050bab2e6778e20dacf6fe8207081'],
@@ -77,21 +83,47 @@ function reviewedHook(name, bytes) {
   }
   requireReviewedContext(Buffer.from(context), hooks[name][0], `hook ${name}`)
   if (name === 'zz-busybox') {
+    const start = original.indexOf('for alias in $($BB_BIN --list-long); do')
+    const end = original.indexOf('\n  [ -e "$DESTDIR/$alias" ]', start)
+    const binary = original.match(/^BB_BIN=.*$/m)[0]
+    const query = `${binary}\n${original.slice(start, end)}\n  printf '%s\\t%s\\n' "$alias" "$BB_BIN"\ndone`
     return replaceOnce(
-      original,
+      replaceOnce(
+        original,
+        'case "${1:-}" in',
+        `case "\${1:-}" in\n  fde-providers)\n${query}\nexit 0;;`,
+      ),
       'ln "$DESTDIR/bin/busybox" "$DESTDIR/$alias"',
       'ln -rs "$DESTDIR/bin/busybox" "$DESTDIR/$alias"',
     )
   }
   if (name === 'klibc-utils') {
-    return replaceOnce(
+    const copy = 'cp -pL "$src" "${DESTDIR}/bin"'
+    const directory = copy.match(/"(\$\{DESTDIR\}[^"\n]+)"$/)[1]
+    const target = `${directory}/$command`
+    const start = original.indexOf('for src in /usr/lib/klibc/bin/*; do')
+    const end = original.indexOf('cp -pL /usr/lib/klibc-', start)
+    const loop = original.slice(start, end)
+    const condition = loop.indexOf('\t\tif ! [ -e ')
+    const finish = loop.indexOf('\n\t\tfi', condition) + '\n\t\tfi'.length
+    const query = replaceOnce(
+      loop,
+      loop.slice(condition, finish),
+      `printf '%s\\t%s\\n' "${target.replace('${DESTDIR}', '')}" "$src"`,
+    )
+    const adapted = replaceOnce(
       replaceOnce(
         original,
         'for src in /usr/lib/klibc/bin/*; do',
         'set -e\n. /usr/share/initramfs-tools/hook-functions\n\nfor src in /usr/lib/klibc/bin/*; do',
       ),
-      'cp -pL "$src" "${DESTDIR}/bin"',
-      'copy_file binary "$src" || [ "$?" = 1 ]\n\t\t\tln -rs "${DESTDIR}${src}" "${DESTDIR}/bin/$command"',
+      copy,
+      `copy_file binary "$src" || [ "$?" = 1 ]\n\t\t\tln -rs "\${DESTDIR}\${src}" "${target}"`,
+    )
+    return replaceOnce(
+      adapted,
+      'case $1 in',
+      `case $1 in\nfde-providers)\nset -e\n${query}\nexit 0;;`,
     )
   }
   if (name === 'intel_microcode') {
@@ -129,6 +161,7 @@ function reviewedHook(name, bytes) {
  * Unknown hooks reject; credential/resume/keymap/FUSE hooks do not enter the FDE profile.
  * Hooks execute in their admitted source namespace; ordering/firmware/archives remain native.
  * BusyBox/klibc command aliases are symlinks; regular providers retain their source paths.
+ * Invoke returned provider admission and metadata queries in that same admitted source namespace.
  */
 export async function prepareNativeHooks(sourceRoot, targetDirectory) {
   const source = await realpath(
@@ -174,4 +207,28 @@ export async function prepareNativeHooks(sourceRoot, targetDirectory) {
   await mkdir(target, { mode: 0o700 })
   for (const [name, text] of output)
     await writeFile(join(target, name), text, { flag: 'wx', mode: 0o755 })
+  const providerAliases = async () => {
+    const aliases = []
+    for (const name of ['zz-busybox', 'klibc-utils']) {
+      const { stdout } = await run(
+        '/bin/sh',
+        [join(target, name), 'fde-providers'],
+        {
+          env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin', LC_ALL: 'C' },
+          maxBuffer: 1024 * 1024,
+        },
+      )
+      for (const line of stdout.trimEnd().split('\n')) {
+        const fields = line.split('\t')
+        if (fields.length !== 2 || fields.some(field => !field))
+          throw Error(`Unsupported native provider metadata: ${name}`)
+        aliases.push(fields)
+      }
+    }
+    return aliases
+  }
+  return Object.freeze({
+    providerAliases,
+    admitProviders: root => admitCopiedProviders(root, providerAliases),
+  })
 }
