@@ -264,7 +264,7 @@ export class StartSdk<Manifest extends T.SDKManifest> {
         /**
          * @description Create a notification attributed to this service. The
          *   notification appears in the StartOS notifications panel just like
-         *   the ones StartOS itself generates (e.g. on backup completion).
+         *   the ones StartOS itself generates (e.g. on an install failure).
          *
          *   Omit `data` for a plain notification — the panel row shows
          *   `title` and `message` only.
