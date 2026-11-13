@@ -45,8 +45,8 @@ async fn subscribe_selects_each_messages_os_version_for_dumps_and_revisions() {
     drop(ctx.rpc_continuations.get_ws_handler(&guid).await);
     let mut socket = registry_socket(&url, &reader).await;
     subscribe(&mut socket, 71, "0.4.0.2").await;
-    subscribe(&mut socket, 72, "0.4.3").await;
-    subscribe(&mut socket, 73, "0.4.2.1").await;
+    subscribe(&mut socket, 72, "0.4.3.1").await;
+    subscribe(&mut socket, 73, "0.4.3").await;
     let mut views = BTreeMap::new();
     for _ in 0..3 {
         let message = response(&mut socket).await;
