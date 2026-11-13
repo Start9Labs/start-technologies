@@ -3085,6 +3085,7 @@ registry.package.signer.not-authorized:
   fr_FR: "Le signataire %{signer} n'est pas autorisé à signer pour %{id}"
   pl_PL: "Sygnatariusz %{signer} nie jest autoryzowany do podpisywania %{id}"
 
+# registry/sync.rs
 registry.sync.closed:
   en_US: "Registry connection closed"
   de_DE: "Registry-Verbindung geschlossen"
@@ -3092,6 +3093,7 @@ registry.sync.closed:
   fr_FR: "Connexion au registre fermée"
   pl_PL: "Połączenie z rejestrem zostało zamknięte"
 
+# sign/commitment/request.rs
 sign.commitment.request.unsupported-type:
   en_US: "Unsupported request commitment type %{ty}"
   de_DE: "Nicht unterstützter Anfrage-Commitment-Typ %{ty}"
