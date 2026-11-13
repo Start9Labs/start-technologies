@@ -26,7 +26,9 @@ use crate::net::vhost::{AlpnInfo, PassthroughInfo};
 use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::system::{KeyboardOptions, SmtpValue};
-use crate::trusted_keys::{TrustedKeys, initial_trusted_keys};
+use crate::trusted_keys::{
+    Registries, TrustedKeys, initial_os_registry, initial_registries, initial_trusted_keys,
+};
 use crate::util::cpupower::{Epp, Governor};
 use crate::util::lshw::LshwDevice;
 use crate::util::serde::MaybeUtf8String;
@@ -41,6 +43,16 @@ pub static DB_UI_SEED_CELL: OnceLock<&'static str> = OnceLock::new();
 pub struct Public {
     pub server_info: ServerInfo,
     pub package_data: AllPackageData,
+    #[serde(default)]
+    pub disks: Vec<crate::disk::util::DiskInfo>,
+    #[serde(default)]
+    pub shared_volumes:
+        BTreeMap<crate::shared_volumes::SharedVolumeId, crate::shared_volumes::SharedVolume>,
+    #[serde(default)]
+    pub backup_targets:
+        BTreeMap<crate::backup::target::BackupTargetId, crate::backup::target::BackupTarget>,
+    /// UI-owned state. Outside `version` migrations, the backend never reads or
+    /// modifies its contents.
     pub ui: Value,
 }
 
@@ -134,6 +146,8 @@ impl Public {
                 },
                 trusted_keys: initial_trusted_keys(),
                 registry_keys: BTreeMap::new(),
+                registries: initial_registries(),
+                os_registry: initial_os_registry(),
                 unread_notification_count: 0,
                 pubkey: ssh_key::PublicKey::from(&account.ssh_key)
                     .to_openssh()
@@ -152,6 +166,9 @@ impl Public {
                 keyboard,
             },
             package_data: AllPackageData::default(),
+            disks: Vec::new(),
+            shared_volumes: BTreeMap::new(),
+            backup_targets: BTreeMap::new(),
             ui: serde_json::from_str(*DB_UI_SEED_CELL.get().unwrap_or(&"null"))
                 .with_kind(ErrorKind::Deserialization)?,
         })
@@ -187,6 +204,12 @@ pub struct ServerInfo {
     /// Last observed trust proposals from connected registries.
     #[serde(default)]
     pub registry_keys: BTreeMap<InternedString, BTreeSet<crate::sign::AnyVerifyingKey>>,
+    /// Connected registries; written only through `server.registries`.
+    #[serde(default)]
+    pub registries: Registries,
+    /// Registry that provides StartOS updates; always connected.
+    #[serde(default = "initial_os_registry")]
+    pub os_registry: Url,
     pub pubkey: String,
     pub ca_fingerprint: String,
     #[serde(default)]

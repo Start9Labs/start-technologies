@@ -24,7 +24,7 @@ pub async fn watch_updates(
     context: impl Fn() -> Option<RpcContext> + Send + Sync,
 ) {
     let mut registry = db
-        .watch("/public/ui/startosRegistry".parse().unwrap())
+        .watch("/public/serverInfo/osRegistry".parse().unwrap())
         .await;
     let mut backoff = 30;
     tokio::time::sleep(Duration::from_secs(rand::random_range(0..30))).await;

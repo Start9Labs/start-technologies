@@ -1275,12 +1275,26 @@ disk.mount.filesystem.cifs.hostname-unresolved:
   fr_FR: "Impossible de résoudre le nom d'hôte %{hostname} via %{resolver} : %{error}"
   pl_PL: "Nie udało się rozwiązać nazwy hosta %{hostname} przy użyciu %{resolver}: %{error}"
 
+disk.mount.filesystem.cifs.invalid-source:
+  en_US: "Enter a valid CIFS host, share path and credentials"
+  de_DE: "Einen gültigen CIFS-Host, Freigabepfad und Zugangsdaten eingeben"
+  es_ES: "Introduce un host CIFS, una ruta compartida y credenciales válidos"
+  fr_FR: "Saisissez un hôte CIFS, un chemin de partage et des identifiants valides"
+  pl_PL: "Podaj prawidłowy host CIFS, ścieżkę udziału i dane uwierzytelniające"
+
 disk.mount.filesystem.cifs.no-dns-addresses:
   en_US: "DNS returned no addresses"
   de_DE: "DNS hat keine Adressen zurückgegeben"
   es_ES: "DNS no devolvió ninguna dirección"
   fr_FR: "DNS n'a renvoyé aucune adresse"
   pl_PL: "DNS nie zwrócił żadnych adresów"
+
+disk.util.missing-filesystem-uuid:
+  en_US: "This partition has no persistent filesystem UUID. Format the drive before using it as a volume."
+  de_DE: "Diese Partition hat keine dauerhafte Dateisystem-UUID. Das Laufwerk vor der Verwendung als Volume formatieren."
+  es_ES: "Esta partición no tiene un UUID de sistema de archivos persistente. Formatea la unidad antes de usarla como volumen."
+  fr_FR: "Cette partition n’a pas d’UUID de système de fichiers persistant. Formatez le disque avant de l’utiliser comme volume."
+  pl_PL: "Ta partycja nie ma trwałego identyfikatora UUID systemu plików. Sformatuj dysk przed użyciem go jako woluminu."
 
 disk.util.not-canonical-block-device:
   en_US: "not a canonical block device"
@@ -1494,7 +1508,13 @@ disk.format.unsupported-sector-size:
   fr_FR: "Ce disque utilise une taille de secteur non prise en charge (%{size} octets) ; StartOS peut formater des disques à secteurs de 512 ou 4096 octets"
   pl_PL: "Ten dysk używa nieobsługiwanego rozmiaru sektora (%{size} bajtów); StartOS może formatować dyski o sektorach 512 lub 4096 bajtów"
 
-# disk/mount/util.rs
+disk.mount.guard.in-use:
+  en_US: "This storage source is in use. Wait for its operations to finish before deleting it."
+  de_DE: "Diese Speicherquelle wird verwendet. Warte, bis ihre Vorgänge abgeschlossen sind, bevor du sie löschst."
+  es_ES: "Este origen de almacenamiento está en uso. Espera a que terminen sus operaciones antes de eliminarlo."
+  fr_FR: "Cette source de stockage est utilisée. Attendez la fin de ses opérations avant de la supprimer."
+  pl_PL: "To źródło pamięci masowej jest używane. Poczekaj na zakończenie operacji, zanim je usuniesz."
+
 disk.mount.binding:
   en_US: "Binding %{src} to %{dst}"
   de_DE: "Binde %{src} an %{dst}"
@@ -1820,11 +1840,11 @@ backup.bulk.legacy-present-title:
   pl_PL: "Stara kopia zapasowa nadal obecna"
 
 backup.bulk.legacy-present-message:
-  en_US: "This backup target still contains an old-format (V1) backup that is no longer needed. To free up space on the drive, go to the backup creation page and delete it."
-  de_DE: "Dieses Sicherungsziel enthält noch eine Sicherung im alten Format (V1), die nicht mehr benötigt wird. Um Speicherplatz auf dem Laufwerk freizugeben, öffnen Sie die Seite zur Sicherungserstellung und löschen Sie sie."
-  es_ES: "Este destino de copia de seguridad todavía contiene una copia en formato antiguo (V1) que ya no es necesaria. Para liberar espacio en la unidad, vaya a la página de creación de copias de seguridad y elimínela."
-  fr_FR: "Cette cible de sauvegarde contient encore une sauvegarde à l'ancien format (V1) qui n'est plus nécessaire. Pour libérer de l'espace sur le disque, accédez à la page de création de sauvegarde et supprimez-la."
-  pl_PL: "Ten cel kopii zapasowej nadal zawiera kopię w starym formacie (V1), która nie jest już potrzebna. Aby zwolnić miejsce na dysku, przejdź do strony tworzenia kopii zapasowej i usuń ją."
+  en_US: "This backup target still contains an old-format (V1) backup that is no longer needed. To free up space on the drive, open this target on the Backups page and delete it."
+  de_DE: "Dieses Sicherungsziel enthält noch eine Sicherung im alten Format (V1), die nicht mehr benötigt wird. Um Speicherplatz auf dem Laufwerk freizugeben, öffnen Sie dieses Ziel auf der Seite Backups und löschen Sie sie."
+  es_ES: "Este destino de copia de seguridad todavía contiene una copia en formato antiguo (V1) que ya no es necesaria. Para liberar espacio en la unidad, abra este destino en la página Copias de seguridad y elimínela."
+  fr_FR: "Cette cible de sauvegarde contient encore une sauvegarde à l'ancien format (V1) qui n'est plus nécessaire. Pour libérer de l'espace sur le disque, ouvrez cette cible sur la page Sauvegardes et supprimez-la."
+  pl_PL: "Ten cel kopii zapasowej nadal zawiera kopię w starym formacie (V1), która nie jest już potrzebna. Aby zwolnić miejsce na dysku, otwórz to miejsce docelowe na stronie Kopie zapasowe i usuń ją."
 
 backup.bulk.failed-error:
   en_US: "Backup Failed: %{error}"
@@ -2050,20 +2070,33 @@ backup.target.partial-mount:
   fr_FR: "Le système de fichiers de base a été monté avec succès sur %{path}."
   pl_PL: "Bazowy system plików został pomyślnie zamontowany w %{path}."
 
-# backup/target/cifs.rs
-backup.target.cifs.target-not-found:
-  en_US: "Backup Target ID %{id} Not Found"
-  de_DE: "Sicherungsziel-ID %{id} nicht gefunden"
-  es_ES: "ID de destino de copia de seguridad %{id} no encontrado"
-  fr_FR: "ID de cible de sauvegarde %{id} non trouvé"
-  pl_PL: "Nie znaleziono ID celu kopii zapasowej %{id}"
+backup.volume.invalid-generation:
+  en_US: "The volume backup has an invalid copy identifier"
+  de_DE: "Die Volume-Sicherung hat eine ungültige Kopiekennung"
+  es_ES: "La copia de seguridad del volumen tiene un identificador de copia no válido"
+  fr_FR: "La sauvegarde du volume contient un identifiant de copie invalide"
+  pl_PL: "Kopia zapasowa woluminu ma nieprawidłowy identyfikator kopii"
 
-backup.target.cifs.target-not-found-id:
-  en_US: "Backup Target ID %{id} Not Found"
-  de_DE: "Sicherungsziel-ID %{id} nicht gefunden"
-  es_ES: "ID de destino de copia de seguridad %{id} no encontrado"
-  fr_FR: "ID de cible de sauvegarde %{id} non trouvé"
-  pl_PL: "Nie znaleziono ID celu kopii zapasowej %{id}"
+backup.volume.overlapping-target:
+  en_US: "The backup target overlaps this volume. Choose a target outside the volume."
+  de_DE: "Das Sicherungsziel überschneidet sich mit diesem Volume. Wählen Sie ein Ziel außerhalb des Volumes."
+  es_ES: "El destino de la copia de seguridad se superpone con este volumen. Elija un destino fuera del volumen."
+  fr_FR: "La destination de sauvegarde chevauche ce volume. Choisissez une destination hors du volume."
+  pl_PL: "Cel kopii zapasowej nakłada się na ten wolumin. Wybierz cel poza woluminem."
+
+backup.volume.restore-error:
+  en_US: "Could not restore volume %{id}: %{error}"
+  de_DE: "Volume %{id} konnte nicht wiederhergestellt werden: %{error}"
+  es_ES: "No se pudo restaurar el volumen %{id}: %{error}"
+  fr_FR: "Impossible de restaurer le volume %{id} : %{error}"
+  pl_PL: "Nie udało się przywrócić woluminu %{id}: %{error}"
+
+backup.volume.volumes:
+  en_US: "Volumes"
+  de_DE: "Volumes"
+  es_ES: "Volúmenes"
+  fr_FR: "Volumes"
+  pl_PL: "Woluminy"
 
 # service/effects/net/plugin.rs
 net.plugin.manifest-missing-plugin:
@@ -3620,14 +3653,6 @@ middleware.auth.unknown-content-type:
   fr_FR: "type de contenu inconnu"
   pl_PL: "nieznany typ zawartości"
 
-# db/mod.rs
-db.registries-not-writable:
-  en_US: "Saved registries are changed through the registry settings, not as UI data"
-  de_DE: "Gespeicherte Registrys werden über die Registry-Einstellungen geändert, nicht als UI-Daten"
-  es_ES: "Los registros guardados se cambian en la configuración de registros, no como datos de la interfaz"
-  fr_FR: "Les registres enregistrés se modifient dans les paramètres des registres, pas comme données de l'interface"
-  pl_PL: "Zapisane rejestry zmienia się w ustawieniach rejestrów, a nie jako dane interfejsu"
-
 # middleware/db.rs
 middleware.db.error-writing-patch-sequence-header:
   en_US: "error writing X-Patch-Sequence header: %{error}"
@@ -3788,6 +3813,62 @@ control.start-critical-task-check-failed:
   pl_PL: "Ostrzeżenie: zażądano uruchomienia usługi %{id}, ale sprawdzenie blokujących zadań krytycznych nie powiodło się"
 
 # shutdown.rs
+shared-volumes.access-denied:
+  en_US: "This service does not have the required volume access"
+  de_DE: "Dieser Dienst hat nicht den erforderlichen Zugriff auf das Volume"
+  es_ES: "Este servicio no tiene el acceso necesario al volumen"
+  fr_FR: "Ce service ne dispose pas de l'accès requis au volume"
+  pl_PL: "Ta usługa nie ma wymaganego dostępu do woluminu"
+
+shared-volumes.availability-watch-failed:
+  en_US: "Storage availability tracking failed: %{error}"
+  de_DE: "Die Überwachung der Speicherverfügbarkeit ist fehlgeschlagen: %{error}"
+  es_ES: "Falló el seguimiento de disponibilidad del almacenamiento: %{error}"
+  fr_FR: "Échec du suivi de disponibilité du stockage : %{error}"
+  pl_PL: "Śledzenie dostępności pamięci masowej nie powiodło się: %{error}"
+
+shared-volumes.backup-isolation:
+  en_US: "Volumes are inaccessible during service backup and restore"
+  de_DE: "Volumes sind während der Sicherung und Wiederherstellung eines Dienstes nicht zugänglich"
+  es_ES: "Los volúmenes no son accesibles durante la copia de seguridad y restauración de un servicio"
+  fr_FR: "Les volumes sont inaccessibles pendant la sauvegarde et la restauration d'un service"
+  pl_PL: "Woluminy są niedostępne podczas tworzenia kopii zapasowej i przywracania usługi"
+
+shared-volumes.invalid-drive:
+  en_US: "Select a detected external drive partition"
+  de_DE: "Eine erkannte externe Laufwerkspartition auswählen"
+  es_ES: "Selecciona una partición detectada de una unidad externa"
+  fr_FR: "Sélectionnez une partition de disque externe détectée"
+  pl_PL: "Wybierz wykrytą partycję dysku zewnętrznego"
+
+shared-volumes.invalid-path:
+  en_US: "Volume paths must stay within their permitted directory"
+  de_DE: "Volume-Pfade müssen innerhalb ihres zulässigen Verzeichnisses bleiben"
+  es_ES: "Las rutas de los volúmenes deben permanecer dentro de su directorio permitido"
+  fr_FR: "Les chemins des volumes doivent rester dans leur répertoire autorisé"
+  pl_PL: "Ścieżki woluminów muszą pozostawać w dozwolonym katalogu"
+
+shared-volumes.name-required:
+  en_US: "Enter a volume name"
+  de_DE: "Einen Namen für das Volume eingeben"
+  es_ES: "Introduce un nombre para el volumen"
+  fr_FR: "Saisissez un nom de volume"
+  pl_PL: "Podaj nazwę woluminu"
+
+shared-volumes.not-cifs:
+  en_US: "Only CIFS share volumes can change their connection details"
+  de_DE: "Nur Volumes auf CIFS-Freigaben können ihre Verbindungsdaten ändern"
+  es_ES: "Solo los volúmenes de recursos compartidos CIFS pueden cambiar sus datos de conexión"
+  fr_FR: "Seuls les volumes de partages CIFS peuvent modifier leurs informations de connexion"
+  pl_PL: "Tylko woluminy udziałów CIFS mogą zmieniać dane połączenia"
+
+shared-volumes.source-unavailable:
+  en_US: "The volume source is unavailable. Check the source, network and credentials."
+  de_DE: "Die Volume-Quelle ist nicht verfügbar. Quelle, Netzwerk und Zugangsdaten prüfen."
+  es_ES: "La fuente del volumen no está disponible. Comprueba la fuente, la red y las credenciales."
+  fr_FR: "La source du volume est indisponible. Vérifiez la source, le réseau et les identifiants."
+  pl_PL: "Źródło woluminu jest niedostępne. Sprawdź źródło, sieć i dane uwierzytelniające."
+
 shutdown.beginning-restart:
   en_US: "Beginning server restart"
   de_DE: "Server-Neustart wird begonnen"
@@ -5001,6 +5082,48 @@ help.arg.trust:
   fr_FR: "Installer sans exiger un signataire de confiance ; les contrôles de signature et d'intégrité restent obligatoires"
   pl_PL: "Instaluj bez wymogu zaufanego sygnatariusza; kontrole podpisu i integralności pozostają obowiązkowe"
 
+help.arg.trust-for:
+  en_US: "Grant this trust to every imported key, including keys already present"
+  de_DE: "Diese Vertrauensstufe jedem importierten Schlüssel gewähren, auch bereits vorhandenen"
+  es_ES: "Conceder esta confianza a cada clave importada, incluidas las que ya existen"
+  fr_FR: "Accorder cette confiance à chaque clé importée, y compris celles déjà présentes"
+  pl_PL: "Nadaj to zaufanie każdemu importowanemu kluczowi, także już istniejącym"
+
+help.arg.trust-marketplace:
+  en_US: "Whether to trust the key for packages"
+  de_DE: "Ob dem Schlüssel für Pakete vertraut wird"
+  es_ES: "Si se confía en la clave para los paquetes"
+  fr_FR: "Indique si la clé est approuvée pour les paquets"
+  pl_PL: "Czy ufać kluczowi w przypadku pakietów"
+
+help.arg.trust-os:
+  en_US: "Whether to trust the key for StartOS updates"
+  de_DE: "Ob dem Schlüssel für StartOS-Updates vertraut wird"
+  es_ES: "Si se confía en la clave para las actualizaciones de StartOS"
+  fr_FR: "Indique si la clé est approuvée pour les mises à jour de StartOS"
+  pl_PL: "Czy ufać kluczowi w przypadku aktualizacji StartOS"
+
+help.arg.trusted-key-id:
+  en_US: "ID of the trusted key, as listed"
+  de_DE: "ID des vertrauenswürdigen Schlüssels, wie aufgelistet"
+  es_ES: "ID de la clave de confianza, tal como aparece en la lista"
+  fr_FR: "Identifiant de la clé de confiance, tel qu'il apparaît dans la liste"
+  pl_PL: "Identyfikator zaufanego klucza, taki jak na liście"
+
+help.arg.trusted-key-name:
+  en_US: "Name for the key; blank names each GPG key after its identity"
+  de_DE: "Name des Schlüssels; leer benennt jeden GPG-Schlüssel nach seiner Identität"
+  es_ES: "Nombre de la clave; si se deja en blanco, cada clave GPG toma el nombre de su identidad"
+  fr_FR: "Nom de la clé ; vide, chaque clé GPG prend le nom de son identité"
+  pl_PL: "Nazwa klucza; pusta nadaje każdemu kluczowi GPG nazwę jego tożsamości"
+
+help.arg.trusted-public-keys:
+  en_US: "Ed25519 public keys in PEM or armored GPG format; put options before -- and keys after it"
+  de_DE: "Öffentliche Ed25519-Schlüssel im PEM- oder ASCII-armierten GPG-Format; Optionen vor -- und Schlüssel danach angeben"
+  es_ES: "Claves públicas Ed25519 en formato PEM o GPG blindado; coloque las opciones antes de -- y las claves después"
+  fr_FR: "Clés publiques Ed25519 au format PEM ou GPG armuré ; placer les options avant -- et les clés après"
+  pl_PL: "Klucze publiczne Ed25519 w formacie PEM lub GPG z pancerzem ASCII; opcje podaj przed --, a klucze po nim"
+
 help.arg.tunnel-address:
   en_US: "Tunnel server address"
   de_DE: "Tunnel-Server-Adresse"
@@ -5042,6 +5165,20 @@ help.arg.version-range:
   es_ES: "Restricción de rango de versión"
   fr_FR: "Contrainte de plage de version"
   pl_PL: "Ograniczenie zakresu wersji"
+
+help.arg.volume-ids-to-backup:
+  en_US: "Volume IDs to back up; omitted selects all volumes"
+  de_DE: "Zu sichernde Volume-IDs; ohne Angabe werden alle Volumes ausgewählt"
+  es_ES: "IDs de volúmenes para respaldar; si se omiten, se seleccionan todos"
+  fr_FR: "Identifiants des volumes à sauvegarder ; tous sont sélectionnés si omis"
+  pl_PL: "Identyfikatory woluminów do skopiowania; pominięcie wybiera wszystkie"
+
+help.arg.volume-ids-to-restore:
+  en_US: "Volume backup IDs to restore as new local volumes"
+  de_DE: "IDs der Volume-Sicherungen, die als neue lokale Volumes wiederhergestellt werden"
+  es_ES: "IDs de copias de seguridad para restaurar como nuevos volúmenes locales"
+  fr_FR: "Identifiants des sauvegardes à restaurer comme nouveaux volumes locaux"
+  pl_PL: "Identyfikatory kopii zapasowych do przywrócenia jako nowe woluminy lokalne"
 
 help.arg.wifi-country-code:
   en_US: "ISO 3166-1 alpha-2 WiFi country code"
@@ -5752,6 +5889,13 @@ about.add-public-domain-to-host:
   fr_FR: "Ajouter un domaine public à cet hôte"
   pl_PL: "Dodaj publiczną domenę do tego hosta"
 
+about.add-registry:
+  en_US: "Connect a registry, trusting the keys it offers for packages"
+  de_DE: "Eine Registry verbinden und ihren angebotenen Schlüsseln für Pakete vertrauen"
+  es_ES: "Conectar un registro y confiar en las claves que ofrece para los paquetes"
+  fr_FR: "Connecter un registre et faire confiance aux clés qu'il propose pour les paquets"
+  pl_PL: "Połącz rejestr i zaufaj oferowanym przez niego kluczom dla pakietów"
+
 about.add-remove-list-package-signers:
   en_US: "Add, remove, and list package signers"
   de_DE: "Paket-Unterzeichner hinzufügen, entfernen und auflisten"
@@ -5800,6 +5944,13 @@ about.add-ssh-key:
   es_ES: "Agregar clave ssh"
   fr_FR: "Ajouter une clé ssh"
   pl_PL: "Dodaj klucz ssh"
+
+about.add-trusted-key:
+  en_US: "Import public keys; newly added keys are trusted for packages"
+  de_DE: "Öffentliche Schlüssel importieren; neu hinzugefügten Schlüsseln wird für Pakete vertraut"
+  es_ES: "Importar claves públicas; las claves recién añadidas son de confianza para los paquetes"
+  fr_FR: "Importer des clés publiques ; les clés nouvellement ajoutées sont approuvées pour les paquets"
+  pl_PL: "Zaimportuj klucze publiczne; nowo dodane klucze są zaufane dla pakietów"
 
 about.add-version-signer:
   en_US: "Add version signer"
@@ -6027,11 +6178,11 @@ about.commands-diagnostic:
   pl_PL: "Polecenia wyświetlania logów, restartu serwera itp."
 
 about.commands-disk:
-  en_US: "Commands for listing disk info and repairing"
-  de_DE: "Befehle zum Auflisten von Festplatteninfo und Reparieren"
-  es_ES: "Comandos para listar información de disco y reparar"
-  fr_FR: "Commandes pour lister les informations de disque et réparer"
-  pl_PL: "Polecenia wyświetlania informacji o dysku i naprawy"
+  en_US: "Commands for formatting and repairing drives"
+  de_DE: "Befehle zum Formatieren und Reparieren von Laufwerken"
+  es_ES: "Comandos para formatear y reparar unidades"
+  fr_FR: "Commandes de formatage et de réparation des disques"
+  pl_PL: "Polecenia formatowania i naprawy dysków"
 
 about.commands-display-file-paths-contents-manifest:
   en_US: "Commands to display file paths, file contents, or manifest"
@@ -6166,6 +6317,20 @@ about.commands-http-redirect:
   fr_FR: "Commandes pour gérer les redirections HTTP→HTTPS"
   pl_PL: "Polecenia do zarządzania przekierowaniami HTTP→HTTPS"
 
+about.commands-registries:
+  en_US: "Manage the registries this server's Marketplace is connected to"
+  de_DE: "Die Registrys verwalten, mit denen der Marketplace dieses Servers verbunden ist"
+  es_ES: "Administrar los registros a los que está conectado el Marketplace de este servidor"
+  fr_FR: "Gérer les registres auxquels le Marketplace de ce serveur est connecté"
+  pl_PL: "Zarządzaj rejestrami, z którymi połączony jest Marketplace tego serwera"
+
+about.commands-trusted-keys:
+  en_US: "Manage the keys this server trusts for packages and StartOS updates"
+  de_DE: "Die Schlüssel verwalten, denen dieser Server für Pakete und StartOS-Updates vertraut"
+  es_ES: "Administrar las claves en las que este servidor confía para paquetes y actualizaciones de StartOS"
+  fr_FR: "Gérer les clés auxquelles ce serveur fait confiance pour les paquets et les mises à jour de StartOS"
+  pl_PL: "Zarządzaj kluczami, którym ten serwer ufa w przypadku pakietów i aktualizacji StartOS"
+
 about.list-http-redirects:
   en_US: "List the port-80 HTTP→HTTPS redirect status of every public IPv4"
   de_DE: "Den HTTP→HTTPS-Weiterleitungsstatus (Port 80) jeder öffentlichen IPv4 auflisten"
@@ -6250,13 +6415,6 @@ about.commands-setup:
   fr_FR: "Commandes liées à la configuration initiale"
   pl_PL: "Polecenia związane z początkową konfiguracją"
 
-about.commands-os-update-signers:
-  en_US: "Manage trusted OS update signers"
-  de_DE: "Vertrauenswürdige Unterzeichner für Betriebssystem-Updates verwalten"
-  es_ES: "Administrar firmantes de confianza para actualizaciones del sistema"
-  fr_FR: "Gérer les signataires de confiance des mises à jour du système"
-  pl_PL: "Zarządzaj zaufanymi sygnatariuszami aktualizacji systemu"
-
 about.commands-ssh-keys:
   en_US: "Commands for interacting with ssh keys i.e. add, delete, list"
   de_DE: "Befehle zur Interaktion mit SSH-Schlüsseln, z.B. hinzufügen, löschen, auflisten"
@@ -6284,6 +6442,13 @@ about.commands-tunnel-web:
   es_ES: "Comandos para gestionar la interfaz web del túnel"
   fr_FR: "Commandes pour gérer l'interface web du tunnel"
   pl_PL: "Polecenia do zarządzania interfejsem webowym tunelu"
+
+about.commands-volume-backups:
+  en_US: "Commands related to volume backups"
+  de_DE: "Befehle für Volume-Sicherungen"
+  es_ES: "Comandos relacionados con las copias de seguridad de volúmenes"
+  fr_FR: "Commandes relatives aux sauvegardes de volumes"
+  pl_PL: "Polecenia dotyczące kopii zapasowych woluminów"
 
 about.commands-wifi:
   en_US: "Commands related to wifi networks i.e. add, connect, delete"
@@ -6670,19 +6835,26 @@ about.get-device-info:
   fr_FR: "Afficher les informations de l'appareil"
   pl_PL: "Wyświetl informacje o urządzeniu"
 
-about.get-os-update-signer:
-  en_US: "Get a trusted OS update signer's label"
-  de_DE: "Bezeichnung eines vertrauenswürdigen Update-Unterzeichners abrufen"
-  es_ES: "Obtener la etiqueta de un firmante de confianza de actualizaciones del sistema"
-  fr_FR: "Obtenir le libellé d’un signataire de confiance des mises à jour du système"
-  pl_PL: "Pobierz etykietę zaufanego sygnatariusza aktualizacji systemu"
-
 about.get-id-pubkey:
   en_US: "Get the identity public key"
   de_DE: "Öffentlichen Identitätsschlüssel abrufen"
   es_ES: "Obtener la clave pública de identidad"
   fr_FR: "Obtenir la clé publique d'identité"
   pl_PL: "Pobierz klucz publiczny tożsamości"
+
+about.list-registries:
+  en_US: "List connected registries and their names"
+  de_DE: "Verbundene Registrys und ihre Namen auflisten"
+  es_ES: "Listar los registros conectados y sus nombres"
+  fr_FR: "Lister les registres connectés et leurs noms"
+  pl_PL: "Wyświetl połączone rejestry i ich nazwy"
+
+about.list-trusted-keys:
+  en_US: "List trusted keys and what each is trusted for"
+  de_DE: "Vertrauenswürdige Schlüssel auflisten und wofür jedem vertraut wird"
+  es_ES: "Listar las claves de confianza y para qué se confía en cada una"
+  fr_FR: "Lister les clés de confiance et ce pour quoi chacune est approuvée"
+  pl_PL: "Wyświetl zaufane klucze i to, do czego każdy jest zaufany"
 
 about.print-shell-completions:
   en_US: "Print a shell completion script"
@@ -6810,13 +6982,6 @@ about.list-devices-in-subnet:
   es_ES: "Listar dispositivos en una subred"
   fr_FR: "Lister les appareils dans un sous-réseau"
   pl_PL: "Wyświetl urządzenia w podsieci"
-
-about.list-disk-info:
-  en_US: "List disk information"
-  de_DE: "Festplatteninformationen auflisten"
-  es_ES: "Listar información del disco"
-  fr_FR: "Lister les informations du disque"
-  pl_PL: "Wyświetl informacje o dysku"
 
 about.list-existing-backup-targets:
   en_US: "List existing backup targets"
@@ -7098,6 +7263,20 @@ about.publish-s9pk:
   fr_FR: "Publier s9pk dans le bucket S3 et indexer dans le registre"
   pl_PL: "Opublikuj s9pk do bucketu S3 i zindeksuj w rejestrze"
 
+about.remove-registry:
+  en_US: "Disconnect a registry, including the Start9 and Community registries"
+  de_DE: "Eine Registry trennen, auch die Start9- und Community-Registrys"
+  es_ES: "Desconectar un registro, incluidos los registros de Start9 y de la comunidad"
+  fr_FR: "Déconnecter un registre, y compris les registres Start9 et Communauté"
+  pl_PL: "Odłącz rejestr, także rejestry Start9 i Community"
+
+about.remove-trusted-key:
+  en_US: "Remove a trusted key"
+  de_DE: "Einen vertrauenswürdigen Schlüssel entfernen"
+  es_ES: "Eliminar una clave de confianza"
+  fr_FR: "Supprimer une clé de confiance"
+  pl_PL: "Usuń zaufany klucz"
+
 about.select-s9pk-for-device:
   en_US: "Select the best compatible s9pk for a target device"
   de_DE: "Das beste kompatible s9pk für ein Zielgerät auswählen"
@@ -7357,6 +7536,13 @@ about.reset-user-interface-password:
   fr_FR: "Réinitialiser le mot de passe de l'interface utilisateur"
   pl_PL: "Zresetuj hasło interfejsu użytkownika"
 
+about.set-os-registry:
+  en_US: "Use a connected registry for StartOS updates"
+  de_DE: "Eine verbundene Registry für StartOS-Updates verwenden"
+  es_ES: "Usar un registro conectado para las actualizaciones de StartOS"
+  fr_FR: "Utiliser un registre connecté pour les mises à jour de StartOS"
+  pl_PL: "Używaj połączonego rejestru do aktualizacji StartOS"
+
 about.uninitialize-webserver:
   en_US: "Uninitialize the webserver"
   de_DE: "Den Webserver deinitialisieren"
@@ -7391,6 +7577,13 @@ about.restore-packages-from-backup:
   es_ES: "Restaurar paquetes desde copia de seguridad"
   fr_FR: "Restaurer les packages depuis la sauvegarde"
   pl_PL: "Przywróć pakiety z kopii zapasowej"
+
+about.restore-volumes-from-backup:
+  en_US: "Restore volumes as new local copies"
+  de_DE: "Volumes als neue lokale Kopien wiederherstellen"
+  es_ES: "Restaurar volúmenes como nuevas copias locales"
+  fr_FR: "Restaurer les volumes sous forme de nouvelles copies locales"
+  pl_PL: "Przywróć woluminy jako nowe kopie lokalne"
 
 about.run-service-action:
   en_US: "Run a service action"
@@ -7813,6 +8006,13 @@ about.update-port-forward-label:
   fr_FR: "Mettre à jour le libellé d'une redirection de port"
   pl_PL: "Zaktualizuj etykietę przekierowania portu"
 
+about.update-trusted-key:
+  en_US: "Rename a trusted key and set what it is trusted for"
+  de_DE: "Einen vertrauenswürdigen Schlüssel umbenennen und festlegen, wofür ihm vertraut wird"
+  es_ES: "Cambiar el nombre de una clave de confianza y definir para qué se confía en ella"
+  fr_FR: "Renommer une clé de confiance et définir ce pour quoi elle est approuvée"
+  pl_PL: "Zmień nazwę zaufanego klucza i określ, do czego jest zaufany"
+
 about.update-tunnel:
   en_US: "Replace a gateway's WireGuard config in place, keeping its identity"
   de_DE: "Die WireGuard-Konfiguration eines Gateways direkt ersetzen, unter Beibehaltung seiner Identität"
@@ -7910,20 +8110,6 @@ update.security.selected-registry:
   es_ES: "el registro del SO seleccionado"
   fr_FR: "le registre du système sélectionné"
   pl_PL: "wybranym rejestrze systemu"
-
-update.signers.already-exists:
-  en_US: "This public key is already a trusted OS update signer"
-  de_DE: "Dieser öffentliche Schlüssel ist bereits als Update-Unterzeichner vertrauenswürdig"
-  es_ES: "Esta clave pública ya es un firmante de confianza de actualizaciones del sistema"
-  fr_FR: "Cette clé publique est déjà un signataire de confiance des mises à jour du système"
-  pl_PL: "Ten klucz publiczny jest już zaufanym sygnatariuszem aktualizacji systemu"
-
-update.signers.not-found:
-  en_US: "Trusted OS update signer not found"
-  de_DE: "Vertrauenswürdiger Update-Unterzeichner nicht gefunden"
-  es_ES: "No se encontró el firmante de confianza de actualizaciones del sistema"
-  fr_FR: "Signataire de confiance des mises à jour du système introuvable"
-  pl_PL: "Nie znaleziono zaufanego sygnatariusza aktualizacji systemu"
 
 trusted-keys.invalid:
   en_US: "Enter a name and at least one Ed25519 public key"
