@@ -5162,12 +5162,6 @@ export const SessionList: z.ZodObject<{
 }).meta({
   id: 'SessionList',
 })
-export const BackupHistory: z.ZodObject<{
-  runs: z.ZodArray<typeof BackupRun>
-  total: z.ZodInt
-}> = /* @__PURE__ */ object({ runs: z.array(BackupRun), total: z.int() }).meta({
-  id: 'BackupHistory',
-})
 
 /**
  * Replaces one gateway's chain without changing the binding's other gateways.
@@ -5182,6 +5176,12 @@ export const SetHttpProxyChainParams: z.ZodObject<{
   id: 'SetHttpProxyChainParams',
   description:
     "Replaces one gateway's chain without changing the binding's other gateways.",
+})
+export const BackupHistory: z.ZodObject<{
+  runs: z.ZodArray<typeof BackupRun>
+  total: z.ZodInt
+}> = /* @__PURE__ */ object({ runs: z.array(BackupRun), total: z.int() }).meta({
+  id: 'BackupHistory',
 })
 
 /**

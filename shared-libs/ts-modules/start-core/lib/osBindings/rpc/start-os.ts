@@ -736,7 +736,6 @@ export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type OsIndex = z.output<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 export type SessionList = z.output<typeof schemas.SessionList>
-export type BackupHistory = z.output<typeof schemas.BackupHistory>
 
 /**
  * Replaces one gateway's chain without changing the binding's other gateways.
@@ -744,6 +743,7 @@ export type BackupHistory = z.output<typeof schemas.BackupHistory>
 export type SetHttpProxyChainParamsInput = z.input<
   typeof schemas.SetHttpProxyChainParams
 >
+export type BackupHistory = z.output<typeof schemas.BackupHistory>
 
 /**
  * Active DNS authority and its bootstrap gateway.
