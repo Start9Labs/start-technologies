@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process'
 import { lstat, readdir, readlink, realpath } from 'node:fs/promises'
 import {
   basename,
@@ -8,17 +7,15 @@ import {
   relative,
   resolve,
 } from 'node:path'
-import { promisify } from 'node:util'
-
-const run = promisify(execFile)
-const environment = { PATH: '/usr/sbin:/usr/bin:/sbin:/bin', LC_ALL: 'C' }
+import { runSource } from './fde-reviewed-source.mjs'
 
 function contained(parent, path) {
   const suffix = relative(parent, path)
   return suffix === '' || (!suffix.startsWith('../') && suffix !== '..')
 }
 
-async function sourcePath(path) {
+/** Resolves a public path within the admitted source namespace. */
+export async function publicSourcePath(path) {
   const source = await realpath(path)
   if (!contained('/usr', source))
     throw Error(`Unsupported source provider path: ${path}`)
@@ -26,7 +23,7 @@ async function sourcePath(path) {
 }
 
 /**
- * Admits copied /usr bytes and native command/root aliases against the stable public source namespace.
+ * Returns canonical source paths after copied /usr byte/mode and native command/root alias admission.
  * The source namespace and private hooks must remain admitted and unchanged throughout the call.
  * Provider links are canonical and relative; admission precedes private control-plane rewriting.
  * Kernel modules, generated control/configuration and complete loader/EARLY closure have separate owners.
@@ -34,6 +31,7 @@ async function sourcePath(path) {
 export async function admitCopiedProviders(root, readNativeAliases) {
   root = await realpath(root)
   const links = []
+  const sources = []
   async function walk(path) {
     if (!(await lstat(join(root, path))).isDirectory())
       throw Error(`Unsupported provider directory: ${path}`)
@@ -48,18 +46,20 @@ export async function admitCopiedProviders(root, readNativeAliases) {
         const source = join('/', child)
         if (
           !(await lstat(source)).isFile() ||
-          (await sourcePath(source)) !== source
+          (await publicSourcePath(source)) !== source
         )
           throw Error(`Unsupported regular provider path: ${child}`)
         const actual = await lstat(join(root, child))
         const expected = await lstat(source)
         if ((actual.mode & 0o7777) !== (expected.mode & 0o7777))
           throw Error(`Copied provider permissions differ: ${child}`)
-        await run(
-          '/usr/bin/cmp',
-          ['--silent', '--', join(root, child), source],
-          { env: environment },
-        )
+        await runSource('/usr/bin/cmp', [
+          '--silent',
+          '--',
+          join(root, child),
+          source,
+        ])
+        sources.push(source)
       } else throw Error(`Unsupported provider file type: ${child}`)
     }
   }
@@ -69,9 +69,9 @@ export async function admitCopiedProviders(root, readNativeAliases) {
   const aliases = new Map()
   for (const [alias, provider] of await readNativeAliases()) {
     const absolute = resolve('/', alias)
-    const parent = await sourcePath(dirname(absolute))
+    const parent = await publicSourcePath(dirname(absolute))
     const path = join(parent, basename(absolute)).slice(1)
-    const target = (await sourcePath(provider)).slice(1)
+    const target = (await publicSourcePath(provider)).slice(1)
     if (!aliases.has(path)) aliases.set(path, new Set())
     aliases.get(path).add(target)
   }
@@ -88,11 +88,12 @@ export async function admitCopiedProviders(root, readNativeAliases) {
     if (aliases.get(path)?.has(destination)) continue
     let source
     try {
-      source = await sourcePath(join('/', path))
+      source = await publicSourcePath(join('/', path))
     } catch (error) {
       if (error.code !== 'ENOENT') throw error
     }
     if (source !== join('/', destination))
       throw Error(`Unsupported copied provider alias: ${path}`)
   }
+  return sources
 }

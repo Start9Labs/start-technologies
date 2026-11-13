@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process'
 import { constants } from 'node:fs'
 import {
   access,
@@ -18,12 +17,13 @@ import {
   resolve,
 } from 'node:path'
 
-import { promisify } from 'node:util'
-
+import { admitNativeDependencies } from './fde-initramfs-dependencies.mjs'
 import { admitCopiedProviders } from './fde-initramfs-providers.mjs'
-import { replaceOnce, requireReviewedContext } from './fde-reviewed-source.mjs'
-
-const run = promisify(execFile)
+import {
+  replaceOnce,
+  requireReviewedContext,
+  runSource,
+} from './fde-reviewed-source.mjs'
 
 const hooks = {
   fsck: ['53593d50a0be41f95bb191b941857e7cfb6050bab2e6778e20dacf6fe8207081'],
@@ -210,14 +210,10 @@ export async function prepareNativeHooks(sourceRoot, targetDirectory) {
   const providerAliases = async () => {
     const aliases = []
     for (const name of ['zz-busybox', 'klibc-utils']) {
-      const { stdout } = await run(
-        '/bin/sh',
-        [join(target, name), 'fde-providers'],
-        {
-          env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin', LC_ALL: 'C' },
-          maxBuffer: 1024 * 1024,
-        },
-      )
+      const { stdout } = await runSource('/bin/sh', [
+        join(target, name),
+        'fde-providers',
+      ])
       for (const line of stdout.trimEnd().split('\n')) {
         const fields = line.split('\t')
         if (fields.length !== 2 || fields.some(field => !field))
@@ -229,6 +225,9 @@ export async function prepareNativeHooks(sourceRoot, targetDirectory) {
   }
   return Object.freeze({
     providerAliases,
-    admitProviders: root => admitCopiedProviders(root, providerAliases),
+    async admitProviders(root) {
+      const sources = await admitCopiedProviders(root, providerAliases)
+      await admitNativeDependencies(root, sources)
+    },
   })
 }

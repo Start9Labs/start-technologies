@@ -14,11 +14,13 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import test from 'node:test'
 
 import { prepareNativeHooks } from '../lib/scripts/fde-initramfs-hooks.mjs'
 import { requireNativeHookFunctions } from '../lib/scripts/fde-initramfs-producer.mjs'
+import { runSource } from '../lib/scripts/fde-reviewed-source.mjs'
 
 const source = process.argv[2]
 assert.ok(source, 'Provide admitted genuine hook sources')
@@ -117,6 +119,38 @@ for (const BUSYBOX of ['y', 'n']) {
 
 for (const [name, mutate, pattern] of [
   [
+    'missing native shared dependency',
+    async root => {
+      const result = shell('find "$ROOT/usr" -type f -name libc.so.6', {
+        ROOT: root,
+      })
+      assert.equal(result.status, 0, result.stderr)
+      const paths = result.stdout.trim().split('\n')
+      assert.equal(paths.length, 1)
+      await rm(paths[0])
+    },
+    /ENOENT/,
+  ],
+  [
+    'missing ELF interpreter directory aliases',
+    async root => {
+      await rm(join(root, 'lib'))
+      await rm(join(root, 'lib64'))
+    },
+    /ENOENT/,
+  ],
+  [
+    'missing klibc interpreter',
+    async root => {
+      const names = (await readdir(join(root, 'usr/lib'))).filter(
+        name => name.startsWith('klibc-') && name.endsWith('.so'),
+      )
+      assert.equal(names.length, 1)
+      await rm(join(root, 'usr/lib', names[0]))
+    },
+    /ENOENT/,
+  ],
+  [
     'another genuine executable at a trusted command path',
     root => copyFile('/usr/bin/true', join(root, 'usr/bin/cat')),
     /cmp/,
@@ -212,9 +246,30 @@ for (const [name, mutate, pattern] of [
   test(`${name} rejects passively`, async t => {
     const { root, admitted } = await context(t)
     await mutate(root)
+    const references = async () =>
+      (await readdir(tmpdir()))
+        .filter(name => name.startsWith('.fde-dependencies-'))
+        .sort()
+    const before = await references()
     await assert.rejects(admitted.admitProviders(root), pattern)
+    assert.deepEqual(await references(), before)
   })
 }
+
+test('source commands exclude inherited loader and diagnostic overrides', async () => {
+  const previous = process.env.TSS2_LOG
+  process.env.TSS2_LOG = 'all+DEBUG'
+  try {
+    const { stdout } = await runSource('/usr/bin/env', [])
+    assert.deepEqual(stdout.trim().split('\n').sort(), [
+      'LC_ALL=C',
+      'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+    ])
+  } finally {
+    if (previous === undefined) delete process.env.TSS2_LOG
+    else process.env.TSS2_LOG = previous
+  }
+})
 
 test('provider metadata is read-only and retains native klibc exclusions', async t => {
   const { directory, admitted } = await context(t)
