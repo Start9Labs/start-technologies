@@ -222,7 +222,7 @@ export class MockApiService extends ApiService implements StartupApiService {
       mockPatchData.registryCache = Object.fromEntries(
         Object.keys(mockPatchData.serverInfo.registries).map(url => [
           registryUrl(url),
-          mockRegistryCache(this.mockRegistryInfo(url)),
+          mockRegistryCache(url, this.mockRegistryInfo(url)),
         ]),
       )
       mockPatchData.osUpdateCache = mockOsUpdateCache(
@@ -335,7 +335,10 @@ export class MockApiService extends ApiService implements StartupApiService {
       await pauseFor(2000)
       const normalized = registryUrl(url)
       const info = this.mockRegistryInfo(normalized)
-      mockPatchData.registryCache[normalized] = mockRegistryCache(info)
+      mockPatchData.registryCache[normalized] = mockRegistryCache(
+        normalized,
+        info,
+      )
       const { added } = this.importRegistryKeys(normalized, info)
       for (const id of added)
         mockPatchData.serverInfo.trustedKeys[id]!.marketplace = true
@@ -359,7 +362,10 @@ export class MockApiService extends ApiService implements StartupApiService {
           this.i18n.transform('Connect this registry before refreshing it.'),
         )
       const info = this.mockRegistryInfo(normalized)
-      mockPatchData.registryCache[normalized] = mockRegistryCache(info)
+      mockPatchData.registryCache[normalized] = mockRegistryCache(
+        normalized,
+        info,
+      )
       this.importRegistryKeys(normalized, info)
       await this.publishTrust()
       return null
