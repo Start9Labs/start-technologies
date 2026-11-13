@@ -742,12 +742,12 @@ export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type OsIndex = z.output<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 export type SessionList = z.output<typeof schemas.SessionList>
-export type BackupHistory = z.output<typeof schemas.BackupHistory>
 
 /**
  * Parameters for replacing the stored NUT configuration.
  */
 export type SetNutParamsInput = z.input<typeof schemas.SetNutParams>
+export type BackupHistory = z.output<typeof schemas.BackupHistory>
 
 /**
  * Active DNS authority and its bootstrap gateway.
