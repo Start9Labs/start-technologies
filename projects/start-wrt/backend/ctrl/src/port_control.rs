@@ -1515,7 +1515,7 @@ fn desired_sni_rule(port: u16, redirect: Option<Ipv4Addr>) -> FirewallRule {
 fn remote_access_fallback_source(mode: Result<&str, ()>, wan: Ipv4Addr) -> Option<FallbackSource> {
     match mode {
         Ok("always") => Some(FallbackSource::Any),
-        Ok("default") if wan.is_private() => Some(FallbackSource::PrivateOnly),
+        Ok("behind-nat") if wan.is_private() => Some(FallbackSource::PrivateOnly),
         _ => None,
     }
 }
@@ -3461,11 +3461,11 @@ config host
         let private_wan = Ipv4Addr::new(192, 168, 10, 92);
         let public_wan = Ipv4Addr::new(203, 0, 113, 7);
         assert_eq!(
-            remote_access_fallback_source(Ok("default"), private_wan),
+            remote_access_fallback_source(Ok("behind-nat"), private_wan),
             Some(FallbackSource::PrivateOnly)
         );
         assert_eq!(
-            remote_access_fallback_source(Ok("default"), public_wan),
+            remote_access_fallback_source(Ok("behind-nat"), public_wan),
             None
         );
         assert_eq!(
