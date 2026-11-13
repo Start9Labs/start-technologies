@@ -17,6 +17,8 @@ for test in \
         "$image" fde-tpm-run /fde-tests "$test"
 done
 for test in \
+    disk::fde::keyring::tests::kernel_keys_outlive_producer_session_and_deny_unprivileged_reads \
+    disk::fde::tests::real_luks_cached_keys_reset_after_unlock_process_exits \
     os_overlay::tests::busy_verity_close_retains_protection_and_defers_kernel_cleanup \
     os_overlay::tests::verity_mount_retains_protection_through_handoff_and_cleans_failures \
     os_overlay::tests::cancelled_native_verity_setup_closes_abandoned_mappings_and_mounts; do

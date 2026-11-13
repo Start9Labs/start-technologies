@@ -27,6 +27,9 @@ use crate::util::io::{delete_dir, delete_file, open_file, rename};
 use crate::util::{GeneralBoxedGuard, GeneralGuard, Invoke, new_guid};
 use crate::{Error, ErrorKind, ResultExt};
 
+#[cfg(target_os = "linux")]
+mod keyring;
+
 pub const HEADER_BACKUP_DIR: &str = "/media/startos/config/luks";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -170,10 +173,7 @@ impl LuksPool {
             }
             require_password(!slots.is_empty())?;
             volumes.push(VolumeSlots {
-                id: VolumeId {
-                    mapper_name: self.mapper_names[i].clone(),
-                    uuid: metadata.uuid,
-                },
+                id: self.volume_id(i, metadata.uuid),
                 slots,
             });
         }
@@ -228,6 +228,58 @@ impl LuksPool {
                 volumes: volumes.try_into().ok().unwrap(),
             },
         ))
+    }
+
+    fn volume_id(&self, index: usize, uuid: String) -> VolumeId {
+        VolumeId {
+            mapper_name: self.mapper_names[index].clone(),
+            uuid,
+        }
+    }
+
+    /// Retains captured keys in the OS root user keyring until reboot.
+    /// Requires initial-user-namespace root credentials and protected transient copies.
+    /// Hardens the entire root user keyring to owner-only access.
+    pub async fn cache_unlock_keys(&self, keys: &VolumeKeys) -> Result<(), Error> {
+        for (index, key) in keys.volumes.iter().enumerate() {
+            self.bound_metadata(index, &key.id).await?;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let ring = keyring::RootKeyring::open()?;
+            for key in &keys.volumes {
+                ring.store(&key.id, &key.bytes)?;
+            }
+            Ok(())
+        }
+        #[cfg(not(target_os = "linux"))]
+        Err(metadata_error())
+    }
+
+    /// Loads both current volume identities' boot-lifetime keys; absent keys return `None`.
+    /// Requires initial-user-namespace root credentials and protected transient copies.
+    /// Hardens the entire root user keyring to owner-only access.
+    pub async fn cached_unlock_keys(&self) -> Result<Option<VolumeKeys>, Error> {
+        #[cfg(target_os = "linux")]
+        {
+            let mut ids = Vec::new();
+            for (index, device) in self.devices.iter().enumerate() {
+                ids.push(self.volume_id(index, self.metadata(device).await?.uuid));
+            }
+            let ring = keyring::RootKeyring::open()?;
+            let mut volumes = Vec::new();
+            for id in ids {
+                let Some(bytes) = ring.load(&id)? else {
+                    return Ok(None);
+                };
+                volumes.push(VolumeKey { id, bytes });
+            }
+            Ok(Some(VolumeKeys {
+                volumes: volumes.try_into().ok().unwrap(),
+            }))
+        }
+        #[cfg(not(target_os = "linux"))]
+        Err(metadata_error())
     }
 
     /// Reads a complete base inventory and reserves free target IDs without mutating either LV.
@@ -1311,53 +1363,108 @@ esac
         assert!(luks2_slots(br#"{"keyslots":{"bad":{}}}"#).is_err());
     }
 
+    fn real_pool(root: &Path) -> LuksPool {
+        let mut pool = LuksPool::new(GUID, root.join("config")).unwrap();
+        pool.devices = [root.join("main"), root.join("package-data")];
+        pool.runtime_dir = root.to_owned();
+        pool.fstrim = "true".into();
+        pool
+    }
+
+    async fn format_real_pool(root: &Path, format: &str) -> LuksPool {
+        std::fs::create_dir(root.join("config")).unwrap();
+        let pool = real_pool(root);
+        let (old_key, _old_cleanup) = pool.password_file(OLD).unwrap();
+        let (manual_key, _manual_cleanup) = pool.password_file(MANUAL).unwrap();
+        for device in &pool.devices {
+            std::fs::File::create(device)
+                .unwrap()
+                .set_len(32 * 1024 * 1024)
+                .unwrap();
+            require_success(
+                "luksFormat",
+                cryptsetup_status(
+                    Command::new("cryptsetup")
+                        .args([
+                            "luksFormat",
+                            "--batch-mode",
+                            "--type",
+                            format,
+                            "--pbkdf",
+                            "pbkdf2",
+                            "--pbkdf-force-iterations",
+                            "1000",
+                            "--key-file",
+                        ])
+                        .arg(&old_key)
+                        .arg(device),
+                )
+                .await
+                .unwrap(),
+            )
+            .unwrap();
+            pool.add_and_verify(device, 5, &manual_key, &old_key, "--key-file")
+                .await
+                .unwrap();
+        }
+        pool
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "controlled subprocess for the managed LUKS/kernel-keyring fixture"]
+    async fn cache_real_pool_keys_process() {
+        let root = PathBuf::from(std::env::var_os("FDE_CACHE_POOL").unwrap());
+        let pool = real_pool(&root);
+        let (admin, keys) = pool.capture_unlock_keys(OLD).await.unwrap();
+        pool.cache_unlock_keys(&keys).await.unwrap();
+        std::fs::write(root.join("admin.json"), serde_json::to_vec(&admin).unwrap()).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires native cryptsetup and OS-root keyrings in an isolated managed guest"]
+    async fn real_luks_cached_keys_reset_after_unlock_process_exits() {
+        for format in ["luks1", "luks2"] {
+            let directory = tempfile::tempdir_in("/dev/shm").unwrap();
+            let root = directory.path();
+            let pool = format_real_pool(root, format).await;
+            assert!(pool.cached_unlock_keys().await.unwrap().is_none());
+            Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "disk::fde::tests::cache_real_pool_keys_process",
+                ])
+                .env("FDE_CACHE_POOL", root)
+                .invoke(ErrorKind::DiskManagement)
+                .await
+                .unwrap();
+            let admin =
+                serde_json::from_slice(&std::fs::read(root.join("admin.json")).unwrap()).unwrap();
+            let keys = pool.cached_unlock_keys().await.unwrap().unwrap();
+            let plan = pool.plan_password_change(&admin).await.unwrap();
+            pool.install_password(&plan, NEW, KeyCredential::VolumeKeys(&keys))
+                .await
+                .unwrap();
+            pool.verify_password(NEW).await.unwrap();
+            pool.verify_password(MANUAL).await.unwrap();
+            let ring = keyring::RootKeyring::open().unwrap();
+            for key in keys.volumes {
+                ring.remove(&key.id).unwrap();
+            }
+            assert!(pool.cached_unlock_keys().await.unwrap().is_none());
+        }
+    }
+
     #[tokio::test]
     #[ignore = "requires cryptsetup; regular-file devices use a stub for fstrim"]
     async fn real_luks_keyslots_and_header_backups_retire_using_only_new_password() {
         for format in ["luks1", "luks2"] {
             let directory = tempfile::tempdir().unwrap();
             let root = directory.path();
-            let config = root.join("config");
-            std::fs::create_dir(&config).unwrap();
-            let mut pool = LuksPool::new(GUID, &config).unwrap();
-            pool.devices = [root.join("main"), root.join("package-data")];
-            pool.runtime_dir = root.to_owned();
-            pool.fstrim = "true".into();
-            let (old_key, old_cleanup) = pool.password_file(OLD).unwrap();
-            let (manual_key, manual_cleanup) = pool.password_file(MANUAL).unwrap();
-            for device in &pool.devices {
-                std::fs::File::create(device)
-                    .unwrap()
-                    .set_len(32 * 1024 * 1024)
-                    .unwrap();
-                require_success(
-                    "luksFormat",
-                    cryptsetup_status(
-                        Command::new("cryptsetup")
-                            .args([
-                                "luksFormat",
-                                "--batch-mode",
-                                "--type",
-                                format,
-                                "--pbkdf",
-                                "pbkdf2",
-                                "--pbkdf-force-iterations",
-                                "1000",
-                                "--key-file",
-                            ])
-                            .arg(&old_key)
-                            .arg(device),
-                    )
-                    .await
-                    .unwrap(),
-                )
-                .unwrap();
-                pool.add_and_verify(device, 5, &manual_key, &old_key, "--key-file")
-                    .await
-                    .unwrap();
-            }
-            drop(manual_cleanup);
-            drop(old_cleanup);
+            let mut pool = format_real_pool(root, format).await;
+            let config = &pool.config_dir;
             let (admin, keys) = pool.capture_unlock_keys(OLD).await.unwrap();
             let fingerprints = keys.volumes.each_ref().map(|key| blake3::hash(&key.bytes));
             assert_eq!(admin.volumes[0].slots, BTreeSet::from([0]));
