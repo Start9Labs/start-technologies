@@ -30,9 +30,13 @@ h2 {
   line-height: unset;
 }
 
-ul {
+ul:not([tuiList]) {
   padding-left: 40px;
   list-style-type: disc;
+}
+
+tui-root:not(._mobile) tui-dialog[data-appearance~='wide'][data-size] {
+  inline-size: 63rem;
 }
 
 :root {

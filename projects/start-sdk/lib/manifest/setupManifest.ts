@@ -25,12 +25,27 @@ type NoExtraKeys<Manifest> = {
 export function setupManifest<
   Id extends string,
   VolumesTypes extends VolumeId,
-  Manifest extends {
+  const Manifest extends {
     id: Id
     volumes: VolumesTypes[]
   } & SDKManifest,
 >(manifest: Manifest & SDKManifest & NoExtraKeys<Manifest>): Manifest {
   return manifest
+}
+
+const sharedVolumeOsVersion = '0.4.3'
+
+function manifestOsVersion(manifest: SDKManifest): string {
+  const required = manifest.sharedVolumes ? sharedVolumeOsVersion : OSVersion
+  const requested = manifest.osVersion ?? required
+  if (
+    manifest.sharedVolumes &&
+    ExverVersion.parse(requested).compare(ExverVersion.parse(required)) ===
+      'less'
+  ) {
+    throw new Error(`Shared volumes require StartOS ${required} or later`)
+  }
+  return requested
 }
 
 /**
@@ -76,7 +91,7 @@ export function buildManifest<
     },
     {} as { [k: string]: ImageConfig },
   )
-  let osVersion = manifest.osVersion ?? OSVersion
+  let osVersion = manifestOsVersion(manifest)
   if (
     claimedPackages.length &&
     ExverVersion.parse(osVersion).compare(ExverVersion.parse('0.4.3')) ===
@@ -123,6 +138,7 @@ export function buildManifest<
     userspaceFilesystems: manifest.userspaceFilesystems ?? false,
     virtualNetworking: manifest.virtualNetworking ?? false,
     hardwareVirtualization: manifest.hardwareVirtualization ?? false,
+    sharedVolumes: manifest.sharedVolumes ?? false,
     plugins: manifest.plugins ?? [],
   }
 }

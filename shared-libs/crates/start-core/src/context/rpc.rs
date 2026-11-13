@@ -68,6 +68,7 @@ pub struct RpcContextSeed {
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
     pub db: TypedPatchDb<Database>,
     pub sync_db: watch::Sender<u64>,
+    pub disk_updates: watch::Sender<()>,
     pub account: SyncRwLock<AccountInfo>,
     pub os_net_service: NetService,
     pub net_controller: Arc<NetController>,
@@ -230,6 +231,22 @@ impl RpcContext {
         } else {
             TypedPatchDb::<Database>::load(config.db().await?).await?
         };
+        db.mutate(|db| {
+            db.as_public_mut().as_disks_mut().ser(&Vec::new())?;
+            for (_, volume) in db
+                .as_public_mut()
+                .as_shared_volumes_mut()
+                .as_entries_mut()?
+            {
+                volume.mutate(|volume| {
+                    volume.inspection = crate::shared_volumes::SharedVolumeInspection::default();
+                    Ok(())
+                })?;
+            }
+            Ok(())
+        })
+        .await
+        .result?;
         let peek = db.peek().await;
         let account = AccountInfo::load(&peek)?;
         load_db.complete();
@@ -351,7 +368,6 @@ impl RpcContext {
                             .invoke(ErrorKind::Unknown)
                             .await?;
 
-                        // Create squashfs with UID/GID mapping (avoids chown on readonly mounts)
                         if let Some(p) = sqfs.parent() {
                             tokio::fs::create_dir_all(p)
                                 .await
@@ -361,12 +377,11 @@ impl RpcContext {
                             .arg(&*tmp)
                             .arg(&sqfs)
                             .arg("-force-uid")
-                            .arg("100000")
+                            .arg(crate::lxc::BASE_IDMAP.to_id.to_string())
                             .arg("-force-gid")
-                            .arg("100000")
+                            .arg(crate::lxc::BASE_IDMAP.to_id.to_string())
                             .invoke(ErrorKind::Filesystem)
                             .await?;
-                        // tmp.unmount_and_delete().await?;
                     }
                     BlockDev::new(&sqfs)
                         .mount(NVIDIA_OVERLAY_PATH, ReadOnly)
@@ -430,6 +445,7 @@ impl RpcContext {
             ephemeral_auth_keys: SyncMutex::new(AuthKeys::new()),
             auth_sig_nonce_cache: SyncMutex::new(Default::default()),
             sync_db: watch::Sender::new(db.sequence().await),
+            disk_updates: watch::Sender::new(()),
             db,
             account: SyncRwLock::new(account),
             callbacks: net_controller.callbacks.clone(),
@@ -468,6 +484,13 @@ impl RpcContext {
         let res = Self(seed.clone());
         crate::update::signer_files::initialize(&res.db).await?;
         res.cleanup_and_initialize(cleanup_init).await?;
+        #[cfg(target_os = "linux")]
+        {
+            let weak = Arc::downgrade(&seed);
+            res.add_cron(crate::shared_volumes::watch::run(move || {
+                weak.upgrade().map(Self)
+            }));
+        }
         tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
 
         crate::version::post_init(&res, run_migrations).await?;
@@ -584,8 +607,7 @@ impl RpcContext {
         });
         cleanup_sessions.complete();
 
-        // Must run before services init: volume conversion requires that no
-        // container hold a mount on a package volume.
+        // Conversion requires unmounted, quiescent roots before observers and services start.
         optimize_storage.start();
         let peek = self.db.peek().await;
         let mut installed = BTreeSet::new();
@@ -605,6 +627,11 @@ impl RpcContext {
             tracing::warn!("{}", t!("context.rpc.volume-maintenance-failed", error = e));
             tracing::debug!("{e:?}");
         }
+        crate::volume::convert_directories_to_subvolumes(
+            crate::shared_volumes::managed_local_paths(&peek)?,
+            &mut optimize_storage,
+        )
+        .await?;
         optimize_storage.complete();
 
         init_services.start();

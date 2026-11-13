@@ -31,7 +31,7 @@ pub async fn bind(
     context
         .seed
         .persistent_container
-        .net_service
+        .net_service()?
         .bind(id, internal_port, options)
         .await
 }
@@ -73,7 +73,7 @@ pub async fn bind_range(
     context
         .seed
         .persistent_container
-        .net_service
+        .net_service()?
         .bind_range(
             id,
             internal_start_port,
@@ -102,7 +102,7 @@ pub async fn clear_bindings(
     context
         .seed
         .persistent_container
-        .net_service
+        .net_service()?
         .clear_bindings(except.into_iter().collect())
         .await?;
     Ok(())
@@ -126,7 +126,7 @@ pub async fn retire_host(
     context
         .seed
         .persistent_container
-        .net_service
+        .net_service()?
         .retire_host(id)
         .await
 }
@@ -149,7 +149,7 @@ pub async fn retire_binding(
     context
         .seed
         .persistent_container
-        .net_service
+        .net_service()?
         .retire_binding(id, internal_port)
         .await
 }

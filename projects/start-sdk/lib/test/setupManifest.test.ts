@@ -151,3 +151,54 @@ test('images can require a native architecture', () => {
   expect(built.images.main.emulateMissing).toBe(false)
   expect(built.hardwareRequirements.arch).toEqual(['aarch64'])
 })
+
+test('shared-volume and provider compatibility floors compose', () => {
+  const graph = VersionGraph.of({
+    current: versions.current.satisfies('bitcoind', '29.0:0'),
+    other: [],
+  })
+  const capable = { ...manifest(), sharedVolumes: true }
+  expect(buildManifest(graph, capable, Dependencies.of()).osVersion).toBe(
+    '0.4.3',
+  )
+  expect(() =>
+    buildManifest(graph, { ...capable, osVersion: '0.4.2' }, Dependencies.of()),
+  ).toThrow('Shared volumes require StartOS 0.4.3 or later')
+  expect(
+    buildManifest(graph, { ...capable, osVersion: '0.5.0' }, Dependencies.of())
+      .osVersion,
+  ).toBe('0.5.0')
+})
+
+test('shared-volume capability defaults to false and preserves explicit opt-in', () => {
+  expect(
+    buildManifest(versions, manifest(), Dependencies.of()).sharedVolumes,
+  ).toBe(false)
+  const optedIn = setupManifest({ ...manifest(), sharedVolumes: true })
+  const built = buildManifest(versions, optedIn, Dependencies.of())
+  expect(built.sharedVolumes).toBe(true)
+  expect(built.osVersion).toBe('0.4.3')
+})
+
+test('an explicit compatibility override cannot understate shared-volume support', () => {
+  for (const osVersion of ['0.4.2', '0.4.1.1']) {
+    expect(() =>
+      buildManifest(
+        versions,
+        setupManifest({ ...manifest(), sharedVolumes: true, osVersion }),
+        Dependencies.of(),
+      ),
+    ).toThrow('Shared volumes require StartOS 0.4.3 or later')
+  }
+  expect(
+    buildManifest(
+      versions,
+      setupManifest({
+        ...manifest(),
+        sharedVolumes: true,
+        osVersion: '0.4.3',
+      }),
+      Dependencies.of(),
+    ).osVersion,
+  ).toBe('0.4.3')
+})
