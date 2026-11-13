@@ -8490,6 +8490,7 @@ name = "start-os"
 version = "0.4.3"
 dependencies = [
  "include_dir",
+ "mimalloc",
  "start-core",
 ]
 
