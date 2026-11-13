@@ -126,12 +126,12 @@ interface UpdatesData {
         <header>
           @if (current(); as registry) {
             {{ registry.name }}
-            <marketplace-registry-status
-              [status]="registry.status || 'connecting'"
-              [url]="registry.url"
-              [error]="registry.error"
-            />
             @if (registry.status === 'error') {
+              <marketplace-registry-status
+                [status]="registry.status"
+                [url]="registry.url"
+                [error]="registry.error"
+              />
               <button [registryRetry]="registry.url" size="xs"></button>
             }
           }

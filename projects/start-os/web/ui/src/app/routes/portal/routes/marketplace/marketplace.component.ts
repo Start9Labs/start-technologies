@@ -66,7 +66,7 @@ import { MarketplaceControlsComponent } from './components/controls.component'
             </ng-template>
           </button>
         </ng-template>
-        <button [registryRetry]="selectedRegistry()!"></button>
+        <button [registryRetry]="selectedRegistry()!" size="xs"></button>
       </marketplace>
     }
   `,

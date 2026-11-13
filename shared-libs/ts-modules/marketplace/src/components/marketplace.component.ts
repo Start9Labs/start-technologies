@@ -76,25 +76,22 @@ const ICONS: Record<string, string> = {
     <aside [tuiNavigationAside]="open()">
       <ng-content />
       @if (current(); as registry) {
-        @if (registry.status; as status) {
-          @let state = status | registryState;
+        @if (registry.status === 'error') {
+          @let state = registry.status | registryState;
           <div tuiCell class="registry-status" [class._collapsed]="!open()">
-            <span
-              role="img"
-              [tuiStatus]="state.color"
-              [attr.aria-label]="state.label | i18n"
-            ></span>
             @if (open()) {
               <marketplace-registry-status
-                [status]="status"
+                [status]="registry.status"
                 [url]="registry.url"
                 [error]="registry.error"
               />
-              @if (status === 'error') {
-                <span class="registry-retry">
-                  <ng-content select="[registryRetry]" />
-                </span>
-              }
+              <ng-content select="[registryRetry]" />
+            } @else {
+              <span
+                role="img"
+                [tuiStatus]="state.color"
+                [attr.aria-label]="state.label | i18n"
+              ></span>
             }
           </div>
         }
@@ -233,12 +230,12 @@ const ICONS: Record<string, string> = {
       }
     }
 
-    .registry-retry {
-      margin-inline-start: auto;
-    }
+    .registry-status {
+      padding-inline: 0;
 
-    .registry-status._collapsed {
-      justify-content: center;
+      &._collapsed {
+        justify-content: center;
+      }
     }
 
     .actions {
