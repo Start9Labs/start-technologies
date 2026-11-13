@@ -64,18 +64,27 @@ async fn start9_shadow_hash(root: &Path) -> Result<Option<String>, Error> {
     Ok(None)
 }
 
-fn mok_enrolled(certificate: &Path, output: Output) -> Result<bool, Error> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MokEnrollment {
+    NotEnrolled,
+    Pending,
+    Enrolled,
+}
+
+fn parse_enrollment(certificate: &Path, output: Output) -> Result<MokEnrollment, Error> {
     let message = String::from_utf8_lossy(&output.stdout);
     let certificate = certificate.display();
     match output.status.code() {
         Some(1) if message.trim() == format!("{certificate} is already enrolled") => {
-            return Ok(true);
+            return Ok(MokEnrollment::Enrolled);
         }
-        Some(0) if message.trim() == format!("{certificate} is not enrolled") => return Ok(false),
+        Some(0) if message.trim() == format!("{certificate} is not enrolled") => {
+            return Ok(MokEnrollment::NotEnrolled);
+        }
         Some(1)
             if message.trim() == format!("{certificate} is already in the enrollment request") =>
         {
-            return Ok(false);
+            return Ok(MokEnrollment::Pending);
         }
         _ => {}
     }
@@ -84,6 +93,19 @@ fn mok_enrolled(certificate: &Path, output: Output) -> Result<bool, Error> {
         eyre!("{}", t!("util.mok.invalid-status")),
         ErrorKind::Bios,
     ))
+}
+
+/// Reports enrolled MOKs separately from pending requests.
+/// The caller keeps the certificate file stable through the probe.
+pub async fn enrollment_status(certificate: &Path) -> Result<MokEnrollment, Error> {
+    let output = Command::new("mokutil")
+        .arg("--test-key")
+        .arg(certificate)
+        .env("LC_ALL", "C")
+        .kill_on_drop(true)
+        .output()
+        .await?;
+    parse_enrollment(certificate, output)
 }
 
 async fn password_hash_file(
@@ -101,11 +123,9 @@ async fn password_hash_file(
     Ok((path, cleanup))
 }
 
-/// Enroll the DKMS MOK certificate, protected by the start9 user's password.
-/// `root` holds both the certificate and `etc/shadow`: `/` at runtime, or the target
-/// overlay during install. Idempotent: skips if already enrolled, or if the password
-/// is not yet set — so it must also be called once the password is written, not only
-/// at boot. Returns true if a new enrollment was staged.
+/// Stages DKMS enrollment using the start9 user's password.
+/// The root holds both the certificate and `etc/shadow`. Call after password changes
+/// to refresh pending authentication. Returns request submission, not enrollment.
 pub async fn enroll_mok(root: &Path) -> Result<bool, Error> {
     let mok_pub = &root.join(DKMS_MOK_PUB.trim_start_matches('/'));
     tracing::info!("enroll_mok: checking EFI and mok_pub={}", mok_pub.display());
@@ -118,14 +138,7 @@ pub async fn enroll_mok(root: &Path) -> Result<bool, Error> {
         return Ok(false);
     }
 
-    let test_output = Command::new("mokutil")
-        .arg("--test-key")
-        .arg(mok_pub)
-        .env("LC_ALL", "C")
-        .kill_on_drop(true)
-        .output()
-        .await?;
-    if mok_enrolled(mok_pub, test_output)? {
+    if enrollment_status(mok_pub).await? == MokEnrollment::Enrolled {
         tracing::info!("enroll_mok: already enrolled, skipping");
         return Ok(false);
     }
@@ -135,9 +148,9 @@ pub async fn enroll_mok(root: &Path) -> Result<bool, Error> {
         return Ok(false);
     };
 
+    // Pending imports share one `MokAuth` value.
     let _ = Command::new("mokutil")
         .arg("--revoke-import")
-        .arg(mok_pub)
         .invoke(ErrorKind::Bios)
         .await;
 
@@ -172,14 +185,18 @@ mod enrollment_tests {
     #[test]
     fn enrollment_probe_distinguishes_enrolled_pending_and_absent_certificates() {
         let certificate = Path::new("/test/mok.pub");
-        for (code, message, enrolled) in [
-            (1, "is already enrolled", true),
-            (0, "is not enrolled", false),
-            (1, "is already in the enrollment request", false),
+        for (code, message, enrollment) in [
+            (1, "is already enrolled", MokEnrollment::Enrolled),
+            (0, "is not enrolled", MokEnrollment::NotEnrolled),
+            (
+                1,
+                "is already in the enrollment request",
+                MokEnrollment::Pending,
+            ),
         ] {
             assert_eq!(
-                mok_enrolled(certificate, output(code, message)).unwrap(),
-                enrolled
+                parse_enrollment(certificate, output(code, message)).unwrap(),
+                enrollment
             );
         }
         for (code, message) in [
@@ -191,7 +208,7 @@ mod enrollment_tests {
             (1, "is not enrolled"),
             (255, "is already enrolled"),
         ] {
-            assert!(mok_enrolled(certificate, output(code, message)).is_err());
+            assert!(parse_enrollment(certificate, output(code, message)).is_err());
         }
     }
 
