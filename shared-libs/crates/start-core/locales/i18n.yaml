@@ -5194,6 +5194,20 @@ help.arg.asset-url:
   fr_FR: "URL de la ressource"
   pl_PL: "URL zasobu"
 
+help.arg.backup-history-limit:
+  en_US: "Maximum number of backups to return"
+  de_DE: "Maximale Anzahl zurückzugebender Sicherungen"
+  es_ES: "Número máximo de copias de seguridad a devolver"
+  fr_FR: "Nombre maximum de sauvegardes à retourner"
+  pl_PL: "Maksymalna liczba kopii zapasowych do zwrócenia"
+
+help.arg.backup-history-offset:
+  en_US: "Number of most recent backups to skip"
+  de_DE: "Anzahl der neuesten Sicherungen, die übersprungen werden"
+  es_ES: "Número de copias de seguridad más recientes que se omiten"
+  fr_FR: "Nombre de sauvegardes les plus récentes à ignorer"
+  pl_PL: "Liczba najnowszych kopii zapasowych do pominięcia"
+
 help.arg.backup-password:
   en_US: "Password for backup encryption"
   de_DE: "Passwort für Backup-Verschlüsselung"
@@ -6100,6 +6114,13 @@ about.commands-backup:
   fr_FR: "Commandes liées à la création de sauvegardes et aux cibles de sauvegarde"
   pl_PL: "Polecenia związane z tworzeniem kopii zapasowych i celami kopii zapasowych"
 
+about.commands-backup-history:
+  en_US: "Commands related to backup history"
+  de_DE: "Befehle zum Sicherungsverlauf"
+  es_ES: "Comandos relacionados con el historial de copias de seguridad"
+  fr_FR: "Commandes liées à l'historique des sauvegardes"
+  pl_PL: "Polecenia związane z historią kopii zapasowych"
+
 about.commands-backup-target:
   en_US: "Commands related to a backup target"
   de_DE: "Befehle zu einem Backup-Ziel"
@@ -6912,6 +6933,13 @@ about.list-available-wifi-networks:
   es_ES: "Listar redes wifi disponibles"
   fr_FR: "Lister les réseaux wifi disponibles"
   pl_PL: "Wyświetl dostępne sieci wifi"
+
+about.list-backup-history:
+  en_US: "List past backups and their reports, newest first"
+  de_DE: "Vergangene Sicherungen und ihre Berichte auflisten, neueste zuerst"
+  es_ES: "Listar las copias de seguridad anteriores y sus informes, de la más reciente a la más antigua"
+  fr_FR: "Lister les sauvegardes passées et leurs rapports, les plus récentes en premier"
+  pl_PL: "Wyświetl poprzednie kopie zapasowe i ich raporty, od najnowszych"
 
 about.list-bindings-for-host:
   en_US: "List bindings for a host"

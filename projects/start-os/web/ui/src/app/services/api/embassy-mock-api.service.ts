@@ -2793,24 +2793,6 @@ export class MockApiService extends ApiService {
     }
   }
 
-  private async notify(
-    notification: Omit<T.NotificationWithId, 'id' | 'createdAt' | 'seen'>,
-  ) {
-    Mock.Notifications.unshift({
-      ...notification,
-      id: Math.max(0, ...Mock.Notifications.map(item => item.id)) + 1,
-      createdAt: new Date().toISOString(),
-      seen: false,
-    })
-    await this.mockRevision([
-      {
-        op: PatchOp.REPLACE,
-        path: '/serverInfo/unreadNotificationCount',
-        value: this.mockData('/serverInfo/unreadNotificationCount') + 1,
-      },
-    ])
-  }
-
   private offeredKeys(url: string): string[] {
     return Object.entries(mockPatchData.serverInfo.registryKeys)
       .filter(([saved]) => sameUrl(saved, url))

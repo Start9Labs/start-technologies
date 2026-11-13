@@ -71,7 +71,10 @@ fn read_password() -> Result<String, Error> {
 
 pub fn backup<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("history", history::handler::<C>().no_cli())
+        .subcommand(
+            "history",
+            history::handler::<C>().with_about("about.commands-backup-history"),
+        )
         .subcommand(
             "create",
             from_fn_async(backup_bulk::backup_all)
