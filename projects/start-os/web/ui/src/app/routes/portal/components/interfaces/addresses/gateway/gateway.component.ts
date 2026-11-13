@@ -5,7 +5,7 @@ import {
   i18nPipe,
   TaskService,
 } from '@start9labs/shared'
-import { ISB, utils } from '@start9labs/start-core'
+import { ISB, T, utils } from '@start9labs/start-core'
 import { TuiButton, TuiIcon, TuiTitle } from '@taiga-ui/core'
 import { TuiHeader } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
@@ -26,7 +26,11 @@ import {
   GatewayAddressGroup,
   MappedServiceInterface,
 } from '../../interface.service'
-import { HTTP_PROXY_PLUGINS, HttpProxyChainButton } from '../../proxy-chain'
+import {
+  HTTP_PROXY_PLUGINS,
+  HttpProxyChainButton,
+  showsHttpProxyChain,
+} from '../../proxy-chain'
 import { DomainHealthService } from './domain-health.service'
 import { DOMAIN_TYPE_PICKER, DomainType } from './domain-type-picker.component'
 import { GatewayItemComponent } from './item.component'
@@ -49,12 +53,9 @@ import { GatewayItemComponent } from './item.component'
       <span tuiTitle>{{ gatewayGroup().gatewayName }}</span>
       <aside tuiAccessories>
         @if (value(); as iface) {
-          @if (iface.binding?.options?.proxy && proxyPlugins().length) {
+          @if (showsChain(iface.binding)) {
             <button
-              [httpProxyChain]="{
-                kind: 'network',
-                gatewayId: gatewayGroup().gatewayId,
-              }"
+              [httpProxyChain]="chainGateway()"
               [gatewayName]="gatewayGroup().gatewayName"
               [address]="iface.addressInfo"
               [packageId]="packageId()"
@@ -117,11 +118,24 @@ export class GatewayComponent {
   private readonly i18n = inject(i18nPipe)
   private readonly domainHealth = inject(DomainHealthService)
 
-  protected readonly proxyPlugins = inject(HTTP_PROXY_PLUGINS)
+  private readonly proxyPlugins = inject(HTTP_PROXY_PLUGINS)
 
   readonly gatewayGroup = input.required<GatewayAddressGroup>()
   readonly packageId = input('')
   readonly value = input<MappedServiceInterface | undefined>()
+
+  protected readonly chainGateway = computed<T.HttpProxyGateway>(() => ({
+    kind: 'network',
+    gatewayId: this.gatewayGroup().gatewayId,
+  }))
+
+  protected showsChain(binding: T.BindInfo | undefined): boolean {
+    return showsHttpProxyChain(
+      binding,
+      this.chainGateway(),
+      this.proxyPlugins().length,
+    )
+  }
 
   // The Certificate Authority column only makes sense when some address is
   // actually SSL-terminated. Non-SSL bindings and port ranges have none.

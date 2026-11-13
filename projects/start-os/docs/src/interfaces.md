@@ -26,7 +26,7 @@ Open the **Interfaces** tab to see every interface the service exposes. Each int
 
 ### HTTP Proxy Chains
 
-For an HTTP-proxied interface, the waypoints button (**HTTP proxy chain**) appears in each gateway table's header when an HTTP proxy plugin is installed. Choose it to put proxy services, such as bot protection or a web application firewall, in front of the application. Configure profiles through the proxy service's actions, choose **Add proxy** in the dialog, select a profile, and use the arrows to order the stages. **Save** applies the settings; **Cancel** discards edits. Remove every stage and save to clear the chain.
+For an HTTP-proxied interface, the waypoints button (**HTTP proxy chain**) appears in each gateway table's header when an HTTP proxy plugin is installed or that gateway has a saved chain. Choose it to put proxy services, such as bot protection or a web application firewall, in front of the application. Configure profiles through the proxy service's actions, choose **Add proxy** in the dialog, select a profile, and use the arrows to order the stages. **Save** applies the settings; **Cancel** discards edits. Remove every stage and save to clear the chain.
 
 Each binding has a separate chain for each gateway. Its chain covers every address and interface sharing that binding on that gateway, including different URL paths. Changing one gateway leaves the others' settings unchanged. Requests pass through the stages in order. A provider can appear with different profiles, but the same provider/profile pair appears once within a chain.
 
@@ -34,7 +34,7 @@ On a network gateway, **Public only** defaults off. When enabled, clients StartO
 
 URL-plugin gateways, such as Tor, have their own chains and no **Public only** switch. StartOS identifies that gateway from the service container delivering the connection, not an onion hostname or forwarded header. Traffic from a URL plugin with no chain does not fall back to a network gateway's chain. Direct connections to an application's container port bypass these gateway chains.
 
-Unavailable stages remain visible and return HTTP 503 for traffic to which the chain applies. Saved gateway settings remain available even if the gateway or URL plugin disappears. If no HTTP proxy plugin remains installed, the buttons are hidden; install one to edit retained selections. Start or configure the provider, restore the missing profile, or remove its stage to restore access. Applying changed settings disconnects existing clients on the binding, including clients on its other gateways and upgraded WebSockets. A selected profile's supported HTTP versions can also limit which clients can connect.
+Unavailable stages remain visible and return HTTP 503 for traffic to which the chain applies. Saved gateway settings remain available even if the gateway or URL plugin disappears. A gateway with a saved chain keeps its button after every HTTP proxy plugin is uninstalled, so its stages can still be removed. Start or configure the provider, restore the missing profile, or remove its stage to restore access. Applying changed settings disconnects existing clients on the binding, including clients on its other gateways and upgraded WebSockets. A selected profile's supported HTTP versions can also limit which clients can connect.
 
 > [!WARNING]
 > Proxy services can read and modify requests and responses, including credentials and cookies. Select providers you trust. Stopping or uninstalling one blocks traffic selected for its chain until you repair or remove the selection.

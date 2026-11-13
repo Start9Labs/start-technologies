@@ -42,7 +42,7 @@ const { TaskService } = await import('@start9labs/shared')
 const { setContext } = await import('@taiga-ui/polymorpheus')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
 const { ConfigService } = await import('src/app/services/config.service')
-const { HTTP_PROXY_CHAIN, HTTP_PROXY_PLUGINS } =
+const { HTTP_PROXY_CHAIN, HTTP_PROXY_PLUGINS, showsHttpProxyChain } =
   await import('../src/app/routes/portal/components/interfaces/proxy-chain.ts')
 const { LocalPackagesService } =
   await import('../src/app/services/local-packages.service.ts')
@@ -327,5 +327,23 @@ test('saved network and URL policies remain discoverable without addresses or pr
   assert.deepEqual(
     plugins.map(group => [group.pluginId, group.addresses]),
     [['retired', []]],
+  )
+})
+
+test('a saved chain keeps its control after every proxy plugin is uninstalled', () => {
+  const chained = binding([
+    policy(network('eth0'), [stage('strict')]),
+    policy(network('wlan0')),
+  ])
+  assert.equal(showsHttpProxyChain(chained, network('eth0'), 0), true)
+  assert.equal(showsHttpProxyChain(chained, network('wlan0'), 0), false)
+  assert.equal(showsHttpProxyChain(chained, network('wlan0'), 1), true)
+  assert.equal(
+    showsHttpProxyChain(
+      { ...chained, options: { ...chained.options, proxy: null } },
+      network('eth0'),
+      1,
+    ),
+    false,
   )
 })

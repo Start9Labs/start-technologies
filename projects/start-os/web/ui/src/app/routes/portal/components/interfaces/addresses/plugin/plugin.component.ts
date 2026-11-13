@@ -1,5 +1,6 @@
-import { Component, inject, input } from '@angular/core'
+import { Component, computed, inject, input } from '@angular/core'
 import { i18nPipe } from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
 import { TuiButton, TuiTitle } from '@taiga-ui/core'
 import { TuiHeader } from '@taiga-ui/layout'
 import { TuiAvatar } from '@taiga-ui/kit'
@@ -11,7 +12,11 @@ import {
   MappedServiceInterface,
   PluginAddressGroup,
 } from '../../interface.service'
-import { HTTP_PROXY_PLUGINS, HttpProxyChainButton } from '../../proxy-chain'
+import {
+  HTTP_PROXY_PLUGINS,
+  HttpProxyChainButton,
+  showsHttpProxyChain,
+} from '../../proxy-chain'
 import { PluginItemComponent } from './item.component'
 
 @Component({
@@ -26,12 +31,9 @@ import { PluginItemComponent } from './item.component'
       <span tuiTitle>{{ pluginGroup().pluginName }}</span>
       <aside tuiAccessories>
         @if (value(); as iface) {
-          @if (iface.binding?.options?.proxy && proxyPlugins().length) {
+          @if (showsChain(iface.binding)) {
             <button
-              [httpProxyChain]="{
-                kind: 'url-plugin',
-                packageId: pluginGroup().pluginId,
-              }"
+              [httpProxyChain]="chainGateway()"
               [gatewayName]="pluginGroup().pluginName"
               [address]="iface.addressInfo"
               [packageId]="packageId()"
@@ -87,11 +89,24 @@ import { PluginItemComponent } from './item.component'
 })
 export class PluginAddressesComponent {
   private readonly actionService = inject(ActionService)
-  protected readonly proxyPlugins = inject(HTTP_PROXY_PLUGINS)
+  private readonly proxyPlugins = inject(HTTP_PROXY_PLUGINS)
 
   readonly pluginGroup = input.required<PluginAddressGroup>()
   readonly packageId = input('')
   readonly value = input<MappedServiceInterface | undefined>()
+
+  protected readonly chainGateway = computed<T.HttpProxyGateway>(() => ({
+    kind: 'url-plugin',
+    packageId: this.pluginGroup().pluginId,
+  }))
+
+  protected showsChain(binding: T.BindInfo | undefined): boolean {
+    return showsHttpProxyChain(
+      binding,
+      this.chainGateway(),
+      this.proxyPlugins().length,
+    )
+  }
 
   runTableAction() {
     const group = this.pluginGroup()

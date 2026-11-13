@@ -78,7 +78,7 @@ StartOS strips client-supplied `X-Forwarded-*`, `Forwarded`, and `X-Real-IP` hea
 
 ## Gateway scope and trust
 
-Users configure each binding × gateway policy through the waypoints button (**HTTP proxy chain**) in that gateway table's header. The button appears while an HTTP proxy plugin is installed, including when it is stopped or has not published profiles. A chain covers every managed address and exported interface sharing that binding on that gateway, including paths such as `/admin`. Package rebinding preserves all gateway policies. To disable HTTP proxying, the user must first clear every nonempty chain; saved empty policies do not prevent it.
+Users configure each binding × gateway policy through the waypoints button (**HTTP proxy chain**) in that gateway table's header. The button appears while an HTTP proxy plugin is installed, including when it is stopped or has not published profiles, and on any gateway with a saved chain. A chain covers every managed address and exported interface sharing that binding on that gateway, including paths such as `/admin`. Package rebinding preserves all gateway policies. To disable HTTP proxying, the user must first clear every nonempty chain; saved empty policies do not prevent it.
 
 Network policies default to `publicOnly: false`. With **Public only** enabled, clients classified as private by StartOS bypass both the stages and their ALPN restrictions, even while a provider is unavailable. StartOS uses its connection-origin classification, including on-link globally routable clients, rather than the requested hostname or an RFC1918-only test.
 

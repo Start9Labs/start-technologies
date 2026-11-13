@@ -57,6 +57,22 @@ export const HTTP_PROXY_PLUGINS = new InjectionToken('HTTP proxy plugins', {
     ),
 })
 
+/** A saved nonempty chain keeps its control after the last provider is uninstalled. */
+export function showsHttpProxyChain(
+  binding: T.BindInfo | undefined,
+  gateway: T.HttpProxyGateway,
+  installedPlugins: number,
+): boolean {
+  return (
+    !!binding?.options.proxy &&
+    (installedPlugins > 0 ||
+      binding.proxyChains.some(
+        policy =>
+          policy.chain.length > 0 && utils.deepEqual(policy.gateway, gateway),
+      ))
+  )
+}
+
 interface ChainContext {
   packageId: string
   address: T.AddressInfo
