@@ -21,6 +21,7 @@ use crate::net::host::binding::{BindInfo, BindOptions, Bindings, DerivedAddressI
 use crate::net::host::{Host, SERVER_UI_SSL_PORT};
 use crate::net::ssl::x509_sha256_fingerprint;
 use crate::net::vhost::PassthroughInfo;
+use crate::nut::NutConfig;
 use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::system::{KeyboardOptions, SmtpValue};
@@ -143,6 +144,7 @@ impl Public {
                 governor: None,
                 epp: None,
                 smtp: None,
+                nut: NutConfig::default(),
                 echoip_urls: default_echoip_urls(),
                 ram: 0,
                 devices: Vec::new(),
@@ -205,6 +207,8 @@ pub struct ServerInfo {
     #[serde(default)]
     pub epp: Option<Epp>,
     pub smtp: Option<SmtpValue>,
+    #[serde(default)]
+    pub nut: NutConfig,
     #[serde(default = "default_echoip_urls")]
     pub echoip_urls: Vec<Url>,
     pub ram: u64,
