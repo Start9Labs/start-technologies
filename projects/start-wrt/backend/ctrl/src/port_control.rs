@@ -41,8 +41,9 @@
 //! # SNI hostname routes
 //!
 //! Hostname routes live in [`SniDemux`] memory and share one IPv4 WAN admission
-//! rule per port. The sweep reconciles those rules and re-keys routes when the
-//! WAN address changes. Protocol leases bound every device-created route.
+//! rule per listening address and port. The sweep reconciles those rules and
+//! re-keys routes when the WAN address changes. Protocol leases bound every
+//! device-created route.
 //!
 //! # LAN source-address spoofing: cross-segment closed, same-segment open
 //!
@@ -954,7 +955,7 @@ impl PortControl {
         }
     }
 
-    /// Reconciles WAN admission against the demux's live ports and the redirect.
+    /// Admits every live listener and the HTTP redirect, including during WAN renumbering.
     async fn sync_sni_rules(&self) -> Result<(), Error> {
         self.sync_sni_rules_inner(true).await
     }
@@ -962,10 +963,10 @@ impl PortControl {
     /// Assumes `write_serial` is held.
     async fn sync_sni_rules_inner(&self, reload: bool) -> Result<(), Error> {
         let routes = self.sni.snapshot();
-        let mut want = std::collections::BTreeMap::new();
-        for route in &routes {
-            want.entry(route.ext_port).or_insert(route.ext_ip);
-        }
+        let mut want: std::collections::BTreeSet<(u16, Ipv4Addr)> = routes
+            .iter()
+            .map(|route| (route.ext_port, route.ext_ip))
+            .collect();
         let uci_root = self.uci_root.clone();
         let redirect = uci_task(move || async move {
             let arena = Arena::new();
@@ -983,7 +984,7 @@ impl PortControl {
             crate::http_redirect::set_admitted(true);
         }
         if let Some(wan) = scope {
-            want.insert(crate::http_redirect::HTTP_PORT, wan);
+            want.insert((crate::http_redirect::HTTP_PORT, wan));
         }
         self.sync_sni_rules_to(want, scope.is_some(), reload)
             .await?;
@@ -1004,7 +1005,7 @@ impl PortControl {
 
     async fn sync_sni_rules_to(
         &self,
-        want: std::collections::BTreeMap<u16, Ipv4Addr>,
+        want: std::collections::BTreeSet<(u16, Ipv4Addr)>,
         redirect: bool,
         reload: bool,
     ) -> Result<(), Error> {
@@ -1489,8 +1490,8 @@ async fn remove_auto_sections(uci_root: &Path, names: &[String]) -> Result<usize
     }
 }
 
-fn sni_section_name(port: u16) -> String {
-    format!("apf_sni_{port}")
+fn sni_section_name(port: u16, dest: Ipv4Addr) -> String {
+    format!("apf_sni_{port}_{}", dest.to_string().replace('.', "_"))
 }
 
 /// Admits only the address the port's listener holds. The `SNI` label lets a build
@@ -1606,14 +1607,14 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
 /// Returns whether UCI changed.
 async fn reconcile_sni_rules_uci(
     uci_root: &Path,
-    want: std::collections::BTreeMap<u16, Ipv4Addr>,
+    want: std::collections::BTreeSet<(u16, Ipv4Addr)>,
     redirect: bool,
 ) -> Result<bool, Error> {
     let mut retries = UCI_RETRIES;
     loop {
         let arena = Arena::new();
         let mut cfgs = parse_all(uci_root, &arena, &["firewall"]).await?;
-        let mut seen: std::collections::BTreeSet<u16> = std::collections::BTreeSet::new();
+        let mut seen = std::collections::BTreeSet::new();
         let mut changed = false;
         cfgs["firewall"].sections.retain(|sec| {
             let Ok(rule) = sec.get::<FirewallRule>() else {
@@ -1622,26 +1623,31 @@ async fn reconcile_sni_rules_uci(
             if rule._apf_label.as_deref() != Some(KIND_SNI) {
                 return true;
             }
-            let port = rule
+            let key = rule
                 .dest_port
                 .as_deref()
                 .and_then(parse_port_range)
-                .map(|r| r.0);
-            let keep = port.is_some_and(|p| {
-                want.get(&p).is_some_and(|&dest| {
-                    let desired = desired_sni_rule(p, dest, redirect);
-                    rule.name == desired.name && rule.dest_ip == desired.dest_ip && seen.insert(p)
-                })
+                .map(|r| r.0)
+                .zip(
+                    rule.dest_ip
+                        .as_deref()
+                        .and_then(|ip| ip.parse::<Ipv4Addr>().ok()),
+                );
+            let keep = key.is_some_and(|(port, dest)| {
+                let desired = desired_sni_rule(port, dest, redirect);
+                want.contains(&(port, dest))
+                    && rule.name == desired.name
+                    && seen.insert((port, dest))
             });
             if !keep {
                 changed = true;
             }
             keep
         });
-        for (&port, &dest) in want.iter().filter(|(p, _)| !seen.contains(p)) {
+        for &(port, dest) in want.difference(&seen) {
             cfgs["firewall"].append(
                 &desired_sni_rule(port, dest, redirect),
-                Some(&sni_section_name(port)),
+                Some(&sni_section_name(port, dest)),
             )?;
             changed = true;
         }
@@ -2475,7 +2481,7 @@ mod tests {
     #[tokio::test]
     async fn port_80_changing_hands_rewrites_its_rule() {
         let dir = temp_root("");
-        let want: std::collections::BTreeMap<u16, Ipv4Addr> =
+        let want: std::collections::BTreeSet<(u16, Ipv4Addr)> =
             [(crate::http_redirect::HTTP_PORT, WAN)]
                 .into_iter()
                 .collect();
@@ -2509,7 +2515,7 @@ mod tests {
              \toption _apf_label 'SNI'\n",
         );
         let firewall = || std::fs::read_to_string(dir.path().join("firewall")).unwrap();
-        let want = |listening: Ipv4Addr| -> std::collections::BTreeMap<u16, Ipv4Addr> {
+        let want = |listening: Ipv4Addr| -> std::collections::BTreeSet<(u16, Ipv4Addr)> {
             [(443, listening)].into_iter().collect()
         };
 
@@ -2537,6 +2543,47 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn a_grant_on_a_renumbered_wan_is_admitted_before_maintenance() {
+        let dir = temp_root("");
+        let pc = with_wan(PortControl::new(dir.path().to_path_buf()), Some(WAN));
+        let probe = std::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 443);
+        pc.add_sni_route(
+            SocketAddrV4::new(WAN, port),
+            target,
+            &["a.example.com".to_string()],
+            Some(3600),
+        )
+        .await
+        .unwrap();
+
+        let renumbered = Ipv4Addr::new(203, 0, 113, 8);
+        let pc = with_wan(pc, Some(renumbered));
+        pc.add_sni_route(
+            SocketAddrV4::new(renumbered, port),
+            target,
+            &["b.example.com".to_string()],
+            Some(3600),
+        )
+        .await
+        .unwrap();
+
+        let firewall = || std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        let written = firewall();
+        assert!(written.contains("option dest_ip '203.0.113.7'"), "{written}");
+        assert!(written.contains("option dest_ip '203.0.113.8'"), "{written}");
+        assert_eq!(written.matches("option _apf_label 'SNI'").count(), 2);
+
+        pc.sni_maintain().await;
+        let written = firewall();
+        assert!(!written.contains("option dest_ip '203.0.113.7'"), "{written}");
+        assert!(written.contains("option dest_ip '203.0.113.8'"), "{written}");
+        assert_eq!(written.matches("option _apf_label 'SNI'").count(), 1);
     }
 
     #[tokio::test]
