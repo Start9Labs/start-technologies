@@ -972,4 +972,5 @@ export default {
   1121: 'Huella actual',
   1122: 'Ver en el Mercado',
   1123: 'Esta implementación alternativa cumple el requisito',
+  1124: 'Los detalles del error no están disponibles',
 } satisfies i18n

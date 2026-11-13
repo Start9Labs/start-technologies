@@ -972,4 +972,5 @@ export default {
   1121: 'Empreinte actuelle',
   1122: 'Voir dans la bibliothèque de services',
   1123: 'Cette implémentation alternative remplit la condition requise',
+  1124: 'Les détails de l’erreur ne sont pas disponibles',
 } satisfies i18n

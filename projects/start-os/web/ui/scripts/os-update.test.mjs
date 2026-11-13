@@ -170,7 +170,7 @@ boundaries.set(
         `export * from ${JSON.stringify(new URL(`../../../../../shared-libs/ts-modules/marketplace/src/${file}`, import.meta.url).href)};`,
     )
     .join('\n') +
-    '\nexport class RegistryStatus {} export class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {} export class MarketplaceSignersComponent {} export class MarketplaceSignerChipsComponent {} export class MarketplaceAboutComponent {} export class MarketplaceDependenciesComponent {} export class MarketplaceLinksComponent {} export class MarketplaceReleaseNotesComponent {}',
+    '\nexport class RegistryConnectionStatus {} export class RegistryStatus {} export class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {} export class MarketplaceSignersComponent {} export class MarketplaceSignerChipsComponent {} export class MarketplaceAboutComponent {} export class MarketplaceDependenciesComponent {} export class MarketplaceLinksComponent {} export class MarketplaceReleaseNotesComponent {}',
 )
 loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
@@ -2803,11 +2803,37 @@ test('registry availability distinguishes first sync, empty success and cached r
   f.replace('/registryCache', {
     'https://registry.test/': { ...entry, status: 'error' },
   })
-  assert.equal(isRegistryLoading(stores.at(-1).status, 0), false)
+  assert.equal(isRegistryLoading(stores.at(-1).status, 0), true)
   assert.equal(rows.at(-1)[0].status, 'error')
   f.replace('/registryCache', { 'https://registry.test/': entry })
   assert.equal(rows.at(-1)[0].status, 'connecting')
   assert.deepEqual(errors.at(-1), [])
+  assert.deepEqual(f.queries, [])
+})
+
+test('registry failures project exact details to both the current catalog and management rows', t => {
+  const f = marketplaceFixture(t)
+  f.makePage()
+  const rows = f.watch(f.service.registries$)
+  const stores = f.watch(f.service.currentRegistry$)
+  const message =
+    'TLS certificate verification failed\n<img src=x onerror=alert(1)>'
+  f.replace('/registryCache', {
+    'https://registry.test/': {
+      ...registryEntry(),
+      status: 'error',
+      error: message,
+    },
+  })
+  assert.equal(rows.at(-1)[0].error, message)
+  assert.equal(stores.at(-1).error, message)
+  assert.equal(stores.at(-1).packages.length, 1)
+  f.replace('/registryCache', {
+    'https://registry.test/': { ...registryEntry(), status: 'connecting' },
+  })
+  assert.equal(rows.at(-1)[0].error, undefined)
+  assert.equal(stores.at(-1).error, undefined)
+  assert.equal(stores.at(-1).packages.length, 1)
   assert.deepEqual(f.queries, [])
 })
 
@@ -2824,7 +2850,12 @@ test('malformed saved registries do not terminate valid registry listings or cac
   })
   await tick()
   assert.deepEqual(saved.at(-1), [
-    { url: 'https://registry.test/', name: 'Saved name', status: 'connected' },
+    {
+      url: 'https://registry.test/',
+      name: 'Saved name',
+      status: 'connected',
+      error: undefined,
+    },
   ])
   assert.equal(page.isRegistrySaved(), true)
   assert.equal(stores.at(-1).packages.length, 1)

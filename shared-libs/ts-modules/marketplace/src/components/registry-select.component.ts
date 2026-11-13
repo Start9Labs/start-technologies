@@ -46,9 +46,6 @@ import { RegistryStatus } from './registry-status'
       <b tuiFade>
         {{ data()?.current?.name || fetched()?.info?.name || 'Loading...' }}
       </b>
-      @if (data()?.current?.status; as status) {
-        <span [marketplaceRegistryStatus]="status"></span>
-      }
       @if (data(); as d) {
         <tui-data-list *tuiDropdown size="m">
           <div class="g-title">

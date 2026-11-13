@@ -56,10 +56,12 @@ export class MarketplaceService extends AbstractMarketplaceService {
     map(([registries, cache]) =>
       Object.entries(registries).flatMap(([url, name]) => {
         try {
+          const entry = findRegistryCache(cache, url)
           return [
             {
               ...toStoreIdentity(url, name),
-              status: registryStatus(findRegistryCache(cache, url)),
+              status: registryStatus(entry),
+              error: entry?.error,
             },
           ]
         } catch {
@@ -196,6 +198,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
       url,
       info: this.registryInfo(entry.info),
       status: registryStatus(entry),
+      error: entry.error,
       packages: Object.entries(packages).flatMap(([id, pkgInfo]) =>
         Object.keys(pkgInfo.best).flatMap(version => {
           const pkg = this.convertRegistryPkgToMarketplacePkg(

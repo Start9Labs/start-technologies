@@ -972,4 +972,5 @@ export default {
   1121: 'Obecny odcisk',
   1122: 'Zobacz w sklepie',
   1123: 'Ta alternatywna implementacja spełnia wymaganie',
+  1124: 'Szczegóły błędu nie są dostępne',
 } satisfies i18n

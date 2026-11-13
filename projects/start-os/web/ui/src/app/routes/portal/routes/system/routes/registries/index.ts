@@ -1,7 +1,10 @@
 import { Component, computed, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { Router } from '@angular/router'
-import { RegistryStatus, StoreIconDirective } from '@start9labs/marketplace'
+import {
+  RegistryConnectionStatus,
+  StoreIconDirective,
+} from '@start9labs/marketplace'
 import type { T } from '@start9labs/start-core'
 import {
   defaultRegistries,
@@ -27,10 +30,9 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
 import { TRUSTED_KEYS_LINK } from '../../system.const'
 
-interface Row {
+interface Row extends Pick<T.RegistryCache, 'status' | 'error'> {
   url: string
   name: string
-  status: T.RegistryStatus
   os: boolean
   builtin: boolean
 }
@@ -71,7 +73,11 @@ interface Row {
               </td>
               <td class="name">
                 <span>{{ row.name }}</span>
-                <span [marketplaceRegistryStatus]="row.status"></span>
+                <marketplace-registry-status
+                  [status]="row.status"
+                  [url]="row.url"
+                  [error]="row.error"
+                />
                 @if (row.os) {
                   <span tuiBadge appearance="primary">
                     {{ 'StartOS updates' | i18n }}
@@ -169,7 +175,7 @@ interface Row {
     }
   `,
   imports: [
-    RegistryStatus,
+    RegistryConnectionStatus,
     BackDirective,
     DocsLinkDirective,
     StoreIconDirective,
@@ -198,10 +204,11 @@ export default class Registries {
 
   protected readonly saving = signal(false)
   protected readonly rows = computed(() =>
-    this.registries()?.map<Row>(({ url, name, status }) => ({
+    this.registries()?.map<Row>(({ url, name, status, error }) => ({
       url,
       name,
       status,
+      error,
       os: sameUrl(url, this.osRegistry()),
       builtin: Object.values(defaultRegistries).some(known =>
         sameUrl(url, known),

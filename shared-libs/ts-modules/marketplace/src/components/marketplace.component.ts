@@ -52,7 +52,7 @@ import { filterPackages } from '../pipes/filter-packages.pipe'
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreDataWithUrl } from '../types'
 import { isRegistryLoading } from '../registry-state'
-import { RegistryStatus } from './registry-status'
+import { RegistryConnectionStatus } from './registry-status'
 
 const ICONS: Record<string, string> = {
   all: '@tui.layout-grid',
@@ -133,8 +133,14 @@ const ICONS: Record<string, string> = {
               </h2>
             </hgroup>
             <aside tuiAccessories>
-              @if (current()?.status; as status) {
-                <span [marketplaceRegistryStatus]="status"></span>
+              @if (current(); as registry) {
+                @if (registry.status; as status) {
+                  <marketplace-registry-status
+                    [status]="status"
+                    [url]="registry.url"
+                    [error]="registry.error"
+                  />
+                }
               }
               <button
                 appearance="secondary-grayscale"
@@ -163,12 +169,7 @@ const ICONS: Record<string, string> = {
               } @empty {
                 <tui-block-status>
                   <p>
-                    {{
-                      (current()?.status === 'error'
-                        ? 'Error'
-                        : 'The list is empty'
-                      ) | i18n
-                    }}
+                    {{ 'The list is empty' | i18n }}
                   </p>
                 </tui-block-status>
               }
@@ -267,7 +268,7 @@ const ICONS: Record<string, string> = {
     tuiButtonOptionsProvider({ size: 's', appearance: 'flat-grayscale' }),
   ],
   imports: [
-    RegistryStatus,
+    RegistryConnectionStatus,
     TuiBlockStatus,
     TuiNavigation,
     TuiInput,

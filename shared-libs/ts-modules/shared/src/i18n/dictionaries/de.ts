@@ -972,4 +972,5 @@ export default {
   1121: 'Aktueller Fingerabdruck',
   1122: 'Im Marktplatz anzeigen',
   1123: 'Diese alternative Implementierung erfüllt die Anforderung',
+  1124: 'Fehlerdetails sind nicht verfügbar',
 } satisfies i18n

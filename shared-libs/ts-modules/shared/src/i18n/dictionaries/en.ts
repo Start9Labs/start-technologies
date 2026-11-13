@@ -973,4 +973,5 @@ export const ENGLISH: Record<string, number> = {
   'Current fingerprint': 1121,
   'View in Marketplace': 1122,
   'This alternative implementation meets the requirement': 1123,
+  'Error details are not available': 1124,
 }
