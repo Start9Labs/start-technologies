@@ -1538,6 +1538,13 @@ os-install.invalid-partuuid:
   fr_FR: "Impossible de résoudre un UUID de partition valide pour %{partition}"
   pl_PL: "Nie udało się ustalić prawidłowego UUID partycji dla %{partition}"
 
+os-install.mbr-drive-needs-legacy-boot:
+  en_US: "%{disk} uses an MBR partition table and this computer started the installer in UEFI mode, so StartOS cannot be installed on it while preserving its data. To keep your data, restart the installer in legacy BIOS (CSM) mode if this computer supports it. To erase %{disk} and start fresh, go back and choose \"Overwrite\"."
+  de_DE: "%{disk} verwendet eine MBR-Partitionstabelle und dieser Computer hat das Installationsprogramm im UEFI-Modus gestartet, daher kann StartOS nicht unter Beibehaltung der Daten darauf installiert werden. Um Ihre Daten zu behalten, starten Sie das Installationsprogramm im Legacy-BIOS-Modus (CSM) neu, sofern dieser Computer ihn unterstützt. Um %{disk} zu löschen und neu zu beginnen, gehen Sie zurück und wählen Sie \"Überschreiben\"."
+  es_ES: "%{disk} usa una tabla de particiones MBR y este equipo inició el instalador en modo UEFI, por lo que StartOS no puede instalarse en ella conservando sus datos. Para conservar sus datos, reinicie el instalador en modo BIOS heredado (CSM) si este equipo lo admite. Para borrar %{disk} y empezar de nuevo, vuelva atrás y elija \"Sobrescribir\"."
+  fr_FR: "%{disk} utilise une table de partitions MBR et cet ordinateur a démarré l'installateur en mode UEFI : StartOS ne peut donc pas y être installé en conservant ses données. Pour garder vos données, redémarrez l'installateur en mode BIOS hérité (CSM) si cet ordinateur le prend en charge. Pour effacer %{disk} et repartir à zéro, revenez en arrière et choisissez « Écraser »."
+  pl_PL: "%{disk} używa tablicy partycji MBR, a ten komputer uruchomił instalator w trybie UEFI, więc nie można zainstalować na nim StartOS z zachowaniem danych. Aby zachować dane, uruchom instalator ponownie w trybie starszego BIOS-u (CSM), jeśli ten komputer go obsługuje. Aby wymazać %{disk} i zacząć od nowa, wróć i wybierz „Nadpisz”."
+
 os-install.unknown-disk:
   en_US: "No connected drive has the stable path %{disk}"
   de_DE: "Kein angeschlossenes Laufwerk hat den stabilen Pfad %{disk}"
