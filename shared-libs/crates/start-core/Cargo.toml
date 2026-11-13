@@ -151,7 +151,7 @@ lettre = { version = "0.11.18", default-features = false, features = [
   "tokio1-rustls",
 ] }
 libc = "0.2.149"
-librqbit = { version = "=9.1.0", default-features = false, features = [
+librqbit = { git = "https://github.com/Start9Labs/rqbit", rev = "233e1a180ed46861969a11e7852afdb1fd7595c4", default-features = false, features = [
   "rust-tls",
   "disable-upload",
 ] }

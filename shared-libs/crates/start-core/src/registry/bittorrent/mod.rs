@@ -273,13 +273,16 @@ impl Drop for TorrentSession {
     }
 }
 
+// Registry sessions must not redistribute discovered peer addresses.
 fn session_options() -> SessionOptions {
     SessionOptions {
         dht: Some(DhtSessionConfig {
+            client_only: true,
             persistence: None,
             ..Default::default()
         }),
         listen: None,
+        disable_peer_exchange: true,
         disable_local_service_discovery: true,
         ..Default::default()
     }

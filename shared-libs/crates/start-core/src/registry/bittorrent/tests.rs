@@ -14,6 +14,14 @@ use crate::util::future::NonDetachingJoinHandle;
 use crate::util::serde::Base64;
 
 #[test]
+fn registry_sessions_do_not_redistribute_peer_addresses() {
+    let options = session_options();
+    assert!(options.disable_peer_exchange);
+    assert!(options.disable_local_service_discovery);
+    assert!(options.dht.unwrap().client_only);
+}
+
+#[test]
 fn torrent_arguments_preserve_parent_command_descriptions() {
     use clap::Args;
 
